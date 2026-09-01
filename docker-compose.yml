@@ -1,0 +1,146 @@
+# Whole stack in one shot:
+#   docker compose up -d --build     then open http://localhost:5173
+#
+# Only backend/cli.py stays on the host: it is the interactive REPL and spawns the
+# DuckDuckGo MCP server via uvx. It reaches every service on localhost.
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.26.0
+    # 4B is what a 16 GB card can spare once ColBERT and ColQwen2 have taken theirs.
+    # See .env.example for the model/quantization/memory trade-offs.
+    command:
+      - ${VLLM_HF_MODEL:-Qwen/Qwen3.5-4B}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --served-model-name
+      - ${VLLM_SERVED_NAME:-qwen}
+      - --max-model-len
+      - "${VLLM_MAX_LEN:-8192}"
+      # A share of the WHOLE card, not of what is free. 0.6 fits Qwen beside ColBERT alone;
+      # with `--profile vision` raise it (VLLM_GPU_UTIL=0.88) and start colbert/colpali first.
+      - --gpu-memory-utilization
+      - "${VLLM_GPU_UTIL:-0.6}"
+      - --enforce-eager # no CUDA graphs: gives back ~1.5 GiB
+      - --max-num-seqs
+      - "2"
+      - --quantization
+      - ${VLLM_QUANT:-fp8}
+      - --kv-cache-dtype
+      - fp8
+      - --generation-config
+      - vllm
+      - --language-model-only
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_xml
+      - --default-chat-template-kwargs
+      - '{"enable_thinking": false}'
+      - --enable-prefix-caching
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-} # optional: only lifts the Hub's anonymous rate limit
+    gpus: all
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-storage:/qdrant/storage # both retrieval indexes survive rebuilds
+    restart: unless-stopped
+
+  grobid:
+    image: lfoppiano/grobid:0.8.2
+    ports:
+      - "8070:8070"
+    restart: unless-stopped
+
+  colbert:
+    build: ./services/colbert
+    ports:
+      - "8893:8893"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - ./data/papers:/app/data/papers # so add("data/papers/x.pdf") resolves in both worlds
+    environment:
+      # Set QDRANT_URL in .env (e.g. a Qdrant Cloud cluster) and the local qdrant
+      # container stops being used. QDRANT_API_KEY is what that one wants.
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    depends_on:
+      - qdrant
+    gpus: all
+    restart: unless-stopped
+
+  # Vision retrieval over figures and rendered pages, ColQwen2 by default. Opt-in: it
+  # downloads a ~4 GB model, so start it deliberately:
+  #   docker compose --profile vision up -d colpali
+  colpali:
+    profiles: [vision]
+    build: ./services/colpali
+    ports:
+      - "8894:8894"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - ./data/papers:/app/data/papers
+    environment:
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      COLPALI_MODEL: ${COLPALI_MODEL:-vidore/colqwen2-v1.0}
+      HF_TOKEN: ${HF_TOKEN:-}
+    depends_on:
+      - qdrant
+    gpus: all
+    restart: unless-stopped
+
+  gateway:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      # Set VLLM_URL in .env to point at a vLLM somewhere else — a Cloud Run service, say —
+      # and the local vllm container stops being used. VLLM_API_KEY is what that one wants.
+      VLLM_URL: ${VLLM_URL:-http://vllm:8000/v1}
+      VLLM_MODEL: ${VLLM_SERVED_NAME:-qwen}
+      VLLM_API_KEY: ${VLLM_API_KEY:-EMPTY}
+      COLBERT_URL: http://colbert:8893
+      COLPALI_URL: http://colpali:8894 # optional; visual hints are skipped when it is not running
+      GROBID_URL: http://grobid:8070
+      PAPERS_DIR: data/papers
+      ANALYSES_DB: /app/data/db/analyses.db
+      S2_API_KEY: ${S2_API_KEY:-} # without one, Semantic Scholar 429s most lookups
+      UNPAYWALL_EMAIL: ${UNPAYWALL_EMAIL:-}
+      CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
+    volumes:
+      - ./data/papers:/app/data/papers # shared with the retrieval services
+      - analyses:/app/data/db # run history survives a rebuild
+      - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
+    depends_on:
+      - vllm
+      - grobid
+      - colbert
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    environment:
+      GATEWAY_URL: http://gateway:8080
+    ports:
+      - "5173:80"
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  analyses:
+  qdrant-storage:
+  hf-cache:

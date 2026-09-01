@@ -1,0 +1,11 @@
+# ColPali visual retrieval service (standalone).
+# colpali-engine pins torch<2.12; install it in its own environment, never alongside the
+# rest of the stack. GPU (RTX 50xx needs cu128+):
+#   pip install "torch<2.12" --index-url https://download.pytorch.org/whl/cu128
+colpali-engine>=0.3
+pymupdf>=1.24
+pillow>=10
+qdrant-client>=1.12
+fastapi>=0.110
+uvicorn>=0.30
+mcp>=1.9

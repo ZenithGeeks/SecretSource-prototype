@@ -1,0 +1,10 @@
+[tool.ruff]
+line-length = 110
+exclude = ["venv", "frontend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]

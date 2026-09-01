@@ -1,0 +1,12 @@
+# ColBERTv2 retrieval service (standalone; the backend only needs its HTTP/MCP contract).
+# GPU (RTX 50xx needs cu128+):  pip install torch --index-url https://download.pytorch.org/whl/cu130
+# CPU-only (~200 MB):           pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.4
+transformers>=4.44
+safetensors>=0.4
+huggingface-hub>=0.24
+qdrant-client>=1.12
+pypdf>=5
+fastapi>=0.110
+uvicorn>=0.30
+mcp>=1.9

@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# runtime data: downloaded papers, figure crops, run history
+data/
+*.db
+
+# frontend
+node_modules/
+dist/

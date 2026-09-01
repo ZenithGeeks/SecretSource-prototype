@@ -1,0 +1,11 @@
+google-adk[extensions,a2a,mcp]>=2.7.1
+a2a-sdk[http-server]>=1.0
+
+dspy>=2.6
+docling>=2.0
+pymupdf>=1.24  # locates a sentence's page and boxes in the original PDF
+fastapi>=0.110
+uvicorn>=0.30
+python-multipart>=0.0.9
+python-dotenv>=1.0  # so host runs read the same .env compose does
+requests>=2.31

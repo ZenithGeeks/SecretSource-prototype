@@ -1,0 +1,28 @@
+# ${GATEWAY_URL} and ${NGINX_RESOLVER} are substituted at container start (nginx does this
+# for /etc/nginx/templates/*.template), so one image runs in compose and on Cloud Run.
+# nginx's own $uri / $host survive: envsubst only replaces names that exist in the environment.
+server {
+    listen 80;
+
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri /index.html;
+    }
+
+    location /api/ {
+        # Resolving through a variable makes nginx look the gateway up per request instead of
+        # once at startup — otherwise restarting the gateway strands this container on a dead IP.
+        resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+        set $gateway ${GATEWAY_URL};
+        rewrite ^/api/?(.*)$ /$1 break;
+        proxy_pass $gateway;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+
+        # server-sent events must not be buffered or timed out
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+    }
+}
