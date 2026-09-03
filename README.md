@@ -43,7 +43,7 @@ multivectors in **Qdrant** (MaxSim comparator), and speaks two protocols from on
 
 - **HTTP** under `/api` — used by the backend pipeline and by `dspy.ColBERTv2`
 - **MCP** under `/mcp` (streamable HTTP) — used by the ADK agents and by any external MCP
-  client (Claude, Cursor, ...)
+  client (Cursor, VS Code, ...)
 
 Same store, same results, one contract to maintain.
 
