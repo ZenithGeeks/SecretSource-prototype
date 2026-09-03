@@ -7,8 +7,8 @@
 # Images are built by Cloud Build (gcloud builds submit), so no local Docker is needed.
 #
 # Three decisions:
-#   MODEL=vertex (default) uses Gemini through LiteLLM — no GPU to pay for.
-#   MODEL=vllm runs Qwen on a Cloud Run GPU instead (see deploy/vllm-cloud-run.md).
+#   MODEL=vllm (default) runs Qwen3.5-9B on a Cloud Run L4 (see deploy/vllm-cloud-run.md).
+#   MODEL=vertex uses Gemini through LiteLLM instead — no GPU to pay for.
 #   VISION=1 (default) deploys colpali on an L4 GPU; VISION=0 skips it. COLPALI_GPU=0
 #   deploys it CPU-only instead (works, but a query takes minutes — demo only).
 #
@@ -16,14 +16,15 @@
 # (e2-small + 10 GB disk, ~$13/month) running the qdrant container. Pass QDRANT_URL /
 # QDRANT_API_KEY to use an external cluster (e.g. Qdrant Cloud) and no VM is touched.
 #
-# NOTE the Cloud Run L4 quota is per project per region; the default MODEL=vertex leaves
-# the one L4 for colpali. MODEL=vllm VISION=1 needs quota for two.
+# NOTE the Cloud Run L4 quota is per project per region and this project has 1. Both vllm
+# and colpali deploy against it (allocation is checked per running instance, and both
+# scale to zero), but they cannot be up at the same time until the quota is raised to 2.
 set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT}"
 REGION="${REGION:-asia-southeast1}"
 ZONE="${ZONE:-$REGION-b}"
-MODEL="${MODEL:-vertex}"
+MODEL="${MODEL:-vllm}"
 VISION="${VISION:-1}"
 COLPALI_GPU="${COLPALI_GPU:-1}"
 REPO="${REPO:-secretsource}"
@@ -104,10 +105,11 @@ deploy colbert --port 8893 --memory 4Gi --allow-unauthenticated \
 COLPALI_ENV=""
 if [ "$VISION" = "1" ]; then
     build_and_push colpali ./services/colpali
+    # No HF cache bucket here: ColQwen2 is 731 safetensors shards and loading them through
+    # GCS FUSE takes ~45 minutes, past the 30-minute startup probe. A fresh Hub download to
+    # the instance disk is a couple of minutes.
     colpali_flags=(--port 8894 --allow-unauthenticated
-        --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET"
-        --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface"
-        --set-env-vars "QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY"
+        --set-env-vars "QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY,HF_TOKEN=${HF_TOKEN:-}"
         --max-instances 1 --concurrency 4 --timeout 600
         --startup-probe "tcpSocket.port=8894,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1")
     if [ "$COLPALI_GPU" = "1" ]; then
