@@ -8,4 +8,4 @@ pillow>=10
 qdrant-client>=1.12
 fastapi>=0.110
 uvicorn>=0.30
-mcp>=1.9
+mcp>=1.9,<2 # 2.x renamed FastMCP to MCPServer; server.py speaks the v1 API
