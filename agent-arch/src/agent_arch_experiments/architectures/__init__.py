@@ -1,0 +1,1 @@
+"""Independently removable architecture implementations."""

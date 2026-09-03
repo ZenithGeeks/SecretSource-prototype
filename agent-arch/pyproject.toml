@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secret-source-agent-architecture-lab"
+version = "0.1.0"
+description = "Offline architecture experiment harness for scientific claim verification agents."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6.0",
+]
+langgraph = [
+    "langgraph>=0.2.0",
+]
+magentic = [
+    "agent-framework-orchestrations>=1.0.0",
+]
+agentarch = []
+all = [
+    "pytest>=8.0",
+    "ruff>=0.6.0",
+    "langgraph>=0.2.0",
+    "agent-framework-orchestrations>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
