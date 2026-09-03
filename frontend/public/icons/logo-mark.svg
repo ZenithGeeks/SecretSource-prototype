@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Logo/Mark">
+<path id="Vector" d="M32 60C47.464 60 60 47.464 60 32C60 16.536 47.464 4 32 4C16.536 4 4 16.536 4 32C4 47.464 16.536 60 32 60Z" stroke="#6A2E6F" stroke-width="3"/>
+<path id="Vector_2" d="M20 38C20 31 23 26 29 23" stroke="#1E1A22" stroke-width="3" stroke-linecap="round"/>
+<path id="Vector_3" d="M23 43C25.7614 43 28 40.7614 28 38C28 35.2386 25.7614 33 23 33C20.2386 33 18 35.2386 18 38C18 40.7614 20.2386 43 23 43Z" fill="#1E1A22"/>
+<path id="Vector_4" d="M36 38C36 31 39 26 45 23" stroke="#1E1A22" stroke-width="3" stroke-linecap="round"/>
+<path id="Vector_5" d="M39 43C41.7614 43 44 40.7614 44 38C44 35.2386 41.7614 33 39 33C36.2386 33 34 35.2386 34 38C34 40.7614 36.2386 43 39 43Z" fill="#1E1A22"/>
+<path id="Vector_6" d="M40 50L44 54L52 45" stroke="#6A2E6F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
