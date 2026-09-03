@@ -9,4 +9,4 @@ qdrant-client>=1.12
 pypdf>=5
 fastapi>=0.110
 uvicorn>=0.30
-mcp>=1.9,<2 # 2.x renamed FastMCP to MCPServer; server.py speaks the v1 API
+mcp>=1.16,<2 # 1.16 adds transport_security; 2.x renamed FastMCP to MCPServer
