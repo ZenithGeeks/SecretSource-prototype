@@ -6,9 +6,9 @@
 #
 # Images are built by Cloud Build (gcloud builds submit), so no local Docker is needed.
 #
-# Three decisions:
-#   MODEL=vllm (default) runs Qwen3.5-9B on a Cloud Run L4 (see deploy/vllm-cloud-run.md).
-#   MODEL=vertex uses Gemini through LiteLLM instead — no GPU to pay for.
+# The model is Qwen3.5-9B on vLLM on a Cloud Run L4 (see deploy/vllm-cloud-run.md).
+#
+# One decision:
 #   VISION=1 (default) deploys colpali on an L4 GPU; VISION=0 skips it. COLPALI_GPU=0
 #   deploys it CPU-only instead (works, but a query takes minutes — demo only).
 #
@@ -24,7 +24,6 @@ set -euo pipefail
 PROJECT="${PROJECT:?set PROJECT}"
 REGION="${REGION:-asia-southeast1}"
 ZONE="${ZONE:-$REGION-b}"
-MODEL="${MODEL:-vllm}"
 VISION="${VISION:-1}"
 COLPALI_GPU="${COLPALI_GPU:-1}"
 REPO="${REPO:-secretsource}"
@@ -122,53 +121,46 @@ if [ "$VISION" = "1" ]; then
     COLPALI_ENV=",COLPALI_URL=$(url_of colpali)"
 fi
 
-if [ "$MODEL" = "vllm" ]; then
-    # A public /v1/chat/completions is a free LLM for whoever finds the URL. vLLM checks
-    # this key on every request. Export your own to keep it stable across deploys.
-    VLLM_API_KEY="${VLLM_API_KEY:-$(openssl rand -hex 24)}"
+# A public /v1/chat/completions is a free LLM for whoever finds the URL. vLLM checks
+# this key on every request. Export your own to keep it stable across deploys.
+VLLM_API_KEY="${VLLM_API_KEY:-$(openssl rand -hex 24)}"
 
-    case "$GPU_TYPE" in
-    nvidia-rtx-pro-6000) GPU_CPU=20 GPU_MEM=80Gi ;;
-    *) GPU_CPU=8 GPU_MEM=32Gi ;;
-    esac
+case "$GPU_TYPE" in
+nvidia-rtx-pro-6000) GPU_CPU=20 GPU_MEM=80Gi ;;
+*) GPU_CPU=8 GPU_MEM=32Gi ;;
+esac
 
-    vllm_args=(
-        "$VLLM_HF_MODEL" --host 0.0.0.0 --port 8000
-        --served-model-name "$VLLM_SERVED_NAME"
-        --max-model-len "$VLLM_MAX_LEN" --max-num-seqs 8
-        # fp8_e4m3 is what plain "fp8" means on CUDA; spelled out because gcloud's --args
-        # rejects a list that repeats a value, and --quantization already said fp8.
-        --kv-cache-dtype fp8_e4m3 --enable-prefix-caching
-        --generation-config vllm --language-model-only
-        --reasoning-parser qwen3
-        --enable-auto-tool-choice --tool-call-parser qwen3_xml
-        --default-chat-template-kwargs '{"enable_thinking": false}'
-    )
-    [ -n "$VLLM_QUANT" ] && vllm_args+=(--quantization "$VLLM_QUANT")
-    # One arg contains a comma, which --args splits on; ^|^ makes it split on | instead.
-    vllm_args_joined=$(
-        IFS='|'
-        echo "${vllm_args[*]}"
-    )
+vllm_args=(
+    "$VLLM_HF_MODEL" --host 0.0.0.0 --port 8000
+    --served-model-name "$VLLM_SERVED_NAME"
+    --max-model-len "$VLLM_MAX_LEN" --max-num-seqs 8
+    # fp8_e4m3 is what plain "fp8" means on CUDA; spelled out because gcloud's --args
+    # rejects a list that repeats a value, and --quantization already said fp8.
+    --kv-cache-dtype fp8_e4m3 --enable-prefix-caching
+    --generation-config vllm --language-model-only
+    --reasoning-parser qwen3
+    --enable-auto-tool-choice --tool-call-parser qwen3_xml
+    --default-chat-template-kwargs '{"enable_thinking": false}'
+)
+[ -n "$VLLM_QUANT" ] && vllm_args+=(--quantization "$VLLM_QUANT")
+# One arg contains a comma, which --args splits on; ^|^ makes it split on | instead.
+vllm_args_joined=$(
+    IFS='|'
+    echo "${vllm_args[*]}"
+)
 
-    gcloud run deploy vllm --image vllm/vllm-openai:v0.26.0 --region "$REGION" --quiet \
-        --port 8000 --gpu 1 --gpu-type "$GPU_TYPE" --no-gpu-zonal-redundancy \
-        --cpu "$GPU_CPU" --memory "$GPU_MEM" --no-cpu-throttling \
-        --max-instances 1 --min-instances "$MIN_INSTANCES" --concurrency 8 --timeout 900 \
-        --allow-unauthenticated \
-        --startup-probe "tcpSocket.port=8000,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1" \
-        --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
-        --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
-        --set-env-vars "VLLM_API_KEY=$VLLM_API_KEY,HF_TOKEN=${HF_TOKEN:-}" \
-        --args "^|^$vllm_args_joined"
+gcloud run deploy vllm --image vllm/vllm-openai:v0.26.0 --region "$REGION" --quiet \
+    --port 8000 --gpu 1 --gpu-type "$GPU_TYPE" --no-gpu-zonal-redundancy \
+    --cpu "$GPU_CPU" --memory "$GPU_MEM" --no-cpu-throttling \
+    --max-instances 1 --min-instances "$MIN_INSTANCES" --concurrency 8 --timeout 900 \
+    --allow-unauthenticated \
+    --startup-probe "tcpSocket.port=8000,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1" \
+    --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
+    --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
+    --set-env-vars "VLLM_API_KEY=$VLLM_API_KEY,HF_TOKEN=${HF_TOKEN:-}" \
+    --args "^|^$vllm_args_joined"
 
-    MODEL_ENV="VLLM_URL=$(url_of vllm)/v1,VLLM_MODEL=$VLLM_SERVED_NAME,VLLM_API_KEY=$VLLM_API_KEY"
-else
-    # LiteLLM routes any vertex_ai/* model string to Vertex with the service's own
-    # credentials; the Cloud Run service account needs roles/aiplatform.user.
-    VERTEX_LOCATION="${VERTEX_LOCATION:-us-central1}"
-    MODEL_ENV="VLLM_MODEL=vertex_ai/gemini-2.5-flash,VERTEXAI_PROJECT=$PROJECT,VERTEXAI_LOCATION=$VERTEX_LOCATION"
-fi
+MODEL_ENV="VLLM_URL=$(url_of vllm)/v1,VLLM_MODEL=$VLLM_SERVED_NAME,VLLM_API_KEY=$VLLM_API_KEY"
 
 # --- gateway and UI -----------------------------------------------------------
 
@@ -190,10 +182,8 @@ echo "Gateway:     $(url_of gateway)"
 echo "Qdrant:      $QDRANT_URL   (api key: $QDRANT_API_KEY — keep it out of git)"
 echo "ColBERT MCP: $(url_of colbert)/mcp"
 [ "$VISION" = "1" ] && echo "ColPali MCP: $(url_of colpali)/mcp"
-if [ "$MODEL" = "vllm" ]; then
-    echo "Model:       $VLLM_HF_MODEL served as '$VLLM_SERVED_NAME' on a $GPU_TYPE"
-    echo "             VLLM_API_KEY=$VLLM_API_KEY   (export it to keep the same key next deploy)"
-fi
+echo "Model:       $VLLM_HF_MODEL served as '$VLLM_SERVED_NAME' on a $GPU_TYPE"
+echo "             VLLM_API_KEY=$VLLM_API_KEY   (export it to keep the same key next deploy)"
 echo
 echo "Run history is SQLite on the container's disk and resets when an instance recycles."
 echo "Point ANALYSES_DB at Cloud SQL before anyone relies on it."
