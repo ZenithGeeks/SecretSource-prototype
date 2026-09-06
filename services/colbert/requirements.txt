@@ -8,5 +8,6 @@ huggingface-hub>=0.24
 qdrant-client>=1.12
 pypdf>=5
 fastapi>=0.110
+python-multipart>=0.0.9  # /api/upload takes the PDF in the request body
 uvicorn>=0.30
 mcp>=1.16,<2 # 1.16 adds transport_security; 2.x renamed FastMCP to MCPServer
