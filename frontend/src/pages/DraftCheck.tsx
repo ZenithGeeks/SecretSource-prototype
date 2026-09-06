@@ -1,12 +1,19 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Badge } from '../components/Badge'
 import { Button } from '../components/Button'
+import { EmptyState } from '../components/EmptyState'
+import { ErrorState } from '../components/ErrorState'
+import { LoadingState } from '../components/LoadingState'
 import { Quote } from '../components/Quote'
 import { Sidebar } from '../components/Sidebar'
-import type { DraftWord } from '../data/draft'
-import { draftCheckParagraphs } from '../data/draft'
+import { useDraftCheck } from '../hooks'
+import type { DraftWord } from '../types'
+import { VERDICT_BADGE_TEXT, VERDICT_LEGEND_TEXT } from '../types'
 import './DraftCheck.css'
+
+const LEGEND_KINDS = ['supports', 'refutes', 'insufficient'] as const
 
 function DraftParagraph({ words }: { words: DraftWord[] }) {
   return (
@@ -28,95 +35,142 @@ function DraftParagraph({ words }: { words: DraftWord[] }) {
 
 export default function DraftCheck() {
   const navigate = useNavigate()
+  const { state, replace } = useDraftCheck('d1')
+  const [issueIndex, setIssueIndex] = useState(0)
+
+  const issues = state.status === 'loaded' ? state.data.issues : []
+  const activeIndex = Math.min(issueIndex, Math.max(issues.length - 1, 0))
 
   return (
     <div className="app" data-page="draft-check">
       <Sidebar />
 
       <main className="main">
-        <header className="page-head">
-          <div className="page-head__text">
-            <h1 className="page-head__title">Check a draft</h1>
-            <p className="page-head__meta">draft-v3.docx · 5 citations found · 2 need work</p>
-          </div>
-          <div className="page-head__actions">
-            <Button variant="ghost" icon={{ src: '/icons/icon-download.svg', alt: 'Export icon' }}>
-              Export references
-            </Button>
-            <Button variant="primary" icon={{ src: '/icons/icon-search.svg', alt: 'Search icon' }}>
-              Re-check
-            </Button>
-          </div>
-        </header>
+        {state.status === 'loading' && <LoadingState label="Checking your draft…" />}
 
-        <div className="workspace">
-          <section className="draft">
-            <h2 className="draft__heading">2. Related work</h2>
+        {state.status === 'error' && (
+          <ErrorState message={state.error.message} onRetry={() => window.location.reload()} />
+        )}
 
-            {draftCheckParagraphs.map((words, index) => (
-              <DraftParagraph words={words} key={index} />
-            ))}
-
-            <div className="legend">
-              <div className="legend__item">
-                <span className="legend__swatch legend__swatch--supports"></span>
-                <span className="legend__label">source backs it</span>
-              </div>
-              <div className="legend__item">
-                <span className="legend__swatch legend__swatch--refutes"></span>
-                <span className="legend__label">source contradicts</span>
-              </div>
-              <div className="legend__item">
-                <span className="legend__swatch legend__swatch--insufficient"></span>
-                <span className="legend__label">source is silent</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="fix-panel">
-            <div className="fix-panel__verdict">
-              <Badge variant="refutes">REFUTES</Badge>
-              <p className="fix-panel__citation">Khattab &amp; Zaharia, 2020</p>
-            </div>
-
-            <p className="fix-panel__explanation">
-              Your sentence says ColBERT (2020) cuts index size 6–10×. That result is from ColBERTv2 (Santhanam
-              et al., 2022); the 2020 paper reports the uncompressed 154 GiB index and defers compression.
-            </p>
-
-            <Quote
-              text="“…we leave compression of the embeddings to future work.”"
-              source="colbert.pdf p.7 · show in the paper"
-              sourceAsLink
-            />
-
-            <p className="fix-panel__subtitle">Suggested fix</p>
-
-            <div className="fix-panel__suggestion">
-              <p className="fix-panel__suggestion-label">Cite the paper that says it:</p>
-              <div className="fix-panel__match">
-                <img className="fix-panel__match-icon" src="/icons/icon-sparkles.svg" alt="Sparkles icon" />
-                <p className="fix-panel__match-text">
-                  Santhanam et al. (2022). ColBERTv2: Effective and Efficient Retrieval via Lightweight Late
-                  Interaction — p.4, similarity 0.91
+        {state.status === 'loaded' && (
+          <>
+            <header className="page-head">
+              <div className="page-head__text">
+                <h1 className="page-head__title">Check a draft</h1>
+                <p className="page-head__meta">
+                  {state.data.draft.fileName} · {state.data.draft.citationsFound} citations found ·{' '}
+                  {state.data.draft.issuesRemaining} need work
                 </p>
               </div>
-              <div className="fix-panel__buttons">
-                <Button variant="primary" onClick={() => navigate('/draft-check/replaced')}>
-                  Replace citation
+              <div className="page-head__actions">
+                <Button variant="ghost" icon={{ src: '/icons/icon-download.svg', alt: 'Export icon' }}>
+                  Export references
                 </Button>
-                <Button variant="ghost">Keep mine</Button>
+                <Button variant="primary" icon={{ src: '/icons/icon-search.svg', alt: 'Search icon' }}>
+                  Re-check
+                </Button>
               </div>
-            </div>
+            </header>
 
-            <div className="fix-panel__footer">
-              <p className="fix-panel__progress">1 of 2 issues</p>
-              <Button variant="ghost" icon={{ src: '/icons/icon-chevron-right.svg', alt: 'Chevron right icon' }}>
-                Next issue
-              </Button>
-            </div>
-          </section>
-        </div>
+            {state.data.draft.paragraphs.length === 0 ? (
+              <EmptyState
+                title="Nothing to check yet"
+                hint="Paste or upload a draft to see every citation get a verdict."
+              />
+            ) : (
+              <div className="workspace">
+                <section className="draft">
+                  <h2 className="draft__heading">{state.data.draft.heading}</h2>
+
+                  {state.data.draft.paragraphs.map((words, index) => (
+                    <DraftParagraph words={words} key={index} />
+                  ))}
+
+                  <div className="legend">
+                    {LEGEND_KINDS.map((kind) => (
+                      <div className="legend__item" key={kind}>
+                        <span className={`legend__swatch legend__swatch--${kind}`}></span>
+                        <span className="legend__label">{VERDICT_LEGEND_TEXT[kind]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="fix-panel">
+                  {issues.length === 0 ? (
+                    <EmptyState title="No issues left" hint="Every citation in this draft checks out." />
+                  ) : (
+                    (() => {
+                      const issue = issues[activeIndex]
+                      return (
+                        <>
+                          <div className="fix-panel__verdict">
+                            <Badge variant={issue.verdict!}>{VERDICT_BADGE_TEXT[issue.verdict!]}</Badge>
+                            <p className="fix-panel__citation">{issue.citation?.label}</p>
+                          </div>
+
+                          <p className="fix-panel__explanation">{issue.explanation}</p>
+
+                          {issue.quote && (
+                            <Quote text={issue.quote} source={`${issue.quoteLocation} · show in the paper`} sourceAsLink />
+                          )}
+
+                          {issue.suggestion && (
+                            <>
+                              <p className="fix-panel__subtitle">Suggested fix</p>
+                              <div className="fix-panel__suggestion">
+                                <p className="fix-panel__suggestion-label">Cite the paper that says it:</p>
+                                <div className="fix-panel__match">
+                                  <img className="fix-panel__match-icon" src="/icons/icon-sparkles.svg" alt="Sparkles icon" />
+                                  <p className="fix-panel__match-text">
+                                    {issue.suggestion.citation}. {issue.suggestion.title} — {issue.suggestion.location},
+                                    similarity {issue.suggestion.similarity.toFixed(2)}
+                                  </p>
+                                </div>
+                                <div className="fix-panel__buttons">
+                                  <Button
+                                    variant="primary"
+                                    onClick={() => {
+                                      replace(issue.id)
+                                      navigate('/draft-check/replaced', {
+                                        state: { newCitationLabel: issue.suggestion?.citation },
+                                      })
+                                    }}
+                                  >
+                                    Replace citation
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    onClick={() => setIssueIndex((n) => Math.min(n + 1, issues.length - 1))}
+                                  >
+                                    Keep mine
+                                  </Button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          <div className="fix-panel__footer">
+                            <p className="fix-panel__progress">
+                              {activeIndex + 1} of {issues.length} issues
+                            </p>
+                            <Button
+                              variant="ghost"
+                              icon={{ src: '/icons/icon-chevron-right.svg', alt: 'Chevron right icon' }}
+                              onClick={() => setIssueIndex((n) => Math.min(n + 1, issues.length - 1))}
+                            >
+                              Next issue
+                            </Button>
+                          </div>
+                        </>
+                      )
+                    })()
+                  )}
+                </section>
+              </div>
+            )}
+          </>
+        )}
       </main>
     </div>
   )

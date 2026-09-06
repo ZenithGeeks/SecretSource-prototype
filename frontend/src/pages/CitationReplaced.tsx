@@ -1,9 +1,11 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '../components/Button'
+import { ErrorState } from '../components/ErrorState'
+import { LoadingState } from '../components/LoadingState'
 import { Sidebar } from '../components/Sidebar'
-import type { DraftWord } from '../data/draft'
-import { citationReplacedParagraphs } from '../data/draft'
+import { useDraftCheck } from '../hooks'
+import type { DraftWord } from '../types'
 import './CitationReplaced.css'
 
 function DraftParagraph({ words }: { words: DraftWord[] }) {
@@ -25,74 +27,105 @@ function DraftParagraph({ words }: { words: DraftWord[] }) {
 }
 
 export default function CitationReplaced() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { state } = useDraftCheck('d1')
+  const newCitationLabel = (location.state as { newCitationLabel?: string } | null)?.newCitationLabel
+
   return (
     <div className="app" data-page="citation-replaced">
       <Sidebar />
 
       <main className="main">
-        <header className="page-head">
-          <div className="page-head__text">
-            <h1 className="page-head__title">Check a draft</h1>
-            <p className="page-head__meta">draft-v3.docx · 5 citations found · 1 needs work</p>
-          </div>
-          <div className="page-head__actions">
-            <Button variant="ghost" icon={{ src: '/icons/icon-download.svg', alt: 'Export icon' }}>
-              Export references
-            </Button>
-            <Button variant="primary" icon={{ src: '/icons/icon-search.svg', alt: 'Search icon' }}>
-              Re-check
-            </Button>
-          </div>
-        </header>
+        {state.status === 'loading' && <LoadingState label="Loading your draft…" />}
 
-        <div className="workspace">
-          <section className="draft">
-            <h2 className="draft__heading">2. Related work</h2>
+        {state.status === 'error' && (
+          <ErrorState message={state.error.message} onRetry={() => window.location.reload()} />
+        )}
 
-            {citationReplacedParagraphs.map((words, index) => (
-              <DraftParagraph words={words} key={index} />
-            ))}
+        {state.status === 'loaded' && (
+          <>
+            <header className="page-head">
+              <div className="page-head__text">
+                <h1 className="page-head__title">Check a draft</h1>
+                <p className="page-head__meta">
+                  {state.data.draft.fileName} · {state.data.draft.citationsFound} citations found ·{' '}
+                  {state.data.draft.issuesRemaining} need{state.data.draft.issuesRemaining === 1 ? 's' : ''} work
+                </p>
+              </div>
+              <div className="page-head__actions">
+                <Button variant="ghost" icon={{ src: '/icons/icon-download.svg', alt: 'Export icon' }}>
+                  Export references
+                </Button>
+                <Button variant="primary" icon={{ src: '/icons/icon-search.svg', alt: 'Search icon' }}>
+                  Re-check
+                </Button>
+              </div>
+            </header>
 
-            <div className="legend">
-              <div className="legend__item">
-                <span className="legend__swatch legend__swatch--supports"></span>
-                <span className="legend__label">source backs it</span>
-              </div>
-              <div className="legend__item">
-                <span className="legend__swatch legend__swatch--refutes"></span>
-                <span className="legend__label">source contradicts</span>
-              </div>
-              <div className="legend__item">
-                <span className="legend__swatch legend__swatch--insufficient"></span>
-                <span className="legend__label">source is silent</span>
-              </div>
+            <div className="workspace">
+              <section className="draft">
+                <h2 className="draft__heading">{state.data.draft.heading}</h2>
+
+                {state.data.draft.paragraphs.map((words, index) => (
+                  <DraftParagraph words={words} key={index} />
+                ))}
+
+                <div className="legend">
+                  <div className="legend__item">
+                    <span className="legend__swatch legend__swatch--supports"></span>
+                    <span className="legend__label">source backs it</span>
+                  </div>
+                  <div className="legend__item">
+                    <span className="legend__swatch legend__swatch--refutes"></span>
+                    <span className="legend__label">source contradicts</span>
+                  </div>
+                  <div className="legend__item">
+                    <span className="legend__swatch legend__swatch--insufficient"></span>
+                    <span className="legend__label">source is silent</span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="fix-panel">
+                {state.data.issues.length > 0 ? (
+                  <div className="fix-panel__status">
+                    <img className="fix-panel__status-icon" src="/icons/icon-check-circle.svg" alt="Check circle icon" />
+                    <p className="fix-panel__status-title">
+                      {state.data.issues.length} issue{state.data.issues.length === 1 ? '' : 's'} left
+                    </p>
+                    <p className="fix-panel__status-text">{state.data.issues[0].explanation}</p>
+                    <Button
+                      variant="primary"
+                      icon={{ src: '/icons/icon-chevron-right-white.svg', alt: 'Chevron right icon' }}
+                      onClick={() => navigate('/draft-check')}
+                    >
+                      Next issue
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="fix-panel__status">
+                    <img className="fix-panel__status-icon" src="/icons/icon-check-circle.svg" alt="Check circle icon" />
+                    <p className="fix-panel__status-title">All caught up</p>
+                    <p className="fix-panel__status-text">Every citation in this draft checks out.</p>
+                  </div>
+                )}
+              </section>
             </div>
-          </section>
-
-          <section className="fix-panel">
-            <div className="fix-panel__status">
-              <img className="fix-panel__status-icon" src="/icons/icon-check-circle.svg" alt="Check circle icon" />
-              <p className="fix-panel__status-title">1 issue left</p>
-              <p className="fix-panel__status-text">
-                BEIR (Thakur et al., 2021) is silent on “outperform single-vector retrievers”. Weaken the claim
-                or find a source.
-              </p>
-              <Button variant="primary" icon={{ src: '/icons/icon-chevron-right-white.svg', alt: 'Chevron right icon' }}>
-                Next issue
-              </Button>
-            </div>
-          </section>
-        </div>
+          </>
+        )}
       </main>
 
-      <div className="toast" role="status">
-        <img className="toast__icon" src="/icons/icon-check-circle.svg" alt="Check circle icon" />
-        <p className="toast__message">Citation replaced with Santhanam et al. (2022)</p>
-        <Link className="toast__action" to="/draft-check">
-          Undo
-        </Link>
-        <p className="toast__timer">· 8 s</p>
-      </div>
+      {newCitationLabel && (
+        <div className="toast" role="status">
+          <img className="toast__icon" src="/icons/icon-check-circle.svg" alt="Check circle icon" />
+          <p className="toast__message">Citation replaced with {newCitationLabel}</p>
+          <Link className="toast__action" to="/draft-check">
+            Undo
+          </Link>
+          <p className="toast__timer">· 8 s</p>
+        </div>
+      )}
     </div>
   )
 }

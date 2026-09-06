@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 
+import { useUser } from '../hooks'
 import { navItems } from '../data/nav'
+import type { Role } from '../types'
+import { Brand } from './Brand'
+import { NavItem } from './NavItem'
+import { RoleChip } from './RoleChip'
+
+const ROLE_CYCLE: Role[] = ['writer', 'researcher', 'teacher']
 
 export interface SidebarProps {
   roleChange?: boolean
@@ -10,24 +17,23 @@ export interface SidebarProps {
 export function Sidebar({ roleChange = false }: SidebarProps) {
   const location = useLocation()
   const [open, setOpen] = useState(false)
+  const user = useUser()
+  // null = follow the fetched user's role; set once the reader cycles it themselves.
+  const [roleOverride, setRoleOverride] = useState<Role | null>(null)
+  const role = roleOverride ?? (user.status === 'loaded' ? user.data.role : 'writer')
 
   useEffect(() => {
     setOpen(false)
   }, [location.pathname])
 
+  function cycleRole() {
+    setRoleOverride(ROLE_CYCLE[(ROLE_CYCLE.indexOf(role) + 1) % ROLE_CYCLE.length])
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar__head">
-        <div className="brand">
-          <div className="brand__title">
-            <img className="brand__logo" src="/icons/logo-mark.svg" alt="SecretSource logo mark" />
-            <div className="brand__wordmark">
-              <span className="brand__wordmark-part brand__wordmark-part--primary">Secret</span>
-              <span className="brand__wordmark-part brand__wordmark-part--accent">Source</span>
-            </div>
-          </div>
-          <p className="brand__tagline">Checks whether the sources a paper cites actually support what it claims.</p>
-        </div>
+        <Brand />
 
         <button
           className="sidebar__toggle"
@@ -47,23 +53,14 @@ export function Sidebar({ roleChange = false }: SidebarProps) {
         <ul className="nav__list">
           {navItems.map((item) => {
             const active = item.isActive(location.pathname)
-            const linkClassName = `nav__link${active ? ' nav__link--active' : ''}`
-            const icon = active ? item.activeIcon : item.icon
-
             return (
-              <li className="nav__item" key={item.label}>
-                {item.to ? (
-                  <Link className={linkClassName} to={item.to} aria-current={active ? 'page' : undefined}>
-                    <img className="nav__icon" src={icon} alt={`${item.label} icon`} />
-                    <span className="nav__label">{item.label}</span>
-                  </Link>
-                ) : (
-                  <a className={linkClassName} href="#" onClick={(event) => event.preventDefault()}>
-                    <img className="nav__icon" src={icon} alt={`${item.label} icon`} />
-                    <span className="nav__label">{item.label}</span>
-                  </a>
-                )}
-              </li>
+              <NavItem
+                key={item.label}
+                label={item.label}
+                to={item.to}
+                icon={active ? item.activeIcon : item.icon}
+                active={active}
+              />
             )
           })}
         </ul>
@@ -71,17 +68,7 @@ export function Sidebar({ roleChange = false }: SidebarProps) {
 
       <div className="sidebar__spacer"></div>
 
-      <div className="role">
-        <div className="role__chip">
-          <img className="role__icon" src="/icons/icon-pen.svg" alt="Pen icon" />
-          <span className="role__label">Writer</span>
-        </div>
-        {roleChange && (
-          <a className="role__change" href="#" onClick={(event) => event.preventDefault()}>
-            change
-          </a>
-        )}
-      </div>
+      <RoleChip role={role} onChange={roleChange ? cycleRole : undefined} />
     </aside>
   )
 }
