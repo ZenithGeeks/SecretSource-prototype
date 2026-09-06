@@ -44,8 +44,9 @@ docker compose --profile dev up -d adk-web        # then open http://localhost:8
 ```
 
 Pick `analysis`, send a DOI, arXiv ID, URL or PDF path as the message; set the session
-state key `verify` to `false` to stop after the claims. The gateway still runs its own
-loop (`app/main.py`); moving it onto the graph is the next step.
+state key `verify` to `false` to stop after the claims. The gateway runs every
+`POST /analyses` through this same graph and mirrors its node events as the progress
+stages, which is also how several cited sources get checked at once.
 
 ### Retrieval services
 

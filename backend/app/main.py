@@ -15,10 +15,12 @@ POST /verify            {"claim", "source"} -> one verdict, outside any analysis
 GET  /health
 
 Analyses are held in memory while they run and written to SQLite (app/store.py) as they
-progress, so a restart keeps the history.
+progress, so a restart keeps the history. A run is the workflow graph in app/workflow.py;
+its node events become the stages above, and several cited sources are checked at once.
 """
 
 import asyncio
+import copy
 import json
 import os
 import uuid
@@ -29,13 +31,15 @@ import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from google.adk.runners import InMemoryRunner
+from google.genai import types
 from pydantic import BaseModel
 
 from app import store
 from app.config import PAPERS_DIR
-from app.pipeline.claims import extract_claims_with_citations, locate
-from app.pipeline.sources import lookup_key
+from app.pipeline.claims import locate
 from app.pipeline.verify import unchecked_reason, verify_claim
+from app.workflow import analysis_workflow, fold_check
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
@@ -80,49 +84,68 @@ async def _publish(analysis_id: str, stage: str, **fields):
     await streams[analysis_id].put(event)
 
 
+def _node(event) -> tuple[str, int]:
+    """Which workflow node an event came from, and how deep it sits: "check_sources" at
+    depth 3 is one worker's check, at depth 2 the whole batch."""
+    path = event.node_info.path if event.node_info else ""
+    parts = path.split("/")
+    return parts[-1].split("@")[0], len(parts)
+
+
 async def _run(analysis_id: str, paper: str, verify: bool):
+    """Run the analysis through the workflow graph and mirror its node events as stages,
+    so the stream and the stored analysis look as they did when this was a loop. The
+    difference is in the middle: the graph checks several cited sources at once."""
     analysis = analyses[analysis_id]
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
-        extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
-        if extracted["status"] == "error":
-            raise RuntimeError(extracted["message"])
-
-        claims = extracted["claims"]
-        analysis["file"] = extracted["file"]
-        analysis["claims"] = claims
-        # Both counts: a cap that quietly halved the claims would read as a short paper.
-        await _publish(
-            analysis_id, "extracted", claims=len(claims),
-            extracted=extracted.get("extracted", len(claims)),
-            windows=extracted.get("windows", 1),
-        )
-
-        if verify:
-            for index, claim in enumerate(claims):
-                for citation in claim["citations"]:
-                    source = lookup_key(citation)
-                    if not source:
-                        continue
-                    await _publish(analysis_id, "verifying", claim=index, source=source)
-                    verdict = await asyncio.to_thread(verify_claim, claim["claim"], source)
+        async with InMemoryRunner(agent=analysis_workflow, app_name="gateway") as runner:
+            session = await runner.session_service.create_session(
+                app_name="gateway", user_id="gateway", state={"verify": verify}
+            )
+            message = types.Content(role="user", parts=[types.Part(text=paper)])
+            async for event in runner.run_async(
+                user_id="gateway", session_id=session.id, new_message=message
+            ):
+                node, depth = _node(event)
+                output = event.output
+                if output is None:
+                    continue
+                if node == "read_paper":
+                    if event.actions and event.actions.route == "error":
+                        continue  # report_error carries the message
+                    analysis["file"] = output["file"]
+                    # A copy: the session hands out the very list assemble will fold at the
+                    # end, and folding each check into it here as well would double them.
+                    delta = event.actions.state_delta or {}
+                    analysis["claims"] = copy.deepcopy(delta.get("claims", []))
+                    # Both counts: a cap that quietly halved the claims would read as a short paper.
+                    await _publish(
+                        analysis_id, "extracted", claims=output["claims"],
+                        extracted=output["extracted"], windows=output["windows"],
+                    )
+                elif node == "plan_checks":
+                    for job in output:
+                        await _publish(analysis_id, "verifying", claim=job["claim"], source=job["source"])
+                elif node == "check_sources" and depth == 3:
+                    fold_check(analysis["claims"], output)
+                    verdict = output["verdict"]
                     if verdict["status"] == "ok":
-                        # Keyed by what we looked the source up by, so the card shows the
-                        # verdict against the citation it answers for.
-                        claim.setdefault("verdicts", []).append({**verdict, "cited": source})
-                        await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
+                        await _publish(
+                            analysis_id, "verified", claim=output["claim"], verdict=verdict["verdict"]
+                        )
                     else:
                         # A failure is a result: a claim we could not check must not look
                         # like one nobody tried.
-                        reason = unchecked_reason(verdict, citation)
-                        claim.setdefault("unchecked", []).append(
-                            {"source": source, "reason": reason,
-                             "message": verdict.get("message", "")}
-                        )
                         await _publish(
-                            analysis_id, "failed", claim=index, source=source,
-                            reason=reason, message=verdict.get("message", ""),
+                            analysis_id, "failed", claim=output["claim"], source=output["source"],
+                            reason=unchecked_reason(verdict, {"url": output["url"]}),
+                            message=verdict.get("message", ""),
                         )
+                elif node == "assemble":
+                    analysis["claims"] = output["claims"]
+                elif node == "report_error":
+                    raise RuntimeError(output["message"])
 
         analysis["status"] = "done"
         await _publish(analysis_id, "done")
