@@ -1,12 +1,15 @@
 """Resolve a cited work to an open-access PDF and download it.
 
 Accepts a DOI, arXiv ID, PMID, direct URL, or a bare title. arXiv resolves directly; the
-rest go to whoever answers: Semantic Scholar (rate-limits without a key), then Unpaywall.
+rest go to whoever answers: Semantic Scholar (one request at a time, see _s2_get), then
+Unpaywall.
 A DOI with no open-access copy falls back to its arXiv twin. Resolutions are cached in
 SQLite so a re-run costs no API call. PDFs land in PAPERS_DIR so they can be indexed.
 """
 
 import re
+import threading
+import time
 from pathlib import Path
 
 from app.config import PAPERS_DIR, S2_API_KEY, UNPAYWALL_EMAIL
@@ -17,7 +20,12 @@ SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper"
 UNPAYWALL_URL = "https://api.unpaywall.org/v2"
 S2_FIELDS = "title,year,externalIds,openAccessPdf"
 TITLE_MATCH = 0.9  # a wrong paper is worse than no paper
-RETRY_WAITS = (2, 6)  # the free S2 tier 429s constantly; two backoffs recover most of them
+RETRY_WAITS = (2, 6, 15)  # a 429 is the service asking us to wait, so wait, three times over
+# One Semantic Scholar request a second, and never two at once. Measured against the graph
+# API: a keyed call answers in ~5s, and firing three together returns two 429s and one
+# answer. Since the analysis graph checks several cited sources in parallel, every lookup
+# goes through _s2_get, which queues them.
+S2_MIN_INTERVAL = 1.2
 USER_AGENT = {"User-Agent": "SecretSource/0.1 (academic claim verification; senior project)"}
 
 
@@ -64,23 +72,57 @@ def _headers() -> dict:
     return {**USER_AGENT, **({"x-api-key": S2_API_KEY} if S2_API_KEY else {})}
 
 
-def _semantic_scholar(path: str, params: dict) -> dict:
-    """One Semantic Scholar call; a 429 is retried, not treated as an answer about the paper."""
-    import time
+_s2_gate = threading.Lock()  # one Semantic Scholar request in flight, process-wide
+_s2_free_at = 0.0  # the monotonic time the next one may go out
 
+
+def _s2_get(path: str, params: dict):
+    """One Semantic Scholar request, on its own. A key buys about one request a second, not
+    parallelism: the service 429s calls that overlap. The analysis graph checks several
+    cited sources at once, so their lookups queue here instead of each collecting a 429.
+    Only the lookup is serialised; indexing a cited PDF, the slow part, still overlaps."""
+    global _s2_free_at
     import requests
 
-    for wait in (*RETRY_WAITS, None):
-        response = requests.get(
-            f"{SEMANTIC_SCHOLAR_URL}{path}", params=params, headers=_headers(), timeout=60
+    with _s2_gate:
+        delay = _s2_free_at - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        try:
+            return requests.get(
+                f"{SEMANTIC_SCHOLAR_URL}{path}", params=params, headers=_headers(), timeout=60
+            )
+        finally:
+            _s2_free_at = time.monotonic() + S2_MIN_INTERVAL
+
+
+def _rate_limited() -> LookupUnavailable:
+    """Why the lookup gave up, without sending a reader to change a setting already set."""
+    if S2_API_KEY:
+        return LookupUnavailable(
+            "Semantic Scholar kept rate limiting us even with S2_API_KEY set; a key allows "
+            "about one request a second and this run has more sources than that to look up"
         )
+    return LookupUnavailable("Semantic Scholar is rate limiting us; set S2_API_KEY for a higher limit")
+
+
+def _retry_after(response, fallback: float) -> float:
+    """What the service asked us to wait, when it says so; our own backoff otherwise."""
+    try:
+        return max(float(response.headers.get("Retry-After", "")), fallback)
+    except ValueError:
+        return fallback
+
+
+def _semantic_scholar(path: str, params: dict) -> dict:
+    """One Semantic Scholar call; a 429 is retried, not treated as an answer about the paper."""
+    for wait in (*RETRY_WAITS, None):
+        response = _s2_get(path, params)
         if response.status_code != 429:
             break
         if wait is None:
-            raise LookupUnavailable(
-                "Semantic Scholar is rate limiting us; set S2_API_KEY for a higher limit"
-            )
-        time.sleep(wait)
+            raise _rate_limited()
+        time.sleep(_retry_after(response, wait))
     response.raise_for_status()
     return response.json()
 
@@ -242,13 +284,7 @@ def _fetch(identifier: str) -> tuple[Path, str, str]:
 def lookup_key(citation: dict) -> str:
     """What to look a cited work up by, or "" when the reference carries nothing usable.
     URL last: usually a blog post or a spec, but still reportable."""
-    return (
-        citation.get("doi")
-        or citation.get("arxiv")
-        or citation.get("title")
-        or citation.get("url")
-        or ""
-    )
+    return citation.get("doi") or citation.get("arxiv") or citation.get("title") or citation.get("url") or ""
 
 
 def local_pdf(paper: str) -> str:
