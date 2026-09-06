@@ -1,11 +1,11 @@
 /** One claim, answered: whether it held, what the paper said, and what each source replied. */
 
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 
 import type { Citation, Claim, Unchecked, Verdict } from '../lib/api'
 import { api, reasonText } from '../lib/api'
-import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
+import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
 import type { Target } from './PageViewer'
@@ -197,13 +197,17 @@ function CitedWork({
   citation,
   verdict,
   failure,
+  running,
   onShow,
 }: {
   citation: Citation
   verdict?: Verdict
   failure?: Unchecked
+  running?: boolean
   onShow?: (target: Target) => void
 }) {
+  const pending = !verdict && !failure
+  const checking = pending && running && Boolean(citedAs(citation))
   const link = citationLink(citation)
   return (
     <li className="border-l-2 border-border-subtle pl-4">
@@ -223,7 +227,13 @@ function CitedWork({
       </p>
       {verdict && <Answer verdict={verdict} onShow={onShow} />}
       {failure && <Failure failure={failure} />}
-      {!verdict && !failure && (
+      {checking && (
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-muted">
+          <Loader2 className="size-3 animate-spin text-accent" />
+          Checking this source…
+        </p>
+      )}
+      {pending && !checking && (
         <p className="mt-1 text-xs text-ink-muted">Not checked — verification did not run.</p>
       )}
     </li>
@@ -235,12 +245,15 @@ export function ClaimCard({
   index,
   standing,
   paper,
+  running,
   onShow,
 }: {
   claim: Claim
   index: number
   standing: Standing
   paper?: string
+  /** The analysis is still verifying: a source without an answer yet is being read. */
+  running?: boolean
   onShow?: (target: Target) => void
 }) {
   const [open, setOpen] = useState(opensByDefault(standing))
@@ -307,6 +320,7 @@ export function ClaimCard({
                 <CitedWork
                   key={i}
                   citation={citation}
+                  running={running}
                   onShow={onShow}
                   {...answersFor(claim, citation)}
                 />

@@ -72,6 +72,7 @@ const STANDING_STYLES = {
   refutes: 'bg-refutes-soft text-refutes',
   insufficient: 'bg-insufficient-soft text-insufficient',
   supports: 'bg-supports-soft text-supports',
+  checking: 'bg-accent-soft text-accent', // in progress, not a finding: the accent, not a verdict colour
   unchecked: 'bg-canvas text-ink-muted',
   uncited: 'bg-canvas text-ink-muted',
 } as const
@@ -100,6 +101,7 @@ const STANDING_TEXT = {
   refutes: 'source contradicts',
   insufficient: 'source is silent',
   supports: 'source backs it',
+  checking: 'checking…',
   unchecked: 'not checked',
   uncited: 'no source cited',
 } as const
