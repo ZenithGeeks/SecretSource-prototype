@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 
 import App from './App'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
+import { WriterApp } from './roles/writer/WriterApp'
 import type { Role } from './screens/Onboarding'
 import { Onboarding } from './screens/Onboarding'
 
@@ -61,6 +62,7 @@ export function Root() {
     case 'researcher':
       return <ResearcherApp onChangeRole={() => setScreen('onboarding')} />
     case 'writer':
+      return <WriterApp onChangeRole={() => setScreen('onboarding')} />
     case 'teacher':
       return <ComingSoon role={screen} onBack={() => setScreen('onboarding')} />
     case 'app':
