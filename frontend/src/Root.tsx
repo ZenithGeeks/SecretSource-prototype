@@ -7,7 +7,7 @@
  * shared-file edit a role needs. `Skip` (or `?role=app`) opens the existing analysis app.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import App from './App'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
@@ -38,8 +38,22 @@ function ComingSoon({ role, onBack }: { role: Role; onBack: () => void }) {
   )
 }
 
+/** Keeps `?role=` in sync with the picked screen, so refreshing stays where you were
+ * instead of falling back to onboarding (#132). Reads and writes the URL fresh each
+ * time rather than replacing it outright, so a role screen's own params (History's
+ * `?screen=`/`?analysis=`) survive a role change untouched. */
+function syncRoleParam(screen: Screen) {
+  const params = new URLSearchParams(window.location.search)
+  if (screen === 'onboarding') params.delete('role')
+  else params.set('role', screen)
+  const query = params.toString()
+  window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+}
+
 export function Root() {
   const [screen, setScreen] = useState<Screen>(initialScreen)
+
+  useEffect(() => syncRoleParam(screen), [screen])
 
   switch (screen) {
     case 'onboarding':
