@@ -147,11 +147,17 @@ export const api = {
         (page ? `&page=${page}` : ''),
     ),
 
-  /** Subscribes to an analysis's stage events. Returns an unsubscribe function. */
-  onStages: (id: string, onStage: (stage: Stage) => void) => {
+  /** Follows an analysis's stages over SSE. A dropped connection is usually transient, so
+   * this does not close on error — the browser retries on its own, and the backend
+   * replays every stage from the start on each new connection (#133). `onOpen` fires on
+   * the initial connection and on every reconnect, so a caller can resync its own
+   * bookkeeping (e.g. how much of that replay to skip) each time. Returns a function that
+   * closes the connection for good, for the caller to call once it knows the run ended,
+   * and for cleanup on unmount. */
+  onStages: (id: string, onStage: (stage: Stage) => void, onOpen?: () => void) => {
     const events = new EventSource(`/api/analyses/${id}/events`)
     events.onmessage = (message) => onStage(JSON.parse(message.data))
-    events.onerror = () => events.close()
+    if (onOpen) events.onopen = onOpen
     return () => events.close()
   },
 }
