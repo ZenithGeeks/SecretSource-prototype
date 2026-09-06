@@ -6,7 +6,8 @@ HTTP (the contract dspy.ColBERTv2 expects):
     GET  /api/search?query=...&k=10      -> {"topk": [{"rank", "score", "text", "title", "source",
                                                        "page", "start", "end"}, ...]}
     POST /api/search {"query", "k"}      -> same
-    POST /api/add    {"path": "x.pdf"}   -> {"added": n, "total": m}
+    POST /api/add    {"path": "x.pdf"}   -> {"added": n, "total": m}   (a path on this machine)
+    POST /api/upload multipart "file"    -> same, for a caller that does not share our disk
     GET  /health
 
 MCP (streamable HTTP at /mcp): tools search_passages, add_paper — same store, same results.
@@ -17,13 +18,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 from store import Store
 
 PORT = int(os.getenv("COLBERT_PORT", "8893"))
+PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))  # where uploads land before indexing
+PDF_UPLOAD = File(...)
 
 _store: Store | None = None
 
@@ -96,6 +99,27 @@ def add(body: AddBody):
     if not Path(body.path).is_file():
         raise HTTPException(404, f"no such file: {body.path}")
     return {"added": store().add_pdf(body.path), "total": len(store())}
+
+
+def receive(upload: UploadFile, folder: Path) -> Path:
+    """Write an uploaded file under `folder` and return where it landed. Only the base name
+    is kept: it is a file name that arrived over HTTP, not a path."""
+    name = Path(upload.filename or "").name
+    if not name:
+        raise HTTPException(400, "the upload needs a file name")
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_bytes(upload.file.read())
+    return path
+
+
+@app.post("/api/upload")
+def upload(file: UploadFile = PDF_UPLOAD):
+    """Index a PDF sent in the request body. /api/add takes a path, which only means the
+    same thing on both sides when the caller shares this disk (the compose bind-mount);
+    a gateway on another machine, or on Cloud Run, sends the file instead."""
+    path = receive(file, PAPERS_DIR)
+    return {"added": store().add_pdf(path), "total": len(store())}
 
 
 @app.get("/health")

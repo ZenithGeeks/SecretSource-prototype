@@ -3,11 +3,30 @@
 Each service exposes the same contract twice: plain HTTP under /api (used here, and by
 dspy.ColBERTv2) and MCP under /mcp (used by the agents). The pipeline calls HTTP because
 it wants typed results and no session handshake in a hot loop.
+
+Files travel with the request (/api/upload, /api/upload_figures) rather than as paths.
+A path only means the same thing on both sides under the compose bind-mount; the
+service may just as well be on another machine or on Cloud Run.
 """
+
+import json
+from contextlib import ExitStack
+from pathlib import Path
 
 import requests
 
 from app.config import COLBERT_URL, COLPALI_URL
+
+
+def _detail(response: requests.Response) -> str:
+    try:
+        return response.json().get("detail", response.text)
+    except ValueError:
+        return response.text
+
+
+def _pdf(path: str, handle) -> dict:
+    return {"file": (Path(path).name, handle, "application/pdf")}
 
 
 def colbert_search(query: str, k: int = 10) -> list[dict]:
@@ -18,9 +37,10 @@ def colbert_search(query: str, k: int = 10) -> list[dict]:
 
 def colbert_add(path: str) -> dict:
     """Index one PDF. Idempotent: re-adding replaces the paper's passages."""
-    response = requests.post(f"{COLBERT_URL}/api/add", json={"path": path}, timeout=600)
+    with open(path, "rb") as pdf:
+        response = requests.post(f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), timeout=600)
     if not response.ok:
-        return {"status": "error", "message": response.json().get("detail", response.text)}
+        return {"status": "error", "message": _detail(response)}
     return {"status": "ok", **response.json()}
 
 
@@ -33,15 +53,23 @@ def colpali_available() -> bool:
 
 
 def colpali_add_pdf(path: str) -> None:
-    requests.post(f"{COLPALI_URL}/api/add", json={"path": path}, timeout=600)
+    with open(path, "rb") as pdf:
+        requests.post(f"{COLPALI_URL}/api/upload", files=_pdf(path, pdf), timeout=600)
 
 
 def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
-    requests.post(
-        f"{COLPALI_URL}/api/add_figures",
-        json={"source": source, "title": title, "figures": figures},
-        timeout=600,
-    )
+    """Send the crops along with their metadata; the service matches them by file name."""
+    with ExitStack() as open_files:
+        images = [
+            ("images", (Path(f["image"]).name, open_files.enter_context(open(f["image"], "rb")), "image/png"))
+            for f in figures
+        ]
+        requests.post(
+            f"{COLPALI_URL}/api/upload_figures",
+            data={"source": source, "title": title, "figures": json.dumps(figures)},
+            files=images,
+            timeout=600,
+        )
 
 
 def colpali_search(query: str, k: int = 20) -> dict:
