@@ -94,6 +94,14 @@ def _build_judge():
     return run
 
 
+def unchecked_reason(verdict: dict, citation: dict) -> str:
+    """Why a claim went unchecked, separating our failures from the paper's. An unresolvable
+    citation that carries a link is usually a blog post or a spec: a fact about the
+    bibliography, not a lookup of ours that failed."""
+    reason = verdict.get("reason", "failed")
+    return "web-source" if reason == "unresolvable" and citation.get("url") else reason
+
+
 def verify_claim(claim: str, source_pdf_path: str) -> dict:
     """Check whether a cited paper actually supports a claim made about it.
 
