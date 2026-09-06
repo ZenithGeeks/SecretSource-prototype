@@ -10,6 +10,7 @@
 import { useState } from 'react'
 
 import App from './App'
+import { ResearcherApp } from './roles/researcher/ResearcherApp'
 import type { Role } from './screens/Onboarding'
 import { Onboarding } from './screens/Onboarding'
 
@@ -44,6 +45,7 @@ export function Root() {
     case 'onboarding':
       return <Onboarding onContinue={setScreen} onSkip={() => setScreen('app')} />
     case 'researcher':
+      return <ResearcherApp onChangeRole={() => setScreen('onboarding')} />
     case 'writer':
     case 'teacher':
       return <ComingSoon role={screen} onBack={() => setScreen('onboarding')} />
