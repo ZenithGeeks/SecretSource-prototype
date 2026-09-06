@@ -1,7 +1,8 @@
 /**
  * 11 Library (Researcher) — the researcher's papers, clustered by meaning, with per-paper
  * claim tallies. Data comes from useResearcherLibrary (mock-backed until the gateway
- * endpoint exists); the cluster chips filter the table locally.
+ * endpoint exists); the cluster chips filter the table locally. Add paper hands off to
+ * History, where the gateway analyzes a paper (`onAddPaper`).
  */
 
 import { ChevronRight, Plus, Upload } from 'lucide-react'
@@ -14,7 +15,7 @@ import { cn } from '../../../lib/utils'
 /** Cluster dot colours, cycled in cluster order so new clusters stay distinguishable. */
 const DOT_COLORS = ['bg-accent', 'bg-supports', 'bg-insufficient', 'bg-ink-muted', 'bg-refutes']
 
-export function Library() {
+export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
   const [filter, setFilter] = useState('All')
   const library = useResearcherLibrary().data
   if (!library) return null
@@ -42,7 +43,7 @@ export function Library() {
             <Upload className="size-4" />
             Import .bib
           </Button>
-          <Button>
+          <Button onClick={onAddPaper}>
             <Plus className="size-4" />
             Add paper
           </Button>

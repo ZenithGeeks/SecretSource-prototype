@@ -1,10 +1,11 @@
 /**
  * 09 Home (Researcher) — greeting, quick actions, conflicts, reading queue, library
  * summary. Data comes from useResearcherHome (mock-backed until the gateway endpoint
- * exists); `onOpen` navigates to another researcher screen.
+ * exists); `onOpen` navigates to another researcher screen. Analyze a paper opens History,
+ * the one screen wired to the gateway.
  */
 
-import { FileText, Library, Plus, Search, Waypoints } from 'lucide-react'
+import { FileSearch, FileText, Library, Plus, Search, Waypoints } from 'lucide-react'
 import type { ComponentType } from 'react'
 
 import { Card } from '../../../components/ui'
@@ -16,6 +17,8 @@ import type { ResearcherScreen } from '../ResearcherApp'
 type Icon = ComponentType<{ className?: string }>
 
 const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; to: ResearcherScreen }[] = [
+  // The one action that reaches the working gateway today; the flow lives on History.
+  { title: 'Analyze a paper', hint: 'DOI, arXiv ID, URL, or a PDF you upload', icon: FileSearch, to: 'history' },
   { title: 'Map my field', hint: 'Cluster library by meaning, see who agrees', icon: Waypoints, to: 'graph' },
   { title: 'What does the field say about…', hint: "One claim, every paper's answer", icon: Search, to: 'field-consensus' },
   { title: 'Add papers', hint: 'DOI, arXiv, PDF, or a whole bibliography', icon: Library, to: 'library' },

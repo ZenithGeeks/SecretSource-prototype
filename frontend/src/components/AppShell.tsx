@@ -3,6 +3,9 @@
  * active role chip at the bottom, content in main. Role-agnostic — each role passes its
  * own nav items and chip, so researcher/writer/teacher share one layout.
  *
+ * `sidebar` goes under the nav (the researcher's past analyses on History); `wide` lets
+ * the shell grow for a screen that shows a PDF page beside its content.
+ *
  * Figma: NavItem (default/active) and RoleChip from the Components page.
  */
 
@@ -22,6 +25,8 @@ export function AppShell<K extends string>({
   role,
   roleIcon: RoleIcon,
   onChangeRole,
+  sidebar,
+  wide = false,
   children,
 }: {
   nav: NavEntry<K>[]
@@ -30,10 +35,17 @@ export function AppShell<K extends string>({
   role: string
   roleIcon: Icon
   onChangeRole?: () => void
+  sidebar?: ReactNode
+  wide?: boolean
   children: ReactNode
 }) {
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl gap-8 p-6">
+    <div
+      className={cn(
+        'mx-auto flex min-h-screen gap-8 p-6 transition-[max-width] duration-200',
+        wide ? 'max-w-[110rem]' : 'max-w-6xl',
+      )}
+    >
       <aside className="flex w-64 shrink-0 flex-col gap-4">
         <Brand />
 
@@ -56,6 +68,8 @@ export function AppShell<K extends string>({
             </button>
           ))}
         </nav>
+
+        {sidebar}
 
         <div className="mt-auto flex items-center gap-2 px-3">
           <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">

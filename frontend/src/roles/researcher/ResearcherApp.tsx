@@ -1,15 +1,23 @@
 /**
  * Researcher role router: which researcher screen is showing, rendered inside the shared
- * AppShell with the researcher nav. `?screen=` deep-links one. field-consensus is reached
- * from Home's "What does the field say" action and lights the Library nav (as in Figma).
+ * AppShell with the researcher nav. `?screen=` deep-links one and `?analysis=` opens that
+ * analysis on History. field-consensus is reached from Home's "What does the field say"
+ * action and lights the Library nav (as in Figma).
+ *
+ * History is where a paper gets analyzed (Figma row "Analyze a paper"): the form and the
+ * results in main, past analyses under the nav. Home's "Analyze a paper" action and
+ * Library's "Add paper" both land there.
  */
 
-import { History, Home as HomeIcon, Library as LibraryIcon, Microscope, Settings, Waypoints } from 'lucide-react'
+import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Microscope, Settings, Waypoints } from 'lucide-react'
 import { useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { HistoryList } from '../../components/HistoryList'
+import { useAnalyses } from '../../lib/useAnalysis'
 import { FieldConsensus } from './screens/FieldConsensus'
+import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
 
@@ -20,7 +28,7 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'library', label: 'Library', icon: LibraryIcon },
   { key: 'graph', label: 'Graph', icon: Waypoints },
-  { key: 'history', label: 'History', icon: History },
+  { key: 'history', label: 'History', icon: HistoryIcon },
   { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
@@ -35,8 +43,14 @@ const NAV_FOR: Record<ResearcherScreen, NavKey> = {
 }
 
 function initialScreen(): ResearcherScreen {
-  const s = new URLSearchParams(window.location.search).get('screen') as ResearcherScreen | null
-  return s && s in NAV_FOR ? s : 'home'
+  const params = new URLSearchParams(window.location.search)
+  const s = params.get('screen') as ResearcherScreen | null
+  if (s && s in NAV_FOR) return s
+  return params.get('analysis') ? 'history' : 'home'
+}
+
+function initialAnalysis(): string | null {
+  return new URLSearchParams(window.location.search).get('analysis')
 }
 
 function Placeholder({ title }: { title: string }) {
@@ -50,21 +64,41 @@ function Placeholder({ title }: { title: string }) {
 
 export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [screen, setScreen] = useState<ResearcherScreen>(initialScreen)
+  const [selected, setSelected] = useState<string | null>(initialAnalysis)
+  const [wide, setWide] = useState(false) // History has a page open beside the claims
+  const analyses = useAnalyses()
+
+  const navigate = (next: ResearcherScreen) => {
+    setScreen(next)
+    setWide(false)
+  }
+  const select = (id: string | null) => {
+    setSelected(id)
+    setWide(false)
+  }
 
   return (
     <AppShell
       nav={NAV}
       active={NAV_FOR[screen]}
-      onNavigate={setScreen}
+      onNavigate={navigate}
       role="Researcher"
       roleIcon={Microscope}
       onChangeRole={onChangeRole}
+      wide={wide}
+      sidebar={
+        screen === 'history' ? (
+          <HistoryList analyses={analyses.data ?? []} selected={selected} onSelect={select} />
+        ) : undefined
+      }
     >
-      {screen === 'home' && <Home onOpen={setScreen} />}
-      {screen === 'library' && <Library />}
+      {screen === 'home' && <Home onOpen={navigate} />}
+      {screen === 'library' && <Library onAddPaper={() => navigate('history')} />}
       {screen === 'field-consensus' && <FieldConsensus />}
       {screen === 'graph' && <Placeholder title="Graph" />}
-      {screen === 'history' && <Placeholder title="History" />}
+      {screen === 'history' && (
+        <History selected={selected} onSelect={select} onTargetChange={setWide} />
+      )}
       {screen === 'settings' && <Placeholder title="Settings" />}
     </AppShell>
   )
