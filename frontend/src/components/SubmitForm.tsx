@@ -38,7 +38,8 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
           placeholder="DOI, arXiv ID, URL, or a PDF path"
           aria-label="Paper to analyze"
         />
-        <div className="flex gap-2">
+        {/* Inside the role shell main is narrower than the prototype; the labels stay on one line. */}
+        <div className="flex shrink-0 gap-2 whitespace-nowrap">
           <Button type="submit" disabled={!reference.trim() || start.isPending}>
             {start.isPending ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
             Analyze
