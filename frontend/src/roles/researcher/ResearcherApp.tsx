@@ -10,7 +10,7 @@
  */
 
 import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Microscope, Settings, Waypoints } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
@@ -53,6 +53,18 @@ function initialAnalysis(): string | null {
   return new URLSearchParams(window.location.search).get('analysis')
 }
 
+/** Keeps `?screen=`/`?analysis=` in sync with what's showing, so a refresh reopens the same
+ * screen and, on History, the same analysis (#132) instead of the params only ever being
+ * read at mount. Reads the URL fresh each time so Root's own `?role=` param is untouched. */
+function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
+  const params = new URLSearchParams(window.location.search)
+  params.set('screen', screen)
+  if (screen === 'history' && selected) params.set('analysis', selected)
+  else params.delete('analysis')
+  const query = params.toString()
+  window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+}
+
 function Placeholder({ title }: { title: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
@@ -67,6 +79,8 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [selected, setSelected] = useState<string | null>(initialAnalysis)
   const [wide, setWide] = useState(false) // History has a page open beside the claims
   const analyses = useAnalyses()
+
+  useEffect(() => syncScreenParams(screen, selected), [screen, selected])
 
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
