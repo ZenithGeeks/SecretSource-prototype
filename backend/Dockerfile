@@ -7,10 +7,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 # Docling's table model imports opencv, which needs these native libraries; without them
-# converting a PDF dies with "ImportError: libxcb.so.1". Kept after pip so editing
+# converting a PDF dies with "ImportError: libxcb.so.1". graphviz is for `adk web`, which
+# draws the pipeline graph with it (adk_agents/). Kept after pip so editing
 # requirements.txt is the only thing that rebuilds the slow install layer.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 graphviz \
     && rm -rf /var/lib/apt/lists/*
 COPY . .
 EXPOSE 8080

@@ -116,7 +116,7 @@ services:
     build: ./backend
     ports:
       - "8080:8080"
-    environment:
+    environment: &gateway-env
       # Set VLLM_URL in .env to point at a vLLM somewhere else — a Cloud Run service, say —
       # and the local vllm container stops being used. VLLM_API_KEY is what that one wants.
       VLLM_URL: ${VLLM_URL:-http://vllm:8000/v1}
@@ -139,6 +139,24 @@ services:
     depends_on:
       - grobid # vllm / colbert are only dependencies under --profile gpu; .env decides
     restart: unless-stopped
+
+  # The analysis pipeline as a graph, drawn by ADK's dev UI, with the events of each run
+  # (backend/app/workflow.py). Development only:
+  #   docker compose --profile dev up -d adk-web        then open http://localhost:8001
+  adk-web:
+    profiles: [dev]
+    build: ./backend
+    command: adk web --host 0.0.0.0 --port 8001 adk_agents
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *gateway-env
+      PYTHONPATH: /app # adk_agents/ imports the app package
+    volumes:
+      - ./data/papers:/app/data/papers
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      - grobid
 
   web:
     build: ./frontend

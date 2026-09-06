@@ -35,6 +35,18 @@ and downloads it if it has to.
 There is also a multi-agent chat interface (Google ADK): a coordinator routes requests to
 search / rag / paper / verify agents. `python backend/cli.py` starts it.
 
+The analysis pipeline is also declared as a graph in `backend/app/workflow.py` (an ADK
+Workflow): read the paper, plan the checks, one worker per cited source, assemble. ADK's
+dev UI draws it and lists the events of each run:
+
+```sh
+docker compose --profile dev up -d adk-web        # then open http://localhost:8001
+```
+
+Pick `analysis`, send a DOI, arXiv ID, URL or PDF path as the message; set the session
+state key `verify` to `false` to stop after the claims. The gateway still runs its own
+loop (`app/main.py`); moving it onto the graph is the next step.
+
 ### Retrieval services
 
 `services/colbert` (text) and `services/colpali` (figures and pages) are standalone
@@ -56,7 +68,9 @@ backend/          gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/llm.py        the one model behind ADK and DSPy
   app/pipeline/     claims, sources, verify, figures, rag
   app/agents/       ADK agent tree
+  app/workflow.py   the pipeline as an ADK Workflow graph
   app/clients/      HTTP clients for the retrieval services
+  adk_agents/       what `adk web` serves: the pipeline graph and the chat tree
   cli.py            agent REPL
 frontend/         React + Vite UI, served by nginx which proxies /api to the gateway
 services/

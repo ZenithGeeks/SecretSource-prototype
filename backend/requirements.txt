@@ -1,4 +1,4 @@
-google-adk[extensions,a2a,mcp]>=2.7.1
+google-adk[extensions,a2a,mcp]>=2.8,<3 # the workflow graph API (app/workflow.py) was checked against 2.8.0
 a2a-sdk[http-server]>=1.0
 
 dspy>=2.6
