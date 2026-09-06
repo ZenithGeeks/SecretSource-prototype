@@ -1,19 +1,12 @@
 /** Writer Find a source — search the library (and open access) for a source that backs
  * a sentence. `onCiteBestMatch` hands off to Citation replaced with the cited label. */
 
+import { Copy, Download, Loader2, Search, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
-import { Badge } from '../../../components/Badge'
-import { Button } from '../../../components/Button'
-import { EmptyState } from '../../../components/EmptyState'
-import { ErrorState } from '../../../components/ErrorState'
-import { Input } from '../../../components/Input'
-import { LoadingState } from '../../../components/LoadingState'
-import { Quote } from '../../../components/Quote'
-import { Toggle } from '../../../components/Toggle'
+import { Button, Card, Empty, Input, StandingBadge } from '../../../components/ui'
 import { useSourceSearch } from '../../../lib/useWriter'
-import { VERDICT_BADGE_TEXT } from '../../../lib/writer'
-import './FindASource.css'
+import { cn } from '../../../lib/utils'
 
 const INITIAL_QUERY = 'compressing token-level embeddings makes the index 6–10× smaller'
 
@@ -38,10 +31,10 @@ export function FindASource({ onCiteBestMatch }: { onCiteBestMatch: (citationLab
 
   return (
     <>
-      <h1 className="main__title">Find the source that actually says it</h1>
+      <h1 className="font-serif text-xl font-semibold tracking-tight text-ink">Find the source that actually says it</h1>
 
       <form
-        className="search"
+        className="flex gap-3"
         onSubmit={(event) => {
           event.preventDefault()
           setSubmittedQuery(query)
@@ -49,93 +42,124 @@ export function FindASource({ onCiteBestMatch }: { onCiteBestMatch: (citationLab
       >
         <Input
           aria-label="Search for a source"
-          placeholder="compressing token-level embeddings makes the index 6–10× smaller"
+          placeholder={INITIAL_QUERY}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          className="max-w-2xl"
         />
-        <Button variant="primary" type="submit" icon={{ src: '/icons/icon-search.svg', alt: 'Search icon' }}>
+        <Button type="submit" className="shrink-0">
+          <Search className="size-4" />
           Search
         </Button>
       </form>
 
       {search.data && (
-        <section className="filters">
-          <p className="filters__label">Search in</p>
-          <Toggle active={libraryOnly} onToggle={() => setLibraryOnly((v) => !v)}>
-            My library ({search.data.libraryCount})
-          </Toggle>
-          <Toggle active={openAccess} onToggle={() => setOpenAccess((v) => !v)}>
-            Open access
-          </Toggle>
-          <Toggle active={citedByLibrary} onToggle={() => setCitedByLibrary((v) => !v)}>
-            Cited by my library
-          </Toggle>
-          <p className="filters__separator">·</p>
-          <p className="filters__note">Matching by meaning of passages, not keywords</p>
-        </section>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs text-ink-muted">Search in</p>
+          {[
+            { label: `My library (${search.data.libraryCount})`, active: libraryOnly, onToggle: () => setLibraryOnly((v) => !v) },
+            { label: 'Open access', active: openAccess, onToggle: () => setOpenAccess((v) => !v) },
+            { label: 'Cited by my library', active: citedByLibrary, onToggle: () => setCitedByLibrary((v) => !v) },
+          ].map(({ label, active, onToggle }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={onToggle}
+              aria-pressed={active}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-xs font-medium text-ink',
+                active ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+          <p className="text-xs text-ink-muted">· Matching by meaning of passages, not keywords</p>
+        </div>
       )}
 
-      {search.isPending && <LoadingState label="Searching your library…" />}
+      {search.isPending && (
+        <p className="flex items-center gap-2 text-sm text-ink-muted">
+          <Loader2 className="size-4 animate-spin" />
+          Searching your library…
+        </p>
+      )}
 
       {search.isError && (
-        <ErrorState message={(search.error as Error).message} onRetry={() => search.refetch()} />
+        <Card className="border-refutes text-refutes">
+          Could not search: {(search.error as Error).message}
+        </Card>
       )}
 
       {search.data && (
         <>
-          <section className="hint">
-            <img className="hint__icon" src="/icons/icon-sparkles.svg" alt="Sparkles icon" />
-            <p className="hint__text">
+          <div className="flex items-start gap-2 rounded-xl bg-accent-soft px-4 py-3">
+            <Sparkles className="mt-0.5 size-4 shrink-0 text-accent" />
+            <p className="text-[13px] text-ink">
               Your current citation for this sentence is {search.data.currentCitation.label}, which{' '}
               {VERDICT_VERB[search.data.currentCitationVerdict]} it. Best match below says it directly.
             </p>
-          </section>
+          </div>
 
           {search.data.results.length === 0 ? (
-            <EmptyState title="No sources found" hint="Try a different phrasing, or search open access too." />
+            <Empty title="No sources found" hint="Try a different phrasing, or search open access too." />
           ) : (
-            <section className="results">
+            <div className="flex flex-col gap-3">
               {search.data.results.map((result) => (
-                <article className={`result${result.isBestMatch ? ' result--best' : ''}`} key={result.id}>
-                  <div className="result__meta">
-                    <Badge variant={result.verdict}>{VERDICT_BADGE_TEXT[result.verdict]}</Badge>
-                    <p className="result__similarity">similarity {result.similarity.toFixed(2)}</p>
-                    <p className="result__source">{sourceMeta(result)}</p>
-                    {result.isBestMatch && <span className="result__tag">best match</span>}
+                <article
+                  key={result.id}
+                  className={cn(
+                    'flex flex-col gap-2 rounded-xl border bg-surface p-4',
+                    result.isBestMatch ? 'border-2 border-accent' : 'border-border-subtle',
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StandingBadge standing={result.verdict} />
+                    <p className="text-xs font-medium text-ink-muted">similarity {result.similarity.toFixed(2)}</p>
+                    <p className="text-xs text-ink-muted">{sourceMeta(result)}</p>
+                    {result.isBestMatch && (
+                      <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">
+                        best match
+                      </span>
+                    )}
                   </div>
 
-                  <p className="result__title">
+                  <p className="text-sm font-medium text-ink">
                     {result.citation}. {result.title}
                   </p>
 
-                  <Quote
-                    text={result.quote}
-                    source={`${result.location} · show in the paper`}
-                    sourceAsLink
-                    linkModifier={result.isBestMatch}
-                    muted={result.isCurrentCitation}
-                  />
+                  <blockquote
+                    className={cn(
+                      'border-l-2 pl-3 text-sm italic',
+                      result.isCurrentCitation ? 'border-border-subtle text-ink-muted' : 'border-accent text-ink',
+                    )}
+                  >
+                    {result.quote}
+                    <p className="mt-1 text-xs not-italic text-accent">{result.location} · show in the paper</p>
+                  </blockquote>
 
-                  <div className="result__actions">
+                  <div className="flex flex-wrap gap-2">
                     <Button
-                      variant={result.isBestMatch ? 'primary' : 'ghost'}
-                      icon={{ src: result.isBestMatch ? '/icons/icon-copy-white.svg' : '/icons/icon-copy.svg', alt: 'Cite icon' }}
+                      variant={result.isBestMatch ? 'solid' : 'ghost'}
                       onClick={result.isBestMatch ? () => onCiteBestMatch(result.citation) : undefined}
                     >
+                      <Copy className="size-4" />
                       Cite this
                     </Button>
                     {!result.inLibrary && (
-                      <Button variant="ghost" icon={{ src: '/icons/icon-download.svg', alt: 'Add to library icon' }}>
+                      <Button variant="ghost">
+                        <Download className="size-4" />
                         Add to library
                       </Button>
                     )}
-                    <Button variant="ghost" icon={{ src: '/icons/icon-copy.svg', alt: 'Copy icon' }}>
+                    <Button variant="ghost">
+                      <Copy className="size-4" />
                       BibTeX
                     </Button>
                   </div>
                 </article>
               ))}
-            </section>
+            </div>
           )}
         </>
       )}
