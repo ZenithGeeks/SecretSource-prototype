@@ -8,9 +8,9 @@ import { ErrorState } from '../components/ErrorState'
 import { LoadingState } from '../components/LoadingState'
 import { Quote } from '../components/Quote'
 import { Sidebar } from '../components/Sidebar'
-import { useDraftCheck } from '../hooks'
-import type { DraftWord } from '../types'
-import { VERDICT_BADGE_TEXT, VERDICT_LEGEND_TEXT } from '../types'
+import { useDraftCheck, useReplaceCitation } from '../lib/useWriter'
+import type { DraftWord } from '../lib/writer'
+import { VERDICT_BADGE_TEXT, VERDICT_LEGEND_TEXT } from '../lib/writer'
 import './DraftCheck.css'
 
 const LEGEND_KINDS = ['supports', 'refutes', 'insufficient'] as const
@@ -35,10 +35,11 @@ function DraftParagraph({ words }: { words: DraftWord[] }) {
 
 export default function DraftCheck() {
   const navigate = useNavigate()
-  const { state, replace } = useDraftCheck('d1')
+  const draftCheck = useDraftCheck()
+  const replaceCitation = useReplaceCitation()
   const [issueIndex, setIssueIndex] = useState(0)
 
-  const issues = state.status === 'loaded' ? state.data.issues : []
+  const issues = draftCheck.data?.issues ?? []
   const activeIndex = Math.min(issueIndex, Math.max(issues.length - 1, 0))
 
   return (
@@ -46,20 +47,20 @@ export default function DraftCheck() {
       <Sidebar />
 
       <main className="main">
-        {state.status === 'loading' && <LoadingState label="Checking your draft…" />}
+        {draftCheck.isPending && <LoadingState label="Checking your draft…" />}
 
-        {state.status === 'error' && (
-          <ErrorState message={state.error.message} onRetry={() => window.location.reload()} />
+        {draftCheck.isError && (
+          <ErrorState message={(draftCheck.error as Error).message} onRetry={() => window.location.reload()} />
         )}
 
-        {state.status === 'loaded' && (
+        {draftCheck.data && (
           <>
             <header className="page-head">
               <div className="page-head__text">
                 <h1 className="page-head__title">Check a draft</h1>
                 <p className="page-head__meta">
-                  {state.data.draft.fileName} · {state.data.draft.citationsFound} citations found ·{' '}
-                  {state.data.draft.issuesRemaining} need work
+                  {draftCheck.data.draft.fileName} · {draftCheck.data.draft.citationsFound} citations found ·{' '}
+                  {draftCheck.data.draft.issuesRemaining} need work
                 </p>
               </div>
               <div className="page-head__actions">
@@ -72,7 +73,7 @@ export default function DraftCheck() {
               </div>
             </header>
 
-            {state.data.draft.paragraphs.length === 0 ? (
+            {draftCheck.data.draft.paragraphs.length === 0 ? (
               <EmptyState
                 title="Nothing to check yet"
                 hint="Paste or upload a draft to see every citation get a verdict."
@@ -80,9 +81,9 @@ export default function DraftCheck() {
             ) : (
               <div className="workspace">
                 <section className="draft">
-                  <h2 className="draft__heading">{state.data.draft.heading}</h2>
+                  <h2 className="draft__heading">{draftCheck.data.draft.heading}</h2>
 
-                  {state.data.draft.paragraphs.map((words, index) => (
+                  {draftCheck.data.draft.paragraphs.map((words, index) => (
                     <DraftParagraph words={words} key={index} />
                   ))}
 
@@ -131,7 +132,7 @@ export default function DraftCheck() {
                                   <Button
                                     variant="primary"
                                     onClick={() => {
-                                      replace(issue.id)
+                                      replaceCitation.mutate(issue.id)
                                       navigate('/draft-check/replaced', {
                                         state: { newCitationLabel: issue.suggestion?.citation },
                                       })

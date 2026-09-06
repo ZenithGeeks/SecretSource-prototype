@@ -4,9 +4,9 @@ import { Button } from '../components/Button'
 import { ErrorState } from '../components/ErrorState'
 import { LoadingState } from '../components/LoadingState'
 import { Sidebar } from '../components/Sidebar'
-import { useDraftCheck } from '../hooks'
-import type { DraftWord } from '../types'
-import { VERDICT_LEGEND_TEXT } from '../types'
+import { useDraftCheck } from '../lib/useWriter'
+import type { DraftWord } from '../lib/writer'
+import { VERDICT_LEGEND_TEXT } from '../lib/writer'
 import './CitationReplaced.css'
 
 const LEGEND_KINDS = ['supports', 'refutes', 'insufficient'] as const
@@ -32,7 +32,7 @@ function DraftParagraph({ words }: { words: DraftWord[] }) {
 export default function CitationReplaced() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { state } = useDraftCheck('d1')
+  const draftCheck = useDraftCheck()
   const newCitationLabel = (location.state as { newCitationLabel?: string } | null)?.newCitationLabel
 
   return (
@@ -40,20 +40,20 @@ export default function CitationReplaced() {
       <Sidebar />
 
       <main className="main">
-        {state.status === 'loading' && <LoadingState label="Loading your draft…" />}
+        {draftCheck.isPending && <LoadingState label="Loading your draft…" />}
 
-        {state.status === 'error' && (
-          <ErrorState message={state.error.message} onRetry={() => window.location.reload()} />
+        {draftCheck.isError && (
+          <ErrorState message={(draftCheck.error as Error).message} onRetry={() => window.location.reload()} />
         )}
 
-        {state.status === 'loaded' && (
+        {draftCheck.data && (
           <>
             <header className="page-head">
               <div className="page-head__text">
                 <h1 className="page-head__title">Check a draft</h1>
                 <p className="page-head__meta">
-                  {state.data.draft.fileName} · {state.data.draft.citationsFound} citations found ·{' '}
-                  {state.data.draft.issuesRemaining} need{state.data.draft.issuesRemaining === 1 ? 's' : ''} work
+                  {draftCheck.data.draft.fileName} · {draftCheck.data.draft.citationsFound} citations found ·{' '}
+                  {draftCheck.data.draft.issuesRemaining} need{draftCheck.data.draft.issuesRemaining === 1 ? 's' : ''} work
                 </p>
               </div>
               <div className="page-head__actions">
@@ -68,9 +68,9 @@ export default function CitationReplaced() {
 
             <div className="workspace">
               <section className="draft">
-                <h2 className="draft__heading">{state.data.draft.heading}</h2>
+                <h2 className="draft__heading">{draftCheck.data.draft.heading}</h2>
 
-                {state.data.draft.paragraphs.map((words, index) => (
+                {draftCheck.data.draft.paragraphs.map((words, index) => (
                   <DraftParagraph words={words} key={index} />
                 ))}
 
@@ -85,13 +85,13 @@ export default function CitationReplaced() {
               </section>
 
               <section className="fix-panel">
-                {state.data.issues.length > 0 ? (
+                {draftCheck.data.issues.length > 0 ? (
                   <div className="fix-panel__status">
                     <img className="fix-panel__status-icon" src="/icons/icon-check-circle.svg" alt="Check circle icon" />
                     <p className="fix-panel__status-title">
-                      {state.data.issues.length} issue{state.data.issues.length === 1 ? '' : 's'} left
+                      {draftCheck.data.issues.length} issue{draftCheck.data.issues.length === 1 ? '' : 's'} left
                     </p>
-                    <p className="fix-panel__status-text">{state.data.issues[0].explanation}</p>
+                    <p className="fix-panel__status-text">{draftCheck.data.issues[0].explanation}</p>
                     <Button
                       variant="primary"
                       icon={{ src: '/icons/icon-chevron-right-white.svg', alt: 'Chevron right icon' }}

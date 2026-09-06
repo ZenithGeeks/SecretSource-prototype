@@ -7,36 +7,28 @@ import { HistoryItem } from '../components/HistoryItem'
 import { LoadingState } from '../components/LoadingState'
 import { Sidebar } from '../components/Sidebar'
 import { quickActions } from '../data/home'
-import { useHomeSummary } from '../hooks'
+import { useWriterHome } from '../lib/useWriter'
 import './HomeWriter.css'
 
 export default function HomeWriter() {
-  const summary = useHomeSummary()
-
-  const needsAttention =
-    summary.status === 'loaded'
-      ? summary.data.attentionClaims.filter((claim) => claim.verdict === 'refutes' || claim.verdict === 'insufficient')
-      : []
+  const home = useWriterHome()
 
   return (
     <div className="app" data-page="home">
       <Sidebar roleChange />
 
       <main className="main">
-        {summary.status === 'loading' && <LoadingState label="Loading your workspace…" />}
+        {home.isPending && <LoadingState label="Loading your workspace…" />}
 
-        {summary.status === 'error' && (
-          <ErrorState message={summary.error.message} onRetry={() => window.location.reload()} />
+        {home.isError && (
+          <ErrorState message={(home.error as Error).message} onRetry={() => window.location.reload()} />
         )}
 
-        {summary.status === 'loaded' && (
+        {home.data && (
           <>
             <section className="greeting">
-              <h1 className="greeting__title">Good morning, {summary.data.greetingName}</h1>
-              <p className="greeting__subtitle">
-                {needsAttention.length} claim{needsAttention.length === 1 ? '' : 's'} in your draft still point at
-                sources that do not say that.
-              </p>
+              <h1 className="greeting__title">Good morning, {home.data.user}</h1>
+              <p className="greeting__subtitle">{home.data.alert}</p>
             </section>
 
             <section className="actions">
@@ -66,16 +58,16 @@ export default function HomeWriter() {
               <header className="panel__head">
                 <p className="panel__title">Needs your attention</p>
                 <p className="panel__meta">
-                  {summary.data.draftFileName} · {summary.data.draftLastCheckedLabel}
+                  {home.data.draftFileName} · {home.data.draftLastCheckedLabel}
                 </p>
               </header>
 
-              {summary.data.attentionClaims.length === 0 ? (
+              {home.data.attention.length === 0 ? (
                 <div className="panel__empty">
                   <EmptyState title="Nothing needs your attention" hint="Every checked citation in this draft holds up." />
                 </div>
               ) : (
-                summary.data.attentionClaims.map((claim) => <ClaimRow claim={claim} to="/draft-check" key={claim.id} />)
+                home.data.attention.map((claim) => <ClaimRow claim={claim} to="/draft-check" key={claim.id} />)
               )}
             </section>
 
@@ -83,10 +75,10 @@ export default function HomeWriter() {
               <div className="recent">
                 <p className="recent__title">Recent papers and drafts</p>
 
-                {summary.data.recentPapers.length === 0 ? (
+                {home.data.recentPapers.length === 0 ? (
                   <EmptyState title="No papers yet" hint="Check a draft or add a paper to see it here." />
                 ) : (
-                  summary.data.recentPapers.map((paper) => <HistoryItem paper={paper} key={paper.id} />)
+                  home.data.recentPapers.map((paper) => <HistoryItem paper={paper} key={paper.id} />)
                 )}
               </div>
             </section>

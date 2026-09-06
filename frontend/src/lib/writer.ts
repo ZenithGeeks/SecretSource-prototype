@@ -1,0 +1,126 @@
+/**
+ * Typed client for the writer-role data. The gateway has no writer endpoints yet, so every
+ * call resolves mock payloads from src/mocks/writer.ts. When an endpoint lands, replace that
+ * call's body with a request() to it (see the TODO on each) — the types, hooks and screens
+ * stay as they are.
+ */
+
+import { MOCK_CHECK_RUN, MOCK_DRAFT_REPLACED, MOCK_HOME, MOCK_SEARCH } from '../mocks/writer'
+
+export type VerdictKind = 'supports' | 'refutes' | 'insufficient'
+
+export const VERDICT_BADGE_TEXT: Record<VerdictKind, string> = {
+  supports: 'SOURCE BACKS IT',
+  refutes: 'SOURCE CONTRADICTS',
+  insufficient: 'SOURCE IS SILENT',
+}
+
+export const VERDICT_LEGEND_TEXT: Record<VerdictKind, string> = {
+  supports: 'source backs it',
+  refutes: 'source contradicts',
+  insufficient: 'source is silent',
+}
+
+export type Citation = { id: string; label: string }
+
+/** A candidate source: a work that may (or does) back, contradict, or stay silent on a claim. */
+export type Source = {
+  id: string
+  citation: string // "Santhanam et al. (2022)"
+  title: string
+  venue?: string
+  verdict: VerdictKind
+  similarity: number // 0..1, cosine match to the searched claim
+  location: string // "p.4 §3.2"
+  quote: string
+  inLibrary: boolean
+  openAccess: boolean
+  isCurrentCitation: boolean
+  isBestMatch: boolean
+}
+
+/**
+ * One claim in a draft, and how its citation stood up.
+ * `citation` absent = nothing was cited (uncited). `verdict` absent = not checked yet.
+ */
+export type Claim = {
+  id: string
+  text: string
+  citation?: Citation
+  verdict?: VerdictKind
+  explanation?: string
+  quote?: string
+  quoteLocation?: string
+  suggestion?: Source
+}
+
+/** A claim known to have a verdict — the shape of a draft's "needs work" issues. */
+export type Issue = Claim & { verdict: VerdictKind }
+
+export function hasVerdict(claim: Claim): claim is Issue {
+  return claim.verdict === 'refutes' || claim.verdict === 'insufficient'
+}
+
+export type DraftWord = { text: string; mark?: VerdictKind }
+
+export type Draft = {
+  fileName: string
+  heading: string
+  paragraphs: DraftWord[][]
+  citationsFound: number
+  issuesRemaining: number
+  lastCheckedLabel: string // "checked 2h ago"
+}
+
+/** A draft plus the claims still needing attention, worst (or next) issue first. */
+export type CheckRun = {
+  draft: Draft
+  issues: Issue[]
+  currentIssueIndex: number
+}
+
+export type Paper = { id: string; fileName: string; summary: string }
+
+export type WriterHome = {
+  user: string
+  alert: string // the one-line "what changed" under the greeting
+  draftFileName: string
+  draftLastCheckedLabel: string // "checked 2h ago"
+  attention: Claim[]
+  recentPapers: Paper[]
+}
+
+/** Result of searching the library (and open access) for a source that backs a sentence. */
+export type SearchResponse = {
+  libraryCount: number
+  currentCitation: Citation
+  currentCitationVerdict: 'refutes' | 'insufficient'
+  results: Source[]
+}
+
+// In-memory current state of the one draft the mock backend tracks. Mutated by
+// replaceCitation so re-opening the draft check shows a consistent, decreasing issue
+// count — no server, so the state lives here.
+let currentCheckRun: CheckRun = MOCK_CHECK_RUN
+
+export const writerApi = {
+  // TODO gateway: GET /writer/home
+  getHome: async (): Promise<WriterHome> => MOCK_HOME,
+
+  // TODO gateway: GET /writer/draft-check
+  getDraftCheck: async (): Promise<CheckRun> => currentCheckRun,
+
+  // TODO gateway: POST /writer/draft-check/replace-citation {"claimId": ...}
+  replaceCitation: async (claimId: string): Promise<CheckRun> => {
+    const remaining = currentCheckRun.issues.filter((issue) => issue.id !== claimId)
+    currentCheckRun = {
+      draft: { ...MOCK_DRAFT_REPLACED, issuesRemaining: remaining.length },
+      issues: remaining,
+      currentIssueIndex: 0,
+    }
+    return currentCheckRun
+  },
+
+  // TODO gateway: GET /writer/search?q=...
+  searchSources: async (_query: string): Promise<SearchResponse> => MOCK_SEARCH,
+}

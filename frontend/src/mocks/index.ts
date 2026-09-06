@@ -1,7 +1,0 @@
-export * from './claims'
-export * from './drafts'
-export * from './history'
-export * from './papers'
-export * from './searchResults'
-export * from './settings'
-export * from './user'

@@ -1,5 +1,0 @@
-export * from './draft'
-export * from './home'
-export * from './papers'
-export * from './search'
-export * from './user'

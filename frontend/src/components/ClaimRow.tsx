@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 
-import type { Claim } from '../types'
-import { VERDICT_BADGE_TEXT } from '../types'
+import type { Claim } from '../lib/writer'
+import { VERDICT_BADGE_TEXT } from '../lib/writer'
 import { Badge } from './Badge'
 
 export interface ClaimRowProps {

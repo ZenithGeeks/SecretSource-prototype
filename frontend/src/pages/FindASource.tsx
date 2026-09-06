@@ -10,9 +10,11 @@ import { LoadingState } from '../components/LoadingState'
 import { Quote } from '../components/Quote'
 import { Sidebar } from '../components/Sidebar'
 import { Toggle } from '../components/Toggle'
-import { useSourceSearch } from '../hooks'
-import { VERDICT_BADGE_TEXT } from '../types'
+import { useSourceSearch } from '../lib/useWriter'
+import { VERDICT_BADGE_TEXT } from '../lib/writer'
 import './FindASource.css'
+
+const INITIAL_QUERY = 'compressing token-level embeddings makes the index 6–10× smaller'
 
 const VERDICT_VERB: Record<'refutes' | 'insufficient', string> = {
   refutes: 'contradicts',
@@ -27,9 +29,9 @@ function sourceMeta(result: { inLibrary: boolean; openAccess: boolean; isCurrent
 
 export default function FindASource() {
   const navigate = useNavigate()
-  const { query, setQuery, search, state } = useSourceSearch(
-    'compressing token-level embeddings makes the index 6–10× smaller',
-  )
+  const [query, setQuery] = useState(INITIAL_QUERY)
+  const [submittedQuery, setSubmittedQuery] = useState(INITIAL_QUERY)
+  const search = useSourceSearch(submittedQuery)
   const [libraryOnly, setLibraryOnly] = useState(true)
   const [openAccess, setOpenAccess] = useState(true)
   const [citedByLibrary, setCitedByLibrary] = useState(false)
@@ -45,7 +47,7 @@ export default function FindASource() {
           className="search"
           onSubmit={(event) => {
             event.preventDefault()
-            search(query)
+            setSubmittedQuery(query)
           }}
         >
           <Input
@@ -59,11 +61,11 @@ export default function FindASource() {
           </Button>
         </form>
 
-        {state.status === 'loaded' && (
+        {search.data && (
           <section className="filters">
             <p className="filters__label">Search in</p>
             <Toggle active={libraryOnly} onToggle={() => setLibraryOnly((v) => !v)}>
-              My library ({state.data.libraryCount})
+              My library ({search.data.libraryCount})
             </Toggle>
             <Toggle active={openAccess} onToggle={() => setOpenAccess((v) => !v)}>
               Open access
@@ -76,27 +78,27 @@ export default function FindASource() {
           </section>
         )}
 
-        {state.status === 'loading' && <LoadingState label="Searching your library…" />}
+        {search.isPending && <LoadingState label="Searching your library…" />}
 
-        {state.status === 'error' && (
-          <ErrorState message={state.error.message} onRetry={() => search(query)} />
+        {search.isError && (
+          <ErrorState message={(search.error as Error).message} onRetry={() => search.refetch()} />
         )}
 
-        {state.status === 'loaded' && (
+        {search.data && (
           <>
             <section className="hint">
               <img className="hint__icon" src="/icons/icon-sparkles.svg" alt="Sparkles icon" />
               <p className="hint__text">
-                Your current citation for this sentence is {state.data.currentCitation.label}, which{' '}
-                {VERDICT_VERB[state.data.currentCitationVerdict]} it. Best match below says it directly.
+                Your current citation for this sentence is {search.data.currentCitation.label}, which{' '}
+                {VERDICT_VERB[search.data.currentCitationVerdict]} it. Best match below says it directly.
               </p>
             </section>
 
-            {state.data.results.length === 0 ? (
+            {search.data.results.length === 0 ? (
               <EmptyState title="No sources found" hint="Try a different phrasing, or search open access too." />
             ) : (
               <section className="results">
-                {state.data.results.map((result) => (
+                {search.data.results.map((result) => (
                   <article className={`result${result.isBestMatch ? ' result--best' : ''}`} key={result.id}>
                     <div className="result__meta">
                       <Badge variant={result.verdict}>{VERDICT_BADGE_TEXT[result.verdict]}</Badge>

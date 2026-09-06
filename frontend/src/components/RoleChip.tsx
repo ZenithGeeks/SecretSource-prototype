@@ -1,4 +1,4 @@
-import type { Role } from '../types'
+import type { Role } from '../screens/Onboarding'
 
 const ROLE_ICON: Record<Role, string> = {
   writer: '/icons/icon-pen.svg',

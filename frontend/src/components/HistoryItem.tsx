@@ -1,4 +1,4 @@
-import type { Paper } from '../types'
+import type { Paper } from '../lib/writer'
 
 export interface HistoryItemProps {
   paper: Paper

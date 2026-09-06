@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
-import { useUser } from '../hooks'
 import { navItems } from '../data/nav'
-import type { Role } from '../types'
+import type { Role } from '../screens/Onboarding'
 import { Brand } from './Brand'
 import { NavItem } from './NavItem'
 import { RoleChip } from './RoleChip'
@@ -17,17 +16,14 @@ export interface SidebarProps {
 export function Sidebar({ roleChange = false }: SidebarProps) {
   const location = useLocation()
   const [open, setOpen] = useState(false)
-  const user = useUser()
-  // null = follow the fetched user's role; set once the reader cycles it themselves.
-  const [roleOverride, setRoleOverride] = useState<Role | null>(null)
-  const role = roleOverride ?? (user.status === 'loaded' ? user.data.role : 'writer')
+  const [role, setRole] = useState<Role>('writer')
 
   useEffect(() => {
     setOpen(false)
   }, [location.pathname])
 
   function cycleRole() {
-    setRoleOverride(ROLE_CYCLE[(ROLE_CYCLE.indexOf(role) + 1) % ROLE_CYCLE.length])
+    setRole(ROLE_CYCLE[(ROLE_CYCLE.indexOf(role) + 1) % ROLE_CYCLE.length])
   }
 
   return (
