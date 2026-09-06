@@ -4,6 +4,11 @@
 server {
     listen 80;
 
+    # nginx's own default is 1M, far under a real paper with figures; a request past this
+    # limit fails at nginx with a bare 413 before the gateway (which has no limit of its
+    # own) ever sees it.
+    client_max_body_size 100M;
+
     location / {
         root /usr/share/nginx/html;
         try_files $uri /index.html;
