@@ -6,8 +6,9 @@
 The same steps the gateway runs as a loop in app/main.py (_run), as nodes, so `adk web`
 draws the graph and lists the events of a run (docker compose --profile dev up adk-web).
 Nodes are plain functions over app.pipeline; there are no LLM agent nodes, the DSPy judge
-stays inside verify_claim. This is a second entry point beside POST /analyses, not yet a
-replacement for it: routing the gateway's runs through here is the next step.
+stays inside verify_claim. The gateway runs every POST /analyses through this graph
+(app/main.py mirrors the node events as its progress stages), and `adk web` runs it on
+its own for a look at the pipeline.
 
 The message is the paper: a DOI, arXiv ID, URL or a PDF path. Session state `verify`
 (default true) set to false stops after the claims, which is the quick way to try it.
@@ -81,25 +82,30 @@ check_sources = node(
 )
 
 
+def fold_check(claims: list[dict], check: dict) -> None:
+    """Record one finished check on its claim: a verdict under `verdicts`, keyed by what the
+    source was looked up by; a failure under `unchecked`, since a claim nobody could check
+    must not look like one nobody tried. The gateway calls this as each check lands."""
+    claim = claims[check["claim"]]
+    verdict = check["verdict"]
+    if verdict["status"] == "ok":
+        claim.setdefault("verdicts", []).append({**verdict, "cited": check["source"]})
+    else:
+        claim.setdefault("unchecked", []).append(
+            {
+                "source": check["source"],
+                "reason": unchecked_reason(verdict, {"url": check["url"]}),
+                "message": verdict.get("message", ""),
+            }
+        )
+
+
 @node
 def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) -> dict:
-    """Fold the checks back into their claims the way the gateway does: a verdict under
-    `verdicts`, keyed by what the source was looked up by; a failure under `unchecked`,
-    since a claim nobody could check must not look like one nobody tried."""
+    """Fold every check back into its claim; the graph's final output."""
     claims = [dict(claim) for claim in claims]
     for check in node_input:
-        claim = claims[check["claim"]]
-        verdict = check["verdict"]
-        if verdict["status"] == "ok":
-            claim.setdefault("verdicts", []).append({**verdict, "cited": check["source"]})
-        else:
-            claim.setdefault("unchecked", []).append(
-                {
-                    "source": check["source"],
-                    "reason": unchecked_reason(verdict, {"url": check["url"]}),
-                    "message": verdict.get("message", ""),
-                }
-            )
+        fold_check(claims, check)
     return {"paper": paper, "file": file, "claims": claims, "checked": len(node_input)}
 
 
