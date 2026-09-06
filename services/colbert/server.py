@@ -19,6 +19,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 from store import Store
 
@@ -32,7 +33,16 @@ def store() -> Store:
     return _store
 
 
-mcp = FastMCP("colbert-retrieval", stateless_http=True, json_response=True, streamable_http_path="/")
+# The SDK's DNS-rebinding guard only admits localhost Host headers, which 421s every request
+# that arrives through Cloud Run or a compose service name. Nothing here is bound to a
+# loopback address, so the guard is off.
+mcp = FastMCP(
+    "colbert-retrieval",
+    stateless_http=True,
+    json_response=True,
+    streamable_http_path="/",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 @mcp.tool()

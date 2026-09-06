@@ -2,8 +2,9 @@
  * App shell / temporary router. No routing library yet, so a small screen state stands in:
  * onboarding picks a role, which opens that role's home. `?role=` deep-links a screen.
  *
- * Only the researcher home is built. Writer/Teacher land on a placeholder for their owners.
- * `Skip` (or `?role=app`) opens the existing analysis app.
+ * Role teams: build your screens in src/roles/<role>/ (own folder — no collisions), export
+ * a <Role>App component, then replace your ComingSoon case below. That one line is the only
+ * shared-file edit a role needs. `Skip` (or `?role=app`) opens the existing analysis app.
  */
 
 import { useState } from 'react'
@@ -25,7 +26,7 @@ function ComingSoon({ role, onBack }: { role: Role; onBack: () => void }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
       <p className="font-serif text-2xl font-semibold capitalize text-ink">{role} home</p>
-      <p className="text-sm text-ink-muted">Not built yet — owned by another teammate.</p>
+      <p className="text-sm text-ink-muted">Not built yet — add it in src/roles/{role}/.</p>
       <button
         type="button"
         onClick={onBack}
