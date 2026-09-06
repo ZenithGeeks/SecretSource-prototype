@@ -35,7 +35,7 @@ from app import store
 from app.config import PAPERS_DIR
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.sources import lookup_key
-from app.pipeline.verify import verify_claim
+from app.pipeline.verify import unchecked_reason, verify_claim
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
@@ -80,14 +80,6 @@ async def _publish(analysis_id: str, stage: str, **fields):
     await streams[analysis_id].put(event)
 
 
-def _why(verdict: dict, citation: dict) -> str:
-    """Why this claim went unchecked, separating our failures from the paper's.
-    An unresolvable citation that carries a link is usually a blog post or a spec —
-    a fact about the bibliography, not a lookup of ours that failed."""
-    reason = verdict.get("reason", "failed")
-    return "web-source" if reason == "unresolvable" and citation.get("url") else reason
-
-
 async def _run(analysis_id: str, paper: str, verify: bool):
     analysis = analyses[analysis_id]
     try:
@@ -122,7 +114,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                     else:
                         # A failure is a result: a claim we could not check must not look
                         # like one nobody tried.
-                        reason = _why(verdict, citation)
+                        reason = unchecked_reason(verdict, citation)
                         claim.setdefault("unchecked", []).append(
                             {"source": source, "reason": reason,
                              "message": verdict.get("message", "")}

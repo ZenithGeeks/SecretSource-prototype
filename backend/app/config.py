@@ -8,16 +8,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# vLLM (OpenAI-compatible). Point VLLM_URL at the compose service or a Cloud Run URL.
+# `or` rather than a default argument on purpose: .env.example ships these empty, and an
+# empty string has to mean "not set", not "connect to nothing".
+
+# vLLM, or any OpenAI-compatible server. Unset means the compose container / localhost.
 VLLM_URL = os.getenv("VLLM_URL") or "http://localhost:8000/v1"
-VLLM_MODEL = os.getenv("VLLM_MODEL", "qwen")  # must match an id from {VLLM_URL}/models
-VLLM_API_KEY = os.getenv("VLLM_API_KEY", "EMPTY")  # only checked when vLLM was started with a key
+VLLM_MODEL = os.getenv("VLLM_MODEL") or "qwen"  # must match an id from {VLLM_URL}/models
+VLLM_API_KEY = os.getenv("VLLM_API_KEY") or "EMPTY"  # only checked when vLLM was started with a key
 
 # Retrieval services. Each serves plain HTTP under /api and MCP under /mcp.
-COLBERT_URL = os.getenv("COLBERT_URL", "http://localhost:8893")
-COLPALI_URL = os.getenv("COLPALI_URL", "http://localhost:8894")  # optional; skipped when down
+COLBERT_URL = os.getenv("COLBERT_URL") or "http://localhost:8893"
+COLPALI_URL = os.getenv("COLPALI_URL") or "http://localhost:8894"  # optional; skipped when down
 
-GROBID_URL = os.getenv("GROBID_URL", "http://localhost:8070")
+GROBID_URL = os.getenv("GROBID_URL") or "http://localhost:8070"
 
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")

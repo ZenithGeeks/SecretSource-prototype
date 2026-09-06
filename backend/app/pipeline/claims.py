@@ -16,7 +16,6 @@ TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 MAX_CHARS = 12_000  # ~3k tokens per window, fits an 8k context with room for output
-FRAGMENT_WORDS = (12, 8)  # fallback window sizes when a whole sentence will not match
 NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertion, reworded
 
 _converter = None  # lazy: loading docling's models takes seconds
@@ -55,56 +54,208 @@ def _pdf_to_text(pdf_path: str) -> str:
     return _converter.convert(pdf_path).document.export_to_markdown()
 
 
-def _fragments(sentence: str) -> list[str]:
-    """The whole sentence, then overlapping windows of its words, longest first."""
-    words = sentence.split()
-    fragments = [sentence]
-    for size in FRAGMENT_WORDS:
-        fragments += [" ".join(words[i : i + size]) for i in range(len(words) - size + 1)]
-    return fragments
+# --- where a sentence sits on a page -------------------------------------------------
+
+# What the PDF and the extracted sentence disagree on most: ligatures, dashes, quotes.
+_FOLD = str.maketrans(
+    {
+        "ﬁ": "fi",
+        "ﬂ": "fl",
+        "ﬀ": "ff",
+        "ﬃ": "ffi",
+        "ﬄ": "ffl",
+        "–": "-",
+        "—": "-",
+        "‐": "-",
+        "’": "'",
+        "‘": "'",
+        "“": '"',
+        "”": '"',
+        "­": "",
+    }
+)
+MIN_COVERAGE = 0.8  # of the sentence's words must be found in order; below that, no box
+MAX_GAP = 3  # page words allowed between two matched words on their own: a footnote mark, "[12]"
+LONG_GAP = 14  # ... when the sentence word after also follows: "(Xin et al., 2021; Xiong et al., 2020)"
+MAX_MISSES = 4  # sentence words in a row that may be missing before we decide it is not here
+MAX_STRETCH = 2.5  # a relaxed match may span at most this many page words per sentence word
+# Short words a relaxed match may not jump to on their own: too common to be evidence.
+STOPWORDS = frozenset(
+    "that with from this than which their these those have been into also more when where "
+    "what while such each both same only over some most many very much".split()
+)
 
 
-def _merge(rects: list) -> list[dict]:
-    """Fold overlapping rectangles together, so one line is one box rather than a stack."""
-    boxes: list[dict] = []
-    for rect in sorted(rects, key=lambda r: (round(r.y0), r.x0)):
-        same_line = next(
-            (b for b in boxes if abs(b["y0"] - rect.y0) < 2 and rect.x0 <= b["x1"] + 2), None
-        )
-        if same_line:
-            same_line["x1"] = max(same_line["x1"], rect.x1)
-            same_line["y1"] = max(same_line["y1"], rect.y1)
+def _token(word: str) -> str:
+    """A word reduced to what survives extraction: lower case, letters and digits only."""
+    return re.sub(r"[^a-z0-9]+", "", word.translate(_FOLD).lower())
+
+
+def _tokens(text: str) -> list[str]:
+    return [token for token in (_token(word) for word in text.split()) if token]
+
+
+class _Word:
+    """One word on the page: its box, its token, and whether it ends in a line-break hyphen."""
+
+    __slots__ = ("rect", "token", "line", "hyphen")
+
+    def __init__(self, entry, next_entry):
+        x0, y0, x1, y1, raw, block, line, _ = entry
+        self.rect = (x0, y0, x1, y1)
+        self.token = _token(raw)
+        self.line = (block, line)
+        # "trans-" at the end of a line continues as "duction" on the next: one word to us.
+        self.hyphen = raw.endswith("-") and next_entry is not None and (block, line) != tuple(next_entry[5:7])
+
+
+def _page_words(page) -> list[_Word]:
+    entries = page.get_text("words")  # x0, y0, x1, y1, word, block, line, word-in-line
+    words = [
+        _Word(entry, entries[i + 1] if i + 1 < len(entries) else None) for i, entry in enumerate(entries)
+    ]
+    return [word for word in words if word.token]
+
+
+def _match_at(words: list[_Word], wanted: list[str], i: int, k: int) -> tuple[list[int], int] | None:
+    """How sentence word i matches page word k, if it does: the page words it takes and the
+    sentence words it accounts for. Beyond the plain match: a word hyphenated at a line end,
+    two of ours the PDF glued ("state-of-the-art"), one of ours the PDF split."""
+    word = words[k]
+    if word.token == wanted[i]:
+        return [k], 1
+    if word.hyphen and k + 1 < len(words) and word.token + words[k + 1].token == wanted[i]:
+        return [k, k + 1], 1
+    if i + 1 < len(wanted) and word.token == wanted[i] + wanted[i + 1]:
+        return [k], 2
+    if k + 1 < len(words) and word.token + words[k + 1].token == wanted[i]:
+        return [k, k + 1], 1
+    return None
+
+
+def _content_word(token: str) -> bool:
+    return len(token) >= 4 and token not in STOPWORDS
+
+
+def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = False) -> tuple[list[int], int]:
+    """Match the sentence's words in order from page word `start`, tolerating page words
+    between matches (citation markers, a parenthetical reference) and sentence words that
+    never turn up. Returns the indices of the page words matched and how many sentence words
+    they account for.
+
+    A far hit counts only with the next sentence word right behind it; on its own, a "the"
+    fourteen words away would drag the highlight off course. `relaxed` also lets a content
+    word stand on its own, for a sentence that lists cited systems with a reference after
+    every one of them ("ColBERT (Khattab and Zaharia, 2020), DPR (Xin et al., 2021), ...")."""
+    matched: list[int] = []
+    accounted = 0
+    i, j, misses = 0, start, 0
+    while i < len(wanted) and j < len(words):
+        hit = None
+        for k in range(j, min(j + LONG_GAP + 1, len(words))):
+            found = _match_at(words, wanted, i, k)
+            if not found:
+                continue
+            if k - j > MAX_GAP:
+                indices, consumed = found
+                after, next_k = i + consumed, indices[-1] + 1
+                confirmed = after >= len(wanted) or (
+                    next_k < len(words) and _match_at(words, wanted, after, next_k)
+                )
+                if not confirmed and not (relaxed and _content_word(wanted[i])):
+                    continue
+            hit = found
+            break
+        if hit:
+            indices, consumed = hit
+            matched += indices
+            accounted += consumed
+            i += consumed
+            j = indices[-1] + 1
+            misses = 0
         else:
-            boxes.append({"x0": rect.x0, "y0": rect.y0, "x1": rect.x1, "y1": rect.y1})
-    return boxes
+            i += 1  # this sentence word is not on the page as written; carry on
+            misses += 1
+            if misses > MAX_MISSES:
+                break
+    return matched, accounted
+
+
+def _best_span(words: list[_Word], wanted: list[str]) -> tuple[list[int], float]:
+    """The alignment with the best coverage, starting at any page word that matches one of the
+    sentence's first three words (the very first may be the one the PDF lost)."""
+    best: tuple[list[int], float] = ([], 0.0)
+    for relaxed in (False, True):
+        for lead in wanted[:3]:
+            for start, word in enumerate(words):
+                if word.token != lead:
+                    continue
+                matched, accounted = _align(words, wanted, start, relaxed)
+                coverage = accounted / len(wanted)
+                if relaxed and matched and matched[-1] - matched[0] + 1 > MAX_STRETCH * len(wanted):
+                    continue  # wandered too far to be one sentence
+                # Ties go to the tighter span: the same words found with less in between.
+                if coverage > best[1] or (coverage == best[1] and matched and len(matched) < len(best[0])):
+                    best = (matched, coverage)
+            if best[1] >= 1.0:
+                break
+        if best[1] >= MIN_COVERAGE:
+            break  # the strict pass found it; the relaxed one is only for what it could not
+    return best
+
+
+def _line_boxes(words: list[_Word], indices: list[int]) -> list[dict]:
+    """One box per line, from the first matched word on it to the last. A citation marker the
+    sentence skipped sits inside the box rather than punching a hole in the highlight."""
+    lines: dict[tuple, dict] = {}
+    for index in indices:
+        word = words[index]
+        x0, y0, x1, y1 = word.rect
+        box = lines.setdefault(word.line, {"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+        box["x0"], box["y0"] = min(box["x0"], x0), min(box["y0"], y0)
+        box["x1"], box["y1"] = max(box["x1"], x1), max(box["y1"], y1)
+    return [lines[key] for key in sorted(lines, key=lambda k: (lines[k]["y0"], lines[k]["x0"]))]
 
 
 def locate(pdf_path: str, sentence: str, page: int | None = None) -> dict | None:
-    """Where a sentence sits in a PDF: 1-based page, boxes, and the page size to scale by.
+    """Where a sentence sits in a PDF: 1-based page, one box per line, the page size to scale
+    by, and how much of the sentence the boxes account for.
 
-    The sentence is what the model copied out of the paper, so it can differ from the PDF's
-    own text (a dropped "(§3.3)", a ligature, a line break). Try the whole sentence, then
-    word windows. Return nothing rather than a box that is nearly right — a wrong highlight
-    is worse than none in a tool built for checking sources.
+    The sentence is what the model copied out of the paper, so it differs from the PDF's own
+    text in small ways: a word hyphenated at a line end, a ligature, a citation marker, a
+    dash. Matching word by word, in order, with room for those differences, finds the whole
+    sentence where a verbatim search found only the fragments that happened to survive.
+    Return nothing rather than a box that is nearly right: a wrong highlight is worse than
+    none in a tool built for checking sources.
     """
     import pymupdf
 
-    fragments = _fragments(sentence)
+    wanted = _tokens(sentence)
+    if not wanted:
+        return None
     with pymupdf.open(pdf_path) as document:
         numbers = [page] if page else range(1, document.page_count + 1)
+        best: tuple[float, int, list[dict], object] | None = None
         for number in numbers:
             if not 1 <= number <= document.page_count:
                 return None
             found = document[number - 1]
-            rects = [rect for fragment in fragments for rect in found.search_for(fragment)]
-            if rects:
-                return {
-                    "page": number,
-                    "boxes": _merge(rects),
-                    "page_width": found.rect.width,  # PyMuPDF is top-left origin, like CSS
-                    "page_height": found.rect.height,
-                }
-    return None
+            words = _page_words(found)
+            indices, coverage = _best_span(words, wanted)
+            if coverage >= MIN_COVERAGE and (best is None or coverage > best[0]):
+                best = (coverage, number, _line_boxes(words, indices), found.rect)
+                if coverage >= 1.0:
+                    break
+        if best is None:
+            return None
+        coverage, number, boxes, rect = best
+        return {
+            "page": number,
+            "boxes": boxes,
+            "page_width": rect.width,  # PyMuPDF is top-left origin, like CSS
+            "page_height": rect.height,
+            "coverage": round(coverage, 2),
+        }
 
 
 def _build_claim_extractor():
@@ -150,8 +301,7 @@ def extract_claims(pdf_path: str) -> dict:
         for window in windows:
             for claim in _claim_extractor(window):
                 claims.setdefault(_normalised_claim(claim), claim)
-        return {"status": "ok", "file": pdf_path,
-                "claims": list(claims.values()), "windows": len(windows)}
+        return {"status": "ok", "file": pdf_path, "claims": list(claims.values()), "windows": len(windows)}
     except Exception as error:
         return {"status": "error", "message": str(error)}
 
@@ -197,7 +347,7 @@ def _without_the_authors(title: str) -> str:
     trimmed = YEAR_PREFIX.sub("", title).strip()
     prefix = AUTHORS_PREFIX.match(trimmed)
     if prefix and _looks_like_authors(prefix.group().rstrip(". ")):
-        trimmed = trimmed[prefix.end():]
+        trimmed = trimmed[prefix.end() :]
     return YEAR_PREFIX.sub("", trimmed).strip()
 
 
@@ -260,8 +410,13 @@ def extract_citations(pdf_path: str) -> dict:
         pdf_path = local_pdf(pdf_path)
         tei = _grobid_pdf("processReferences", pdf_path)
         citations, dropped = _findable_references(tei)
-        return {"status": "ok", "file": pdf_path, "count": len(citations),
-                "dropped": dropped, "citations": citations}
+        return {
+            "status": "ok",
+            "file": pdf_path,
+            "count": len(citations),
+            "dropped": dropped,
+            "citations": citations,
+        }
     except Exception as error:
         return {"status": "error", "message": str(error)}
 
@@ -392,7 +547,7 @@ ABOUT_ITSELF = re.compile(
 
 
 def _asserts_nothing(claim: str) -> bool:
-    """"This paper explores X" cannot be true or false against a cited work. The rule is
+    """ "This paper explores X" cannot be true or false against a cited work. The rule is
     deliberately narrow: a wrong drop is a claim nobody ever sees."""
     return bool(ABOUT_ITSELF.match(claim))
 
@@ -459,8 +614,13 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         claims = _most_checkable(
             _deduplicated([c for c in found if not _asserts_nothing(c["claim"])]), CLAIM_LIMIT
         )
-        return {"status": "ok", "file": pdf_path, "claims": claims,
-                "extracted": len(found),  # before repeats, announcements and the cap
-                "dropped": dropped, "windows": len(windows)}
+        return {
+            "status": "ok",
+            "file": pdf_path,
+            "claims": claims,
+            "extracted": len(found),  # before repeats, announcements and the cap
+            "dropped": dropped,
+            "windows": len(windows),
+        }
     except Exception as error:
         return {"status": "error", "message": str(error)}
