@@ -1,30 +1,37 @@
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
 
-import { navItems } from '../data/nav'
-import type { Role } from '../screens/Onboarding'
 import { Brand } from './Brand'
 import { NavItem } from './NavItem'
 import { RoleChip } from './RoleChip'
 
-const ROLE_CYCLE: Role[] = ['writer', 'researcher', 'teacher']
-
-export interface SidebarProps {
-  roleChange?: boolean
+export interface NavEntry<K extends string = string> {
+  key: K
+  label: string
+  icon: string
+  activeIcon: string
+  disabled?: boolean
 }
 
-export function Sidebar({ roleChange = false }: SidebarProps) {
-  const location = useLocation()
+export interface SidebarProps<K extends string = string> {
+  nav: NavEntry<K>[]
+  active: K
+  onNavigate: (key: K) => void
+  roleChange?: boolean
+  onChangeRole?: () => void
+}
+
+export function Sidebar<K extends string = string>({
+  nav,
+  active,
+  onNavigate,
+  roleChange = false,
+  onChangeRole,
+}: SidebarProps<K>) {
   const [open, setOpen] = useState(false)
-  const [role, setRole] = useState<Role>('writer')
 
   useEffect(() => {
     setOpen(false)
-  }, [location.pathname])
-
-  function cycleRole() {
-    setRole(ROLE_CYCLE[(ROLE_CYCLE.indexOf(role) + 1) % ROLE_CYCLE.length])
-  }
+  }, [active])
 
   return (
     <aside className="sidebar">
@@ -47,15 +54,15 @@ export function Sidebar({ roleChange = false }: SidebarProps) {
 
       <nav className={`nav${open ? ' nav--open' : ''}`} id="primary-nav" aria-label="Primary">
         <ul className="nav__list">
-          {navItems.map((item) => {
-            const active = item.isActive(location.pathname)
+          {nav.map((item) => {
+            const isActive = item.key === active
             return (
               <NavItem
-                key={item.label}
+                key={item.key}
                 label={item.label}
-                to={item.to}
-                icon={active ? item.activeIcon : item.icon}
-                active={active}
+                icon={isActive ? item.activeIcon : item.icon}
+                active={isActive}
+                onClick={item.disabled ? undefined : () => onNavigate(item.key)}
               />
             )
           })}
@@ -64,7 +71,7 @@ export function Sidebar({ roleChange = false }: SidebarProps) {
 
       <div className="sidebar__spacer"></div>
 
-      <RoleChip role={role} onChange={roleChange ? cycleRole : undefined} />
+      <RoleChip role="writer" onChange={roleChange ? onChangeRole : undefined} />
     </aside>
   )
 }
