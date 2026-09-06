@@ -37,7 +37,8 @@ export function AnalysisView({
 
   const claims = analysis.data?.claims
   // Worst first: a reader is looking for what went wrong, not for the paper's order (#37).
-  const standings = useMemo(() => ranked(claims ?? []), [claims])
+  // While the run is on, unanswered claims read "checking" rather than "not checked".
+  const standings = useMemo(() => ranked(claims ?? [], running), [claims, running])
   const counts = useMemo(() => countsOf(standings), [standings])
   const shown = filter ? standings.filter((entry) => entry.standing === filter) : standings
 
@@ -114,6 +115,7 @@ export function AnalysisView({
               index={index}
               standing={standing}
               paper={file}
+              running={running}
               onShow={setTarget}
             />
           ))}

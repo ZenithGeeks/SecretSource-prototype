@@ -14,6 +14,7 @@ const COUNT_STYLES: Record<Standing, string> = {
   refutes: 'text-refutes',
   insufficient: 'text-insufficient',
   supports: 'text-supports',
+  checking: 'text-accent',
   unchecked: 'text-ink-muted',
   uncited: 'text-ink-muted',
 }

@@ -9,8 +9,10 @@
 import type { Citation, Claim, Unchecked, Verdict } from './api'
 import { reasonText } from './api'
 
-/** One claim's standing, worst first: that order is the reading order. */
-export const STANDINGS = ['refutes', 'insufficient', 'unchecked', 'supports', 'uncited'] as const
+/** One claim's standing, worst first: that order is the reading order. "checking" is the
+ * run's own state, a claim whose sources are being read right now; it sits with the
+ * unanswered ones so a reader watching the run sees what is still to come. */
+export const STANDINGS = ['refutes', 'insufficient', 'checking', 'unchecked', 'supports', 'uncited'] as const
 
 export type Standing = (typeof STANDINGS)[number]
 
@@ -18,6 +20,7 @@ export type Standing = (typeof STANDINGS)[number]
 export const STANDING_LABELS: Record<Standing, string> = {
   refutes: 'Source contradicts',
   insufficient: 'Source is silent',
+  checking: 'Checking',
   unchecked: 'Not checked',
   supports: 'Source backs it',
   uncited: 'No source cited',
@@ -27,6 +30,7 @@ export const STANDING_LABELS: Record<Standing, string> = {
 export const STANDING_MEANINGS: Record<Standing, string> = {
   refutes: 'A cited paper says something that goes against this claim.',
   insufficient: 'We read the cited paper and it does not settle the claim either way.',
+  checking: 'A cited paper is being read right now; the answer appears when that is done.',
   unchecked: 'We could not read a cited paper, so this claim has not been checked at all.',
   supports: 'A cited paper says what this claim says it does.',
   uncited: 'The sentence this claim came from cites nothing, so there is nothing to check.',
@@ -39,26 +43,32 @@ export const STANDING_MEANINGS: Record<Standing, string> = {
  * a claim worth a reader's attention, and averaging that away would hide the only finding
  * on the page.
  */
-export function standingOf(claim: Claim): Standing {
+export function standingOf(claim: Claim, running = false): Standing {
   const verdicts = claim.verdicts ?? []
   if (verdicts.some((verdict) => verdict.verdict === 'refutes')) return 'refutes'
   if (verdicts.some((verdict) => verdict.verdict === 'insufficient')) return 'insufficient'
   if (verdicts.length) return 'supports'
   if ((claim.unchecked ?? []).length) return 'unchecked'
+  // While the run is on, a claim with a source we can look up is still to be answered;
+  // "not checked" would read as a result before there is one.
+  if (running && claim.citations.some(citedAs)) return 'checking'
   return claim.citations.length ? 'unchecked' : 'uncited'
 }
 
-/** A supported claim needs no reading; one that failed or was never checked does. */
+/** A supported claim needs no reading; one that failed, is being checked or was never checked does. */
 export function opensByDefault(standing: Standing) {
-  return standing === 'refutes' || standing === 'insufficient' || standing === 'unchecked'
+  return (
+    standing === 'refutes' || standing === 'insufficient' || standing === 'checking' || standing === 'unchecked'
+  )
 }
 
 export type Standings = { claim: Claim; index: number; standing: Standing }[]
 
-/** Every claim with its standing, worst first, keeping the paper's order within a standing. */
-export function ranked(claims: Claim[]): Standings {
+/** Every claim with its standing, worst first, keeping the paper's order within a standing.
+ * `running` marks the claims whose sources are still being read. */
+export function ranked(claims: Claim[], running = false): Standings {
   return claims
-    .map((claim, index) => ({ claim, index, standing: standingOf(claim) }))
+    .map((claim, index) => ({ claim, index, standing: standingOf(claim, running) }))
     .sort((a, b) => STANDINGS.indexOf(a.standing) - STANDINGS.indexOf(b.standing))
 }
 
