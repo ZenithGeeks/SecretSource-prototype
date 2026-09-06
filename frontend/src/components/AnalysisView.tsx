@@ -102,6 +102,9 @@ export function AnalysisView({
               filter={filter}
               onFilter={setFilter}
               paper={file}
+              // The paper itself, from page 1, in the same viewer a claim opens: reading it
+              // here keeps the claims in view, where a download or a new tab would not.
+              onOpenPaper={file ? () => setTarget({ paper: file, label: 'The paper', source: null, page: 1 }) : undefined}
             />
           )}
           {shown.map(({ claim, index, standing }) => (
