@@ -14,8 +14,8 @@ reader checks the tool the same way the tool checks the paper.
 frontend (React)  ──► gateway (FastAPI)
                          │
                          ├─ GROBID          reference + fulltext parsing
-                         ├─ Docling         PDF → text, figure crops
-                         ├─ vLLM            claim extraction + verdicts (Qwen, or Cloud Run)
+                         ├─ Docling         PDF → text, figure crops (a library inside the gateway)
+                         ├─ vLLM            claim extraction + verdicts (Qwen3, any OpenAI-compatible server)
                          ├─ colbert service text retrieval  ─┐
                          └─ colpali service visual retrieval ─┴─► Qdrant (MaxSim multivectors)
 ```
@@ -52,6 +52,8 @@ Same store, same results, one contract to maintain.
 ```
 backend/          gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/main.py       HTTP gateway the frontend talks to
+  app/config.py     every setting, read from the environment / .env
+  app/llm.py        the one model behind ADK and DSPy
   app/pipeline/     claims, sources, verify, figures, rag
   app/agents/       ADK agent tree
   app/clients/      HTTP clients for the retrieval services
@@ -60,39 +62,60 @@ frontend/         React + Vite UI, served by nginx which proxies /api to the gat
 services/
   colbert/          ColBERTv2 text retrieval (HTTP + MCP, Qdrant)
   colpali/          ColPali visual retrieval (HTTP + MCP, Qdrant, opt-in)
-deploy/           Cloud Run deploy script and vLLM-on-Cloud-Run guide
+deploy/           Cloud Run deploy script, Qdrant VM startup script, vLLM-on-Cloud-Run guide
 data/papers/      downloaded PDFs and figure crops (gitignored, shared volume in compose)
 ```
 
-## Quick start
+## Running it
 
-Needs Docker with GPU support (or a remote vLLM, see below).
+Three ways, chosen entirely in `.env`. Empty `*_URL` variables mean "the compose
+container"; filled-in ones mean "that service, wherever it is". Nothing in the code
+changes between them.
+
+| | What runs on your machine | What you need |
+|---|---|---|
+| **Local gateway, cloud services** (team default) | grobid, gateway, web | Docker, `gcloud` |
+| **Everything local** | + vllm, qdrant, colbert (+ colpali) | Docker with an NVIDIA GPU, 16 GB+ |
+| **Shared Cloud Run stack** | nothing | a browser |
+
+### Local gateway, cloud services
 
 ```sh
-cp .env.example .env      # fill in S2_API_KEY at minimum
+cp .env.example .env   # fill in S2_API_KEY, the VLLM_* block, COLBERT_URL, COLPALI_URL
 docker compose up -d --build
 ```
 
 Open <http://localhost:5173>, paste an arXiv ID (e.g. `2112.01488`), watch it run.
+GROBID and Docling run locally; retrieval and the LLM are wherever `.env` points.
 
-Visual retrieval is opt-in (downloads a ~4 GB model, shares the GPU):
+The Cloud Run retrieval services still require a Google identity token
+([#4](https://github.com/ZenithGeeks/SecretSource-prototype/issues/4)), and the gateway does
+not send one. Until they are public, keep gcloud's authenticated proxy running and point
+the gateway at it — `.env.example` has the exact lines:
 
 ```sh
-docker compose --profile vision up -d colpali
+gcloud run services proxy colbert --region asia-southeast1 --port 8893
+gcloud run services proxy colpali --region asia-southeast1 --port 8894
 ```
 
-No local GPU? Deploy vLLM to Cloud Run (`deploy/vllm-cloud-run.md`), then set in `.env`:
+The first request after ~15 idle minutes wakes the services (colbert a few seconds,
+colpali about a minute — it is a GPU instance that reloads its weights). Visual hints are
+skipped, not failed, while colpali is still waking up.
 
+### Everything local
+
+```sh
+docker compose --profile gpu up -d --build        # + vllm, qdrant, colbert
+docker compose --profile vision up -d colpali     # optional: figure/page retrieval, ~4 GB model
 ```
-VLLM_URL=https://vllm-....run.app/v1
-VLLM_API_KEY=...
-```
 
-and restart the gateway. Nothing else changes.
+`VLLM_HF_MODEL` picks the checkpoint; the 4B default fits a 16 GB card beside ColBERT.
+See the `.env.example` comments for the memory split with `--profile vision`.
 
-## Running pieces on the host
+### Pieces on the host
 
-Each part runs standalone against the compose services on localhost:
+Each part also runs standalone, against whatever `.env` says (use `localhost` rather than
+container names there):
 
 ```sh
 # gateway
@@ -117,13 +140,25 @@ cd frontend && npm ci && npm run dev
 Everything is an environment variable; `.env.example` documents them all. The ones that
 matter first:
 
-| Variable | Default | Why you'd set it |
+| Variable | Empty means | Why you'd set it |
 |---|---|---|
-| `S2_API_KEY` | empty | without it Semantic Scholar rate-limits and most cited papers never resolve |
-| `VLLM_URL` | local container | point at a Cloud Run vLLM instead of a local GPU |
-| `QDRANT_URL` | `http://localhost:6333` | managed Qdrant (add `QDRANT_API_KEY`) |
+| `S2_API_KEY` | — | without it Semantic Scholar rate-limits and most cited papers never resolve |
+| `VLLM_URL`, `VLLM_MODEL`, `VLLM_API_KEY` | the `vllm` container | any OpenAI-compatible vLLM: Cloud Run, a teammate's server, a hosted endpoint |
+| `COLBERT_URL`, `COLPALI_URL` | the compose containers | the shared Cloud Run services (through the gcloud proxy for now) |
+| `GROBID_URL` | the `grobid` container | a GROBID elsewhere |
+| `QDRANT_URL`, `QDRANT_API_KEY` | the `qdrant` container | the team's GCE VM or Qdrant Cloud (only colbert/colpali use it) |
 | `CLAIM_LIMIT` | 20 | claims kept per paper; `0` keeps all (benchmarks) |
 | `COLPALI_MODEL` | `vidore/colqwen2-v1.0` | bigger checkpoint, better visual retrieval |
+
+Two things worth knowing about the LLM side:
+
+- The gateway sends `enable_thinking: false` with every request (`backend/app/llm.py`).
+  A Qwen3 endpoint that thinks by default otherwise spends the whole `max_tokens` budget
+  on reasoning and returns no answer, which surfaces as "The LM returned an empty or null
+  response." The compose vLLM sets the same thing server-side; an external one may not.
+- The gateway image installs torch from the CPU index before the rest of
+  `requirements.txt`. Docling needs torch, not a GPU, so the build is pinned there rather
+  than left to whichever build pip resolves.
 
 ## API
 
@@ -142,14 +177,17 @@ MCP endpoints: `http://localhost:8893/mcp` (ColBERT: `search_passages`, `add_pap
 
 ## Deploying
 
-`deploy/cloudrun.sh` deploys grobid, colbert, gateway and web to Cloud Run; `MODEL=vllm`
-adds a GPU-backed vLLM, `MODEL=vertex` (default) uses Gemini instead. Qdrant is not
-deployed there — use a managed cluster and pass `QDRANT_URL` / `QDRANT_API_KEY`.
+`PROJECT=<gcp-project> ./deploy/cloudrun.sh` builds every image with Cloud Build and
+deploys grobid, colbert, colpali (`VISION=0` skips it), vllm, gateway and web to Cloud
+Run, and keeps Qdrant on a small GCE VM with a persistent disk (`deploy/qdrant-startup.sh`).
+Pass `QDRANT_URL` / `QDRANT_API_KEY` to use a managed cluster instead.
 `deploy/vllm-cloud-run.md` is the step-by-step for the vLLM piece, including quota,
 warm-up and cost notes.
 
 ## Working on this repo
 
+- Branch and PR titles carry the Jira key (`SCRUM-120: ...`); that is what links them to
+  the board. One branch per ticket, off `main`.
 - One service = one directory = one Dockerfile. Services talk over HTTP/MCP only; nothing
   imports across `backend/`, `services/*`, `frontend/`.
 - Tool functions return `{"status": "ok" | "error", ...}` instead of raising — the agents
@@ -158,3 +196,5 @@ warm-up and cost notes.
 - Lint: `ruff check .` (config in `pyproject.toml`). Frontend: `npm run lint`.
 - Indexes are disposable: deleting the Qdrant volume loses nothing that `add_paper` can't
   rebuild from `data/papers/`.
+- Changing `backend/requirements.txt` rebuilds the slow pip layer of the gateway image;
+  everything else in `backend/` is a fast layer on top.
