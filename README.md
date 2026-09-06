@@ -208,6 +208,8 @@ warm-up and cost notes.
   and the gateway both rely on it. Typed failure reasons live in
   `backend/app/pipeline/sources.py`; the UI shows them, so keep them meaningful.
 - Lint: `ruff check .` (config in `pyproject.toml`). Frontend: `npm run lint`.
+- Backend tests: `cd backend && pip install -r requirements-dev.txt && pytest`. They build
+  their own PDFs with PyMuPDF, so no service or model has to be running.
 - Indexes are disposable: deleting the Qdrant volume loses nothing that `add_paper` can't
   rebuild from `data/papers/`.
 - Changing `backend/requirements.txt` rebuilds the slow pip layer of the gateway image;
