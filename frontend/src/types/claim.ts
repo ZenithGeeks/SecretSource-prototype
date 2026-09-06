@@ -16,3 +16,12 @@ export interface Claim {
   quoteLocation?: string
   suggestion?: Source
 }
+
+/** A claim known to have a verdict — the shape of a draft's "needs work" issues. */
+export interface Issue extends Claim {
+  verdict: VerdictKind
+}
+
+export function hasVerdict(claim: Claim): claim is Issue {
+  return claim.verdict === 'refutes' || claim.verdict === 'insufficient'
+}

@@ -105,7 +105,7 @@ export default function DraftCheck() {
                       return (
                         <>
                           <div className="fix-panel__verdict">
-                            <Badge variant={issue.verdict!}>{VERDICT_BADGE_TEXT[issue.verdict!]}</Badge>
+                            <Badge variant={issue.verdict}>{VERDICT_BADGE_TEXT[issue.verdict]}</Badge>
                             <p className="fix-panel__citation">{issue.citation?.label}</p>
                           </div>
 

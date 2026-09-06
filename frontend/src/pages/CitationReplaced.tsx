@@ -6,7 +6,10 @@ import { LoadingState } from '../components/LoadingState'
 import { Sidebar } from '../components/Sidebar'
 import { useDraftCheck } from '../hooks'
 import type { DraftWord } from '../types'
+import { VERDICT_LEGEND_TEXT } from '../types'
 import './CitationReplaced.css'
+
+const LEGEND_KINDS = ['supports', 'refutes', 'insufficient'] as const
 
 function DraftParagraph({ words }: { words: DraftWord[] }) {
   return (
@@ -72,18 +75,12 @@ export default function CitationReplaced() {
                 ))}
 
                 <div className="legend">
-                  <div className="legend__item">
-                    <span className="legend__swatch legend__swatch--supports"></span>
-                    <span className="legend__label">source backs it</span>
-                  </div>
-                  <div className="legend__item">
-                    <span className="legend__swatch legend__swatch--refutes"></span>
-                    <span className="legend__label">source contradicts</span>
-                  </div>
-                  <div className="legend__item">
-                    <span className="legend__swatch legend__swatch--insufficient"></span>
-                    <span className="legend__label">source is silent</span>
-                  </div>
+                  {LEGEND_KINDS.map((kind) => (
+                    <div className="legend__item" key={kind}>
+                      <span className={`legend__swatch legend__swatch--${kind}`}></span>
+                      <span className="legend__label">{VERDICT_LEGEND_TEXT[kind]}</span>
+                    </div>
+                  ))}
                 </div>
               </section>
 

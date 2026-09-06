@@ -1,6 +1,7 @@
 import { mockClaims } from '../mocks/claims'
 import { mockDraftInitial, mockDraftReplaced } from '../mocks/drafts'
 import type { CheckRun } from '../types'
+import { hasVerdict } from '../types'
 import { resolveMock, USE_MOCKS } from './_mock'
 
 /**
@@ -10,7 +11,7 @@ import { resolveMock, USE_MOCKS } from './_mock'
  */
 let current: CheckRun = {
   draft: mockDraftInitial,
-  issues: mockClaims.filter((claim) => claim.verdict === 'refutes' || claim.verdict === 'insufficient'),
+  issues: mockClaims.filter(hasVerdict),
   currentIssueIndex: 0,
 }
 
