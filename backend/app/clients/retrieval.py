@@ -40,7 +40,7 @@ def colbert_add(path: str) -> dict:
     with open(path, "rb") as pdf:
         response = requests.post(f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), timeout=600)
     if not response.ok:
-        return {"status": "error", "message": _detail(response)}
+        return {"status": "error", "message": _detail(response), "reason": "indexing-failed"}
     return {"status": "ok", **response.json()}
 
 

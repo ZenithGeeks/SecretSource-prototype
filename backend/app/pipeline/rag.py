@@ -63,4 +63,4 @@ def add_paper(pdf_path: str) -> dict:
     try:
         return colbert_add(pdf_path)
     except Exception as error:
-        return {"status": "error", "message": str(error)}
+        return {"status": "error", "message": str(error), "reason": "indexing-failed"}

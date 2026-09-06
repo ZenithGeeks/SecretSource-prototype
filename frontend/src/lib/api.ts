@@ -66,6 +66,7 @@ export type Reason =
   | 'not-downloadable'
   | 'lookup-unavailable'
   | 'web-source'
+  | 'indexing-failed'
   | 'failed'
 
 export const REASONS: Record<Reason, string> = {
@@ -74,6 +75,7 @@ export const REASONS: Record<Reason, string> = {
   'not-downloadable': 'the PDF would not download',
   'lookup-unavailable': 'the lookup service would not answer, so we could not tell',
   'web-source': 'a web page, not a paper we can check a claim against',
+  'indexing-failed': 'the retrieval service could not read this paper',
   failed: 'checking it failed',
 }
 
