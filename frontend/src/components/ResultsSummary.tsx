@@ -32,6 +32,7 @@ export function ResultsSummary({
   filter,
   onFilter,
   paper,
+  onOpenPaper,
 }: {
   claims: Claim[]
   standings: Standings
@@ -39,6 +40,8 @@ export function ResultsSummary({
   filter: Standing | null
   onFilter: (standing: Standing | null) => void
   paper?: string
+  /** Opens the paper in the page viewer beside the claims; without it the button links to the file. */
+  onOpenPaper?: () => void
 }) {
   const [copied, setCopied] = useState(false)
 
@@ -62,7 +65,13 @@ export function ResultsSummary({
         </div>
 
         <div className="flex items-center gap-2">
-          {paper && (
+          {paper && onOpenPaper && (
+            <Button variant="ghost" onClick={onOpenPaper} title="Read the paper here, page by page">
+              <FileText className="size-4" />
+              The PDF
+            </Button>
+          )}
+          {paper && !onOpenPaper && (
             <a
               href={`/api/papers/${encodeURIComponent(paper)}`}
               target="_blank"

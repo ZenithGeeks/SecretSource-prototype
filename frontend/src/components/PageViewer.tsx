@@ -98,7 +98,8 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
           <p className="truncate text-sm font-medium">{target.label}</p>
           <p className="truncate text-xs text-ink-muted">
             {target.paper}
-            {!target.source && onOriginalPage && ' · exact place not found, showing the page'}
+            {/* Only when there was a passage to find: opening the paper itself has none. */}
+            {!target.source && target.quote && onOriginalPage && ' · exact place not found, showing the page'}
           </p>
         </div>
         <IconButton label="Close the page view" onClick={onClose}>
