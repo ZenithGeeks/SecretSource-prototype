@@ -1,6 +1,6 @@
 /** Start an analysis from a reference (path, DOI, arXiv ID, URL) or an uploaded PDF. */
 
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileUp, Loader2, Search } from 'lucide-react'
 import { useRef, useState } from 'react'
 
@@ -11,6 +11,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
   const [reference, setReference] = useState('')
   const [verify, setVerify] = useState(true)
   const fileInput = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
 
   const start = useMutation({
     mutationFn: (input: string | File) =>
@@ -19,6 +20,8 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         : api.uploadAnalysis(input, verify),
     onSuccess: ({ id }) => {
       setReference('')
+      // The history list should show the run from the moment it starts, not when it ends.
+      queryClient.invalidateQueries({ queryKey: ['analyses'] })
       onStarted(id)
     },
   })
