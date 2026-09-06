@@ -11,6 +11,15 @@ import { cn } from '../lib/utils'
 import type { Target } from './PageViewer'
 import { Card, StandingBadge, VerdictBadge } from './ui'
 
+/** The verdict colour, carried onto the left edge of the answer block that holds it — not
+ * just the badge — so a reader can tell supports/refutes/insufficient apart while
+ * scrolling past a closed card, the way a claim's own quote already gets a rule (#22). */
+const VERDICT_BORDER = {
+  supports: 'border-supports',
+  refutes: 'border-refutes',
+  insufficient: 'border-insufficient',
+} as const
+
 /** "vidore/colqwen2-v1.0" -> "ColQwen2 v1.0": the reader wants the model, not the repo path. */
 function modelName(checkpoint: string) {
   const name = checkpoint.split('/').pop() ?? checkpoint
@@ -99,8 +108,13 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
     })
   }
 
+  const hasAside = (verdict.pages && verdict.pages.length > 0) || verdict.evidence.length > 0
+
   return (
-    <div className="mt-2 rounded-lg bg-canvas p-3">
+    // The left rule repeats the badge's verdict colour on the block that holds the
+    // evidence for it, so a reader scrolling past a closed card still sees which sources
+    // contradicted a claim without opening one (#22).
+    <div className={cn('mt-2 rounded-lg border-l-[3px] bg-canvas p-3', VERDICT_BORDER[verdict.verdict])}>
       <div className="flex flex-wrap items-center gap-2">
         <VerdictBadge verdict={verdict.verdict} />
         <span className="text-xs text-ink-muted">read from {verdict.source}</span>
@@ -120,73 +134,77 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
         </blockquote>
       )}
 
-      <p className="mt-2 text-sm text-ink-muted">{verdict.reasoning}</p>
+      {/* Full ink, not muted: the paper's own words above are a quote and read as one;
+          this is the model's working, and it has to look like a different kind of text,
+          not a continuation of the same paragraph (#22). */}
+      <p className="mt-2 text-sm text-ink">{verdict.reasoning}</p>
 
-      {verdict.pages && verdict.pages.length > 0 && (
-        <p className="mt-2 text-sm text-ink-muted">
-          Also worth reading by eye:{' '}
-          {verdict.pages.map((hit, k) => (
-            <span key={k}>
-              {k > 0 && ' and '}
-              {onShow ? (
-                <PageLink
-                  page={hit.page}
-                  onClick={() =>
-                    onShow({
-                      paper: verdict.source,
-                      label: `${hitName(hit)} of ${verdict.source}`,
-                      source: null, // the crop itself is rendered by #36; this opens its page
-                      page: hit.page,
-                    })
-                  }
-                >
-                  {hitName(hit)}
-                </PageLink>
-              ) : (
-                hitName(hit)
+      {hasAside && (
+        <div className="mt-2 space-y-2 rounded-lg bg-accent-soft p-3">
+          {verdict.pages && verdict.pages.length > 0 && (
+            <p className="text-sm text-ink-muted">
+              Also worth reading by eye:{' '}
+              {verdict.pages.map((hit, k) => (
+                <span key={k}>
+                  {k > 0 && ' and '}
+                  {onShow ? (
+                    <PageLink
+                      page={hit.page}
+                      onClick={() =>
+                        onShow({
+                          paper: verdict.source,
+                          label: `${hitName(hit)} of ${verdict.source}`,
+                          source: null, // the crop itself is rendered by #36; this opens its page
+                          page: hit.page,
+                        })
+                      }
+                    >
+                      {hitName(hit)}
+                    </PageLink>
+                  ) : (
+                    hitName(hit)
+                  )}
+                </span>
+              ))}{' '}
+              — matched by what the paper shows rather than what it says.
+              {verdict.page_model && (
+                <span className="text-ink-muted"> Matched by {modelName(verdict.page_model)}.</span>
               )}
-            </span>
-          ))}{' '}
-          — matched by what the paper shows rather than what it says.
-          {verdict.page_model && (
-            <span className="text-ink-muted"> Matched by {modelName(verdict.page_model)}.</span>
+            </p>
           )}
-        </p>
+
+          {verdict.evidence.length > 0 && (
+            <button
+              onClick={() => setShowEvidence(!showEvidence)}
+              aria-expanded={showEvidence}
+              className="rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {showEvidence ? 'Hide' : 'Show'} {verdict.evidence.length} retrieved passages
+            </button>
+          )}
+        </div>
       )}
 
-      {verdict.evidence.length > 0 && (
-        <>
-          <button
-            onClick={() => setShowEvidence(!showEvidence)}
-            aria-expanded={showEvidence}
-            className="mt-2 rounded text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            {showEvidence ? 'Hide' : 'Show'} {verdict.evidence.length} retrieved passages
-          </button>
-          {showEvidence && (
-            <ul className="mt-2 space-y-2 text-xs text-ink-muted">
-              {verdict.evidence.map((passage, j) => (
-                <li key={j} className="rounded border border-border-subtle p-2">
-                  <span className="mr-2 inline-block">
-                    {onShow ? (
-                      <PageLink
-                        page={passage.page}
-                        onClick={() =>
-                          showInCitedPaper(`Passage in ${verdict.source}`, passage.text, passage.page)
-                        }
-                      />
-                    ) : (
-                      <span className="rounded bg-surface px-1.5 py-0.5 font-medium tabular-nums">
-                        p. {passage.page}
-                      </span>
-                    )}
+      {showEvidence && verdict.evidence.length > 0 && (
+        <ul className="mt-2 space-y-2 text-xs text-ink-muted">
+          {verdict.evidence.map((passage, j) => (
+            <li key={j} className="rounded border border-border-subtle p-2">
+              <span className="mr-2 inline-block">
+                {onShow ? (
+                  <PageLink
+                    page={passage.page}
+                    onClick={() => showInCitedPaper(`Passage in ${verdict.source}`, passage.text, passage.page)}
+                  />
+                ) : (
+                  <span className="rounded bg-surface px-1.5 py-0.5 font-medium tabular-nums">
+                    p. {passage.page}
                   </span>
-                  {passage.text}
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+                )}
+              </span>
+              {passage.text}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
