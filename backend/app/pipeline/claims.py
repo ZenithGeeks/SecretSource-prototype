@@ -5,6 +5,7 @@ parses references. Each claim keeps the sentence it came from, located back in t
 
 import re
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 
 import pydantic
 from pydantic import Field
@@ -17,6 +18,9 @@ TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 MAX_CHARS = 12_000  # ~3k tokens per window, fits an 8k context with room for output
 NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertion, reworded
+# Windows extracted at once. Each one is a full LLM round trip and they do not depend on
+# each other; the cap keeps a long paper from opening a connection per window.
+EXTRACT_WORKERS = 3
 
 _converter = None  # lazy: loading docling's models takes seconds
 _claim_extractor = None  # lazy: needs dspy and a running LM
@@ -296,10 +300,12 @@ def extract_claims(pdf_path: str) -> dict:
         if _claim_extractor is None:
             _claim_extractor = _build_claim_extractor()
         windows = _windows(_pdf_to_text(pdf_path))
+        with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
+            per_window = list(pool.map(_claim_extractor, windows))
         # The abstract and the conclusion repeat each other across windows: keep first wording.
         claims: dict[str, str] = {}
-        for window in windows:
-            for claim in _claim_extractor(window):
+        for window_claims in per_window:
+            for claim in window_claims:
                 claims.setdefault(_normalised_claim(claim), claim)
         return {"status": "ok", "file": pdf_path, "claims": list(claims.values()), "windows": len(windows)}
     except Exception as error:
@@ -606,10 +612,12 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         # Markers are matched against the whole paper, not the window a claim came from.
         cited = _cited_sentences(paper_text)
         windows = _citing_windows(paper_text)  # a paper that cites nothing has no windows
+        with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
+            per_window = list(pool.map(_cited_claim_extractor, windows))
         found = [
             _cited_claim(extracted, references, cited, pdf_path)
-            for window in windows
-            for extracted in _cited_claim_extractor(window)
+            for window_claims in per_window
+            for extracted in window_claims
         ]
         claims = _most_checkable(
             _deduplicated([c for c in found if not _asserts_nothing(c["claim"])]), CLAIM_LIMIT
