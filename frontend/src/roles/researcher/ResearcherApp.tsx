@@ -17,6 +17,7 @@ import { AppShell } from '../../components/AppShell'
 import { HistoryList } from '../../components/HistoryList'
 import { useAnalyses } from '../../lib/useAnalysis'
 import { FieldConsensus } from './screens/FieldConsensus'
+import { Graph } from './screens/Graph'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
@@ -109,7 +110,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'home' && <Home onOpen={navigate} />}
       {screen === 'library' && <Library onAddPaper={() => navigate('history')} />}
       {screen === 'field-consensus' && <FieldConsensus />}
-      {screen === 'graph' && <Placeholder title="Graph" />}
+      {screen === 'graph' && <Graph />}
       {screen === 'history' && (
         <History selected={selected} onSelect={select} onTargetChange={setWide} />
       )}

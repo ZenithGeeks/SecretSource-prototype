@@ -4,7 +4,12 @@
  * the design until the endpoints exist. Nothing outside src/lib/researcher.ts imports this.
  */
 
-import type { FieldConsensus, ResearcherHome, ResearcherLibrary } from '../lib/researcher'
+import type {
+  FieldConsensus,
+  KnowledgeGraph,
+  ResearcherHome,
+  ResearcherLibrary,
+} from '../lib/researcher'
 
 export const MOCK_HOME: ResearcherHome = {
   user: 'Wittawat',
@@ -169,5 +174,103 @@ export const MOCK_LIBRARY: ResearcherLibrary = {
       contradicted: null,
       linked: ['Docling'],
     },
+  ],
+}
+
+export const MOCK_GRAPH: KnowledgeGraph = {
+  stats: [
+    { count: 3, label: 'claims rest on a single source' },
+    { count: 1, label: 'circular citation (A cites B cites A)' },
+    { count: 2, label: 'claims with no primary evidence' },
+    { count: 4, label: 'claims every paper agrees on' },
+  ],
+  clusters: ['Late interaction', 'Dense retrieval', 'Benchmarks', 'PDF tooling'],
+  nodes: [
+    { id: 'colbert20', kind: 'paper', label: 'ColBERT', year: "'20", cluster: 'Late interaction' },
+    { id: 'colbertv222', kind: 'paper', label: 'ColBERTv2', year: "'22", cluster: 'Late interaction' },
+    { id: 'plaid22', kind: 'paper', label: 'PLAID', year: "'22", cluster: 'Late interaction' },
+    { id: 'beir21', kind: 'paper', label: 'BEIR', year: "'21", cluster: 'Benchmarks' },
+    { id: 'dpr20', kind: 'paper', label: 'DPR', year: "'20", cluster: 'Dense retrieval' },
+    { id: 'msmarco16', kind: 'paper', label: 'MS MARCO', year: "'16", cluster: 'Benchmarks' },
+    { id: 'bert19', kind: 'paper', label: 'BERT', year: "'19", cluster: 'Dense retrieval' },
+    { id: 'docling24', kind: 'paper', label: 'Docling', year: "'24", cluster: 'PDF tooling' },
+    { id: 'grobid09', kind: 'paper', label: 'GROBID', year: "'09", cluster: 'PDF tooling' },
+    { id: 'c_residual', kind: 'claim', label: 'Residual compression cuts index size 6–10×' },
+    { id: 'c_lateinteraction', kind: 'claim', label: 'Late interaction generalizes better out of domain' },
+    { id: 'c_msmarco', kind: 'claim', label: 'MS MARCO has 8.8M passages' },
+    { id: 'c_distill', kind: 'claim', label: 'Cross-encoder distillation is required for SOTA' },
+  ],
+  edges: [
+    // Residual compression cuts index size 6–10× — one source holds it up.
+    {
+      id: 'e1', source: 'colbertv222', target: 'c_residual', relation: 'asserts',
+      note: 'origin — asserts',
+      quote: '…reduces the space footprint by 6–10× [b13] with no loss in quality.', page: 'p.4',
+    },
+    {
+      id: 'e2', source: 'colbert20', target: 'c_residual', relation: 'contradicts',
+      note: 'cited as [b13] — contradicts',
+      quote: '…154 GiB; we leave compression to future work.', page: 'p.7',
+    },
+    {
+      id: 'e3', source: 'plaid22', target: 'c_residual', relation: 'backs',
+      note: 'repeats — backs',
+      quote: "…building on ColBERTv2's compressed representations…", page: 'p.2',
+    },
+    // Late interaction generalizes better out of domain.
+    {
+      id: 'e4', source: 'colbert20', target: 'c_lateinteraction', relation: 'asserts',
+      note: 'origin — asserts',
+      quote: '…late interaction generalizes better than single-vector encoders zero-shot.', page: 'p.6',
+    },
+    {
+      id: 'e5', source: 'colbertv222', target: 'c_lateinteraction', relation: 'backs',
+      note: 'backs', quote: '…outperforms single-vector baselines on 13 of 13 BEIR datasets.', page: 'p.5',
+    },
+    {
+      id: 'e6', source: 'beir21', target: 'c_lateinteraction', relation: 'silent',
+      note: 'measured, no verdict — silent',
+      quote: '…no single model dominates across all domains.', page: '§5',
+    },
+    {
+      id: 'e7', source: 'dpr20', target: 'c_lateinteraction', relation: 'contradicts',
+      note: 'contradicts', quote: '…dense single-vector retrieval outperforms multi-vector baselines.', page: 'p.8',
+    },
+    // MS MARCO has 8.8M passages.
+    {
+      id: 'e8', source: 'msmarco16', target: 'c_msmarco', relation: 'asserts',
+      note: 'origin — asserts', quote: '…a collection of 8.8 million passages.', page: 'p.3',
+    },
+    // Cross-encoder distillation is required for SOTA.
+    {
+      id: 'e9', source: 'colbertv222', target: 'c_distill', relation: 'asserts',
+      note: 'origin — asserts', quote: '…distillation from a cross-encoder teacher is key to quality.', page: 'p.5',
+    },
+    {
+      id: 'e10', source: 'plaid22', target: 'c_distill', relation: 'backs',
+      note: 'backs', quote: '…inherits ColBERTv2 training, distillation included.', page: 'p.2',
+    },
+  ],
+  paperEdges: [
+    {
+      id: 'p1', a: 'colbert20', b: 'colbertv222',
+      similarity: 0.92, sharedPassages: 14, citations: 3, cites: true, contradicted: 1,
+      passages: [
+        { paper: 'ColBERTv2', page: 'p.3', quote: '…late interaction over token-level embeddings, as in ColBERT…' },
+        { paper: 'ColBERT', page: 'p.2', quote: '…late interaction: a fine-grained MaxSim between query and document token embeddings.' },
+        { paper: 'ColBERTv2', page: 'p.4', quote: '…residual compression reduces the space footprint by 6–10×…' },
+        { paper: 'ColBERT', page: 'p.7', quote: '…the index for MS MARCO occupies 154 GiB…' },
+      ],
+    },
+    { id: 'p2', a: 'colbertv222', b: 'plaid22', similarity: 0.85, sharedPassages: 9, citations: 2, cites: true, passages: [] },
+    { id: 'p3', a: 'colbertv222', b: 'dpr20', similarity: 0.61, sharedPassages: 5, citations: 1, cites: false, passages: [] },
+    { id: 'p4', a: 'colbert20', b: 'bert19', similarity: 0.52, sharedPassages: 4, citations: 1, cites: true, passages: [] },
+    { id: 'p5', a: 'colbertv222', b: 'msmarco16', similarity: 0.44, sharedPassages: 3, citations: 1, cites: true, passages: [] },
+    { id: 'p6', a: 'dpr20', b: 'beir21', similarity: 0.55, sharedPassages: 4, citations: 1, cites: false, passages: [] },
+    { id: 'p7', a: 'beir21', b: 'msmarco16', similarity: 0.5, sharedPassages: 4, citations: 1, cites: false, passages: [] },
+    { id: 'p8', a: 'dpr20', b: 'msmarco16', similarity: 0.46, sharedPassages: 3, citations: 1, cites: false, passages: [] },
+    { id: 'p9', a: 'plaid22', b: 'dpr20', similarity: 0.4, sharedPassages: 2, citations: 0, cites: false, passages: [] },
+    { id: 'p10', a: 'bert19', b: 'dpr20', similarity: 0.58, sharedPassages: 4, citations: 1, cites: true, passages: [] },
+    { id: 'p11', a: 'docling24', b: 'grobid09', similarity: 0.7, sharedPassages: 6, citations: 1, cites: true, passages: [] },
   ],
 }

@@ -19,3 +19,8 @@ export function useFieldConsensus(question: string) {
 export function useResearcherLibrary() {
   return useQuery({ queryKey: ['researcher', 'library'], queryFn: researcherApi.getLibrary })
 }
+
+// Global (all roles), like the analyses History lists — keyed outside the researcher namespace.
+export function useKnowledgeGraph() {
+  return useQuery({ queryKey: ['graph'], queryFn: researcherApi.getGraph })
+}
