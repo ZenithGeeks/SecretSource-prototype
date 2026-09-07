@@ -59,5 +59,13 @@ export function useAnalysis(id: string | null) {
 }
 
 export function useAnalyses() {
-  return useQuery({ queryKey: ['analyses'], queryFn: api.listAnalyses })
+  return useQuery({
+    queryKey: ['analyses'],
+    queryFn: api.listAnalyses,
+    // Nothing keeps this current once a running analysis's own detail view is closed
+    // (its stream, and the invalidation it does on done/error, both go with it). Poll
+    // while anything is running so the sidebar doesn't need a page reload to catch up.
+    refetchInterval: (query) =>
+      query.state.data?.some((analysis) => analysis.status === 'running') ? 3000 : false,
+  })
 }
