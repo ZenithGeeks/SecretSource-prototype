@@ -41,6 +41,9 @@ PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
 PAGE_CACHE = Path(os.getenv("PAGE_CACHE", "/tmp/pages"))
 DEFAULT_DPI, MAX_DPI = 110, 300
+# Checks running at once. The retrieval services and the judge are the bottleneck, so this
+# is small on purpose; app/workflow.py's graph fans out to the same number.
+PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 
 analyses: dict[str, dict] = {}
 streams: dict[str, asyncio.Queue] = {}
@@ -104,30 +107,40 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         )
 
         if verify:
-            for index, claim in enumerate(claims):
-                for citation in claim["citations"]:
-                    source = lookup_key(citation)
-                    if not source:
-                        continue
+            # One job per claim and cited work, the way app/workflow.py plans them. Run one
+            # at a time and a paper's whole wait is the sum of its checks; each one indexes a
+            # source and asks the judge, so PARALLEL_CHECKS of them overlap instead.
+            jobs = [
+                (index, claim, citation, source)
+                for index, claim in enumerate(claims)
+                for citation in claim["citations"]
+                if (source := lookup_key(citation))
+            ]
+            limit = asyncio.Semaphore(PARALLEL_CHECKS)
+
+            async def check(index: int, claim: dict, citation: dict, source: str):
+                async with limit:
                     await _publish(analysis_id, "verifying", claim=index, source=source)
                     verdict = await asyncio.to_thread(verify_claim, claim["claim"], source)
-                    if verdict["status"] == "ok":
-                        # Keyed by what we looked the source up by, so the card shows the
-                        # verdict against the citation it answers for.
-                        claim.setdefault("verdicts", []).append({**verdict, "cited": source})
-                        await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
-                    else:
-                        # A failure is a result: a claim we could not check must not look
-                        # like one nobody tried.
-                        reason = unchecked_reason(verdict, citation)
-                        claim.setdefault("unchecked", []).append(
-                            {"source": source, "reason": reason,
-                             "message": verdict.get("message", "")}
-                        )
-                        await _publish(
-                            analysis_id, "failed", claim=index, source=source,
-                            reason=reason, message=verdict.get("message", ""),
-                        )
+                if verdict["status"] == "ok":
+                    # Keyed by what we looked the source up by, so the card shows the
+                    # verdict against the citation it answers for.
+                    claim.setdefault("verdicts", []).append({**verdict, "cited": source})
+                    await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
+                else:
+                    # A failure is a result: a claim we could not check must not look
+                    # like one nobody tried.
+                    reason = unchecked_reason(verdict, citation)
+                    claim.setdefault("unchecked", []).append(
+                        {"source": source, "reason": reason,
+                         "message": verdict.get("message", "")}
+                    )
+                    await _publish(
+                        analysis_id, "failed", claim=index, source=source,
+                        reason=reason, message=verdict.get("message", ""),
+                    )
+
+            await asyncio.gather(*(check(*job) for job in jobs))
 
         analysis["status"] = "done"
         await _publish(analysis_id, "done")
