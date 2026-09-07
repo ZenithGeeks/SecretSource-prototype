@@ -24,7 +24,9 @@ from app.pipeline.verify import verify_claim
 # The retrieval service's own MCP endpoint. Same tools the HTTP client wraps; letting the
 # agent call them directly keeps one contract for both agent and external MCP clients.
 colbert_mcp = McpToolset(
-    connection_params=StreamableHTTPConnectionParams(url=f"{COLBERT_URL}/mcp"),
+    # Trailing slash on purpose: /mcp 307-redirects, the MCP client does not follow it, and
+    # the redirect drops the Authorization header when the service is behind the gcloud proxy.
+    connection_params=StreamableHTTPConnectionParams(url=f"{COLBERT_URL}/mcp/"),
     tool_filter=["search_passages"],
 )
 
