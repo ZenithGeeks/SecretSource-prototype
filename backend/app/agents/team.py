@@ -1,7 +1,6 @@
 """Multi-agent tree (Google ADK):
 
     coordinator (root, routes via transfer_to_agent)
-    ├── search_agent    MCP: DuckDuckGo (stdio, spawned via uvx)
     ├── rag_agent       tools: answer_from_docs, add_paper (DSPy + ColBERT service)
     ├── paper_agent     tools: claims, citations, fetch_source (Docling + GROBID)
     ├── verify_agent    tool: verify_claim (retrieval over the cited paper + LLM judge)
@@ -12,10 +11,8 @@
 from google.adk.agents import LlmAgent
 from google.adk.tools.mcp_tool import (
     McpToolset,
-    StdioConnectionParams,
     StreamableHTTPConnectionParams,
 )
-from mcp import StdioServerParameters
 
 from app.config import COLBERT_URL
 from app.llm import adk_model
@@ -24,30 +21,11 @@ from app.pipeline.rag import add_paper, answer_from_docs
 from app.pipeline.sources import fetch_source
 from app.pipeline.verify import verify_claim
 
-duckduckgo = McpToolset(
-    connection_params=StdioConnectionParams(
-        server_params=StdioServerParameters(command="uvx", args=["duckduckgo-mcp-server"]),
-        timeout=60,
-    ),
-    tool_filter=["search", "fetch_content"],
-)
-
 # The retrieval service's own MCP endpoint. Same tools the HTTP client wraps; letting the
 # agent call them directly keeps one contract for both agent and external MCP clients.
 colbert_mcp = McpToolset(
     connection_params=StreamableHTTPConnectionParams(url=f"{COLBERT_URL}/mcp"),
     tool_filter=["search_passages"],
-)
-
-search_agent = LlmAgent(
-    name="search_agent",
-    description="Searches the web and reads web pages.",
-    model=adk_model(),
-    instruction=(
-        "Use search (max_results=5). Use fetch_content only if a page must be read.\n"
-        "Answer in 2-3 sentences with source URLs."
-    ),
-    tools=[duckduckgo],
 )
 
 rag_agent = LlmAgent(
@@ -104,8 +82,7 @@ root_agent = LlmAgent(
         "- list the claims or the citations found in a paper -> transfer_to_agent(paper_agent)\n"
         "- download / fetch a paper by DOI, arXiv ID, PMID or URL -> transfer_to_agent(paper_agent)\n"
         "- questions about the indexed documents / knowledge base -> transfer_to_agent(rag_agent)\n"
-        "- current web search / news -> transfer_to_agent(search_agent)\n"
         "If the request fits none, say so briefly."
     ),
-    sub_agents=[search_agent, rag_agent, paper_agent, verify_agent],
+    sub_agents=[rag_agent, paper_agent, verify_agent],
 )
