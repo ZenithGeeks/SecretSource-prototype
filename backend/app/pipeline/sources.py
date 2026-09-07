@@ -11,6 +11,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from app.config import PAPERS_DIR, S2_API_KEY, UNPAYWALL_EMAIL
 
@@ -56,6 +57,18 @@ REASONS = {
     LookupUnavailable: "lookup-unavailable",
     WebSource: "web-source",
 }
+
+
+class Resolution(NamedTuple):
+    """Where a cited work was found. `index` is which service answered and `ids` are the
+    identifiers it returned, so a reader can tell a work a major index knows from one
+    nobody could place. Semantic Scholar answers with DOI, ArXiv, PubMed, MAG, DBLP and
+    CorpusId and never a Scopus id, so nothing here claims Scopus was consulted."""
+
+    url: str
+    title: str = ""
+    index: str = ""  # "" when the identifier was taken at face value, e.g. a bare URL
+    ids: dict = {}  # never mutated; a shared empty default is the point
 
 
 def reason_for(error: BaseException) -> str:
@@ -127,20 +140,21 @@ def _semantic_scholar(path: str, params: dict) -> dict:
     return response.json()
 
 
-def _pdf_of(paper: dict, described_as: str) -> tuple[str, str]:
+def _pdf_of(paper: dict, described_as: str) -> Resolution:
     """Semantic Scholar record -> (pdf_url, title). Falls back to the arXiv twin:
     a paywalled DOI often has one, and not looking loses most cited papers."""
     title = paper.get("title", "")
+    ids = paper.get("externalIds") or {}
     pdf = (paper.get("openAccessPdf") or {}).get("url")
     if pdf:
-        return pdf, title
-    arxiv = (paper.get("externalIds") or {}).get("ArXiv")
+        return Resolution(pdf, title, "semantic-scholar", ids)
+    arxiv = ids.get("ArXiv")
     if arxiv:
-        return f"https://arxiv.org/pdf/{arxiv}", title
+        return Resolution(f"https://arxiv.org/pdf/{arxiv}", title, "semantic-scholar", ids)
     raise NoOpenAccessCopy(f"no open-access PDF known for {described_as}")
 
 
-def _semantic_scholar_pdf(paper_id: str) -> tuple[str, str]:
+def _semantic_scholar_pdf(paper_id: str) -> Resolution:
     return _pdf_of(_semantic_scholar(f"/{paper_id}", {"fields": S2_FIELDS}), paper_id)
 
 
@@ -154,7 +168,7 @@ def _matches(wanted: str, found: str) -> bool:
     return SequenceMatcher(None, _normalised(wanted), _normalised(found)).ratio() >= TITLE_MATCH
 
 
-def _arxiv_by_title(title: str) -> tuple[str, str]:
+def _arxiv_by_title(title: str) -> Resolution:
     import xml.etree.ElementTree as ET
 
     import requests
@@ -169,12 +183,14 @@ def _arxiv_by_title(title: str) -> tuple[str, str]:
     for entry in ET.fromstring(response.text).iter(f"{ATOM}entry"):
         found = " ".join((entry.findtext(f"{ATOM}title") or "").split())
         if _matches(title, found):
-            arxiv_id = (entry.findtext(f"{ATOM}id") or "").rsplit("/", 1)[-1]
-            return f"https://arxiv.org/pdf/{ARXIV_VERSION.sub('', arxiv_id)}", found
+            arxiv_id = ARXIV_VERSION.sub("", (entry.findtext(f"{ATOM}id") or "").rsplit("/", 1)[-1])
+            return Resolution(
+                f"https://arxiv.org/pdf/{arxiv_id}", found, "arxiv", {"ArXiv": arxiv_id}
+            )
     raise Unresolvable(f"arXiv knows no paper by that title: {title}")
 
 
-def _semantic_scholar_by_title(title: str) -> tuple[str, str]:
+def _semantic_scholar_by_title(title: str) -> Resolution:
     found = _semantic_scholar("/search", {"query": title, "fields": S2_FIELDS, "limit": 5})
     for paper in found.get("data") or []:
         if _matches(title, paper.get("title", "")):
@@ -182,7 +198,7 @@ def _semantic_scholar_by_title(title: str) -> tuple[str, str]:
     raise Unresolvable(f"no paper found matching the title: {title}")
 
 
-def _unpaywall_pdf(doi: str) -> tuple[str, str]:
+def _unpaywall_pdf(doi: str) -> Resolution:
     import requests
 
     if not UNPAYWALL_EMAIL:
@@ -198,10 +214,10 @@ def _unpaywall_pdf(doi: str) -> tuple[str, str]:
     pdf = location.get("url_for_pdf") or location.get("url")
     if not pdf:
         raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}")
-    return pdf, work.get("title") or ""
+    return Resolution(pdf, work.get("title") or "", "unpaywall", {"DOI": doi})
 
 
-def _first_answer(resolvers, argument: str) -> tuple[str, str]:
+def _first_answer(resolvers, argument: str) -> Resolution:
     """Ask each resolver in turn; an unavailable service is not an answer about the paper."""
     failure: Exception = LookupUnavailable("no resolver was asked")
     for resolver in resolvers:
@@ -212,30 +228,32 @@ def _first_answer(resolvers, argument: str) -> tuple[str, str]:
     raise failure
 
 
-def _by_title(title: str) -> tuple[str, str]:
+def _by_title(title: str) -> Resolution:
     return _first_answer((_arxiv_by_title, _semantic_scholar_by_title), title)
 
 
-def _by_doi(doi: str) -> tuple[str, str]:
+def _by_doi(doi: str) -> Resolution:
     return _first_answer((lambda found: _semantic_scholar_pdf(f"DOI:{found}"), _unpaywall_pdf), doi)
 
 
-def _lookup(identifier: str) -> tuple[str, str]:
+def _lookup(identifier: str) -> Resolution:
     arxiv = ARXIV_PATTERN.search(identifier)
     doi = DOI_PATTERN.search(identifier)
 
     if arxiv and ("arxiv" in identifier.lower() or arxiv.group(0) == identifier):
-        return f"https://arxiv.org/pdf/{arxiv.group(1)}", ""
+        return Resolution(
+            f"https://arxiv.org/pdf/{arxiv.group(1)}", "", "arxiv", {"ArXiv": arxiv.group(1)}
+        )
     if doi:
         return _by_doi(doi.group(1).rstrip(".,;)"))
     if identifier.isdigit():
         return _semantic_scholar_pdf(f"PMID:{identifier}")
     if identifier.startswith("http"):
-        return identifier, ""
+        return Resolution(identifier)  # taken at face value: nothing says where it is indexed
     return _by_title(identifier)
 
 
-def _resolve(identifier: str) -> tuple[str, str]:
+def _resolve(identifier: str) -> Resolution:
     """_lookup, cached: one run verifies several claims against the same work, and the
     resolution is kept under both the query and the returned title."""
     from app import store
@@ -243,13 +261,15 @@ def _resolve(identifier: str) -> tuple[str, str]:
     identifier = identifier.strip()
     key = _normalised(identifier)
     cached = store.recall_source(key)
-    if cached:
-        return cached["url"], cached["title"]
+    if cached:  # rows written before the index was recorded simply have nothing to say
+        return Resolution(
+            cached["url"], cached["title"], cached.get("index", ""), cached.get("ids") or {}
+        )
 
-    url, title = _lookup(identifier)
-    for known in {key, _normalised(title)} - {""}:
-        store.remember_source(known, {"url": url, "title": title})
-    return url, title
+    found = _lookup(identifier)
+    for known in {key, _normalised(found.title)} - {""}:
+        store.remember_source(known, found._asdict())
+    return found
 
 
 def _download(pdf_url: str, name: str) -> Path:
@@ -270,13 +290,13 @@ def _download(pdf_url: str, name: str) -> Path:
     return path
 
 
-def _fetch(identifier: str) -> tuple[Path, str, str]:
+def _fetch(identifier: str) -> tuple[Path, Resolution]:
     import requests
 
     try:
-        pdf_url, title = _resolve(identifier)
+        found = _resolve(identifier)
         name = re.sub(r"[^A-Za-z0-9._-]+", "-", identifier.strip()).strip("-")[:80]
-        return _download(pdf_url, name), pdf_url, title
+        return _download(found.url, name), found
     except requests.RequestException as error:
         raise NotDownloadable(str(error)) from error
 
@@ -287,11 +307,22 @@ def lookup_key(citation: dict) -> str:
     return citation.get("doi") or citation.get("arxiv") or citation.get("title") or citation.get("url") or ""
 
 
+def known_index(identifier: str) -> dict:
+    """Where the resolution found this work, read back from the cache it already wrote.
+    Costs no request: whoever asks has resolved the work to a PDF first. A work resolved
+    from a local path or a bare URL was never looked up, and says so with an empty index
+    rather than claiming it is indexed nowhere."""
+    from app import store
+
+    cached = store.recall_source(_normalised(identifier.strip())) or {}
+    return {"index": cached.get("index", ""), "ids": cached.get("ids") or {}}
+
+
 def local_pdf(paper: str) -> str:
     """Any reference to a paper -> a local PDF path. Downloads it first if needed."""
     if Path(paper).is_file():
         return paper
-    path, _, _ = _fetch(paper)
+    path, _ = _fetch(paper)
     return path.as_posix()
 
 
@@ -303,7 +334,8 @@ def fetch_source(identifier: str) -> dict:
             (e.g. "2112.01488"), a PMID, or a direct URL to a paper.
     """
     try:
-        path, pdf_url, title = _fetch(identifier)
-        return {"status": "ok", "path": path.as_posix(), "url": pdf_url, "title": title}
+        path, found = _fetch(identifier)
+        return {"status": "ok", "path": path.as_posix(), "url": found.url, "title": found.title,
+                "index": found.index, "ids": found.ids}
     except Exception as error:
         return {"status": "error", "message": str(error), "reason": reason_for(error)}
