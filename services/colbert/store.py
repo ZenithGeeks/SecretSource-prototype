@@ -19,10 +19,12 @@ from qdrant_client import QdrantClient, models
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None  # only Qdrant Cloud checks it
+QDRANT_TIMEOUT = 60  # qdrant-client's short default times out on a long paper's whole batch
 COLLECTION = os.getenv("COLBERT_COLLECTION", "academic_text_claims")
 VECTOR_NAME = "colbert"  # named vector, matching the team's cluster provisioning
 DIM = 128
 WORDS_PER_PASSAGE = 120
+UPSERT_BATCH = 64  # points per write; one request per paper timed out on longer ones
 
 
 def _word_spans(text: str) -> list[tuple[int, int]]:
@@ -58,7 +60,7 @@ def pdf_passages(path: Path) -> list[dict]:
 class Store:
     def __init__(self, device: str | None = None):
         self.encoder = Encoder(device)
-        self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=QDRANT_TIMEOUT)
         if not self.client.collection_exists(COLLECTION):
             self.client.create_collection(
                 COLLECTION,
@@ -101,8 +103,11 @@ class Store:
             for passage, vector in zip(passages, vectors, strict=True)
             if len(vector)  # skip passages with no tokens left
         ]
-        if points:
-            self.client.upsert(COLLECTION, points)
+        # In batches: one request for a whole long paper's passages was the write that timed
+        # out, even with a generous client timeout — many small requests survive a slow
+        # moment on the Qdrant VM that one large one does not.
+        for start in range(0, len(points), UPSERT_BATCH):
+            self.client.upsert(COLLECTION, points[start : start + UPSERT_BATCH])
         return len(points)
 
     def search(self, query: str, k: int = 10) -> list[dict]:
