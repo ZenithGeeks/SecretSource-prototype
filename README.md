@@ -225,3 +225,10 @@ warm-up and cost notes.
   rebuild from `data/papers/`.
 - Changing `backend/requirements.txt` rebuilds the slow pip layer of the gateway image;
   everything else in `backend/` is a fast layer on top.
+- Papers this system works with — the analyzed paper, the works it cites, the library, the
+  benchmark — are expected to be in a public index. One that is not is still analyzed, and
+  still gets its verdict; it is marked instead, so a reader can see the verdict rests on a
+  source outside the index. What answered is recorded per work rather than assumed:
+  `verify_claim` returns `indexed_in` with the index that resolved it and the ids it gave.
+  Nothing claims Scopus until an Elsevier key is configured, because Semantic Scholar and
+  arXiv cannot answer for Scopus.
