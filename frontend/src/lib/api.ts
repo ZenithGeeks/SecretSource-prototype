@@ -48,7 +48,7 @@ export type Claim = {
 }
 
 export type Stage = {
-  stage: 'extracting' | 'extracted' | 'verifying' | 'verified' | 'failed' | 'done' | 'error'
+  stage: 'extracting' | 'extracted' | 'verifying' | 'verified' | 'failed' | 'audited' | 'done' | 'error'
   message?: string
   claims?: number
   extracted?: number // before repeats, announcements and the cap were taken out (#55)
@@ -57,6 +57,7 @@ export type Stage = {
   source?: string
   verdict?: string
   reason?: Reason
+  findings?: number // what the audit disagreed with, 0 on an ordinary run
 }
 
 /** Why a cited work could not be checked. Kept as codes so the wording lives in one place. */
