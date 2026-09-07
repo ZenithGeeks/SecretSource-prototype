@@ -53,6 +53,11 @@ def restore():
     for analysis in analyses.values():
         if analysis["status"] == "running":
             analysis.update(status="error", message="interrupted by a restart")
+            # Record a terminal stage so a reconnecting client sees the run is over.
+            analysis["stages"].append(
+                {"stage": "error", "message": "interrupted by a restart"}
+            )
+            store.save(analysis)
 
 
 @asynccontextmanager
