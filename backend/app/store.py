@@ -1,8 +1,9 @@
 """Analyses and resolved sources that outlive a restart.
 
-SQLite, one row per analysis, results kept as JSON — the gateway reads and writes whole
-analyses, never parts of them. Swapping in Cloud SQL means changing the SQL strings and
-the connection, nothing above this file.
+Two backends behind one API: SQLite for local runs and tests (the default), or Supabase
+Postgres when SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set. Both keep one row per
+analysis with the result as JSON — the gateway reads and writes whole analyses, never
+parts of them, so switching backends changes the storage calls here and nothing above.
 """
 
 import json
@@ -10,6 +11,30 @@ import os
 import sqlite3
 from pathlib import Path
 
+# ── Backend selection ────────────────────────────────────────────────────────────
+# Read at call time (not import) so tests can set the environment before the first use.
+def _use_supabase() -> bool:
+    return bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+
+
+# ── Supabase (blob tables: analyses(id, started, data), sources(key, data)) ────────
+_client = None
+
+
+def _supabase():
+    """The Supabase client, created once. Uses the service role, which bypasses RLS —
+    these tables are server-only and have no policies."""
+    global _client
+    if _client is None:
+        from supabase import create_client
+
+        _client = create_client(
+            os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        )
+    return _client
+
+
+# ── SQLite ─────────────────────────────────────────────────────────────────────
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS analyses (
     id      TEXT PRIMARY KEY,
@@ -46,7 +71,13 @@ def _connect() -> sqlite3.Connection:
     return _db
 
 
+# ── Public API ───────────────────────────────────────────────────────────────────
 def save(analysis: dict) -> None:
+    if _use_supabase():
+        _supabase().table("analyses").upsert(
+            {"id": analysis["id"], "data": analysis}
+        ).execute()
+        return
     database = _connect()
     database.execute(
         "INSERT INTO analyses (id, data) VALUES (?, ?) "
@@ -58,12 +89,19 @@ def save(analysis: dict) -> None:
 
 def load_all() -> dict[str, dict]:
     """Every stored analysis, oldest first, keyed by id."""
+    if _use_supabase():
+        rows = _supabase().table("analyses").select("data").order("started").execute().data
+        analyses = [row["data"] for row in rows]
+        return {analysis["id"]: analysis for analysis in analyses}
     rows = _connect().execute("SELECT data FROM analyses ORDER BY started").fetchall()
     analyses = [json.loads(row["data"]) for row in rows]
     return {analysis["id"]: analysis for analysis in analyses}
 
 
 def delete(analysis_id: str) -> bool:
+    if _use_supabase():
+        deleted = _supabase().table("analyses").delete().eq("id", analysis_id).execute().data
+        return bool(deleted)
     database = _connect()
     deleted = database.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,)).rowcount
     database.commit()
@@ -72,6 +110,9 @@ def delete(analysis_id: str) -> bool:
 
 def remember_source(key: str, resolution: dict) -> None:
     """Where a cited work's PDF lives, so a re-run does not re-ask a rate-limited API."""
+    if _use_supabase():
+        _supabase().table("sources").upsert({"key": key, "data": resolution}).execute()
+        return
     database = _connect()
     database.execute(
         "INSERT INTO sources (key, data) VALUES (?, ?) "
@@ -82,5 +123,8 @@ def remember_source(key: str, resolution: dict) -> None:
 
 
 def recall_source(key: str) -> dict | None:
+    if _use_supabase():
+        rows = _supabase().table("sources").select("data").eq("key", key).limit(1).execute().data
+        return rows[0]["data"] if rows else None
     row = _connect().execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
