@@ -47,6 +47,10 @@ Pick `analysis`, send a DOI, arXiv ID, URL or PDF path as the message; set the s
 state key `verify` to `false` to stop after the claims. The gateway still runs its own
 loop (`app/main.py`); moving it onto the graph is the next step.
 
+[ARCHITECTURE.md](ARCHITECTURE.md) goes a level deeper: the three entry points and which
+one serves the product, what `verify_claim` actually calls, where run state lives, and
+which file to change for a given kind of change.
+
 ### Retrieval services
 
 `services/colbert` (text) and `services/colpali` (figures and pages) are standalone
