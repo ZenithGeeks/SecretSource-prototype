@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 
 import type { Citation, Claim, Unchecked, Verdict } from '../lib/api'
-import { api, reasonText } from '../lib/api'
+import { api, figureImageUrl, reasonText } from '../lib/api'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
@@ -27,6 +27,15 @@ function modelName(checkpoint: string) {
 }
 
 /** What the paper calls a visual hit: "Figure 3" where it has a name, "page 7" otherwise. */
+/** What to write under a crop: the caption when it already names the figure, the label
+ * with the caption after it when it does not, the label alone when there is no caption. */
+function captionOf(hit: NonNullable<Verdict['pages']>[number]) {
+  const label = hitName(hit)
+  const caption = (hit.caption ?? '').trim()
+  if (!caption) return label
+  return caption.toLowerCase().startsWith(label.toLowerCase()) ? caption : `${label}: ${caption}`
+}
+
 function hitName(hit: { page: number; label?: string }) {
   return hit.label && hit.label.trim() ? hit.label : `page ${hit.page}`
 }
@@ -171,6 +180,31 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
                 <span className="text-ink-muted"> Matched by {modelName(verdict.page_model)}.</span>
               )}
             </p>
+          )}
+
+          {/* The crops themselves. Naming a figure and making the reader open a page to see
+              it is most of the work of looking it up; the point of matching one is that it
+              can be shown. Pages have no crop, so only figures get a thumbnail. */}
+          {verdict.pages && verdict.pages.some((hit) => hit.kind === 'figure' && hit.image) && (
+            <div className="flex flex-wrap gap-3">
+              {verdict.pages
+                .filter((hit) => hit.kind === 'figure' && hit.image)
+                .map((hit, k) => (
+                  <figure key={k} className="max-w-56 space-y-1">
+                    <img
+                      src={figureImageUrl(verdict.source, hit.image as string)}
+                      alt={hit.caption || `${hitName(hit)} of ${verdict.source}`}
+                      loading="lazy"
+                      className="max-h-40 rounded border border-border-subtle bg-surface object-contain"
+                    />
+                    <figcaption className="text-xs text-ink-muted">
+                      {/* Docling's caption usually already opens with "Figure 3:", so
+                          prefixing the label again reads as a stutter. */}
+                      {captionOf(hit)}
+                    </figcaption>
+                  </figure>
+                ))}
+            </div>
           )}
 
           {verdict.evidence.length > 0 && (

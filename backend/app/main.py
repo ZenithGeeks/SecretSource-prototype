@@ -21,6 +21,7 @@ progress, so a restart keeps the history.
 import asyncio
 import json
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,6 +36,7 @@ from app import store
 from app.config import PAPERS_DIR
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
+from app.pipeline.figures import figures_dir
 from app.pipeline.sources import lookup_key
 from app.pipeline.verify import unchecked_reason, verify_claim
 
@@ -42,6 +44,10 @@ PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
 PAGE_CACHE = Path(os.getenv("PAGE_CACHE", "/tmp/pages"))
 DEFAULT_DPI, MAX_DPI = 110, 300
+# Crops are written as figure-1.png, figure-2.png ... by pipeline/figures.py. Matching the
+# whole name against that shape is what keeps this route from serving an arbitrary path:
+# the request never contributes a directory, only an index.
+FIGURE_NAME = re.compile(r"figure-\d+")
 # Checks running at once. The retrieval services and the judge are the bottleneck, so this
 # is small on purpose; app/workflow.py's graph fans out to the same number.
 PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
@@ -260,6 +266,19 @@ async def page_image(name: str, page_number: int, dpi: int = DEFAULT_DPI):
     path = _paper(name)
     image = await asyncio.to_thread(_render, path, page_number, min(dpi, MAX_DPI))
     return FileResponse(image, media_type="image/png", headers={"Cache-Control": "max-age=31536000"})
+
+
+@app.get("/papers/{name}/figures/{figure}.png")
+async def figure_image(name: str, figure: str):
+    """One cropped figure of a paper, the image a verdict's `pages` entry points at."""
+    paper = _paper(name)
+    if not FIGURE_NAME.fullmatch(figure):
+        raise HTTPException(400, "a figure is named figure-<n>")
+    path = figures_dir(paper) / f"{figure}.png"
+    if not path.is_file():
+        raise HTTPException(404, f"no such figure: {figure}")
+    # A crop never changes once written, so it is cached like a rendered page.
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=31536000"})
 
 
 @app.get("/papers/{name}/find")
