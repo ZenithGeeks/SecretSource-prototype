@@ -158,6 +158,28 @@ services:
     depends_on:
       - grobid
 
+  # The agent tree over A2A, for callers that are agents rather than people:
+  #   docker compose --profile a2a up -d a2a     then http://localhost:8002
+  # Its own service rather than a route on the gateway, so agent traffic and the product
+  # API scale and fail separately.
+  a2a:
+    profiles: [a2a]
+    build: ./backend
+    command: python -m uvicorn a2a_server:app --host 0.0.0.0 --port 8002
+    ports:
+      - "8002:8002"
+    environment:
+      <<: *gateway-env
+      # What the agent card advertises back to callers, not what the server binds.
+      A2A_HOST: ${A2A_HOST:-localhost}
+      A2A_PORT: "8002"
+    volumes:
+      - ./data/papers:/app/data/papers
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      - grobid
+    restart: unless-stopped
+
   web:
     build: ./frontend
     environment:

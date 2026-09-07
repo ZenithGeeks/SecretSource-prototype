@@ -171,6 +171,7 @@ steps are deterministic and only the judge inside `verify_claim` needs a model.
 | LLM endpoint | One OpenAI-compatible server behind both frameworks | compose `vllm`, or whatever `VLLM_URL` points at |
 | `gateway` | The HTTP API above | `backend/`, port 8080 |
 | `web` | Built frontend served by nginx, proxying `/api` to the gateway | `frontend/`, port 5173 |
+| `a2a` | The chat tree over A2A, for callers that are agents | `backend/a2a_server.py`, port 8002, `--profile a2a` |
 
 `backend/app/llm.py` is the single place the model is configured: ADK agents get a
 `LiteLlm`, DSPy programs get a `dspy.LM`, both pointed at `VLLM_URL`. `backend/app/config.py`
@@ -181,6 +182,32 @@ containers without a code change.
 `web` and `gateway` are built images with no source mount, so a code change needs
 `docker compose up -d --build <service>`. For iteration, run that one service on the host
 instead (`npm run dev`, or `uvicorn app.main:app --reload`) and let the rest stay in compose.
+
+## Two ways in for machines
+
+The retrieval services speak **MCP** at `/mcp/` alongside their HTTP API, which is
+tool-level access: a client calls `search_passages` and gets passages back. The trailing
+slash matters — `/mcp` redirects.
+
+The `a2a` service speaks **A2A**, which is agent-level access: a caller sends a task in
+natural language and the coordinator decides which specialist handles it. It serves an
+agent card describing the whole tree, so a client discovers the skills rather than being
+told them:
+
+```sh
+docker compose --profile a2a up -d a2a
+curl http://localhost:8002/.well-known/agent-card.json
+
+curl -X POST http://localhost:8002/ -H 'Content-Type: application/json' -d '{
+  "jsonrpc": "2.0", "id": "1", "method": "message/send",
+  "params": {"message": {"messageId": "1", "role": "user",
+    "parts": [{"kind": "text", "text": "List the claims in data/papers/paper.pdf"}]}}}'
+```
+
+The reply is a task with `status.state` and the answer as an artifact. `A2A_HOST` and
+`A2A_PORT` set the URL the card advertises back to callers, which has to be an address
+they can actually reach — `a2a:8002` from another compose service, `localhost:8002` from
+the host.
 
 ## State
 
