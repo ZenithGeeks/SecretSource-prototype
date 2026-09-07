@@ -114,6 +114,14 @@ export function pageImageUrl(paper: string, page: number, dpi = 150) {
   return `/api/papers/${encodeURIComponent(paper)}/pages/${page}.png?dpi=${dpi}`
 }
 
+/** A figure crop, from the `image` path a verdict's `pages` entry carries. Only the file
+ * name travels: the gateway builds the directory from the paper and rejects anything that
+ * is not a figure-<n>. */
+export function figureImageUrl(paper: string, image: string) {
+  const file = image.split('/').pop()?.replace(/\.png$/, '') ?? ''  // figures.py writes as_posix()
+  return `/api/papers/${encodeURIComponent(paper)}/figures/${encodeURIComponent(file)}.png`
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, init)
   if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`)
