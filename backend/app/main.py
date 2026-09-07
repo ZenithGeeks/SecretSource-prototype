@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from app import store
 from app.config import PAPERS_DIR
+from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.sources import lookup_key
 from app.pipeline.verify import unchecked_reason, verify_claim
@@ -141,6 +142,10 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                     )
 
             await asyncio.gather(*(check(*job) for job in jobs))
+
+        # What the run says about itself, before anyone reads it. Reported, not applied.
+        analysis["audit"] = audit(analysis)
+        await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
         await _publish(analysis_id, "done")
