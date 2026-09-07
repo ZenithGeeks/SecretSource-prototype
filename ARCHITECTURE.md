@@ -83,31 +83,82 @@ and no chat agent decides a verdict, they all call this same function.
 
 ## The two graphs
 
-`backend/app/workflow.py`, the analysis pipeline as an ADK Workflow:
+### The chat tree
 
+`backend/app/agents/team.py`. A root LLM agent that only routes, four specialists that only
+work. Dashed edges are delegation — the coordinator handing the conversation over with
+`transfer_to_agent`; solid edges are an agent calling one of its own tools.
+
+```mermaid
+flowchart TD
+    U(["cli.py, or adk web"]) --> C
+
+    C{{"coordinator<br/>LlmAgent, routes only"}}
+    C -.->|"transfer_to_agent"| SA["search_agent"]
+    C -.->|"transfer_to_agent"| RA["rag_agent"]
+    C -.->|"transfer_to_agent"| PA["paper_agent"]
+    C -.->|"transfer_to_agent"| VA["verify_agent"]
+
+    SA --> DDG["DuckDuckGo MCP, stdio via uvx<br/>search, fetch_content"]
+    RA --> RT["answer_from_docs, add_paper"]
+    RA --> CMCP["colbert MCP, streamable HTTP<br/>search_passages"]
+    PA --> PT["extract_claims, extract_citations,<br/>extract_claims_with_citations, fetch_source"]
+    VA --> VT["verify_claim"]
+
+    RT --> PIPE[["app/pipeline"]]
+    PT --> PIPE
+    VT --> PIPE
 ```
-START -> read_paper -+- ok ----> plan_checks -> check_sources -> assemble
-                     \- error -> report_error   (one worker per cited source, in parallel)
+
+Every specialist is an `LlmAgent` with its own instruction and its own tools, and the
+coordinator's instruction forbids it from answering anything itself. The tools are the same
+functions the gateway calls directly, which is why a fix in `app/pipeline` reaches all three
+entry points at once.
+
+### The analysis graph
+
+`backend/app/workflow.py`. Not an agent tree: plain functions as nodes, with one node that
+fans out. `read_paper` returns a routed `Event`, so the graph branches on `ok` / `error`.
+
+```mermaid
+flowchart LR
+    S(["START"]) --> RP["read_paper"]
+    RP -->|ok| PC["plan_checks<br/>one job per claim and cited work"]
+    RP -->|error| RE["report_error"]
+
+    PC --> W1["check_source"]
+    PC --> W2["check_source"]
+    PC --> W3["check_source"]
+    W1 --> AS["assemble"]
+    W2 --> AS
+    W3 --> AS
+
+    ST[("ctx.state<br/>paper, file, claims")] -.-> PC
+    RP -.-> ST
 ```
 
-`plan_checks` flattens the gateway's nested loop into one job per (claim, cited source);
-`check_sources` is a parallel worker node; `assemble` folds verdicts and failures back onto
-their claims the same way `_run` does. Nodes are plain functions over `app.pipeline` — there
-are no LLM agent nodes in this graph.
+`check_sources` is one node declared with `parallel_worker=True` and
+`max_parallel_workers=PARALLEL_CHECKS` (3); the three boxes above are that node's workers,
+not three separate nodes. `assemble` folds verdicts and failures back onto their claims the
+same way `_run` does. Session state carries the run between nodes — `read_paper` writes
+`paper`, `file` and `claims`; the session key `verify` set to false makes `plan_checks`
+return nothing, which stops the run after extraction.
 
-`backend/app/agents/team.py`, the chat tree:
+### ADK patterns, mapped
 
-```
-coordinator (root, routes via transfer_to_agent)
-├── search_agent    MCP: DuckDuckGo (stdio, spawned via uvx)
-├── rag_agent       tools: answer_from_docs, add_paper (DSPy + ColBERT service)
-├── paper_agent     tools: claims, citations, fetch_source (Docling + GROBID)
-├── verify_agent    tool: verify_claim
-└── retrieval MCP   the ColBERT service also speaks MCP at /mcp, attached to rag_agent
-```
+For a reader arriving from Google's ADK multi-agent guide, this system uses:
 
-The coordinator only routes. Each specialist wraps the same pipeline functions the gateway
-calls directly, which is why a fix in `app/pipeline` reaches all three entry points at once.
+| Pattern | Where |
+| --- | --- |
+| LLM-driven delegation (coordinator / dispatcher) | `team.py`: `sub_agents=[...]` on the root, routing by `transfer_to_agent` |
+| Shared session state | `workflow.py`: `ctx.state["paper" / "file" / "claims"]`, and the `verify` key |
+| MCP toolsets | DuckDuckGo over stdio, the colbert service over streamable HTTP at `/mcp` |
+| Parallel fan-out | `workflow.py`: the `check_sources` worker node |
+
+And deliberately does not use `AgentTool` (no agent is wrapped as another agent's tool),
+`LoopAgent` (nothing iterates to a condition), or the `SequentialAgent` / `ParallelAgent`
+classes — the analysis pipeline is a `Workflow` graph of functions instead, because its
+steps are deterministic and only the judge inside `verify_claim` needs a model.
 
 ## Services
 
