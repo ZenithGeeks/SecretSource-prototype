@@ -1,7 +1,7 @@
 /** The page a claim or a passage came from, with the region it came from boxed on it. */
 
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X, ZoomIn, ZoomOut } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { Source } from '../lib/api'
 import { pageImageUrl } from '../lib/api'
@@ -62,11 +62,14 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
   const [loaded, setLoaded] = useState(false)
   const [page, setPage] = useState(target.source?.page ?? target.page ?? 1)
   const [zoom, setZoom] = useState(1)
+  const previousPaper = useRef(target.paper)
 
-  // A new target resets the view; otherwise page 7 of one paper opens at page 3 of another.
+  // A new target updates the page to wherever it points; zoom only resets when it is a
+  // different paper, so comparing two claims in the same paper keeps the reader's zoom level.
   useEffect(() => {
     setPage(target.source?.page ?? target.page ?? 1)
-    setZoom(1)
+    if (previousPaper.current !== target.paper) setZoom(1)
+    previousPaper.current = target.paper
   }, [target])
 
   // Only the page changes the image URL. Resetting on zoom would hide it forever:
