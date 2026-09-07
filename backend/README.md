@@ -93,8 +93,15 @@ Response: `text/event-stream`. Each event is a `data:` line carrying a JSON obje
 a `stage` field plus stage-specific fields. Stages seen in the pipeline: `extracting`
 (`message`), `extracted` (`claims`, `extracted`, `windows`), `verifying` (`claim`,
 `source`), `verified` (`claim`, `verdict`), `failed` (`claim`, `source`, `reason`,
-`message`), `done`, and `error` (`message`). The stream ends once the analysis is no
-longer running.
+`message`), `audited` (`findings`, how many ways the finished analysis disagreed with
+itself), `done`, and `error` (`message`). The stream ends once the analysis is no longer
+running.
+
+Checks run three at a time, so `verifying` and `verified` events for different claims
+interleave rather than arriving in claim order — each one names the claim it belongs to.
+The analysis body changes as they land, so a client that wants the claims and verdicts
+while the run is still going should re-read `GET /analyses/{analysis_id}` on `extracted`,
+`verified` and `failed` rather than waiting for `done`.
 
 Errors: `404` — `"no such analysis"` when the id is not known.
 
@@ -134,6 +141,25 @@ Response: the page image, `image/png`, with `Cache-Control: max-age=31536000`.
 
 Errors: `400`/`404` from the paper-name check (see `GET /papers/{name}`); `404` —
 `"<name> has <n> pages"` when `page_number` is out of range.
+
+### GET /papers/{name}/figures/{figure}.png
+
+Returns one cropped figure of the paper — the image a verdict's `pages` entry points at
+with its `image` field.
+
+Path parameters:
+
+| Param    | Type  | Required | Meaning                                                     |
+| -------- | ----- | -------- | ----------------------------------------------------------- |
+| `name`   | `str` | yes      | The paper's file name.                                       |
+| `figure` | `str` | yes      | The crop's name, always `figure-<n>` as written by pipeline/figures.py. |
+
+Response: the crop, `image/png`, with `Cache-Control: max-age=31536000`.
+
+Errors: `400` — `"a figure is named figure-<n>"` when the name is any other shape, which
+is what stops the request naming a path; `400`/`404` from the paper-name check (see
+`GET /papers/{name}`); `404` — `"no such figure: <figure>"` when that crop was never
+written, which is the normal answer for a paper whose figures nobody has extracted.
 
 ### GET /papers/{name}/find
 
