@@ -18,7 +18,7 @@ import copy
 
 from google.adk import Event
 from google.adk.agents.context import Context
-from google.adk.workflow import Workflow, node
+from google.adk.workflow import START, Workflow, node
 
 from app.pipeline.claims import extract_claims_with_citations
 from app.pipeline.sources import lookup_key
@@ -112,7 +112,9 @@ def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
 @node
 def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) -> dict:
     """Fold the checks onto the claims and answer with the finished analysis."""
-    return {"paper": paper, "file": file,
+    # Same "status" the pipeline's tool functions answer with, and the same key
+    # report_error uses, so a caller can branch on one field either way.
+    return {"status": "ok", "paper": paper, "file": file,
             "claims": fold_checks(claims, node_input), "checked": len(node_input)}
 
 
@@ -126,7 +128,7 @@ analysis_workflow = Workflow(
     name="analysis",
     description="Read a paper, extract its claims, check each claim against the works it cites.",
     edges=[
-        ("START", read_paper),
+        (START, read_paper),
         (read_paper, {"ok": plan_checks, "error": report_error}),
         (plan_checks, check_sources, assemble),
     ],
