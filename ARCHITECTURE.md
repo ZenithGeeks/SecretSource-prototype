@@ -33,13 +33,13 @@ flowchart TD
     EXTRACT --> DOCLING["Docling: PDF to text"]
     EXTRACT --> GROBID["GROBID: references"]
     EXTRACT --> DSPY1["DSPy extractor: claims + their markers"]
-    RUN --> LOOP["per claim, per citation"]
-    LOOP --> LOOKUP["lookup_key<br/>pipeline/sources.py"]
-    LOOKUP --> VERIFY["verify_claim<br/>pipeline/verify.py"]
-    VERIFY --> INDEX["add_paper: index the cited PDF"]
+    RUN --> JOBS["one job per claim and cited work<br/>lookup_key, pipeline/sources.py"]
+    JOBS --> VERIFY["verify_claim x3 at a time<br/>pipeline/verify.py"]
+    VERIFY --> INDEX["indexed once per source<br/>per-source lock"]
     INDEX --> COLBERT["colbert service: passages"]
     INDEX --> COLPALI["colpali service: figures or pages"]
     VERIFY --> JUDGE["DSPy judge: supports / refutes / insufficient"]
+    JUDGE --> AUDIT["audit: is the analysis consistent<br/>pipeline/audit.py"]
     RUN --> PUBLISH["_publish: SSE stage + store.save"]
 ```
 
@@ -51,14 +51,23 @@ Stage by stage:
    parses the bibliography from GROBID's TEI, asks a DSPy extractor for claims that cite
    something, and locates each claim's sentence back in the PDF (`locate`, giving page and
    boxes) so the viewer can show the place rather than describe it.
-3. For each claim, each citation that resolves to something lookupable (`lookup_key`) is
-   verified. `verify_claim` downloads and indexes the cited paper, retrieves the passages
-   that bear on the claim, and asks the judge.
-4. Every step calls `_publish`, which appends a stage to the analysis, saves it, and pushes
+3. Every claim and cited work that resolves to something lookupable (`lookup_key`) becomes
+   one job, and the jobs run through `asyncio.gather` behind a `Semaphore(PARALLEL_CHECKS)`.
+   `verify_claim` downloads and indexes the cited paper, retrieves the passages that bear
+   on the claim, and asks the judge.
+4. `audit` reads the assembled analysis before it is marked done and reports where it
+   disagrees with itself — most usefully, a verdict whose quote is not in the evidence that
+   verdict was given. It reports; it never rewrites a verdict.
+5. Every step calls `_publish`, which appends a stage to the analysis, saves it, and pushes
    it onto that analysis's queue for `GET /analyses/{id}/events`.
 
-The gateway's loop is serial: one `verify_claim` at a time. `workflow.py` runs the
-equivalent checks with `max_parallel_workers=PARALLEL_CHECKS` (3).
+Both entry points now check three sources at a time: the gateway with that semaphore, the
+graph with `max_parallel_workers=PARALLEL_CHECKS`. Extraction is concurrent too — a paper
+is split into windows and `claims.py` maps them over a thread pool capped at
+`EXTRACT_WORKERS`, since each window is its own model call.
+
+Stages arrive in whatever order the checks finish rather than in claim order, which is why
+every stage names its own claim.
 
 ## Verification, in detail
 
@@ -67,15 +76,19 @@ equivalent checks with `max_parallel_workers=PARALLEL_CHECKS` (3).
 1. `local_pdf` resolves the source — a local path, or a DOI / arXiv ID / PMID / URL that
    `pipeline/sources.py` looks up (arXiv directly; otherwise Semantic Scholar, then
    Unpaywall) and downloads into `PAPERS_DIR`.
-2. `add_paper` indexes it in the ColBERT service (text passages) and, when the service is
+2. `_index_once` indexes it in the ColBERT service (text passages) and, when the service is
    up, the ColPali service (cropped figures, or whole rendered pages when no figures could
-   be cropped).
+   be cropped) — once per process, behind a per-source lock. Both stores replace a source
+   rather than merge into it, so without that lock a second check could search a source
+   while the first sat between its delete and its upsert, retrieve nothing, and report the
+   claim unsupported.
 3. `_evidence` retrieves passages for the claim from ColBERT, filtered to that source.
    `_visual` retrieves matching figures or pages from ColPali; their captions are folded
    into the evidence, since a caption is a line the judge can read and quote.
-4. The judge decides. Failures return `status: "error"` with a `reason`, which
-   `unchecked_reason` maps to a code the UI can show — a claim nobody could check must not
-   look like one nobody tried.
+4. The judge decides. The verdict also carries `indexed_in`, which index resolved the work
+   and the ids it gave, read back from the resolution cache at no extra request. Failures
+   return `status: "error"` with a `reason`, which `unchecked_reason` maps to a code the UI
+   can show — a claim nobody could check must not look like one nobody tried.
 
 The judge is a DSPy `ChainOfThought` over a `JudgeClaim` signature, built lazily inside
 `_build_judge` and cached in a module global. It is not an ADK agent node: no graph node
@@ -85,7 +98,7 @@ and no chat agent decides a verdict, they all call this same function.
 
 ### The chat tree
 
-`backend/app/agents/team.py`. A root LLM agent that only routes, four specialists that only
+`backend/app/agents/team.py`. A root LLM agent that only routes, three specialists that only
 work. Dashed edges are delegation — the coordinator handing the conversation over with
 `transfer_to_agent`; solid edges are an agent calling one of its own tools.
 
@@ -94,12 +107,10 @@ flowchart TD
     U(["cli.py, or adk web"]) --> C
 
     C{{"coordinator<br/>LlmAgent, routes only"}}
-    C -.->|"transfer_to_agent"| SA["search_agent"]
     C -.->|"transfer_to_agent"| RA["rag_agent"]
     C -.->|"transfer_to_agent"| PA["paper_agent"]
     C -.->|"transfer_to_agent"| VA["verify_agent"]
 
-    SA --> DDG["DuckDuckGo MCP, stdio via uvx<br/>search, fetch_content"]
     RA --> RT["answer_from_docs, add_paper"]
     RA --> CMCP["colbert MCP, streamable HTTP<br/>search_passages"]
     PA --> PT["extract_claims, extract_citations,<br/>extract_claims_with_citations, fetch_source"]
