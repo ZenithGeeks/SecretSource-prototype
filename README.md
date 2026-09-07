@@ -63,6 +63,12 @@ multivectors in **Qdrant** (MaxSim comparator), and speaks two protocols from on
 
 Same store, same results, one contract to maintain.
 
+MCP is tool-level access — a client calls `search_passages` itself. For agent-level access
+there is **A2A**: `docker compose --profile a2a up -d a2a` serves the whole agent tree on
+port 8002, with an agent card at `/.well-known/agent-card.json`, so another agent can send
+a paper as a task and let the coordinator pick the specialist. See
+[ARCHITECTURE.md](ARCHITECTURE.md#two-ways-in-for-machines).
+
 ## Repository layout
 
 ```
@@ -73,6 +79,7 @@ backend/          gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/pipeline/     claims, sources, verify, figures, rag
   app/agents/       ADK agent tree
   app/workflow.py   the pipeline as an ADK Workflow graph
+  a2a_server.py     the agent tree over A2A (docker compose --profile a2a)
   app/clients/      HTTP clients for the retrieval services
   adk_agents/       what `adk web` serves: the pipeline graph and the chat tree
   cli.py            agent REPL
