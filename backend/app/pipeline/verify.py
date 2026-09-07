@@ -148,7 +148,7 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
     """
     global _judge
     try:
-        from app.pipeline.sources import local_pdf
+        from app.pipeline.sources import known_index, local_pdf
 
         source = Path(local_pdf(source_pdf_path))
         if failure := _index_once(source):
@@ -159,16 +159,18 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
         pages, page_model = _visual(claim, source)
         # A caption is evidence like any other line.
         passages += _captions(pages)
+        indexed_in = known_index(source_pdf_path)
         if not passages:
             return {"status": "ok", "claim": claim, "source": source.name,
                     "verdict": "insufficient", "quote": "", "reasoning": "no passages retrieved",
-                    "evidence": [], "pages": pages, "page_model": page_model}
+                    "evidence": [], "pages": pages, "page_model": page_model,
+                    "indexed_in": indexed_in}
 
         if _judge is None:
             _judge = _build_judge()
         return {"status": "ok", "claim": claim, "source": source.name,
                 **_judge(claim, passages), "evidence": evidence, "pages": pages,
-                "page_model": page_model}
+                "page_model": page_model, "indexed_in": indexed_in}
     except Exception as error:
         from app.pipeline.sources import reason_for
 
