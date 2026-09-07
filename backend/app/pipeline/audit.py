@@ -1,0 +1,109 @@
+"""What an analysis claims about itself, checked before a reader sees it.
+
+Deterministic: no model is asked whether the model was right. The check that earns this
+module is the first one — the judge is told to quote the sentence from the evidence that
+decides the verdict, and nothing else confirms that sentence was ever in the evidence. A
+composed quote reaches the UI looking exactly like a copied one.
+
+Findings are reported, never applied. A flagged verdict is a signal about the judge; what
+to do about one is a separate decision from noticing it.
+"""
+
+from app.config import CLAIM_LIMIT
+from app.pipeline.claims import _tokens  # the folding claim extraction already uses
+from app.pipeline.verify import LABELS
+
+# How much of a quote must survive in a passage before it counts as taken from it. Exact
+# containment is the normal case; the ratio only catches a quote stitched from two lines
+# or trimmed mid-sentence, without failing a verdict over a dropped word.
+QUOTE_OVERLAP = 0.6
+
+
+def _contains(passage: list[str], quote: list[str]) -> bool:
+    """Is the quote a run of words inside the passage, once both are folded to tokens?"""
+    if not quote or len(quote) > len(passage):
+        return False
+    first = quote[0]
+    return any(
+        passage[start : start + len(quote)] == quote
+        for start, token in enumerate(passage)
+        if token == first
+    )
+
+
+def _overlap(passage: list[str], quote: list[str]) -> float:
+    """The share of the quote's words the passage has, ignoring order."""
+    if not quote:
+        return 0.0
+    remaining = list(passage)
+    found = 0
+    for token in quote:
+        if token in remaining:
+            remaining.remove(token)
+            found += 1
+    return found / len(quote)
+
+
+def _grounded(quote: str, verdict: dict) -> bool:
+    """Was this quote in what the judge was given — a passage, or a figure's caption?"""
+    quote_tokens = _tokens(quote)
+    if not quote_tokens:
+        return True  # nothing to ground; the empty-quote checks cover that case
+    sources = [item.get("text", "") for item in verdict.get("evidence", [])]
+    sources += [hit.get("caption", "") for hit in verdict.get("pages", [])]
+    passages = [_tokens(text) for text in sources if text]
+    return any(_contains(passage, quote_tokens) for passage in passages) or any(
+        _overlap(passage, quote_tokens) >= QUOTE_OVERLAP for passage in passages
+    )
+
+
+def audit(analysis: dict) -> list[dict]:
+    """Every way this analysis disagrees with itself, worst first is not attempted: the
+    caller shows them all. An empty list is the ordinary result."""
+    findings = []
+    claims = analysis.get("claims", [])
+
+    if CLAIM_LIMIT and len(claims) > CLAIM_LIMIT:
+        findings.append(
+            {"check": "claim-limit", "claim": None, "source": None,
+             "detail": f"{len(claims)} claims kept, over the limit of {CLAIM_LIMIT}"}
+        )
+
+    for index, claim in enumerate(claims):
+        verdicts = claim.get("verdicts", [])
+        unchecked = claim.get("unchecked", [])
+
+        checked_sources = {verdict.get("cited") for verdict in verdicts}
+        for entry in unchecked:
+            if not entry.get("reason"):
+                findings.append(
+                    {"check": "unchecked-without-reason", "claim": index,
+                     "source": entry.get("source"), "detail": "no reason code"}
+                )
+            if entry.get("source") in checked_sources:
+                findings.append(
+                    {"check": "checked-and-unchecked", "claim": index,
+                     "source": entry.get("source"),
+                     "detail": "the same source carries a verdict and an unchecked entry"}
+                )
+
+        for verdict in verdicts:
+            label, quote = verdict.get("verdict"), verdict.get("quote", "")
+            source = verdict.get("cited")
+            if label not in LABELS:
+                findings.append(
+                    {"check": "unknown-verdict", "claim": index, "source": source,
+                     "detail": f"verdict {label!r} is not one of {sorted(LABELS)}"}
+                )
+            if label in ("supports", "refutes") and not quote.strip():
+                findings.append(
+                    {"check": "decided-without-quote", "claim": index, "source": source,
+                     "detail": f"{label} with no quote to stand on"}
+                )
+            elif quote.strip() and not _grounded(quote, verdict):
+                findings.append(
+                    {"check": "quote-not-in-evidence", "claim": index, "source": source,
+                     "detail": f"quote is not in the passages the judge was given: {quote[:120]!r}"}
+                )
+
+    return findings

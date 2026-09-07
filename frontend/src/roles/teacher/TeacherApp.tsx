@@ -52,7 +52,6 @@ const PLACEHOLDER_TITLES: Record<Exclude<TeacherScreen, 'home'>, string> = {
 function initialScreen(): TeacherScreen {
   const screen = new URLSearchParams(window.location.search).get('screen') as TeacherScreen | null
   if (screen && screen in NAV_FOR) return screen
-
   return 'home'
 }
 

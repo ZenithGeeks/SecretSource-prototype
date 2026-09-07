@@ -1,0 +1,53 @@
+"""Folding checks onto claims must not touch the claims it was given.
+
+The graph's session hands the same claims list to every node and to whoever ran it, so a
+fold that mutates its input corrupts the caller's copy — and folding twice then doubles
+every verdict, which is what happened while wiring the gateway onto the graph.
+
+Needs google-adk, so run it in the gateway image: docker run --rm -v .../app:/app/app
+secretsource-prototype-gateway python -m pytest tests/test_workflow_assemble.py
+"""
+
+import copy
+
+from app.workflow import fold_checks
+
+CLAIMS = [
+    {"claim": "Late interaction beats single-vector retrieval.", "citations": [{"doi": "10.1/a"}]},
+    {"claim": "Residual compression loses no quality.", "citations": [{"arxiv": "2112.01488"}]},
+]
+
+CHECKS = [
+    {"claim": 0, "source": "colbertv2.pdf", "url": "",
+     "verdict": {"status": "ok", "verdict": "supports", "quote": "…late interaction…"}},
+    {"claim": 1, "source": "plaid.pdf", "url": "",
+     "verdict": {"status": "error", "reason": "no-open-access", "message": "no free copy"}},
+]
+
+
+def test_the_claims_passed_in_are_not_touched():
+    original = copy.deepcopy(CLAIMS)
+    fold_checks(CLAIMS, CHECKS)
+    assert CLAIMS == original
+
+
+def test_folding_twice_gives_the_same_answer_as_folding_once():
+    once = fold_checks(CLAIMS, CHECKS)
+    twice = fold_checks(CLAIMS, CHECKS)
+    assert twice == once
+    assert len(once[0]["verdicts"]) == 1
+    assert len(once[1]["unchecked"]) == 1
+
+
+def test_folding_onto_already_folded_claims_appends_rather_than_doubling():
+    """The reachable case: a rerun sees claims that already carry verdicts."""
+    already = fold_checks(CLAIMS, CHECKS)
+    again = fold_checks(already, CHECKS)
+    assert len(again[0]["verdicts"]) == 2  # the new fold, on top of what was there
+    assert len(already[0]["verdicts"]) == 1  # and the input it was given is unchanged
+
+
+def test_a_verdict_is_keyed_by_what_the_source_was_looked_up_by():
+    folded = fold_checks(CLAIMS, CHECKS)
+    assert folded[0]["verdicts"][0]["cited"] == "colbertv2.pdf"
+    assert folded[1]["unchecked"][0]["reason"] == "no-open-access"

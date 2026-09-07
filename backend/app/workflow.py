@@ -14,6 +14,7 @@ The message is the paper: a DOI, arXiv ID, URL or a PDF path. Session state `ver
 """
 
 import asyncio
+import copy
 
 from google.adk import Event
 from google.adk.agents.context import Context
@@ -81,13 +82,18 @@ check_sources = node(
 )
 
 
-@node
-def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) -> dict:
-    """Fold the checks back into their claims the way the gateway does: a verdict under
-    `verdicts`, keyed by what the source was looked up by; a failure under `unchecked`,
-    since a claim nobody could check must not look like one nobody tried."""
-    claims = [dict(claim) for claim in claims]
-    for check in node_input:
+def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
+    """The checks folded back into their claims, as new claims: a verdict under `verdicts`,
+    keyed by what the source was looked up by; a failure under `unchecked`, since a claim
+    nobody could check must not look like one nobody tried.
+
+    Deep copy, not dict(): the in-memory session hands the same claims list to whoever runs
+    the graph, and a shallow copy shares each claim's verdicts and unchecked lists, so
+    setdefault().append() would fold into the caller's data as well as into ours — folding
+    twice then doubles every verdict. A plain function so it can be tested without a run.
+    """
+    claims = copy.deepcopy(claims)
+    for check in checks:
         claim = claims[check["claim"]]
         verdict = check["verdict"]
         if verdict["status"] == "ok":
@@ -100,7 +106,14 @@ def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) 
                     "message": verdict.get("message", ""),
                 }
             )
-    return {"paper": paper, "file": file, "claims": claims, "checked": len(node_input)}
+    return claims
+
+
+@node
+def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) -> dict:
+    """Fold the checks onto the claims and answer with the finished analysis."""
+    return {"paper": paper, "file": file,
+            "claims": fold_checks(claims, node_input), "checked": len(node_input)}
 
 
 @node

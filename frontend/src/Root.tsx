@@ -3,7 +3,7 @@
  * onboarding picks a role, which opens that role's home. `?role=` deep-links a screen.
  *
  * Role teams: build your screens in src/roles/<role>/ (own folder — no collisions), export
- * a <Role>App component, then replace your ComingSoon case below. That one line is the only
+ * a <Role>App component, then wire its case below. That one case is the only
  * shared-file edit a role needs. `Skip` (or `?role=app`) opens the existing analysis app.
  */
 

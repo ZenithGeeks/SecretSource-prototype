@@ -5,6 +5,7 @@ query, and the LLM judges whether they support it: supports / refutes / insuffic
 Visual evidence (ColPali) is optional and skipped when that service is down.
 """
 
+import threading
 from pathlib import Path
 
 from app.clients import retrieval
@@ -41,13 +42,48 @@ def _index_visually(source: Path):
         retrieval.colpali_add_pdf(source.as_posix())
 
 
+_indexed: set[str] = set()  # sources this process has already put in the retrieval stores
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(name: str) -> threading.Lock:
+    with _locks_guard:
+        return _locks.setdefault(name, threading.Lock())
+
+
+def _index_once(source: Path) -> dict | None:
+    """Put the cited paper in both stores, the first time this process is asked for it.
+
+    Both stores replace a source rather than merge into it, so re-indexing per check was
+    not just repeated work: with several checks in flight, one could search a source while
+    another sat between its delete and its upsert, retrieve nothing, and report the claim
+    unsupported. Holding the source's lock across indexing means a later check waits for
+    the first to finish rather than starting its own, so a search only ever sees a
+    complete index. Returns the failure when the text index could not be built.
+    """
+    from app.pipeline.rag import add_paper
+
+    with _lock_for(source.name):
+        if source.name in _indexed:
+            return None
+        indexed = add_paper(source.as_posix())
+        if indexed["status"] == "error":
+            return indexed  # not remembered: the next check should try again
+        try:
+            if retrieval.colpali_available():
+                _index_visually(source)
+        except Exception:
+            pass  # visual hints are optional, and _visual reports nothing when they are missing
+        _indexed.add(source.name)
+        return None
+
+
 def _visual(claim: str, source: Path) -> tuple[list[dict], str]:
-    """What the cited paper *shows* that matches the claim, and the model that matched it.
-    Health-checked first: extracting figures costs a Docling run."""
+    """What the cited paper *shows* that matches the claim, and the model that matched it."""
     try:
         if not retrieval.colpali_available():
             return [], ""
-        _index_visually(source)
         body = retrieval.colpali_search(claim, k=20)
         hits = [hit for hit in body["topk"] if hit.get("source") == source.name]
         found = [{field: hit.get(field, "") for field in HIT_FIELDS} for hit in hits[:PAGE_COUNT]]
@@ -112,29 +148,29 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
     """
     global _judge
     try:
-        from app.pipeline.rag import add_paper
-        from app.pipeline.sources import local_pdf
+        from app.pipeline.sources import known_index, local_pdf
 
         source = Path(local_pdf(source_pdf_path))
-        indexed = add_paper(source.as_posix())
-        if indexed["status"] == "error":
-            return indexed
+        if failure := _index_once(source):
+            return failure
 
         evidence = _evidence(claim, source.name)
         passages = [item["text"] for item in evidence]  # the judge reads text, not provenance
         pages, page_model = _visual(claim, source)
         # A caption is evidence like any other line.
         passages += _captions(pages)
+        indexed_in = known_index(source_pdf_path)
         if not passages:
             return {"status": "ok", "claim": claim, "source": source.name,
                     "verdict": "insufficient", "quote": "", "reasoning": "no passages retrieved",
-                    "evidence": [], "pages": pages, "page_model": page_model}
+                    "evidence": [], "pages": pages, "page_model": page_model,
+                    "indexed_in": indexed_in}
 
         if _judge is None:
             _judge = _build_judge()
         return {"status": "ok", "claim": claim, "source": source.name,
                 **_judge(claim, passages), "evidence": evidence, "pages": pages,
-                "page_model": page_model}
+                "page_model": page_model, "indexed_in": indexed_in}
     except Exception as error:
         from app.pipeline.sources import reason_for
 

@@ -18,6 +18,10 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   failed: (stage) =>
     `Claim ${(stage.claim ?? 0) + 1}: could not check ${stage.source} — ` +
     `${reasonText(stage.reason)}`,
+  audited: (stage) =>
+    stage.findings
+      ? `Checked the results: ${stage.findings} to look at`
+      : 'Checked the results: nothing to flag',
   done: () => 'Finished',
   error: (stage) => stage.message ?? 'Failed',
 }
@@ -34,7 +38,8 @@ export function PipelineStages({ stages, running }: { stages: Stage[]; running: 
           <li key={index} className="flex items-center gap-2">
             {stage.stage === 'error' ? (
               <AlertCircle className="size-4 shrink-0 text-refutes" />
-            ) : stage.stage === 'failed' ? (
+            ) : /* an audit that found something is not a green tick */
+            stage.stage === 'failed' || (stage.stage === 'audited' && stage.findings) ? (
               <SearchX className="size-4 shrink-0 text-insufficient" />
             ) : pending ? (
               <Loader2 className="size-4 shrink-0 animate-spin text-accent" />
