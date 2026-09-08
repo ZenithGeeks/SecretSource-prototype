@@ -13,6 +13,7 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { EssayCheck } from './screens/EssayCheck'
 import { Home } from './screens/Home'
+import { ReadingQuestions } from './screens/ReadingQuestions'
 
 type NavKey = 'home' | 'classes' | 'library' | 'graph' | 'settings'
 export type TeacherScreen = NavKey | 'essay-check' | 'reading-questions' | 'class-library' | 'class-note'
@@ -100,6 +101,8 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         <Home onOpen={navigate} />
       ) : screen === 'essay-check' ? (
         <EssayCheck />
+      ) : screen === 'reading-questions' ? (
+        <ReadingQuestions />
       ) : (
         <Placeholder title={PLACEHOLDER_TITLES[screen]} />
       )}
