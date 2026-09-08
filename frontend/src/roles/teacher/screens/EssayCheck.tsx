@@ -8,7 +8,7 @@
  */
 
 import { Check, ChevronLeft, ChevronRight, Copy, FileText, Loader2, Pencil } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import { Button, Card, StandingBadge } from '../../../components/ui'
 import type { EssayCheck as EssayCheckData, EssayReview, StudentNavigation } from '../../../lib/teacher'
@@ -19,8 +19,7 @@ const DEFAULT_STUDENT_ID = 'student-anan'
 
 function feedbackPreview(body: string, citedPages: string[]) {
   const firstParagraph = body.split(/\n\s*\n/)[0]?.trim() || body.trim()
-  const lineCount = Math.max(1, Math.ceil(body.split(/\r?\n/).length / 2))
-  return `“${firstParagraph}” — ${lineCount} lines, cites ${citedPages.join(', ')}`
+  return `“${firstParagraph}” — cites ${citedPages.join(', ')}`
 }
 
 function CitationReviewCard({
@@ -216,6 +215,53 @@ function SendConfirmation({
   onSend: () => void
 }) {
   const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+
+    const previouslyFocusedElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const getFocusableElements = () =>
+      Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+        (element) => !element.hasAttribute('aria-hidden'),
+      )
+
+    const focusableElements = getFocusableElements()
+    ;(focusableElements[0] ?? dialog).focus()
+
+    const keepFocusInsideDialog = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+
+      const currentFocusableElements = getFocusableElements()
+      if (currentFocusableElements.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const firstElement = currentFocusableElements[0]
+      const lastElement = currentFocusableElements[currentFocusableElements.length - 1]
+      const focusIsOutsideDialog = !dialog.contains(document.activeElement)
+
+      if (focusIsOutsideDialog || (event.shiftKey && document.activeElement === firstElement)) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    }
+
+    document.addEventListener('keydown', keepFocusInsideDialog)
+    return () => {
+      document.removeEventListener('keydown', keepFocusInsideDialog)
+      if (previouslyFocusedElement?.isConnected) previouslyFocusedElement.focus()
+    }
+  }, [])
 
   return (
     <div
@@ -228,6 +274,8 @@ function SendConfirmation({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
         className="w-full max-w-[440px] rounded-2xl bg-surface p-6 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -419,8 +467,8 @@ function EssayCheckContent({
   )
 }
 
-export function EssayCheck({ initialStudentId = DEFAULT_STUDENT_ID }: { initialStudentId?: string }) {
-  const [studentId, setStudentId] = useState(initialStudentId)
+export function EssayCheck() {
+  const [studentId, setStudentId] = useState(DEFAULT_STUDENT_ID)
   const essay = useTeacherEssayCheck(studentId)
 
   if (essay.isPending) {

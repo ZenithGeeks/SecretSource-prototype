@@ -111,7 +111,7 @@ export const teacherApi = {
   getHome: async (): Promise<TeacherHome> => MOCK_TEACHER_HOME,
 
   // TODO gateway: GET /teacher/assignments/{assignmentId}/submissions/{studentId}/essay-check
-  getEssayCheck: async (studentId = MOCK_ESSAY_CHECK.student.id): Promise<EssayCheck> =>
+  getEssayCheck: async (studentId: string): Promise<EssayCheck> =>
     MOCK_ESSAY_CHECKS[studentId] ?? MOCK_ESSAY_CHECK,
 
   // TODO gateway: POST /teacher/submissions/{studentId}/feedback
