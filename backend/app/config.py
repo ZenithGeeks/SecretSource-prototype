@@ -25,6 +25,12 @@ GROBID_URL = os.getenv("GROBID_URL") or "http://localhost:8070"
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 
+# Persistence backend. With both set, the gateway stores analyses and source resolutions in
+# Supabase Postgres (whole-analysis JSON, service role) instead of the SQLite file above.
+# Unset means SQLite — the default for local runs and tests.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
 # Source lookups. Without S2_API_KEY, Semantic Scholar rate-limits most calls;
 # UNPAYWALL_EMAIL lets Unpaywall answer instead (a contact address, not a key).
 S2_API_KEY = os.getenv("S2_API_KEY", "")
