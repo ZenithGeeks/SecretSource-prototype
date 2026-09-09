@@ -1,41 +1,125 @@
 /**
- * 11 Library (Researcher) — the researcher's papers, clustered by meaning, with per-paper
- * claim tallies. Data comes from useResearcherLibrary (mock-backed until the gateway
- * endpoint exists); the cluster chips filter the table locally. Add paper hands off to
- * History, where the gateway analyzes a paper (`onAddPaper`).
+ * 11 Library (Researcher) — project-first. The Library opens on a list of projects; opening
+ * one shows that project's papers. New uploads land in the "Unsorted" project until filed.
+ * Data comes from useProjects / useResearcherLibrary (mock-backed until the gateway endpoints
+ * exist). "Add paper" hands off to History, where the gateway analyzes a paper.
  */
 
 import { ChevronRight, Plus, Upload } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Input } from '../../../components/ui'
-import { useResearcherLibrary } from '../../../lib/useResearcher'
+import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
+import { useProjects, useResearcherLibrary } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
 /** Cluster dot colours, cycled in cluster order so new clusters stay distinguishable. */
 const DOT_COLORS = ['bg-accent', 'bg-supports', 'bg-insufficient', 'bg-ink-muted', 'bg-refutes']
 
-export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
-  const [filter, setFilter] = useState('All')
-  const library = useResearcherLibrary().data
-  if (!library) return null
+/** Display order + colour for a project's claim tally bar. */
+const STANDINGS: { key: ClaimStanding; color: string }[] = [
+  { key: 'backed', color: 'bg-supports' },
+  { key: 'silent', color: 'bg-insufficient' },
+  { key: 'contradicted', color: 'bg-refutes' },
+  { key: 'unchecked', color: 'bg-ink-muted' },
+]
 
-  const dotFor = (cluster: string) => {
-    const names = [...new Set(library.papers.map((p) => p.cluster))]
-    return DOT_COLORS[names.indexOf(cluster) % DOT_COLORS.length]
-  }
-
-  const shown = library.papers.filter((p) =>
-    filter === 'All' ? true
-    : filter === 'Unverified' ? p.backed === null
-    : p.cluster === filter,
+function TallyBar({ tally }: { tally: ClaimTally }) {
+  const total = STANDINGS.reduce((sum, s) => sum + tally[s.key], 0)
+  if (!total) return null
+  return (
+    <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded">
+      {STANDINGS.map(({ key, color }) => (
+        <span key={key} className={cn('h-full rounded-sm', color)} style={{ flexGrow: tally[key] }} />
+      ))}
+    </div>
   )
+}
 
+function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
+  const meta = project.unsorted
+    ? `${project.papers} papers · not filed yet`
+    : `${project.papers} papers · ${project.claims} claims · ${project.clusters} clusters`
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(project.id)}
+      className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
+    >
+      <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
+      <p className="text-[13px] text-ink-muted">{meta}</p>
+      <TallyBar tally={project.tally} />
+      <div className="mt-1 flex items-center justify-between">
+        <span className="text-xs text-ink-muted">{project.updated}</span>
+        <ChevronRight className="size-4 text-accent" />
+      </div>
+    </button>
+  )
+}
+
+function ProjectsLanding({ projects, onOpen }: { projects: Project[]; onOpen: (id: string) => void }) {
   return (
     <>
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Library</h1>
+          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Projects</h1>
+          <p className="text-sm text-ink-muted">
+            Group your papers. Each project keeps its own library and graph.
+          </p>
+        </div>
+        <Button>
+          <Plus className="size-4" />
+          New project
+        </Button>
+      </header>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {projects.map((p) => (
+          <ProjectCard key={p.id} project={p} onOpen={onOpen} />
+        ))}
+        <button
+          type="button"
+          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
+        >
+          <span className="font-serif text-base font-semibold text-accent">+ New project</span>
+          <span className="text-xs text-ink-muted">Start a fresh library and graph</span>
+        </button>
+      </div>
+    </>
+  )
+}
+
+function ProjectDetail({
+  projectId,
+  projectName,
+  onBack,
+  onAddPaper,
+}: {
+  projectId: string
+  projectName: string
+  onBack: () => void
+  onAddPaper?: () => void
+}) {
+  const [filter, setFilter] = useState('All')
+  const library = useResearcherLibrary(projectId).data
+  if (!library) return null
+
+  const clusterNames = [...new Set(library.papers.map((p) => p.cluster))]
+  const dotFor = (cluster: string) => DOT_COLORS[clusterNames.indexOf(cluster) % DOT_COLORS.length]
+  const shown = library.papers.filter((p) =>
+    filter === 'All' ? true : filter === 'Unverified' ? p.backed === null : p.cluster === filter,
+  )
+
+  return (
+    <>
+      <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
+        <span className="font-medium text-accent hover:underline">← Projects</span>
+        <span className="text-ink-muted">· {projectName}</span>
+      </button>
+
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{projectName}</h1>
           <p className="text-sm text-ink-muted">{library.summary}</p>
         </div>
         <div className="flex gap-2">
@@ -61,9 +145,7 @@ export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
               onClick={() => setFilter(cluster)}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-xs font-medium text-ink',
-                filter === cluster
-                  ? 'border-accent bg-accent-soft'
-                  : 'border-border-subtle hover:border-accent',
+                filter === cluster ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
               )}
             >
               {cluster}
@@ -107,4 +189,25 @@ export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
       </div>
     </>
   )
+}
+
+export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
+  const [openId, setOpenId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('project'),
+  )
+  const projects = useProjects().data
+  if (!projects) return null
+
+  if (openId) {
+    const name = projects.find((p) => p.id === openId)?.name ?? 'Project'
+    return (
+      <ProjectDetail
+        projectId={openId}
+        projectName={name}
+        onBack={() => setOpenId(null)}
+        onAddPaper={onAddPaper}
+      />
+    )
+  }
+  return <ProjectsLanding projects={projects} onOpen={setOpenId} />
 }

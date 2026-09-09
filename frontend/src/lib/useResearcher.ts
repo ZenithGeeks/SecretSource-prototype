@@ -16,6 +16,13 @@ export function useFieldConsensus(question: string) {
   })
 }
 
-export function useResearcherLibrary() {
-  return useQuery({ queryKey: ['researcher', 'library'], queryFn: researcherApi.getLibrary })
+export function useProjects() {
+  return useQuery({ queryKey: ['researcher', 'projects'], queryFn: researcherApi.getProjects })
+}
+
+export function useResearcherLibrary(projectId: string) {
+  return useQuery({
+    queryKey: ['researcher', 'library', projectId],
+    queryFn: () => researcherApi.getLibrary(projectId),
+  })
 }
