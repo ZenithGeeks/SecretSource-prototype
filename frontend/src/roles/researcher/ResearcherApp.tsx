@@ -17,6 +17,7 @@ import { AppShell } from '../../components/AppShell'
 import { HistoryList } from '../../components/HistoryList'
 import { useAnalyses } from '../../lib/useAnalysis'
 import { FieldConsensus } from './screens/FieldConsensus'
+import { Graph } from './screens/Graph'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
@@ -66,15 +67,6 @@ function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
-      <p className="font-serif text-2xl font-semibold text-ink">{title}</p>
-      <p className="text-sm text-ink-muted">Not built yet.</p>
-    </div>
-  )
-}
-
 export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [screen, setScreen] = useState<ResearcherScreen>(initialScreen)
   const [selected, setSelected] = useState<string | null>(initialAnalysis)
@@ -110,7 +102,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'home' && <Home onOpen={navigate} />}
       {screen === 'library' && <Library onAddPaper={() => navigate('history')} />}
       {screen === 'field-consensus' && <FieldConsensus />}
-      {screen === 'graph' && <Placeholder title="Graph" />}
+      {screen === 'graph' && <Graph />}
       {screen === 'history' && (
         <History selected={selected} onSelect={select} onTargetChange={setWide} />
       )}

@@ -5,7 +5,7 @@
  * types, hooks and screens stay as they are.
  */
 
-import { MOCK_CONSENSUS, MOCK_HOME, MOCK_LIBRARIES, MOCK_PROJECTS } from '../mocks/researcher'
+import { MOCK_CONSENSUS, MOCK_GRAPH, MOCK_HOME, MOCK_LIBRARIES, MOCK_PROJECTS } from '../mocks/researcher'
 
 export type ClaimStanding = 'backed' | 'silent' | 'contradicted' | 'unchecked'
 
@@ -90,7 +90,55 @@ export type Project = {
   unsorted?: boolean // the catch-all for new uploads
 }
 
+/**
+ * The knowledge graph ("What rests on what" / "How your library relates"). GLOBAL — like the
+ * History tab it spans every analysis in the store (all projects and roles), not one project.
+ * Papers and claims are the two node kinds; edges are typed relations (claims view) or
+ * paper-to-paper similarity/citation links (papers view).
+ */
+export type GraphRelation = 'asserts' | 'backs' | 'contradicts' | 'silent'
+
+export type GraphNode =
+  | { id: string; kind: 'paper'; label: string; year: string; cluster: string }
+  | { id: string; kind: 'claim'; label: string }
+
+export type GraphEdge = {
+  id: string
+  source: string // paper node id
+  target: string // claim node id
+  relation: GraphRelation
+  note?: string
+  quote?: string
+  page?: string
+}
+
+export type PaperEdge = {
+  id: string
+  a: string
+  b: string
+  similarity: number // 0..1, ColBERT passage similarity
+  sharedPassages: number
+  citations: number
+  cites: boolean // one cites the other → drawn dashed
+  contradicted?: number
+  passages: { paper: string; page: string; quote: string }[]
+}
+
+export type GraphStat = { count: number; label: string }
+
+export type KnowledgeGraph = {
+  stats: GraphStat[]
+  clusters: string[]
+  nodes: GraphNode[]
+  edges: GraphEdge[] // paper → claim (claims view)
+  paperEdges: PaperEdge[] // paper ↔ paper (papers view)
+}
+
 export const researcherApi = {
+  // TODO gateway: GET /graph — GLOBAL, built from every analysis in the store (all projects
+  // and roles), the same set History lists. Not scoped to one project.
+  getGraph: async (): Promise<KnowledgeGraph> => MOCK_GRAPH,
+
   // TODO gateway: GET /researcher/home
   getHome: async (): Promise<ResearcherHome> => MOCK_HOME,
 
