@@ -20,6 +20,11 @@ export function useProjects() {
   return useQuery({ queryKey: ['researcher', 'projects'], queryFn: researcherApi.getProjects })
 }
 
+// Global (all projects/roles), like the analyses History lists — keyed outside the researcher namespace.
+export function useKnowledgeGraph() {
+  return useQuery({ queryKey: ['graph'], queryFn: researcherApi.getGraph })
+}
+
 export function useResearcherLibrary(projectId: string) {
   return useQuery({
     queryKey: ['researcher', 'library', projectId],
