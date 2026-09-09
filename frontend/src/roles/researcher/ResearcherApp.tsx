@@ -20,6 +20,7 @@ import { FieldConsensus } from './screens/FieldConsensus'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
+import { Settings as SettingsScreen } from './screens/Settings'
 
 type NavKey = 'home' | 'library' | 'graph' | 'history' | 'settings'
 export type ResearcherScreen = NavKey | 'field-consensus'
@@ -113,7 +114,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'history' && (
         <History selected={selected} onSelect={select} onTargetChange={setWide} />
       )}
-      {screen === 'settings' && <Placeholder title="Settings" />}
+      {screen === 'settings' && <SettingsScreen onChangeRole={onChangeRole} />}
     </AppShell>
   )
 }

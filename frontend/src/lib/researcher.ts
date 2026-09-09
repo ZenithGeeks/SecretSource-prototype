@@ -5,7 +5,7 @@
  * types, hooks and screens stay as they are.
  */
 
-import { MOCK_CONSENSUS, MOCK_HOME, MOCK_LIBRARY } from '../mocks/researcher'
+import { MOCK_CONSENSUS, MOCK_HOME, MOCK_LIBRARIES, MOCK_PROJECTS } from '../mocks/researcher'
 
 export type ClaimStanding = 'backed' | 'silent' | 'contradicted' | 'unchecked'
 
@@ -74,6 +74,22 @@ export type ResearcherLibrary = {
   papers: LibraryPaper[]
 }
 
+/**
+ * A project groups a researcher's papers so each stays its own library and graph. The
+ * Library opens on the project list; opening a project shows that project's papers.
+ * New uploads land in the `unsorted` project until they're filed.
+ */
+export type Project = {
+  id: string
+  name: string
+  papers: number
+  claims: number
+  clusters: number
+  tally: ClaimTally // drives the card's mini bar
+  updated: string // human line, e.g. "Updated today" (or "New uploads land here")
+  unsorted?: boolean // the catch-all for new uploads
+}
+
 export const researcherApi = {
   // TODO gateway: GET /researcher/home
   getHome: async (): Promise<ResearcherHome> => MOCK_HOME,
@@ -84,6 +100,10 @@ export const researcherApi = {
     question: question || MOCK_CONSENSUS.question,
   }),
 
-  // TODO gateway: GET /researcher/library
-  getLibrary: async (): Promise<ResearcherLibrary> => MOCK_LIBRARY,
+  // TODO gateway: GET /researcher/projects
+  getProjects: async (): Promise<Project[]> => MOCK_PROJECTS,
+
+  // TODO gateway: GET /researcher/projects/{id}/library
+  getLibrary: async (projectId: string): Promise<ResearcherLibrary> =>
+    MOCK_LIBRARIES[projectId] ?? MOCK_LIBRARIES['retrieval-survey'],
 }
