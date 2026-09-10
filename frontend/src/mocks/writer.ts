@@ -1,10 +1,11 @@
 /**
  * Mock payloads for the writer screens, shaped exactly like the gateway responses will be
  * (types in src/lib/writer.ts). Content mirrors the Figma prototype so screens match the
- * design until the endpoints exist. Nothing outside src/lib/writer.ts imports this.
+ * design until the endpoints exist. Nothing outside src/lib/writer.ts and writerStore.ts
+ * imports this.
  */
 
-import type { CheckRun, Claim, Draft, DraftWord, Paper, SearchResponse, VerdictKind, WriterHome } from '../lib/writer'
+import type { Claim, Draft, DraftWord, Paper, SearchResponse, VerdictKind, WriterHome } from '../lib/writer'
 
 function w(text: string): DraftWord {
   return { text }
@@ -17,6 +18,7 @@ function m(text: string, mark: VerdictKind): DraftWord {
 export const MOCK_CLAIMS: Claim[] = [
   {
     id: 'c1',
+    draftId: 'd1',
     text: 'ColBERTv2 reduces index size by 6–10× relative to ColBERT while matching retrieval quality.',
     citation: { id: 'cit1', label: 'Khattab & Zaharia, 2020' },
     verdict: 'refutes',
@@ -40,6 +42,7 @@ export const MOCK_CLAIMS: Claim[] = [
   },
   {
     id: 'c2',
+    draftId: 'd1',
     text: 'Late interaction outperforms single-vector retrieval on BEIR out-of-domain benchmarks.',
     citation: { id: 'cit2', label: 'Thakur et al., 2021' },
     verdict: 'insufficient',
@@ -47,14 +50,23 @@ export const MOCK_CLAIMS: Claim[] = [
   },
   {
     id: 'c3',
+    draftId: 'd1',
     text: 'MS MARCO contains 8.8M passages drawn from web documents.',
     citation: { id: 'cit3', label: 'Nguyen et al., 2016' },
     verdict: 'supports',
   },
   {
     id: 'c4',
+    draftId: 'd1',
     // edge case: a claim with no citation at all
     text: 'Retrieval-augmented models are becoming the default architecture for open-domain QA.',
+  },
+  {
+    id: 'c5',
+    draftId: 'd2',
+    text: 'Open-domain QA systems retrieve supporting passages before generating an answer.',
+    citation: { id: 'cit4', label: 'Lewis et al., 2020' },
+    verdict: 'supports',
   },
 ]
 
@@ -79,78 +91,99 @@ export const MOCK_HOME: WriterHome = {
   recentPapers: MOCK_PAPERS.slice(0, 3),
 }
 
-const MOCK_DRAFT_INITIAL: Draft = {
-  fileName: 'draft-v3.docx',
-  heading: '2. Related work',
-  citationsFound: 5,
-  issuesRemaining: 2,
-  lastCheckedLabel: 'checked 2h ago',
-  paragraphs: [
-    [
-      w('Late'), w('interaction'), w('retrievers'), w('encode'), w('queries'), w('and'), w('documents'),
-      w('into'), w('token-level'), w('vectors'), w('and'), w('score'), w('them'), w('with'), w('MaxSim'),
-      m('[Khattab', 'supports'), m('&', 'supports'), m('Zaharia,', 'supports'), m('2020].', 'supports'),
-      w('ColBERTv2'), w('further'),
-      m('reduces', 'refutes'), m('index', 'refutes'), m('size', 'refutes'), m('by', 'refutes'),
-      m('6–10×', 'refutes'), m('while', 'refutes'), m('matching', 'refutes'), m('retrieval', 'refutes'),
-      m('quality', 'refutes'), m('[Khattab', 'refutes'), m('&', 'refutes'), m('Zaharia,', 'refutes'),
-      m('2020].', 'refutes'),
-      w('On'), w('out-of-domain'), w('data'), w('these'), w('models'),
-      m('outperform', 'insufficient'), m('single-vector', 'insufficient'), m('retrievers', 'insufficient'),
-      m('on', 'insufficient'), m('BEIR', 'insufficient'), m('[Thakur', 'insufficient'), m('et', 'insufficient'),
-      m('al.,', 'insufficient'), m('2021].', 'insufficient'),
-    ],
-    [
-      w('Denoised'), w('supervision'), w('from'), w('a'), w('cross-encoder'), w('teacher'), w('improves'),
-      w('learned'), w('representations'),
-      m('[Santhanam', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2022].', 'supports'),
-      w('MS'), w('MARCO'), w('contains'), w('8.8M'), w('passages'),
-      m('[Nguyen', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2016].', 'supports'),
-    ],
+const D1_LATEX_SOURCE = String.raw`\section{Related work}
+Late interaction retrievers encode queries and documents into token-level vectors and score them with MaxSim \cite{cit1}. ColBERTv2 further reduces index size by 6--10\times{} while matching retrieval quality \cite{cit1}. On out-of-domain data these models outperform single-vector retrievers on BEIR \cite{cit2}.
+
+Denoised supervision from a cross-encoder teacher improves learned representations \cite{cit1}. MS MARCO contains 8.8M passages \cite{cit3}.`
+
+const D1_PARAGRAPHS: DraftWord[][] = [
+  [
+    w('Late'), w('interaction'), w('retrievers'), w('encode'), w('queries'), w('and'), w('documents'),
+    w('into'), w('token-level'), w('vectors'), w('and'), w('score'), w('them'), w('with'), w('MaxSim'),
+    m('[Khattab', 'supports'), m('&', 'supports'), m('Zaharia,', 'supports'), m('2020].', 'supports'),
+    w('ColBERTv2'), w('further'),
+    m('reduces', 'refutes'), m('index', 'refutes'), m('size', 'refutes'), m('by', 'refutes'),
+    m('6–10×', 'refutes'), m('while', 'refutes'), m('matching', 'refutes'), m('retrieval', 'refutes'),
+    m('quality', 'refutes'), m('[Khattab', 'refutes'), m('&', 'refutes'), m('Zaharia,', 'refutes'),
+    m('2020].', 'refutes'),
+    w('On'), w('out-of-domain'), w('data'), w('these'), w('models'),
+    m('outperform', 'insufficient'), m('single-vector', 'insufficient'), m('retrievers', 'insufficient'),
+    m('on', 'insufficient'), m('BEIR', 'insufficient'), m('[Thakur', 'insufficient'), m('et', 'insufficient'),
+    m('al.,', 'insufficient'), m('2021].', 'insufficient'),
   ],
-}
+  [
+    w('Denoised'), w('supervision'), w('from'), w('a'), w('cross-encoder'), w('teacher'), w('improves'),
+    w('learned'), w('representations'),
+    m('[Santhanam', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2022].', 'supports'),
+    w('MS'), w('MARCO'), w('contains'), w('8.8M'), w('passages'),
+    m('[Nguyen', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2016].', 'supports'),
+  ],
+]
 
 /**
  * Draft after the ColBERT (2020) citation is replaced with Santhanam et al. (2022).
  * The "[Santhanam al., al., 2022]" repetition below is a typo baked into the source
- * mockup (missing "et", duplicated "al.,"). Ported verbatim, not fixed.
+ * mockup (missing "et", duplicated "al.,"). Ported verbatim, not fixed. writerStore's
+ * replaceCitation swaps a draft's paragraphs to this scripted blob only for the c1/d1
+ * demo case — there is no general re-tokenization of arbitrary LaTeX into marked words.
  */
-export const MOCK_DRAFT_REPLACED: Draft = {
-  ...MOCK_DRAFT_INITIAL,
-  issuesRemaining: 1,
-  paragraphs: [
-    [
-      w('Late'), w('interaction'), w('retrievers'), w('encode'), w('queries'), w('and'), w('documents'),
-      w('into'), w('token-level'), w('vectors'), w('and'), w('score'), w('them'), w('with'), w('MaxSim'),
-      m('[Santhanam', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2022].', 'supports'),
-      w('ColBERTv2'), w('further'),
-      m('reduces', 'supports'), m('index', 'supports'), m('size', 'supports'), m('by', 'supports'),
-      m('6–10×', 'supports'), m('while', 'supports'), m('matching', 'supports'), m('retrieval', 'supports'),
-      m('quality', 'supports'), m('[Santhanam', 'supports'), m('al.,', 'supports'), m('al.,', 'supports'),
-      m('2022].', 'supports'),
-      w('On'), w('out-of-domain'), w('data'), w('these'), w('models'),
-      m('outperform', 'insufficient'), m('single-vector', 'insufficient'), m('retrievers', 'insufficient'),
-      m('on', 'insufficient'), m('BEIR', 'insufficient'), m('[Thakur', 'insufficient'), m('et', 'insufficient'),
-      m('al.,', 'insufficient'), m('2021].', 'insufficient'),
-    ],
-    [
-      w('Denoised'), w('supervision'), w('from'), w('a'), w('cross-encoder'), w('teacher'), w('improves'),
-      w('learned'), w('representations'),
-      m('[Santhanam', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2022].', 'supports'),
-      w('MS'), w('MARCO'), w('contains'), w('8.8M'), w('passages'),
-      m('[Nguyen', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2016].', 'supports'),
-    ],
+export const D1_PARAGRAPHS_AFTER_C1_REPLACED: DraftWord[][] = [
+  [
+    w('Late'), w('interaction'), w('retrievers'), w('encode'), w('queries'), w('and'), w('documents'),
+    w('into'), w('token-level'), w('vectors'), w('and'), w('score'), w('them'), w('with'), w('MaxSim'),
+    m('[Santhanam', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2022].', 'supports'),
+    w('ColBERTv2'), w('further'),
+    m('reduces', 'supports'), m('index', 'supports'), m('size', 'supports'), m('by', 'supports'),
+    m('6–10×', 'supports'), m('while', 'supports'), m('matching', 'supports'), m('retrieval', 'supports'),
+    m('quality', 'supports'), m('[Santhanam', 'supports'), m('al.,', 'supports'), m('al.,', 'supports'),
+    m('2022].', 'supports'),
+    w('On'), w('out-of-domain'), w('data'), w('these'), w('models'),
+    m('outperform', 'insufficient'), m('single-vector', 'insufficient'), m('retrievers', 'insufficient'),
+    m('on', 'insufficient'), m('BEIR', 'insufficient'), m('[Thakur', 'insufficient'), m('et', 'insufficient'),
+    m('al.,', 'insufficient'), m('2021].', 'insufficient'),
   ],
-}
+  [
+    w('Denoised'), w('supervision'), w('from'), w('a'), w('cross-encoder'), w('teacher'), w('improves'),
+    w('learned'), w('representations'),
+    m('[Santhanam', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2022].', 'supports'),
+    w('MS'), w('MARCO'), w('contains'), w('8.8M'), w('passages'),
+    m('[Nguyen', 'supports'), m('et', 'supports'), m('al.,', 'supports'), m('2016].', 'supports'),
+  ],
+]
 
-export const MOCK_CHECK_RUN: CheckRun = {
-  draft: MOCK_DRAFT_INITIAL,
-  issues: MOCK_CLAIMS.filter(
-    (claim): claim is CheckRun['issues'][number] =>
-      claim.verdict === 'refutes' || claim.verdict === 'insufficient',
-  ),
-  currentIssueIndex: 0,
-}
+const D2_LATEX_SOURCE = String.raw`\section{Introduction}
+Open-domain QA systems retrieve supporting passages before generating an answer \cite{cit4}.`
+
+const D2_PARAGRAPHS: DraftWord[][] = [
+  [
+    w('Open-domain'), w('QA'), w('systems'), w('retrieve'), w('supporting'), w('passages'), w('before'),
+    w('generating'), w('an'), w('answer'), m('[Lewis', 'supports'), m('et', 'supports'), m('al.,', 'supports'),
+    m('2020].', 'supports'),
+  ],
+]
+
+export const MOCK_DRAFTS: Draft[] = [
+  {
+    id: 'd1',
+    fileName: 'draft-v3.docx',
+    heading: '2. Related work',
+    latexSource: D1_LATEX_SOURCE,
+    paragraphs: D1_PARAGRAPHS,
+    citationsFound: 5,
+    issuesRemaining: 2,
+    lastCheckedLabel: 'checked 2h ago',
+  },
+  {
+    id: 'd2',
+    fileName: 'draft-intro.docx',
+    heading: '1. Introduction',
+    latexSource: D2_LATEX_SOURCE,
+    paragraphs: D2_PARAGRAPHS,
+    citationsFound: 1,
+    issuesRemaining: 0,
+    lastCheckedLabel: 'checked 1d ago',
+  },
+]
 
 export const MOCK_SEARCH: SearchResponse = {
   libraryCount: 9,
