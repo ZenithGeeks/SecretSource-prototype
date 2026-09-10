@@ -146,7 +146,9 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
   return base
 }
 
-const LAYOUT = { name: 'fcose', animate: false, randomize: true, fit: true, nodeSeparation: 150, idealEdgeLength: 140, padding: 36 } as const
+// randomize:false makes fcose deterministic — the same graph lays out the same way every
+// time, so toggling Papers↔Claims (which remounts the canvas) doesn't reshuffle it.
+const LAYOUT = { name: 'fcose', animate: false, randomize: false, fit: true, nodeSeparation: 150, idealEdgeLength: 140, padding: 36 } as const
 
 function StatTile({ count, label }: { count: number; label: string }) {
   return (

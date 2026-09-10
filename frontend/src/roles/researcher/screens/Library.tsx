@@ -218,18 +218,79 @@ function ProjectDetail({
   )
 }
 
+/** The "New project" modal (Figma: New project modal). Scrim + card; Esc or backdrop cancels,
+ * Enter/Create submits when a name is present. Description is captured for the future endpoint. */
+function NewProjectDialog({
+  onCancel,
+  onCreate,
+}: {
+  onCancel: () => void
+  onCreate: (name: string, description: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onKeyDown={(e) => e.key === 'Escape' && onCancel()}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div className="absolute inset-0 bg-ink/45" onClick={onCancel} />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          const n = name.trim()
+          if (n) onCreate(n, description.trim())
+        }}
+        className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
+      >
+        <h2 className="font-serif text-xl font-semibold text-ink">New project</h2>
+        <p className="mt-1 text-[13px] text-ink-muted">
+          Group papers into their own library and graph. You can move papers between projects any time.
+        </p>
+
+        <label className="mt-4 block text-[13px] font-medium text-ink">Project name</label>
+        <Input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Retrieval survey"
+          className="mt-1.5 w-full"
+        />
+
+        <label className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What is this project about?"
+          rows={3}
+          className="mt-1.5 w-full resize-none rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted focus-visible:border-accent"
+        />
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!name.trim()}>
+            Create project
+          </Button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
   const [openId, setOpenId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('project'),
   )
+  const [showNew, setShowNew] = useState(
+    () => new URLSearchParams(window.location.search).get('new') === '1',
+  )
   const projects = useProjects().data
   const { createProject } = useResearcherActions()
   if (!projects) return null
-
-  const newProject = () => {
-    const name = window.prompt('New project name')?.trim()
-    if (name) setOpenId(createProject(name))
-  }
 
   if (openId) {
     const name = projects.find((p) => p.id === openId)?.name ?? 'Project'
@@ -242,5 +303,18 @@ export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
       />
     )
   }
-  return <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={newProject} />
+  return (
+    <>
+      <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} />
+      {showNew && (
+        <NewProjectDialog
+          onCancel={() => setShowNew(false)}
+          onCreate={(name) => {
+            setShowNew(false)
+            setOpenId(createProject(name))
+          }}
+        />
+      )}
+    </>
+  )
 }
