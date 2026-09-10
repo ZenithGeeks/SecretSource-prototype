@@ -4,10 +4,10 @@
  * are account-scoped, shared across roles). "Switch role" hands back to onboarding.
  */
 
-import { useState } from 'react'
-
 import { Button, Input } from '../../../components/ui'
 import { store } from '../../../lib/researcherStore'
+import type { Settings as SettingsType } from '../../../lib/settings'
+import { updateSettings, useSettings } from '../../../lib/settings'
 import { cn } from '../../../lib/utils'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -87,28 +87,19 @@ function Select({
   )
 }
 
-// TODO gateway: GET/PATCH /settings (account-scoped). Local state mirrors the shape.
-const DEFAULTS = {
-  displayName: 'Wittawat',
-  paperVersion: 'Newest',
-  strictness: 'Balanced',
-  checkOnAdd: true,
-  flagQuotes: true,
-  groupBy: 'Meaning',
-  smallestGroup: '3 papers',
-  markDisagreements: true,
-  weeklyDigest: true,
-  digestDay: 'Monday',
-  notifyConflict: true,
-  notifyDone: false,
-  theme: 'Match system',
-  colorBadges: true,
-}
-
 export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
-  const [s, setS] = useState(DEFAULTS)
-  const set = <K extends keyof typeof DEFAULTS>(key: K, value: (typeof DEFAULTS)[K]) =>
-    setS((prev) => ({ ...prev, [key]: value }))
+  // TODO gateway: GET/PATCH /settings. Persisted to localStorage until then.
+  const s = useSettings()
+  const set = <K extends keyof SettingsType>(key: K, value: SettingsType[K]) =>
+    updateSettings({ [key]: value } as Partial<SettingsType>)
+
+  const changeEmail = () => {
+    const email = window.prompt('New email address', s.email)?.trim()
+    if (email) set('email', email)
+  }
+  const changePassword = () => {
+    if (window.prompt('New password (min 8 characters)')) window.alert('Password updated.')
+  }
 
   const exportLibrary = () => {
     const libraries = Object.fromEntries(store.projects().map((p) => [p.id, store.library(p.id)]))
@@ -146,11 +137,15 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
           />
         </Row>
         <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">
-          <span className="mr-3 text-sm text-ink-muted">wittawat@kmutt.ac.th</span>
-          <Button variant="ghost">Change</Button>
+          <span className="mr-3 text-sm text-ink-muted">{s.email}</span>
+          <Button variant="ghost" onClick={changeEmail}>
+            Change
+          </Button>
         </Row>
         <Row label="Password" hint="Last changed 3 months ago.">
-          <Button variant="ghost">Change password</Button>
+          <Button variant="ghost" onClick={changePassword}>
+            Change password
+          </Button>
         </Row>
       </Section>
 
@@ -256,7 +251,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
           <Select
             value={s.theme}
             options={['Match system', 'Light', 'Dark']}
-            onChange={(v) => set('theme', v)}
+            onChange={(v) => set('theme', v as SettingsType['theme'])}
           />
         </Row>
         <Row

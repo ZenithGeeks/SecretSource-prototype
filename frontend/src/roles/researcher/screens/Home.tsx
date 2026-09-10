@@ -10,6 +10,7 @@ import type { ComponentType } from 'react'
 
 import { Card } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
+import { useSettings } from '../../../lib/settings'
 import { useResearcherActions, useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
@@ -54,6 +55,7 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
 
 export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void }) {
   const home = useResearcherHome().data
+  const { displayName } = useSettings()
   const { fileQueuePaper } = useResearcherActions()
   if (!home) return null
 
@@ -61,7 +63,7 @@ export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void })
     <>
       <header className="flex flex-col gap-1">
         <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          Good morning, {home.user}
+          Good morning, {displayName}
         </h1>
         <p className="text-sm text-ink-muted">{home.alert}</p>
       </header>
