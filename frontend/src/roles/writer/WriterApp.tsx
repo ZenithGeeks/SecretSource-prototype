@@ -14,6 +14,7 @@ import { CitationReplaced } from './screens/CitationReplaced'
 import { DraftCheck } from './screens/DraftCheck'
 import { FindASource } from './screens/FindASource'
 import { Home } from './screens/Home'
+import { Settings as SettingsScreen } from './screens/Settings'
 
 type NavKey = 'home' | 'library' | 'graph' | 'history' | 'settings'
 export type WriterScreen = 'home' | 'draft-check' | 'citation-replaced' | 'find-source' | 'graph' | 'history' | 'settings'
@@ -100,7 +101,7 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'find-source' && <FindASource onCiteBestMatch={replaceCitation} />}
       {screen === 'graph' && <Placeholder title="Graph" />}
       {screen === 'history' && <Placeholder title="History" />}
-      {screen === 'settings' && <Placeholder title="Settings" />}
+      {screen === 'settings' && <SettingsScreen onChangeRole={onChangeRole} />}
     </AppShell>
   )
 }

@@ -49,6 +49,7 @@ function buildCheckRun(draftId: string): CheckRun {
 
 export const store = {
   drafts: (): Draft[] => db.drafts,
+  claims: (): Claim[] => db.claims,
   draft: (id: string): Draft => findDraft(id),
   checkRun: (draftId: string = DEFAULT_DRAFT_ID): CheckRun => buildCheckRun(draftId),
   home: (): WriterHome => db.home,
