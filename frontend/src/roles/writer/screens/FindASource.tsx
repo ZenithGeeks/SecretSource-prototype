@@ -1,11 +1,14 @@
-/** Writer Find a source — search the library (and open access) for a source that backs
- * a sentence. `onCiteBestMatch` hands off to Citation replaced with the cited label. */
+/** Writer Find a source — search the library (and open access) for a source that backs a
+ * sentence. `?q=` deep-links the query. With `?claim=<id>` in the URL (arrived from Draft
+ * check's "Replace citation"), "Cite this" on any result replaces that claim's citation and
+ * hands back to `onReplaced`; without it, "Cite this" copies the cite key instead. */
 
 import { Copy, Download, Loader2, Search, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Card, Empty, Input, StandingBadge } from '../../../components/ui'
-import { useSourceSearch } from '../../../lib/useWriter'
+import { useSourceSearch, useWriterActions } from '../../../lib/useWriter'
+import type { Source } from '../../../lib/writer'
 import { cn } from '../../../lib/utils'
 
 const INITIAL_QUERY = 'compressing token-level embeddings makes the index 6–10× smaller'
@@ -21,13 +24,60 @@ function sourceMeta(result: { inLibrary: boolean; openAccess: boolean; isCurrent
   return `· ${parts.join(' · ')}`
 }
 
-export function FindASource({ onCiteBestMatch }: { onCiteBestMatch: (citationLabel: string) => void }) {
-  const [query, setQuery] = useState(INITIAL_QUERY)
-  const [submittedQuery, setSubmittedQuery] = useState(INITIAL_QUERY)
-  const search = useSourceSearch(submittedQuery)
+/** Best-effort BibTeX from what a Source has — there's no raw BibTeX field in the mock data. */
+function toBibTeX(source: Source): string {
+  const year = source.citation.match(/\((\d{4})\)/)?.[1] ?? ''
+  const authorKey = source.citation
+    .split(/\s+(?:et al\.|&)/)[0]
+    .toLowerCase()
+    .replace(/[^a-z]/g, '')
+  const author = source.citation.replace(/\s*\(\d{4}\)\s*$/, '')
+  return `@article{${authorKey}${year},\n  title={${source.title}},\n  author={${author}},\n  year={${year}}\n}`
+}
+
+function readQueryParam() {
+  const params = new URLSearchParams(window.location.search)
+  return { q: params.get('q') ?? undefined, claimId: params.get('claim') ?? undefined }
+}
+
+function writeQueryParam(q: string) {
+  const params = new URLSearchParams(window.location.search)
+  if (q) params.set('q', q)
+  else params.delete('q')
+  window.history.replaceState(null, '', `?${params.toString()}`)
+}
+
+export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => void }) {
+  const initial = readQueryParam()
+  const [query, setQuery] = useState(initial.q ?? INITIAL_QUERY)
+  const [submittedQuery, setSubmittedQuery] = useState(initial.q ?? INITIAL_QUERY)
   const [libraryOnly, setLibraryOnly] = useState(true)
   const [openAccess, setOpenAccess] = useState(true)
   const [citedByLibrary, setCitedByLibrary] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const claimId = initial.claimId
+  // The mock only "knows" how to semantically match the current sentence (the scripted
+  // default results) — it has no real embedding search. Treat the untouched default query
+  // as "no text filter" so the demo's baked-in match set still shows; a query the user
+  // actually typed does a real title/citation substring filter (title/authors/venue/year).
+  const effectiveQuery = submittedQuery.trim() === INITIAL_QUERY.trim() ? '' : submittedQuery
+  const search = useSourceSearch(effectiveQuery, { libraryOnly, openAccess, citedByLibrary })
+  const actions = useWriterActions()
+
+  const copy = (id: string, text: string) => {
+    void navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500)
+  }
+
+  const citeSource = (result: Source) => {
+    if (claimId) {
+      actions.replaceCitation(claimId, result.id)
+      onReplaced(claimId)
+    } else {
+      copy(result.id, result.citation)
+    }
+  }
 
   return (
     <>
@@ -38,6 +88,7 @@ export function FindASource({ onCiteBestMatch }: { onCiteBestMatch: (citationLab
         onSubmit={(event) => {
           event.preventDefault()
           setSubmittedQuery(query)
+          writeQueryParam(query)
         }}
       >
         <Input
@@ -139,22 +190,19 @@ export function FindASource({ onCiteBestMatch }: { onCiteBestMatch: (citationLab
                   </blockquote>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant={result.isBestMatch ? 'solid' : 'ghost'}
-                      onClick={result.isBestMatch ? () => onCiteBestMatch(result.citation) : undefined}
-                    >
+                    <Button variant={result.isBestMatch ? 'solid' : 'ghost'} onClick={() => citeSource(result)}>
                       <Copy className="size-4" />
-                      Cite this
+                      {copiedId === result.id ? 'Copied!' : claimId ? 'Cite this' : 'Cite this (copy)'}
                     </Button>
                     {!result.inLibrary && (
-                      <Button variant="ghost">
+                      <Button variant="ghost" onClick={() => actions.markInLibrary(result.id)}>
                         <Download className="size-4" />
                         Add to library
                       </Button>
                     )}
-                    <Button variant="ghost">
+                    <Button variant="ghost" onClick={() => copy(`${result.id}-bib`, toBibTeX(result))}>
                       <Copy className="size-4" />
-                      BibTeX
+                      {copiedId === `${result.id}-bib` ? 'Copied!' : 'BibTeX'}
                     </Button>
                   </div>
                 </article>

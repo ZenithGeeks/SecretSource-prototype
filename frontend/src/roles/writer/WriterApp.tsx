@@ -104,6 +104,16 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
     openDraftCheck({ draftId: id })
   }
 
+  /** Find a source, arrived at from Draft check's "Replace citation" with `?claim=`, hands
+   * back to Draft check with that same claim selected once the swap is applied. */
+  const backToDraftCheck = (claimId: string) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('claim', claimId)
+    params.set('screen', 'draft-check')
+    window.history.replaceState(null, '', `?${params.toString()}`)
+    setScreen('draft-check')
+  }
+
   return (
     <AppShell
       nav={NAV}
@@ -127,7 +137,7 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'citation-replaced' && (
         <CitationReplaced newCitationLabel={replacedCitation} onBackToDraft={() => navigate('draft-check')} />
       )}
-      {screen === 'find-source' && <FindASource onCiteBestMatch={replaceCitation} />}
+      {screen === 'find-source' && <FindASource onReplaced={backToDraftCheck} />}
       {screen === 'graph' && <Placeholder title="Graph" />}
       {screen === 'history' && <Placeholder title="History" />}
       {screen === 'settings' && <Placeholder title="Settings" />}

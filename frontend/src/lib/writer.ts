@@ -35,9 +35,14 @@ export type Source = {
   quote: string
   inLibrary: boolean
   openAccess: boolean
+  citedByLibrary: boolean
   isCurrentCitation: boolean
   isBestMatch: boolean
 }
+
+/** Which "search in" scopes are active. Omitted/undefined scopes are treated as active
+ * (matching Find a source's all-on-by-default toggles). */
+export type SearchScope = { libraryOnly?: boolean; openAccess?: boolean; citedByLibrary?: boolean }
 
 /**
  * One claim in a draft, and how its citation stood up. `draftId` scopes it to its draft.
@@ -120,6 +125,6 @@ export const writerApi = {
   // sourceId for the Find-a-source flow (#4/#5), and is the version future screens should use.
   replaceCitation: async (claimId: string): Promise<CheckRun> => store.replaceCitationWithSuggestion(claimId),
 
-  // TODO gateway: GET /writer/search?q=...
-  searchSources: async (_query: string): Promise<SearchResponse> => store.search(),
+  // TODO gateway: GET /writer/search?q=...&library=&openAccess=&citedByLibrary=
+  searchSources: async (query: string, scope?: SearchScope): Promise<SearchResponse> => store.search(query, scope),
 }

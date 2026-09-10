@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { store } from './writerStore'
 import { writerApi } from './writer'
+import type { SearchScope } from './writer'
 
 export function useWriterHome() {
   return useQuery({ queryKey: ['writer', 'home'], queryFn: writerApi.getHome })
@@ -37,10 +38,10 @@ export function useReplaceCitation() {
   })
 }
 
-export function useSourceSearch(query: string) {
+export function useSourceSearch(query: string, scope?: SearchScope) {
   return useQuery({
-    queryKey: ['writer', 'search', query],
-    queryFn: () => writerApi.searchSources(query),
+    queryKey: ['writer', 'search', query, scope],
+    queryFn: () => writerApi.searchSources(query, scope),
   })
 }
 

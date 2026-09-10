@@ -12,7 +12,7 @@ import {
   MOCK_HOME,
   MOCK_SEARCH,
 } from '../mocks/writer'
-import type { Citation, Claim, Draft, CheckRun, SearchResponse, WriterHome } from './writer'
+import type { Citation, Claim, Draft, CheckRun, SearchResponse, SearchScope, Source, WriterHome } from './writer'
 
 /** Deep clone so mutations never touch the shared mock module. */
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -52,7 +52,24 @@ export const store = {
   draft: (id: string): Draft => findDraft(id),
   checkRun: (draftId: string = DEFAULT_DRAFT_ID): CheckRun => buildCheckRun(draftId),
   home: (): WriterHome => db.home,
-  search: (): SearchResponse => db.search,
+
+  /** Filters search results by text (title/citation) and by which "search in" scopes are
+   * active. The current citation always shows — it's context for the swap, not a candidate
+   * competing for the scope filters. An all-off scope (every toggle unchecked) falls back to
+   * showing everything rather than nothing. */
+  search: (query = '', scope: SearchScope = {}): SearchResponse => {
+    const q = query.trim().toLowerCase()
+    const noScopeActive = !scope.libraryOnly && !scope.openAccess && !scope.citedByLibrary
+    const matchesScope = (s: Source) =>
+      s.isCurrentCitation ||
+      noScopeActive ||
+      (scope.libraryOnly && s.inLibrary) ||
+      (scope.openAccess && s.openAccess) ||
+      (scope.citedByLibrary && s.citedByLibrary)
+    const matchesQuery = (s: Source) =>
+      q.length === 0 || s.title.toLowerCase().includes(q) || s.citation.toLowerCase().includes(q)
+    return { ...db.search, results: db.search.results.filter((s) => matchesScope(s) && matchesQuery(s)) }
+  },
 
   /** Create an empty draft and return its id. */
   createDraft(title?: string): string {
