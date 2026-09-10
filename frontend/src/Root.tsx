@@ -10,9 +10,12 @@
 import { useEffect, useState } from 'react'
 
 import App from './App'
+import { authEnabled } from './lib/supabase'
+import { useAuth } from './lib/useAuth'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
 import { TeacherApp } from './roles/teacher/TeacherApp'
 import { WriterApp } from './roles/writer/WriterApp'
+import { Auth } from './screens/auth/Auth'
 import type { Role } from './screens/Onboarding'
 import { Onboarding } from './screens/Onboarding'
 
@@ -38,8 +41,15 @@ function syncRoleParam(screen: Screen) {
 
 export function Root() {
   const [screen, setScreen] = useState<Screen>(initialScreen)
+  const { session, loading } = useAuth()
 
   useEffect(() => syncRoleParam(screen), [screen])
+
+  // Auth gate — only when Supabase is configured (VITE_SUPABASE_*). Without it the app runs
+  // open, as before. `?auth=1` previews the auth screens regardless of config.
+  if (new URLSearchParams(window.location.search).has('auth')) return <Auth />
+  if (authEnabled && loading) return null
+  if (authEnabled && !session) return <Auth />
 
   switch (screen) {
     case 'onboarding':
