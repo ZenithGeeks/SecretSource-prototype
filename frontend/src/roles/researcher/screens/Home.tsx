@@ -10,7 +10,7 @@ import type { ComponentType } from 'react'
 
 import { Card } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
-import { useResearcherHome } from '../../../lib/useResearcher'
+import { useResearcherActions, useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
 
@@ -54,6 +54,7 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
 
 export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void }) {
   const home = useResearcherHome().data
+  const { fileQueuePaper } = useResearcherActions()
   if (!home) return null
 
   return (
@@ -130,6 +131,7 @@ export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void })
                 </div>
                 <button
                   type="button"
+                  onClick={() => fileQueuePaper(entry.paper)}
                   className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-accent-soft hover:text-ink"
                 >
                   <Plus className="size-4" />

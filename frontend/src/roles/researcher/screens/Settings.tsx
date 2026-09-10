@@ -7,6 +7,7 @@
 import { useState } from 'react'
 
 import { Button, Input } from '../../../components/ui'
+import { store } from '../../../lib/researcherStore'
 import { cn } from '../../../lib/utils'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -108,6 +109,24 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
   const [s, setS] = useState(DEFAULTS)
   const set = <K extends keyof typeof DEFAULTS>(key: K, value: (typeof DEFAULTS)[K]) =>
     setS((prev) => ({ ...prev, [key]: value }))
+
+  const exportLibrary = () => {
+    const libraries = Object.fromEntries(store.projects().map((p) => [p.id, store.library(p.id)]))
+    const data = JSON.stringify({ projects: store.projects(), libraries }, null, 2)
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'secretsource-library.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const deleteAll = () => {
+    // TODO gateway: DELETE /researcher/papers — for now just confirm the destructive intent.
+    window.confirm(
+      'Delete all uploaded papers? This removes the files and every check made on them. This cannot be undone.',
+    )
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -250,13 +269,19 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
 
       <Section title="Your data">
         <Row label="Export your library" hint="Papers, claims and verdicts as a JSON file.">
-          <Button variant="ghost">Export</Button>
+          <Button variant="ghost" onClick={exportLibrary}>
+            Export
+          </Button>
         </Row>
         <Row
           label="Delete all uploaded papers"
           hint="Removes the files and every check made on them. This cannot be undone."
         >
-          <button type="button" className="text-sm font-medium text-refutes hover:underline">
+          <button
+            type="button"
+            onClick={deleteAll}
+            className="text-sm font-medium text-refutes hover:underline"
+          >
             Delete all
           </button>
         </Row>

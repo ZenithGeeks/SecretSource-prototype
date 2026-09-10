@@ -10,7 +10,7 @@ import { useState } from 'react'
 
 import { Button, Input } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
-import { useProjects, useResearcherLibrary } from '../../../lib/useResearcher'
+import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
 /** Cluster dot colours, cycled in cluster order so new clusters stay distinguishable. */
@@ -57,7 +57,15 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: strin
   )
 }
 
-function ProjectsLanding({ projects, onOpen }: { projects: Project[]; onOpen: (id: string) => void }) {
+function ProjectsLanding({
+  projects,
+  onOpen,
+  onNew,
+}: {
+  projects: Project[]
+  onOpen: (id: string) => void
+  onNew: () => void
+}) {
   return (
     <>
       <header className="flex items-center justify-between">
@@ -67,7 +75,7 @@ function ProjectsLanding({ projects, onOpen }: { projects: Project[]; onOpen: (i
             Group your papers. Each project keeps its own library and graph.
           </p>
         </div>
-        <Button>
+        <Button onClick={onNew}>
           <Plus className="size-4" />
           New project
         </Button>
@@ -79,6 +87,7 @@ function ProjectsLanding({ projects, onOpen }: { projects: Project[]; onOpen: (i
         ))}
         <button
           type="button"
+          onClick={onNew}
           className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
         >
           <span className="font-serif text-base font-semibold text-accent">+ New project</span>
@@ -101,14 +110,22 @@ function ProjectDetail({
   onAddPaper?: () => void
 }) {
   const [filter, setFilter] = useState('All')
+  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const library = useResearcherLibrary(projectId).data
   if (!library) return null
 
   const clusterNames = [...new Set(library.papers.map((p) => p.cluster))]
   const dotFor = (cluster: string) => DOT_COLORS[clusterNames.indexOf(cluster) % DOT_COLORS.length]
-  const shown = library.papers.filter((p) =>
-    filter === 'All' ? true : filter === 'Unverified' ? p.backed === null : p.cluster === filter,
-  )
+  const q = query.trim().toLowerCase()
+  const shown = library.papers
+    .filter((p) =>
+      filter === 'All' ? true : filter === 'Unverified' ? p.backed === null : p.cluster === filter,
+    )
+    .filter((p) =>
+      q === ''
+        ? true
+        : `${p.title} ${p.cite} ${p.cluster} ${p.linked.join(' ')}`.toLowerCase().includes(q),
+    )
 
   return (
     <>
@@ -136,7 +153,12 @@ function ProjectDetail({
 
       {/* Search + cluster filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <Input placeholder="Search by meaning, e.g. “compression of token embeddings”" className="max-w-xl" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by meaning, e.g. “compression of token embeddings”"
+          className="max-w-xl"
+        />
         <div className="flex flex-wrap gap-2">
           {library.clusters.map((cluster) => (
             <button
@@ -186,6 +208,11 @@ function ProjectDetail({
             <ChevronRight className="size-4 shrink-0 text-ink-muted" />
           </button>
         ))}
+        {shown.length === 0 && (
+          <p className="border-t border-border-subtle px-5 py-6 text-sm text-ink-muted">
+            No papers match.
+          </p>
+        )}
       </div>
     </>
   )
@@ -196,7 +223,13 @@ export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
     () => new URLSearchParams(window.location.search).get('project'),
   )
   const projects = useProjects().data
+  const { createProject } = useResearcherActions()
   if (!projects) return null
+
+  const newProject = () => {
+    const name = window.prompt('New project name')?.trim()
+    if (name) setOpenId(createProject(name))
+  }
 
   if (openId) {
     const name = projects.find((p) => p.id === openId)?.name ?? 'Project'
@@ -209,5 +242,5 @@ export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
       />
     )
   }
-  return <ProjectsLanding projects={projects} onOpen={setOpenId} />
+  return <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={newProject} />
 }

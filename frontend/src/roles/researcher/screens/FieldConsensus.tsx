@@ -13,8 +13,37 @@ import { useFieldConsensus } from '../../../lib/useResearcher'
 export function FieldConsensus() {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [copied, setCopied] = useState(false)
   const consensus = useFieldConsensus(question).data
   if (!consensus) return null
+
+  const copyParagraph = async () => {
+    const text =
+      consensus.note +
+      '\n\n' +
+      consensus.rows
+        .map((r) => `${r.paper} (${r.cite}) — ${r.verdict}: “${r.quote}”`)
+        .join('\n')
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  const downloadCsv = () => {
+    const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
+    const rows = [
+      ['Paper', 'Cite', 'Verdict', 'Quote'],
+      ...consensus.rows.map((r) => [r.paper, r.cite, r.verdict, r.quote]),
+    ]
+    const csv = rows.map((r) => r.map(esc).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'field-consensus.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const stats = [
     { value: String(consensus.supports), label: 'papers support', className: 'text-supports' },
@@ -98,15 +127,15 @@ export function FieldConsensus() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost">
+        <Button variant="ghost" onClick={() => setSaved(true)}>
           <Bookmark className="size-4" />
-          Save this question
+          {saved ? 'Saved ✓' : 'Save this question'}
         </Button>
-        <Button variant="ghost">
+        <Button variant="ghost" onClick={copyParagraph}>
           <Copy className="size-4" />
-          Copy as related-work paragraph
+          {copied ? 'Copied ✓' : 'Copy as related-work paragraph'}
         </Button>
-        <Button variant="ghost">
+        <Button variant="ghost" onClick={downloadCsv}>
           <Download className="size-4" />
           CSV
         </Button>
