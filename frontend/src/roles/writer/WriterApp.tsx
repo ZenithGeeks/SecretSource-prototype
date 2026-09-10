@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { useWriterActions } from '../../lib/useWriter'
 import { CitationReplaced } from './screens/CitationReplaced'
 import { DraftCheck } from './screens/DraftCheck'
 import { FindASource } from './screens/FindASource'
@@ -71,6 +72,7 @@ function Placeholder({ title }: { title: string }) {
 export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [screen, setScreen] = useState<WriterScreen>(initialScreen)
   const [replacedCitation, setReplacedCitation] = useState<string | null>(null)
+  const actions = useWriterActions()
 
   useEffect(() => syncScreenParam(screen), [screen])
 
@@ -79,6 +81,26 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const replaceCitation = (citationLabel: string) => {
     setReplacedCitation(citationLabel)
     navigate('citation-replaced')
+  }
+
+  /** Opens Draft check, optionally deep-linked to a draft, a claim to jump to, or a
+   * verdict filter — read by the Draft check screen itself. */
+  const openDraftCheck = (opts?: { draftId?: string; claimId?: string; filter?: string }) => {
+    const params = new URLSearchParams(window.location.search)
+    if (opts?.draftId) params.set('draft', opts.draftId)
+    else params.delete('draft')
+    if (opts?.claimId) params.set('claim', opts.claimId)
+    else params.delete('claim')
+    if (opts?.filter) params.set('filter', opts.filter)
+    else params.delete('filter')
+    params.set('screen', 'draft-check')
+    window.history.replaceState(null, '', `?${params.toString()}`)
+    setScreen('draft-check')
+  }
+
+  const newDraft = () => {
+    const id = actions.createDraft()
+    openDraftCheck({ draftId: id })
   }
 
   return (
@@ -91,7 +113,12 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
     >
       {screen === 'home' && (
-        <Home onOpenDraftCheck={() => navigate('draft-check')} onOpenFindSource={() => navigate('find-source')} />
+        <Home
+          onNewDraft={newDraft}
+          onOpenFindSource={() => navigate('find-source')}
+          onFixReferences={() => openDraftCheck({ filter: 'refutes,insufficient' })}
+          onOpenClaim={(claimId) => openDraftCheck({ claimId })}
+        />
       )}
       {screen === 'draft-check' && <DraftCheck onReplaceCitation={replaceCitation} />}
       {screen === 'citation-replaced' && (

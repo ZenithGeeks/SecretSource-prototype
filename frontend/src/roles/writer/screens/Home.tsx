@@ -1,21 +1,13 @@
 /** Writer Home — greeting, quick actions, needs-attention list, recent papers. Data comes
- * from useWriterHome (mock-backed until the gateway endpoint exists); `onOpenDraftCheck`
- * and `onOpenFindSource` move to the other writer screens. */
+ * from useWriterHome (mock-backed until the gateway endpoint exists). `onNewDraft` creates
+ * a draft and opens it in Draft check; `onFixReferences` opens Draft check pre-filtered to
+ * claims that need work; `onOpenClaim` opens Draft check with a claim selected. */
 
 import { ChevronRight, FileText, ListChecks, Loader2, Pen, Search } from 'lucide-react'
-import type { ComponentType } from 'react'
 
 import { Card, Empty, StandingBadge } from '../../../components/ui'
 import { useWriterHome } from '../../../lib/useWriter'
 import type { Claim, VerdictKind } from '../../../lib/writer'
-
-type Icon = ComponentType<{ className?: string }>
-
-const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; action: 'draft-check' | 'find-source' | null }[] = [
-  { title: 'Check a draft', hint: 'Paste text, every citation gets a verdict', icon: Pen, action: 'draft-check' },
-  { title: 'Find a source for…', hint: 'Search your library by meaning', icon: Search, action: 'find-source' },
-  { title: 'Fix reference list', hint: 'From a checked draft, with corrected sources', icon: ListChecks, action: null },
-]
 
 /** A claim only belongs in "needs your attention" once it has been checked at all. */
 function isAnswered(claim: Claim): claim is Claim & { verdict: VerdictKind } {
@@ -23,18 +15,17 @@ function isAnswered(claim: Claim): claim is Claim & { verdict: VerdictKind } {
 }
 
 export function Home({
-  onOpenDraftCheck,
+  onNewDraft,
   onOpenFindSource,
+  onFixReferences,
+  onOpenClaim,
 }: {
-  onOpenDraftCheck: () => void
+  onNewDraft: () => void
   onOpenFindSource: () => void
+  onFixReferences: () => void
+  onOpenClaim: (claimId: string) => void
 }) {
   const home = useWriterHome()
-
-  const open = (action: 'draft-check' | 'find-source' | null) => {
-    if (action === 'draft-check') onOpenDraftCheck()
-    if (action === 'find-source') onOpenFindSource()
-  }
 
   if (home.isPending) {
     return (
@@ -65,18 +56,33 @@ export function Home({
       </header>
 
       <div className="flex flex-col gap-3 sm:flex-row">
-        {QUICK_ACTIONS.map(({ title, hint, icon: Icon, action }) => (
-          <button
-            key={title}
-            type="button"
-            onClick={() => open(action)}
-            className="flex flex-1 flex-col items-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent"
-          >
-            <Icon className="size-4 text-accent" />
-            <p className="text-sm font-medium text-ink">{title}</p>
-            <p className="text-xs text-ink-muted">{hint}</p>
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={onNewDraft}
+          className="flex flex-1 flex-col items-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent"
+        >
+          <Pen className="size-4 text-accent" />
+          <p className="text-sm font-medium text-ink">Check a draft</p>
+          <p className="text-xs text-ink-muted">Paste text, every citation gets a verdict</p>
+        </button>
+        <button
+          type="button"
+          onClick={onOpenFindSource}
+          className="flex flex-1 flex-col items-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent"
+        >
+          <Search className="size-4 text-accent" />
+          <p className="text-sm font-medium text-ink">Find a source for…</p>
+          <p className="text-xs text-ink-muted">Search your library by meaning</p>
+        </button>
+        <button
+          type="button"
+          onClick={onFixReferences}
+          className="flex flex-1 flex-col items-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent"
+        >
+          <ListChecks className="size-4 text-accent" />
+          <p className="text-sm font-medium text-ink">Fix reference list</p>
+          <p className="text-xs text-ink-muted">From a checked draft, with corrected sources</p>
+        </button>
       </div>
 
       <Card className="p-0">
@@ -96,7 +102,7 @@ export function Home({
             <button
               key={claim.id}
               type="button"
-              onClick={onOpenDraftCheck}
+              onClick={() => onOpenClaim(claim.id)}
               className="flex w-full items-center gap-3 border-t border-border-subtle px-5 py-3 text-left hover:bg-accent-soft"
             >
               <StandingBadge standing={claim.verdict} />
