@@ -56,7 +56,7 @@ export const store = {
 
   /** Create an empty draft and return its id. */
   createDraft(title?: string): string {
-    const id = `d${seq++}`
+    const id = `draft-${seq++}` // distinct prefix from seeded d1/d2, so ids never collide
     db.drafts.unshift({
       id,
       fileName: title ?? `untitled-${id}.tex`,
