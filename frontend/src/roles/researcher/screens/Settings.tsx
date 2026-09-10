@@ -49,14 +49,14 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void
       aria-checked={on}
       onClick={() => onChange(!on)}
       className={cn(
-        'relative h-6 w-11 rounded-full transition-colors',
+        'inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
         on ? 'bg-accent' : 'bg-border-subtle',
       )}
     >
       <span
         className={cn(
-          'absolute top-0.5 size-5 rounded-full bg-white transition-transform',
-          on ? 'translate-x-5' : 'translate-x-0.5',
+          'inline-block size-5 rounded-full bg-white shadow-sm transition-transform',
+          on ? 'translate-x-[1.375rem]' : 'translate-x-0.5',
         )}
       />
     </button>
