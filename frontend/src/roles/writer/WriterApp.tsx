@@ -104,6 +104,16 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
     openDraftCheck({ draftId: id })
   }
 
+  /** Draft check's "Replace citation" hands off to Find a source with the claim as context,
+   * per the #4/#5 contract — Find a source applies the swap and returns here with `?claim=`. */
+  const goToFindSource = (claimId: string) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('claim', claimId)
+    params.set('screen', 'find-source')
+    window.history.replaceState(null, '', `?${params.toString()}`)
+    setScreen('find-source')
+  }
+
   return (
     <AppShell
       nav={NAV}
@@ -123,7 +133,7 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
           onOpenClaim={(claimId) => openDraftCheck({ claimId })}
         />
       )}
-      {screen === 'draft-check' && <DraftCheck onReplaceCitation={replaceCitation} />}
+      {screen === 'draft-check' && <DraftCheck onGoToFindSource={goToFindSource} />}
       {screen === 'citation-replaced' && (
         <CitationReplaced newCitationLabel={replacedCitation} onBackToDraft={() => navigate('draft-check')} />
       )}

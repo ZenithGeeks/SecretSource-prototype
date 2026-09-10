@@ -62,7 +62,10 @@ export function hasVerdict(claim: Claim): claim is Issue {
   return claim.verdict === 'refutes' || claim.verdict === 'insufficient'
 }
 
-export type DraftWord = { text: string; mark?: VerdictKind }
+/** `claimId` links a marked run of words back to the claim it belongs to, so Draft check
+ * can select/scroll to a claim when its text is clicked. Only set on issue-holding claims
+ * (refutes/insufficient) — that's the only direction Draft check currently needs. */
+export type DraftWord = { text: string; mark?: VerdictKind; claimId?: string }
 
 export type Draft = {
   id: string
@@ -75,11 +78,14 @@ export type Draft = {
   lastCheckedLabel: string // "checked 2h ago"
 }
 
-/** A draft plus the claims still needing attention, worst (or next) issue first. */
+/** A draft plus the claims still needing attention, worst (or next) issue first.
+ * `pendingReplacement` is set right after a citation swap, for the 08b "citation replaced"
+ * state — a state of this screen, not a separate one. */
 export type CheckRun = {
   draft: Draft
   issues: Issue[]
   currentIssueIndex: number
+  pendingReplacement?: { claimId: string; newCitationLabel: string }
 }
 
 export type Paper = { id: string; fileName: string; summary: string }
@@ -105,20 +111,15 @@ export const writerApi = {
   // TODO gateway: GET /writer/home
   getHome: async (): Promise<WriterHome> => store.home(),
 
-  // TODO gateway: GET /writer/drafts/{id}/check
-  getDraftCheck: async (draftId?: string): Promise<CheckRun> => store.checkRun(draftId),
+  // TODO gateway: GET /writer/drafts/{id}/check?filter=refutes,insufficient
+  getDraftCheck: async (draftId?: string, filterKinds?: VerdictKind[]): Promise<CheckRun> =>
+    store.checkRun(draftId, filterKinds),
 
   // TODO gateway: GET /writer/drafts/{id}
   getDraft: async (draftId: string): Promise<Draft> => store.draft(draftId),
 
   // TODO gateway: GET /writer/drafts
   getDrafts: async (): Promise<Draft[]> => store.drafts(),
-
-  // TODO gateway: POST /writer/draft-check/replace-citation {"claimId": ...}
-  // Kept as the one-arg shim DraftCheck's "Replace citation" button already calls (it applies
-  // the claim's own `suggestion`). useWriterActions.replaceCitation below takes an explicit
-  // sourceId for the Find-a-source flow (#4/#5), and is the version future screens should use.
-  replaceCitation: async (claimId: string): Promise<CheckRun> => store.replaceCitationWithSuggestion(claimId),
 
   // TODO gateway: GET /writer/search?q=...
   searchSources: async (_query: string): Promise<SearchResponse> => store.search(),

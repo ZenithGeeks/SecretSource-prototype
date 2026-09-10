@@ -12,7 +12,7 @@ import {
   MOCK_HOME,
   MOCK_SEARCH,
 } from '../mocks/writer'
-import type { Citation, Claim, Draft, CheckRun, SearchResponse, WriterHome } from './writer'
+import type { Citation, Claim, Draft, CheckRun, SearchResponse, VerdictKind, WriterHome } from './writer'
 
 /** Deep clone so mutations never touch the shared mock module. */
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -22,8 +22,12 @@ const db = {
   claims: clone(MOCK_CLAIMS) as Claim[],
   home: clone(MOCK_HOME) as WriterHome,
   search: clone(MOCK_SEARCH) as SearchResponse,
-  // claimId -> the citation it had before a replacement, so Undo can restore it.
-  pendingReplacements: {} as Record<string, { previousCitation: Citation | undefined }>,
+  // claimId -> what it had before a replacement, so Undo can restore it and Draft check
+  // can show the 08b "citation replaced" toast.
+  pendingReplacements: {} as Record<
+    string,
+    { previousCitation: Citation | undefined; previousVerdict: VerdictKind | undefined; newCitationLabel: string }
+  >,
 }
 
 let seq = 1
@@ -39,18 +43,25 @@ function claimsFor(draftId: string): Claim[] {
   return db.claims.filter((c) => c.draftId === draftId)
 }
 
-function buildCheckRun(draftId: string): CheckRun {
+const DEFAULT_FILTER_KINDS: VerdictKind[] = ['refutes', 'insufficient']
+
+function buildCheckRun(draftId: string, filterKinds: VerdictKind[] = DEFAULT_FILTER_KINDS): CheckRun {
   const draft = findDraft(draftId)
   const issues = claimsFor(draftId).filter(
-    (c): c is CheckRun['issues'][number] => c.verdict === 'refutes' || c.verdict === 'insufficient',
+    (c): c is CheckRun['issues'][number] => c.verdict !== undefined && filterKinds.includes(c.verdict),
   )
-  return { draft, issues, currentIssueIndex: 0 }
+  const pendingClaim = claimsFor(draftId).find((c) => c.id in db.pendingReplacements)
+  const pendingReplacement = pendingClaim
+    ? { claimId: pendingClaim.id, newCitationLabel: db.pendingReplacements[pendingClaim.id].newCitationLabel }
+    : undefined
+  return { draft, issues, currentIssueIndex: 0, pendingReplacement }
 }
 
 export const store = {
   drafts: (): Draft[] => db.drafts,
   draft: (id: string): Draft => findDraft(id),
-  checkRun: (draftId: string = DEFAULT_DRAFT_ID): CheckRun => buildCheckRun(draftId),
+  checkRun: (draftId: string = DEFAULT_DRAFT_ID, filterKinds?: VerdictKind[]): CheckRun =>
+    buildCheckRun(draftId, filterKinds),
   home: (): WriterHome => db.home,
   search: (): SearchResponse => db.search,
 
@@ -86,31 +97,25 @@ export const store = {
     const claim = db.claims.find((c) => c.id === claimId)
     if (!claim) return buildCheckRun(DEFAULT_DRAFT_ID)
     const source = db.search.results.find((s) => s.id === sourceId)
-    db.pendingReplacements[claimId] = { previousCitation: claim.citation }
+    db.pendingReplacements[claimId] = {
+      previousCitation: claim.citation,
+      previousVerdict: claim.verdict,
+      newCitationLabel: source?.citation ?? claim.citation?.label ?? '',
+    }
     if (source) claim.citation = { id: source.id, label: source.citation }
     claim.verdict = undefined
+    // Scripted paragraph swap for the c1 -> s1 (Santhanam) demo case only — see mocks/writer.ts.
+    if (claimId === 'c1' && sourceId === 's1') findDraft(claim.draftId).paragraphs = clone(D1_PARAGRAPHS_AFTER_C1_REPLACED)
     return buildCheckRun(claim.draftId)
   },
 
-  /** Back-compat for DraftCheck's existing "Replace citation" button, which applies the
-   * claim's own bundled `suggestion` rather than a source picked in Find a source. */
-  replaceCitationWithSuggestion(claimId: string): CheckRun {
-    const claim = db.claims.find((c) => c.id === claimId)
-    if (!claim) return buildCheckRun(DEFAULT_DRAFT_ID)
-    db.pendingReplacements[claimId] = { previousCitation: claim.citation }
-    if (claim.suggestion) claim.citation = { id: claim.suggestion.id, label: claim.suggestion.citation }
-    claim.verdict = claim.suggestion?.verdict
-    // Scripted paragraph swap for the c1/d1 demo case only — see mocks/writer.ts.
-    if (claimId === 'c1') findDraft(claim.draftId).paragraphs = clone(D1_PARAGRAPHS_AFTER_C1_REPLACED)
-    return buildCheckRun(claim.draftId)
-  },
-
-  /** Undo a pending citation replacement, restoring the previous citation. */
+  /** Undo a pending citation replacement, restoring the previous citation and verdict. */
   undoReplacement(claimId: string): CheckRun {
     const claim = db.claims.find((c) => c.id === claimId)
     const pending = db.pendingReplacements[claimId]
     if (claim && pending) {
       claim.citation = pending.previousCitation
+      claim.verdict = pending.previousVerdict
       delete db.pendingReplacements[claimId]
     }
     return buildCheckRun(claim?.draftId ?? DEFAULT_DRAFT_ID)
