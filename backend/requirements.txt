@@ -9,3 +9,4 @@ uvicorn>=0.30
 python-multipart>=0.0.9
 python-dotenv>=1.0  # so host runs read the same .env compose does
 requests>=2.31
+supabase>=2.0  # optional persistence backend (app/store.py); SQLite is used when unset
