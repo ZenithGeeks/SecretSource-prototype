@@ -1,11 +1,11 @@
 /**
  * Typed client for the writer-role data. The gateway has no writer endpoints yet, so every
- * call resolves mock payloads from src/mocks/writer.ts. When an endpoint lands, replace that
- * call's body with a request() to it (see the TODO on each) — the types, hooks and screens
- * stay as they are.
+ * call resolves through src/lib/writerStore.ts, itself seeded from src/mocks/writer.ts. When
+ * an endpoint lands, replace that call's body with a request() to it (see the TODO on each) —
+ * the types, hooks and screens stay as they are.
  */
 
-import { MOCK_CHECK_RUN, MOCK_DRAFT_REPLACED, MOCK_HOME, MOCK_SEARCH } from '../mocks/writer'
+import { store } from './writerStore'
 
 export type VerdictKind = 'supports' | 'refutes' | 'insufficient'
 
@@ -40,11 +40,12 @@ export type Source = {
 }
 
 /**
- * One claim in a draft, and how its citation stood up.
+ * One claim in a draft, and how its citation stood up. `draftId` scopes it to its draft.
  * `citation` absent = nothing was cited (uncited). `verdict` absent = not checked yet.
  */
 export type Claim = {
   id: string
+  draftId: string
   text: string
   citation?: Citation
   verdict?: VerdictKind
@@ -64,8 +65,10 @@ export function hasVerdict(claim: Claim): claim is Issue {
 export type DraftWord = { text: string; mark?: VerdictKind }
 
 export type Draft = {
+  id: string
   fileName: string
   heading: string
+  latexSource: string
   paragraphs: DraftWord[][]
   citationsFound: number
   issuesRemaining: number
@@ -98,29 +101,25 @@ export type SearchResponse = {
   results: Source[]
 }
 
-// In-memory current state of the one draft the mock backend tracks. Mutated by
-// replaceCitation so re-opening the draft check shows a consistent, decreasing issue
-// count — no server, so the state lives here.
-let currentCheckRun: CheckRun = MOCK_CHECK_RUN
-
 export const writerApi = {
   // TODO gateway: GET /writer/home
-  getHome: async (): Promise<WriterHome> => MOCK_HOME,
+  getHome: async (): Promise<WriterHome> => store.home(),
 
-  // TODO gateway: GET /writer/draft-check
-  getDraftCheck: async (): Promise<CheckRun> => currentCheckRun,
+  // TODO gateway: GET /writer/drafts/{id}/check
+  getDraftCheck: async (draftId?: string): Promise<CheckRun> => store.checkRun(draftId),
+
+  // TODO gateway: GET /writer/drafts/{id}
+  getDraft: async (draftId: string): Promise<Draft> => store.draft(draftId),
+
+  // TODO gateway: GET /writer/drafts
+  getDrafts: async (): Promise<Draft[]> => store.drafts(),
 
   // TODO gateway: POST /writer/draft-check/replace-citation {"claimId": ...}
-  replaceCitation: async (claimId: string): Promise<CheckRun> => {
-    const remaining = currentCheckRun.issues.filter((issue) => issue.id !== claimId)
-    currentCheckRun = {
-      draft: { ...MOCK_DRAFT_REPLACED, issuesRemaining: remaining.length },
-      issues: remaining,
-      currentIssueIndex: 0,
-    }
-    return currentCheckRun
-  },
+  // Kept as the one-arg shim DraftCheck's "Replace citation" button already calls (it applies
+  // the claim's own `suggestion`). useWriterActions.replaceCitation below takes an explicit
+  // sourceId for the Find-a-source flow (#4/#5), and is the version future screens should use.
+  replaceCitation: async (claimId: string): Promise<CheckRun> => store.replaceCitationWithSuggestion(claimId),
 
   // TODO gateway: GET /writer/search?q=...
-  searchSources: async (_query: string): Promise<SearchResponse> => MOCK_SEARCH,
+  searchSources: async (_query: string): Promise<SearchResponse> => store.search(),
 }
