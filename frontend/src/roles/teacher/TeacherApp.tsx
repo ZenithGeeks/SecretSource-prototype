@@ -1,6 +1,9 @@
 /**
- * Teacher role router. The shared AppShell owns the sidebar; this router owns only teacher
- * screen state and keeps future destinations explicit until their screens are implemented.
+ * Teacher role router.
+ *
+ * The shared AppShell owns the sidebar. This role router owns only teacher destinations and
+ * keeps the unbuilt destinations explicit, so adding another teacher page does not require
+ * changing the essay-check screen.
  */
 
 import { GraduationCap, Home as HomeIcon, Library as LibraryIcon, Settings, Waypoints } from 'lucide-react'
@@ -8,6 +11,7 @@ import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { EssayCheck } from './screens/EssayCheck'
 import { Home } from './screens/Home'
 
 type NavKey = 'home' | 'classes' | 'library' | 'graph' | 'settings'
@@ -21,7 +25,7 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
-// Detail destinations stay highlighted under the section that will own them later.
+// Essay check is a detail screen reached from Classes, so Classes remains highlighted.
 const NAV_FOR: Record<TeacherScreen, NavKey> = {
   home: 'home',
   classes: 'classes',
@@ -59,6 +63,12 @@ function syncScreenParam(screen: TeacherScreen) {
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
+function screenForNav(key: NavKey): TeacherScreen {
+  // Classes owns the delivered essay-review destination. The remaining nav entries keep
+  // their own placeholder until those teacher pages are implemented.
+  return key === 'classes' ? 'essay-check' : key
+}
+
 function Placeholder({ title }: { title: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
@@ -79,13 +89,20 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     <AppShell
       nav={NAV}
       active={NAV_FOR[screen]}
-      onNavigate={navigate}
+      onNavigate={(key) => navigate(screenForNav(key))}
       role="Teacher"
       roleIcon={GraduationCap}
       onChangeRole={onChangeRole}
+      // The prototype teacher screens use the full available width of the role shell.
       wide
     >
-      {screen === 'home' ? <Home onOpen={navigate} /> : <Placeholder title={PLACEHOLDER_TITLES[screen]} />}
+      {screen === 'home' ? (
+        <Home onOpen={navigate} />
+      ) : screen === 'essay-check' ? (
+        <EssayCheck />
+      ) : (
+        <Placeholder title={PLACEHOLDER_TITLES[screen]} />
+      )}
     </AppShell>
   )
 }
