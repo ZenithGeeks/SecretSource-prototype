@@ -382,9 +382,10 @@ export function ReadingQuestions() {
   )
 
   const toggleType = (type: ReadingQuestionType) => {
-    setSelectedTypes((current) =>
-      current?.includes(type) ? current.filter((selected) => selected !== type) : [...(current ?? activeTypes), type],
-    )
+    setSelectedTypes((current) => {
+      const types = current ?? activeTypes
+      return types.includes(type) ? types.filter((selected) => selected !== type) : [...types, type]
+    })
   }
 
   const regenerateQuestions = () => {
@@ -469,8 +470,7 @@ export function ReadingQuestions() {
         ))}
       </div>
 
-      {/* These choices configure the next generation; the current worksheet stays visible so
-          the teacher can review every generated type before replacing it. */}
+      {/* The same choices filter the current worksheet and configure the next generation. */}
 
       {activeTypes.length === 0 && (
         <p role="status" className="text-xs text-ink-muted">

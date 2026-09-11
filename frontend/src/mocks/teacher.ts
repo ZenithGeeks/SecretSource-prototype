@@ -6,7 +6,15 @@
  * replace it at one data-layer boundary.
  */
 
-import type { EssayCheck, ReadingQuestionLevel, ReadingQuestionType, RegenerateReadingQuestionsInput, TeacherHome, TeacherReadingQuestion, TeacherReadingQuestionsPage } from '../lib/teacher'
+import type {
+  EssayCheck,
+  ReadingQuestionLevel,
+  ReadingQuestionType,
+  RegenerateReadingQuestionsInput,
+  TeacherHome,
+  TeacherReadingQuestion,
+  TeacherReadingQuestionsPage,
+} from '../lib/teacher'
 
 /** The prototype overview payload. It remains here so its Home action and this detail page
  * share the same teacher data boundary while the gateway is still being built. */
