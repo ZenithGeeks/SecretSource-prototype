@@ -2,6 +2,7 @@
 
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 
+import { useSettings } from '../lib/settings'
 import { cn } from '../lib/utils'
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
@@ -50,11 +51,13 @@ const VERDICT_STYLES = {
 } as const
 
 export function VerdictBadge({ verdict }: { verdict: keyof typeof VERDICT_STYLES }) {
+  // The Settings "Colour the verdict badges" toggle: off shows plain text (for print/export).
+  const { colorBadges } = useSettings()
   return (
     <span
       className={cn(
         'rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide uppercase',
-        VERDICT_STYLES[verdict],
+        colorBadges ? VERDICT_STYLES[verdict] : 'text-ink',
       )}
     >
       {verdict}

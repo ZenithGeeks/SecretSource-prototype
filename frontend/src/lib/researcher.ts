@@ -5,7 +5,8 @@
  * types, hooks and screens stay as they are.
  */
 
-import { MOCK_CONSENSUS, MOCK_GRAPH, MOCK_HOME, MOCK_LIBRARIES, MOCK_PROJECTS } from '../mocks/researcher'
+import { MOCK_CONSENSUS, MOCK_GRAPH } from '../mocks/researcher'
+import { store } from './researcherStore'
 
 export type ClaimStanding = 'backed' | 'silent' | 'contradicted' | 'unchecked'
 
@@ -140,7 +141,7 @@ export const researcherApi = {
   getGraph: async (): Promise<KnowledgeGraph> => MOCK_GRAPH,
 
   // TODO gateway: GET /researcher/home
-  getHome: async (): Promise<ResearcherHome> => MOCK_HOME,
+  getHome: async (): Promise<ResearcherHome> => store.home(),
 
   // TODO gateway: POST /researcher/consensus {"question": ...}
   askConsensus: async (question: string): Promise<FieldConsensus> => ({
@@ -149,9 +150,8 @@ export const researcherApi = {
   }),
 
   // TODO gateway: GET /researcher/projects
-  getProjects: async (): Promise<Project[]> => MOCK_PROJECTS,
+  getProjects: async (): Promise<Project[]> => store.projects(),
 
   // TODO gateway: GET /researcher/projects/{id}/library
-  getLibrary: async (projectId: string): Promise<ResearcherLibrary> =>
-    MOCK_LIBRARIES[projectId] ?? MOCK_LIBRARIES['retrieval-survey'],
+  getLibrary: async (projectId: string): Promise<ResearcherLibrary> => store.library(projectId),
 }
