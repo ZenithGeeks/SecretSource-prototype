@@ -18,8 +18,9 @@ const VERDICT_VERB: Record<'refutes' | 'insufficient', string> = {
   insufficient: 'is silent on',
 }
 
-function sourceMeta(result: { inLibrary: boolean; openAccess: boolean; isCurrentCitation: boolean }) {
+function sourceMeta(result: { inLibrary: boolean; openAccess: boolean; isCurrentCitation: boolean; citedByLibrary: boolean }) {
   const parts = [result.inLibrary ? 'in library' : 'open access · not in library']
+  if (result.citedByLibrary) parts.push('cited by your library')
   if (result.isCurrentCitation) parts.push('your current citation')
   return `· ${parts.join(' · ')}`
 }
@@ -42,7 +43,7 @@ function readQueryParam() {
 
 function writeQueryParam(q: string) {
   const params = new URLSearchParams(window.location.search)
-  if (q) params.set('q', q)
+  if (q && q.trim() !== INITIAL_QUERY.trim()) params.set('q', q)
   else params.delete('q')
   window.history.replaceState(null, '', `?${params.toString()}`)
 }
@@ -65,7 +66,11 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
   const actions = useWriterActions()
 
   const copy = (id: string, text: string) => {
-    void navigator.clipboard.writeText(text)
+    try {
+      navigator.clipboard.writeText(text).catch(() => {})
+    } catch {
+      return
+    }
     setCopiedId(id)
     setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500)
   }

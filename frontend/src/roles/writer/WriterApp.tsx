@@ -77,7 +77,18 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
 
   useEffect(() => syncScreenParam(screen), [screen])
 
-  const navigate = (next: WriterScreen) => setScreen(next)
+  /** Plain nav (sidebar, Home's shortcuts, etc.) — strips `claim`/`q` so a screen reached this
+   * way never inherits a stale claim from wherever the user was before. Screens reached via an
+   * explicit hand-off (openDraftCheck, backToDraftCheck) set those params themselves. */
+  const navigate = (next: WriterScreen) => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('claim') || params.has('q')) {
+      params.delete('claim')
+      params.delete('q')
+      window.history.replaceState(null, '', `?${params.toString()}`)
+    }
+    setScreen(next)
+  }
 
   const replaceCitation = (citationLabel: string) => {
     setReplacedCitation(citationLabel)
