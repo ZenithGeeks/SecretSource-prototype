@@ -5,87 +5,10 @@
  */
 
 import { Button, Input } from '../../../components/ui'
+import { Row, Section, Select, Toggle } from '../../../components/settings'
 import { store } from '../../../lib/researcherStore'
 import type { Settings as SettingsType } from '../../../lib/settings'
 import { updateSettings, useSettings } from '../../../lib/settings'
-import { cn } from '../../../lib/utils'
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
-      <h2 className="border-b border-border-subtle px-5 py-3 text-sm font-semibold text-ink">
-        {title}
-      </h2>
-      <div className="divide-y divide-border-subtle">{children}</div>
-    </section>
-  )
-}
-
-function Row({
-  label,
-  hint,
-  children,
-}: {
-  label: string
-  hint?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center justify-between gap-6 px-5 py-3.5">
-      <div className="min-w-0">
-        <p className="text-sm text-ink">{label}</p>
-        {hint && <p className="text-xs text-ink-muted">{hint}</p>}
-      </div>
-      <div className="flex shrink-0 items-center">{children}</div>
-    </div>
-  )
-}
-
-function Toggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className={cn(
-        'inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
-        on ? 'bg-accent' : 'bg-border-subtle',
-      )}
-    >
-      <span
-        className={cn(
-          'inline-block size-5 rounded-full bg-white shadow-sm transition-transform',
-          on ? 'translate-x-[1.375rem]' : 'translate-x-0.5',
-        )}
-      />
-    </button>
-  )
-}
-
-function Select({
-  value,
-  options,
-  onChange,
-}: {
-  value: string
-  options: string[]
-  onChange: (v: string) => void
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-lg border border-border-subtle bg-canvas px-3 py-1.5 text-sm text-ink outline-none focus-visible:border-accent"
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
-  )
-}
 
 export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
   // TODO gateway: GET/PATCH /settings. Persisted to localStorage until then.
