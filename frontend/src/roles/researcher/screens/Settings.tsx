@@ -20,9 +20,6 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
     const email = window.prompt('New email address', s.email)?.trim()
     if (email) set('email', email)
   }
-  const changePassword = () => {
-    if (window.prompt('New password (min 8 characters)')) window.alert('Password updated.')
-  }
 
   const exportLibrary = () => {
     const libraries = Object.fromEntries(store.projects().map((p) => [p.id, store.library(p.id)]))
@@ -65,8 +62,8 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
             Change
           </Button>
         </Row>
-        <Row label="Password" hint="Last changed 3 months ago.">
-          <Button variant="ghost" onClick={changePassword}>
+        <Row label="Password" hint="Coming with authentication.">
+          <Button variant="ghost" disabled>
             Change password
           </Button>
         </Row>
