@@ -4,8 +4,8 @@
  * Verdict chips filter which issues the side panel shows (`?filter=`); clicking a marked
  * claim in the text selects it (`?claim=`); `?draft=` picks which draft to check. */
 
-import { CheckCircle2, ChevronRight, Download, Loader2, Search, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { CheckCircle2, ChevronRight, Download, Loader2, Search, Sparkles, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button, Card, Empty, StandingBadge } from '../../../components/ui'
 import { useDraftCheck, useWriterActions } from '../../../lib/useWriter'
@@ -32,7 +32,9 @@ function readParams() {
   const draftId = params.get('draft') ?? undefined
   const claimId = params.get('claim') ?? undefined
   const filterRaw = params.get('filter')
-  const filterKinds = (filterRaw ? filterRaw.split(',') : ['refutes', 'insufficient']) as VerdictKind[]
+  const filterKinds: VerdictKind[] = filterRaw
+    ? filterRaw.split(',').filter((k): k is VerdictKind => (LEGEND_KINDS as string[]).includes(k))
+    : ['refutes', 'insufficient']
   return { draftId, claimId, filterKinds }
 }
 
@@ -87,6 +89,9 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
   const [isRechecking, setIsRechecking] = useState(false)
   const draftCheck = useDraftCheck(initial.draftId, filterKinds)
   const actions = useWriterActions()
+  const recheckTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => () => clearTimeout(recheckTimer.current), [])
 
   const setClaimId = (id?: string) => {
     setClaimIdState(id)
@@ -106,8 +111,21 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
   )
   const activeIssue: Issue | undefined = issues[activeIndex]
 
+  // Stale `?claim=` (e.g. after a filter change drops it from the list): resync during render
+  // to whatever actually ended up active, instead of leaving the URL pointing at a claim no
+  // longer shown.
+  if (claimId && activeIssue && activeIssue.id !== claimId) {
+    setClaimIdState(activeIssue.id)
+    writeParams({ claimId: activeIssue.id, filterKinds })
+  }
+
+  const dismissPendingToast = () => {
+    if (draftCheck.data?.pendingReplacement) actions.dismissReplacement(draftCheck.data.pendingReplacement.claimId)
+  }
+
   const goToIssue = (index: number) => {
     const next = issues[Math.min(Math.max(index, 0), issues.length - 1)]
+    dismissPendingToast()
     if (next) setClaimId(next.id)
   }
 
@@ -129,8 +147,9 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
 
   const recheck = () => {
     if (!activeIssue) return
+    dismissPendingToast()
     setIsRechecking(true)
-    setTimeout(() => {
+    recheckTimer.current = setTimeout(() => {
       actions.recheckClaim(activeIssue.id)
       setIsRechecking(false)
     }, 700)
@@ -282,6 +301,14 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
             className="rounded bg-white/10 px-2.5 py-1 text-xs font-medium"
           >
             Undo
+          </button>
+          <button
+            type="button"
+            onClick={dismissPendingToast}
+            aria-label="Dismiss"
+            className="rounded p-1 text-white/70 hover:text-white"
+          >
+            <X className="size-4" />
           </button>
         </div>
       )}

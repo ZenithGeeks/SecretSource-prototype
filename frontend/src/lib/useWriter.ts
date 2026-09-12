@@ -58,6 +58,10 @@ export function useWriterActions() {
       store.undoReplacement(claimId)
       qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
     },
+    dismissReplacement: (claimId: string): void => {
+      store.dismissReplacement(claimId)
+      qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
+    },
     recheckClaim: (claimId: string): void => {
       store.recheckClaim(claimId)
       qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })

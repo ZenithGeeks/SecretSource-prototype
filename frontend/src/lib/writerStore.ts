@@ -125,6 +125,13 @@ export const store = {
     return claimId in db.pendingReplacements
   },
 
+  /** Dismiss a pending replacement's toast without undoing the swap. */
+  dismissReplacement(claimId: string): CheckRun {
+    const claim = db.claims.find((c) => c.id === claimId)
+    delete db.pendingReplacements[claimId]
+    return buildCheckRun(claim?.draftId ?? DEFAULT_DRAFT_ID)
+  },
+
   /** Simulated re-check: after a delay, resolves to the claim's suggestion's verdict (or
    * `supports` when there's nothing left to disagree with). */
   recheckClaim(claimId: string): CheckRun {
