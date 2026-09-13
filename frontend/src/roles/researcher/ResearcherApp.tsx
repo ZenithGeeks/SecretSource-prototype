@@ -9,7 +9,7 @@
  * Library's "Add paper" both land there.
  */
 
-import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Microscope, Settings, Waypoints } from 'lucide-react'
+import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Microscope, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -26,12 +26,13 @@ import { Settings as SettingsScreen } from './screens/Settings'
 type NavKey = 'home' | 'library' | 'graph' | 'history' | 'settings'
 export type ResearcherScreen = NavKey | 'field-consensus'
 
+// Settings is not a nav item — it's account-level, reached from the profile menu at the
+// sidebar bottom (as in Figma). It stays a routable screen so ?screen=settings still opens it.
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'library', label: 'Library', icon: LibraryIcon },
   { key: 'graph', label: 'Graph', icon: Waypoints },
   { key: 'history', label: 'History', icon: HistoryIcon },
-  { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
 // field-consensus sits under the Library section in the nav.
@@ -97,6 +98,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Researcher"
       roleIcon={Microscope}
       onChangeRole={onChangeRole}
+      onOpenSettings={() => navigate('settings')}
       wide={wide}
       sidebar={
         screen === 'history' ? (

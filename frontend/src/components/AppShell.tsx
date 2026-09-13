@@ -9,16 +9,102 @@
  * Figma: NavItem (default/active) and RoleChip from the Components page.
  */
 
-import { Menu, X } from 'lucide-react'
+import { LogOut, Menu, Settings as SettingsIcon, X } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
+import { useSettings } from '../lib/settings'
+import { useAuth, signOut } from '../lib/useAuth'
 import { cn } from '../lib/utils'
 import { Brand } from './Brand'
 
 type Icon = ComponentType<{ className?: string }>
 
 export type NavEntry<K extends string = string> = { key: K; label: string; icon: Icon }
+
+/** Avatar initials from the display name ("Wittawat S." → "WS"). */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
+}
+
+/** The profile button + upward menu at the sidebar bottom: identity, Settings (when the role
+ * passes onOpenSettings), and Sign out (wired to useAuth signOut). */
+function ProfileMenu({ onOpenSettings }: { onOpenSettings?: () => void }) {
+  const { displayName } = useSettings()
+  const { session } = useAuth()
+  const email = session?.user?.email ?? 'Signed in locally'
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      {open && (
+        <div className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-border-subtle bg-surface p-1.5 shadow-xl">
+          <div className="flex items-center gap-2.5 px-2 py-2">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
+              {initials(displayName)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-semibold text-ink">{displayName}</p>
+              <p className="truncate text-[11px] text-ink-muted">{email}</p>
+            </div>
+          </div>
+          <div className="my-1 h-px bg-border-subtle" />
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                onOpenSettings()
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink hover:bg-accent-soft"
+            >
+              <SettingsIcon className="size-4" />
+              Settings
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              void signOut()
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-refutes hover:bg-refutes-soft"
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </button>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-2.5 rounded-lg border border-border-subtle px-2 py-2 text-left transition-colors hover:border-accent',
+          open && 'bg-accent-soft',
+        )}
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
+          {initials(displayName)}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{displayName}</span>
+      </button>
+    </div>
+  )
+}
 
 export function AppShell<K extends string>({
   nav,
@@ -27,6 +113,7 @@ export function AppShell<K extends string>({
   role,
   roleIcon: RoleIcon,
   onChangeRole,
+  onOpenSettings,
   sidebar,
   wide = false,
   children,
@@ -37,6 +124,7 @@ export function AppShell<K extends string>({
   role: string
   roleIcon: Icon
   onChangeRole?: () => void
+  onOpenSettings?: () => void
   sidebar?: ReactNode
   wide?: boolean
   children: ReactNode
@@ -89,14 +177,20 @@ export function AppShell<K extends string>({
         {sidebar}
       </div>
 
-      <div className="mt-auto flex items-center gap-2 px-3">
-        <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
-          <RoleIcon className="size-4" />
-          {role}
-        </span>
-        <button type="button" onClick={onChangeRole} className="py-2 text-xs text-accent hover:underline">
-          change
-        </button>
+      <div className="mt-auto flex flex-col gap-3 px-3">
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
+            <RoleIcon className="size-4" />
+            {role}
+          </span>
+          <button type="button" onClick={onChangeRole} className="py-2 text-xs text-accent hover:underline">
+            change
+          </button>
+        </div>
+        <ProfileMenu onOpenSettings={onOpenSettings && (() => {
+          setMenuOpen(false)
+          onOpenSettings()
+        })} />
       </div>
     </>
   )
