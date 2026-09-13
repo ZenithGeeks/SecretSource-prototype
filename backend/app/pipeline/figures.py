@@ -19,8 +19,11 @@ from app.config import PAPERS_DIR
 IMAGE_SCALE = 2.0  # crops rendered at twice the page's own resolution
 MANIFEST = "media.json"  # cache: Docling runs once per paper
 FORMULAS = os.getenv("DOCLING_FORMULAS", "") == "1"  # reading formulas as LaTeX costs its own model download
+# auto: OCR only a PDF without a text layer (needs_ocr); always; never.
+OCR = os.getenv("DOCLING_OCR", "auto").strip().lower() or "auto"
+OCR_SAMPLE_PAGES = 10  # pages looked at, spread over the paper, to tell a scan from a born-digital PDF
 
-_converter = None
+_converters: dict[tuple[bool, bool], object] = {}  # by (ocr, pictures): loading the models takes seconds
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 _converter_guard = threading.Lock()
@@ -33,18 +36,54 @@ def _lock_for(pdf: Path) -> threading.Lock:
         return _locks.setdefault(pdf.as_posix(), threading.Lock())
 
 
-def _enriched_converter():
-    """Docling with picture crops and formula reading turned on (both off by default)."""
+def needs_ocr(pdf_path: str) -> bool:
+    """Whether Docling should run OCR on this PDF.
+
+    The papers we read are born-digital: their text layer already holds every caption and
+    sentence. OCR over every page doubled Docling's time on ColBERT (36 s against 18 s on a CPU)
+    and changed no caption and no character of the text (#161). A scanned page is an image with
+    no fonts, so a PDF where fewer than half of up to OCR_SAMPLE_PAGES pages use a font still
+    gets OCR. Reading a page's font list is cheap, where extracting its text took up to 11 s on a
+    PDF full of vector drawings. DOCLING_OCR=always or never overrides the check.
+    """
+    if OCR in ("always", "never"):
+        return OCR == "always"
+    import pymupdf
+
+    try:
+        with pymupdf.open(pdf_path) as document:
+            count = document.page_count
+            sample = range(count)
+            if count > OCR_SAMPLE_PAGES:
+                step = (count - 1) / (OCR_SAMPLE_PAGES - 1)
+                sample = sorted({round(i * step) for i in range(OCR_SAMPLE_PAGES)})
+            with_fonts = sum(1 for number in sample if document[number].get_fonts())
+            return with_fonts * 2 < len(sample)
+    except Exception:
+        return True  # pymupdf cannot read it: let Docling try, with everything on
+
+
+def docling_converter(ocr: bool, pictures: bool = True):
+    """A Docling converter, built once per setting and shared by every paper.
+
+    `pictures` renders picture crops, and reads formulas as LaTeX when DOCLING_FORMULAS is on;
+    both are off in Docling by default.
+    """
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    options = PdfPipelineOptions(
-        generate_picture_images=True, images_scale=IMAGE_SCALE, do_formula_enrichment=FORMULAS
-    )
-    return DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
-    )
+    with _converter_guard:
+        if (ocr, pictures) not in _converters:
+            options = PdfPipelineOptions(do_ocr=ocr)
+            if pictures:
+                options.generate_picture_images = True
+                options.images_scale = IMAGE_SCALE
+                options.do_formula_enrichment = FORMULAS
+            _converters[ocr, pictures] = DocumentConverter(
+                format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
+            )
+        return _converters[ocr, pictures]
 
 
 NUMBERED = re.compile(r"^\s*(figure|fig\.?|table|equation|eq\.?)\s*([0-9]+[a-z]?)", re.I)
@@ -165,17 +204,13 @@ def paper_media(pdf_path: str, refresh: bool = False) -> dict:
         pdf_path: a local PDF path.
         refresh: run Docling again even when this paper was read before.
     """
-    global _converter
     pdf = Path(pdf_path)
     try:
         with _lock_for(pdf):
             if not refresh and (cached := _read_manifest(pdf)):
                 return {"status": "ok", "cached": True, **_named(cached)}
 
-            with _converter_guard:
-                if _converter is None:
-                    _converter = _enriched_converter()
-            document = _converter.convert(pdf).document
+            document = docling_converter(needs_ocr(pdf_path)).convert(pdf).document
 
             media = _named(
                 {
