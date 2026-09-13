@@ -11,12 +11,14 @@ covers how to run the backend, how it is organised, and the HTTP API.
 
 - [Run it](#run-it)
 - [Settings](#settings)
+- [Login](#login)
 - [Folder layout](#folder-layout)
 - [Tests](#tests)
 - [HTTP API](#http-api)
   - [Analyses](#analyses)
   - [Progress events](#progress-events)
   - [Papers](#papers)
+  - [Researcher](#researcher)
   - [Other routes](#other-routes)
 
 ## Run it
@@ -68,7 +70,10 @@ default".
 | `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
 | `PAPERS_DIR` | `data/papers` | downloaded PDFs and figure crops |
 | `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses in Supabase instead of SQLite |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses and projects in Supabase instead of SQLite, and turn on login (see Login) |
+| `SESSION_DB_URL` | empty | Postgres URL where the chat agents keep their sessions (`app/sessions.py`); empty keeps them in memory, so a restart forgets them. ADK's tables go in the `adk` schema, never `public` |
+| `DIRECT_URL` | empty | used when `SESSION_DB_URL` is empty; it is the name Supabase's Connect dialog gives the session pooler URL |
+| `A2A_HOST`, `A2A_PORT` | `localhost`, `8002` | the address the A2A agent card tells callers to use (`a2a_server.py`), not the address the server binds |
 | `S2_API_KEY` | empty | Semantic Scholar key; without it most lookups are rate limited |
 | `UNPAYWALL_EMAIL` | empty | contact email that lets Unpaywall answer lookups |
 | `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
@@ -81,6 +86,26 @@ default".
 The service role key can read and write all data. Keep it on the server and never put it in
 the frontend or in git.
 
+## Login
+
+Login is on when the gateway has `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and the web
+image was built with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (build arguments of the
+`web` service in `docker-compose.yml`).
+
+- The web app sends the user's Supabase access token as `Authorization: Bearer <token>` on every
+  request, including the event stream. A token in the URL is ignored, because access logs record
+  URLs.
+- The gateway asks Supabase who the token belongs to (`app/auth.py`) and remembers the answer
+  for 5 minutes.
+- A token Supabase rejects returns `401` with `the session has expired, sign in again`.
+- No token means nobody is signed in. Without Supabase settings, every request is nobody, and
+  every analysis is shared, as before login existed.
+- A new analysis gets `owner`, the user id of whoever started it (`null` when nobody).
+  Each caller sees only analyses whose `owner` is them. Someone else's analysis returns `404`,
+  not `403`, so an id does not tell anyone that it exists.
+- A paper under `/papers/{name}` is served only when it is the analysed paper, or a cited paper
+  a check read, in one of the caller's analyses. Anything else returns `404`, signed in or not.
+
 ## Folder layout
 
 ```
@@ -89,6 +114,10 @@ backend/
 │   ├── main.py          HTTP gateway: the routes below and the analysis run (_run)
 │   ├── config.py        all settings
 │   ├── store.py         saves analyses and source lookups (SQLite or Supabase)
+│   ├── auth.py          who is asking: the Supabase user behind a request's token
+│   ├── researcher.py    the researcher screens, built from one user's analyses
+│   ├── sessions.py      where the chat agents keep sessions (Postgres or memory)
+│   ├── backfill_titles.py  gives stored analyses the title a new run would give them
 │   ├── llm.py           the LLM for ADK (adk_model) and for DSPy (dspy_lm)
 │   ├── workflow.py      the same pipeline as an ADK Workflow graph
 │   ├── agents/team.py   chat agents: coordinator, rag_agent, paper_agent, verify_agent
@@ -165,7 +194,8 @@ Response: `{"id": "<analysis id>"}`.
 
 #### `GET /analyses`
 
-Every analysis, newest first, without its `stages` list.
+Every analysis the caller may see, newest first, without `stages`, `references` and
+`markers`.
 
 #### `GET /analyses/{id}`
 
@@ -181,6 +211,11 @@ One analysis with its results.
 | `claims` | the claims found, see below |
 | `stages` | every progress event so far, see [Progress events](#progress-events) |
 | `audit` | problems the audit found in the finished analysis; usually empty |
+| `owner` | the user id of whoever started it, or `null` |
+| `title`, `authors`, `year` | the analysed paper's own title, authors and year; missing on older analyses |
+| `figures` | the analysed paper's figures whose caption gives their number: `label`, `page`, `caption`, `image` |
+| `references` | the references the paper's citation markers point to, by GROBID id (like `b12`); each is a citation (see below) |
+| `markers` | where the paper cites a reference: `ref`, `text` (the marker as printed, like `[13]`), `page`, `x0`, `y0`, `x1`, `y1`, `page_width`, `page_height` in PDF points |
 
 Each claim has:
 
@@ -189,7 +224,7 @@ Each claim has:
 | `claim` | the claim in short form |
 | `sentence` | the sentence from the paper it came from |
 | `source` | where that sentence is in the PDF: `page`, `boxes`, `page_width`, `page_height`; `null` if not found |
-| `citations` | the works the sentence cites: `title`, `authors`, `year`, `doi`, `arxiv`, `url` |
+| `citations` | the works the sentence cites: `title`, `authors`, `year`, `doi`, `arxiv`, `url`, `ref` (GROBID's id, like `b12`) and `label` (the number the paper prints, like `13`) |
 | `verdicts` | one result per cited work that was checked (same shape as `POST /verify`), plus `cited` |
 | `unchecked` | one entry per cited work that could not be checked: `source`, `reason`, `message` |
 
@@ -236,12 +271,16 @@ different claims arrive in any order. To show verdicts while a run is still goin
 curl -N http://localhost:8080/analyses/3f9c2a7b1d04/events
 ```
 
+With login on, add `-H "Authorization: Bearer <token>"`, as for every other route.
+
 Errors: `404` when the id is unknown.
 
 ### Papers
 
 `{name}` is a file name inside `PAPERS_DIR`, for example `2112.01488.pdf`. A name with a
 path in it, or one that starts with `.`, returns `400`. A missing file returns `404`.
+A paper that is not the analysed paper, or a cited paper a check read, in one of the
+caller's analyses also returns `404` (see [Login](#login)).
 
 #### `GET /papers/{name}`
 
@@ -277,6 +316,59 @@ Response: `page`, `boxes`, `page_width`, `page_height` and `coverage` (how much 
 was matched). Boxes are in PDF points with the origin at the top left. To draw them on a
 page image, divide by `page_width` and `page_height`. When nothing is found:
 `{"page": null, "boxes": []}`.
+
+### Researcher
+
+These routes build the researcher screens from the caller's own finished analyses; they make
+no LLM calls.
+
+#### `GET /researcher/home`
+
+| Field | Meaning |
+| --- | --- |
+| `alert` | one sentence for the top of the page, for example how many claims a source contradicts |
+| `conflicts` | claims a cited work contradicts: `claim`, `for`, `against`, `analysis`, `claimIndex` |
+| `queue` | works cited by more than one claim that are not analysed: `paper`, `note`, `identifier` |
+| `library` | `papers`, `claims`, `verified`, `tally` |
+
+`tally` counts claims as `backed`, `silent`, `contradicted` and `unchecked`.
+
+#### `GET /researcher/projects`
+
+The caller's projects, newest change first, then `unsorted` when some papers are in no project.
+Each has: `id`, `name`, `papers`, `claims`, `clusters`, `tally`, `updated`, and `unsorted: true`
+on the last one.
+
+#### `POST /researcher/projects`
+
+Body `{"name": "...", "description": "..."}`. Returns the new project in the same shape.
+`400` when the name is empty.
+
+#### `GET /researcher/projects/{id}/library`
+
+One project's papers: `summary`, `clusters`, `papers` (each `id`, `title`, `cite`, `cluster`,
+`claims`, `backed`, `contradicted`, `linked`). `backed` and `contradicted` are `null` for a
+paper that was not verified. Use `unsorted` as the id for papers in no project. `404` for an
+unknown project.
+
+#### `POST /researcher/projects/{id}/papers`
+
+Body `{"analysis_id": "..."}`. Puts one of the caller's analyses in the project and returns the
+project. `404` when the analysis or project is not the caller's.
+
+#### `POST /researcher/consensus`
+
+Body `{"question": "..."}`. What the works cited in the caller's papers say about the question,
+from verdicts already found: `question`, `supports`, `refutes`, `silent`, `span` (years),
+`note`, `rows` (each `paper`, `cite`, `verdict`, `quote`, `claim`, `analysis`, `claimIndex`),
+`unlisted` (rows past the first 20).
+
+#### `GET /researcher/graph`
+
+The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: `relation` is
+`asserts`, `backs`, `contradicts`, `silent` or `unchecked`) and `paperEdges` (paper to paper).
+A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
+when the run does not say.
 
 ### Other routes
 
