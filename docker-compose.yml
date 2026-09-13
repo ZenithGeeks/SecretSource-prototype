@@ -134,6 +134,11 @@ services:
       S2_API_KEY: ${S2_API_KEY:-} # without one, Semantic Scholar 429s most lookups
       UNPAYWALL_EMAIL: ${UNPAYWALL_EMAIL:-}
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
+      PARALLEL_SOURCES: ${PARALLEL_SOURCES:-3} # cited papers downloaded and indexed at the same time
+      PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims judged at the same time
+      # Both set: analyses are stored in Supabase Postgres instead of SQLite (supabase/README.md).
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
     volumes:
       - ./data/papers:/app/data/papers # shared with the retrieval services
       - ./backend/secrets:/app/secrets:ro # identity-token credentials, see .env.example

@@ -1,9 +1,9 @@
-"""Analyses and resolved sources that outlive a restart.
+"""Analyses and resolved sources that stay after a restart.
 
 Two backends behind one API: SQLite for local runs and tests (the default), or Supabase
 Postgres when SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set. Both keep one row per
-analysis with the result as JSON — the gateway reads and writes whole analyses, never
-parts of them, so switching backends changes the storage calls here and nothing above.
+analysis with the result as JSON. The gateway reads and writes whole analyses, never
+parts of them. So switching backends changes the storage calls here and nothing above.
 """
 
 import json
@@ -12,18 +12,18 @@ import sqlite3
 from pathlib import Path
 
 
-# ── Backend selection ────────────────────────────────────────────────────────────
-# Read at call time (not import) so tests can set the environment before the first use.
+# Backend selection.
+# Read at call time, not import: tests set the environment before the first use.
 def _use_supabase() -> bool:
     return bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
 
 
-# ── Supabase (blob tables: analyses(id, started, data), sources(key, data)) ────────
+# Supabase. Blob tables: analyses(id, started, data), sources(key, data).
 _client = None
 
 
 def _supabase():
-    """The Supabase client, created once. Uses the service role, which bypasses RLS —
+    """The Supabase client, created once. Uses the service role, which skips RLS:
     these tables are server-only and have no policies."""
     global _client
     if _client is None:
@@ -35,7 +35,7 @@ def _supabase():
     return _client
 
 
-# ── SQLite ─────────────────────────────────────────────────────────────────────
+# SQLite.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS analyses (
     id      TEXT PRIMARY KEY,
@@ -56,7 +56,7 @@ _db_path: str | None = None
 
 
 def _connect() -> sqlite3.Connection:
-    """The open connection, reopened if ANALYSES_DB changed since last time."""
+    """The open connection. Reopens it if ANALYSES_DB changed since last time."""
     global _db, _db_path
 
     path = os.getenv("ANALYSES_DB", "data/analyses.db")
@@ -72,7 +72,7 @@ def _connect() -> sqlite3.Connection:
     return _db
 
 
-# ── Public API ───────────────────────────────────────────────────────────────────
+# Public API.
 def save(analysis: dict) -> None:
     if _use_supabase():
         _supabase().table("analyses").upsert(
@@ -110,7 +110,7 @@ def delete(analysis_id: str) -> bool:
 
 
 def remember_source(key: str, resolution: dict) -> None:
-    """Where a cited work's PDF lives, so a re-run does not re-ask a rate-limited API."""
+    """Where a cited work's PDF lives, so a re-run does not ask a rate-limited API again."""
     if _use_supabase():
         _supabase().table("sources").upsert({"key": key, "data": resolution}).execute()
         return

@@ -10,7 +10,7 @@ secretsource-prototype-gateway python -m pytest tests/test_workflow_assemble.py
 
 import copy
 
-from app.workflow import fold_checks
+from app.workflow import fold_checks, pair_with_sources
 
 CLAIMS = [
     {"claim": "Late interaction beats single-vector retrieval.", "citations": [{"doi": "10.1/a"}]},
@@ -51,3 +51,20 @@ def test_a_verdict_is_keyed_by_what_the_source_was_looked_up_by():
     folded = fold_checks(CLAIMS, CHECKS)
     assert folded[0]["verdicts"][0]["cited"] == "colbertv2.pdf"
     assert folded[1]["unchecked"][0]["reason"] == "no-open-access"
+
+
+def test_each_job_gets_the_prepared_source_it_cites():
+    jobs = [
+        {"claim": 0, "text": "a", "source": "10.1/a", "url": ""},
+        {"claim": 1, "text": "b", "source": "10.1/b", "url": ""},
+        {"claim": 2, "text": "c", "source": "10.1/a", "url": ""},
+    ]
+    prepared = [
+        {"source": "10.1/a", "status": "ok", "path": "data/papers/a.pdf"},
+        {"source": "10.1/b", "status": "error", "reason": "no-open-access", "message": "no free copy"},
+    ]
+    paired = pair_with_sources(jobs, prepared)
+    assert [job["prepared"]["status"] for job in paired] == ["ok", "error", "ok"]
+    assert paired[2]["prepared"]["path"] == "data/papers/a.pdf"
+    assert "prepared" not in jobs[0]  # the jobs passed in are not changed
+

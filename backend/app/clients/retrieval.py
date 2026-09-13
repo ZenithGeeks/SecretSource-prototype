@@ -1,12 +1,12 @@
 """HTTP clients for the retrieval services.
 
-Each service exposes the same contract twice: plain HTTP under /api (used here, including
-the RAG retriever) and MCP under /mcp (used by the agents). The pipeline calls HTTP because
-it wants typed results and no session handshake in a hot loop.
+Each service offers the same tools twice: plain HTTP under /api (used here) and MCP
+under /mcp (used by the agents). The pipeline uses HTTP. It wants typed results and
+no session handshake in a hot loop.
 
-Files travel with the request (/api/upload, /api/upload_figures) rather than as paths.
-A path only means the same thing on both sides under the compose bind-mount; the
-service may just as well be on another machine or on Cloud Run.
+Files go with the request (/api/upload, /api/upload_figures), not as paths. A path
+means the same thing on both sides only under the compose bind-mount. The service may
+be on another machine or on Cloud Run.
 """
 
 import json
@@ -42,7 +42,7 @@ def colbert_search(query: str, k: int = 10) -> list[dict]:
 
 
 def colbert_add(path: str) -> dict:
-    """Index one PDF. Idempotent: re-adding replaces the paper's passages."""
+    """Index one PDF. Safe to run again: re-adding replaces the paper's passages."""
     with open(path, "rb") as pdf:
         response = requests.post(
             f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=600
@@ -68,12 +68,12 @@ def colpali_add_pdf(path: str) -> None:
 
 
 def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
-    """Send the crops along with their metadata; the service matches them by file name."""
+    """Send the crops with their metadata. The service matches them by file name."""
     with ExitStack() as open_files:
-        images = [
-            ("images", (Path(f["image"]).name, open_files.enter_context(open(f["image"], "rb")), "image/png"))
-            for f in figures
-        ]
+        images = []
+        for figure in figures:
+            handle = open_files.enter_context(open(figure["image"], "rb"))
+            images.append(("images", (Path(figure["image"]).name, handle, "image/png")))
         requests.post(
             f"{COLPALI_URL}/api/upload_figures",
             data={"source": source, "title": title, "figures": json.dumps(figures)},

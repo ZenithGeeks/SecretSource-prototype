@@ -1,8 +1,8 @@
-"""What a paper shows rather than says: figure crops with captions, tables and formulas as text.
+"""What a paper shows instead of saying: figure crops, tables, and formulas.
 
-Docling finds all of them. A figure is cropped and written beside the paper — a whole
-rendered page dilutes the figure's patches among prose — and the crop carries its caption,
-so a visual hit gives the judge something to quote. Tables stay markdown, formulas LaTeX.
+Docling finds all of them. Each figure is cropped and saved beside the paper with its
+caption, so a visual hit gives the judge something to quote. Tables stay markdown,
+formulas LaTeX.
 
     python -m app.pipeline.figures data/papers/colbertv2.pdf
 """
@@ -16,13 +16,13 @@ from app.config import PAPERS_DIR
 
 IMAGE_SCALE = 2.0  # crops rendered at twice the page's own resolution
 MANIFEST = "media.json"  # cache: Docling runs once per paper
-FORMULAS = os.getenv("DOCLING_FORMULAS", "") == "1"  # LaTeX enrichment costs its own model download
+FORMULAS = os.getenv("DOCLING_FORMULAS", "") == "1"  # reading formulas as LaTeX costs its own model download
 
 _converter = None
 
 
 def _enriched_converter():
-    """Docling with picture crops and formula enrichment turned on (both off by default)."""
+    """Docling with picture crops and formula reading turned on (both off by default)."""
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -40,7 +40,7 @@ KINDS = {"fig": "Figure", "figure": "Figure", "table": "Table", "equation": "Equ
 
 
 def _label(caption: str, kind: str, index: int) -> str:
-    """"Figure 3" — the paper's own name for it, falling back to counting."""
+    """"Figure 3". The paper's own name for it, or a count if it has none."""
     found = NUMBERED.match(caption or "")
     if found:
         return f"{KINDS[found.group(1).lower().rstrip('.')]} {found.group(2)}"
@@ -117,7 +117,7 @@ def _read_manifest(pdf: Path) -> dict | None:
     if not manifest.is_file():
         return None
     found = json.loads(manifest.read_text(encoding="utf-8"))
-    return found if all(Path(f["image"]).is_file() for f in found.get("figures", [])) else None
+    return found if all(Path(figure["image"]).is_file() for figure in found.get("figures", [])) else None
 
 
 def paper_media(pdf_path: str, refresh: bool = False) -> dict:

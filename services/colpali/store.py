@@ -2,13 +2,12 @@
 
     python -m store paper.pdf "papers/*.pdf" papers/   # files, globs or folders
 
-A point is one image with its patch vectors (Qdrant multivector, MAX_SIM comparator): a
-cropped figure where the caller extracted them, or a whole rendered page where it could
-not. A crop is all signal, and it carries a caption and a name, so a hit is "Figure 3" —
-quotable and showable — rather than "look at page 7".
+A point is one image with its patch vectors (Qdrant multivector, MAX_SIM comparator).
+It is a cropped figure if the caller extracted them, or a whole rendered page if it
+could not. A crop has a caption and a name. So a hit is "Figure 3", not "page 7".
 
-Re-adding a paper replaces every point it already had. The collection name carries the
-vector width; swapping checkpoints with a different width needs a fresh collection.
+Re-adding a paper replaces every point it already had. The collection name holds the
+vector width. A checkpoint with a different width needs a fresh collection.
 """
 
 import os
@@ -20,16 +19,16 @@ from encoder import Encoder
 from qdrant_client import QdrantClient, models
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None  # only Qdrant Cloud checks it
-QDRANT_TIMEOUT = 60  # qdrant-client's short default times out on a long paper's whole batch
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None  # only Qdrant Cloud uses it
+QDRANT_TIMEOUT = 60  # qdrant-client's short default is too short for a long paper's whole batch
 COLLECTION = os.getenv("COLPALI_COLLECTION", "academic_visual_pages")
-VECTOR_NAME = "colqwen"  # named vector, matching the team's cluster provisioning
+VECTOR_NAME = "colqwen"  # named vector, to match the team's cluster setup
 RENDER_DPI = int(os.getenv("COLPALI_DPI", "150"))
-UPSERT_BATCH = 16  # points per write; page/figure patch multivectors are large, so fewer per batch
+UPSERT_BATCH = 16  # points per write. Page and figure patch multivectors are large, so fewer per batch
 
 
 def pdf_pages(path: Path, dpi: int = RENDER_DPI) -> list:
-    """PDF -> one PIL image per page. PyMuPDF renders without needing poppler installed."""
+    """PDF -> one PIL image per page. PyMuPDF renders the pages, so poppler is not needed."""
     import pymupdf
     from PIL import Image
 
@@ -55,11 +54,11 @@ class Store:
                         multivector_config=models.MultiVectorConfig(
                             comparator=models.MultiVectorComparator.MAX_SIM
                         ),
-                        hnsw_config=models.HnswConfigDiff(m=0),  # multivectors: exact rescoring
+                        hnsw_config=models.HnswConfigDiff(m=0),  # multivectors: use exact rescoring
                     )
                 },
             )
-        # Idempotent; also covers a collection someone provisioned without the index.
+        # Safe to run again. Also adds the index to a collection made without it.
         self.client.create_payload_index(COLLECTION, "source", models.PayloadSchemaType.KEYWORD)
 
     def __len__(self) -> int:
@@ -80,15 +79,14 @@ class Store:
             models.PointStruct(id=uuid.uuid4().hex, vector={VECTOR_NAME: vector.tolist()}, payload=row)
             for row, vector in zip(rows, vectors, strict=True)
         ]
-        # In batches: one request for a whole paper's pages or crops was the write that timed
-        # out, even with a generous client timeout — many small requests survive a slow
-        # moment on the Qdrant VM that one large one does not.
+        # In batches. One big request for a whole paper timed out before, even with a
+        # long client timeout. Many small requests get through a slow moment on the Qdrant VM.
         for start in range(0, len(points), UPSERT_BATCH):
             self.client.upsert(COLLECTION, points[start : start + UPSERT_BATCH])
         return len(points)
 
     def add_pdf(self, pdf_path: str | Path) -> int:
-        """Whole rendered pages: the fallback for a paper no figures could be cropped from."""
+        """Whole rendered pages. This is the fallback for a paper with no croppable figures."""
         path = Path(pdf_path)
         images = pdf_pages(path)
         vectors = self.encoder.pages(images)
@@ -101,12 +99,12 @@ class Store:
         return self._upsert(rows, vectors)
 
     def add_figures(self, source: str, title: str, figures: list[dict]) -> int:
-        """One point per cropped figure, keyed by the name the paper gives it."""
+        """One point per cropped figure, matched by the name the paper gives it."""
         from PIL import Image
 
         images = [Image.open(figure["image"]).convert("RGB") for figure in figures]
         vectors = self.encoder.pages(images)
-        self._delete_source(source)  # figures replace whatever this paper had
+        self._delete_source(source)  # the new figures replace what this paper had before
         rows = [
             {"page": figure.get("page", 0), "title": title, "source": source,
              "kind": "figure", "label": figure.get("label", ""),
