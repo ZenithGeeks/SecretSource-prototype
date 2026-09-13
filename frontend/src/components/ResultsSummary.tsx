@@ -52,7 +52,7 @@ export function ResultsSummary({
   }
 
   return (
-    <div className="sticky top-0 z-10 -mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur">
+    <div className="-mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur lg:sticky lg:top-0 lg:z-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium" title={paper}>

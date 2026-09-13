@@ -59,7 +59,7 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
           What does the field say about…
         </h1>
         <form
-          className="flex gap-3"
+          className="flex flex-col gap-3 sm:flex-row"
           onSubmit={(event) => {
             event.preventDefault()
             setQuestion(draft)
@@ -78,7 +78,7 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
       </header>
 
       {/* Summary stats */}
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
         {stats.map((s) => (
           <div key={s.label} className="flex-1 rounded-xl border border-border-subtle bg-surface px-4 py-3">
             <p className={`font-serif text-2xl font-semibold tracking-tight ${s.className}`}>{s.value}</p>
@@ -95,7 +95,7 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
 
       {/* Verdict table */}
       <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
-        <div className="flex gap-4 px-5 py-3 text-xs font-medium text-ink-muted">
+        <div className="hidden gap-4 px-5 py-3 text-xs font-medium text-ink-muted sm:flex">
           <span className="w-56 shrink-0">Paper</span>
           <span className="w-36 shrink-0">Verdict</span>
           <span className="flex-1">Deciding passage</span>
@@ -103,13 +103,13 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
         {consensus.rows.map((row) => (
           <div
             key={`${row.analysis}-${row.claimIndex}-${row.paper}-${row.verdict}`}
-            className="flex gap-4 border-t border-border-subtle px-5 py-3"
+            className="flex flex-col gap-2 border-t border-border-subtle px-4 py-3 sm:flex-row sm:gap-4 sm:px-5"
           >
-            <div className="w-56 shrink-0">
+            <div className="sm:w-56 sm:shrink-0">
               <p className="text-sm font-medium text-ink">{row.paper}</p>
               <p className="text-xs text-ink-muted">{row.cite}</p>
             </div>
-            <div className="w-36 shrink-0">
+            <div className="sm:w-36 sm:shrink-0">
               <VerdictBadge verdict={row.verdict} />
             </div>
             <div className="min-w-0 flex-1">

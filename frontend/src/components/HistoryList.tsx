@@ -43,6 +43,7 @@ export function HistoryList({
           )}
         >
           <button
+            data-closes-menu
             onClick={() => onSelect(analysis.id)}
             aria-current={analysis.id === selected ? 'true' : undefined}
             className={cn(

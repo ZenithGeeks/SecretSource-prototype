@@ -39,10 +39,15 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
   )
 }
 
+/** "1 paper", "3 papers". */
+function count(number: number, noun: string) {
+  return `${number} ${noun}${number === 1 ? '' : 's'}`
+}
+
 function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
   const meta = project.unsorted
-    ? `${project.papers} papers · not in a project yet`
-    : `${project.papers} papers · ${project.claims} claims`
+    ? `${count(project.papers, 'paper')} · not in a project yet`
+    : `${count(project.papers, 'paper')} · ${count(project.claims, 'claim')}`
   return (
     <button
       type="button"
@@ -71,14 +76,14 @@ function ProjectsLanding({
 }) {
   return (
     <>
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Projects</h1>
           <p className="text-sm text-ink-muted">
             Group the papers you analysed into projects.
           </p>
         </div>
-        <Button onClick={onNew}>
+        <Button onClick={onNew} className="self-start sm:self-auto">
           <Plus className="size-4" />
           New project
         </Button>
@@ -199,12 +204,12 @@ function ProjectDetail({
         <span className="text-ink-muted">· {projectName}</span>
       </button>
 
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{projectName}</h1>
           <p className="text-sm text-ink-muted">{library.summary}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 self-start sm:self-auto">
           <Button onClick={unsorted ? onAddPaper : () => setPicking(true)}>
             <Plus className="size-4" />
             {unsorted ? 'Analyse a paper' : 'Add paper'}
@@ -246,7 +251,7 @@ function ProjectDetail({
 
       {/* Table */}
       <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
-        <div className="flex items-center gap-4 px-5 py-2.5 text-xs font-medium text-ink-muted">
+        <div className="hidden items-center gap-4 px-5 py-2.5 text-xs font-medium text-ink-muted md:flex">
           <span className="flex-1">Paper</span>
           {hasClusters && <span className="w-36 shrink-0">Cluster</span>}
           <span className="w-16 shrink-0">Claims</span>
@@ -261,22 +266,31 @@ function ProjectDetail({
             type="button"
             onClick={() => onOpenAnalysis(paper.id)}
             title="Open this analysis"
-            className="flex w-full items-center gap-4 border-t border-border-subtle px-5 py-2.5 text-left hover:bg-accent-soft"
+            className="flex w-full items-center gap-4 border-t border-border-subtle px-4 py-3 text-left first:border-t-0 hover:bg-accent-soft md:px-5 md:py-2.5 md:first:border-t"
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-ink">{paper.title}</p>
               <p className="text-xs text-ink-muted">{paper.cite}</p>
+              {/* On a phone the number columns do not fit, so they read as one line here. */}
+              <p className="mt-1 text-xs text-ink-muted md:hidden">
+                {count(paper.claims, 'claim')}
+                {paper.backed !== null && <> · <span className="text-supports">{paper.backed} backed</span></>}
+                {paper.contradicted !== null && (
+                  <> · <span className="text-refutes">{paper.contradicted} contradicted</span></>
+                )}
+                {paper.linked.length > 0 && <> · linked to {paper.linked.join(', ')}</>}
+              </p>
             </div>
             {hasClusters && (
-              <span className="flex w-36 shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+              <span className="hidden w-36 shrink-0 items-center gap-1.5 text-xs text-ink-muted md:flex">
                 <span className={cn('size-2 rounded-full', dotFor(paper.cluster))} />
                 {paper.cluster}
               </span>
             )}
-            <span className="w-16 shrink-0 text-sm font-medium text-ink">{paper.claims}</span>
-            <span className="w-16 shrink-0 text-sm font-medium text-supports">{paper.backed ?? '—'}</span>
-            <span className="w-24 shrink-0 text-sm font-medium text-refutes">{paper.contradicted ?? '—'}</span>
-            <span className="w-40 shrink-0 truncate text-xs text-accent">{paper.linked.join(', ')}</span>
+            <span className="hidden w-16 shrink-0 text-sm font-medium text-ink md:inline">{paper.claims}</span>
+            <span className="hidden w-16 shrink-0 text-sm font-medium text-supports md:inline">{paper.backed ?? '—'}</span>
+            <span className="hidden w-24 shrink-0 text-sm font-medium text-refutes md:inline">{paper.contradicted ?? '—'}</span>
+            <span className="hidden w-40 shrink-0 truncate text-xs text-accent md:inline">{paper.linked.join(', ')}</span>
             <ChevronRight className="size-4 shrink-0 text-ink-muted" />
           </button>
         ))}
