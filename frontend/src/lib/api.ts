@@ -7,6 +7,8 @@ export type Citation = {
   doi: string
   arxiv: string
   url: string
+  ref?: string // GROBID's id for the reference, e.g. "b12" (#123)
+  label?: string // how the paper cites it, e.g. "13"; missing on older analyses
 }
 
 export type Verdict = {

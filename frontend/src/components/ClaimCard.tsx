@@ -5,7 +5,7 @@ import { useState } from 'react'
 
 import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
-import { citationLink, reference } from '../lib/citations'
+import { citationLink, citationNumber, reference } from '../lib/citations'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
@@ -68,11 +68,23 @@ function hitName(hit: { page: number; label?: string }) {
 /**
  * The paper's sentence as the paper wrote it.
  *
- * The gateway renders each citation as a "[b13]" marker so a claim can be traced back to the
- * works it cites. That is machinery, and it belongs nowhere near a reader.
+ * The gateway writes each citation as a "[b12]" marker, GROBID's id for the reference. We put
+ * back the number the paper prints ("[13]"), so the sentence reads as it does in the PDF.
+ * Markers next to each other become one list, "[5, 25]". A marker whose number we do not know
+ * is removed.
  */
-function asWritten(sentence: string) {
-  return sentence.replace(/\s*\[b\d+\]/g, '').trim()
+function asWritten(sentence: string, citations: Citation[] = []) {
+  const numbers = new Map(
+    citations.filter((c) => c.ref && citationNumber(c)).map((c) => [c.ref, citationNumber(c)]),
+  )
+  return sentence
+    .replace(/(?:\s*\[b\d+\])+/g, (run) => {
+      const printed = [...run.matchAll(/\[(b\d+)\]/g)]
+        .map((marker) => numbers.get(marker[1]))
+        .filter(Boolean)
+      return printed.length ? ` [${printed.join(', ')}]` : ''
+    })
+    .trim()
 }
 
 /** "Figure 2", "Fig. 2" or "Fig 2b" in a sentence. The number is group 1. */
@@ -339,6 +351,10 @@ function CitedWork({
         ) : (
           reference(citation)
         )}
+        {/* The number the PDF prints for this work, to find it in the paper's reference list. */}
+        {citationNumber(citation) && (
+          <span className="ml-1.5 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
+        )}
       </p>
       {verdict && <Answer verdict={verdict} onShow={onShow} />}
       {failure && <Failure failure={failure} />}
@@ -355,6 +371,7 @@ export function ClaimCard({
   standing,
   paper,
   figures = [],
+  references = {},
   onShow,
 }: {
   claim: Claim
@@ -363,11 +380,16 @@ export function ClaimCard({
   paper?: string
   /** The analysed paper's numbered figures, so "Figure 2" in its sentence can be shown. */
   figures?: PaperFigure[]
+  /** Every reference the paper's markers point to, by id, to print their numbers. */
+  references?: Record<string, Citation>
   onShow?: (target: Target) => void
 }) {
   const [open, setOpen] = useState(opensByDefault(standing))
   const loose = unpaired(claim)
-  const sentence = claim.sentence ? asWritten(claim.sentence) : ''
+  // The analysis-wide references too: a sentence can carry a marker its claim did not keep.
+  const sentence = claim.sentence
+    ? asWritten(claim.sentence, [...claim.citations, ...Object.values(references)])
+    : ''
   const ownFigures = paper ? figuresNamedIn(sentence, figures) : []
   const openFigure =
     paper && onShow

@@ -7,6 +7,7 @@ UI can show the place instead of telling the reader to go looking.
 
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 import pydantic
@@ -465,7 +466,13 @@ def extract_citations(pdf_path: str) -> dict:
 
 
 def _references_by_id(tei) -> tuple[dict, int]:
-    """({"b12": parsed reference, ...}, how many were dropped) from the TEI bibliography."""
+    """({"b12": parsed reference, ...}, how many were dropped) from the TEI bibliography.
+
+    Each reference also gets `ref`, its id, and `label`, the number the paper prints for
+    it ("13"), so a reader can find it in the PDF. GROBID's ids start at b0 and are not
+    those numbers.
+    """
+    labels = _printed_labels(tei)
     references, dropped = {}, 0
     for bibl in tei.iter(TEI_TAG + "biblStruct"):
         ref_id = bibl.get(XML_ID)
@@ -473,10 +480,34 @@ def _references_by_id(tei) -> tuple[dict, int]:
             continue
         citation = _parse_reference(bibl)
         if _findable(citation):
-            references[ref_id] = citation
+            references[ref_id] = {**citation, "ref": ref_id, "label": labels.get(ref_id, "")}
         else:
             dropped += 1
     return references, dropped
+
+
+def _marker_text(ref) -> str:
+    """A citation marker as printed, without the punctuation of a list: "[5," is "5"."""
+    return "".join(ref.itertext()).strip().strip("[](),;").strip()
+
+
+def _printed_labels(tei) -> dict[str, str]:
+    """{"b12": "13", ...}: how the paper's body cites each reference.
+
+    GROBID's bibliography has no label, so we read the markers in the body. The same
+    reference can be printed a little differently ("5," and "[5]"), so the most common
+    form wins.
+    """
+    body = tei.find(".//tei:body", TEI_NAMESPACE)
+    if body is None:
+        return {}
+    seen: dict[str, Counter] = {}
+    for ref in body.iter(TEI_TAG + "ref"):
+        ref_id = (ref.get("target") or "").lstrip("#")
+        text = _marker_text(ref)
+        if ref.get("type") == "bibr" and ref_id and text:
+            seen.setdefault(ref_id, Counter())[text] += 1
+    return {ref_id: counts.most_common(1)[0][0] for ref_id, counts in seen.items()}
 
 
 def _boxes(coords: str) -> list[dict]:
@@ -522,8 +553,7 @@ def _citation_markers(tei, references: dict) -> list[dict]:
         ref_id = (ref.get("target") or "").lstrip("#")
         if ref.get("type") != "bibr" or ref_id not in references:
             continue
-        # GROBID keeps the punctuation around a marker in a list: "[5," "8," "24]".
-        text = "".join(ref.itertext()).strip().strip("[](),;").strip()
+        text = _marker_text(ref)
         for box in _boxes(ref.get("coords", "")):
             if box["page"] not in sizes:
                 continue

@@ -115,6 +115,7 @@ export function AnalysisView({
               standing={standing}
               paper={file}
               figures={analysis.data.figures}
+              references={analysis.data.references}
               onShow={setTarget}
             />
           ))}
