@@ -160,8 +160,11 @@ Surface panel: rounded, subtle border, padding. The default container for groupe
 ```tsx
 import { VerdictBadge } from '../components/ui'
 <VerdictBadge verdict="supports" />   // "refutes" | "insufficient"
+<VerdictBadge verdict="refutes" text="contradicts the claim" />
 ```
 The per-source verdict pill (SUPPORTS / REFUTES / INSUFFICIENT), soft fill + verdict colour.
+`text` replaces the verdict name; the claim card uses it to say what the cited paper does to
+the claim.
 
 ### StandingBadge (Figma `Badge` — Kind=backs/contradicts/silent/unchecked/uncited)
 ```tsx
