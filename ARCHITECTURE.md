@@ -116,6 +116,15 @@ When a check fails, the result has `status: "error"` and a `reason`, for example
 `no-open-access`. The web app shows the reason. A claim we could not check must not look
 like a claim nobody tried.
 
+**Papers outside a public index.** The papers we work with (the analysed paper, the works
+it cites, the library, the benchmark) should be in a public index. A paper that is not is
+still analysed and still gets a verdict. The web app should mark it (not built yet, #21),
+so a reader can see that the verdict rests on a source outside the index. We record which
+index answered instead of guessing: each verdict has `indexed_in` with the index that
+found the paper (`semantic-scholar`, `arxiv`, `unpaywall`, or empty) and the ids it gave.
+We never say Scopus, because Semantic Scholar and arXiv cannot tell us whether a paper is
+in Scopus. Only an Elsevier key could.
+
 ## How DSPy is used
 
 DSPy is a Python library for calling an LLM from code.
