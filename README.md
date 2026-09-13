@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/images/logo-lockup.png" alt="SecretSource" width="360" />
   <br /><br />
-  <p>Checks a research paper's claims against the papers it cites, with the quote and the exact place in the PDF behind every verdict.</p>
+  <p>Checks if the papers a research paper cites really say what it claims. Every result shows the quote and where it is in the PDF.</p>
   <h4><a href="#quick-start">Quick start</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="ARCHITECTURE.md">Architecture</a> · <a href="https://github.com/ZenithGeeks/SecretSource-prototype/issues">Report a bug</a></h4>
 </div>
 <br />
@@ -22,17 +22,17 @@
 
 ## What it is
 
-SecretSource checks a research paper's claims against the papers it cites. Each verdict
-(`supports` / `refutes` / `insufficient`) comes with the quote it relied on and the exact
-place in the PDF.
+SecretSource reads a research paper, finds its claims, and checks each claim against the
+paper it cites. For each claim you get a verdict (`supports`, `refutes` or `insufficient`),
+the quote from the cited paper, and the page where the quote is.
 
-Google ADK runs the agents and the order of the steps. DSPy handles each call to the
-language model that must return structured data: the claims, the verdicts, and the answers.
-See [How DSPy is used](ARCHITECTURE.md#how-dspy-is-used) in the architecture notes.
+Google ADK runs the agents and the order of the steps. DSPy is used for each LLM call that
+must return exact data, like the claims and the verdicts. See
+[How DSPy is used](ARCHITECTURE.md#how-dspy-is-used).
 
 On your machine, Docker runs two things: `web` (the UI at http://localhost:5173) and
-`gateway` (the API at http://localhost:8080). Everything heavy is shared and already
-running in the cloud:
+`gateway` (the API at http://localhost:8080). The heavy services are shared and already
+run in the cloud:
 
 | Service | What it does | Where |
 | --- | --- | --- |
@@ -42,15 +42,17 @@ running in the cloud:
 | Qdrant | stores the ColBERT and ColPali indexes | shared cloud; only ColBERT and ColPali talk to it, so you never configure it |
 | LLM | extracts claims and writes verdicts (any OpenAI-compatible endpoint) | shared endpoint |
 
-The shared cloud services only accept requests that carry a Google identity token. The gateway adds it automatically once you follow steps 3 and 4 below.
+The cloud services only accept requests with a Google identity token. The gateway adds the
+token for you after you do steps 3 and 4 below.
 
 ## Screenshots
 
-Analysis results. Each claim shows what the cited paper says about it, the deciding quote, and page hints from ColPali:
+Analysis results. For each claim: the verdict, the quote from the cited paper, and pages
+that ColPali found:
 
 ![Analysis results with verdicts and quotes](docs/images/analysis-results.jpg)
 
-The deciding quote highlighted in the cited PDF:
+The quote highlighted in the cited PDF:
 
 ![PDF viewer with the quote highlighted](docs/images/pdf-viewer.jpg)
 
@@ -96,11 +98,15 @@ Writer draft check (sample data):
    | `GOOGLE_APPLICATION_CREDENTIALS` | `secrets/service-auth.json` | type it (the file itself comes from the team lead) |
    | `S2_API_KEY` | your own free Semantic Scholar key | https://www.semanticscholar.org/product/api (strongly recommended: without it most cited papers never resolve) |
 
-   Optional: `UNPAYWALL_EMAIL` (a contact email that helps find open-access PDFs) and `CLAIM_LIMIT` (max claims per paper, default `20`; `0` = all).
+   Optional settings:
+   - `UNPAYWALL_EMAIL`: your email. It helps find free PDFs.
+   - `CLAIM_LIMIT`: the most claims to check per paper. Default `20`. `0` means all.
+   - `PARALLEL_SOURCES`: how many cited papers are prepared at the same time. Default `3`.
+   - `PARALLEL_CHECKS`: how many claims are judged at the same time. Default `3`.
 
-   Two more settings tune how much runs at once: `PARALLEL_SOURCES` (papers prepared at the same time, default `3`) and `PARALLEL_CHECKS` (claims judged at the same time, default `3`).
-
-4. **Add the credentials file:** save the file the team lead gives you as `backend/secrets/service-auth.json`. That folder is already in the repo, is gitignored, and is never copied into Docker images.
+4. **Add the credentials file:** save the file from the team lead as
+   `backend/secrets/service-auth.json`. Git ignores this folder, and Docker never copies it
+   into an image.
 
 5. **Start the stack:**
 
@@ -108,7 +114,8 @@ Writer draft check (sample data):
    docker compose up -d --build
    ```
 
-   This also starts a local `grobid` container; it sits unused when `GROBID_URL` points at the shared one.
+   This also starts a local `grobid` container. It is not used when `GROBID_URL` points to
+   the cloud one.
 
 6. **Open the app:** go to http://localhost:5173 and paste an arXiv ID (for example `2112.01488`) or upload a PDF. Check the API is up with:
 
@@ -118,7 +125,8 @@ Writer draft check (sample data):
 
 ## Run the retrieval services on your own GPU
 
-This way runs ColBERT and ColPali on your own NVIDIA GPU. A 16 GB card is enough. It does not run vLLM; it uses the shared LLM endpoint.
+Use this when the cloud services are not available. ColBERT and ColPali run on your own
+NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 
 1. In `.env`, leave `COLBERT_URL`, `COLPALI_URL`, `GROBID_URL`, `QDRANT_URL` and `QDRANT_API_KEY` empty. Set `SERVICE_AUTH=none`. Keep the `VLLM_*` values for the shared LLM endpoint.
 
@@ -137,16 +145,17 @@ This way runs ColBERT and ColPali on your own NVIDIA GPU. A 16 GB card is enough
    curl http://localhost:8894/health
    ```
 
-If you do not have an LLM endpoint, `docker compose --profile gpu up -d --build` runs vLLM on the same card as well.
+No LLM endpoint? `docker compose --profile gpu up -d --build` also runs vLLM on your GPU.
 
 ## Everyday use
 
 - Stop the stack: `docker compose down`
 - After `git pull`, rebuild: `docker compose up -d --build`
-- `.env` is only read when containers start, so run `docker compose up -d` after editing it
+- After you edit `.env`, run `docker compose up -d`. Containers read `.env` only when they start
 - Logs: `docker compose logs -f gateway`
 
-In the UI, paste an arXiv ID, DOI or URL (or upload a PDF), watch the pipeline stages as they happen, and find past analyses in the history.
+In the web app, paste an arXiv ID, a DOI or a URL, or upload a PDF. You can watch each step
+while it runs. Past analyses are in History.
 
 ## Troubleshooting
 
@@ -154,11 +163,11 @@ In the UI, paste an arXiv ID, DOI or URL (or upload a PDF), watch the pipeline s
 | --- | --- |
 | 401 or 403 from colbert, colpali or grobid in the gateway logs | check `SERVICE_AUTH=google-id-token`, `GOOGLE_APPLICATION_CREDENTIALS=secrets/service-auth.json`, and that `backend/secrets/service-auth.json` exists; then `docker compose up -d` |
 | Gateway exits with "SERVICE_AUTH must be 'none' or 'google-id-token'" | typo in `SERVICE_AUTH` |
-| 503 from the cloud services | the first request after idle wakes them (ColBERT a few seconds, ColPali about a minute); if it keeps happening the cloud project itself is down, tell the team lead |
+| 503 from the cloud services | the services sleep when nobody uses them. The first request wakes them (ColBERT: a few seconds, ColPali: about a minute). If it does not stop, tell the team lead |
 | "The LM returned an empty or null response." | check `VLLM_URL` ends in `/v1` and `VLLM_MODEL` is an id the endpoint lists |
 | Most citations show as unresolved / Semantic Scholar 429 | set `S2_API_KEY` |
-| Figure/page hints missing | ColPali is still waking up; hints are skipped, not failed, until it answers |
-| Port 5173 or 8080 already in use | another copy of the stack is running; `docker compose down` there first |
+| No figure or page hints | ColPali is still starting. The check still works, just without figure hints |
+| Port 5173 or 8080 already in use | another copy is running. Run `docker compose down` in that folder first |
 
 ## API
 
@@ -183,7 +192,8 @@ GET  /health
 
 ## For maintainers
 
-The quick start above is the team path; everything below is for people who change the stack itself.
+The quick start is enough to use the app. The sections below are for people who change the
+system.
 
 <details>
 <summary>How it works</summary>
@@ -227,7 +237,11 @@ data/papers/        downloaded PDFs and figure crops (gitignored, shared volume 
 <details>
 <summary>Deploying to Cloud Run</summary>
 
-`PROJECT=<gcp-project> ./deploy/cloudrun.sh` builds every image with Cloud Build and deploys grobid, colbert, colpali (`VISION=0` skips it), vllm, gateway and web to Cloud Run, and keeps Qdrant on a small GCE VM with a persistent disk (`deploy/qdrant-startup.sh`). Pass `QDRANT_URL` / `QDRANT_API_KEY` to use a managed cluster instead. [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md) is the step-by-step for the vLLM piece, including quota, warm-up and cost notes.
+Run `PROJECT=<gcp-project> ./deploy/cloudrun.sh`. It builds every image with Cloud Build and
+deploys grobid, colbert, colpali, vllm, gateway and web to Cloud Run. Set `VISION=0` to skip
+colpali. Qdrant runs on a small VM with its own disk (`deploy/qdrant-startup.sh`). To use a
+Qdrant cluster instead, set `QDRANT_URL` and `QDRANT_API_KEY`. For the vLLM part (quota,
+start-up time, cost), read [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
 </details>
 
 <details>
@@ -242,7 +256,8 @@ docker compose --profile a2a up -d a2a           # the agent tree over A2A at ht
 <details>
 <summary>Running pieces on the host</summary>
 
-Each part also runs standalone, against whatever `.env` says (use `localhost` rather than container names):
+You can run each part without Docker. It uses the settings in `.env`. Use `localhost`, not
+container names:
 
 ```sh
 # gateway (from backend/)
@@ -276,14 +291,17 @@ CI runs on every PR and on `main`: `ruff check backend services`, `python -m com
 
 - Branch names start with the Jira key: `SCRUM-<n>-short-slug`, one branch per ticket, off `main`.
 - Commit and PR titles use Conventional Commits with the Jira key as scope. For example `fix(SCRUM-142): drop the stale researcher session on refresh`.
-- Open pull requests against `main`. One service = one directory = one Dockerfile; services talk over HTTP/MCP only.
-- Tool functions return `{"status": "ok" | "error", ...}` instead of raising.
+- Open pull requests against `main`.
+- One service is one folder with one Dockerfile. Services talk to each other only over HTTP or MCP.
+- Tool functions return `{"status": "ok" | "error", ...}`. They do not raise errors.
 </details>
 
 <details>
 <summary>Optional: Supabase persistence</summary>
 
-Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (both) to store analyses in Supabase Postgres instead of local SQLite. The service role key bypasses RLS, so it is server-only and never shipped to the browser. Never commit a real key. See [supabase/README.md](supabase/README.md).
+Set both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to save analyses in Supabase Postgres
+instead of local SQLite. The service role key can read and write all data, so keep it on the
+server. Never put it in the frontend or in git. See [supabase/README.md](supabase/README.md).
 </details>
 
 ## Team
