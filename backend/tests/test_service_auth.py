@@ -3,6 +3,7 @@ URL only, is fetched once per origin, and refreshes itself when it expires. No n
 fetch_id_token_credentials is a fake, since service_auth.py imports it lazily inside
 auth_headers rather than at module level."""
 
+import asyncio
 import importlib
 
 import pytest
@@ -101,3 +102,29 @@ def test_config_rejects_unknown_auth_modes(monkeypatch):
     monkeypatch.setenv("SERVICE_AUTH", "none")
     importlib.reload(config)
     assert config.SERVICE_AUTH == "none"
+
+
+def _signed_headers(client, url):
+    import httpx
+
+    async def sign():
+        flow = client.auth.async_auth_flow(httpx.Request("POST", url))
+        request = await flow.__anext__()
+        await client.aclose()
+        return request.headers
+
+    return asyncio.run(sign())
+
+
+def test_mcp_client_signs_every_request(fake_fetch):
+    pytest.importorskip("google.adk")
+    client = service_auth.mcp_http_client_factory(COLBERT)()
+    assert _signed_headers(client, f"{COLBERT}/mcp/")["Authorization"] == "Bearer token-1"
+
+
+def test_mcp_client_for_other_hosts_adds_nothing(fake_fetch):
+    pytest.importorskip("google.adk")
+    client = service_auth.mcp_http_client_factory("http://colbert:8893")()
+    assert client.auth is None  # no signing hook at all, so nothing can add a token
+    asyncio.run(client.aclose())
+    assert not fake_fetch

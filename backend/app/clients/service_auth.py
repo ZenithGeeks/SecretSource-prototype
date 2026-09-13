@@ -51,3 +51,29 @@ def auth_headers(url: str) -> dict[str, str]:
         if not credentials.valid:
             credentials.refresh(request)
         return {"Authorization": f"Bearer {credentials.token}"}
+
+
+def mcp_http_client_factory(url: str):
+    """An `httpx_client_factory` for an McpToolset whose server is `url`: every MCP request
+    gets auth_headers(url) as it is sent.
+
+    ADK's `header_provider` is not enough. McpToolset only calls it when it has a context, and
+    the A2A agent card and `adk web` list tools without one, so those requests went out with no
+    token and the card silently lost the toolset's skills."""
+    import asyncio
+
+    import httpx
+    from google.adk.tools.mcp_tool.mcp_session_manager import create_mcp_http_client
+
+    class IdTokenAuth(httpx.Auth):
+        async def async_auth_flow(self, request):
+            # A token refresh is blocking I/O; keep it off the event loop.
+            request.headers.update(await asyncio.to_thread(auth_headers, url))
+            yield request
+
+    signing = IdTokenAuth() if _audience(url) else None
+
+    def factory(headers=None, timeout=None, auth=None):
+        return create_mcp_http_client(headers=headers, timeout=timeout, auth=auth or signing)
+
+    return factory

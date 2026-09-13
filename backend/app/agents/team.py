@@ -14,7 +14,7 @@ from google.adk.tools.mcp_tool import (
     StreamableHTTPConnectionParams,
 )
 
-from app.clients.service_auth import auth_headers
+from app.clients.service_auth import mcp_http_client_factory
 from app.config import COLBERT_URL
 from app.llm import adk_model
 from app.pipeline.claims import extract_citations, extract_claims, extract_claims_with_citations
@@ -27,11 +27,12 @@ from app.pipeline.verify import verify_claim
 colbert_mcp = McpToolset(
     # Trailing slash on purpose: /mcp 307-redirects, the MCP client does not follow it, and
     # the redirect drops the Authorization header.
-    connection_params=StreamableHTTPConnectionParams(url=f"{COLBERT_URL}/mcp/"),
+    connection_params=StreamableHTTPConnectionParams(
+        url=f"{COLBERT_URL}/mcp/",
+        # Signs each request, including tool listing with no context (A2A agent card, adk web).
+        httpx_client_factory=mcp_http_client_factory(COLBERT_URL),
+    ),
     tool_filter=["search_passages"],
-    # Asked on every tool call; ADK pools sessions by header hash, so a refreshed token moves
-    # to a new session instead of reusing one the service would now reject.
-    header_provider=lambda _context: auth_headers(COLBERT_URL),
 )
 
 rag_agent = LlmAgent(
