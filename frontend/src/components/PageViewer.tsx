@@ -3,8 +3,9 @@
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import type { Source } from '../lib/api'
+import type { Citation, CitationMarker, Source } from '../lib/api'
 import { pageImageUrl } from '../lib/api'
+import { citationLink, reference } from '../lib/citations'
 import { cn } from '../lib/utils'
 import { Button } from './ui'
 
@@ -18,18 +19,60 @@ export type Target = {
 
 const ZOOMS = [1, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
 
+type Box = { x0: number; y0: number; x1: number; y1: number }
+
 /** Boxes arrive in PDF points; percentages keep them right at any rendered size. */
-function Highlight({ box, source }: { box: Source['boxes'][number]; source: Source }) {
+function boxStyle(box: Box, width: number, height: number) {
+  return {
+    left: `${(box.x0 / width) * 100}%`,
+    top: `${(box.y0 / height) * 100}%`,
+    width: `${((box.x1 - box.x0) / width) * 100}%`,
+    height: `${((box.y1 - box.y0) / height) * 100}%`,
+  }
+}
+
+function Highlight({ box, source }: { box: Box; source: Source }) {
   return (
     <div
       className="pointer-events-none absolute rounded-xs bg-accent/20 ring-2 ring-accent/70"
-      style={{
-        left: `${(box.x0 / source.page_width) * 100}%`,
-        top: `${(box.y0 / source.page_height) * 100}%`,
-        width: `${((box.x1 - box.x0) / source.page_width) * 100}%`,
-        height: `${((box.y1 - box.y0) / source.page_height) * 100}%`,
-      }}
+      style={boxStyle(box, source.page_width, source.page_height)}
     />
+  )
+}
+
+/** The reference a clicked citation marker points to, next to the marker. */
+function ReferencePopover({ marker, citation }: { marker: CitationMarker; citation: Citation }) {
+  const link = citationLink(citation)
+  const left = Math.min((marker.x0 / marker.page_width) * 100, 50)
+  // Near the bottom of the page, open upwards so the card stays on the page.
+  const below = marker.y1 / marker.page_height < 0.75
+  return (
+    <div
+      role="dialog"
+      aria-label="Cited paper"
+      className="absolute z-10 w-72 max-w-[90%] space-y-1.5 rounded-lg border border-border-subtle bg-surface px-3 py-2.5 shadow-lg"
+      style={
+        below
+          ? { left: `${left}%`, top: `calc(${(marker.y1 / marker.page_height) * 100}% + 6px)` }
+          : { left: `${left}%`, bottom: `calc(${(1 - marker.y0 / marker.page_height) * 100}% + 6px)` }
+      }
+    >
+      <p className="text-[11px] leading-4 font-semibold tracking-wide text-ink-muted uppercase">
+        Cited paper{marker.text ? ` · ${marker.text}` : ''}
+      </p>
+      <p className="text-[13px] leading-[18px] text-ink">{reference(citation)}</p>
+      {link && (
+        <a
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          Open the paper
+          <ExternalLink className="size-3" />
+        </a>
+      )}
+    </div>
   )
 }
 
@@ -58,10 +101,22 @@ function IconButton({
   )
 }
 
-export function PageViewer({ target, onClose }: { target: Target; onClose: () => void }) {
+export function PageViewer({
+  target,
+  onClose,
+  markers = [],
+  references = {},
+}: {
+  target: Target
+  onClose: () => void
+  /** Citation markers of this paper. Only passed when the viewer shows the analysed paper. */
+  markers?: CitationMarker[]
+  references?: Record<string, Citation>
+}) {
   const [loaded, setLoaded] = useState(false)
   const [page, setPage] = useState(target.source?.page ?? target.page ?? 1)
   const [zoom, setZoom] = useState(1)
+  const [opened, setOpened] = useState<{ marker: CitationMarker; target: Target } | null>(null)
   const previousPaper = useRef(target.paper)
 
   // A new target updates the page to wherever it points; zoom only resets when it is a
@@ -79,17 +134,25 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
   // Escape closes, arrows page: a reader checking a source should never feel trapped in it.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      // Escape closes an open reference first, then the viewer.
+      if (event.key === 'Escape') {
+        if (opened) setOpened(null)
+        else onClose()
+      }
       if (event.key === 'ArrowLeft') setPage((n) => Math.max(1, n - 1))
       if (event.key === 'ArrowRight') setPage((n) => n + 1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, opened])
 
   // Highlights belong to one page; paging away from it must not leave them behind.
   const onOriginalPage = page === (target.source?.page ?? target.page ?? 1)
   const zoomIndex = ZOOMS.indexOf(zoom)
+  const pageMarkers = markers.filter((marker) => marker.page === page && references[marker.ref])
+  // An open reference belongs to one marker on one page: paging away or a new target hides it.
+  const openMarker =
+    opened && opened.target === target && opened.marker.page === page ? opened.marker : null
 
   return (
     <aside
@@ -136,6 +199,24 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
             target.source?.boxes.map((box, i) => (
               <Highlight key={i} box={box} source={target.source as Source} />
             ))}
+          {loaded &&
+            pageMarkers.map((marker, i) => (
+              <button
+                key={`marker-${i}`}
+                type="button"
+                onClick={() => setOpened(marker === openMarker ? null : { marker, target })}
+                aria-label={`Cited paper ${marker.text}: ${reference(references[marker.ref])}`}
+                aria-expanded={marker === openMarker}
+                className={cn(
+                  'absolute rounded-xs ring-1 ring-accent/50 hover:bg-accent/20 focus-visible:outline-2 focus-visible:outline-accent',
+                  marker === openMarker ? 'bg-accent/20 ring-2 ring-accent' : 'bg-accent/5',
+                )}
+                style={boxStyle(marker, marker.page_width, marker.page_height)}
+              />
+            ))}
+          {loaded && openMarker && references[openMarker.ref] && (
+            <ReferencePopover marker={openMarker} citation={references[openMarker.ref]} />
+          )}
         </div>
       </div>
 

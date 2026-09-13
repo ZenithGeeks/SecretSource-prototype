@@ -15,8 +15,9 @@ graph reads them after. Both read PARALLEL_SOURCES and PARALLEL_CHECKS from app.
 The gateway does not run through this graph, because it publishes an event after every
 check for the web app. A change to the steps in one of them must be made in the other too.
 
-A run ends with {"status": "ok", "paper", "file", "claims", "checked", "figures", "audit"},
-the same fields the gateway stores, or with {"status": "error", "paper", "message"}.
+A run ends with {"status": "ok", "paper", "file", "claims", "checked", "references",
+"markers", "figures", "audit"}, the same fields the gateway stores, or with
+{"status": "error", "paper", "message"}.
 
 `adk web` draws the graph and lists the events of a run (docker compose --profile dev up
 adk-web). The message is the paper: a DOI, arXiv ID, URL or a PDF path. Session state
@@ -52,6 +53,8 @@ async def read_paper(ctx: Context, node_input: str) -> Event:
     ctx.state["paper"] = paper
     ctx.state["file"] = extracted["file"]
     ctx.state["claims"] = extracted["claims"]
+    ctx.state["references"] = extracted.get("references", {})
+    ctx.state["markers"] = extracted.get("markers", [])
     return Event(
         route="ok",
         output={
@@ -143,20 +146,27 @@ def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
     return claims
 
 
-def finished_analysis(checks: list[dict], claims: list[dict], paper: str, file: str) -> dict:
+def finished_analysis(
+    checks: list[dict], claims: list[dict], paper: str, file: str,
+    references: dict | None = None, markers: list[dict] | None = None,
+) -> dict:
     """The finished analysis, with the checks folded onto the claims.
 
     It has a "status" like report_error's answer, so a caller can check one field either
     way. A plain function so it can be tested without a run.
     """
     return {"status": "ok", "paper": paper, "file": file,
-            "claims": fold_checks(claims, checks), "checked": len(checks)}
+            "claims": fold_checks(claims, checks), "checked": len(checks),
+            "references": references or {}, "markers": markers or []}
 
 
 @node
-def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) -> dict:
+def assemble(
+    node_input: list[dict], claims: list[dict], paper: str, file: str,
+    references: dict | None = None, markers: list[dict] | None = None,
+) -> dict:
     """Fold the checks onto the claims and answer with the finished analysis."""
-    return finished_analysis(node_input, claims, paper, file)
+    return finished_analysis(node_input, claims, paper, file, references, markers)
 
 
 @node

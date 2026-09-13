@@ -61,7 +61,8 @@ flowchart TD
 2. **Read the paper.** `extract_claims_with_citations` in `claims.py` does four things.
    Docling turns the PDF into text. GROBID reads the reference list. The LLM finds the
    claims that cite other papers. `locate` finds each claim's sentence in the PDF, so the
-   web app can highlight it.
+   web app can highlight it. GROBID also gives the place of each citation marker, like
+   "[13]", so the page viewer can open the reference when you click the marker.
 3. **Make jobs.** Each pair of (claim, cited paper) becomes one job.
 4. **Prepare each cited paper once.** `prepare_source` downloads the paper if needed. Then
    it indexes the paper in ColBERT and ColPali at the same time. Many claims can cite the

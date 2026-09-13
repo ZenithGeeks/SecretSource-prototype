@@ -331,7 +331,9 @@ def extract_claims(pdf_path: str) -> dict:
         return {"status": "error", "message": str(error)}
 
 
-def _grobid_pdf(endpoint: str, pdf_path: str) -> ET.Element:
+def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ()) -> ET.Element:
+    """GROBID's TEI for a PDF. `coordinates` names the elements that should get a `coords`
+    attribute with their place on the page, for example ("ref",)."""
     import requests
 
     from app.clients.service_auth import auth_headers
@@ -340,6 +342,7 @@ def _grobid_pdf(endpoint: str, pdf_path: str) -> ET.Element:
         response = requests.post(
             f"{GROBID_URL}/api/{endpoint}",
             files={"input": pdf_file},
+            data={"teiCoordinates": list(coordinates)},
             headers=auth_headers(GROBID_URL),
             timeout=300,
         )
@@ -474,6 +477,60 @@ def _references_by_id(tei) -> tuple[dict, int]:
         else:
             dropped += 1
     return references, dropped
+
+
+def _boxes(coords: str) -> list[dict]:
+    """GROBID's "page,x,y,width,height;..." as boxes in PDF points, top-left origin.
+
+    A marker that breaks across two lines has two boxes.
+    """
+    boxes = []
+    for part in (coords or "").split(";"):
+        values = part.split(",")
+        if len(values) != 5:
+            continue
+        page, x, y, width, height = values
+        x0, y0 = float(x), float(y)
+        boxes.append({"page": int(float(page)), "x0": x0, "y0": y0,
+                      "x1": x0 + float(width), "y1": y0 + float(height)})
+    return boxes
+
+
+def _page_sizes(tei) -> dict[int, tuple[float, float]]:
+    """{page number: (width, height)} in PDF points, from GROBID's <surface> elements."""
+    sizes = {}
+    for surface in tei.iter(TEI_TAG + "surface"):
+        try:
+            sizes[int(surface.get("n"))] = (float(surface.get("lrx")), float(surface.get("lry")))
+        except (TypeError, ValueError):
+            continue
+    return sizes
+
+
+def _citation_markers(tei, references: dict) -> list[dict]:
+    """Where each citation marker ("[13]") is on its page, and which reference it points to.
+
+    Only markers of references we kept. The web app draws a click area on each box and
+    scales it by the page size.
+    """
+    body = tei.find(".//tei:body", TEI_NAMESPACE)
+    if body is None:
+        return []
+    sizes = _page_sizes(tei)
+    markers = []
+    for ref in body.iter(TEI_TAG + "ref"):
+        ref_id = (ref.get("target") or "").lstrip("#")
+        if ref.get("type") != "bibr" or ref_id not in references:
+            continue
+        # GROBID keeps the punctuation around a marker in a list: "[5," "8," "24]".
+        text = "".join(ref.itertext()).strip().strip("[](),;").strip()
+        for box in _boxes(ref.get("coords", "")):
+            if box["page"] not in sizes:
+                continue
+            width, height = sizes[box["page"]]
+            markers.append({"ref": ref_id, "text": text, **box,
+                            "page_width": width, "page_height": height})
+    return markers
 
 
 def _paragraph_text(paragraph) -> str:
@@ -649,8 +706,9 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
     global _cited_claim_extractor
     try:
         pdf_path = local_pdf(pdf_path)
-        tei = _grobid_pdf("processFulltextDocument", pdf_path)
+        tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref",))
         references, dropped = _references_by_id(tei)
+        markers = _citation_markers(tei, references)
         paper_text = _body_text(tei)
         if _cited_claim_extractor is None:
             _cited_claim_extractor = _build_cited_claim_extractor()
@@ -675,6 +733,9 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
             "extracted": len(found),  # before repeats, announcements and the cap
             "dropped": dropped,
             "windows": len(windows),
+            # Every kept reference by id, and where the paper cites it, for the page viewer.
+            "references": {ref_id: references[ref_id] for ref_id in {m["ref"] for m in markers}},
+            "markers": markers,
         }
     except Exception as error:
         return {"status": "error", "message": str(error)}

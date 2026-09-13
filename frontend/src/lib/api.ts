@@ -104,6 +104,19 @@ export function reasonText(reason?: string) {
 /** A cited work we tried to check and could not. */
 export type Unchecked = { source: string; reason: Reason; message: string }
 
+/** Where the analysed paper cites a reference, e.g. "[13]": one box in PDF points. */
+export type CitationMarker = {
+  ref: string // the reference's id, a key of Analysis.references
+  text: string // the marker as printed
+  page: number
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  page_width: number
+  page_height: number
+}
+
 /** A figure of the analysed paper whose caption gives its number, e.g. "Figure 2". */
 export type PaperFigure = { label: string; page: number; caption: string; image: string }
 
@@ -115,6 +128,8 @@ export type Analysis = {
   file?: string
   claims: Claim[]
   figures?: PaperFigure[] // missing on analyses from before #85, and until the run has read them
+  references?: Record<string, Citation> // the references the paper's markers point to (#47)
+  markers?: CitationMarker[] // missing on analyses from before #47
   stages: Stage[]
 }
 
