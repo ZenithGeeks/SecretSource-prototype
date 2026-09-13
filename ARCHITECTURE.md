@@ -273,6 +273,11 @@ reach it: `a2a:8002` from another compose service, `localhost:8002` from your ma
 - The store also caches resolved sources, so running the same paper again does not repeat
   the lookups.
 - Downloaded PDFs and figure crops are files in `data/papers/`.
+- Chat agent sessions (`backend/cli.py`, the A2A server) live in memory by default. If
+  `SESSION_DB_URL` is set to a Postgres URL, `backend/app/sessions.py` keeps them in
+  Postgres with ADK's `DatabaseSessionService`, so a session continues after a restart
+  (`python cli.py --session <id>`). ADK's tables go in the `adk` schema, not `public`,
+  because Supabase serves `public` through its REST API to the browser's anon key.
 
 ## Where to change what
 
