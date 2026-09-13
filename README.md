@@ -1,28 +1,34 @@
 <div align="center">
-  <img src="frontend/public/favicon.svg" alt="SecretSource logo" width="80" />
-  <h1>SecretSource</h1>
+  <img src="docs/images/logo-lockup.png" alt="SecretSource" width="360" />
+  <br /><br />
   <p>Checks a research paper's claims against the papers it cites, with the quote and the exact place in the PDF behind every verdict.</p>
-  <h4><a href="#rocket-quick-start">Quick start</a> · <a href="#wrench-troubleshooting">Troubleshooting</a> · <a href="ARCHITECTURE.md">Architecture</a> · <a href="https://github.com/ZenithGeeks/SecretSource-prototype/issues">Report a bug</a></h4>
+  <h4><a href="#quick-start">Quick start</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="ARCHITECTURE.md">Architecture</a> · <a href="https://github.com/ZenithGeeks/SecretSource-prototype/issues">Report a bug</a></h4>
 </div>
 <br />
 
-## :notebook_with_decorative_cover: Contents
+## Contents
 
-- [What it is](#star2-what-it-is)
-- [Quick start](#rocket-quick-start)
-- [Everyday use](#computer-everyday-use)
-- [Troubleshooting](#wrench-troubleshooting)
-- [API](#electric_plug-api)
-- [Roadmap](#compass-roadmap)
-- [For maintainers](#hammer_and_wrench-for-maintainers)
-- [Team](#handshake-team)
-- [Acknowledgements](#gem-acknowledgements)
+- [What it is](#what-it-is)
+- [Screenshots](#screenshots)
+- [Quick start](#quick-start)
+- [Run the retrieval services on your own GPU](#run-the-retrieval-services-on-your-own-gpu)
+- [Everyday use](#everyday-use)
+- [Troubleshooting](#troubleshooting)
+- [API](#api)
+- [Roadmap](#roadmap)
+- [For maintainers](#for-maintainers)
+- [Team](#team)
+- [Acknowledgements](#acknowledgements)
 
-## :star2: What it is
+## What it is
 
 SecretSource checks a research paper's claims against the papers it cites. Each verdict
 (`supports` / `refutes` / `insufficient`) comes with the quote it relied on and the exact
 place in the PDF.
+
+Google ADK runs the agents and the order of the steps. DSPy handles each call to the
+language model that must return structured data: the claims, the verdicts, and the answers.
+See [How DSPy is used](ARCHITECTURE.md#how-dspy-is-used) in the architecture notes.
 
 On your machine, Docker runs two things: `web` (the UI at http://localhost:5173) and
 `gateway` (the API at http://localhost:8080). Everything heavy is shared and already
@@ -36,9 +42,35 @@ running in the cloud:
 | Qdrant | stores the ColBERT and ColPali indexes | shared cloud; only ColBERT and ColPali talk to it, so you never configure it |
 | LLM | extracts claims and writes verdicts (any OpenAI-compatible endpoint) | shared endpoint |
 
-The shared cloud services only accept requests that carry a Google identity token; the gateway adds it automatically once you follow steps 3 and 4 below.
+The shared cloud services only accept requests that carry a Google identity token. The gateway adds it automatically once you follow steps 3 and 4 below.
 
-## :rocket: Quick start
+## Screenshots
+
+Analysis results. Each claim shows what the cited paper says about it, the deciding quote, and page hints from ColPali:
+
+![Analysis results with verdicts and quotes](docs/images/analysis-results.jpg)
+
+The deciding quote highlighted in the cited PDF:
+
+![PDF viewer with the quote highlighted](docs/images/pdf-viewer.jpg)
+
+<details>
+<summary>More screens</summary>
+
+Choosing a role:
+
+![Onboarding: pick researcher, writer or teacher](docs/images/onboarding.jpg)
+
+Researcher home:
+
+![Researcher home with quick actions, conflicts and reading queue](docs/images/researcher-home.jpg)
+
+Writer draft check (sample data):
+
+![Writer draft check with marked citations and a suggested fix](docs/images/writer-draft-check.jpg)
+</details>
+
+## Quick start
 
 1. **Prerequisites:** Git and Docker Desktop (Docker with Compose). No GPU, no Python, no Node.
 
@@ -50,7 +82,7 @@ The shared cloud services only accept requests that carry a Google identity toke
    cp .env.example .env
    ```
 
-3. **Fill in `.env`** — everything else in `.env.example` can stay empty:
+3. **Fill in `.env`**. Everything else in `.env.example` can stay empty:
 
    | Variable | Value | Where it comes from |
    | --- | --- | --- |
@@ -65,6 +97,8 @@ The shared cloud services only accept requests that carry a Google identity toke
    | `S2_API_KEY` | your own free Semantic Scholar key | https://www.semanticscholar.org/product/api (strongly recommended: without it most cited papers never resolve) |
 
    Optional: `UNPAYWALL_EMAIL` (a contact email that helps find open-access PDFs) and `CLAIM_LIMIT` (max claims per paper, default `20`; `0` = all).
+
+   Two more settings tune how much runs at once: `PARALLEL_SOURCES` (papers prepared at the same time, default `3`) and `PARALLEL_CHECKS` (claims judged at the same time, default `6`).
 
 4. **Add the credentials file:** save the file the team lead gives you as `backend/secrets/service-auth.json`. That folder is already in the repo, is gitignored, and is never copied into Docker images.
 
@@ -82,7 +116,30 @@ The shared cloud services only accept requests that carry a Google identity toke
    curl http://localhost:8080/health
    ```
 
-## :computer: Everyday use
+## Run the retrieval services on your own GPU
+
+This way runs ColBERT and ColPali on your own NVIDIA GPU. A 16 GB card is enough. It does not run vLLM; it uses the shared LLM endpoint.
+
+1. In `.env`, leave `COLBERT_URL`, `COLPALI_URL`, `GROBID_URL`, `QDRANT_URL` and `QDRANT_API_KEY` empty. Set `SERVICE_AUTH=none`. Keep the `VLLM_*` values for the shared LLM endpoint.
+
+2. Start the services:
+
+   ```sh
+   docker compose up -d --build qdrant grobid colbert colpali gateway web
+   ```
+
+3. The models are ColBERTv2 (`colbert-ir/colbertv2.0`, about 0.5 GB) and ColPali (`COLPALI_MODEL=vidore/colqwen2-v1.0`, about 4 GB). In a test run, both together used about 7 to 9 GB of GPU memory.
+
+4. The first start downloads the models, so it takes several minutes. Check that the services are up:
+
+   ```sh
+   curl http://localhost:8893/health
+   curl http://localhost:8894/health
+   ```
+
+If you do not have an LLM endpoint, `docker compose --profile gpu up -d --build` runs vLLM on the same card as well.
+
+## Everyday use
 
 - Stop the stack: `docker compose down`
 - After `git pull`, rebuild: `docker compose up -d --build`
@@ -91,7 +148,7 @@ The shared cloud services only accept requests that carry a Google identity toke
 
 In the UI, paste an arXiv ID, DOI or URL (or upload a PDF), watch the pipeline stages as they happen, and find past analyses in the history.
 
-## :wrench: Troubleshooting
+## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
@@ -103,7 +160,7 @@ In the UI, paste an arXiv ID, DOI or URL (or upload a PDF), watch the pipeline s
 | Figure/page hints missing | ColPali is still waking up; hints are skipped, not failed, until it answers |
 | Port 5173 or 8080 already in use | another copy of the stack is running; `docker compose down` there first |
 
-## :electric_plug: API
+## API
 
 Interactive docs: http://localhost:8080/docs. The short version:
 
@@ -116,7 +173,7 @@ POST /verify               one claim against one source
 GET  /health
 ```
 
-## :compass: Roadmap
+## Roadmap
 
 - [ ] One MCP server for SecretSource with API-key access, for editors and other agents (SCRUM-165)
 - [ ] Ready-made .env templates and a dependency report in /health (SCRUM-163)
@@ -124,7 +181,7 @@ GET  /health
 - [ ] Public web, gateway and MCP entry points (SCRUM-166)
 - [ ] Analyses that survive cloud restarts (SCRUM-167)
 
-## :hammer_and_wrench: For maintainers
+## For maintainers
 
 The quick start above is the team path; everything below is for people who change the stack itself.
 
@@ -142,8 +199,8 @@ frontend (React)  ──► gateway (FastAPI)
 
 paper.pdf
    └─ extract_claims_with_citations   claim + the references it cites (GROBID + LLM)
-        └─ fetch_source               the cited paper's open-access PDF (arXiv / S2 / Unpaywall)
-             └─ verify_claim          supports / refutes / insufficient + the quote
+        └─ prepare_source             download the cited PDF, index it in ColBERT and ColPali
+             └─ check_prepared        supports / refutes / insufficient + the quote
 ```
 
 [ARCHITECTURE.md](ARCHITECTURE.md) goes a level deeper.
@@ -171,19 +228,6 @@ data/papers/        downloaded PDFs and figure crops (gitignored, shared volume 
 <summary>Deploying to Cloud Run</summary>
 
 `PROJECT=<gcp-project> ./deploy/cloudrun.sh` builds every image with Cloud Build and deploys grobid, colbert, colpali (`VISION=0` skips it), vllm, gateway and web to Cloud Run, and keeps Qdrant on a small GCE VM with a persistent disk (`deploy/qdrant-startup.sh`). Pass `QDRANT_URL` / `QDRANT_API_KEY` to use a managed cluster instead. [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md) is the step-by-step for the vLLM piece, including quota, warm-up and cost notes.
-</details>
-
-<details>
-<summary>Running everything locally (NVIDIA GPU)</summary>
-
-Leave the `*_URL` variables in `.env` empty and set `SERVICE_AUTH=none`, then:
-
-```sh
-docker compose --profile gpu up -d --build        # + vllm, qdrant, colbert
-docker compose --profile vision up -d colpali     # optional: figure/page retrieval
-```
-
-`VLLM_HF_MODEL` picks the checkpoint (the 4B default fits a 16 GB card beside ColBERT); `VLLM_GPU_UTIL` is the share of the whole card (default `0.6`), raised to `0.88` with `--profile vision` (start colbert and colpali first).
 </details>
 
 <details>
@@ -231,7 +275,7 @@ CI runs on every PR and on `main`: `ruff check backend services`, `python -m com
 <summary>Contributing</summary>
 
 - Branch names start with the Jira key: `SCRUM-<n>-short-slug`, one branch per ticket, off `main`.
-- Commit and PR titles use Conventional Commits with the Jira key as scope, e.g. `fix(SCRUM-142): drop the stale researcher session on refresh`.
+- Commit and PR titles use Conventional Commits with the Jira key as scope. For example `fix(SCRUM-142): drop the stale researcher session on refresh`.
 - Open pull requests against `main`. One service = one directory = one Dockerfile; services talk over HTTP/MCP only.
 - Tool functions return `{"status": "ok" | "error", ...}` instead of raising.
 </details>
@@ -239,10 +283,10 @@ CI runs on every PR and on `main`: `ruff check backend services`, `python -m com
 <details>
 <summary>Optional: Supabase persistence</summary>
 
-Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (both) to store analyses in Supabase Postgres instead of local SQLite. The service role key bypasses RLS — server-only, never shipped to the browser. Never commit a real key. See [supabase/README.md](supabase/README.md).
+Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (both) to store analyses in Supabase Postgres instead of local SQLite. The service role key bypasses RLS, so it is server-only and never shipped to the browser. Never commit a real key. See [supabase/README.md](supabase/README.md).
 </details>
 
-## :handshake: Team
+## Team
 
 - [EarthWittawat](https://github.com/EarthWittawat)
 - [JoyChanya](https://github.com/JoyChanya)
@@ -251,7 +295,7 @@ Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (both) to store analyses in S
 
 Ask @EarthWittawat for the shared .env values and the credentials file.
 
-## :gem: Acknowledgements
+## Acknowledgements
 
 [ColBERT](https://github.com/stanford-futuredata/ColBERT), [ColPali](https://github.com/illuin-tech/colpali), [GROBID](https://github.com/kermitt2/grobid), [Docling](https://github.com/docling-project/docling), [DSPy](https://github.com/stanfordnlp/dspy), [Google ADK](https://github.com/google/adk-python), [Qdrant](https://github.com/qdrant/qdrant), [vLLM](https://github.com/vllm-project/vllm), [Awesome Readme Template](https://github.com/Louis3797/awesome-readme-template)
 
