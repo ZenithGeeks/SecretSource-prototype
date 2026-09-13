@@ -8,6 +8,13 @@ export function reference({ authors, year, title, arxiv }: Citation) {
   return `${who}${year ? ` (${year})` : ''}. ${title || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
 }
 
+/** The number the paper prints for this work, like "13", or empty. Author-year labels
+ * ("Khattab et al., 2020") are not numbers and are left out: the reference line already
+ * shows the author and year. */
+export function citationNumber({ label }: Citation) {
+  return label && /^\d+[a-z]?$/i.test(label) ? label : ''
+}
+
 /** Where this work lives, preferring the identifier that resolves exactly. */
 export function citationLink({ doi, arxiv, url }: Citation) {
   if (doi) return `https://doi.org/${doi}`
