@@ -19,7 +19,7 @@ from pathlib import Path
 
 from google.adk import Event
 from google.adk.agents.context import Context
-from google.adk.workflow import Workflow, node
+from google.adk.workflow import START, Workflow, node
 
 from app.config import PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.claims import extract_claims_with_citations
@@ -143,11 +143,20 @@ def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
     return claims
 
 
+def finished_analysis(checks: list[dict], claims: list[dict], paper: str, file: str) -> dict:
+    """The finished analysis, with the checks folded onto the claims.
+
+    It has a "status" like report_error's answer, so a caller can check one field either
+    way. A plain function so it can be tested without a run.
+    """
+    return {"status": "ok", "paper": paper, "file": file,
+            "claims": fold_checks(claims, checks), "checked": len(checks)}
+
+
 @node
 def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) -> dict:
     """Fold the checks onto the claims and answer with the finished analysis."""
-    return {"paper": paper, "file": file,
-            "claims": fold_checks(claims, node_input), "checked": len(node_input)}
+    return finished_analysis(node_input, claims, paper, file)
 
 
 @node
@@ -160,7 +169,7 @@ analysis_workflow = Workflow(
     name="analysis",
     description="Read a paper, extract its claims, check each claim against the works it cites.",
     edges=[
-        ("START", read_paper),
+        (START, read_paper),
         (read_paper, {"ok": plan_checks, "error": report_error}),
         (plan_checks, prepare_sources, plan_judging, check_sources, assemble),
     ],
