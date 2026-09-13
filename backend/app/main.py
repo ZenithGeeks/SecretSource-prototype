@@ -22,6 +22,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -93,8 +94,9 @@ class AnalysisRequest(BaseModel):
 
 
 async def _publish(analysis_id: str, stage: str, **fields):
-    """Record a stage on the analysis and send it to the open event stream."""
-    event = {"stage": stage, **fields}
+    """Record a stage on the analysis and send it to the open event stream. `at` is the Unix
+    time, so the web app can show how long a run has taken."""
+    event = {"stage": stage, **fields, "at": round(time.time(), 1)}
     analyses[analysis_id]["stages"].append(event)
     store.save(analyses[analysis_id])
     await streams[analysis_id].put(event)
@@ -136,6 +138,11 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                 if (source := lookup_key(citation))
             ]
 
+            # The totals, so the web app can show "12 of 33 checks" instead of a growing list.
+            await _publish(
+                analysis_id, "planned", checks=len(jobs), sources=len({source for *_, source in jobs})
+            )
+
             # Step 1: get each cited paper ready once (download and index), several at a time.
             # Many claims can cite the same paper, so this avoids repeating that slow work.
             source_limit = asyncio.Semaphore(PARALLEL_SOURCES)
@@ -164,7 +171,9 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                         )
                 fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":
-                    await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
+                    await _publish(
+                        analysis_id, "verified", claim=index, source=source, verdict=verdict["verdict"]
+                    )
                 else:
                     await _publish(
                         analysis_id, "failed", claim=index, source=source,

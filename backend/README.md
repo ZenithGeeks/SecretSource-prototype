@@ -219,14 +219,16 @@ Each event is one `data:` line with a JSON object:
 | --- | --- | --- |
 | `extracting` | `message` | reading the paper started |
 | `extracted` | `claims`, `extracted`, `windows` | claims found; `extracted` is the count before repeats and the cap were removed |
+| `planned` | `checks`, `sources` | how many checks will run, against how many cited works |
 | `verifying` | `claim`, `source` | a check started |
-| `verified` | `claim`, `verdict` | a check finished |
+| `verified` | `claim`, `source`, `verdict` | a check finished |
 | `failed` | `claim`, `source`, `reason`, `message` | a cited work could not be checked |
+| `figures` | `figures` | the analysed paper's numbered figures were read |
 | `audited` | `findings` | the audit ran; `findings` is usually `0` |
 | `done` | | the analysis finished |
 | `error` | `message` | the analysis failed |
 
-`claim` is the index of the claim in `claims`. Checks run in parallel, so events for
+Every event also has `at`, the Unix time it was recorded. `claim` is the index of the claim in `claims`. Checks run in parallel, so events for
 different claims arrive in any order. To show verdicts while a run is still going, read
 `GET /analyses/{id}` again after `extracted`, `verified` and `failed`.
 

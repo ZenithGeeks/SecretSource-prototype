@@ -55,6 +55,7 @@ export type Stage = {
   stage:
     | 'extracting'
     | 'extracted'
+    | 'planned'
     | 'verifying'
     | 'verified'
     | 'failed'
@@ -72,6 +73,9 @@ export type Stage = {
   reason?: Reason
   findings?: number // what the audit disagreed with, 0 on an ordinary run
   figures?: number // numbered figures found in the analysed paper
+  checks?: number // on "planned": how many checks will run
+  sources?: number // on "planned": against how many cited works
+  at?: number // Unix time the stage was recorded; missing on older analyses
 }
 
 /** Why a cited work could not be checked. Kept as codes so the wording lives in one place. */

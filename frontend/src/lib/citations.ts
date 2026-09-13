@@ -5,7 +5,9 @@ import type { Citation } from './api'
 /** "Khattab et al. (2020). ColBERT: ..." */
 export function reference({ authors, year, title, arxiv }: Citation) {
   const who = authors.length ? `${authors[0]}${authors.length > 1 ? ' et al.' : ''}` : 'Unknown'
-  return `${who}${year ? ` (${year})` : ''}. ${title || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
+  const head = `${who}${year ? ` (${year})` : ''}`
+  // "et al." already ends with a full stop; a second one reads as a typo.
+  return `${head}${head.endsWith('.') ? '' : '.'} ${title || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
 }
 
 /** The number the paper prints for this work, like "13", or empty. Author-year labels
