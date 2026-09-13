@@ -136,3 +136,83 @@ def test_the_graph_links_papers_claims_and_the_works_that_answer_them():
     papers = {node["label"] for node in graph["nodes"] if node["kind"] == "paper"}
     assert {"ColBERTv2", "other", "ColBERT", "PLAID"} <= papers
     assert any(edge["cites"] and edge["contradicted"] == 1 for edge in graph["paperEdges"])
+
+
+def work(title: str, arxiv: str = "", url: str = "") -> dict:
+    return {"title": title, "authors": [], "year": "2021", "doi": "", "arxiv": arxiv, "url": url}
+
+
+def test_a_cited_work_says_whether_a_public_index_knew_it():
+    beir, splade, blog, lost, flaky = (
+        work("BEIR: A Heterogeneous Benchmark", "2104.08663"),
+        work("SPLADE v2"),
+        work("Tevatron docs", url="https://example.org/tevatron"),
+        work("A garbled reference title"),
+        work("Paper whose PDF would not download"),
+    )
+    analysis = {
+        "id": "i1",
+        "paper": "data/papers/i1.pdf",
+        "status": "done",
+        "title": "Index marks",
+        "claims": [
+            {
+                "claim": "Late interaction generalises out of domain.",
+                "citations": [beir, splade, blog],
+                "verdicts": [
+                    {
+                        "verdict": "supports",
+                        "cited": "2104.08663",
+                        "indexed_in": {"index": "arxiv", "ids": {}},
+                    },
+                    {
+                        "verdict": "insufficient",
+                        "cited": "https://example.org/tevatron",
+                        "indexed_in": {"index": ""},
+                    },
+                ],
+                "unchecked": [{"source": "SPLADE v2", "reason": "no-open-access", "message": ""}],
+            },
+            {
+                "claim": "Distillation is needed.",
+                "citations": [lost, flaky],
+                "unchecked": [
+                    {"source": "A garbled reference title", "reason": "unresolvable", "message": ""},
+                    {
+                        "source": "Paper whose PDF would not download",
+                        "reason": "not-downloadable",
+                        "message": "",
+                    },
+                ],
+            },
+        ],
+    }
+    graph = researcher.graph([analysis])
+    marks = {
+        node["label"]: (node["indexed"], node["index"]) for node in graph["nodes"] if node["kind"] == "paper"
+    }
+    assert marks == {
+        "Index marks": ("", ""),  # the analysed paper itself was never looked up
+        "BEIR": ("yes", "arXiv"),
+        "SPLADE v2": ("yes", ""),  # found, but no free copy
+        "Tevatron docs": ("no", ""),  # a bare link no index was asked about
+        "A garbled reference title": ("no", ""),
+        "Paper whose PDF would not download": ("", ""),
+    }
+    unchecked = [edge for edge in graph["edges"] if edge["relation"] == "unchecked"]
+    assert sorted(edge["reason"] for edge in unchecked) == [
+        "no-open-access",
+        "not-downloadable",
+        "unresolvable",
+    ]
+    # Works we could not check still link to the paper that cites them.
+    assert sum(edge["cites"] for edge in graph["paperEdges"]) == 5
+
+
+def test_found_by_one_citation_beats_not_found_by_another():
+    node = {"indexed": "", "index": ""}
+    researcher._mark_index(node, ("no", ""))
+    researcher._mark_index(node, ("yes", ""))
+    researcher._mark_index(node, ("yes", "Semantic Scholar"))
+    researcher._mark_index(node, ("no", ""))
+    assert node == {"indexed": "yes", "index": "Semantic Scholar"}

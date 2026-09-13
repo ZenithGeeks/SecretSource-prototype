@@ -99,10 +99,24 @@ export type Project = {
  * paper the user analysed. Papers and claims are the two node kinds; edges are typed relations
  * (claims view) or paper-to-paper links (papers view).
  */
-export type GraphRelation = 'asserts' | 'backs' | 'contradicts' | 'silent'
+export type GraphRelation = 'asserts' | 'backs' | 'contradicts' | 'silent' | 'unchecked'
+
+/**
+ * Whether a public index (Semantic Scholar, arXiv, Unpaywall) knew a cited work: 'yes', 'no',
+ * or '' when the run does not say, as for the analysed papers themselves. Not a Scopus check.
+ */
+export type Indexed = 'yes' | 'no' | ''
 
 export type GraphNode =
-  | { id: string; kind: 'paper'; label: string; year: string; cluster: string }
+  | {
+      id: string
+      kind: 'paper'
+      label: string
+      year: string
+      cluster: string
+      indexed: Indexed
+      index: string // the index that answered, e.g. "Semantic Scholar"; '' when not known
+    }
   | { id: string; kind: 'claim'; label: string }
 
 export type GraphEdge = {
@@ -110,6 +124,7 @@ export type GraphEdge = {
   source: string // paper node id
   target: string // claim node id
   relation: GraphRelation
+  reason?: string // why the check could not run, for 'unchecked'
   note?: string
   quote?: string
   page?: string

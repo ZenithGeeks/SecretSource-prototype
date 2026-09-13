@@ -118,12 +118,21 @@ like a claim nobody tried.
 
 **Papers outside a public index.** The papers we work with (the analysed paper, the works
 it cites, the library, the benchmark) should be in a public index. A paper that is not is
-still analysed and still gets a verdict. The web app should mark it (not built yet, #21),
-so a reader can see that the verdict rests on a source outside the index. We record which
-index answered instead of guessing: each verdict has `indexed_in` with the index that
-found the paper (`semantic-scholar`, `arxiv`, `unpaywall`, or empty) and the ids it gave.
-We never say Scopus, because Semantic Scholar and arXiv cannot tell us whether a paper is
-in Scopus. Only an Elsevier key could.
+still analysed and still gets a verdict. The web app marks it, so a reader can see that the
+verdict rests on a source outside the index. We record which index answered instead of
+guessing: each verdict has `indexed_in` with the index that found the paper
+(`semantic-scholar`, `arxiv`, `unpaywall`, or empty) and the ids it gave. We never say
+Scopus, because Semantic Scholar and arXiv cannot tell us whether a paper is in Scopus.
+Only an Elsevier key could.
+
+The knowledge graph (`researcher.graph`) turns this into `indexed` on each cited work:
+`yes` when a verdict names an index or the lookup found the work without a free copy, `no`
+when no index knew it (`unresolvable`, a web page, or a bare link), and empty when the run
+does not say (a download that failed, or the analysed papers themselves). A work cited
+several times keeps its strongest answer. The graph draws `no` as a dashed amber ring.
+"Not found" means our lookup found nothing for the reference as written, so a reference
+GROBID read badly can be marked too. The Library rows are not marked yet (#21): nothing
+records whether the analysed paper itself is indexed.
 
 ## How DSPy is used
 
