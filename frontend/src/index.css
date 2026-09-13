@@ -85,6 +85,12 @@ body {
   color: var(--color-ink);
 }
 
+/* pdf.js puts invisible text over the drawn page so it can be selected. Its glyphs do not line
+   up with the page's own, so a visible selection colour shows the text twice, blurred. */
+.textLayer ::selection {
+  color: transparent;
+}
+
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
