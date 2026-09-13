@@ -20,6 +20,7 @@ as they progress. A restart keeps the history.
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -81,6 +82,20 @@ async def lifespan(app: FastAPI):
     restore()
     yield
 
+
+class PathWithoutQuery(logging.Filter):
+    """Keep the query string out of uvicorn's access log. The web app sends tokens only in
+    headers, but a query can still carry something private, and anyone who can read the
+    container logs reads this (#134). uvicorn's args are (client, method, path, version, status)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            client, method, path, version, status = record.args
+            record.args = (client, method, str(path).split("?", 1)[0], version, status)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(PathWithoutQuery())
 
 app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
 app.add_middleware(
@@ -263,7 +278,7 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
     """Server-sent events: the stages already recorded, then each new one as it happens.
-    EventSource cannot send headers, so the web app passes its token as ?access_token=."""
+    The web app reads this with fetch(), so its token travels in the Authorization header."""
     _owned(analysis_id, user)
 
     async def stream():

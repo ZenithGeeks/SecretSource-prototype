@@ -1,9 +1,10 @@
 """Who is asking: the Supabase user behind a request, or nobody.
 
-The web app signs users in with Supabase and sends the session's access token, as
-`Authorization: Bearer <token>` or, for the event stream (EventSource cannot send headers),
-as the `access_token` query parameter. We ask Supabase who the token belongs to and keep the
-answer for a few minutes, so a page that makes ten requests does not make ten lookups.
+The web app signs users in with Supabase and sends the session's access token as
+`Authorization: Bearer <token>`, on every request including the event stream. A token in the
+URL is ignored: access logs record URLs, so anyone who can read the logs could reuse it (#134).
+We ask Supabase who the token belongs to and keep the answer for a few minutes, so a page that
+makes ten requests does not make ten lookups.
 
 No token, or no Supabase configured, means nobody: the owner is None and the gateway works
 as one shared space, as it did before login existed. A token that Supabase rejects is a 401.
@@ -29,9 +30,7 @@ def _supabase_configured() -> bool:
 
 def _token(request: Request) -> str:
     header = request.headers.get("authorization", "")
-    if header.lower().startswith("bearer "):
-        return header[7:].strip()
-    return request.query_params.get("access_token", "").strip()
+    return header[7:].strip() if header.lower().startswith("bearer ") else ""
 
 
 def _user_id_for(token: str) -> str | None:

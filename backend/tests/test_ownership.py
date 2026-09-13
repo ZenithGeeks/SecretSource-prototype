@@ -4,6 +4,8 @@ Supabase is not called: the token check is replaced by a table of known tokens. 
 used without its context manager, so the app's startup (which loads the store) does not run.
 """
 
+import logging
+
 import pytest
 from app import auth, main
 from fastapi.testclient import TestClient
@@ -45,9 +47,25 @@ def test_someone_elses_analysis_is_not_found(client):
     assert client.get("/analyses/a1", headers=ada).status_code == 200
 
 
-def test_the_event_stream_takes_the_token_from_the_query(client):
-    assert client.get("/analyses/b1/events?access_token=token-ada").status_code == 404
-    assert client.get("/analyses/a1/events?access_token=token-ada").status_code == 200
+def test_the_event_stream_takes_the_token_from_the_header(client):
+    ada = {"Authorization": "Bearer token-ada"}
+    assert client.get("/analyses/b1/events", headers=ada).status_code == 404
+    assert client.get("/analyses/a1/events", headers=ada).status_code == 200
+
+
+def test_a_token_in_the_url_is_ignored(client):
+    # Access logs record URLs, so a token there would be readable by anyone with the logs.
+    assert client.get("/analyses/a1/events?access_token=token-ada").status_code == 404
+    assert ids(client.get("/analyses?access_token=token-ada")) == ["shared"]
+
+
+def test_the_access_log_leaves_out_the_query():
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+        ("172.21.0.6:46100", "GET", "/analyses/a1/events?access_token=secret", "1.1", 200), None,
+    )
+    main.PathWithoutQuery().filter(record)
+    assert record.getMessage() == '172.21.0.6:46100 - "GET /analyses/a1/events HTTP/1.1" 200'
 
 
 def test_a_token_supabase_rejects_is_a_401(client):

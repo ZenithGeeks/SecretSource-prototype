@@ -203,26 +203,62 @@ export const api = {
     ),
 
   /** Follows an analysis's stages over SSE. A dropped connection is usually transient, so
-   * this does not close on error — the browser retries on its own, and the backend
-   * replays every stage from the start on each new connection (#133). `onOpen` fires on
-   * the initial connection and on every reconnect, so a caller can resync its own
+   * this does not stop on error: it reconnects after a pause, as EventSource would, and the
+   * backend replays every stage from the start on each new connection (#133). `onOpen` fires
+   * on the initial connection and on every reconnect, so a caller can resync its own
    * bookkeeping (e.g. how much of that replay to skip) each time. Returns a function that
    * closes the connection for good, for the caller to call once it knows the run ended,
-   * and for cleanup on unmount. */
+   * and for cleanup on unmount.
+   *
+   * This reads the stream with fetch() rather than EventSource, because EventSource cannot
+   * send the Authorization header, and a token in the URL ends up in access logs (#134). */
   onStages: (id: string, onStage: (stage: Stage) => void, onOpen?: () => void) => {
-    // EventSource cannot send an Authorization header, so the token goes in the query.
-    let events: EventSource | null = null
-    let closed = false
-    accessToken().then((token) => {
-      if (closed) return
-      const query = token ? `?access_token=${encodeURIComponent(token)}` : ''
-      events = new EventSource(`/api/analyses/${id}/events${query}`)
-      events.onmessage = (message) => onStage(JSON.parse(message.data))
-      if (onOpen) events.onopen = onOpen
-    })
-    return () => {
-      closed = true
-      events?.close()
+    const controller = new AbortController()
+    const follow = async () => {
+      while (!controller.signal.aborted) {
+        try {
+          const token = await accessToken()
+          const response = await fetch(`/api/analyses/${id}/events`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal: controller.signal,
+          })
+          // Like EventSource, a refused stream (401, 404) is not retried.
+          if (!response.ok || !response.body) return
+          onOpen?.()
+          await readEvents(response.body, (data) => onStage(JSON.parse(data)))
+        } catch {
+          if (controller.signal.aborted) return
+        }
+        await new Promise((resolve) => setTimeout(resolve, RECONNECT_MS))
+      }
     }
+    void follow()
+    return () => controller.abort()
   },
+}
+
+/** EventSource's own default pause before it reconnects. */
+const RECONNECT_MS = 3000
+
+/** Calls `onData` with the data of each server-sent event in the stream, until it ends. */
+async function readEvents(body: ReadableStream<Uint8Array>, onData: (data: string) => void) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffered = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) return
+    buffered += decoder.decode(value, { stream: true })
+    let end: number
+    while ((end = buffered.indexOf('\n\n')) !== -1) {
+      const event = buffered.slice(0, end)
+      buffered = buffered.slice(end + 2)
+      const data = event
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).replace(/^ /, ''))
+        .join('\n')
+      if (data) onData(data)
+    }
+  }
 }
