@@ -98,13 +98,16 @@ image was built with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (build arg
 - The gateway asks Supabase who the token belongs to (`app/auth.py`) and remembers the answer
   for 5 minutes.
 - A token Supabase rejects returns `401` with `the session has expired, sign in again`.
-- No token means nobody is signed in. Without Supabase settings, every request is nobody, and
-  every analysis is shared, as before login existed.
-- A new analysis gets `owner`, the user id of whoever started it (`null` when nobody).
+- With login on, a request with no token returns `401` with `sign in to use SecretSource`, on
+  every route except `POST /verify` and `GET /health`. When the web app has no session to send,
+  or gets a `401`, it signs out and shows the sign-in screen.
+- Without Supabase settings, login is off: every request is nobody, and every analysis is
+  shared, as before login existed.
+- A new analysis gets `owner`, the user id of whoever started it (`null` when login is off).
   Each caller sees only analyses whose `owner` is them. Someone else's analysis returns `404`,
   not `403`, so an id does not tell anyone that it exists.
 - A paper under `/papers/{name}` is served only when it is the analysed paper, or a cited paper
-  a check read, in one of the caller's analyses. Anything else returns `404`, signed in or not.
+  a check read, in one of the caller's analyses. Anything else returns `404`.
 
 ## Folder layout
 

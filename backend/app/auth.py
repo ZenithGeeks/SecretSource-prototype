@@ -6,8 +6,11 @@ URL is ignored: access logs record URLs, so anyone who can read the logs could r
 We ask Supabase who the token belongs to and keep the answer for a few minutes, so a page that
 makes ten requests does not make ten lookups.
 
-No token, or no Supabase configured, means nobody: the owner is None and the gateway works
-as one shared space, as it did before login existed. A token that Supabase rejects is a 401.
+Without Supabase configured, login is off: every caller is nobody, the owner is None, and the
+gateway works as one shared space, as it did before login existed. With Supabase configured, a
+request with no token is a 401, like a token Supabase rejects. Treating it as nobody would show
+a signed-in user whose token went missing every analysis without an owner, and would let anyone
+list, open or delete those analyses (#147).
 """
 
 import asyncio
@@ -57,10 +60,12 @@ def _user_id_for(token: str) -> str | None:
 
 
 async def current_user(request: Request) -> str | None:
-    """FastAPI dependency: the signed-in user's id, or None when nobody is signed in."""
-    token = _token(request)
-    if not token or not _supabase_configured():
+    """FastAPI dependency: the signed-in user's id, or None when login is off."""
+    if not _supabase_configured():
         return None
+    token = _token(request)
+    if not token:
+        raise HTTPException(401, "sign in to use SecretSource")
     user_id = await asyncio.to_thread(_user_id_for, token)
     if user_id is None:
         raise HTTPException(401, "the session has expired, sign in again")
