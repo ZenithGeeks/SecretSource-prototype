@@ -9,7 +9,7 @@
  * Library's "Add paper" both land there.
  */
 
-import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Microscope, Settings, Waypoints } from 'lucide-react'
+import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Microscope, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -23,25 +23,27 @@ import { Home } from './screens/Home'
 import { Library } from './screens/Library'
 import { Settings as SettingsScreen } from './screens/Settings'
 
-type NavKey = 'home' | 'library' | 'graph' | 'history' | 'settings'
-export type ResearcherScreen = NavKey | 'field-consensus'
+type NavKey = 'home' | 'library' | 'graph' | 'history'
+// Settings and field-consensus are screen-only — reachable and deep-linkable, but with no nav
+// entry of their own. Settings is account-level, opened from the profile menu (as in Figma).
+export type ResearcherScreen = NavKey | 'field-consensus' | 'settings'
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'library', label: 'Library', icon: LibraryIcon },
   { key: 'graph', label: 'Graph', icon: Waypoints },
   { key: 'history', label: 'History', icon: HistoryIcon },
-  { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
-// field-consensus sits under the Library section in the nav.
-const NAV_FOR: Record<ResearcherScreen, NavKey> = {
+// Which nav item lights for each screen; null means none (field-consensus lights Library,
+// Settings lights nothing — the profile button carries its own active state instead).
+const NAV_FOR: Record<ResearcherScreen, NavKey | null> = {
   home: 'home',
   library: 'library',
   'field-consensus': 'library',
   graph: 'graph',
   history: 'history',
-  settings: 'settings',
+  settings: null,
 }
 
 function initialScreen(): ResearcherScreen {
@@ -97,6 +99,8 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Researcher"
       roleIcon={Microscope}
       onChangeRole={onChangeRole}
+      onOpenSettings={() => navigate('settings')}
+      settingsActive={screen === 'settings'}
       wide={wide}
       sidebar={
         screen === 'history' ? (
