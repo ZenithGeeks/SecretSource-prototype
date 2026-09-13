@@ -6,6 +6,7 @@ UI can show the place instead of telling the reader to go looking.
 """
 
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -485,6 +486,75 @@ def extract_citations(pdf_path: str) -> dict:
 # --- Claims linked to the references they cite ----------------------------------
 
 
+# An author-year citation as printed: "Ren et al., 2021b", "Gao and Callan, 2021", "Lee et al. (2021b)".
+AUTHOR_YEAR = re.compile(
+    r"([A-Z][\w'\-]+)(?:\s+(?:and|&)\s+([A-Z][\w'\-]+))?(\s+et\s+al\.?)?[,\s]*\(?((?:19|20)\d\d)([a-z]?)\)?"
+)
+
+
+def _plain(text: str) -> str:
+    """Lower case without accents, so "Stéphane" and "Stephane" compare equal."""
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+
+
+def _link_author_year_citations(tei) -> int:
+    """Give a target to author-year citations GROBID could not link to the reference list.
+
+    GROBID tags "(Ren et al., 2021b)" as a citation but, when it cannot match it, leaves out
+    the target, and then the claim looks like it cites nothing. We match the first author's
+    surname and the year ourselves. A letter after the year ("2021a", "2021b") picks between
+    works by the same first author in the same year: the reference whose text carries that
+    year and letter, or else the one at that place in the list. An unclear match stays
+    unlinked. Returns how many citations were linked.
+    """
+    body = tei.find(".//tei:body", TEI_NAMESPACE)
+    if body is None:
+        return 0
+    entries = []  # (id, author surnames, full text of the entry, year from its date)
+    for bibl in tei.iter(TEI_TAG + "biblStruct"):
+        ref_id = bibl.get(XML_ID)
+        names = bibl.findall(".//tei:author//tei:surname", TEI_NAMESPACE)
+        surnames = [_plain(name.text) for name in names if name.text]
+        if not ref_id or not surnames:
+            continue
+        date = bibl.find(".//tei:date[@when]", TEI_NAMESPACE)
+        entries.append((ref_id, surnames, " ".join(bibl.itertext()),
+                        date.get("when", "")[:4] if date is not None else ""))
+
+    linked = 0
+    for ref in body.iter(TEI_TAG + "ref"):
+        if ref.get("type") != "bibr" or ref.get("target"):
+            continue
+        found = AUTHOR_YEAR.search("".join(ref.itertext()))
+        if not found:
+            continue
+        name, second, et_al, year, letter = found.groups()
+        name = _plain(name)
+        candidates = [
+            e for e in entries if e[1][0] == name and (e[3] == year or re.search(rf"\b{year}", e[2]))
+        ]
+        # "Gao and Callan" has exactly two authors with Callan second; "Gao et al." has three or more.
+        if len(candidates) > 1 and not letter:
+            if second:
+                candidates = [e for e in candidates if len(e[1]) == 2 and e[1][1] == _plain(second)]
+            elif et_al:
+                candidates = [e for e in candidates if len(e[1]) >= 3]
+        chosen = None
+        if letter:
+            exact = [e for e in candidates if re.search(rf"\b{year}{letter}\b", e[2])]
+            index = ord(letter) - ord("a")
+            if len(exact) == 1:
+                chosen = exact[0]
+            elif len(candidates) > index:
+                chosen = candidates[index]
+        elif len(candidates) == 1:
+            chosen = candidates[0]
+        if chosen:
+            ref.set("target", "#" + chosen[0])
+            linked += 1
+    return linked
+
+
 def _references_by_id(tei) -> tuple[dict, int]:
     """({"b12": parsed reference, ...}, how many were dropped) from the TEI bibliography.
 
@@ -757,6 +827,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
     try:
         pdf_path = local_pdf(pdf_path)
         tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref",))
+        _link_author_year_citations(tei)
         references, dropped = _references_by_id(tei)
         markers = _citation_markers(tei, references)
         paper_text = _body_text(tei)
