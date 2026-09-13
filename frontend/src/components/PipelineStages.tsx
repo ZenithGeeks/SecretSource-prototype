@@ -18,6 +18,10 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   failed: (stage) =>
     `Claim ${(stage.claim ?? 0) + 1}: could not check ${stage.source} — ` +
     `${reasonText(stage.reason)}`,
+  figures: (stage) =>
+    stage.figures
+      ? `Found ${stage.figures} numbered figures in the paper`
+      : 'Found no numbered figures in the paper',
   audited: (stage) =>
     stage.findings
       ? `Checked the results: ${stage.findings} to look at`
@@ -47,7 +51,8 @@ export function PipelineStages({ stages, running }: { stages: Stage[]; running: 
               <CheckCircle2 className="size-4 shrink-0 text-supports" />
             )}
             <span className={stage.stage === 'error' ? 'text-refutes' : 'text-ink-muted'}>
-              {LABELS[stage.stage](stage)}
+              {/* A stage this build does not know yet shows its name instead of crashing. */}
+              {LABELS[stage.stage]?.(stage) ?? stage.stage}
             </span>
           </li>
         )

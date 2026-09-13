@@ -3,7 +3,7 @@
 import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 
-import type { Citation, Claim, Unchecked, Verdict } from '../lib/api'
+import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
@@ -77,6 +77,54 @@ function reference({ authors, year, title, arxiv }: Citation) {
  */
 function asWritten(sentence: string) {
   return sentence.replace(/\s*\[b\d+\]/g, '').trim()
+}
+
+/** "Figure 2", "Fig. 2" or "Fig 2b" in a sentence. The number is group 1. */
+const FIGURE_MENTION = /\bFig(?:ure|\.)?\s*(\d+[a-z]?)\b/gi
+
+function figureByNumber(figures: PaperFigure[], number: string) {
+  return figures.find((figure) => figure.label.toLowerCase() === `figure ${number.toLowerCase()}`)
+}
+
+/** The paper's own figures that a sentence names, once each, in the order it names them. */
+function figuresNamedIn(sentence: string, figures: PaperFigure[]) {
+  const named: PaperFigure[] = []
+  for (const mention of sentence.matchAll(FIGURE_MENTION)) {
+    const figure = figureByNumber(figures, mention[1])
+    if (figure && !named.includes(figure)) named.push(figure)
+  }
+  return named
+}
+
+/**
+ * The sentence with each "Figure N" as a link, but only where the paper has that figure.
+ * A mention of a figure we did not extract stays plain text, so it never opens the wrong one.
+ */
+function withFigureLinks(
+  sentence: string,
+  figures: PaperFigure[],
+  open?: (figure: PaperFigure) => void,
+) {
+  if (!open || figures.length === 0) return sentence
+  const parts: React.ReactNode[] = []
+  let last = 0
+  for (const mention of sentence.matchAll(FIGURE_MENTION)) {
+    const figure = figureByNumber(figures, mention[1])
+    if (!figure) continue
+    parts.push(sentence.slice(last, mention.index))
+    parts.push(
+      <button
+        key={mention.index}
+        onClick={() => open(figure)}
+        className="rounded text-accent underline underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        {mention[0]}
+      </button>,
+    )
+    last = mention.index + mention[0].length
+  }
+  parts.push(sentence.slice(last))
+  return parts
 }
 
 /** Where this work lives, preferring the identifier that resolves exactly. */
@@ -317,16 +365,26 @@ export function ClaimCard({
   index,
   standing,
   paper,
+  figures = [],
   onShow,
 }: {
   claim: Claim
   index: number
   standing: Standing
   paper?: string
+  /** The analysed paper's numbered figures, so "Figure 2" in its sentence can be shown. */
+  figures?: PaperFigure[]
   onShow?: (target: Target) => void
 }) {
   const [open, setOpen] = useState(opensByDefault(standing))
   const loose = unpaired(claim)
+  const sentence = claim.sentence ? asWritten(claim.sentence) : ''
+  const ownFigures = paper ? figuresNamedIn(sentence, figures) : []
+  const openFigure =
+    paper && onShow
+      ? (figure: PaperFigure) =>
+          onShow({ paper, label: `${figure.label} in this paper`, source: null, page: figure.page })
+      : undefined
 
   return (
     <Card className="p-0">
@@ -360,7 +418,7 @@ export function ClaimCard({
             <div className="border-l-2 border-border-subtle pl-4">
               <Label>In this paper</Label>
               <blockquote className="text-sm italic text-ink-muted">
-                “{asWritten(claim.sentence)}”
+                “{withFigureLinks(sentence, ownFigures, openFigure)}”
                 {claim.source && (
                   <span className="ml-2 not-italic">
                     {paper && onShow ? (
@@ -383,6 +441,29 @@ export function ClaimCard({
                   </span>
                 )}
               </blockquote>
+              {paper && ownFigures.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {ownFigures.map((figure) => (
+                    <figure key={figure.image} className="max-w-56 space-y-1">
+                      <button
+                        onClick={() => openFigure?.(figure)}
+                        disabled={!openFigure}
+                        className="block rounded focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <img
+                          src={figureImageUrl(paper, figure.image)}
+                          alt={figure.caption}
+                          loading="lazy"
+                          className="max-h-40 rounded border border-border-subtle bg-surface object-contain"
+                        />
+                      </button>
+                      <figcaption className="line-clamp-3 text-xs text-ink-muted" title={figure.caption}>
+                        {figure.caption}
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

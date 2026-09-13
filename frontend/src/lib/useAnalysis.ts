@@ -43,7 +43,12 @@ export function useAnalysis(id: string | null) {
         // published, so refetch and the reader gets them while the run is still going
         // rather than all at once at the end. Concurrent refetches of one key are
         // deduplicated, so several checks reporting together are not several requests.
-        if (stage.stage === 'extracted' || stage.stage === 'verified' || stage.stage === 'failed') {
+        if (
+          stage.stage === 'extracted' ||
+          stage.stage === 'verified' ||
+          stage.stage === 'failed' ||
+          stage.stage === 'figures'
+        ) {
           queryClient.invalidateQueries({ queryKey: ['analysis', id] })
         }
         // A run that ended between the fetch and the stream replays its end too; act on

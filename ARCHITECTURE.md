@@ -49,7 +49,9 @@ flowchart TD
     B --> C["Make one job per claim and cited paper"]
     C --> D["Prepare each cited paper once<br/>download and index"]
     D --> E["Judge each claim<br/>search and ask the LLM"]
+    B --> P["Read the paper's own figures<br/>figures.py"]
     E --> F["Audit the result<br/>audit.py"]
+    P --> F
     F --> G["Done"]
 ```
 
@@ -67,7 +69,12 @@ flowchart TD
    (default 3) are prepared at the same time.
 5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
    `PARALLEL_CHECKS` claims (default 3) are judged at the same time.
-6. **Audit.** `audit.py` checks the finished analysis for problems, for example a quote
+6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
+   `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
+   keeps only figures whose caption gives their number, like "Figure 2: ...". The web app
+   then turns "Figure 2" in a claim's sentence into a link to that crop. If Docling fails,
+   the list is empty and the rest of the analysis is not affected.
+7. **Audit.** `audit.py` checks the finished analysis for problems, for example a quote
    that is not in the evidence. It only reports problems. It never changes a verdict.
 
 After every step the gateway calls `_publish`. This saves the analysis and sends one event
@@ -199,16 +206,18 @@ flowchart LR
     PS --> PJ["plan_judging"]
     PJ --> CS["check_sources<br/>up to PARALLEL_CHECKS"]
     CS --> AS["assemble"]
-    AS --> AU["audit_analysis"]
+    AS --> RF["read_figures"]
+    RF --> AU["audit_analysis"]
 ```
 
 - We keep the graph and the gateway's `_run` in step. Both use the same pipeline
-  functions, `fold_check` to add a result to its claim, and `audit`. If you change the
-  steps in one, change the other.
+  functions, `fold_check` to add a result to its claim, `paper_figures` and `audit`. If
+  you change the steps in one, change the other. The graph reads the figures after the
+  checks; the gateway reads them while it checks.
 - The gateway does not run through the graph, because it sends an event to the web app
   after every check.
 - A run ends with `status` `ok` and the same fields the gateway stores (`paper`, `file`,
-  `claims`, `audit`), or with `status` `error` and a `message`.
+  `claims`, `figures`, `audit`), or with `status` `error` and a `message`.
 - The nodes are plain Python functions, not agents.
 - `prepare_sources` and `check_sources` are parallel workers: they run once for each item
   in a list, several at a time.
