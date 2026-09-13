@@ -451,6 +451,59 @@ def _paper_header(tei) -> dict:
     }
 
 
+def _printed_title(pdf_path: str) -> str:
+    """The title as printed on page 1: the largest horizontal text in the top half of the page.
+
+    Only horizontal lines count, so the sideways "arXiv:2112.01488v3 [cs.IR]" stamp on arXiv
+    PDFs is skipped although its font is bigger. Empty when the PDF cannot be read.
+    """
+    import pymupdf
+
+    try:
+        with pymupdf.open(pdf_path) as document:
+            page = document[0]
+            half = page.rect.height / 2
+            spans = [
+                (span["size"], span["bbox"][1], span["bbox"][0], span["text"])
+                for block in page.get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                if line["dir"] == (1.0, 0.0)
+                for span in line["spans"]
+                if span["text"].strip() and span["bbox"][3] < half
+            ]
+    except Exception:
+        return ""
+    if not spans:
+        return ""
+    largest = max(size for size, *_ in spans)
+    words = [text for size, _, _, text in sorted(spans, key=lambda s: (s[1], s[2])) if size >= largest - 0.5]
+    return " ".join(unicodedata.normalize("NFKC", " ".join(words)).split())
+
+
+def _comparable(text: str) -> str:
+    return " ".join(re.findall(r"\w+", unicodedata.normalize("NFKC", text).lower()))
+
+
+def paper_title(pdf_path: str, grobid_title: str = "", given: str = "") -> str:
+    """The analysed paper's title (#140).
+
+    GROBID's header can drop the first line of a title: for 2112.01488 it gives "Effective and
+    Efficient Retrieval via Lightweight Late Interaction", without "ColBERTv2:". So, in order:
+    the title the source lookup found for what the user gave (a DOI resolved through Semantic
+    Scholar has one); the title printed on page 1, when GROBID found none or the printed one
+    contains GROBID's, so a different heading is never taken for the title; GROBID's.
+    """
+    from app.pipeline.sources import known_title
+
+    if given and (known := known_title(given)):
+        return known
+    printed = _printed_title(pdf_path)
+    words = printed.split()
+    if 2 <= len(words) <= 40 and (not grobid_title or _comparable(grobid_title) in _comparable(printed)):
+        return printed
+    return grobid_title
+
+
 def _findable(citation: dict) -> bool:
     """A reference with no title, id, or URL is a lookup that cannot succeed. Drop it counted."""
     return bool(citation["title"] or citation["doi"] or citation["arxiv"] or citation["url"])
@@ -825,6 +878,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
             for example "data/papers/colbertv2.pdf" or "2112.01488".
     """
     global _cited_claim_extractor
+    given = pdf_path
     try:
         pdf_path = local_pdf(pdf_path)
         tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref",))
@@ -848,10 +902,12 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         claims = _most_checkable(
             _deduplicated([claim for claim in found if not _asserts_nothing(claim["claim"])]), CLAIM_LIMIT
         )
+        header = _paper_header(tei)
+        header["title"] = paper_title(pdf_path, header["title"], given)
         return {
             "status": "ok",
             "file": pdf_path,
-            **_paper_header(tei),
+            **header,
             "claims": claims,
             "extracted": len(found),  # before repeats, announcements and the cap
             "dropped": dropped,

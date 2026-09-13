@@ -313,6 +313,14 @@ def known_index(identifier: str) -> dict:
     return {"index": cached.get("index", ""), "ids": cached.get("ids") or {}}
 
 
+def known_title(identifier: str) -> str:
+    """The title the lookup found for this work, read back from the cache. Costs no request.
+    Empty for a work used as given (an arXiv ID, a URL, a file) or never looked up."""
+    from app import store
+
+    return (store.recall_source(_normalised(identifier.strip())) or {}).get("title", "")
+
+
 def local_pdf(paper: str) -> str:
     """Any paper reference -> a local PDF path. Downloads it first if needed."""
     if Path(paper).is_file():
