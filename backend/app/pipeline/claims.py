@@ -315,8 +315,15 @@ def extract_claims(pdf_path: str) -> dict:
 def _grobid_pdf(endpoint: str, pdf_path: str) -> ET.Element:
     import requests
 
+    from app.clients.service_auth import auth_headers
+
     with open(pdf_path, "rb") as pdf_file:
-        response = requests.post(f"{GROBID_URL}/api/{endpoint}", files={"input": pdf_file}, timeout=300)
+        response = requests.post(
+            f"{GROBID_URL}/api/{endpoint}",
+            files={"input": pdf_file},
+            headers=auth_headers(GROBID_URL),
+            timeout=300,
+        )
     response.raise_for_status()
     return ET.fromstring(response.text)
 

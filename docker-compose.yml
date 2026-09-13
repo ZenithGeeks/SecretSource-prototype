@@ -127,6 +127,8 @@ services:
       COLBERT_URL: ${COLBERT_URL:-http://colbert:8893}
       COLPALI_URL: ${COLPALI_URL:-http://colpali:8894} # optional; visual hints are skipped when it is not running
       GROBID_URL: ${GROBID_URL:-http://grobid:8070}
+      SERVICE_AUTH: ${SERVICE_AUTH:-none} # google-id-token for the shared Cloud Run services
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-} # e.g. secrets/service-auth.json
       PAPERS_DIR: data/papers
       ANALYSES_DB: /app/data/db/analyses.db
       S2_API_KEY: ${S2_API_KEY:-} # without one, Semantic Scholar 429s most lookups
@@ -134,6 +136,7 @@ services:
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
     volumes:
       - ./data/papers:/app/data/papers # shared with the retrieval services
+      - ./backend/secrets:/app/secrets:ro # identity-token credentials, see .env.example
       - analyses:/app/data/db # run history survives a rebuild
       - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
     depends_on:
@@ -154,6 +157,7 @@ services:
       PYTHONPATH: /app # adk_agents/ imports the app package
     volumes:
       - ./data/papers:/app/data/papers
+      - ./backend/secrets:/app/secrets:ro
       - hf-cache:/root/.cache/huggingface
     depends_on:
       - grobid
@@ -175,6 +179,7 @@ services:
       A2A_PORT: "8002"
     volumes:
       - ./data/papers:/app/data/papers
+      - ./backend/secrets:/app/secrets:ro
       - hf-cache:/root/.cache/huggingface
     depends_on:
       - grobid
