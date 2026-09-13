@@ -1,208 +1,308 @@
-# SecretSource Backend
+# SecretSource backend
 
-This is the HTTP gateway for the frontend. It starts an analysis of a paper, lets the
-client watch the analysis run over Server-Sent Events, and serves the resulting claims,
-verdicts, and the source PDFs (as the PDF itself, as rendered page images, and as text
-locations). Run it with `python -m uvicorn app.main:app --port 8080`, or with
-`docker compose up -d gateway`.
+The backend reads a research paper, finds its claims, and checks each claim against the
+paper it cites. It is a FastAPI gateway that the web app talks to. The same code also runs
+as a chat agent (`cli.py`), an A2A server (`a2a_server.py`) and an ADK graph (`adk web`).
 
-Analyses are held in memory while they run and written to SQLite as they progress, so a
-restart keeps the history (anything still marked `running` is marked as interrupted).
+For how the pipeline works inside, read [ARCHITECTURE.md](../ARCHITECTURE.md). This page
+covers how to run the backend, how it is organised, and the HTTP API.
 
-## API Reference
+## Contents
 
-### POST /analyses
+- [Run it](#run-it)
+- [Settings](#settings)
+- [Folder layout](#folder-layout)
+- [Tests](#tests)
+- [HTTP API](#http-api)
+  - [Analyses](#analyses)
+  - [Progress events](#progress-events)
+  - [Papers](#papers)
+  - [Other routes](#other-routes)
 
-Starts an analysis of a paper given by path, DOI, arXiv ID, or URL.
+## Run it
 
-Request body (JSON):
+The usual way is Docker Compose from the repository root:
 
-| Field  | Type | Required | Meaning                                                        |
-| ------ | ---- | -------- | -------------------------------------------------------------- |
-| `paper` | `str` | yes   | The paper to analyze: a path, DOI, arXiv ID, or URL.           |
-| `verify` | `bool` | no  | Whether to verify claims against their sources. Defaults to `true`. |
+```bash
+docker compose up -d gateway
+curl http://localhost:8080/health
+```
 
-Response: `{"id": "<analysis id>"}` — a 12-character hex id for the new analysis.
+The gateway needs GROBID, ColBERT and an LLM endpoint. ColPali is optional. Their URLs come
+from `.env` (see the root [README](../README.md)).
 
-### POST /analyses/upload
+To run it on your own machine instead:
 
-Starts an analysis from an uploaded PDF file; the file is saved into the papers directory
-and analyzed the same way as `POST /analyses`.
+```bash
+cd backend
+pip install -r requirements.txt
+python -m uvicorn app.main:app --port 8080
+```
 
-Request:
+On the host, use `localhost` URLs in `.env`, not compose service names. The host also needs
+`dspy` and `pymupdf`, which `requirements.txt` installs.
 
-| Param    | Type    | Required | Meaning                                          |
-| -------- | ------- | -------- | ------------------------------------------------ |
-| `file`   | file (multipart) | yes | The PDF to upload. |
-| `verify` | `bool`  | no       | Whether to verify claims. Defaults to `true`.    |
+Other entry points:
+
+| Command | What it does |
+| --- | --- |
+| `python cli.py` | chat with the coordinator agent in the terminal |
+| `python cli.py "list the claims in data/papers/x.pdf"` | one turn, then exit |
+| `python -m uvicorn a2a_server:app --port 8002` | serve the agents over A2A |
+| `docker compose --profile dev up -d adk-web` | ADK's dev UI on http://localhost:8001 |
+
+## Settings
+
+Every setting is an environment variable, read in `app/config.py`. Empty means "use the
+default".
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `VLLM_URL` | `http://localhost:8000/v1` | OpenAI-compatible LLM endpoint |
+| `VLLM_MODEL` | `qwen` | model id, as listed by `{VLLM_URL}/models` |
+| `VLLM_API_KEY` | `EMPTY` | key for that endpoint |
+| `GROBID_URL` | `http://localhost:8070` | GROBID, reads references and body text |
+| `COLBERT_URL` | `http://localhost:8893` | ColBERT text search service |
+| `COLPALI_URL` | `http://localhost:8894` | ColPali figure and page search; skipped when down |
+| `SERVICE_AUTH` | `none` | `google-id-token` adds an identity token for private Cloud Run services |
+| `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
+| `PAPERS_DIR` | `data/papers` | downloaded PDFs and figure crops |
+| `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses in Supabase instead of SQLite |
+| `S2_API_KEY` | empty | Semantic Scholar key; without it most lookups are rate limited |
+| `UNPAYWALL_EMAIL` | empty | contact email that lets Unpaywall answer lookups |
+| `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
+| `PARALLEL_SOURCES` | `3` | cited papers downloaded and indexed at the same time |
+| `PARALLEL_CHECKS` | `3` | claims judged at the same time |
+| `GATEWAY_PORT` | `8080` | port when started with `python -m app.main` |
+| `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
+| `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |
+
+The service role key can read and write all data. Keep it on the server and never put it in
+the frontend or in git.
+
+## Folder layout
+
+```
+backend/
+├── app/
+│   ├── main.py          HTTP gateway: the routes below and the analysis run (_run)
+│   ├── config.py        all settings
+│   ├── store.py         saves analyses and source lookups (SQLite or Supabase)
+│   ├── llm.py           the LLM for ADK (adk_model) and for DSPy (dspy_lm)
+│   ├── workflow.py      the same pipeline as an ADK Workflow graph
+│   ├── agents/team.py   chat agents: coordinator, rag_agent, paper_agent, verify_agent
+│   ├── clients/         HTTP clients for ColBERT, ColPali and GROBID, and identity tokens
+│   └── pipeline/
+│       ├── claims.py    reads a paper and extracts claims with their citations
+│       ├── sources.py   finds and downloads a cited paper
+│       ├── verify.py    indexes a cited paper and judges a claim against it
+│       ├── figures.py   figure crops, tables and formulas (Docling)
+│       ├── rag.py       question answering over indexed papers
+│       └── audit.py     checks a finished analysis for problems
+├── adk_agents/          entry points for `adk web` (chat and analysis)
+├── cli.py               terminal chat with the coordinator
+├── a2a_server.py        the agents over A2A
+└── tests/
+```
+
+If you change what a user sees, change `app/main.py` or `app/pipeline/`. The gateway is the
+only part the web app uses.
+
+## Tests
+
+The tests need `google-adk` and `pymupdf`, so run them inside the gateway image:
+
+```bash
+docker compose build gateway
+docker run --rm -v "$PWD/backend:/app" -w /app secretsource-prototype-gateway \
+  sh -c "pip install -q pytest && python -m pytest -q"
+```
+
+On Git Bash for Windows, put `MSYS_NO_PATHCONV=1` before `docker run` and use
+`$(pwd -W)` instead of `$PWD`.
+
+`tests/test_sources.py` also runs on the host with `pytest tests/test_sources.py`. Lint with
+`ruff check backend` from the repository root.
+
+## HTTP API
+
+All routes return JSON unless noted. CORS allows every origin. The web app reaches these
+routes under `/api`, for example `/api/analyses`.
+
+Errors use FastAPI's shape: `{"detail": "<message>"}` with a `400` or `404` status.
+
+### Analyses
+
+#### `POST /analyses`
+
+Starts an analysis. It returns at once; the work runs in the background.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `paper` | string | yes | a local path, DOI, arXiv ID or URL |
+| `verify` | boolean | no | check each claim against its cited paper; default `true` |
+
+```bash
+curl -X POST http://localhost:8080/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"paper": "2112.01488"}'
+```
+
+Response: `{"id": "3f9c2a7b1d04"}`, a 12-character id.
+
+#### `POST /analyses/upload`
+
+Starts an analysis of an uploaded PDF. The file is saved in `PAPERS_DIR` under its own file
+name.
+
+| Parameter | In | Required | Meaning |
+| --- | --- | --- | --- |
+| `file` | multipart form | yes | the PDF |
+| `verify` | query | no | default `true` |
 
 Response: `{"id": "<analysis id>"}`.
 
-### GET /analyses
+#### `GET /analyses`
 
-Lists every analysis, newest first.
+Every analysis, newest first, without its `stages` list.
 
-No parameters.
+#### `GET /analyses/{id}`
 
-Response: a JSON array of analyses, each with the analysis fields (see
-`GET /analyses/{analysis_id}`) but with the `stages` list omitted.
+One analysis with its results.
 
-### GET /analyses/{analysis_id}
+| Field | Meaning |
+| --- | --- |
+| `id` | the analysis id |
+| `paper` | what the analysis was started with |
+| `status` | `running`, `done` or `error` |
+| `message` | the error, when `status` is `error` |
+| `file` | the local PDF path, once the paper is read |
+| `claims` | the claims found, see below |
+| `stages` | every progress event so far, see [Progress events](#progress-events) |
+| `audit` | problems the audit found in the finished analysis; usually empty |
 
-Returns one analysis with its results.
+Each claim has:
 
-Path parameters:
+| Field | Meaning |
+| --- | --- |
+| `claim` | the claim in short form |
+| `sentence` | the sentence from the paper it came from |
+| `source` | where that sentence is in the PDF: `page`, `boxes`, `page_width`, `page_height`; `null` if not found |
+| `citations` | the works the sentence cites: `title`, `authors`, `year`, `doi`, `arxiv`, `url` |
+| `verdicts` | one result per cited work that was checked (same shape as `POST /verify`), plus `cited` |
+| `unchecked` | one entry per cited work that could not be checked: `source`, `reason`, `message` |
 
-| Param         | Type  | Required | Meaning           |
-| ------------- | ----- | -------- | ----------------- |
-| `analysis_id` | `str` | yes      | The analysis id.  |
+`reason` is one of `unresolvable`, `no-open-access`, `not-downloadable`,
+`lookup-unavailable`, `web-source`, `indexing-failed` or `failed`.
 
-Response: the full analysis object — `id`, `paper`, `status` (`running`, `done`, or
-`error`), `stages` (the recorded pipeline events), `claims`, and, once set, `file` and
-`message` (the error message when `status` is `error`).
+Errors: `404` when the id is unknown.
 
-Errors: `404` — `"no such analysis"` when the id is not known.
+#### `DELETE /analyses/{id}`
 
-### DELETE /analyses/{analysis_id}
+Deletes an analysis. Response: `{"deleted": "<analysis id>"}`. Errors: `404` when the id is
+unknown.
 
-Deletes an analysis.
+A server restart keeps all analyses, because each change is saved. An analysis that was
+still running at the restart is marked `error` with the message `interrupted by a restart`.
 
-Path parameters:
+### Progress events
 
-| Param         | Type  | Required | Meaning           |
-| ------------- | ----- | -------- | ----------------- |
-| `analysis_id` | `str` | yes      | The analysis id.  |
+#### `GET /analyses/{id}/events`
 
-Response: `{"deleted": "<analysis id>"}`.
+A server-sent events stream (`text/event-stream`). It first sends every stage recorded so
+far, then each new stage as it happens. It ends when the analysis is no longer running.
 
-Errors: `404` — `"no such analysis"` when the id is not stored.
+Each event is one `data:` line with a JSON object:
 
-### GET /analyses/{analysis_id}/events
+| `stage` | Extra fields | When |
+| --- | --- | --- |
+| `extracting` | `message` | reading the paper started |
+| `extracted` | `claims`, `extracted`, `windows` | claims found; `extracted` is the count before repeats and the cap were removed |
+| `verifying` | `claim`, `source` | a check started |
+| `verified` | `claim`, `verdict` | a check finished |
+| `failed` | `claim`, `source`, `reason`, `message` | a cited work could not be checked |
+| `audited` | `findings` | the audit ran; `findings` is usually `0` |
+| `done` | | the analysis finished |
+| `error` | `message` | the analysis failed |
 
-Server-Sent Events stream of the analysis's progress. It emits one event per pipeline
-stage (including failures), first replaying the stages already recorded and then
-streaming each new stage as it happens.
+`claim` is the index of the claim in `claims`. Checks run in parallel, so events for
+different claims arrive in any order. To show verdicts while a run is still going, read
+`GET /analyses/{id}` again after `extracted`, `verified` and `failed`.
 
-Path parameters:
+```bash
+curl -N http://localhost:8080/analyses/3f9c2a7b1d04/events
+```
 
-| Param         | Type  | Required | Meaning           |
-| ------------- | ----- | -------- | ----------------- |
-| `analysis_id` | `str` | yes      | The analysis id.  |
+Errors: `404` when the id is unknown.
 
-Response: `text/event-stream`. Each event is a `data:` line carrying a JSON object with
-a `stage` field plus stage-specific fields. Stages seen in the pipeline: `extracting`
-(`message`), `extracted` (`claims`, `extracted`, `windows`), `verifying` (`claim`,
-`source`), `verified` (`claim`, `verdict`), `failed` (`claim`, `source`, `reason`,
-`message`), `audited` (`findings`, how many ways the finished analysis disagreed with
-itself), `done`, and `error` (`message`). The stream ends once the analysis is no longer
-running.
+### Papers
 
-Checks run three at a time, so `verifying` and `verified` events for different claims
-interleave rather than arriving in claim order — each one names the claim it belongs to.
-The analysis body changes as they land, so a client that wants the claims and verdicts
-while the run is still going should re-read `GET /analyses/{analysis_id}` on `extracted`,
-`verified` and `failed` rather than waiting for `done`.
+`{name}` is a file name inside `PAPERS_DIR`, for example `2112.01488.pdf`. A name with a
+path in it, or one that starts with `.`, returns `400`. A missing file returns `404`.
 
-Errors: `404` — `"no such analysis"` when the id is not known.
+#### `GET /papers/{name}`
 
-### GET /papers/{name}
+The PDF itself, as `application/pdf`.
 
-Returns the source PDF itself.
+#### `GET /papers/{name}/pages/{page}.png`
 
-Path parameters:
+One page rendered as a PNG. `page` starts at 1. Pages are rendered once and then served
+from `PAGE_CACHE`.
 
-| Param  | Type  | Required | Meaning                          |
-| ------ | ----- | -------- | -------------------------------- |
-| `name` | `str` | yes      | The paper's file name (a bare file name, not a path). |
+| Query | Default | Meaning |
+| --- | --- | --- |
+| `dpi` | `110` | resolution; values above `300` are lowered to `300` |
 
-Response: the PDF, `application/pdf`, with the file name set.
+Errors: `404` when the page number is out of range.
 
-Errors: `400` — `"a paper name is a file name, not a path"` when `name` contains a path
-or starts with `.`; `404` — `"no such paper: <name>"` when the file does not exist.
+#### `GET /papers/{name}/figures/{figure}.png`
 
-### GET /papers/{name}/pages/{page_number}.png
+One cropped figure, the image that a verdict's `pages` entry names in its `image` field.
+`figure` must look like `figure-3`; anything else returns `400`. A crop that was never made
+returns `404`.
 
-Renders one page of the paper to a PNG image (rendered once, then served from cache).
+#### `GET /papers/{name}/find`
 
-Path parameters:
+Finds a piece of text in the paper.
 
-| Param         | Type  | Required | Meaning                          |
-| ------------- | ----- | -------- | -------------------------------- |
-| `name`        | `str` | yes      | The paper's file name.           |
-| `page_number` | `int` | yes      | The 1-based page number.         |
+| Query | Required | Meaning |
+| --- | --- | --- |
+| `q` | yes | the text to find |
+| `page` | no | only search this page |
 
-Query parameters:
+Response: `page`, `boxes`, `page_width`, `page_height` and `coverage` (how much of the text
+was matched). Boxes are in PDF points with the origin at the top left. To draw them on a
+page image, divide by `page_width` and `page_height`. When nothing is found:
+`{"page": null, "boxes": []}`.
 
-| Param | Type  | Required | Meaning                                          |
-| ----- | ----- | -------- | ------------------------------------------------ |
-| `dpi` | `int` | no       | Render resolution. Defaults to `110`; values above `300` are clamped to `300`. |
+### Other routes
 
-Response: the page image, `image/png`, with `Cache-Control: max-age=31536000`.
+#### `POST /verify`
 
-Errors: `400`/`404` from the paper-name check (see `GET /papers/{name}`); `404` —
-`"<name> has <n> pages"` when `page_number` is out of range.
+Checks one claim against one source, outside any analysis.
 
-### GET /papers/{name}/figures/{figure}.png
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `claim` | string | yes | the claim to check |
+| `source` | string | yes | the cited paper: a local path, DOI, arXiv ID or URL |
 
-Returns one cropped figure of the paper — the image a verdict's `pages` entry points at
-with its `image` field.
+A successful check returns:
 
-Path parameters:
+| Field | Meaning |
+| --- | --- |
+| `status` | `ok` |
+| `verdict` | `supports`, `refutes` or `insufficient` |
+| `quote` | the sentence from the cited paper the verdict rests on |
+| `reasoning` | one sentence from the model |
+| `evidence` | the passages it read: `text`, `page`, `start`, `end`, `score` |
+| `pages` | figures or pages ColPali matched: `page`, `score`, `kind`, `label`, `caption`, `image` |
+| `page_model` | the ColPali model that matched them; empty when ColPali is down |
+| `indexed_in` | which public index found the cited paper, and the ids it gave |
+| `claim`, `source` | what was checked |
 
-| Param    | Type  | Required | Meaning                                                     |
-| -------- | ----- | -------- | ----------------------------------------------------------- |
-| `name`   | `str` | yes      | The paper's file name.                                       |
-| `figure` | `str` | yes      | The crop's name, always `figure-<n>` as written by pipeline/figures.py. |
+A failed check returns `status: "error"` with `message` and `reason`.
 
-Response: the crop, `image/png`, with `Cache-Control: max-age=31536000`.
+#### `GET /health`
 
-Errors: `400` — `"a figure is named figure-<n>"` when the name is any other shape, which
-is what stops the request naming a path; `400`/`404` from the paper-name check (see
-`GET /papers/{name}`); `404` — `"no such figure: <figure>"` when that crop was never
-written, which is the normal answer for a paper whose figures nobody has extracted.
-
-### GET /papers/{name}/find
-
-Finds where a piece of text sits in the paper, returning the page and the boxes that
-contain it. The returned boxes are in PDF points with a top-left origin; the client
-scales them by `dpi / 72` to line them up with the rendered page.
-
-Path parameters:
-
-| Param  | Type  | Required | Meaning                          |
-| ------ | ----- | -------- | -------------------------------- |
-| `name` | `str` | yes      | The paper's file name.           |
-
-Query parameters:
-
-| Param  | Type    | Required | Meaning                                    |
-| ------ | ------- | -------- | ------------------------------------------ |
-| `q`    | `str`   | yes      | The text to locate in the paper.           |
-| `page` | `int`   | no       | Restrict the search to this page.          |
-
-Response: a JSON object with `page` and `boxes` (the located boxes); when nothing is
-found it is `{"page": null, "boxes": []}`.
-
-Errors: `400`/`404` from the paper-name check (see `GET /papers/{name}`).
-
-### POST /verify
-
-Checks one claim against one source, without running a whole analysis.
-
-Request body (JSON):
-
-| Field    | Type  | Required | Meaning                          |
-| -------- | ----- | -------- | -------------------------------- |
-| `claim`  | `str` | yes      | The claim text to check.         |
-| `source` | `str` | yes      | The source to check it against.  |
-
-Response: the verdict object, with `status` (`ok` on success), `verdict`, and `message`
-fields.
-
-### GET /health
-
-Reports that the gateway is up and how many analyses it is holding.
-
-No parameters.
-
-Response: `{"ok": true, "analyses": <count>}`.
+Response: `{"ok": true, "analyses": <number of analyses held>}`.
