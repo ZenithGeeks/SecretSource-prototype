@@ -48,3 +48,9 @@ S2_API_KEY = os.getenv("S2_API_KEY", "")
 UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "")
 
 CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 keeps all
+
+# How many cited papers are downloaded and indexed at the same time. Indexing uses the
+# GPU services, so keep it small.
+PARALLEL_SOURCES = int(os.getenv("PARALLEL_SOURCES", "3"))
+# How many claims are judged at the same time. Judging only searches and asks the LLM.
+PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))

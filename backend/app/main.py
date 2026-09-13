@@ -33,12 +33,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import store
-from app.config import PAPERS_DIR
+from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir
 from app.pipeline.sources import lookup_key
-from app.pipeline.verify import unchecked_reason, verify_claim
+from app.pipeline.verify import check_prepared, prepare_source, unchecked_reason, verify_claim
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
@@ -48,10 +48,6 @@ DEFAULT_DPI, MAX_DPI = 110, 300
 # We match the whole name. This stops the route from serving any path.
 # The request only sends a number, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
-# How many checks run at once. The retrieval services and the judge are the slowest
-# part, so this number is small on purpose. The graph in app/workflow.py sends out
-# the same number.
-PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 
 analyses: dict[str, dict] = {}
 streams: dict[str, asyncio.Queue] = {}
@@ -116,21 +112,39 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
         if verify:
             # One job per claim and cited work, the way app/workflow.py plans them.
-            # If we ran one at a time, the total wait would be the sum of all checks.
-            # Each check indexes a source and asks the judge, so we run
-            # PARALLEL_CHECKS of them at once.
             jobs = [
                 (index, claim, citation, source)
                 for index, claim in enumerate(claims)
                 for citation in claim["citations"]
                 if (source := lookup_key(citation))
             ]
-            limit = asyncio.Semaphore(PARALLEL_CHECKS)
+
+            # Step 1: get each cited paper ready once (download and index), several at a time.
+            # Many claims can cite the same paper, so this avoids repeating that slow work.
+            source_limit = asyncio.Semaphore(PARALLEL_SOURCES)
+
+            async def prepare(source: str) -> dict:
+                async with source_limit:
+                    return await asyncio.to_thread(prepare_source, source)
+
+            ready_sources = {}
+            for _, _, _, source in jobs:
+                if source not in ready_sources:
+                    ready_sources[source] = asyncio.create_task(prepare(source))
+
+            # Step 2: judge each claim against its paper as soon as that paper is ready.
+            check_limit = asyncio.Semaphore(PARALLEL_CHECKS)
 
             async def check(index: int, claim: dict, citation: dict, source: str):
-                async with limit:
+                ready = await ready_sources[source]
+                async with check_limit:
                     await _publish(analysis_id, "verifying", claim=index, source=source)
-                    verdict = await asyncio.to_thread(verify_claim, claim["claim"], source)
+                    if ready["status"] == "error":
+                        verdict = {**ready, "claim": claim["claim"], "source": source}
+                    else:
+                        verdict = await asyncio.to_thread(
+                            check_prepared, claim["claim"], source, Path(ready["path"])
+                        )
                 if verdict["status"] == "ok":
                     # We key it by the name we used to look up the source.
                     # The card then shows the verdict next to its own citation.

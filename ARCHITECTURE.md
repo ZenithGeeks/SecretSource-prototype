@@ -38,7 +38,7 @@ flowchart TD
     PREPARE --> INDEX["each cited work indexed once<br/>per-source lock"]
     INDEX --> COLBERT["colbert service: passages"]
     INDEX --> COLPALI["colpali service: figures or pages"]
-    PREPARE --> CHECK["check_prepared: up to PARALLEL_CHECKS (6) at a time<br/>as soon as the paper is ready"]
+    PREPARE --> CHECK["check_prepared: up to PARALLEL_CHECKS (3) at a time<br/>as soon as the paper is ready"]
     CHECK --> JUDGE["DSPy judge: supports / refutes / insufficient"]
     JUDGE --> AUDIT["audit: is the analysis consistent<br/>pipeline/audit.py"]
     RUN --> PUBLISH["_publish: SSE stage + store.save"]
@@ -58,7 +58,7 @@ Stage by stage:
    Up to `PARALLEL_SOURCES` papers (default 3) are prepared at the same time, because
    indexing uses the GPU services.
 4. As soon as a paper is ready, its claims are judged by `check_prepared`, up to
-   `PARALLEL_CHECKS` claims (default 6) at a time. Judging searches ColBERT and ColPali at
+   `PARALLEL_CHECKS` claims (default 3) at a time. Judging searches ColBERT and ColPali at
    the same time, then asks the LLM judge. Both numbers are environment variables read in
    `backend/app/config.py`.
 5. `audit` reads the assembled analysis before it is marked done and reports where it
@@ -234,7 +234,7 @@ flowchart LR
 `prepare_sources` and `check_sources` are each one node declared with
 `parallel_worker=True`. `prepare_sources` uses `max_parallel_workers=PARALLEL_SOURCES`
 (3) and downloads and indexes each cited work once. `check_sources` uses
-`max_parallel_workers=PARALLEL_CHECKS` (6) and judges each claim against its already
+`max_parallel_workers=PARALLEL_CHECKS` (3) and judges each claim against its already
 prepared work. `assemble` folds verdicts and failures back onto their claims the same way
 `_run` does. Session state carries the run between nodes. `read_paper` writes `paper`,
 `file` and `claims`; `plan_checks` saves the jobs; the session key `verify` set to false

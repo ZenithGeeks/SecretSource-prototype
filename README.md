@@ -98,7 +98,7 @@ Writer draft check (sample data):
 
    Optional: `UNPAYWALL_EMAIL` (a contact email that helps find open-access PDFs) and `CLAIM_LIMIT` (max claims per paper, default `20`; `0` = all).
 
-   Two more settings tune how much runs at once: `PARALLEL_SOURCES` (papers prepared at the same time, default `3`) and `PARALLEL_CHECKS` (claims judged at the same time, default `6`).
+   Two more settings tune how much runs at once: `PARALLEL_SOURCES` (papers prepared at the same time, default `3`) and `PARALLEL_CHECKS` (claims judged at the same time, default `3`).
 
 4. **Add the credentials file:** save the file the team lead gives you as `backend/secrets/service-auth.json`. That folder is already in the repo, is gitignored, and is never copied into Docker images.
 
