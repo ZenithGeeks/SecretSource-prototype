@@ -49,6 +49,7 @@ export type Claim = {
   verdicts?: Verdict[]
   unchecked?: Unchecked[] // cited works we tried and could not read
   sentence?: string // the paper's own wording, which the claim paraphrases
+  section?: string // the number of the section the sentence is in, e.g. "3.1" (#152)
   source?: Source | null // null when that sentence could not be found in the PDF
 }
 
@@ -126,6 +127,9 @@ export type CitationMarker = {
   page_height: number
 }
 
+/** A numbered section of the analysed paper, from GROBID: where its heading is (#152). */
+export type OutlineEntry = { n: string; title: string; page: number; y: number }
+
 /** A figure of the analysed paper whose caption gives its number, e.g. "Figure 2". */
 export type PaperFigure = { label: string; page: number; caption: string; image: string }
 
@@ -140,6 +144,7 @@ export type Analysis = {
   figures?: PaperFigure[] // missing on analyses from before #85, and until the run has read them
   references?: Record<string, Citation> // the references the paper's markers point to (#47)
   markers?: CitationMarker[] // missing on analyses from before #47
+  outline?: OutlineEntry[] // missing on analyses from before #152
   stages: Stage[]
 }
 

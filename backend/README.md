@@ -197,8 +197,8 @@ Response: `{"id": "<analysis id>"}`.
 
 #### `GET /analyses`
 
-Every analysis the caller may see, newest first, without `stages`, `references` and
-`markers`.
+Every analysis the caller may see, newest first, without `stages`, `references`,
+`markers` and `outline`.
 
 #### `GET /analyses/{id}`
 
@@ -219,6 +219,7 @@ One analysis with its results.
 | `figures` | the analysed paper's figures whose caption gives their number: `label`, `page`, `caption`, `image` |
 | `references` | the references the paper's citation markers point to, by GROBID id (like `b12`); each is a citation (see below) |
 | `markers` | where the paper cites a reference: `ref`, `text` (the marker as printed, like `[13]`), `page`, `x0`, `y0`, `x1`, `y1`, `page_width`, `page_height` in PDF points |
+| `outline` | the paper's numbered sections in order: `n` (like `3.1`), `title`, `page`, `y` (the top of the heading, in PDF points); missing on older analyses |
 
 Each claim has:
 
@@ -227,6 +228,7 @@ Each claim has:
 | `claim` | the claim in short form |
 | `sentence` | the sentence from the paper it came from |
 | `source` | where that sentence is in the PDF: `page`, `boxes`, `page_width`, `page_height`; `null` if not found |
+| `section` | the `n` of the outline section the sentence is in, like `3.1`; missing when the sentence was not found or comes before the first numbered heading |
 | `citations` | the works the sentence cites: `title`, `authors`, `year`, `doi`, `arxiv`, `url`, `ref` (GROBID's id, like `b12`) and `label` (the number the paper prints, like `13`) |
 | `verdicts` | one result per cited work that was checked (same shape as `POST /verify`), plus `cited` |
 | `unchecked` | one entry per cited work that could not be checked: `source`, `reason`, `message` |

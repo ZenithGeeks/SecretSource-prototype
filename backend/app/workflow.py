@@ -16,7 +16,7 @@ The gateway does not run through this graph, because it publishes an event after
 check for the web app. A change to the steps in one of them must be made in the other too.
 
 A run ends with {"status": "ok", "paper", "file", "claims", "checked", "references",
-"markers", "figures", "audit"}, the same fields the gateway stores, or with
+"markers", "outline", "figures", "audit"}, the same fields the gateway stores, or with
 {"status": "error", "paper", "message"}.
 
 `adk web` draws the graph and lists the events of a run (docker compose --profile dev up
@@ -55,6 +55,7 @@ async def read_paper(ctx: Context, node_input: str) -> Event:
     ctx.state["claims"] = extracted["claims"]
     ctx.state["references"] = extracted.get("references", {})
     ctx.state["markers"] = extracted.get("markers", [])
+    ctx.state["outline"] = extracted.get("outline", [])
     return Event(
         route="ok",
         output={
@@ -148,7 +149,7 @@ def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
 
 def finished_analysis(
     checks: list[dict], claims: list[dict], paper: str, file: str,
-    references: dict | None = None, markers: list[dict] | None = None,
+    references: dict | None = None, markers: list[dict] | None = None, outline: list[dict] | None = None,
 ) -> dict:
     """The finished analysis, with the checks folded onto the claims.
 
@@ -157,16 +158,16 @@ def finished_analysis(
     """
     return {"status": "ok", "paper": paper, "file": file,
             "claims": fold_checks(claims, checks), "checked": len(checks),
-            "references": references or {}, "markers": markers or []}
+            "references": references or {}, "markers": markers or [], "outline": outline or []}
 
 
 @node
 def assemble(
     node_input: list[dict], claims: list[dict], paper: str, file: str,
-    references: dict | None = None, markers: list[dict] | None = None,
+    references: dict | None = None, markers: list[dict] | None = None, outline: list[dict] | None = None,
 ) -> dict:
     """Fold the checks onto the claims and answer with the finished analysis."""
-    return finished_analysis(node_input, claims, paper, file, references, markers)
+    return finished_analysis(node_input, claims, paper, file, references, markers, outline)
 
 
 @node
