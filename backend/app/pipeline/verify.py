@@ -150,6 +150,22 @@ def unchecked_reason(verdict: dict, citation: dict) -> str:
     return "web-source" if reason == "unresolvable" and citation.get("url") else reason
 
 
+def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
+    """Add the result of one check to its claim. The gateway and the graph both use this.
+
+    A verdict goes under `verdicts`, keyed by the name the source was looked up by, so the
+    card can show it next to its citation. A failure goes under `unchecked` with a reason,
+    because a claim we could not check must not look like one nobody tried.
+    """
+    if verdict["status"] == "ok":
+        claim.setdefault("verdicts", []).append({**verdict, "cited": source})
+    else:
+        claim.setdefault("unchecked", []).append(
+            {"source": source, "reason": unchecked_reason(verdict, citation),
+             "message": verdict.get("message", "")}
+        )
+
+
 def verify_claim(claim: str, source_pdf_path: str) -> dict:
     """Check whether a cited paper actually supports a claim made about it.
 

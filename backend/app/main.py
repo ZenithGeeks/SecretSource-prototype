@@ -38,7 +38,13 @@ from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir
 from app.pipeline.sources import lookup_key
-from app.pipeline.verify import check_prepared, prepare_source, unchecked_reason, verify_claim
+from app.pipeline.verify import (
+    check_prepared,
+    fold_check,
+    prepare_source,
+    unchecked_reason,
+    verify_claim,
+)
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
@@ -145,22 +151,13 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                         verdict = await asyncio.to_thread(
                             check_prepared, claim["claim"], source, Path(ready["path"])
                         )
+                fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":
-                    # We key it by the name we used to look up the source.
-                    # The card then shows the verdict next to its own citation.
-                    claim.setdefault("verdicts", []).append({**verdict, "cited": source})
                     await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
                 else:
-                    # A failure is a result too. A claim we could not check must not
-                    # look like one nobody tried.
-                    reason = unchecked_reason(verdict, citation)
-                    claim.setdefault("unchecked", []).append(
-                        {"source": source, "reason": reason,
-                         "message": verdict.get("message", "")}
-                    )
                     await _publish(
                         analysis_id, "failed", claim=index, source=source,
-                        reason=reason, message=verdict.get("message", ""),
+                        reason=unchecked_reason(verdict, citation), message=verdict.get("message", ""),
                     )
 
             await asyncio.gather(*(check(*job) for job in jobs))

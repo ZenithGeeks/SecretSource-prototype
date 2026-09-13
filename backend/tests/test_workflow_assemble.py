@@ -10,7 +10,8 @@ secretsource-prototype-gateway python -m pytest tests/test_workflow_assemble.py
 
 import copy
 
-from app.workflow import finished_analysis, fold_checks, pair_with_sources
+from app.pipeline.verify import fold_check
+from app.workflow import finished_analysis, fold_checks, pair_with_sources, with_audit
 
 CLAIMS = [
     {"claim": "Late interaction beats single-vector retrieval.", "citations": [{"doi": "10.1/a"}]},
@@ -73,3 +74,24 @@ def test_a_finished_run_has_a_status_like_a_failed_one():
     finished = finished_analysis(CHECKS, CLAIMS, "2112.01488", "data/papers/2112.01488.pdf")
     assert finished["status"] == "ok"
     assert finished["checked"] == 2
+
+
+def test_the_graph_and_the_gateway_fold_a_check_the_same_way():
+    """The gateway calls fold_check on its own claims; the graph calls it through fold_checks."""
+    gateway_claims = copy.deepcopy(CLAIMS)
+    for check in CHECKS:
+        fold_check(gateway_claims[check["claim"]], check["source"], {"url": check["url"]}, check["verdict"])
+    assert fold_checks(CLAIMS, CHECKS) == gateway_claims
+
+
+def test_a_link_we_could_not_resolve_is_a_web_source():
+    claim = {"claim": "A spec says so.", "citations": []}
+    fold_check(claim, "https://example.org/spec", {"url": "https://example.org/spec"},
+               {"status": "error", "reason": "unresolvable", "message": "not a paper"})
+    assert claim["unchecked"][0]["reason"] == "web-source"
+
+
+def test_a_finished_run_is_audited_like_the_gateway_does():
+    finished = with_audit(finished_analysis(CHECKS, CLAIMS, "2112.01488", "data/papers/2112.01488.pdf"))
+    assert finished["status"] == "ok"
+    assert isinstance(finished["audit"], list)
