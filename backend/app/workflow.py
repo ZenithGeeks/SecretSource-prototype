@@ -1,16 +1,24 @@
 """The analysis pipeline as an ADK Workflow graph.
 
     START -> read_paper -+- ok ----> plan_checks -> prepare_sources -> plan_judging
-                         |                -> check_sources -> assemble
+                         |                -> check_sources -> assemble -> audit_analysis
                          \\- error -> report_error
 
 prepare_sources downloads and indexes each cited work once, several at a time.
 check_sources then judges each claim against its prepared work, several at a time.
 
-The same steps the gateway runs in app/main.py, as nodes. This lets `adk web` draw the
-graph and list the events of a run (docker compose --profile dev up adk-web). The message is
-the paper: a DOI, arXiv ID, URL or a PDF path. Session state `verify` (default true) set
-to false stops after the claims, the quick way to try it.
+This is a maintained second way to run the pipeline, next to `_run` in app/main.py. Both
+call the same functions: the pipeline steps, fold_check to add a result to its claim, and
+audit. Both read PARALLEL_SOURCES and PARALLEL_CHECKS from app.config. The gateway does not
+run through this graph, because it publishes an event after every check for the web app.
+A change to the steps in one of them must be made in the other too.
+
+A run ends with {"status": "ok", "paper", "file", "claims", "checked", "audit"}, the same
+fields the gateway stores, or with {"status": "error", "paper", "message"}.
+
+`adk web` draws the graph and lists the events of a run (docker compose --profile dev up
+adk-web). The message is the paper: a DOI, arXiv ID, URL or a PDF path. Session state
+`verify` (default true) set to false stops after the claims, the quick way to try it.
 """
 
 import asyncio
@@ -22,9 +30,10 @@ from google.adk.agents.context import Context
 from google.adk.workflow import START, Workflow, node
 
 from app.config import PARALLEL_CHECKS, PARALLEL_SOURCES
+from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations
 from app.pipeline.sources import lookup_key
-from app.pipeline.verify import check_prepared, prepare_source, unchecked_reason
+from app.pipeline.verify import check_prepared, fold_check, prepare_source
 
 
 @node
@@ -117,9 +126,8 @@ check_sources = node(
 
 
 def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
-    """The checks folded back into their claims, as new claims: a verdict under `verdicts`,
-    stored under the key used to look up the source. A failure goes under `unchecked`,
-    since a claim nobody could check must not look like one nobody tried.
+    """The checks folded back into their claims, as new claims. Each check is added with
+    fold_check, the same function the gateway uses.
 
     Deep copy, not dict(): the in-memory session hands the same claims list to whoever
     runs the graph. A shallow copy shares each claim's verdicts and unchecked lists. So
@@ -128,18 +136,7 @@ def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
     """
     claims = copy.deepcopy(claims)
     for check in checks:
-        claim = claims[check["claim"]]
-        verdict = check["verdict"]
-        if verdict["status"] == "ok":
-            claim.setdefault("verdicts", []).append({**verdict, "cited": check["source"]})
-        else:
-            claim.setdefault("unchecked", []).append(
-                {
-                    "source": check["source"],
-                    "reason": unchecked_reason(verdict, {"url": check["url"]}),
-                    "message": verdict.get("message", ""),
-                }
-            )
+        fold_check(claims[check["claim"]], check["source"], {"url": check["url"]}, check["verdict"])
     return claims
 
 
@@ -159,6 +156,18 @@ def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) 
     return finished_analysis(node_input, claims, paper, file)
 
 
+def with_audit(analysis: dict) -> dict:
+    """The analysis with the audit findings added, as the gateway adds them before a run is
+    done. A plain function so it can be tested without a run."""
+    return {**analysis, "audit": audit(analysis)}
+
+
+@node
+def audit_analysis(node_input: dict) -> dict:
+    """Check the finished analysis against itself. Findings are reported, not fixed."""
+    return with_audit(node_input)
+
+
 @node
 def report_error(node_input: dict) -> dict:
     """The paper could not be read: say why and stop."""
@@ -171,6 +180,6 @@ analysis_workflow = Workflow(
     edges=[
         (START, read_paper),
         (read_paper, {"ok": plan_checks, "error": report_error}),
-        (plan_checks, prepare_sources, plan_judging, check_sources, assemble),
+        (plan_checks, prepare_sources, plan_judging, check_sources, assemble, audit_analysis),
     ],
 )

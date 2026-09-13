@@ -199,8 +199,16 @@ flowchart LR
     PS --> PJ["plan_judging"]
     PJ --> CS["check_sources<br/>up to PARALLEL_CHECKS"]
     CS --> AS["assemble"]
+    AS --> AU["audit_analysis"]
 ```
 
+- We keep the graph and the gateway's `_run` in step. Both use the same pipeline
+  functions, `fold_check` to add a result to its claim, and `audit`. If you change the
+  steps in one, change the other.
+- The gateway does not run through the graph, because it sends an event to the web app
+  after every check.
+- A run ends with `status` `ok` and the same fields the gateway stores (`paper`, `file`,
+  `claims`, `audit`), or with `status` `error` and a `message`.
 - The nodes are plain Python functions, not agents.
 - `prepare_sources` and `check_sources` are parallel workers: they run once for each item
   in a list, several at a time.
