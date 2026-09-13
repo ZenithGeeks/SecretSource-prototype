@@ -16,6 +16,7 @@ export function FieldConsensus({ onShow }: { onShow?: (claims: ViewerClaim[], in
   const [question, setQuestion] = useState('')
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showUnlisted, setShowUnlisted] = useState(false)
   const consensus = useFieldConsensus(question).data
   if (!consensus) return null
 
@@ -63,19 +64,24 @@ export function FieldConsensus({ onShow }: { onShow?: (claims: ViewerClaim[], in
           className="flex gap-3"
           onSubmit={(event) => {
             event.preventDefault()
-            setQuestion(draft)
+            setQuestion(draft.trim())
           }}
         >
           <Input
-            value={draft || consensus.question}
+            value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            placeholder="Ask your library — e.g. late interaction beats single-vector retrieval"
             className="max-w-2xl"
           />
-          <Button type="submit" className="shrink-0">
+          <Button type="submit" className="shrink-0" disabled={!draft.trim()}>
             <Search className="size-4" />
             Ask library
           </Button>
         </form>
+        <p className="text-sm text-ink-muted">
+          Showing every paper’s answer to “
+          <span className="text-ink">{question || consensus.question}</span>”
+        </p>
       </header>
 
       {/* Summary stats */}
@@ -127,10 +133,28 @@ export function FieldConsensus({ onShow }: { onShow?: (claims: ViewerClaim[], in
             </div>
           </div>
         ))}
+        {showUnlisted &&
+          Array.from({ length: consensus.unlisted }).map((_, i) => (
+            <div key={`unlisted-${i}`} className="flex gap-4 border-t border-border-subtle px-5 py-3">
+              <div className="w-56 shrink-0">
+                <p className="text-sm font-medium text-ink-muted">Unlisted paper {i + 1}</p>
+              </div>
+              <div className="w-36 shrink-0">
+                <VerdictBadge verdict="insufficient" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] text-ink-muted">Silent — no passage speaks to this claim.</p>
+              </div>
+            </div>
+          ))}
         <div className="flex gap-2 border-t border-border-subtle px-5 py-3 text-xs text-ink-muted">
           {consensus.unlisted} more papers are silent or unchecked
-          <button type="button" className="text-accent hover:underline">
-            show
+          <button
+            type="button"
+            onClick={() => setShowUnlisted((v) => !v)}
+            className="text-accent hover:underline"
+          >
+            {showUnlisted ? 'hide' : 'show'}
           </button>
         </div>
       </div>
