@@ -48,7 +48,16 @@ export type Claim = {
 }
 
 export type Stage = {
-  stage: 'extracting' | 'extracted' | 'verifying' | 'verified' | 'failed' | 'audited' | 'done' | 'error'
+  stage:
+    | 'extracting'
+    | 'extracted'
+    | 'verifying'
+    | 'verified'
+    | 'failed'
+    | 'figures'
+    | 'audited'
+    | 'done'
+    | 'error'
   message?: string
   claims?: number
   extracted?: number // before repeats, announcements and the cap were taken out (#55)
@@ -58,6 +67,7 @@ export type Stage = {
   verdict?: string
   reason?: Reason
   findings?: number // what the audit disagreed with, 0 on an ordinary run
+  figures?: number // numbered figures found in the analysed paper
 }
 
 /** Why a cited work could not be checked. Kept as codes so the wording lives in one place. */
@@ -94,6 +104,9 @@ export function reasonText(reason?: string) {
 /** A cited work we tried to check and could not. */
 export type Unchecked = { source: string; reason: Reason; message: string }
 
+/** A figure of the analysed paper whose caption gives its number, e.g. "Figure 2". */
+export type PaperFigure = { label: string; page: number; caption: string; image: string }
+
 export type Analysis = {
   id: string
   paper: string
@@ -101,6 +114,7 @@ export type Analysis = {
   message?: string
   file?: string
   claims: Claim[]
+  figures?: PaperFigure[] // missing on analyses from before #85, and until the run has read them
   stages: Stage[]
 }
 

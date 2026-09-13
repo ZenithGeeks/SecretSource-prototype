@@ -114,6 +114,7 @@ export function AnalysisView({
               index={index}
               standing={standing}
               paper={file}
+              figures={analysis.data.figures}
               onShow={setTarget}
             />
           ))}

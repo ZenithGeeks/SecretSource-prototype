@@ -36,7 +36,7 @@ from app import store
 from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
-from app.pipeline.figures import figures_dir
+from app.pipeline.figures import figures_dir, paper_figures
 from app.pipeline.sources import lookup_key
 from app.pipeline.verify import (
     check_prepared,
@@ -116,6 +116,10 @@ async def _run(analysis_id: str, paper: str, verify: bool):
             windows=extracted.get("windows", 1),
         )
 
+        # The paper's own figures, so "Figure 2" in a claim can show that crop.
+        # Docling takes minutes, so this runs while the claims are checked.
+        figures = asyncio.create_task(asyncio.to_thread(paper_figures, analysis["file"]))
+
         if verify:
             # One job per claim and cited work, the way app/workflow.py plans them.
             jobs = [
@@ -161,6 +165,9 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                     )
 
             await asyncio.gather(*(check(*job) for job in jobs))
+
+        analysis["figures"] = await figures
+        await _publish(analysis_id, "figures", figures=len(analysis["figures"]))
 
         # We check the run itself before anyone reads it.
         # We only report the findings; we do not fix them.

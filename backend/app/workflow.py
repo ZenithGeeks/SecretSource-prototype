@@ -1,20 +1,22 @@
 """The analysis pipeline as an ADK Workflow graph.
 
     START -> read_paper -+- ok ----> plan_checks -> prepare_sources -> plan_judging
-                         |                -> check_sources -> assemble -> audit_analysis
-                         \\- error -> report_error
+                         |                -> check_sources -> assemble -> read_figures
+                         |                -> audit_analysis
+                         \- error -> report_error
 
 prepare_sources downloads and indexes each cited work once, several at a time.
 check_sources then judges each claim against its prepared work, several at a time.
 
 This is a maintained second way to run the pipeline, next to `_run` in app/main.py. Both
-call the same functions: the pipeline steps, fold_check to add a result to its claim, and
-audit. Both read PARALLEL_SOURCES and PARALLEL_CHECKS from app.config. The gateway does not
-run through this graph, because it publishes an event after every check for the web app.
-A change to the steps in one of them must be made in the other too.
+call the same functions: the pipeline steps, fold_check to add a result to its claim,
+paper_figures and audit. The gateway reads the figures while it checks the claims; the
+graph reads them after. Both read PARALLEL_SOURCES and PARALLEL_CHECKS from app.config.
+The gateway does not run through this graph, because it publishes an event after every
+check for the web app. A change to the steps in one of them must be made in the other too.
 
-A run ends with {"status": "ok", "paper", "file", "claims", "checked", "audit"}, the same
-fields the gateway stores, or with {"status": "error", "paper", "message"}.
+A run ends with {"status": "ok", "paper", "file", "claims", "checked", "figures", "audit"},
+the same fields the gateway stores, or with {"status": "error", "paper", "message"}.
 
 `adk web` draws the graph and lists the events of a run (docker compose --profile dev up
 adk-web). The message is the paper: a DOI, arXiv ID, URL or a PDF path. Session state
@@ -32,6 +34,7 @@ from google.adk.workflow import START, Workflow, node
 from app.config import PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations
+from app.pipeline.figures import paper_figures
 from app.pipeline.sources import lookup_key
 from app.pipeline.verify import check_prepared, fold_check, prepare_source
 
@@ -156,6 +159,12 @@ def assemble(node_input: list[dict], claims: list[dict], paper: str, file: str) 
     return finished_analysis(node_input, claims, paper, file)
 
 
+@node
+async def read_figures(node_input: dict, file: str) -> dict:
+    """Add the paper's own numbered figures. Docling blocks for minutes, so in a thread."""
+    return {**node_input, "figures": await asyncio.to_thread(paper_figures, file)}
+
+
 def with_audit(analysis: dict) -> dict:
     """The analysis with the audit findings added, as the gateway adds them before a run is
     done. A plain function so it can be tested without a run."""
@@ -180,6 +189,6 @@ analysis_workflow = Workflow(
     edges=[
         (START, read_paper),
         (read_paper, {"ok": plan_checks, "error": report_error}),
-        (plan_checks, prepare_sources, plan_judging, check_sources, assemble, audit_analysis),
+        (plan_checks, prepare_sources, plan_judging, check_sources, assemble, read_figures, audit_analysis),
     ],
 )

@@ -10,6 +10,7 @@ formulas LaTeX.
 import json
 import os
 import re
+import threading
 from pathlib import Path
 
 from app.config import PAPERS_DIR
@@ -19,6 +20,16 @@ MANIFEST = "media.json"  # cache: Docling runs once per paper
 FORMULAS = os.getenv("DOCLING_FORMULAS", "") == "1"  # reading formulas as LaTeX costs its own model download
 
 _converter = None
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+_converter_guard = threading.Lock()
+
+
+def _lock_for(pdf: Path) -> threading.Lock:
+    """One lock per paper. Two runs that read the same paper at once would write the same
+    crop files and manifest."""
+    with _locks_guard:
+        return _locks.setdefault(pdf.as_posix(), threading.Lock())
 
 
 def _enriched_converter():
@@ -130,23 +141,47 @@ def paper_media(pdf_path: str, refresh: bool = False) -> dict:
     global _converter
     pdf = Path(pdf_path)
     try:
-        if not refresh and (cached := _read_manifest(pdf)):
-            return {"status": "ok", "cached": True, **cached}
+        with _lock_for(pdf):
+            if not refresh and (cached := _read_manifest(pdf)):
+                return {"status": "ok", "cached": True, **cached}
 
-        if _converter is None:
-            _converter = _enriched_converter()
-        document = _converter.convert(pdf).document
+            with _converter_guard:
+                if _converter is None:
+                    _converter = _enriched_converter()
+            document = _converter.convert(pdf).document
 
-        media = {
-            "file": pdf.as_posix(),
-            "figures": _figures(document, pdf),
-            "tables": _tables(document),
-            "formulas": _formulas(document),
-        }
-        (figures_dir(pdf) / MANIFEST).write_text(json.dumps(media, ensure_ascii=False), encoding="utf-8")
-        return {"status": "ok", "cached": False, **media}
+            media = {
+                "file": pdf.as_posix(),
+                "figures": _figures(document, pdf),
+                "tables": _tables(document),
+                "formulas": _formulas(document),
+            }
+            (figures_dir(pdf) / MANIFEST).write_text(json.dumps(media, ensure_ascii=False), encoding="utf-8")
+            return {"status": "ok", "cached": False, **media}
     except Exception as error:
         return {"status": "error", "message": str(error), "file": pdf.as_posix()}
+
+
+def named_figures(figures: list[dict]) -> list[dict]:
+    """The figures whose caption gives their number, like "Figure 2: ...".
+
+    A figure without one gets a counted label, and "Figure 2" by count may not be the
+    paper's own Figure 2. A link from the text must never point at the wrong figure.
+    """
+    return [
+        {key: figure[key] for key in ("label", "page", "caption", "image")}
+        for figure in figures
+        if NUMBERED.match(figure.get("caption") or "")
+    ]
+
+
+def paper_figures(pdf_path: str) -> list[dict]:
+    """The analysed paper's own numbered figures, so a claim's "Figure 2" can show its crop.
+
+    Empty when Docling fails: a paper without figure links still has all its results.
+    """
+    media = paper_media(pdf_path)
+    return named_figures(media["figures"]) if media["status"] == "ok" else []
 
 
 if __name__ == "__main__":
