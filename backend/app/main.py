@@ -14,8 +14,8 @@ GET  /papers/{name}/find?q=...&page=N       -> where that text sits, as boxes
 POST /verify            {"claim", "source"} -> one verdict, outside any analysis
 GET  /health
 
-Analyses are held in memory while they run and written to SQLite (app/store.py) as they
-progress, so a restart keeps the history.
+Analyses live in memory while they run. They are also written to SQLite (app/store.py)
+as they progress. A restart keeps the history.
 """
 
 import asyncio
@@ -44,12 +44,13 @@ PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
 PAGE_CACHE = Path(os.getenv("PAGE_CACHE", "/tmp/pages"))
 DEFAULT_DPI, MAX_DPI = 110, 300
-# Crops are written as figure-1.png, figure-2.png ... by pipeline/figures.py.
-# Matching the whole name keeps the route from serving an arbitrary path: the request
-# only supplies an index, never a directory.
+# Crops are saved as figure-1.png, figure-2.png ... by pipeline/figures.py.
+# We match the whole name. This stops the route from serving any path.
+# The request only sends a number, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
-# Checks running at once. The retrieval services and the judge are the bottleneck, so
-# this is small on purpose. app/workflow.py's graph fans out to the same number.
+# How many checks run at once. The retrieval services and the judge are the slowest
+# part, so this number is small on purpose. The graph in app/workflow.py sends out
+# the same number.
 PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 
 analyses: dict[str, dict] = {}
@@ -63,7 +64,7 @@ def restore():
     for analysis in analyses.values():
         if analysis["status"] == "running":
             analysis.update(status="error", message="interrupted by a restart")
-            # Record a terminal stage so a reconnecting client sees the run is over.
+            # Add a final stage. A client that reconnects then sees the run is over.
             analysis["stages"].append(
                 {"stage": "error", "message": "interrupted by a restart"}
             )
@@ -106,7 +107,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         claims = extracted["claims"]
         analysis["file"] = extracted["file"]
         analysis["claims"] = claims
-        # Both counts: a cap that quietly halved the claims would read as a short paper.
+        # We send both counts. If a cap cut the claims in half, the paper would look short.
         await _publish(
             analysis_id, "extracted", claims=len(claims),
             extracted=extracted.get("extracted", len(claims)),
@@ -114,9 +115,10 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         )
 
         if verify:
-            # One job per claim and cited work, the way app/workflow.py plans them. Run one
-            # at a time and a paper's whole wait is the sum of its checks; each one indexes a
-            # source and asks the judge, so PARALLEL_CHECKS of them overlap instead.
+            # One job per claim and cited work, the way app/workflow.py plans them.
+            # If we ran one at a time, the total wait would be the sum of all checks.
+            # Each check indexes a source and asks the judge, so we run
+            # PARALLEL_CHECKS of them at once.
             jobs = [
                 (index, claim, citation, source)
                 for index, claim in enumerate(claims)
@@ -130,13 +132,13 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                     await _publish(analysis_id, "verifying", claim=index, source=source)
                     verdict = await asyncio.to_thread(verify_claim, claim["claim"], source)
                 if verdict["status"] == "ok":
-                    # Keyed by the name we looked the source up by, so the card shows the
-                    # verdict against its own citation.
+                    # We key it by the name we used to look up the source.
+                    # The card then shows the verdict next to its own citation.
                     claim.setdefault("verdicts", []).append({**verdict, "cited": source})
                     await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
                 else:
-                    # A failure is a result: a claim we could not check must not look
-                    # like one nobody tried.
+                    # A failure is a result too. A claim we could not check must not
+                    # look like one nobody tried.
                     reason = unchecked_reason(verdict, citation)
                     claim.setdefault("unchecked", []).append(
                         {"source": source, "reason": reason,
@@ -149,7 +151,8 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
             await asyncio.gather(*(check(*job) for job in jobs))
 
-        # A self-check of the run, before anyone reads it. Reported, not applied.
+        # We check the run itself before anyone reads it.
+        # We only report the findings; we do not fix them.
         analysis["audit"] = audit(analysis)
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
@@ -232,7 +235,10 @@ async def analysis_events(analysis_id: str):
 
 
 def _paper(name: str) -> Path:
-    """The PDF named `name`, or 404 if missing. The name comes over HTTP, so it is not a path."""
+    """The PDF named `name`, or 404 if it is missing.
+
+    The name comes from an HTTP request, so it is not a path.
+    """
     if name != Path(name).name or name.startswith("."):
         raise HTTPException(400, "a paper name is a file name, not a path")
     path = PAPERS_DIR / name

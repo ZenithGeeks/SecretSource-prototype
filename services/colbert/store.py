@@ -2,9 +2,9 @@
 
     python -m store paper.pdf "papers/*.pdf" papers/   # files, globs or folders
 
-Each PDF becomes ~120-word passages, stored as one multivector point each, with the page
-and character span so a hit can be pointed at in the original. Re-adding a PDF with the
-same file name replaces its old passages.
+Each PDF becomes ~120-word passages, stored as one multivector point each. Each point
+keeps the page and character span, so a hit can be pointed at in the original. Re-adding
+a PDF with the same file name replaces its old passages.
 """
 
 import os
@@ -23,11 +23,12 @@ COLLECTION = os.getenv("COLBERT_COLLECTION", "academic_text_claims")
 VECTOR_NAME = "colbert"  # named vector, matching the team's cluster provisioning
 DIM = 128
 WORDS_PER_PASSAGE = 120
-UPSERT_BATCH = 64  # points per write; one request per paper timed out on longer ones
+UPSERT_BATCH = 64  # points per write. One request per paper timed out on longer ones
 
 
 def _word_spans(text: str) -> list[tuple[int, int]]:
-    """(start, end) of every whitespace-separated word, walking forward so repeats stay distinct."""
+    """(start, end) of every whitespace-separated word. It walks forward, so repeated
+    words keep their own positions."""
     spans, cursor = [], 0
     for word in text.split():
         start = text.index(word, cursor)
@@ -37,8 +38,8 @@ def _word_spans(text: str) -> list[tuple[int, int]]:
 
 
 def pdf_passages(path: Path) -> list[dict]:
-    """PDF -> ~120-word passages, each knowing its page and where on that page it sits.
-    Chunked per page: a passage that straddled a page break could not name one."""
+    """PDF -> ~120-word passages. Each one knows its page and where on that page it sits.
+    We chunk per page: a passage that crossed a page break could not name one page."""
     passages = []
     for number, page in enumerate(PdfReader(path).pages, start=1):
         text = page.extract_text() or ""
@@ -74,7 +75,7 @@ class Store:
                     )
                 },
             )
-        # Idempotent; also covers a collection someone provisioned without the index.
+        # Safe to run again. Also covers a collection made without the index.
         self.client.create_payload_index(COLLECTION, "source", models.PayloadSchemaType.KEYWORD)
 
     def _delete_source(self, name: str) -> None:
@@ -102,15 +103,15 @@ class Store:
             for passage, vector in zip(passages, vectors, strict=True)
             if len(vector)  # skip passages with no tokens left
         ]
-        # In batches: one request for a whole long paper timed out, even with a generous
+        # In batches: one request for a whole long paper timed out, even with a long
         # client timeout. Many small requests survive a slow moment on the Qdrant VM.
         for start in range(0, len(points), UPSERT_BATCH):
             self.client.upsert(COLLECTION, points[start : start + UPSERT_BATCH])
         return len(points)
 
     def search(self, query: str, k: int = 10) -> list[dict]:
-        """Top-k passages by MaxSim: each query token takes its best-matching doc token,
-        summed. Qdrant scores the multivector natively."""
+        """Top-k passages by MaxSim. Each query token finds its best-matching doc token,
+        and the scores are added up. Qdrant does this scoring for multivectors itself."""
         vector = self.encoder.query(query).tolist()
         hits = self.client.query_points(
             COLLECTION, query=vector, using=VECTOR_NAME, limit=k, with_payload=True

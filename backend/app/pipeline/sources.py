@@ -1,8 +1,8 @@
 """Find the open-access PDF of a cited work and download it.
 
-Takes a DOI, arXiv ID, PMID, direct URL, or a bare title. arXiv IDs resolve directly;
-the rest go to Semantic Scholar, then Unpaywall. Resolutions are cached in SQLite, so a
-re-run costs no API call. PDFs land in PAPERS_DIR so they can be indexed.
+Takes a DOI, arXiv ID, PMID, direct URL, or a bare title. arXiv IDs resolve directly.
+The rest go to Semantic Scholar, then Unpaywall. Results are cached in SQLite, so a
+re-run makes no API call. PDFs are saved in PAPERS_DIR so they can be indexed.
 """
 
 import re
@@ -19,10 +19,10 @@ SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper"
 UNPAYWALL_URL = "https://api.unpaywall.org/v2"
 S2_FIELDS = "title,year,externalIds,openAccessPdf"
 TITLE_MATCH = 0.9  # a wrong paper is worse than no paper
-RETRY_WAITS = (2, 6, 15)  # a 429 is the service asking us to wait, so wait, three times over
+RETRY_WAITS = (2, 6, 15)  # a 429 means the service asks us to wait, so we wait, three times
 # Semantic Scholar answers about one request a second, and never two at once.
-# Firing three together gives two 429s and one answer. The analysis graph checks
-# several cited sources in parallel, so every lookup queues through _s2_get.
+# Send three together and two get a 429, one gets an answer. The analysis graph
+# checks several cited sources in parallel, so every lookup waits its turn in _s2_get.
 S2_MIN_INTERVAL = 1.2
 USER_AGENT = {"User-Agent": "SecretSource/0.1 (academic claim verification; senior project)"}
 
@@ -58,14 +58,14 @@ REASONS = {
 
 class Resolution(NamedTuple):
     """Where a cited work was found. `index` is the service that answered and `ids` are
-    the identifiers it returned, so a reader can tell a well-known work from one nobody
+    the identifiers it returned. This lets us tell a well-known work from one nobody
     could place. Semantic Scholar returns DOI, ArXiv, PubMed, MAG, DBLP and CorpusId ids,
     never a Scopus id."""
 
     url: str
     title: str = ""
-    index: str = ""  # "" when the identifier was taken at face value, e.g. a bare URL
-    ids: dict = {}  # never mutated; a shared empty default is the point
+    index: str = ""  # "" when the identifier was used as-is, for example a bare URL
+    ids: dict = {}  # never changed after creation; one shared empty default is safe
 
 
 def reason_for(error: BaseException) -> str:
@@ -87,9 +87,9 @@ _s2_free_at = 0.0  # the monotonic time the next one may go out
 
 
 def _s2_get(path: str, params: dict):
-    """One Semantic Scholar request at a time. The service 429s calls that overlap, so
-    lookups from parallel checks queue here instead of each getting a 429. Only the
-    lookup is serial; indexing the PDF, the slow part, still overlaps."""
+    """One Semantic Scholar request at a time. The service sends a 429 when calls
+    overlap, so lookups from parallel checks wait here instead of each getting a 429.
+    Only the lookup waits its turn. Indexing the PDF, the slow part, still overlaps."""
     global _s2_free_at
     import requests
 
@@ -116,7 +116,7 @@ def _rate_limited() -> LookupUnavailable:
 
 
 def _retry_after(response, fallback: float) -> float:
-    """What the service asked us to wait, when it says so; our own backoff otherwise."""
+    """How long the service asked us to wait, when it says so. Our own backoff otherwise."""
     try:
         return max(float(response.headers.get("Retry-After", "")), fallback)
     except ValueError:
@@ -138,7 +138,7 @@ def _semantic_scholar(path: str, params: dict) -> dict:
 
 def _pdf_of(paper: dict, described_as: str) -> Resolution:
     """Turn a Semantic Scholar record into a Resolution with a PDF URL. Falls back to
-    the arXiv twin: a paywalled DOI often has one, and not looking loses most papers."""
+    the arXiv twin. A paywalled DOI often has one, and not looking loses most papers."""
     title = paper.get("title", "")
     ids = paper.get("externalIds") or {}
     pdf = (paper.get("openAccessPdf") or {}).get("url")
@@ -245,19 +245,19 @@ def _lookup(identifier: str) -> Resolution:
     if identifier.isdigit():
         return _semantic_scholar_pdf(f"PMID:{identifier}")
     if identifier.startswith("http"):
-        return Resolution(identifier)  # taken at face value: nothing says where it is indexed
+        return Resolution(identifier)  # used as-is: nothing says where it is indexed
     return _by_title(identifier)
 
 
 def _resolve(identifier: str) -> Resolution:
-    """_lookup, cached. One run checks several claims against the same work, and the
-    resolution is kept under both the query and the returned title."""
+    """_lookup, cached. One run checks several claims against the same work. The result
+    is kept under both the query and the returned title."""
     from app import store
 
     identifier = identifier.strip()
     key = _normalised(identifier)
     cached = store.recall_source(key)
-    if cached:  # older rows have no index recorded
+    if cached:  # older rows have no index
         return Resolution(
             cached["url"], cached["title"], cached.get("index", ""), cached.get("ids") or {}
         )
@@ -299,14 +299,14 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
 
 def lookup_key(citation: dict) -> str:
     """What to look a cited work up by, or "" when the reference has nothing usable.
-    URL is last: it is usually a blog post or a spec, but still reportable."""
+    URL is last. It is usually a blog post or a spec, but we still report it."""
     return citation.get("doi") or citation.get("arxiv") or citation.get("title") or citation.get("url") or ""
 
 
 def known_index(identifier: str) -> dict:
-    """Where the resolution found this work, read back from the cache. Costs no request:
-    the caller has resolved the work to a PDF first. An empty index means the work was
-    never looked up, e.g. a local path or a bare URL."""
+    """Where the resolution found this work, read back from the cache. Costs no request.
+    The caller has resolved the work to a PDF first. An empty index means the work was
+    never looked up, for example a local path or a bare URL."""
     from app import store
 
     cached = store.recall_source(_normalised(identifier.strip())) or {}
@@ -314,7 +314,7 @@ def known_index(identifier: str) -> dict:
 
 
 def local_pdf(paper: str) -> str:
-    """Any reference to a paper -> a local PDF path. Downloads it first if needed."""
+    """Any paper reference -> a local PDF path. Downloads it first if needed."""
     if Path(paper).is_file():
         return paper
     path, _ = _fetch(paper)
@@ -325,8 +325,8 @@ def fetch_source(identifier: str) -> dict:
     """Download the open-access PDF of a cited work.
 
     Args:
-        identifier: a DOI (e.g. "10.18653/v1/2022.naacl-main.272"), an arXiv ID
-            (e.g. "2112.01488"), a PMID, or a direct URL to a paper.
+        identifier: a DOI (for example "10.18653/v1/2022.naacl-main.272"), an arXiv ID
+            (for example "2112.01488"), a PMID, or a direct URL to a paper.
     """
     try:
         path, found = _fetch(identifier)

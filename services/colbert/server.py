@@ -1,6 +1,6 @@
 """ColBERTv2 retrieval service.
 
-Serves the same store over two protocols: plain HTTP under /api (the contract
+Serves the same store over two protocols: plain HTTP under /api (the agreement
 dspy.ColBERTv2 expects) and MCP under /mcp. Run with `python server.py`
 (http://0.0.0.0:8893, COLBERT_PORT to change).
 """
@@ -28,7 +28,7 @@ def store() -> Store:
     return _store
 
 
-# The SDK's DNS-rebinding guard only accepts localhost Host headers, so it would 421 every
+# The SDK's DNS-rebinding guard only accepts localhost Host headers. It would 421 every
 # request from Cloud Run or a compose service name. Nothing here is on loopback, so it is off.
 mcp = FastMCP(
     "colbert-retrieval",
@@ -41,7 +41,7 @@ mcp = FastMCP(
 
 @mcp.tool()
 def search_passages(query: str, k: int = 10) -> dict:
-    """Search the indexed papers; returns the top-k passages with page and span provenance."""
+    """Search the indexed papers. Returns the top-k passages with page and span for each."""
     return {"topk": store().search(query, min(k, 100))}
 
 
@@ -93,8 +93,8 @@ def add(body: AddBody):
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
-    """Write an uploaded file under `folder` and return where it landed. Only the base name
-    is kept: it is a file name that arrived over HTTP, not a path."""
+    """Write an uploaded file under `folder` and return its path. Only the base name
+    is kept. It is a file name from an HTTP upload, not a path."""
     name = Path(upload.filename or "").name
     if not name:
         raise HTTPException(400, "the upload needs a file name")

@@ -28,8 +28,8 @@ def _build_rag():
             self.generate = dspy.ChainOfThought(GenerateAnswer)
 
         def forward(self, question: str):
-            # colbert_search, not dspy.ColBERTv2: dspy's client cannot send the identity
-            # token the Cloud Run service requires.
+            # colbert_search, not dspy.ColBERTv2. dspy's client cannot send the identity
+            # token. The Cloud Run service requires it.
             passages = [passage["text"] for passage in colbert_search(question, k=self.k)]
             # dspy.context is thread-safe, dspy.configure is not.
             # ADK runs tools in worker threads.
@@ -41,10 +41,10 @@ def _build_rag():
 
 
 def answer_from_docs(question: str) -> dict:
-    """Answer a question from the indexed document collection using ColBERTv2 retrieval (RAG).
+    """Answer a question from the indexed document collection with ColBERTv2 retrieval (RAG).
 
     Args:
-        question: a question about the indexed documents, e.g. "How does ColBERTv2 compress its index?".
+        question: a question about the indexed documents, like "How does ColBERTv2 compress its index?".
     """
     global _rag
     try:
@@ -57,10 +57,10 @@ def answer_from_docs(question: str) -> dict:
 
 
 def add_paper(pdf_path: str) -> dict:
-    """Add a research paper (PDF) to the document index so answer_from_docs can use it.
+    """Add a research paper (PDF) to the document index. answer_from_docs can use it then.
 
     Args:
-        pdf_path: path to a PDF file, e.g. "data/papers/colbertv2.pdf".
+        pdf_path: path to a PDF file, for example "data/papers/colbertv2.pdf".
     """
     try:
         return colbert_add(pdf_path)

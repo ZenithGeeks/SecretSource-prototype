@@ -1,6 +1,6 @@
 """Claim extraction from research paper PDFs.
 
-Docling reads the PDF, the LLM (via DSPy) extracts claims, and GROBID parses references.
+Docling reads the PDF, the LLM (with DSPy) extracts claims, and GROBID parses references.
 Each claim keeps the sentence it came from, located back in the PDF (page and boxes) so the
 UI can show the place instead of telling the reader to go looking.
 """
@@ -21,7 +21,7 @@ XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 MAX_CHARS = 12_000  # ~3k tokens per window, fits an 8k context with room for output
 NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertion, reworded
 # Windows extracted at once. Each one is a full LLM round trip and they do not depend on
-# each other; the cap keeps a long paper from opening a connection per window.
+# each other. The cap keeps a long paper from opening a connection per window.
 EXTRACT_WORKERS = 3
 
 _converter = None  # lazy: loading docling's models takes seconds
@@ -131,7 +131,7 @@ def _page_words(page) -> list[_Word]:
 
 def _match_at(words: list[_Word], wanted: list[str], i: int, k: int) -> tuple[list[int], int] | None:
     """If sentence word i matches page word k, the page words it takes and the sentence
-    words it accounts for.
+    words it covers.
 
     Beyond the plain match: a word hyphenated at a line end, two of ours the PDF glued
     ("state-of-the-art"), one of ours the PDF split.
@@ -156,10 +156,10 @@ def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = Fa
     """Match the sentence's words in order, starting at page word `start`.
 
     Page words between matches (citation markers, parenthetical references) and sentence
-    words that never turn up are tolerated. Returns the indices of the page words matched
-    and how many sentence words they account for.
+    words that never turn up are allowed. Returns the indices of the page words matched
+    and how many sentence words they cover.
 
-    A far hit counts only with the next sentence word right behind it; on its own, a "the"
+    A far hit counts only with the next sentence word right behind it. On its own, a "the"
     fourteen words away would drag the highlight off course. `relaxed` also lets a content
     word stand on its own, for a sentence that lists cited systems with a reference after
     every one of them ("ColBERT (Khattab and Zaharia, 2020), DPR (Xin et al., 2021), ...").
@@ -242,14 +242,14 @@ def _line_boxes(words: list[_Word], indices: list[int]) -> list[dict]:
 
 def locate(pdf_path: str, sentence: str, page: int | None = None) -> dict | None:
     """Where a sentence sits in a PDF: 1-based page, one box per line, the page size to
-    scale by, and how much of the sentence the boxes account for.
+    scale by, and how much of the sentence the boxes cover.
 
     The sentence is what the model copied out of the paper, so it differs from the PDF's own
     text in small ways: a word hyphenated at a line end, a ligature, a citation marker, a
     dash. Matching word by word, in order, with room for those differences, finds the whole
     sentence where a verbatim search found only the fragments that happened to survive.
-    Returns nothing rather than a box that is nearly right: a wrong highlight is worse than
-    none in a tool built for checking sources.
+    It returns nothing instead of a box that is nearly right. A wrong highlight is worse
+    than none in a tool built for checking sources.
     """
     import pymupdf
 
@@ -311,7 +311,7 @@ def extract_claims(pdf_path: str) -> dict:
 
     Args:
         pdf_path: a local PDF path, or a DOI, arXiv ID, PMID, or URL to download,
-            e.g. "data/papers/colbertv2.pdf" or "2112.01488".
+            for example "data/papers/colbertv2.pdf" or "2112.01488".
     """
     global _claim_extractor
     try:
@@ -419,14 +419,14 @@ def _parse_reference(reference) -> dict:
         "authors": [_full_name(person) for person in reference.findall(".//tei:persName", TEI_NAMESPACE)],
         "year": date.get("when", "")[:4] if date is not None else "",
         "doi": _identifier(reference, "DOI"),
-        # GROBID tags an arXiv id only sometimes; where it did not, the link often says so
+        # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so
         "arxiv": _identifier(reference, "arXiv").replace("arXiv:", "") or (in_url.group(1) if in_url else ""),
         "url": url,
     }
 
 
 def _findable(citation: dict) -> bool:
-    """A reference with no title, id, or URL is a lookup that cannot succeed; drop it counted."""
+    """A reference with no title, id, or URL is a lookup that cannot succeed. Drop it counted."""
     return bool(citation["title"] or citation["doi"] or citation["arxiv"] or citation["url"])
 
 
@@ -437,11 +437,11 @@ def _findable_references(tei) -> tuple[list[dict], int]:
 
 
 def extract_citations(pdf_path: str) -> dict:
-    """Extract the bibliography (cited works) from a research paper PDF via GROBID.
+    """Extract the bibliography (cited works) from a research paper PDF with GROBID.
 
     Args:
         pdf_path: a local PDF path, or a DOI, arXiv ID, PMID, or URL to download,
-            e.g. "data/papers/colbertv2.pdf" or "2112.01488".
+            for example "data/papers/colbertv2.pdf" or "2112.01488".
     """
     try:
         pdf_path = local_pdf(pdf_path)
@@ -518,7 +518,7 @@ def _markers_for(claim: str, sentence: str, cited: list[str]) -> list[str]:
     """The [bN] markers this claim belongs to.
 
     Taken from the claim if the model kept them. Otherwise recovered from the paper's own
-    copy of the sentence: the text is the authority, the model's output only points at it.
+    copy of the sentence: the text is the source we trust, the model's output only points at it.
     """
     from difflib import SequenceMatcher
 
@@ -575,7 +575,7 @@ def _cited_claim(extracted, references: dict, cited: list[str], pdf_path: str) -
 
 
 def _provenance(claim: dict) -> tuple[int, int]:
-    """How far a claim can be followed: to its sources first, then to its page."""
+    """How far a claim can be followed: to where it came from first, then to its page."""
     return len(claim["citations"]), int(bool(claim["source"]))
 
 
@@ -610,10 +610,10 @@ def _same_assertion(one: str, other: str) -> bool:
 
 
 def _deduplicated(claims: list[dict]) -> list[dict]:
-    """One entry per assertion, in the paper's order.
+    """Remove repeated claims and keep the paper's order.
 
-    A repeat keeps whichever copy carries the most provenance (cited works, then a located
-    sentence).
+    When a claim appears twice, keep the copy with more source information: first the one
+    with cited works, then the one we could find in the PDF.
     """
     kept: list[dict] = []
     keys: list[str] = []
@@ -629,7 +629,7 @@ def _deduplicated(claims: list[dict]) -> list[dict]:
 
 
 def _most_checkable(claims: list[dict], limit: int) -> list[dict]:
-    """At most `limit` claims, ranked by provenance, restored to the paper's order.
+    """At most `limit` claims, ranked by source information, restored to the paper's order.
 
     CLAIM_LIMIT=0 keeps everything (what the benchmark wants).
     """
@@ -644,7 +644,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
 
     Args:
         pdf_path: a local PDF path, or a DOI, arXiv ID, PMID, or URL to download,
-            e.g. "data/papers/colbertv2.pdf" or "2112.01488".
+            for example "data/papers/colbertv2.pdf" or "2112.01488".
     """
     global _cited_claim_extractor
     try:

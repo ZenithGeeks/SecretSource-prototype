@@ -10,8 +10,9 @@ HTTP:
     POST /api/add_figures {"source", "title", "figures": [{"label", "page", "caption", "image"}]}
     POST /api/upload          multipart "file"                        -> like /api/add
     POST /api/upload_figures  form source, title, figures (JSON) + "images" files -> like /api/add_figures
-    The /add routes take paths on this machine; the /upload routes carry the files, for a
-    caller that does not share this disk (a gateway on another machine, or on Cloud Run).
+    The /add routes take paths on this machine. The /upload routes carry the files.
+    Use them when the caller does not share this disk (a gateway on another machine,
+    or on Cloud Run).
     GET  /health
 
 MCP (streamable HTTP at /mcp): tool search_media — same store, same results.
@@ -46,9 +47,9 @@ def store() -> Store:
     return _store
 
 
-# The SDK's DNS-rebinding guard only admits localhost Host headers, which 421s every request
-# that arrives through Cloud Run or a compose service name. Nothing here is bound to a
-# loopback address, so the guard is off.
+# The SDK's DNS-rebinding guard only allows localhost Host headers. It returns 421 for
+# every request that comes through Cloud Run or a compose service name. Nothing here is
+# bound to a loopback address, so the guard is off.
 mcp = FastMCP(
     "colpali-retrieval",
     stateless_http=True,
@@ -60,14 +61,14 @@ mcp = FastMCP(
 
 @mcp.tool()
 def search_media(query: str, k: int = 5) -> dict:
-    """Search indexed figures and pages visually; returns labeled hits with captions."""
+    """Search indexed figures and pages by how they look. Returns labeled hits with captions."""
     return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50))}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _store
-    _store = Store()  # loads the model + connects to Qdrant once
+    _store = Store()  # loads the model and connects to Qdrant once
     print(f"{CHECKPOINT}: {len(_store)} rows on {_store.encoder.device}")
     async with mcp.session_manager.run():
         yield
@@ -90,11 +91,11 @@ class Figure(BaseModel):
     label: str = ""
     page: int = 0
     caption: str = ""
-    image: str  # the crop on disk, written by the pipeline and shared through the papers volume
+    image: str  # the crop on disk. The pipeline writes it and shares it through the papers volume
 
 
 class AddFiguresBody(BaseModel):
-    source: str  # the cited paper's file name, which search results are filtered by
+    source: str  # the cited paper's file name. Search results are filtered by it
     title: str = ""
     figures: list[Figure]
 
@@ -118,7 +119,7 @@ def add(body: AddBody):
 
 @app.post("/api/add_figures")
 def add_figures(body: AddFiguresBody):
-    """Index a paper's cropped figures instead of its whole pages."""
+    """Index a paper's cropped figures, not its whole pages."""
     figures = [figure.model_dump() for figure in body.figures]
     missing = [figure["image"] for figure in figures if not Path(figure["image"]).is_file()]
     if missing:
@@ -128,8 +129,8 @@ def add_figures(body: AddFiguresBody):
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
-    """Write an uploaded file under `folder` and return where it landed. Only the base name
-    is kept: it is a file name that arrived over HTTP, not a path."""
+    """Write an uploaded file under `folder` and return its path. Only the base name
+    is kept. It is a file name from an HTTP request, not a path."""
     name = Path(upload.filename or "").name
     if not name:
         raise HTTPException(400, "the upload needs a file name")
@@ -141,7 +142,7 @@ def receive(upload: UploadFile, folder: Path) -> Path:
 
 @app.post("/api/upload")
 def upload(file: UploadFile = PDF_UPLOAD):
-    """Index a PDF's pages from a file sent in the request body."""
+    """Index a PDF's pages from a file in the request body."""
     path = receive(file, PAPERS_DIR)
     return {"added": store().add_pdf(path), "total": len(store())}
 
@@ -153,10 +154,10 @@ def upload_figures(
     figures: str = FIGURES_FORM,
     images: list[UploadFile] = IMAGES_UPLOAD,
 ):
-    """add_figures for a caller on another machine: the crops travel with the request.
+    """add_figures for a caller on another machine. The crops travel with the request.
 
     `figures` is the JSON list add_figures takes. Each image is matched to an upload by
-    file name and re-pointed at where it lands here."""
+    file name. Its path is then set to where it lands here."""
     try:
         wanted = [Figure(**figure) for figure in json.loads(figures)]
     except (TypeError, ValueError) as error:

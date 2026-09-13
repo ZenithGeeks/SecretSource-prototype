@@ -14,7 +14,7 @@ EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
 LABELS = ("supports", "refutes", "insufficient")
 
-_judge = None  # lazy: needs dspy and a running LM
+_judge = None  # built on first use: needs dspy and a running LM
 
 
 def _evidence(claim: str, source_name: str) -> list[dict]:
@@ -133,8 +133,8 @@ def _build_judge():
 def unchecked_reason(verdict: dict, citation: dict) -> str:
     """Why a claim went unchecked.
 
-    An unresolvable citation that has a link is usually a blog post or a spec. That is a
-    fact about the bibliography, not a lookup that failed on our side.
+    A citation we could not find that has a link is usually a blog post or a spec. That is
+    a fact about the source list, not a lookup that failed on our side.
     """
     reason = verdict.get("reason", "failed")
     return "web-source" if reason == "unresolvable" and citation.get("url") else reason
@@ -144,9 +144,9 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
     """Check whether a cited paper actually supports a claim made about it.
 
     Args:
-        claim: the claim to check, e.g. "ColBERT reduces index size by 10x".
-        source_pdf_path: the cited paper — a local PDF path, or a DOI, arXiv ID, PMID,
-            or URL to download, e.g. "data/papers/colbertv2.pdf" or "2112.01488".
+        claim: the claim to check. For example "ColBERT reduces index size by 10x".
+        source_pdf_path: the cited paper. A local PDF path, or a DOI, arXiv ID, PMID,
+            or URL to download. For example "data/papers/colbertv2.pdf" or "2112.01488".
     """
     global _judge
     try:
@@ -157,7 +157,7 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
             return failure
 
         evidence = _evidence(claim, source.name)
-        passages = [item["text"] for item in evidence]  # the judge reads text, not provenance
+        passages = [item["text"] for item in evidence]  # the judge reads text, not where it came from
         pages, page_model = _visual(claim, source)
         # A caption is evidence like any other line.
         passages += _captions(pages)
