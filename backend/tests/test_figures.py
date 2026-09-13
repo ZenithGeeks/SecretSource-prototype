@@ -88,3 +88,43 @@ def test_paper_figures_returns_only_the_numbered_figures(monkeypatch):
     monkeypatch.setattr(figures, "paper_media", lambda pdf_path: media)
     kept = figures.paper_figures("data/papers/x.pdf")
     assert [figure["label"] for figure in kept] == ["Figure 2"]
+
+
+def crop(page: int, caption: str, kind: str = "figure") -> dict:
+    return {"kind": kind, "page": page, "caption": caption}
+
+
+def test_a_picture_without_a_numbered_caption_is_named_by_its_page_not_a_count():
+    # The shape of Going-deeper-with-convolutions' media.json, where counting gave "Figure 3" twice.
+    named = figures._name(
+        [
+            crop(3, "(a) Siberian husky"),
+            crop(3, "(b) Eskimo dog"),
+            crop(5, ""),
+            crop(7, "Figure 3: GoogLeNet network with all the bells and whistles"),
+        ]
+    )
+    assert [item["label"] for item in named] == [
+        "Picture on page 3 (1 of 2)",
+        "Picture on page 3 (2 of 2)",
+        "Picture on page 5",
+        "Figure 3",
+    ]
+    assert [item["numbered"] for item in named] == [False, False, False, True]
+
+
+def test_no_two_items_of_a_paper_share_a_label():
+    named = figures._name(
+        [crop(1, "", "table"), crop(6, "Table 1: Inception", "table"), crop(6, "Table 1: Inception", "table")]
+    )
+    labels = [item["label"] for item in named]
+    assert labels == ["Table on page 1", "Table 1 (1 of 2)", "Table 1 (2 of 2)"]
+    assert len(set(labels)) == len(labels)
+
+
+def test_a_manifest_written_with_counted_labels_is_named_again_when_read(monkeypatch):
+    old = {"figures": [dict(crop(5, ""), label="Figure 3", image="x.png")], "tables": [], "formulas": []}
+    monkeypatch.setattr(figures, "_read_manifest", lambda pdf: old)
+    media = figures.paper_media("data/papers/x.pdf")
+    assert media["cached"] is True
+    assert media["figures"][0]["label"] == "Picture on page 5"
