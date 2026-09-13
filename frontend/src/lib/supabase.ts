@@ -12,3 +12,7 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 export const authEnabled = Boolean(url && anonKey)
 
 export const supabase = authEnabled ? createClient(url as string, anonKey as string) : null
+
+/** Where supabase-js keeps the session in localStorage: `sb-<project ref>-auth-token`, the
+ * default it derives from the URL. */
+export const sessionStorageKey = authEnabled ? `sb-${new URL(url as string).hostname.split('.')[0]}-auth-token` : ''

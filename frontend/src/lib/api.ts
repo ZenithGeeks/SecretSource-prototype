@@ -1,6 +1,7 @@
 /** Typed client for the gateway (api.py). Every call goes through the /api proxy. */
 
 import { supabase } from './supabase'
+import { endSession } from './useAuth'
 
 export type Citation = {
   title: string
@@ -155,12 +156,31 @@ export function figureImageUrl(paper: string, image: string) {
   return `/api/papers/${encodeURIComponent(paper)}/figures/${encodeURIComponent(file)}.png`
 }
 
-/** The signed-in user's access token, so the gateway knows whose analyses to show.
- * Empty when login is off. */
+/** A request that could not say who is asking. The session is gone, and the app has signed out
+ * so the sign-in screen shows. */
+export class SignedOut extends Error {
+  constructor() {
+    super('the session has expired, sign in again')
+  }
+}
+
+/** The signed-in user's access token, so the gateway knows whose analyses to show. Empty when
+ * login is off. With login on and no session (for example a token refresh that failed), the
+ * request is not sent without one, which would ask as nobody (#147): it signs out instead. */
 async function accessToken() {
   if (!supabase) return ''
   const { data } = await supabase.auth.getSession()
-  return data.session?.access_token ?? ''
+  if (data.session?.access_token) return data.session.access_token
+  await endSession()
+  throw new SignedOut()
+}
+
+/** A 401 means the gateway would not take the token: sign out rather than keep asking. */
+async function signOutIfRefused(response: Response) {
+  if (response.status === 401 && supabase) {
+    await endSession()
+    throw new SignedOut()
+  }
 }
 
 /** A file from the gateway (a paper, a figure crop), fetched with the signed-in user's token:
@@ -168,6 +188,7 @@ async function accessToken() {
 export async function fetchFile(url: string) {
   const token = await accessToken()
   const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  await signOutIfRefused(response)
   if (!response.ok) throw new Error(`${response.status}: ${url}`)
   return response.blob()
 }
@@ -177,6 +198,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const response = await fetch(`/api${path}`, { ...init, headers })
+  await signOutIfRefused(response)
   if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`)
   return response.json()
 }
@@ -232,11 +254,12 @@ export const api = {
             signal: controller.signal,
           })
           // Like EventSource, a refused stream (401, 404) is not retried.
+          await signOutIfRefused(response)
           if (!response.ok || !response.body) return
           onOpen?.()
           await readEvents(response.body, (data) => onStage(JSON.parse(data)))
-        } catch {
-          if (controller.signal.aborted) return
+        } catch (error) {
+          if (controller.signal.aborted || error instanceof SignedOut) return
         }
         await new Promise((resolve) => setTimeout(resolve, RECONNECT_MS))
       }
