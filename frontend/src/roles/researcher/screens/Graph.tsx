@@ -12,11 +12,11 @@
 
 import cytoscape from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { Bookmark, Copy, ExternalLink, FileText, Search } from 'lucide-react'
+import { Bookmark, Copy, ExternalLink, FileText, Maximize2, Search, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
-import type { GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import type { GraphEdge, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
@@ -53,13 +53,27 @@ const DARK: Palette = {
   insufficient: '#D8B45F',
 }
 
+/** Follows the app theme: the Settings choice (`data-theme` on <html>) wins, and with no choice
+ * set it falls back to the OS preference — matching how index.css applies the palette. Cytoscape
+ * can't read CSS variables, so the graph mirrors the same decision to pick its hex palette. */
 function usePalette(): { pal: Palette; dark: boolean } {
-  const [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const isDark = () => {
+    const attr = document.documentElement.getAttribute('data-theme')
+    if (attr === 'dark') return true
+    if (attr === 'light') return false
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  }
+  const [dark, setDark] = useState(isDark)
   useEffect(() => {
+    const update = () => setDark(isDark())
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = (e: MediaQueryListEvent) => setDark(e.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
+    mq.addEventListener('change', update)
+    const observer = new MutationObserver(update)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => {
+      mq.removeEventListener('change', update)
+      observer.disconnect()
+    }
   }, [])
   return { pal: dark ? DARK : LIGHT, dark }
 }
@@ -80,6 +94,24 @@ function clusterColors(pal: Palette): string[] {
   return [pal.accent, pal.supports, pal.insufficient, pal.inkMuted, pal.refutes]
 }
 
+/** A short node label for the canvas — the full title would overlap everything. Cuts on a word
+ * boundary near the limit so it does not end mid-word. The full text stays in `data(label)` for
+ * the hover tooltip and the detail panel. */
+function truncate(text: string, max = 22): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max - 8 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
+/** How a claim stands overall, worst-first, so its dot colour shows contradiction at a glance. */
+function claimStanding(edges: GraphEdge[]): GraphRelation {
+  if (edges.some((e) => e.relation === 'contradicts')) return 'contradicts'
+  if (edges.some((e) => e.relation === 'backs')) return 'backs'
+  if (edges.some((e) => e.relation === 'silent')) return 'silent'
+  return 'asserts'
+}
+
 type View = 'claims' | 'papers'
 type PapersFilter = 'all' | 'strong' | 'citations'
 
@@ -90,25 +122,33 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
     {
       selector: 'node',
       style: {
-        label: 'data(label)', color: ink, 'font-size': 11,
+        color: ink, 'font-size': 11,
         'font-family': 'ui-sans-serif, system-ui, sans-serif',
         'text-wrap': 'wrap', 'text-valign': 'center', 'text-halign': 'center',
       },
     },
     {
+      // A claim is a fixed-size dot (the full sentence would overlap everything). Its colour is
+      // the claim's overall standing; the sentence shows on hover and in the detail panel.
       selector: 'node[kind="claim"]',
       style: {
-        shape: 'round-rectangle', 'background-color': surface, 'border-width': 1,
-        'border-color': border, 'text-max-width': '150px', width: 'label', height: 'label',
-        padding: '10px',
+        shape: 'ellipse', width: 16, height: 16, label: '', 'border-width': 1.5,
+        'border-color': surface, 'background-color': inkMuted,
       },
     },
+    { selector: 'node[standing="backs"]', style: { 'background-color': pal.supports } },
+    { selector: 'node[standing="contradicts"]', style: { 'background-color': pal.refutes } },
+    { selector: 'node[standing="silent"]', style: { 'background-color': pal.insufficient } },
     {
       selector: 'node[kind="paper"]',
       style: {
-        shape: 'ellipse', color: inkMuted, 'font-size': 10, 'text-valign': 'bottom',
-        'text-margin-y': 5, 'border-width': 1.5, 'border-color': accent,
-        'background-color': accentSoft,
+        // A short label sits below the node on a surface chip, so it stays readable over edges
+        // and neighbours; the full title is on hover and in the panel.
+        label: 'data(short)', shape: 'ellipse', color: ink, 'font-size': 10,
+        'text-valign': 'bottom', 'text-margin-y': 5, 'text-max-width': '120px',
+        'text-background-color': surface, 'text-background-opacity': 0.85,
+        'text-background-padding': '2px', 'text-background-shape': 'roundrectangle',
+        'border-width': 1.5, 'border-color': accent, 'background-color': accentSoft,
         // Papers view sizes by how connected a paper is; claims view is uniform.
         width: view === 'papers' ? ('mapData(weight, 1, 5, 26, 48)' as unknown as number) : 30,
         height: view === 'papers' ? ('mapData(weight, 1, 5, 26, 48)' as unknown as number) : 30,
@@ -143,7 +183,14 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
   return base
 }
 
-const LAYOUT = { name: 'fcose', animate: false, randomize: true, fit: true, nodeSeparation: 150, idealEdgeLength: 140, padding: 36 } as const
+// randomize:false makes fcose deterministic, so a reload lays the graph out the same way.
+// nodeDimensionsIncludeLabels keeps the short paper labels from overlapping. Edges are short so
+// each paper's claim dots sit close around it instead of flung across the canvas.
+const LAYOUT = {
+  name: 'fcose', animate: false, randomize: false, fit: true, quality: 'proof',
+  nodeDimensionsIncludeLabels: true, nodeSeparation: 130, idealEdgeLength: 95,
+  packComponents: true, padding: 40,
+} as const
 
 function StatTile({ count, label }: { count: number; label: string }) {
   return (
@@ -290,13 +337,32 @@ export function Graph() {
   const graph = useKnowledgeGraph().data
   const { pal, dark } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
+
+  // Cytoscape reads a pixel size once; in a flex column that size is wrong until the layout
+  // settles (and again when the detail panel opens or the window resizes). Re-measure and re-fit
+  // whenever the canvas box changes so the graph is never drawn off-screen or oversized.
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      const cy = cyRef.current
+      if (!cy) return
+      cy.resize()
+      cy.fit(undefined, 40)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   const params = new URLSearchParams(window.location.search)
   const [view, setView] = useState<View>(params.get('view') === 'papers' ? 'papers' : 'claims')
   const [claimSel, setClaimSel] = useState<string | null>(params.get('claim'))
   const [pairSel, setPairSel] = useState<string | null>(params.get('pair'))
   const [filter, setFilter] = useState('')
   const [pFilter, setPFilter] = useState<PapersFilter>('all')
+  // Full label of the hovered node, positioned over the canvas — the on-node label is short.
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
 
   const paperIds = useMemo(
     () => (graph ? new Set(graph.edges.map((e) => e.source)) : new Set<string>()),
@@ -306,8 +372,16 @@ export function Graph() {
   const elements = useMemo(() => {
     if (!graph) return []
     if (view === 'claims') {
+      const claimEdges: Record<string, GraphEdge[]> = {}
+      graph.edges.forEach((e) => (claimEdges[e.target] ??= []).push(e))
       return [
-        ...graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id)).map((n) => ({ data: n })),
+        ...graph.nodes
+          .filter((n) => n.kind === 'claim' || paperIds.has(n.id))
+          .map((n) =>
+            n.kind === 'paper'
+              ? { data: { ...n, short: truncate(n.label) } }
+              : { data: { ...n, standing: claimStanding(claimEdges[n.id] ?? []) } },
+          ),
         ...graph.edges.map((e) => ({ data: e })),
       ]
     }
@@ -322,7 +396,7 @@ export function Graph() {
     return [
       ...graph.nodes
         .filter((n) => n.kind === 'paper')
-        .map((n) => ({ data: { ...n, weight: deg[n.id] ?? 1 } })),
+        .map((n) => ({ data: { ...n, weight: deg[n.id] ?? 1, short: truncate(n.label) } })),
       ...edges.map((e) => ({
         data: { id: e.id, source: e.a, target: e.b, kind: 'paper', cites: e.cites ? 1 : 0, similarity: e.similarity },
       })),
@@ -421,8 +495,35 @@ export function Graph() {
         </div>
       )}
 
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <div className="relative h-[420px] flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas sm:h-[560px]">
+      <div className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:flex-1 lg:flex-row">
+        <div
+          ref={canvasRef}
+          className="relative h-[440px] min-w-0 overflow-hidden rounded-xl border border-border-subtle bg-canvas lg:h-auto lg:min-h-0 lg:flex-1"
+        >
+          {/* Zoom + fit, so a dense library can be opened up and re-framed. factor 0 = fit. */}
+          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface">
+            {[
+              { icon: ZoomIn, label: 'Zoom in', factor: 1.3 },
+              { icon: ZoomOut, label: 'Zoom out', factor: 1 / 1.3 },
+              { icon: Maximize2, label: 'Fit to view', factor: 0 },
+            ].map(({ icon: Icon, label, factor }) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                title={label}
+                onClick={() => {
+                  const cy = cyRef.current
+                  if (!cy) return
+                  if (factor === 0) cy.fit(undefined, 40)
+                  else cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+                }}
+                className="flex size-8 items-center justify-center text-ink-muted hover:bg-accent-soft hover:text-ink"
+              >
+                <Icon className="size-4" />
+              </button>
+            ))}
+          </div>
           {view === 'claims' ? (
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5">
               <Search className="size-3.5 text-ink-muted" />
@@ -457,10 +558,32 @@ export function Graph() {
                   setPairSel(null)
                 }
               })
+              // Full label on hover; drop it whenever the view moves so it can't hang stale.
+              cy.on('mouseover', 'node', (evt: cytoscape.EventObject) => {
+                const p = evt.target.renderedPosition()
+                setTip({ x: p.x, y: p.y, text: String(evt.target.data('label')) })
+              })
+              cy.on('mouseout', 'node', () => setTip(null))
+              cy.on('drag', 'node', () => setTip(null))
+              cy.on('pan zoom', () => setTip(null))
+              // The initial layout can run before the flex box has its final size (the ResizeObserver
+              // races cy readiness), leaving the graph unfitted. Re-fit once cy is ready.
+              requestAnimationFrame(() => {
+                cy.resize()
+                cy.fit(undefined, 40)
+              })
               setReady(true)
             }}
           />
           {view === 'claims' && <ClaimsLegend pal={pal} />}
+          {tip && (
+            <div
+              className="pointer-events-none absolute z-20 max-w-xs -translate-x-1/2 -translate-y-full rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs leading-snug text-ink shadow-lg"
+              style={{ left: tip.x, top: tip.y - 10 }}
+            >
+              {tip.text}
+            </div>
+          )}
         </div>
 
         {view === 'claims' && claimSel && <ClaimDetail graph={graph} claimId={claimSel} pal={pal} />}
