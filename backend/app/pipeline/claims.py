@@ -26,7 +26,6 @@ NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertio
 # each other. The cap keeps a long paper from opening a connection per window.
 EXTRACT_WORKERS = 3
 
-_converter = None  # lazy: loading docling's models takes seconds
 _claim_extractor = None  # lazy: needs dspy and a running LM
 _cited_claim_extractor = None
 
@@ -57,12 +56,10 @@ def _normalised_claim(claim: str) -> str:
 
 
 def _pdf_to_text(pdf_path: str) -> str:
-    global _converter
-    if _converter is None:
-        from docling.document_converter import DocumentConverter
+    from app.pipeline.figures import docling_converter, needs_ocr
 
-        _converter = DocumentConverter()
-    return _converter.convert(pdf_path).document.export_to_markdown()
+    converter = docling_converter(needs_ocr(pdf_path), pictures=False)
+    return converter.convert(pdf_path).document.export_to_markdown()
 
 
 # --- where a sentence sits on a page -------------------------------------------------

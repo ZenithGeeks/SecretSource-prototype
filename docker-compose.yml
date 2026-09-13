@@ -143,6 +143,7 @@ services:
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
       PARALLEL_SOURCES: ${PARALLEL_SOURCES:-3} # cited papers downloaded and indexed at the same time
       PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims judged at the same time
+      DOCLING_OCR: ${DOCLING_OCR:-auto} # auto: OCR only PDFs without a text layer
       # Both set: analyses are stored in Supabase Postgres instead of SQLite (supabase/README.md).
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
