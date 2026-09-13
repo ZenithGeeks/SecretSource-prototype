@@ -1,13 +1,34 @@
-/** The page a claim or a passage came from, with the region it came from boxed on it. */
+/**
+ * A paper in the browser, opened at the place a claim or a passage came from.
+ *
+ * The PDF is drawn by pdf.js (react-pdf), not shown as a picture from the gateway. Pages are
+ * drawn at screen resolution at every zoom level, the text can be selected, and the PDF's
+ * own links work. The highlight and the citation markers are drawn on top of their page.
+ */
 
-import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X, ZoomIn, ZoomOut } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Document, Page, pdfjs } from 'react-pdf'
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 import type { Citation, CitationMarker, Source } from '../lib/api'
-import { pageImageUrl } from '../lib/api'
 import { citationLink, reference } from '../lib/citations'
 import { cn } from '../lib/utils'
 import { Button } from './ui'
+
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
 export type Target = {
   paper: string // file name, e.g. "colbertv2.pdf"
@@ -18,6 +39,10 @@ export type Target = {
 }
 
 const ZOOMS = [1, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
+const PAGE_GAP = 16 // px between pages, and around them
+const RENDERED_AROUND = 2 // pages drawn on each side of the one in view; the rest are placeholders
+const MAX_PAGE_WIDTH = 2400 // css px; wider than this only costs memory
+const MAX_CANVAS_WIDTH = 4096 // device px; a canvas this wide is already sharp at any zoom here
 
 type Box = { x0: number; y0: number; x1: number; y1: number }
 
@@ -34,7 +59,7 @@ function boxStyle(box: Box, width: number, height: number) {
 function Highlight({ box, source }: { box: Box; source: Source }) {
   return (
     <div
-      className="pointer-events-none absolute rounded-xs bg-accent/20 ring-2 ring-accent/70"
+      className="pointer-events-none absolute z-10 rounded-xs bg-accent/20 ring-2 ring-accent/70"
       style={boxStyle(box, source.page_width, source.page_height)}
     />
   )
@@ -50,7 +75,7 @@ function ReferencePopover({ marker, citation }: { marker: CitationMarker; citati
     <div
       role="dialog"
       aria-label="Cited paper"
-      className="absolute z-10 w-72 max-w-[90%] space-y-1.5 rounded-lg border border-border-subtle bg-surface px-3 py-2.5 shadow-lg"
+      className="absolute z-20 w-72 max-w-[90%] space-y-1.5 rounded-lg border border-border-subtle bg-surface px-3 py-2.5 shadow-lg"
       style={
         below
           ? { left: `${left}%`, top: `calc(${(marker.y1 / marker.page_height) * 100}% + 6px)` }
@@ -101,6 +126,10 @@ function IconButton({
   )
 }
 
+function targetPage(target: Target) {
+  return target.source?.page ?? target.page ?? 1
+}
+
 export function PageViewer({
   target,
   onClose,
@@ -113,159 +142,277 @@ export function PageViewer({
   markers?: CitationMarker[]
   references?: Record<string, Citation>
 }) {
-  const [loaded, setLoaded] = useState(false)
-  const [page, setPage] = useState(target.source?.page ?? target.page ?? 1)
+  const [pageCount, setPageCount] = useState(0)
+  const [pageRatio, setPageRatio] = useState(1.294) // height / width; US Letter until page 1 says
+  const [failed, setFailed] = useState(false)
+  const [page, setPage] = useState(targetPage(target))
   const [zoom, setZoom] = useState(1)
+  const [expanded, setExpanded] = useState(false)
+  const [panelWidth, setPanelWidth] = useState(0)
   const [opened, setOpened] = useState<{ marker: CitationMarker; target: Target } | null>(null)
-  const previousPaper = useRef(target.paper)
+  const scroller = useRef<HTMLDivElement>(null)
+  const pageNodes = useRef(new Map<number, HTMLDivElement>())
+  const pageInView = useRef(page) // for effects that must not re-run on every scroll
 
-  // A new target updates the page to wherever it points; zoom only resets when it is a
-  // different paper, so comparing two claims in the same paper keeps the reader's zoom level.
+  const pageWidth = Math.min(Math.max(0, panelWidth - 2 * PAGE_GAP) * zoom, MAX_PAGE_WIDTH)
+  // Sharp on high-density screens, but capped: a 3x zoom on a 4K screen would otherwise ask
+  // for canvases of hundreds of megabytes.
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_CANVAS_WIDTH / Math.max(pageWidth, 1))
+
+  // The page is as wide as the panel, so it follows the panel's size (and the expand button).
   useEffect(() => {
-    setPage(target.source?.page ?? target.page ?? 1)
-    if (previousPaper.current !== target.paper) setZoom(1)
-    previousPaper.current = target.paper
-  }, [target])
+    const node = scroller.current
+    if (!node) return
+    const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
-  // Only the page changes the image URL. Resetting on zoom would hide it forever:
-  // the src is unchanged, so the browser fires no second load event.
-  useEffect(() => setLoaded(false), [page])
+  /** Scroll so page `number` is in view; with a box, so that box is. */
+  const scrollToPage = useCallback((number: number, box?: Box, size?: Source) => {
+    const node = pageNodes.current.get(number)
+    const container = scroller.current
+    if (!node || !container) return
+    const inside = box && size ? (box.y0 / size.page_height) * node.offsetHeight - 80 : -PAGE_GAP
+    container.scrollTo({ top: node.offsetTop + Math.max(0, inside) - PAGE_GAP })
+    pageInView.current = number
+    setPage(number)
+  }, [])
 
-  // Escape closes, arrows page: a reader checking a source should never feel trapped in it.
+  // A new target opens at its page and its highlight. The viewer is remounted for another
+  // paper (AnalysisView keys it by paper), so zoom only resets then: comparing two claims in
+  // the same paper keeps the reader's zoom level.
+  const ready = pageCount > 0 && panelWidth > 0
+  useEffect(() => {
+    if (ready) scrollToPage(targetPage(target), target.source?.boxes[0], target.source ?? undefined)
+  }, [target, ready, scrollToPage])
+
+  // Zooming keeps the reader on the page they were reading.
+  useEffect(() => {
+    if (ready) scrollToPage(pageInView.current)
+  }, [zoom, ready, scrollToPage])
+
+  // The page counter follows the scroll.
+  useEffect(() => {
+    const container = scroller.current
+    if (!container || !pageCount) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        const number = Number(visible?.target.getAttribute('data-page'))
+        if (number) {
+          pageInView.current = number
+          setPage(number)
+        }
+      },
+      { root: container, threshold: [0.25, 0.5, 0.75] },
+    )
+    pageNodes.current.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [pageCount])
+
+  // Escape closes an open reference first, then the full-window view, then the viewer.
+  // Arrows page, unless the reader is typing somewhere.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Escape closes an open reference first, then the viewer.
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.key === 'Escape') {
         if (opened) setOpened(null)
+        else if (expanded) setExpanded(false)
         else onClose()
       }
-      if (event.key === 'ArrowLeft') setPage((n) => Math.max(1, n - 1))
-      if (event.key === 'ArrowRight') setPage((n) => n + 1)
+      if (event.key === 'ArrowLeft') scrollToPage(Math.max(1, page - 1))
+      if (event.key === 'ArrowRight') scrollToPage(Math.min(pageCount || page, page + 1))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, opened])
+  }, [onClose, opened, expanded, page, pageCount, scrollToPage])
 
-  // Highlights belong to one page; paging away from it must not leave them behind.
-  const onOriginalPage = page === (target.source?.page ?? target.page ?? 1)
   const zoomIndex = ZOOMS.indexOf(zoom)
-  const pageMarkers = markers.filter((marker) => marker.page === page && references[marker.ref])
-  // An open reference belongs to one marker on one page: paging away or a new target hides it.
-  const openMarker =
-    opened && opened.target === target && opened.marker.page === page ? opened.marker : null
+  const openMarker = opened && opened.target === target ? opened.marker : null
+  const highlightPage = target.source ? target.source.page : null
+  const paperUrl = `/api/papers/${encodeURIComponent(target.paper)}`
 
   return (
-    <aside
-      aria-label={`${target.paper}, page ${page}`}
-      className="flex h-[calc(100vh-3rem)] flex-col gap-3 overflow-hidden rounded-xl border border-border-subtle bg-surface p-4"
-    >
-      <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{target.label}</p>
-          <p className="truncate text-xs text-ink-muted">
-            {target.paper}
-            {/* Only when there was a passage to find: opening the paper itself has none. */}
-            {!target.source && target.quote && onOriginalPage && ' · exact place not found, showing the page'}
-          </p>
-        </div>
-        <IconButton label="Close the page view" onClick={onClose}>
-          <X className="size-4" />
-        </IconButton>
-      </header>
-
-      {target.quote && (
-        <blockquote className="max-h-20 shrink-0 overflow-y-auto border-l-2 border-accent pl-3 text-sm italic text-ink-muted">
-          “{target.quote}”
-        </blockquote>
+    <>
+      {expanded && (
+        <div className="fixed inset-0 z-40 bg-ink/30" onClick={() => setExpanded(false)} aria-hidden />
       )}
-
-      <div className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-border-subtle bg-canvas">
-        {!loaded && (
-          <p className="absolute inset-x-0 top-0 flex items-center gap-2 p-4 text-sm text-ink-muted">
-            <Loader2 className="size-4 animate-spin" />
-            Rendering page {page}…
-          </p>
+      <aside
+        aria-label={`${target.paper}, page ${page}`}
+        className={cn(
+          'flex flex-col gap-3 overflow-hidden rounded-xl border border-border-subtle bg-surface p-4',
+          expanded ? 'fixed inset-4 z-50 shadow-2xl' : 'h-[calc(100vh-3rem)]',
         )}
-        <div className="relative mx-auto" style={{ width: `${zoom * 100}%` }}>
-          <img
-            src={pageImageUrl(target.paper, page)}
-            alt={`Page ${page} of ${target.paper}`}
-            onLoad={() => setLoaded(true)}
-            onError={() => setLoaded(true)}
-            className={cn('w-full transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
-          />
-          {loaded &&
-            onOriginalPage &&
-            target.source?.boxes.map((box, i) => (
-              <Highlight key={i} box={box} source={target.source as Source} />
-            ))}
-          {loaded &&
-            pageMarkers.map((marker, i) => (
-              <button
-                key={`marker-${i}`}
-                type="button"
-                onClick={() => setOpened(marker === openMarker ? null : { marker, target })}
-                aria-label={`Cited paper ${marker.text}: ${reference(references[marker.ref])}`}
-                aria-expanded={marker === openMarker}
-                className={cn(
-                  'absolute rounded-xs ring-1 ring-accent/50 hover:bg-accent/20 focus-visible:outline-2 focus-visible:outline-accent',
-                  marker === openMarker ? 'bg-accent/20 ring-2 ring-accent' : 'bg-accent/5',
-                )}
-                style={boxStyle(marker, marker.page_width, marker.page_height)}
-              />
-            ))}
-          {loaded && openMarker && references[openMarker.ref] && (
-            <ReferencePopover marker={openMarker} citation={references[openMarker.ref]} />
+      >
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{target.label}</p>
+            <p className="truncate text-xs text-ink-muted">
+              {target.paper}
+              {/* Only when there was a passage to find: opening the paper itself has none. */}
+              {!target.source && target.quote && ' · exact place not found, showing the page'}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center">
+            <IconButton
+              label={expanded ? 'Back to the side panel' : 'Fill the window'}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </IconButton>
+            <IconButton label="Close the page view" onClick={onClose}>
+              <X className="size-4" />
+            </IconButton>
+          </div>
+        </header>
+
+        {target.quote && (
+          <blockquote className="max-h-20 shrink-0 overflow-y-auto border-l-2 border-accent pl-3 text-sm italic text-ink-muted">
+            “{target.quote}”
+          </blockquote>
+        )}
+
+        <div
+          ref={scroller}
+          className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-border-subtle bg-canvas"
+        >
+          {panelWidth > 0 && (
+            <Document
+              file={paperUrl}
+              externalLinkTarget="_blank"
+              onLoadSuccess={async (pdf) => {
+                const first = await pdf.getPage(1)
+                const { width, height } = first.getViewport({ scale: 1 })
+                setPageRatio(height / width)
+                setPageCount(pdf.numPages)
+              }}
+              onLoadError={() => setFailed(true)}
+              // A link inside the PDF, like a reference number, jumps to its page.
+              onItemClick={({ pageNumber }) => scrollToPage(pageNumber)}
+              loading={
+                <p className="flex items-center gap-2 p-4 text-sm text-ink-muted">
+                  <Loader2 className="size-4 animate-spin" />
+                  Opening the paper…
+                </p>
+              }
+              error={
+                <p className="p-4 text-sm text-ink-muted">
+                  This PDF could not be shown here. Open the original PDF instead.
+                </p>
+              }
+              className="flex min-w-max flex-col items-center pb-4"
+            >
+              {Array.from({ length: pageCount }, (_, index) => {
+                const number = index + 1
+                // Drawing every page of a long paper at high resolution costs a lot of memory,
+                // so only the pages near the one in view are drawn.
+                const around = zoom > 1 ? 1 : RENDERED_AROUND
+                const drawn = Math.abs(number - page) <= around || number === targetPage(target)
+                const pageMarkers = markers.filter((marker) => marker.page === number && references[marker.ref])
+                return (
+                  <div key={number} style={{ padding: `${PAGE_GAP}px ${PAGE_GAP}px 0` }}>
+                    <div
+                      ref={(node) => {
+                        if (node) pageNodes.current.set(number, node)
+                        else pageNodes.current.delete(number)
+                      }}
+                      data-page={number}
+                      className="relative bg-white shadow-sm"
+                      style={{ width: pageWidth, minHeight: drawn ? undefined : pageWidth * pageRatio }}
+                    >
+                      {drawn && (
+                        <Page
+                          pageNumber={number}
+                          width={pageWidth}
+                          devicePixelRatio={pixelRatio}
+                          renderTextLayer
+                          renderAnnotationLayer
+                          loading={<div style={{ height: pageWidth * pageRatio }} />}
+                        />
+                      )}
+                      {number === highlightPage &&
+                        target.source?.boxes.map((box, i) => (
+                          <Highlight key={i} box={box} source={target.source as Source} />
+                        ))}
+                      {pageMarkers.map((marker, i) => (
+                        <button
+                          key={`marker-${i}`}
+                          type="button"
+                          onClick={() => setOpened(marker === openMarker ? null : { marker, target })}
+                          aria-label={`Cited paper ${marker.text}: ${reference(references[marker.ref])}`}
+                          aria-expanded={marker === openMarker}
+                          className={cn(
+                            'absolute z-10 rounded-xs ring-1 ring-accent/50 hover:bg-accent/20 focus-visible:outline-2 focus-visible:outline-accent',
+                            marker === openMarker ? 'bg-accent/20 ring-2 ring-accent' : 'bg-accent/5',
+                          )}
+                          style={boxStyle(marker, marker.page_width, marker.page_height)}
+                        />
+                      ))}
+                      {openMarker?.page === number && references[openMarker.ref] && (
+                        <ReferencePopover marker={openMarker} citation={references[openMarker.ref]} />
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </Document>
+          )}
+          {failed && (
+            <a href={paperUrl} target="_blank" rel="noreferrer" className="block px-4 text-sm text-accent hover:underline">
+              Original PDF
+            </a>
           )}
         </div>
-      </div>
 
-      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <IconButton
-            label="Previous page"
-            onClick={() => setPage((n) => Math.max(1, n - 1))}
-            disabled={page === 1}
-          >
-            <ChevronLeft className="size-4" />
-          </IconButton>
-          <span className="min-w-16 text-center text-sm tabular-nums" aria-live="polite">
-            page {page}
-          </span>
-          <IconButton label="Next page" onClick={() => setPage((n) => n + 1)}>
-            <ChevronRight className="size-4" />
-          </IconButton>
-        </div>
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1">
+            <IconButton label="Previous page" onClick={() => scrollToPage(Math.max(1, page - 1))} disabled={page <= 1}>
+              <ChevronLeft className="size-4" />
+            </IconButton>
+            <span className="min-w-20 text-center text-sm tabular-nums" aria-live="polite">
+              page {page}
+              {pageCount ? ` of ${pageCount}` : ''}
+            </span>
+            <IconButton
+              label="Next page"
+              onClick={() => scrollToPage(Math.min(pageCount, page + 1))}
+              disabled={!pageCount || page >= pageCount}
+            >
+              <ChevronRight className="size-4" />
+            </IconButton>
+          </div>
 
-        <div className="flex items-center gap-1">
-          <IconButton
-            label="Zoom out"
-            onClick={() => setZoom(ZOOMS[Math.max(0, zoomIndex - 1)])}
-            disabled={zoomIndex <= 0}
-          >
-            <ZoomOut className="size-4" />
-          </IconButton>
-          <span className="min-w-12 text-center text-sm tabular-nums">
-            {zoom === 1 ? 'fit' : `${zoom}×`}
-          </span>
-          <IconButton
-            label="Zoom in"
-            onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zoomIndex + 1)])}
-            disabled={zoomIndex >= ZOOMS.length - 1}
-          >
-            <ZoomIn className="size-4" />
-          </IconButton>
-          <a
-            href={`/api/papers/${encodeURIComponent(target.paper)}`}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-2 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <ExternalLink className="size-3.5" />
-            Original PDF
-          </a>
-        </div>
-      </footer>
-    </aside>
+          <div className="flex items-center gap-1">
+            <IconButton
+              label="Zoom out"
+              onClick={() => setZoom(ZOOMS[Math.max(0, zoomIndex - 1)])}
+              disabled={zoomIndex <= 0}
+            >
+              <ZoomOut className="size-4" />
+            </IconButton>
+            <span className="min-w-12 text-center text-sm tabular-nums">{zoom === 1 ? 'fit' : `${zoom}×`}</span>
+            <IconButton
+              label="Zoom in"
+              onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zoomIndex + 1)])}
+              disabled={zoomIndex >= ZOOMS.length - 1}
+            >
+              <ZoomIn className="size-4" />
+            </IconButton>
+            <a
+              href={paperUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-2 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <ExternalLink className="size-3.5" />
+              Original PDF
+            </a>
+          </div>
+        </footer>
+      </aside>
+    </>
   )
 }

@@ -140,11 +140,6 @@ export function paperName(file: string) {
   return file.split(/[\/]/).pop() ?? file
 }
 
-/** The rendered page, at a dpi that stays sharp on a retina screen without being huge. */
-export function pageImageUrl(paper: string, page: number, dpi = 150) {
-  return `/api/papers/${encodeURIComponent(paper)}/pages/${page}.png?dpi=${dpi}`
-}
-
 /** A figure crop, from the `image` path a verdict's `pages` entry carries. Only the file
  * name travels: the gateway builds the directory from the paper and rejects anything that
  * is not a figure-<n>. */

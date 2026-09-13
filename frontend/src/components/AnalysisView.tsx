@@ -86,12 +86,10 @@ export function AnalysisView({
         <Card className="border-refutes text-refutes">{analysis.data.message}</Card>
       )}
 
-      {/* Wide screens put the page beside the claims and give it the larger half:
-          a PDF page below about 600px wide stops being readable. */}
+      {/* Wide screens put the page beside the claims and give it the larger part: a PDF page
+          below about 600px wide stops being readable. The viewer can also fill the window. */}
       <div
-        className={
-          target ? 'grid gap-4 xl:grid-cols-[minmax(24rem,1fr)_minmax(28rem,42rem)]' : undefined
-        }
+        className={target ? 'grid gap-4 xl:grid-cols-[minmax(22rem,2fr)_minmax(32rem,3fr)]' : undefined}
       >
         <section className="space-y-3">
           {standings.length > 0 && (
@@ -124,6 +122,7 @@ export function AnalysisView({
         {target && (
           <div className="xl:sticky xl:top-6 xl:self-start">
             <PageViewer
+              key={target.paper}
               target={target}
               onClose={() => setTarget(null)}
               // Markers belong to the analysed paper, not to a cited paper opened in the viewer.
