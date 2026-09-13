@@ -11,14 +11,31 @@ reached over the wire.
 A2A_HOST and A2A_PORT are the address the card tells callers to use, not what the
 server binds. A client that cannot reach the URL in the card cannot send the task.
 From another compose service that is `a2a:8002`. From the host, it is `localhost:8002`.
+
+Sessions are kept in Postgres when SESSION_DB_URL is set (app/sessions.py), so a caller's
+conversation survives a restart.
 """
 
 import os
 
 from app.agents.team import root_agent
+from app.sessions import session_service
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
+from google.adk.artifacts import InMemoryArtifactService
+from google.adk.auth.credential_service.in_memory_credential_service import InMemoryCredentialService
+from google.adk.memory import InMemoryMemoryService
+from google.adk.runners import Runner
 
 HOST = os.getenv("A2A_HOST", "localhost")
 PORT = int(os.getenv("A2A_PORT", "8002"))
 
-app = to_a2a(root_agent, host=HOST, port=PORT)
+# The same services to_a2a builds by default, except sessions, which can be kept in Postgres.
+runner = Runner(
+    agent=root_agent,
+    app_name=root_agent.name,
+    session_service=session_service(),
+    artifact_service=InMemoryArtifactService(),
+    memory_service=InMemoryMemoryService(),
+    credential_service=InMemoryCredentialService(),
+)
+app = to_a2a(root_agent, host=HOST, port=PORT, runner=runner)
