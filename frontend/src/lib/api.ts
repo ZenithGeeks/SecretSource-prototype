@@ -163,6 +163,15 @@ async function accessToken() {
   return data.session?.access_token ?? ''
 }
 
+/** A file from the gateway (a paper, a figure crop), fetched with the signed-in user's token:
+ * the gateway serves papers only to the user whose analyses they belong to (#135). */
+export async function fetchFile(url: string) {
+  const token = await accessToken()
+  const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!response.ok) throw new Error(`${response.status}: ${url}`)
+  return response.blob()
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await accessToken()
   const headers = new Headers(init?.headers)

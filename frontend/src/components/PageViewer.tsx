@@ -25,6 +25,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 import type { Citation, CitationMarker, Source } from '../lib/api'
 import { citationLink, reference } from '../lib/citations'
+import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
 import { Button } from './ui'
 
@@ -250,7 +251,10 @@ export function PageViewer({
   const zoomIndex = ZOOMS.indexOf(zoom)
   const openMarker = opened && opened.target === target ? opened.marker : null
   const highlightPage = target.source ? target.source.page : null
-  const paperUrl = `/api/papers/${encodeURIComponent(target.paper)}`
+  // The gateway serves a paper only with the user's token, so pdf.js and the links below
+  // get an in-memory copy fetched with it (#135).
+  const pdf = useAuthorizedUrl(`/api/papers/${encodeURIComponent(target.paper)}`)
+  const cannotOpen = failed || pdf.failed
 
   return (
     <>
@@ -300,9 +304,15 @@ export function PageViewer({
           ref={scroller}
           className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-border-subtle bg-canvas"
         >
-          {panelWidth > 0 && (
+          {panelWidth > 0 && !pdf.url && !pdf.failed && (
+            <p className="flex items-center gap-2 p-4 text-sm text-ink-muted">
+              <Loader2 className="size-4 animate-spin" />
+              Opening the paper…
+            </p>
+          )}
+          {panelWidth > 0 && pdf.url && (
             <Document
-              file={paperUrl}
+              file={pdf.url}
               externalLinkTarget="_blank"
               onLoadSuccess={async (pdf) => {
                 const first = await pdf.getPage(1)
@@ -381,11 +391,12 @@ export function PageViewer({
               })}
             </Document>
           )}
-          {failed && (
-            <a href={paperUrl} target="_blank" rel="noreferrer" className="block px-4 text-sm text-accent hover:underline">
+          {cannotOpen && pdf.url && (
+            <a href={pdf.url} target="_blank" rel="noreferrer" className="block px-4 text-sm text-accent hover:underline">
               Original PDF
             </a>
           )}
+          {pdf.failed && <p className="p-4 text-sm text-ink-muted">This paper could not be opened.</p>}
         </div>
 
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2">
@@ -422,15 +433,17 @@ export function PageViewer({
             >
               <ZoomIn className="size-4" />
             </IconButton>
-            <a
-              href={paperUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-2 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-            >
-              <ExternalLink className="size-3.5" />
-              Original PDF
-            </a>
+            {pdf.url && (
+              <a
+                href={pdf.url}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-2 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <ExternalLink className="size-3.5" />
+                Original PDF
+              </a>
+            )}
           </div>
         </footer>
       </aside>
