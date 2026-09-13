@@ -6,7 +6,7 @@
  * changing the essay-check screen.
  */
 
-import { GraduationCap, Home as HomeIcon, Library as LibraryIcon, Settings, Waypoints } from 'lucide-react'
+import { GraduationCap, Home as HomeIcon, Library as LibraryIcon, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -14,24 +14,25 @@ import { AppShell } from '../../components/AppShell'
 import { EssayCheck } from './screens/EssayCheck'
 import { Home } from './screens/Home'
 
-type NavKey = 'home' | 'classes' | 'library' | 'graph' | 'settings'
-export type TeacherScreen = NavKey | 'essay-check' | 'reading-questions' | 'class-library' | 'class-note'
+type NavKey = 'home' | 'classes' | 'library' | 'graph'
+// Settings is screen-only — opened from the profile menu, not the nav (as in Figma).
+export type TeacherScreen = NavKey | 'settings' | 'essay-check' | 'reading-questions' | 'class-library' | 'class-note'
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'classes', label: 'Classes', icon: GraduationCap },
   { key: 'library', label: 'Library', icon: LibraryIcon },
   { key: 'graph', label: 'Graph', icon: Waypoints },
-  { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
 // Essay check is a detail screen reached from Classes, so Classes remains highlighted.
-const NAV_FOR: Record<TeacherScreen, NavKey> = {
+// Settings lights nothing (the profile button carries its own active state).
+const NAV_FOR: Record<TeacherScreen, NavKey | null> = {
   home: 'home',
   classes: 'classes',
   library: 'library',
   graph: 'graph',
-  settings: 'settings',
+  settings: null,
   'essay-check': 'classes',
   'reading-questions': 'library',
   'class-library': 'library',
@@ -93,6 +94,8 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Teacher"
       roleIcon={GraduationCap}
       onChangeRole={onChangeRole}
+      onOpenSettings={() => navigate('settings')}
+      settingsActive={screen === 'settings'}
       // The prototype teacher screens use the full available width of the role shell.
       wide
     >

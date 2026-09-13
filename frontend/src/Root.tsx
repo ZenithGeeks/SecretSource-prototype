@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react'
 
 import App from './App'
-import { authEnabled } from './lib/supabase'
+import { authEnabled, supabase } from './lib/supabase'
 import { useAuth } from './lib/useAuth'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
 import { TeacherApp } from './roles/teacher/TeacherApp'
@@ -44,6 +44,22 @@ export function Root() {
   const { session, loading } = useAuth()
 
   useEffect(() => syncRoleParam(screen), [screen])
+
+  // On sign-out, forget the previous user's place: reset to onboarding and drop the deep-link
+  // params (Root's ?role plus the role screens' ?screen/?analysis). Without this the next
+  // account on this browser skips onboarding and lands on the previous user's analysis id.
+  useEffect(() => {
+    if (!supabase) return
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event !== 'SIGNED_OUT') return
+      setScreen('onboarding')
+      const params = new URLSearchParams(window.location.search)
+      for (const key of ['role', 'screen', 'analysis']) params.delete(key)
+      const query = params.toString()
+      window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+    })
+    return () => data.subscription.unsubscribe()
+  }, [])
 
   // Auth gate — only when Supabase is configured (VITE_SUPABASE_*). Without it the app runs
   // open, as before. `?auth=1` previews the auth screens regardless of config.
