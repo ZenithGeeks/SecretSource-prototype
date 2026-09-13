@@ -31,12 +31,12 @@ function Row({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-5 py-3.5">
+    <div className="flex flex-col items-start gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5">
       <div className="min-w-0">
         <p className="text-sm text-ink">{label}</p>
         {hint && <p className="text-xs text-ink-muted">{hint}</p>}
       </div>
-      <div className="flex shrink-0 items-center">{children}</div>
+      <div className="flex max-w-full flex-wrap items-center sm:shrink-0">{children}</div>
     </div>
   )
 }
@@ -136,7 +136,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
           <Input
             value={s.displayName}
             onChange={(e) => set('displayName', e.target.value)}
-            className="w-56"
+            className="w-full sm:w-56"
           />
         </Row>
         <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">

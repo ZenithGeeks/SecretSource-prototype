@@ -194,7 +194,7 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
   const singleOrigin = edges.filter((e) => e.relation === 'asserts').length <= 1
 
   return (
-    <aside className="w-80 shrink-0 overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5">
+    <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
       <p className="mb-2 inline-block rounded bg-refutes-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-refutes">
         {contradicts ? 'Source contradicts' : 'Traced'}
       </p>
@@ -250,7 +250,7 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
     { value: String(edge.contradicted ?? 0), label: 'contradicted' },
   ]
   return (
-    <aside className="w-80 shrink-0 overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5">
+    <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
       <h2 className="font-serif text-lg font-semibold text-ink">{a} and {b}</h2>
       <div className="mt-3 flex gap-2">
         {stats.map((s) => (
@@ -373,12 +373,12 @@ export function Graph() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
           <p className="max-w-2xl text-sm text-ink-muted">{subtitle}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
           <div className="flex rounded-lg border border-border-subtle p-0.5 text-xs font-medium">
             {(['claims', 'papers'] as View[]).map((v) => (
               <button
@@ -392,7 +392,7 @@ export function Graph() {
             ))}
           </div>
           {view === 'papers' && (
-            <div className="flex gap-1.5 text-xs font-medium">
+            <div className="flex flex-wrap gap-1.5 text-xs font-medium">
               {([['all', `All ${paperCount} papers`], ['strong', 'Strong links only'], ['citations', 'Citations']] as [PapersFilter, string][]).map(
                 ([key, label]) => (
                   <button
@@ -414,15 +414,15 @@ export function Graph() {
       </header>
 
       {view === 'claims' && (
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
           {graph.stats.map((s) => (
             <StatTile key={s.label} count={s.count} label={s.label} />
           ))}
         </div>
       )}
 
-      <div className="flex gap-4">
-        <div className="relative h-[560px] flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas">
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="relative h-[420px] flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas sm:h-[560px]">
           {view === 'claims' ? (
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5">
               <Search className="size-3.5 text-ink-muted" />

@@ -1,6 +1,7 @@
 /** Live pipeline progress: one line per stage, newest last. */
 
 import { AlertCircle, CheckCircle2, Loader2, SearchX } from 'lucide-react'
+import { useState } from 'react'
 
 import type { Stage } from '../lib/api'
 import { reasonText } from '../lib/api'
@@ -30,12 +31,32 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   error: (stage) => stage.message ?? 'Failed',
 }
 
+/** A finished run can have forty lines; past this many only the last few show until asked. */
+const FOLDED_AFTER = 8
+const SHOWN_WHEN_FOLDED = 3
+
 export function PipelineStages({ stages, running }: { stages: Stage[]; running: boolean }) {
+  const [showAll, setShowAll] = useState(false)
   if (!stages.length) return null
 
+  const folded = !running && !showAll && stages.length > FOLDED_AFTER
+  const shown = folded ? stages.slice(-SHOWN_WHEN_FOLDED) : stages
+  const offset = stages.length - shown.length
+
   return (
+    <>
+    {folded && (
+      <button
+        type="button"
+        onClick={() => setShowAll(true)}
+        className="mb-2 rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        Show all {stages.length} steps
+      </button>
+    )}
     <ol className="space-y-1.5 text-sm" aria-live="polite" aria-busy={running}>
-      {stages.map((stage, index) => {
+      {shown.map((stage, shownIndex) => {
+        const index = offset + shownIndex
         const isLast = index === stages.length - 1
         const pending = running && isLast
         return (
@@ -58,5 +79,6 @@ export function PipelineStages({ stages, running }: { stages: Stage[]; running: 
         )
       })}
     </ol>
+    </>
   )
 }

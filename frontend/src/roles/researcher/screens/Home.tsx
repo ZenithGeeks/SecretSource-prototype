@@ -120,7 +120,7 @@ export function Home({
                   className="flex w-full flex-col gap-1 py-2 text-left"
                 >
                   <p className="text-sm text-ink">{c.claim}</p>
-                  <span className="flex gap-3 text-xs">
+                  <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
                     <span className="flex gap-1">
                       <span className="font-medium text-supports">for</span>
                       <span className="text-ink-muted">{c.for.join(', ') || '—'}</span>

@@ -126,6 +126,19 @@ function IconButton({
   )
 }
 
+/** True below the xl breakpoint, where AnalysisView stacks the viewer under the claims. */
+function useNarrowScreen() {
+  const query = '(max-width: 1279px)'
+  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const onChange = () => setNarrow(media.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
+
 function targetPage(target: Target) {
   return target.source?.page ?? target.page ?? 1
 }
@@ -148,6 +161,10 @@ export function PageViewer({
   const [page, setPage] = useState(targetPage(target))
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
+  // Below xl there is no column beside the claims, so the viewer would open under all of them.
+  // It opens over the whole screen instead.
+  const narrow = useNarrowScreen()
+  const fullScreen = narrow || expanded
   const [panelWidth, setPanelWidth] = useState(0)
   const [opened, setOpened] = useState<{ marker: CitationMarker; target: Target } | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -220,7 +237,7 @@ export function PageViewer({
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.key === 'Escape') {
         if (opened) setOpened(null)
-        else if (expanded) setExpanded(false)
+        else if (expanded && !narrow) setExpanded(false)
         else onClose()
       }
       if (event.key === 'ArrowLeft') scrollToPage(Math.max(1, page - 1))
@@ -228,7 +245,7 @@ export function PageViewer({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, opened, expanded, page, pageCount, scrollToPage])
+  }, [onClose, opened, expanded, narrow, page, pageCount, scrollToPage])
 
   const zoomIndex = ZOOMS.indexOf(zoom)
   const openMarker = opened && opened.target === target ? opened.marker : null
@@ -237,14 +254,16 @@ export function PageViewer({
 
   return (
     <>
-      {expanded && (
+      {expanded && !narrow && (
         <div className="fixed inset-0 z-40 bg-ink/30" onClick={() => setExpanded(false)} aria-hidden />
       )}
       <aside
         aria-label={`${target.paper}, page ${page}`}
         className={cn(
-          'flex flex-col gap-3 overflow-hidden rounded-xl border border-border-subtle bg-surface p-4',
-          expanded ? 'fixed inset-4 z-50 shadow-2xl' : 'h-[calc(100vh-3rem)]',
+          'flex flex-col gap-3 overflow-hidden border-border-subtle bg-surface',
+          narrow
+            ? 'fixed inset-0 z-50 p-3'
+            : cn('rounded-xl border p-4', fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : 'h-[calc(100vh-3rem)]'),
         )}
       >
         <header className="flex items-start justify-between gap-3">
@@ -257,12 +276,14 @@ export function PageViewer({
             </p>
           </div>
           <div className="flex shrink-0 items-center">
-            <IconButton
-              label={expanded ? 'Back to the side panel' : 'Fill the window'}
-              onClick={() => setExpanded(!expanded)}
-            >
-              {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-            </IconButton>
+            {!narrow && (
+              <IconButton
+                label={expanded ? 'Back to the side panel' : 'Fill the window'}
+                onClick={() => setExpanded(!expanded)}
+              >
+                {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              </IconButton>
+            )}
             <IconButton label="Close the page view" onClick={onClose}>
               <X className="size-4" />
             </IconButton>
