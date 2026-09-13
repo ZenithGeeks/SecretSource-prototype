@@ -371,6 +371,7 @@ export function ClaimCard({
   index,
   standing,
   paper,
+  section,
   figures = [],
   references = {},
   onShow,
@@ -379,6 +380,8 @@ export function ClaimCard({
   index: number
   standing: Standing
   paper?: string
+  /** Where in the paper the claim comes from, e.g. "Section 3.3 · Representation" (#153). */
+  section?: string
   /** The analysed paper's numbered figures, so "Figure 2" in its sentence can be shown. */
   figures?: PaperFigure[]
   /** Every reference the paper's markers point to, by id, to print their numbers. */
@@ -409,7 +412,10 @@ export function ClaimCard({
       >
         <span className="mt-1 text-xs font-semibold tabular-nums text-ink-muted">{index + 1}</span>
         <span className="flex-1 space-y-2">
-          <StandingBadge standing={standing} title={STANDING_MEANINGS[standing]} />
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <StandingBadge standing={standing} title={STANDING_MEANINGS[standing]} />
+            {section && <span className="text-xs text-ink-muted">{section}</span>}
+          </span>
           <span className={cn('block max-w-[68ch] leading-relaxed', !open && 'line-clamp-2')}>
             {claim.claim}
           </span>

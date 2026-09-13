@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2 } from 'lucide-react'
+import { Fragment, type ReactNode } from 'react'
 
 import { api, type Analysis } from '../lib/api'
 import { cn } from '../lib/utils'
@@ -14,10 +15,13 @@ export function HistoryList({
   analyses,
   selected,
   onSelect,
+  contents,
 }: {
   analyses: Analysis[]
   selected: string | null
   onSelect: (id: string | null) => void
+  /** Shown under the selected analysis, e.g. its table of contents. */
+  contents?: ReactNode
 }) {
   const queryClient = useQueryClient()
   const remove = useMutation({
@@ -35,35 +39,37 @@ export function HistoryList({
   return (
     <nav className="space-y-1">
       {analyses.map((analysis) => (
-        <div
-          key={analysis.id}
-          className={cn(
-            'group flex items-center gap-1 rounded-lg pr-1 transition-colors',
-            analysis.id === selected ? 'bg-accent-soft' : 'hover:bg-accent-soft',
-          )}
-        >
-          <button
-            data-closes-menu
-            onClick={() => onSelect(analysis.id)}
-            aria-current={analysis.id === selected ? 'true' : undefined}
+        <Fragment key={analysis.id}>
+          <div
             className={cn(
-              'min-h-11 flex-1 truncate px-3 text-left text-sm',
-              analysis.id === selected ? 'text-ink' : 'text-ink-muted',
+              'group flex items-center gap-1 rounded-lg pr-1 transition-colors',
+              analysis.id === selected ? 'bg-accent-soft' : 'hover:bg-accent-soft',
             )}
-            title={label(analysis)}
           >
-            {label(analysis)}
-            {analysis.status === 'running' && <span className="ml-1 text-accent">·</span>}
-            {analysis.status === 'error' && <span className="ml-1 text-refutes">!</span>}
-          </button>
-          <button
-            onClick={() => remove.mutate(analysis.id)}
-            aria-label={`Delete analysis of ${label(analysis)}`}
-            className="grid size-11 shrink-0 place-items-center rounded text-ink-muted transition-colors hover:text-refutes"
-          >
-            <Trash2 className="size-4" />
-          </button>
-        </div>
+            <button
+              data-closes-menu
+              onClick={() => onSelect(analysis.id)}
+              aria-current={analysis.id === selected ? 'true' : undefined}
+              className={cn(
+                'min-h-11 flex-1 truncate px-3 text-left text-sm',
+                analysis.id === selected ? 'text-ink' : 'text-ink-muted',
+              )}
+              title={label(analysis)}
+            >
+              {label(analysis)}
+              {analysis.status === 'running' && <span className="ml-1 text-accent">·</span>}
+              {analysis.status === 'error' && <span className="ml-1 text-refutes">!</span>}
+            </button>
+            <button
+              onClick={() => remove.mutate(analysis.id)}
+              aria-label={`Delete analysis of ${label(analysis)}`}
+              className="grid size-11 shrink-0 place-items-center rounded text-ink-muted transition-colors hover:text-refutes"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+          {analysis.id === selected && contents}
+        </Fragment>
       ))}
     </nav>
   )
