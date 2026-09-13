@@ -19,6 +19,8 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   failed: (stage) =>
     `Claim ${(stage.claim ?? 0) + 1}: could not check ${stage.source} — ` +
     `${reasonText(stage.reason)}`,
+  planned: (stage) =>
+    `Planned ${stage.checks} checks against ${stage.sources} cited ${stage.sources === 1 ? 'work' : 'works'}`,
   figures: (stage) =>
     stage.figures
       ? `Found ${stage.figures} numbered figures in the paper`
@@ -35,11 +37,19 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
 const FOLDED_AFTER = 8
 const SHOWN_WHEN_FOLDED = 3
 
-export function PipelineStages({ stages, running }: { stages: Stage[]; running: boolean }) {
+export function PipelineStages({
+  stages,
+  running,
+  fold = true,
+}: {
+  stages: Stage[]
+  running: boolean
+  fold?: boolean // false shows every step, for a caller that already offers a summary
+}) {
   const [showAll, setShowAll] = useState(false)
   if (!stages.length) return null
 
-  const folded = !running && !showAll && stages.length > FOLDED_AFTER
+  const folded = fold && !running && !showAll && stages.length > FOLDED_AFTER
   const shown = folded ? stages.slice(-SHOWN_WHEN_FOLDED) : stages
   const offset = stages.length - shown.length
 

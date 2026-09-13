@@ -14,10 +14,10 @@ import { paperName } from '../lib/api'
 import { countsOf, ranked } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { useAnalysis } from '../lib/useAnalysis'
+import { AnalysisProgress } from './AnalysisProgress'
 import { ClaimCard } from './ClaimCard'
 import type { Target } from './PageViewer'
 import { PageViewer } from './PageViewer'
-import { PipelineStages } from './PipelineStages'
 import { ResultsSummary } from './ResultsSummary'
 import { Card, Empty } from './ui'
 
@@ -76,11 +76,7 @@ export function AnalysisView({
 
   return (
     <>
-      {analysis.data.stages.length > 0 && (
-        <Card>
-          <PipelineStages stages={analysis.data.stages} running={running} />
-        </Card>
-      )}
+      <AnalysisProgress stages={analysis.data.stages} claims={analysis.data.claims} status={analysis.data.status} />
 
       {analysis.data.status === 'error' && (
         <Card className="border-refutes text-refutes">{analysis.data.message}</Card>
