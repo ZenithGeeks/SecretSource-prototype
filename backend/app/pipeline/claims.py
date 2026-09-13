@@ -362,7 +362,7 @@ TITLE_PATHS = (
     "tei:monogr/tei:title[@level='m']",  # a book or proceedings, cited whole
     "tei:monogr/tei:title[@level='j']",  # a journal, when nothing finer was parsed
 )
-NAME_TOKEN = re.compile(r"^[A-Z][A-Za-z'’-]*\.?$")
+NAME_TOKEN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['’-])*\.?$")  # any alphabet, so "Stéphane" counts
 
 
 def _looks_like_authors(text: str) -> bool:
@@ -373,7 +373,8 @@ def _looks_like_authors(text: str) -> bool:
     """
     groups = [group.split() for group in re.split(r",|\band\b", text) if group.strip()]
     return len(groups) >= 2 and all(
-        2 <= len(group) <= 3 and all(NAME_TOKEN.match(word) for word in group) for group in groups
+        2 <= len(group) <= 3 and all(NAME_TOKEN.match(word) and word[0].isupper() for word in group)
+        for group in groups
     )
 
 
@@ -448,6 +449,59 @@ def _paper_header(tei) -> dict:
         "authors": authors,
         "year": date.get("when", "")[:4] if date is not None else "",
     }
+
+
+def _printed_title(pdf_path: str) -> str:
+    """The title as printed on page 1: the largest horizontal text in the top half of the page.
+
+    Only horizontal lines count, so the sideways "arXiv:2112.01488v3 [cs.IR]" stamp on arXiv
+    PDFs is skipped although its font is bigger. Empty when the PDF cannot be read.
+    """
+    import pymupdf
+
+    try:
+        with pymupdf.open(pdf_path) as document:
+            page = document[0]
+            half = page.rect.height / 2
+            spans = [
+                (span["size"], span["bbox"][1], span["bbox"][0], span["text"])
+                for block in page.get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                if line["dir"] == (1.0, 0.0)
+                for span in line["spans"]
+                if span["text"].strip() and span["bbox"][3] < half
+            ]
+    except Exception:
+        return ""
+    if not spans:
+        return ""
+    largest = max(size for size, *_ in spans)
+    words = [text for size, _, _, text in sorted(spans, key=lambda s: (s[1], s[2])) if size >= largest - 0.5]
+    return " ".join(unicodedata.normalize("NFKC", " ".join(words)).split())
+
+
+def _comparable(text: str) -> str:
+    return " ".join(re.findall(r"\w+", unicodedata.normalize("NFKC", text).lower()))
+
+
+def paper_title(pdf_path: str, grobid_title: str = "", given: str = "") -> str:
+    """The analysed paper's title (#140).
+
+    GROBID's header can drop the first line of a title: for 2112.01488 it gives "Effective and
+    Efficient Retrieval via Lightweight Late Interaction", without "ColBERTv2:". So, in order:
+    the title the source lookup found for what the user gave (a DOI resolved through Semantic
+    Scholar has one); the title printed on page 1, when GROBID found none or the printed one
+    contains GROBID's, so a different heading is never taken for the title; GROBID's.
+    """
+    from app.pipeline.sources import known_title
+
+    if given and (known := known_title(given)):
+        return known
+    printed = _printed_title(pdf_path)
+    words = printed.split()
+    if 2 <= len(words) <= 40 and (not grobid_title or _comparable(grobid_title) in _comparable(printed)):
+        return printed
+    return grobid_title
 
 
 def _findable(citation: dict) -> bool:
@@ -824,6 +878,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
             for example "data/papers/colbertv2.pdf" or "2112.01488".
     """
     global _cited_claim_extractor
+    given = pdf_path
     try:
         pdf_path = local_pdf(pdf_path)
         tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref",))
@@ -847,10 +902,12 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         claims = _most_checkable(
             _deduplicated([claim for claim in found if not _asserts_nothing(claim["claim"])]), CLAIM_LIMIT
         )
+        header = _paper_header(tei)
+        header["title"] = paper_title(pdf_path, header["title"], given)
         return {
             "status": "ok",
             "file": pdf_path,
-            **_paper_header(tei),
+            **header,
             "claims": claims,
             "extracted": len(found),  # before repeats, announcements and the cap
             "dropped": dropped,

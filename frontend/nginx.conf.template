@@ -1,8 +1,18 @@
 # ${GATEWAY_URL} and ${NGINX_RESOLVER} are substituted at container start (nginx does this
 # for /etc/nginx/templates/*.template), so one image runs in compose and on Cloud Run.
 # nginx's own $uri / $host survive: envsubst only replaces names that exist in the environment.
+
+# Log the path without its query string. The web app sends tokens only in headers, but a query
+# can still carry something private, and anyone who can read the container logs reads this.
+map $request_uri $path_only {
+    ~^(?<path_part>[^?]*) $path_part;
+}
+log_format no_query '$remote_addr - [$time_local] "$request_method $path_only $server_protocol" '
+                    '$status $body_bytes_sent "$http_user_agent"';
+
 server {
     listen 80;
+    access_log /var/log/nginx/access.log no_query;
 
     # nginx's own default is 1M, far under a real paper with figures; a request past this
     # limit fails at nginx with a bare 413 before the gateway (which has no limit of its

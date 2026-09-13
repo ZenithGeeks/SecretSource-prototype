@@ -20,6 +20,7 @@ as they progress. A restart keeps the history.
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -81,6 +82,20 @@ async def lifespan(app: FastAPI):
     restore()
     yield
 
+
+class PathWithoutQuery(logging.Filter):
+    """Keep the query string out of uvicorn's access log. The web app sends tokens only in
+    headers, but a query can still carry something private, and anyone who can read the
+    container logs reads this (#134). uvicorn's args are (client, method, path, version, status)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            client, method, path, version, status = record.args
+            record.args = (client, method, str(path).split("?", 1)[0], version, status)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(PathWithoutQuery())
 
 app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
 app.add_middleware(
@@ -263,7 +278,7 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
     """Server-sent events: the stages already recorded, then each new one as it happens.
-    EventSource cannot send headers, so the web app passes its token as ?access_token=."""
+    The web app reads this with fetch(), so its token travels in the Authorization header."""
     _owned(analysis_id, user)
 
     async def stream():
@@ -285,22 +300,43 @@ async def analysis_events(analysis_id: str, user: str | None = Depends(current_u
 # --- the paper itself, so the UI can show the page a claim or a passage came from ---
 
 
-def _paper(name: str) -> Path:
-    """The PDF named `name`, or 404 if it is missing.
+def papers_of(user: str | None) -> set[str]:
+    """The file names of the papers this user may open: the analysed paper of each of their
+    analyses, and each cited paper a check read for one of them."""
+    names = set()
+    for analysis in visible_to(user):
+        if analysis.get("file"):
+            names.add(Path(analysis["file"]).name)
+        for claim in analysis.get("claims", []):
+            names.update(Path(v["source"]).name for v in claim.get("verdicts", []) if v.get("source"))
+    return names
 
-    The name comes from an HTTP request, so it is not a path.
+
+def _paper(name: str, user: str | None) -> Path:
+    """The PDF named `name`, if it belongs to one of this user's analyses; 404 otherwise.
+
+    Papers are stored once, by file name, for every user, so without this check anyone could
+    download a paper someone else uploaded (#135). A paper that exists but is not the caller's
+    is a 404 like a missing one, so a name does not tell anyone that it exists. The name comes
+    from an HTTP request, so it is not a path.
     """
     if name != Path(name).name or name.startswith("."):
         raise HTTPException(400, "a paper name is a file name, not a path")
     path = PAPERS_DIR / name
-    if not path.is_file():
+    if not path.is_file() or name not in papers_of(user):
         raise HTTPException(404, f"no such paper: {name}")
     return path
 
 
+# Only the browser that asked may keep a copy: these are one user's papers.
+PRIVATE_CACHE = {"Cache-Control": "private, max-age=31536000"}
+
+
 @app.get("/papers/{name}")
-async def paper(name: str):
-    return FileResponse(_paper(name), media_type="application/pdf", filename=name)
+async def paper(name: str, user: str | None = Depends(current_user)):
+    return FileResponse(
+        _paper(name, user), media_type="application/pdf", filename=name, headers={"Cache-Control": "private"}
+    )
 
 
 def _render(path: Path, page_number: int, dpi: int) -> Path:
@@ -319,30 +355,32 @@ def _render(path: Path, page_number: int, dpi: int) -> Path:
 
 
 @app.get("/papers/{name}/pages/{page_number}.png")
-async def page_image(name: str, page_number: int, dpi: int = DEFAULT_DPI):
-    path = _paper(name)
+async def page_image(
+    name: str, page_number: int, dpi: int = DEFAULT_DPI, user: str | None = Depends(current_user)
+):
+    path = _paper(name, user)
     image = await asyncio.to_thread(_render, path, page_number, min(dpi, MAX_DPI))
-    return FileResponse(image, media_type="image/png", headers={"Cache-Control": "max-age=31536000"})
+    return FileResponse(image, media_type="image/png", headers=PRIVATE_CACHE)
 
 
 @app.get("/papers/{name}/figures/{figure}.png")
-async def figure_image(name: str, figure: str):
+async def figure_image(name: str, figure: str, user: str | None = Depends(current_user)):
     """One cropped figure of a paper, the image a verdict's `pages` entry points at."""
-    paper = _paper(name)
+    paper = _paper(name, user)
     if not FIGURE_NAME.fullmatch(figure):
         raise HTTPException(400, "a figure is named figure-<n>")
     path = figures_dir(paper) / f"{figure}.png"
     if not path.is_file():
         raise HTTPException(404, f"no such figure: {figure}")
     # A crop never changes once written, so it is cached like a rendered page.
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=31536000"})
+    return FileResponse(path, media_type="image/png", headers=PRIVATE_CACHE)
 
 
 @app.get("/papers/{name}/find")
-async def find(name: str, q: str, page: int | None = None):
+async def find(name: str, q: str, page: int | None = None, user: str | None = Depends(current_user)):
     """Where a piece of text sits in the paper: page, boxes, and the page size to scale by.
     Boxes are PDF points, top-left origin. The browser scales them by dpi / 72."""
-    path = _paper(name)
+    path = _paper(name, user)
     found = await asyncio.to_thread(locate, path.as_posix(), q, page)
     return found or {"page": None, "boxes": []}
 

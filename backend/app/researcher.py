@@ -369,13 +369,50 @@ def _year(year: str) -> str:
     return f"'{year[-2:]}" if year and year[-2:].isdigit() else ""
 
 
+INDEX_NAMES = {"semantic-scholar": "Semantic Scholar", "arxiv": "arXiv", "unpaywall": "Unpaywall"}
+FOUND_WITHOUT_COPY = {"no-open-access"}  # an index knew the work; it just has no free PDF
+NOT_FOUND = {"unresolvable", "web-source"}  # no index knew the work
+
+
+def _index_of_verdict(verdict: dict) -> tuple[str, str]:
+    """Whether a public index knew a checked work: ("yes", "Semantic Scholar"), ("no", "") or
+    ("", "") when the run does not say. arXiv is asked first for titles, so "arXiv" names the
+    index that answered, not the only one that has the work. This is never a Scopus check."""
+    index = (verdict.get("indexed_in") or {}).get("index", "")
+    if index in INDEX_NAMES:
+        return "yes", INDEX_NAMES[index]
+    # A bare URL is used as it is, so no index was asked or knew it.
+    return ("no", "") if str(verdict.get("cited", "")).startswith("http") else ("", "")
+
+
+def _index_of_unchecked(entry: dict) -> tuple[str, str]:
+    """The same answer for a work we could not check, read from why the check failed."""
+    reason = entry.get("reason", "")
+    if reason in FOUND_WITHOUT_COPY:
+        return "yes", ""
+    return ("no", "") if reason in NOT_FOUND else ("", "")
+
+
+def _mark_index(node: dict, found: tuple[str, str]) -> None:
+    """Keep the strongest answer for a work cited several times: found beats not found, and
+    either beats not known. One citation with a garbled title must not hide a clean one."""
+    rank = {"": 0, "no": 1, "yes": 2}
+    state, name = found
+    if rank[state] > rank[node["indexed"]]:
+        node["indexed"], node["index"] = state, name
+    elif state == node["indexed"] and name and not node["index"]:
+        node["index"] = name
+
+
 def graph(analyses: list[dict]) -> dict:
     """Papers and claims as nodes; a paper asserts a claim, a cited work backs, contradicts or
-    is silent on it. Paper links join a paper to the works it cites, and two analysed papers
-    that cite the same works."""
+    is silent on it, or could not be checked. Paper links join a paper to the works it cites,
+    and two analysed papers that cite the same works. A cited work's node says whether a
+    public index knew it (`indexed`: yes, no, or "" when not known)."""
     papers = library_papers(analyses)
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
+    edge_ids: set[str] = set()
     key_to_node: dict[str, str] = {}
 
     for paper in papers:
@@ -386,6 +423,8 @@ def graph(analyses: list[dict]) -> dict:
             "label": short_title(title_of(paper)),
             "year": _year(paper.get("year", "")),
             "cluster": "Analysed",
+            "indexed": "",
+            "index": "",
         }
         for key in analysis_keys(paper):
             key_to_node[key] = node
@@ -416,7 +455,13 @@ def graph(analyses: list[dict]) -> dict:
                 single_source += 1
             if standing(claim) == "contradicted":
                 contradicted += 1
-            for verdict in claim.get("verdicts", []):
+            # Checks that ran, then checks that could not: a work we could not find is still
+            # cited, and hiding it would hide the sources most likely to be outside an index.
+            answers = [(verdict, None) for verdict in claim.get("verdicts", [])] + [
+                ({"cited": entry.get("source", ""), "source": entry.get("source", "")}, entry)
+                for entry in claim.get("unchecked", [])
+            ]
+            for verdict, unchecked in answers:
                 work = _cited_work(claim, verdict)
                 key = work_key(work)
                 work_node = key_to_node.get(key) or _node_id("w:", key)
@@ -427,21 +472,46 @@ def graph(analyses: list[dict]) -> dict:
                         "label": short_title(work.get("title", "")),
                         "year": _year(work.get("year", "")),
                         "cluster": "Cited",
+                        "indexed": "",
+                        "index": "",
                     }
-                relation = {"supports": "backs", "refutes": "contradicts"}.get(
-                    verdict.get("verdict"), "silent"
+                _mark_index(
+                    nodes[work_node],
+                    _index_of_unchecked(unchecked) if unchecked else _index_of_verdict(verdict),
                 )
-                edges.append(
-                    {
-                        "id": f"{claim_node}:{work_node}",
-                        "source": work_node,
-                        "target": claim_node,
-                        "relation": relation,
-                        "note": verdict.get("reasoning", ""),
-                        "quote": verdict.get("quote", ""),
-                        "page": _page(verdict),
-                    }
-                )
+                edge_id = f"{claim_node}:{work_node}"
+                if edge_id in edge_ids:  # the same work cited twice in one claim
+                    continue
+                edge_ids.add(edge_id)
+                if unchecked:
+                    relation = "unchecked"
+                    edges.append(
+                        {
+                            "id": edge_id,
+                            "source": work_node,
+                            "target": claim_node,
+                            "relation": relation,
+                            "reason": unchecked.get("reason", ""),
+                            "note": "",
+                            "quote": "",
+                            "page": "",
+                        }
+                    )
+                else:
+                    relation = {"supports": "backs", "refutes": "contradicts"}.get(
+                        verdict.get("verdict"), "silent"
+                    )
+                    edges.append(
+                        {
+                            "id": edge_id,
+                            "source": work_node,
+                            "target": claim_node,
+                            "relation": relation,
+                            "note": verdict.get("reasoning", ""),
+                            "quote": verdict.get("quote", ""),
+                            "page": _page(verdict),
+                        }
+                    )
                 if work_node == paper_node:
                     continue
                 cites[paper_node].add(work_node)

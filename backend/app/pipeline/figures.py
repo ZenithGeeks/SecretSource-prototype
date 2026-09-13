@@ -11,6 +11,7 @@ import json
 import os
 import re
 import threading
+from collections import Counter
 from pathlib import Path
 
 from app.config import PAPERS_DIR
@@ -48,14 +49,43 @@ def _enriched_converter():
 
 NUMBERED = re.compile(r"^\s*(figure|fig\.?|table|equation|eq\.?)\s*([0-9]+[a-z]?)", re.I)
 KINDS = {"fig": "Figure", "figure": "Figure", "table": "Table", "equation": "Equation", "eq": "Equation"}
+UNNAMED = {"figure": "Picture", "table": "Table", "formula": "Equation"}
 
 
-def _label(caption: str, kind: str, index: int) -> str:
-    """"Figure 3". The paper's own name for it, or a count if it has none."""
+def _label(caption: str, kind: str, page: int) -> tuple[str, bool]:
+    """The paper's own name for it, like "Figure 3", or where it is, like "Picture on page 7".
+
+    The second value says whether the name came from the caption. A picture without a numbered
+    caption used to be counted, and a counted "Figure 3" could not be told from the paper's
+    own Figure 3 (#138).
+    """
     found = NUMBERED.match(caption or "")
     if found:
-        return f"{KINDS[found.group(1).lower().rstrip('.')]} {found.group(2)}"
-    return f"{kind.title()} {index}"
+        return f"{KINDS[found.group(1).lower().rstrip('.')]} {found.group(2)}", True
+    return f"{UNNAMED[kind]} on page {page}", False
+
+
+def _name(items: list[dict]) -> list[dict]:
+    """Give each item its label, and make labels unique within the list: two pictures on one
+    page, or one captioned figure Docling cut into parts, become "... (1 of 2)", "... (2 of 2)"."""
+    for item in items:
+        item["label"], item["numbered"] = _label(item.get("caption", ""), item["kind"], item["page"])
+    totals = Counter(item["label"] for item in items)
+    seen: Counter = Counter()
+    for item in items:
+        label = item["label"]
+        if totals[label] > 1:
+            seen[label] += 1
+            item["label"] = f"{label} ({seen[label]} of {totals[label]})"
+    return items
+
+
+def _named(media: dict) -> dict:
+    """The media with every label worked out again. Manifests written before #138 carry counted
+    labels, and the labels cost nothing to recompute from the captions and pages."""
+    for kind in ("figures", "tables", "formulas"):
+        media[kind] = _name(media.get(kind, []))
+    return media
 
 
 def _page_of(item) -> int:
@@ -82,7 +112,6 @@ def _figures(document, pdf: Path) -> list[dict]:
         figures.append(
             {
                 "kind": "figure",
-                "label": _label(caption, "figure", index),
                 "page": _page_of(picture),
                 "caption": caption,
                 "image": path.as_posix(),
@@ -96,12 +125,11 @@ def _tables(document) -> list[dict]:
     return [
         {
             "kind": "table",
-            "label": _label(table.caption_text(document) or "", "table", index),
             "page": _page_of(table),
             "caption": table.caption_text(document) or "",
             "text": table.export_to_markdown(document),
         }
-        for index, table in enumerate(document.tables, start=1)
+        for table in document.tables
     ]
 
 
@@ -114,7 +142,6 @@ def _formulas(document) -> list[dict]:
             formulas.append(
                 {
                     "kind": "formula",
-                    "label": f"Equation {len(formulas) + 1}",
                     "page": _page_of(item),
                     "caption": "",
                     "text": item.text.strip(),
@@ -143,19 +170,21 @@ def paper_media(pdf_path: str, refresh: bool = False) -> dict:
     try:
         with _lock_for(pdf):
             if not refresh and (cached := _read_manifest(pdf)):
-                return {"status": "ok", "cached": True, **cached}
+                return {"status": "ok", "cached": True, **_named(cached)}
 
             with _converter_guard:
                 if _converter is None:
                     _converter = _enriched_converter()
             document = _converter.convert(pdf).document
 
-            media = {
-                "file": pdf.as_posix(),
-                "figures": _figures(document, pdf),
-                "tables": _tables(document),
-                "formulas": _formulas(document),
-            }
+            media = _named(
+                {
+                    "file": pdf.as_posix(),
+                    "figures": _figures(document, pdf),
+                    "tables": _tables(document),
+                    "formulas": _formulas(document),
+                }
+            )
             (figures_dir(pdf) / MANIFEST).write_text(json.dumps(media, ensure_ascii=False), encoding="utf-8")
             return {"status": "ok", "cached": False, **media}
     except Exception as error:
@@ -165,8 +194,8 @@ def paper_media(pdf_path: str, refresh: bool = False) -> dict:
 def named_figures(figures: list[dict]) -> list[dict]:
     """The figures whose caption gives their number, like "Figure 2: ...".
 
-    A figure without one gets a counted label, and "Figure 2" by count may not be the
-    paper's own Figure 2. A link from the text must never point at the wrong figure.
+    Only those can be the target of "Figure 2" in the text. A link from the text must never
+    point at the wrong figure.
     """
     return [
         {key: figure[key] for key in ("label", "page", "caption", "image")}
