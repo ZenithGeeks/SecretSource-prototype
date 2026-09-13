@@ -193,7 +193,12 @@ services:
     restart: unless-stopped
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Both set: users sign in, and each sees only their own analyses (SCRUM-177).
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     environment:
       GATEWAY_URL: http://gateway:8080
     ports:

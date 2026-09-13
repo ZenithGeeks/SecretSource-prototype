@@ -1,7 +1,7 @@
 /**
  * 10 Field consensus (Researcher) — ask the library one claim, see how every paper answers.
- * Data comes from useFieldConsensus (mock-backed until the gateway endpoint exists); the
- * input drives the query on "Ask library".
+ * Data comes from useFieldConsensus: the claims in the user's analysed papers that match the
+ * question, with the verdicts and quotes already found. The input drives the query on "Ask library".
  */
 
 import { Bookmark, Copy, Download, Search, Sparkles } from 'lucide-react'
@@ -10,7 +10,7 @@ import { useState } from 'react'
 import { Button, Input, VerdictBadge } from '../../../components/ui'
 import { useFieldConsensus } from '../../../lib/useResearcher'
 
-export function FieldConsensus() {
+export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
   const [saved, setSaved] = useState(false)
@@ -101,7 +101,10 @@ export function FieldConsensus() {
           <span className="flex-1">Deciding passage</span>
         </div>
         {consensus.rows.map((row) => (
-          <div key={row.paper} className="flex gap-4 border-t border-border-subtle px-5 py-3">
+          <div
+            key={`${row.analysis}-${row.claimIndex}-${row.paper}-${row.verdict}`}
+            className="flex gap-4 border-t border-border-subtle px-5 py-3"
+          >
             <div className="w-56 shrink-0">
               <p className="text-sm font-medium text-ink">{row.paper}</p>
               <p className="text-xs text-ink-muted">{row.cite}</p>
@@ -110,19 +113,23 @@ export function FieldConsensus() {
               <VerdictBadge verdict={row.verdict} />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-serif text-[13px] italic text-ink-muted">“{row.quote}”</p>
-              <button type="button" className="text-xs font-medium text-accent hover:underline">
-                show in the paper
+              {row.quote && <p className="font-serif text-[13px] italic text-ink-muted">“{row.quote}”</p>}
+              <p className="mt-1 text-xs text-ink-muted">On the claim: {row.claim}</p>
+              <button
+                type="button"
+                onClick={() => onOpenAnalysis(row.analysis)}
+                className="text-xs font-medium text-accent hover:underline"
+              >
+                open the analysis
               </button>
             </div>
           </div>
         ))}
-        <div className="flex gap-2 border-t border-border-subtle px-5 py-3 text-xs text-ink-muted">
-          {consensus.unlisted} more papers are silent or unchecked
-          <button type="button" className="text-accent hover:underline">
-            show
-          </button>
-        </div>
+        {consensus.unlisted > 0 && (
+          <div className="border-t border-border-subtle px-5 py-3 text-xs text-ink-muted">
+            {consensus.unlisted} more verdicts match. Ask a narrower question to see them.
+          </div>
+        )}
       </div>
 
       {/* Actions */}

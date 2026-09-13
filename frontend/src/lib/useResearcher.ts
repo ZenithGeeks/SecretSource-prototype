@@ -1,29 +1,31 @@
 /** Query hooks for the researcher screens, mirroring useAnalysis. Screens read data only
- * through these, so swapping researcherApi's mocks for gateway calls touches nothing else. */
+ * through these. */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { LibraryPaper } from './researcher'
+import { api } from './api'
+import type { QueueEntry } from './researcher'
 import { researcherApi } from './researcher'
-import { store } from './researcherStore'
 
-/** Session-local mutations. Each mutates the store and invalidates the affected queries so
- * the screens re-render with the new data. Swap the store calls for gateway POSTs later. */
+/** The researcher's actions. Each calls the gateway, then refreshes what it changed. */
 export function useResearcherActions() {
   const qc = useQueryClient()
   return {
-    createProject: (name: string): string => {
-      const id = store.createProject(name)
-      qc.invalidateQueries({ queryKey: ['researcher', 'projects'] })
+    /** Create a project and return its id, so the screen can open it. */
+    createProject: async (name: string, description: string) => {
+      const project = await researcherApi.createProject(name, description)
+      await qc.invalidateQueries({ queryKey: ['researcher', 'projects'] })
+      return project.id
+    },
+    addToProject: async (projectId: string, analysisId: string) => {
+      await researcherApi.addToProject(projectId, analysisId)
+      await qc.invalidateQueries({ queryKey: ['researcher'] })
+    },
+    /** Start analysing a paper from the reading queue; returns the new analysis id. */
+    analyseQueued: async (entry: QueueEntry) => {
+      const { id } = await api.startAnalysis(entry.identifier, true)
+      await qc.invalidateQueries({ queryKey: ['analyses'] })
       return id
-    },
-    addPaper: (projectId: string, paper: LibraryPaper): void => {
-      store.addPaper(projectId, paper)
-      qc.invalidateQueries({ queryKey: ['researcher'] })
-    },
-    fileQueuePaper: (title: string): void => {
-      store.fileQueuePaper(title)
-      qc.invalidateQueries({ queryKey: ['researcher', 'home'] })
     },
   }
 }
@@ -43,9 +45,8 @@ export function useProjects() {
   return useQuery({ queryKey: ['researcher', 'projects'], queryFn: researcherApi.getProjects })
 }
 
-// Global (all projects/roles), like the analyses History lists — keyed outside the researcher namespace.
 export function useKnowledgeGraph() {
-  return useQuery({ queryKey: ['graph'], queryFn: researcherApi.getGraph })
+  return useQuery({ queryKey: ['researcher', 'graph'], queryFn: researcherApi.getGraph })
 }
 
 export function useResearcherLibrary(projectId: string) {

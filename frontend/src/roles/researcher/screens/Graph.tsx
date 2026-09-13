@@ -1,16 +1,13 @@
 /**
  * 16/07 Knowledge graph (Researcher). Two modes on one canvas:
  *  - Claims ("What rests on what"): claims and the papers that back / contradict / ignore them.
- *  - Papers ("How your library relates"): papers clustered by meaning; edges are passage
- *    similarity (solid) and citations (dashed); a selected pair shows its closest passages.
+ *  - Papers ("How your library relates"): the papers you analysed and the works they cite;
+ *    dashed edges are citations, solid edges join two of your papers that cite the same works,
+ *    and a selected pair shows the quotes behind the link.
  *
- * Rendered with Cytoscape + fcose. Data from useKnowledgeGraph (mock until the gateway
- * endpoint exists). Cytoscape's style parser rejects oklch(), so colours are concrete hex
- * mirroring the index.css tokens, in both themes.
- *
- * Scope: GLOBAL. Like History, the graph spans every analysis in the store — all roles
- * (researcher / writer / teacher), not just the researcher's. It's a shared screen; other
- * roles render the same one.
+ * Rendered with Cytoscape + fcose. Data from useKnowledgeGraph, built from every paper the
+ * signed-in user analysed. Cytoscape's style parser rejects oklch(), so colours are concrete
+ * hex mirroring the index.css tokens, in both themes.
  */
 
 import cytoscape from 'cytoscape'
@@ -212,7 +209,7 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
               <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ backgroundColor: relationColor(pal, e.relation) }} />
               <div className="min-w-0">
                 <p className="text-sm text-ink">
-                  {p?.kind === 'paper' ? `${p.label} · 20${p.year.replace(/\D/g, '')}` : e.source}{' '}
+                  {p?.kind === 'paper' ? `${p.label}${p.year ? ` · 20${p.year.replace(/\D/g, '')}` : ''}` : e.source}{' '}
                   <span className="text-xs text-ink-muted">{e.note}</span>
                 </p>
                 {e.quote && (
@@ -248,9 +245,9 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
   const a = label(edge.a)
   const b = label(edge.b)
   const stats = [
-    { value: edge.similarity.toFixed(2), label: 'similarity' },
-    { value: String(edge.sharedPassages), label: 'shared passages' },
-    { value: String(edge.citations), label: 'citations' },
+    { value: edge.similarity.toFixed(2), label: edge.cites ? 'share of claims' : 'overlap' },
+    { value: String(edge.citations), label: edge.cites ? 'claims citing it' : 'works both cite' },
+    { value: String(edge.contradicted ?? 0), label: 'contradicted' },
   ]
   return (
     <aside className="w-80 shrink-0 overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5">
@@ -370,7 +367,7 @@ export function Graph() {
   const subtitle =
     view === 'claims'
       ? 'Claims and the papers that back, contradict, or ignore them. Click a claim to follow it back to the evidence it was born from.'
-      : 'Edges = shared meaning between passages (ColBERT similarity). Dashed = one cites the other. Click a link to compare a pair.'
+      : 'Dashed = a paper you analysed cites the other. Solid = two of your papers cite the same works. Thicker = more in common. Click a link to compare a pair.'
   const paperCount = graph.nodes.filter((n) => n.kind === 'paper').length
   const selectedEdge = pairSel ? graph.paperEdges.find((e) => e.id === pairSel) : undefined
 

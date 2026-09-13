@@ -24,15 +24,17 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app import store
+from app import researcher, store
+from app.auth import current_user
 from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
@@ -108,6 +110,9 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
         claims = extracted["claims"]
         analysis["file"] = extracted["file"]
+        analysis["title"] = extracted.get("title", "")
+        analysis["authors"] = extracted.get("authors", [])
+        analysis["year"] = extracted.get("year", "")
         analysis["claims"] = claims
         analysis["references"] = extracted.get("references", {})
         analysis["markers"] = extracted.get("markers", [])
@@ -186,44 +191,59 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         await streams[analysis_id].put(None)  # closes any open stream
 
 
-def _start(paper: str, verify: bool) -> dict:
+def _start(paper: str, verify: bool, owner: str | None) -> dict:
     analysis_id = uuid.uuid4().hex[:12]
     analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
-                             "stages": [], "claims": []}
+                             "owner": owner, "stages": [], "claims": []}
     streams[analysis_id] = asyncio.Queue()
     asyncio.create_task(_run(analysis_id, paper, verify))
     return {"id": analysis_id}
 
 
+def visible_to(user: str | None) -> list[dict]:
+    """The analyses this user may see, oldest first. Signed out, only analyses without an owner."""
+    return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
+
+
+def _owned(analysis_id: str, user: str | None) -> dict:
+    """The analysis, if this user may see it. Someone else's analysis is a 404, not a 403,
+    so an id does not tell anyone that it exists."""
+    analysis = analyses.get(analysis_id)
+    if analysis is None or analysis.get("owner") != user:
+        raise HTTPException(404, "no such analysis")
+    return analysis
+
+
 @app.post("/analyses")
-async def start_analysis(request: AnalysisRequest):
-    return _start(request.paper, request.verify)
+async def start_analysis(request: AnalysisRequest, user: str | None = Depends(current_user)):
+    return _start(request.paper, request.verify, user)
 
 
 @app.post("/analyses/upload")
-async def upload_analysis(file: UploadFile = PDF_UPLOAD, verify: bool = True):
+async def upload_analysis(
+    file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
+):
     PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     path = PAPERS_DIR / Path(file.filename).name
     path.write_bytes(await file.read())
-    return _start(path.as_posix(), verify)
+    return _start(path.as_posix(), verify, user)
 
 
 @app.get("/analyses")
-async def list_analyses():
+async def list_analyses(user: str | None = Depends(current_user)):
     # The list leaves out what only one analysis's own view needs.
     left_out = ("stages", "references", "markers")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(analyses.values())]
+    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
 
 
 @app.get("/analyses/{analysis_id}")
-async def get_analysis(analysis_id: str):
-    if analysis_id not in analyses:
-        raise HTTPException(404, "no such analysis")
-    return analyses[analysis_id]
+async def get_analysis(analysis_id: str, user: str | None = Depends(current_user)):
+    return _owned(analysis_id, user)
 
 
 @app.delete("/analyses/{analysis_id}")
-async def delete_analysis(analysis_id: str):
+async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
+    _owned(analysis_id, user)
     if not store.delete(analysis_id):
         raise HTTPException(404, "no such analysis")
     analyses.pop(analysis_id, None)
@@ -232,10 +252,10 @@ async def delete_analysis(analysis_id: str):
 
 
 @app.get("/analyses/{analysis_id}/events")
-async def analysis_events(analysis_id: str):
-    """Server-sent events: the stages already recorded, then each new one as it happens."""
-    if analysis_id not in analyses:
-        raise HTTPException(404, "no such analysis")
+async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
+    """Server-sent events: the stages already recorded, then each new one as it happens.
+    EventSource cannot send headers, so the web app passes its token as ?access_token=."""
+    _owned(analysis_id, user)
 
     async def stream():
         replayed = list(analyses[analysis_id]["stages"])
@@ -316,6 +336,88 @@ async def find(name: str, q: str, page: int | None = None):
     path = _paper(name)
     found = await asyncio.to_thread(locate, path.as_posix(), q, page)
     return found or {"page": None, "boxes": []}
+
+
+# --- the researcher screens, built from the caller's own analyses (app/researcher.py) ---
+
+
+class ProjectRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+class ProjectPaperRequest(BaseModel):
+    analysis_id: str
+
+
+class ConsensusRequest(BaseModel):
+    question: str
+
+
+def _project(project_id: str, stored: list[dict]) -> dict:
+    project = next((project for project in stored if project["id"] == project_id), None)
+    if project is None:
+        raise HTTPException(404, "no such project")
+    return project
+
+
+@app.get("/researcher/home")
+async def researcher_home(user: str | None = Depends(current_user)):
+    return researcher.home(visible_to(user))
+
+
+@app.get("/researcher/projects")
+async def researcher_projects(user: str | None = Depends(current_user)):
+    stored = await asyncio.to_thread(store.load_projects, user)
+    return researcher.projects(stored, visible_to(user))
+
+
+@app.post("/researcher/projects")
+async def create_project(request: ProjectRequest, user: str | None = Depends(current_user)):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(400, "a project needs a name")
+    now = datetime.now(timezone.utc).isoformat()
+    project = {"id": uuid.uuid4().hex[:12], "owner": user, "name": name,
+               "description": request.description.strip(), "analyses": [], "created": now, "updated": now}
+    await asyncio.to_thread(store.save_project, project)
+    return researcher.projects([project], [])[0]
+
+
+@app.get("/researcher/projects/{project_id}/library")
+async def project_library(project_id: str, user: str | None = Depends(current_user)):
+    stored = await asyncio.to_thread(store.load_projects, user)
+    found = researcher.library(project_id, stored, visible_to(user))
+    if found is None:
+        raise HTTPException(404, "no such project")
+    return found
+
+
+@app.post("/researcher/projects/{project_id}/papers")
+async def add_to_project(
+    project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
+):
+    """Put one of the caller's analysed papers in one of their projects."""
+    _owned(request.analysis_id, user)
+    stored = await asyncio.to_thread(store.load_projects, user)
+    project = _project(project_id, stored)
+    if request.analysis_id not in project["analyses"]:
+        project["analyses"].append(request.analysis_id)
+    project["updated"] = datetime.now(timezone.utc).isoformat()
+    await asyncio.to_thread(store.save_project, project)
+    return researcher.projects([project], visible_to(user))[0]
+
+
+@app.post("/researcher/consensus")
+async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
+    """What the works cited in the caller's papers say about a question. Reuses the verdicts
+    already found; it makes no LLM calls."""
+    return researcher.consensus(request.question, visible_to(user))
+
+
+@app.get("/researcher/graph")
+async def knowledge_graph(user: str | None = Depends(current_user)):
+    return researcher.graph(visible_to(user))
 
 
 class VerifyRequest(BaseModel):

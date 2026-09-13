@@ -5,7 +5,7 @@
  */
 
 import { Button, Input } from '../../../components/ui'
-import { store } from '../../../lib/researcherStore'
+import { researcherApi } from '../../../lib/researcher'
 import type { Settings as SettingsType } from '../../../lib/settings'
 import { updateSettings, useSettings } from '../../../lib/settings'
 import { cn } from '../../../lib/utils'
@@ -101,9 +101,12 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
     if (window.prompt('New password (min 8 characters)')) window.alert('Password updated.')
   }
 
-  const exportLibrary = () => {
-    const libraries = Object.fromEntries(store.projects().map((p) => [p.id, store.library(p.id)]))
-    const data = JSON.stringify({ projects: store.projects(), libraries }, null, 2)
+  const exportLibrary = async () => {
+    const projects = await researcherApi.getProjects()
+    const libraries = Object.fromEntries(
+      await Promise.all(projects.map(async (p) => [p.id, await researcherApi.getLibrary(p.id)] as const)),
+    )
+    const data = JSON.stringify({ projects, libraries }, null, 2)
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     const a = document.createElement('a')
     a.href = url

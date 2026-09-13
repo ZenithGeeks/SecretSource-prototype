@@ -48,10 +48,10 @@ src/
 │  ├─ api.ts              gateway client for the analysis app
 │  ├─ supabase.ts         Supabase browser client (auth)      · useAuth.ts   live session
 │  ├─ settings.ts         account settings store (localStorage) + useSettings + applyTheme
-│  ├─ researcher.ts / writer.ts / teacher.ts   per-role typed clients (read through the store)
+│  ├─ researcher.ts / writer.ts / teacher.ts   per-role typed clients (researcher.ts calls the gateway; writer.ts / teacher.ts read mocks)
 │  ├─ useResearcher.ts / useWriter.ts / useTeacher.ts   per-role query hooks
 │  │                       (+ useResearcherActions / writer actions — mutations; teacher has none yet)
-│  ├─ researcherStore.ts / writerStore.ts   in-session mutable stores (teacher not converted yet)
+│  ├─ writerStore.ts   in-session mutable store (writer only)
 │  └─ claims.ts · useAnalysis.ts · utils.ts (cn)
 └─ mocks/<role>.ts        per-role mock payloads (until gateway endpoints exist)
 
@@ -252,38 +252,35 @@ lib/use<Role>.ts    TanStack Query hooks the screens call
 screens             read data only through the hook
 ```
 
-Reads already resolve from the store, e.g. `researcher.ts` — `getHome: async () =>
-store.home()`, `getProjects: async () => store.projects()`, `getLibrary: (id) =>
-store.library(id)`. Wiring the real backend later = swap each store call for a `request(...)`:
+The researcher role reads and writes go to the gateway. `researcher.ts` calls the gateway with
+`request()` from `lib/api.ts`:
+
 ```ts
-// TODO gateway: GET /researcher/home
-getHome: async (): Promise<ResearcherHome> => store.home(),
-// →
 getHome: () => request<ResearcherHome>('/researcher/home'),
 ```
-Types, hooks and screens don't change.
 
-> **Not every role uses a store.** Researcher and writer do (`researcherStore.ts`,
-> `writerStore.ts`) with `useResearcherActions` / writer actions. **Teacher is not converted
-> yet** — `teacher.ts` returns the mocks directly and `useTeacher.ts` has no actions. Copy the
-> researcher trio when a role gains create/add.
+The other calls: `getProjects` → `GET /researcher/projects`, `getLibrary(id)` →
+`GET /researcher/projects/{id}/library`, `askConsensus(question)` → `POST /researcher/consensus`,
+`getGraph` → `GET /researcher/graph`, `createProject(name, description)` → `POST
+/researcher/projects`, `addToProject(projectId, analysisId)` → `POST
+/researcher/projects/{id}/papers`. The gateway builds these from the signed-in user's own
+analyses (`backend/app/researcher.py`). `request()` sends the Supabase access token when login
+is on.
 
-### Mutations (create / add / edit) — in-session store
+Writer still uses a store and mocks. Teacher reads mocks directly.
 
-Writes go through `use<Role>Actions()`, which mutates the store and **invalidates** the affected
-TanStack Query keys so screens re-render. Live researcher mutations today:
+### Mutations
+
+Writes go through `useResearcherActions()`, which calls the gateway and then invalidates the
+TanStack Query keys it changed (`['researcher', ...]` or `['analyses']`). The graph query key is
+`['researcher', 'graph']`.
 
 ```ts
-const { createProject, fileQueuePaper } = useResearcherActions()
-createProject('Retrieval survey')   // Library.tsx → ['researcher','projects'] invalidated → new project appears
-fileQueuePaper(title)               // Home.tsx → removes it from the reading queue
+const { createProject, addToProject, analyseQueued } = useResearcherActions()
+createProject('Retrieval survey', '')  // returns the new project id
+addToProject(projectId, analysisId)  // files a finished analysis into a project
+analyseQueued(entry)                 // starts an analysis of a reading-queue paper, returns the analysis id
 ```
-
-> `researcherStore.addPaper` exists but has **no caller yet**, so the "Unsorted" project is
-> currently unreachable — wire `addPaper` before documenting an add-to-project flow.
-
-Swap the store calls for gateway POSTs later; the screens don't change. Each role has its own
-store — no cross-role imports.
 
 ## Auth (Supabase)
 
@@ -328,32 +325,35 @@ sigma.js for rich styling/interaction at this scale). Two modes on one canvas: *
   index.css tokens, with a light/dark set (see `LIGHT`/`DARK` in the file). Keep them in step
   with `index.css` if the palette changes.
 - Type shims: `cytoscape-fcose.d.ts`, `react-cytoscapejs.d.ts`.
-- Data via `useKnowledgeGraph()` — **global** (all projects/roles), like History.
+- Data via `useKnowledgeGraph()` — built from the user's own analyses (gateway `GET
+  /researcher/graph`), not a global mock. The two clusters are **Analysed** and **Cited**.
 
 ## Projects (Library)
 
 `roles/researcher/screens/Library.tsx` is project-first: a landing grid of project cards →
-open one → its papers (search + cluster filters + table). **New project** opens
-`NewProjectDialog` (modal in the same file) and calls `createProject`. An **Unsorted** project
-exists in the mock as the intended home for new uploads, but nothing files papers into it yet
-(`addPaper` is unwired — see Mutations). Deep-links: `?project=<id>`, `&q=<search>`, `&new=1`.
+open one → its papers (search + cluster filters + table). Projects come from the gateway.
+**New project** opens `NewProjectDialog` (modal in the same file) and calls `createProject`.
+**Unsorted** lists the user's analysed papers that are in no project. **Add paper** in a
+project opens a dialog that lists the user's finished analyses; picking one calls
+`addToProject`. A paper row opens its analysis. Deep-links: `?project=<id>`, `&q=<search>`,
+`&new=1`.
 
 Modal pattern to reuse: `fixed inset-0 z-50 flex items-center justify-center` + `bg-ink/45`
 scrim + a `bg-surface` card; Esc/backdrop cancel, Enter/submit confirms.
 
 ## Adding a new role (checklist)
 
-**Researcher is the complete example to copy** — it has all six screen types, a store, and
-actions. (Writer is also converted but smaller; teacher has no store/actions yet, and both
-have `graph`/`history`/`settings` nav keys that still fall through to the "Not built yet"
-`Placeholder` — don't copy those as finished patterns.)
+**Researcher is the complete example to copy** — it has all six screen types, gateway-backed
+reads, and actions. (Writer is also converted but smaller and still reads mocks; teacher has no
+actions yet, and both have `graph`/`history`/`settings` nav keys that still fall through to the
+"Not built yet" `Placeholder` — don't copy those as finished patterns.)
 
 1. `src/roles/<role>/screens/` — build your Figma screens as content-only components.
 2. `src/roles/<role>/<Role>App.tsx` — copy `ResearcherApp.tsx`, swap the `NAV` array,
    `role="…"`, `roleIcon={…}`.
-3. `src/mocks/<role>.ts` + `src/lib/<role>.ts` + `src/lib/use<Role>.ts` — copy the researcher
-   trio, put your payloads + types in. Add `src/lib/<role>Store.ts` + a `use<Role>Actions()`
-   hook if the role has create/add interactions.
+3. `src/lib/<role>.ts` + `src/lib/use<Role>.ts` — the typed client and query hooks. A role
+   without gateway endpoints yet can start from `src/mocks/<role>.ts` like writer. Add a
+   `use<Role>Actions()` hook if the role has create/add interactions.
 4. Wire it into the two shared routing files:
    - `src/screens/Onboarding.tsx` — add the role to the `Role` union and the `ROLES` array.
    - `src/Root.tsx` — add it to the `Screen` union, to `initialScreen()`'s allow-list, and add
