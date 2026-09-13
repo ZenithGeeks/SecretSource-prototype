@@ -15,11 +15,13 @@ export function PaperDetail({
   paperId,
   projectName,
   onBack,
+  onShow,
 }: {
   projectId: string
   paperId: string
   projectName: string
   onBack: () => void
+  onShow: (claimIndex: number) => void
 }) {
   const paper = useResearcherPaper(projectId, paperId).data
   if (!paper) return null
@@ -52,7 +54,9 @@ export function PaperDetail({
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button variant="ghost">Open PDF</Button>
+          <Button variant="ghost" onClick={() => onShow(0)}>
+            Open PDF
+          </Button>
           <Button>
             <RefreshCw className="size-4" />
             Re-check
@@ -80,7 +84,11 @@ export function PaperDetail({
             </div>
             <p className="mt-2 font-serif text-[13px] italic text-ink-muted">“{c.quote}”</p>
             <div className="mt-2 flex flex-wrap items-center gap-4">
-              <button type="button" className="text-[13px] font-medium text-accent hover:underline">
+              <button
+                type="button"
+                onClick={() => onShow(i)}
+                className="text-[13px] font-medium text-accent hover:underline"
+              >
                 Show in the paper
               </button>
               {c.linked.length > 0 && (

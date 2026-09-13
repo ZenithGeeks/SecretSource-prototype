@@ -9,8 +9,9 @@ import { useState } from 'react'
 
 import { Button, Input, VerdictBadge } from '../../../components/ui'
 import { useFieldConsensus } from '../../../lib/useResearcher'
+import type { ViewerClaim } from './PageViewer'
 
-export function FieldConsensus() {
+export function FieldConsensus({ onShow }: { onShow?: (claims: ViewerClaim[], index: number) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
   const [saved, setSaved] = useState(false)
@@ -100,7 +101,7 @@ export function FieldConsensus() {
           <span className="w-36 shrink-0">Verdict</span>
           <span className="flex-1">Deciding passage</span>
         </div>
-        {consensus.rows.map((row) => (
+        {consensus.rows.map((row, i) => (
           <div key={row.paper} className="flex gap-4 border-t border-border-subtle px-5 py-3">
             <div className="w-56 shrink-0">
               <p className="text-sm font-medium text-ink">{row.paper}</p>
@@ -111,7 +112,16 @@ export function FieldConsensus() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-serif text-[13px] italic text-ink-muted">“{row.quote}”</p>
-              <button type="button" className="text-xs font-medium text-accent hover:underline">
+              <button
+                type="button"
+                onClick={() =>
+                  onShow?.(
+                    consensus.rows.map((r) => ({ claim: r.paper, verdict: r.verdict, quote: r.quote, page: 'page 4 of 12' })),
+                    i,
+                  )
+                }
+                className="text-xs font-medium text-accent hover:underline"
+              >
                 show in the paper
               </button>
             </div>

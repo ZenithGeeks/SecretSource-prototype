@@ -22,6 +22,8 @@ import { Graph } from './screens/Graph'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
+import type { ViewerClaim } from './screens/PageViewer'
+import { PageViewer, PaperPageViewer } from './screens/PageViewer'
 import { PaperDetail } from './screens/PaperDetail'
 import { Settings as SettingsScreen } from './screens/Settings'
 
@@ -78,6 +80,14 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     const paperId = p.get('paper')
     return pid && paperId ? { projectId: pid, id: paperId } : null
   })
+  const [viewer, setViewer] = useState<{ projectId: string; id: string; claim: number } | null>(() => {
+    const p = new URLSearchParams(window.location.search)
+    const pid = p.get('project')
+    const paperId = p.get('paper')
+    return pid && paperId && p.has('view') ? { projectId: pid, id: paperId, claim: 0 } : null
+  })
+  // Standalone viewer for consensus rows (claims passed in, not loaded from a paper id).
+  const [sViewer, setSViewer] = useState<{ title: string; claims: ViewerClaim[]; active: number } | null>(null)
   const [wide, setWide] = useState(false) // History has a page open beside the claims
   const analyses = useAnalyses()
   const projects = useProjects().data ?? []
@@ -87,6 +97,8 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
     setPaper(null)
+    setViewer(null)
+    setSViewer(null)
     setWide(false)
   }
   const select = (id: string | null) => {
@@ -110,27 +122,48 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         ) : undefined
       }
     >
-      {paper && (
+      {sViewer && (
+        <PageViewer
+          title={sViewer.title}
+          claims={sViewer.claims}
+          active={sViewer.active}
+          onSelect={(i) => setSViewer({ ...sViewer, active: i })}
+          onBack={() => setSViewer(null)}
+          backLabel="← Back to results"
+        />
+      )}
+      {!sViewer && viewer && (
+        <PaperPageViewer
+          projectId={viewer.projectId}
+          paperId={viewer.id}
+          initialClaim={viewer.claim}
+          onBack={() => setViewer(null)}
+        />
+      )}
+      {!viewer && paper && (
         <PaperDetail
           projectId={paper.projectId}
           paperId={paper.id}
           projectName={projects.find((p) => p.id === paper.projectId)?.name ?? 'Library'}
           onBack={() => setPaper(null)}
+          onShow={(claim) => setViewer({ projectId: paper.projectId, id: paper.id, claim })}
         />
       )}
-      {!paper && screen === 'home' && <Home onOpen={navigate} />}
-      {!paper && screen === 'library' && (
+      {!viewer && !sViewer && !paper && screen === 'home' && <Home onOpen={navigate} />}
+      {!viewer && !sViewer && !paper && screen === 'library' && (
         <Library
           onAddPaper={() => navigate('history')}
           onOpenPaper={(projectId, id) => setPaper({ projectId, id })}
         />
       )}
-      {screen === 'field-consensus' && <FieldConsensus />}
-      {screen === 'graph' && <Graph />}
-      {screen === 'history' && (
+      {!sViewer && screen === 'field-consensus' && (
+        <FieldConsensus onShow={(claims, active) => setSViewer({ title: 'From your library', claims, active })} />
+      )}
+      {!sViewer && !viewer && screen === 'graph' && <Graph />}
+      {!sViewer && !viewer && screen === 'history' && (
         <History selected={selected} onSelect={select} onTargetChange={setWide} />
       )}
-      {screen === 'settings' && <SettingsScreen onChangeRole={onChangeRole} />}
+      {!sViewer && !viewer && screen === 'settings' && <SettingsScreen onChangeRole={onChangeRole} />}
     </AppShell>
   )
 }
