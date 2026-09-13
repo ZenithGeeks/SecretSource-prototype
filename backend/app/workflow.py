@@ -3,14 +3,10 @@
     START -> read_paper -+- ok ----> plan_checks -> check_sources -> assemble
                          \\- error -> report_error   (one worker per cited source, in parallel)
 
-The same steps the gateway runs as a loop in app/main.py (_run), as nodes, so `adk web`
-draws the graph and lists the events of a run (docker compose --profile dev up adk-web).
-Nodes are plain functions over app.pipeline; there are no LLM agent nodes, the DSPy judge
-stays inside verify_claim. This is a second entry point beside POST /analyses, not yet a
-replacement for it: routing the gateway's runs through here is the next step.
-
-The message is the paper: a DOI, arXiv ID, URL or a PDF path. Session state `verify`
-(default true) set to false stops after the claims, which is the quick way to try it.
+The same steps the gateway runs in app/main.py, as nodes, so `adk web` draws the graph
+and lists the events of a run (docker compose --profile dev up adk-web). The message is
+the paper: a DOI, arXiv ID, URL or a PDF path. Session state `verify` (default true) set
+to false stops after the claims, the quick way to try it.
 """
 
 import asyncio
@@ -31,9 +27,10 @@ PARALLEL_CHECKS = 3
 
 @node
 async def read_paper(ctx: Context, node_input: str) -> Event:
-    """Fetch the paper if it is not a local file, then extract its claims and the works each
-    one cites. Routes to `error` when the paper cannot be read. The pipeline call blocks for
-    minutes (GROBID, Docling, the model), so it runs in a thread and the loop stays free."""
+    """Fetch the paper if it is not a local file, then extract its claims and the works
+    each one cites. Routes to `error` when the paper cannot be read. The pipeline call
+    blocks for minutes (GROBID, Docling, the model), so it runs in a thread and the loop
+    stays free."""
     paper = node_input.strip()
     extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
     if extracted["status"] == "error":
@@ -71,7 +68,10 @@ def plan_checks(claims: list[dict], verify: bool = True) -> list[dict]:
 async def check_source(node_input: dict) -> dict:
     """Check one claim against one cited work: index the source in the retrieval services,
     retrieve the passages that bear on the claim, ask the judge. In a thread, because
-    verify_claim blocks and the workers are meant to overlap."""
+    verify_claim blocks and the workers are meant to overlap.
+
+    No @node: the node is built below so it can carry the worker settings.
+    """
     job = node_input
     verdict = await asyncio.to_thread(verify_claim, job["text"], job["source"])
     return {**job, "verdict": verdict}
@@ -89,8 +89,8 @@ def fold_checks(claims: list[dict], checks: list[dict]) -> list[dict]:
 
     Deep copy, not dict(): the in-memory session hands the same claims list to whoever runs
     the graph, and a shallow copy shares each claim's verdicts and unchecked lists, so
-    setdefault().append() would fold into the caller's data as well as into ours — folding
-    twice then doubles every verdict. A plain function so it can be tested without a run.
+    setdefault().append() would fold into the caller's data as well. Folding twice then
+    doubles every verdict. A plain function so it can be tested without a run.
     """
     claims = copy.deepcopy(claims)
     for check in checks:

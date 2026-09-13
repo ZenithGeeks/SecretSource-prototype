@@ -44,12 +44,12 @@ PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
 PAGE_CACHE = Path(os.getenv("PAGE_CACHE", "/tmp/pages"))
 DEFAULT_DPI, MAX_DPI = 110, 300
-# Crops are written as figure-1.png, figure-2.png ... by pipeline/figures.py. Matching the
-# whole name against that shape is what keeps this route from serving an arbitrary path:
-# the request never contributes a directory, only an index.
+# Crops are written as figure-1.png, figure-2.png ... by pipeline/figures.py.
+# Matching the whole name keeps the route from serving an arbitrary path: the request
+# only supplies an index, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
-# Checks running at once. The retrieval services and the judge are the bottleneck, so this
-# is small on purpose; app/workflow.py's graph fans out to the same number.
+# Checks running at once. The retrieval services and the judge are the bottleneck, so
+# this is small on purpose. app/workflow.py's graph fans out to the same number.
 PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 
 analyses: dict[str, dict] = {}
@@ -57,7 +57,7 @@ streams: dict[str, asyncio.Queue] = {}
 
 
 def restore():
-    """Load stored analyses on startup. Anything still marked running was interrupted."""
+    """Load stored analyses on startup. Ones still marked running were interrupted."""
     analyses.clear()
     analyses.update(store.load_all())
     for analysis in analyses.values():
@@ -88,7 +88,7 @@ class AnalysisRequest(BaseModel):
 
 
 async def _publish(analysis_id: str, stage: str, **fields):
-    """Record a stage on the analysis and push it to any open event stream."""
+    """Record a stage on the analysis and send it to the open event stream."""
     event = {"stage": stage, **fields}
     analyses[analysis_id]["stages"].append(event)
     store.save(analyses[analysis_id])
@@ -130,8 +130,8 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                     await _publish(analysis_id, "verifying", claim=index, source=source)
                     verdict = await asyncio.to_thread(verify_claim, claim["claim"], source)
                 if verdict["status"] == "ok":
-                    # Keyed by what we looked the source up by, so the card shows the
-                    # verdict against the citation it answers for.
+                    # Keyed by the name we looked the source up by, so the card shows the
+                    # verdict against its own citation.
                     claim.setdefault("verdicts", []).append({**verdict, "cited": source})
                     await _publish(analysis_id, "verified", claim=index, verdict=verdict["verdict"])
                 else:
@@ -149,7 +149,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
             await asyncio.gather(*(check(*job) for job in jobs))
 
-        # What the run says about itself, before anyone reads it. Reported, not applied.
+        # A self-check of the run, before anyone reads it. Reported, not applied.
         analysis["audit"] = audit(analysis)
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
@@ -232,7 +232,7 @@ async def analysis_events(analysis_id: str):
 
 
 def _paper(name: str) -> Path:
-    """The PDF called `name`, or 404. The name arrives over HTTP, so it is not a path."""
+    """The PDF named `name`, or 404 if missing. The name comes over HTTP, so it is not a path."""
     if name != Path(name).name or name.startswith("."):
         raise HTTPException(400, "a paper name is a file name, not a path")
     path = PAPERS_DIR / name
@@ -247,7 +247,7 @@ async def paper(name: str):
 
 
 def _render(path: Path, page_number: int, dpi: int) -> Path:
-    """Render one page to PNG, once. A rendered page never changes, so it is cached."""
+    """Render one page to PNG once. A rendered page never changes, so it is cached."""
     import pymupdf
 
     cached = PAGE_CACHE / f"{path.stem}-{page_number}-{dpi}.png"
@@ -284,7 +284,7 @@ async def figure_image(name: str, figure: str):
 @app.get("/papers/{name}/find")
 async def find(name: str, q: str, page: int | None = None):
     """Where a piece of text sits in the paper: page, boxes, and the page size to scale by.
-    Boxes are PDF points, top-left origin; the browser scales them by dpi / 72."""
+    Boxes are PDF points, top-left origin. The browser scales them by dpi / 72."""
     path = _paper(name)
     found = await asyncio.to_thread(locate, path.as_posix(), q, page)
     return found or {"page": None, "boxes": []}

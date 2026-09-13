@@ -154,8 +154,9 @@ def upload_figures(
     images: list[UploadFile] = IMAGES_UPLOAD,
 ):
     """add_figures for a caller on another machine: the crops travel with the request.
-    `figures` is the JSON list add_figures takes; each entry's image is matched to an
-    upload by file name and re-pointed at where it lands here."""
+
+    `figures` is the JSON list add_figures takes. Each image is matched to an upload by
+    file name and re-pointed at where it lands here."""
     try:
         wanted = [Figure(**figure) for figure in json.loads(figures)]
     except (TypeError, ValueError) as error:

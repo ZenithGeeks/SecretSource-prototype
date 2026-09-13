@@ -1,6 +1,8 @@
-"""Claim extraction: Docling reads the PDF, the LLM (via DSPy) extracts claims, GROBID
-parses references. Each claim keeps the sentence it came from, located back in the PDF
-(page and boxes) so the UI can show the place instead of telling the reader to go looking.
+"""Claim extraction from research paper PDFs.
+
+Docling reads the PDF, the LLM (via DSPy) extracts claims, and GROBID parses references.
+Each claim keeps the sentence it came from, located back in the PDF (page and boxes) so the
+UI can show the place instead of telling the reader to go looking.
 """
 
 import re
@@ -28,8 +30,11 @@ _cited_claim_extractor = None
 
 
 def _windows(text: str, size: int = MAX_CHARS) -> list[str]:
-    """The whole paper in model-sized pieces, split at paragraph breaks. Reading only the
-    first piece would never reach the results section, where claims worth checking live."""
+    """The whole paper in model-sized pieces, split at paragraph breaks.
+
+    We read every piece, not only the first one, because the results section (where most
+    claims worth checking are) is usually far into the paper.
+    """
     windows: list[str] = []
     current = ""
     for paragraph in text.split("\n\n"):
@@ -91,7 +96,7 @@ STOPWORDS = frozenset(
 
 
 def _token(word: str) -> str:
-    """A word reduced to what survives extraction: lower case, letters and digits only."""
+    """A word reduced to lower case letters and digits only."""
     return re.sub(r"[^a-z0-9]+", "", word.translate(_FOLD).lower())
 
 
@@ -100,31 +105,37 @@ def _tokens(text: str) -> list[str]:
 
 
 class _Word:
-    """One word on the page: its box, its token, and whether it ends in a line-break hyphen."""
+    """One word on the page: its box, its token, and any line-break hyphen at its end."""
 
     __slots__ = ("rect", "token", "line", "hyphen")
 
-    def __init__(self, entry, next_entry):
-        x0, y0, x1, y1, raw, block, line, _ = entry
+    def __init__(self, word_entry, next_word_entry):
+        x0, y0, x1, y1, raw, block, line, _ = word_entry
         self.rect = (x0, y0, x1, y1)
         self.token = _token(raw)
         self.line = (block, line)
-        # "trans-" at the end of a line continues as "duction" on the next: one word to us.
-        self.hyphen = raw.endswith("-") and next_entry is not None and (block, line) != tuple(next_entry[5:7])
+        # "trans-" at a line end continues as "duction" on the next line. We read it as one word.
+        self.hyphen = (
+            raw.endswith("-") and next_word_entry is not None and (block, line) != tuple(next_word_entry[5:7])
+        )
 
 
 def _page_words(page) -> list[_Word]:
     entries = page.get_text("words")  # x0, y0, x1, y1, word, block, line, word-in-line
     words = [
-        _Word(entry, entries[i + 1] if i + 1 < len(entries) else None) for i, entry in enumerate(entries)
+        _Word(word_entry, entries[i + 1] if i + 1 < len(entries) else None)
+        for i, word_entry in enumerate(entries)
     ]
     return [word for word in words if word.token]
 
 
 def _match_at(words: list[_Word], wanted: list[str], i: int, k: int) -> tuple[list[int], int] | None:
-    """How sentence word i matches page word k, if it does: the page words it takes and the
-    sentence words it accounts for. Beyond the plain match: a word hyphenated at a line end,
-    two of ours the PDF glued ("state-of-the-art"), one of ours the PDF split."""
+    """If sentence word i matches page word k, the page words it takes and the sentence
+    words it accounts for.
+
+    Beyond the plain match: a word hyphenated at a line end, two of ours the PDF glued
+    ("state-of-the-art"), one of ours the PDF split.
+    """
     word = words[k]
     if word.token == wanted[i]:
         return [k], 1
@@ -142,15 +153,17 @@ def _content_word(token: str) -> bool:
 
 
 def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = False) -> tuple[list[int], int]:
-    """Match the sentence's words in order from page word `start`, tolerating page words
-    between matches (citation markers, a parenthetical reference) and sentence words that
-    never turn up. Returns the indices of the page words matched and how many sentence words
-    they account for.
+    """Match the sentence's words in order, starting at page word `start`.
+
+    Page words between matches (citation markers, parenthetical references) and sentence
+    words that never turn up are tolerated. Returns the indices of the page words matched
+    and how many sentence words they account for.
 
     A far hit counts only with the next sentence word right behind it; on its own, a "the"
     fourteen words away would drag the highlight off course. `relaxed` also lets a content
     word stand on its own, for a sentence that lists cited systems with a reference after
-    every one of them ("ColBERT (Khattab and Zaharia, 2020), DPR (Xin et al., 2021), ...")."""
+    every one of them ("ColBERT (Khattab and Zaharia, 2020), DPR (Xin et al., 2021), ...").
+    """
     matched: list[int] = []
     accounted = 0
     i, j, misses = 0, start, 0
@@ -186,8 +199,11 @@ def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = Fa
 
 
 def _best_span(words: list[_Word], wanted: list[str]) -> tuple[list[int], float]:
-    """The alignment with the best coverage, starting at any page word that matches one of the
-    sentence's first three words (the very first may be the one the PDF lost)."""
+    """The alignment with the best coverage.
+
+    It starts at any page word that matches one of the sentence's first three words, since
+    the very first word may be the one the PDF lost.
+    """
     best: tuple[list[int], float] = ([], 0.0)
     for relaxed in (False, True):
         for lead in wanted[:3]:
@@ -209,8 +225,10 @@ def _best_span(words: list[_Word], wanted: list[str]) -> tuple[list[int], float]
 
 
 def _line_boxes(words: list[_Word], indices: list[int]) -> list[dict]:
-    """One box per line, from the first matched word on it to the last. A citation marker the
-    sentence skipped sits inside the box rather than punching a hole in the highlight."""
+    """One box per line, from the first matched word on it to the last.
+
+    A citation marker the sentence skipped sits inside the box, not a hole in the highlight.
+    """
     lines: dict[tuple, dict] = {}
     for index in indices:
         word = words[index]
@@ -218,18 +236,19 @@ def _line_boxes(words: list[_Word], indices: list[int]) -> list[dict]:
         box = lines.setdefault(word.line, {"x0": x0, "y0": y0, "x1": x1, "y1": y1})
         box["x0"], box["y0"] = min(box["x0"], x0), min(box["y0"], y0)
         box["x1"], box["y1"] = max(box["x1"], x1), max(box["y1"], y1)
-    return [lines[key] for key in sorted(lines, key=lambda k: (lines[k]["y0"], lines[k]["x0"]))]
+    keys = sorted(lines, key=lambda line_key: (lines[line_key]["y0"], lines[line_key]["x0"]))
+    return [lines[key] for key in keys]
 
 
 def locate(pdf_path: str, sentence: str, page: int | None = None) -> dict | None:
-    """Where a sentence sits in a PDF: 1-based page, one box per line, the page size to scale
-    by, and how much of the sentence the boxes account for.
+    """Where a sentence sits in a PDF: 1-based page, one box per line, the page size to
+    scale by, and how much of the sentence the boxes account for.
 
     The sentence is what the model copied out of the paper, so it differs from the PDF's own
     text in small ways: a word hyphenated at a line end, a ligature, a citation marker, a
     dash. Matching word by word, in order, with room for those differences, finds the whole
     sentence where a verbatim search found only the fragments that happened to survive.
-    Return nothing rather than a box that is nearly right: a wrong highlight is worse than
+    Returns nothing rather than a box that is nearly right: a wrong highlight is worse than
     none in a tool built for checking sources.
     """
     import pymupdf
@@ -243,11 +262,11 @@ def locate(pdf_path: str, sentence: str, page: int | None = None) -> dict | None
         for number in numbers:
             if not 1 <= number <= document.page_count:
                 return None
-            found = document[number - 1]
-            words = _page_words(found)
+            found_page = document[number - 1]
+            words = _page_words(found_page)
             indices, coverage = _best_span(words, wanted)
             if coverage >= MIN_COVERAGE and (best is None or coverage > best[0]):
-                best = (coverage, number, _line_boxes(words, indices), found.rect)
+                best = (coverage, number, _line_boxes(words, indices), found_page.rect)
                 if coverage >= 1.0:
                     break
         if best is None:
@@ -342,8 +361,11 @@ NAME_TOKEN = re.compile(r"^[A-Z][A-Za-z'’-]*\.?$")
 
 
 def _looks_like_authors(text: str) -> bool:
-    """Whether this "title" is really an author list GROBID mis-parsed: two or more comma-
-    or "and"-separated groups, each two or three name-shaped words."""
+    """Whether this "title" is really an author list GROBID mis-parsed.
+
+    The test: two or more comma- or "and"-separated groups, each two or three name-shaped
+    words.
+    """
     groups = [group.split() for group in re.split(r",|\band\b", text) if group.strip()]
     return len(groups) >= 2 and all(
         2 <= len(group) <= 3 and all(NAME_TOKEN.match(word) for word in group) for group in groups
@@ -355,8 +377,10 @@ AUTHORS_PREFIX = re.compile(r"^(?:[^.,]+,\s*)+(?:and\s+)?[^.,]+\.\s+")
 
 
 def _without_the_authors(title: str) -> str:
-    """Cut a leading author list and year off a loosely parsed title, so a title-only
-    lookup can still match. Only a prefix that looks like authors is cut."""
+    """Cut a leading author list and year off a loosely parsed title.
+
+    A title-only lookup can then still match. Only a prefix that looks like authors is cut.
+    """
     trimmed = YEAR_PREFIX.sub("", title).strip()
     prefix = AUTHORS_PREFIX.match(trimmed)
     if prefix and _looks_like_authors(prefix.group().rstrip(". ")):
@@ -480,17 +504,22 @@ def _cited_sentences(paper_text: str) -> list[str]:
 
 
 def _citing_windows(paper_text: str) -> list[str]:
-    """Windows built only from paragraphs that cite something. Asked over the whole paper,
-    the model picks citing sentences at the rate they occur — rarely. Restricting its input
-    means every sentence it can pick cites, and a four-window paper takes one."""
+    """Windows built only from paragraphs that cite something.
+
+    Asked over the whole paper, the model picks citing sentences at the rate they occur,
+    which is rare. Restricting its input means every sentence it can pick cites, and a
+    four-window paper takes one.
+    """
     citing = [p for p in paper_text.split("\n\n") if MARKER.search(p)]
     return _windows("\n\n".join(citing)) if citing else []
 
 
 def _markers_for(claim: str, sentence: str, cited: list[str]) -> list[str]:
-    """The [bN] markers this claim belongs to. Taken from the claim if the model kept them,
-    otherwise recovered from the paper's own copy of the sentence — the text is the
-    authority, the model's output only points at it."""
+    """The [bN] markers this claim belongs to.
+
+    Taken from the claim if the model kept them. Otherwise recovered from the paper's own
+    copy of the sentence: the text is the authority, the model's output only points at it.
+    """
     from difflib import SequenceMatcher
 
     if found := list(dict.fromkeys(MARKER.findall(claim))):
@@ -560,14 +589,19 @@ ABOUT_ITSELF = re.compile(
 
 
 def _asserts_nothing(claim: str) -> bool:
-    """ "This paper explores X" cannot be true or false against a cited work. The rule is
-    deliberately narrow: a wrong drop is a claim nobody ever sees."""
+    """ "This paper explores X" cannot be true or false against a cited work.
+
+    The rule is deliberately narrow: a wrong drop is a claim nobody ever sees.
+    """
     return bool(ABOUT_ITSELF.match(claim))
 
 
 def _same_assertion(one: str, other: str) -> bool:
-    """Whether two normalised claims say the same thing in different words. Numbers must
-    agree first: "improves by 5%" vs "15%" is a different claim in a near-identical string."""
+    """Whether two normalised claims say the same thing in different words.
+
+    Numbers must agree first: "improves by 5%" vs "15%" is a different claim in a
+    near-identical string.
+    """
     from difflib import SequenceMatcher
 
     if NUMBER.findall(one) != NUMBER.findall(other):
@@ -576,8 +610,11 @@ def _same_assertion(one: str, other: str) -> bool:
 
 
 def _deduplicated(claims: list[dict]) -> list[dict]:
-    """One entry per assertion, in the paper's order; a repeat keeps whichever copy carries
-    the most provenance (cited works, then a located sentence)."""
+    """One entry per assertion, in the paper's order.
+
+    A repeat keeps whichever copy carries the most provenance (cited works, then a located
+    sentence).
+    """
     kept: list[dict] = []
     keys: list[str] = []
     for claim in claims:
@@ -593,11 +630,13 @@ def _deduplicated(claims: list[dict]) -> list[dict]:
 
 def _most_checkable(claims: list[dict], limit: int) -> list[dict]:
     """At most `limit` claims, ranked by provenance, restored to the paper's order.
-    CLAIM_LIMIT=0 keeps everything (what the benchmark wants)."""
+
+    CLAIM_LIMIT=0 keeps everything (what the benchmark wants).
+    """
     if limit <= 0 or len(claims) <= limit:
         return claims
-    ranked = sorted(range(len(claims)), key=lambda i: _provenance(claims[i]), reverse=True)
-    return [claims[i] for i in sorted(ranked[:limit])]
+    ranked = sorted(range(len(claims)), key=lambda index: _provenance(claims[index]), reverse=True)
+    return [claims[index] for index in sorted(ranked[:limit])]
 
 
 def extract_claims_with_citations(pdf_path: str) -> dict:
@@ -627,7 +666,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
             for extracted in window_claims
         ]
         claims = _most_checkable(
-            _deduplicated([c for c in found if not _asserts_nothing(c["claim"])]), CLAIM_LIMIT
+            _deduplicated([claim for claim in found if not _asserts_nothing(claim["claim"])]), CLAIM_LIMIT
         )
         return {
             "status": "ok",

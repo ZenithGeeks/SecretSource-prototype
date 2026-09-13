@@ -1,8 +1,8 @@
 """ColPali-family retrievers on `colpali-engine`: page image -> one vector per image patch.
 
-The same late-interaction idea as ColBERT, but the "tokens" of a document are the patches of
-a rendered page, so a query can match a number inside a table or a trend inside a figure.
-Scoring is MaxSim, done in store.py; this file only encodes.
+The document "tokens" are the patches of a rendered page, so a query can match a number
+inside a table or a trend inside a figure. Scoring (MaxSim) is in store.py; this file
+only encodes.
 
 Pick a model with COLPALI_MODEL. ViDoRe scores and rough bf16 footprints:
 
@@ -24,7 +24,7 @@ CHECKPOINT = os.getenv("COLPALI_MODEL", "vidore/colqwen2-v1.0")
 
 
 def _classes(checkpoint: str):
-    """(model class, processor class) for a checkpoint — each family has its own pair."""
+    """The (model class, processor class) pair for a checkpoint. Each family has its own."""
     import colpali_engine.models as models
 
     name = checkpoint.lower()
@@ -58,7 +58,7 @@ class Encoder:
 
     @property
     def dim(self) -> int:
-        """Width of one patch vector — 128 across the family, but read it rather than assume."""
+        """Width of one patch vector. 128 across the family, but read it rather than assume."""
         return getattr(self.model.config, "embedding_dim", 128)
 
     @torch.no_grad()

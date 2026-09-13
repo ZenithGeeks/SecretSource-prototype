@@ -1,11 +1,10 @@
-"""Qdrant collection of ColBERTv2 token embeddings. Add PDFs, search with MaxSim.
+"""Qdrant collection of ColBERTv2 token embeddings.
 
     python -m store paper.pdf "papers/*.pdf" papers/   # files, globs or folders
 
-Each PDF becomes ~120-word passages; each passage is stored as one point whose vector is
-the passage's token matrix (Qdrant multivector, MAX_SIM comparator) with the page and
-character span it came from, so a hit can be pointed at in the original.
-Re-adding a PDF with the same file name replaces its old passages.
+Each PDF becomes ~120-word passages, stored as one multivector point each, with the page
+and character span so a hit can be pointed at in the original. Re-adding a PDF with the
+same file name replaces its old passages.
 """
 
 import os
@@ -103,9 +102,8 @@ class Store:
             for passage, vector in zip(passages, vectors, strict=True)
             if len(vector)  # skip passages with no tokens left
         ]
-        # In batches: one request for a whole long paper's passages was the write that timed
-        # out, even with a generous client timeout — many small requests survive a slow
-        # moment on the Qdrant VM that one large one does not.
+        # In batches: one request for a whole long paper timed out, even with a generous
+        # client timeout. Many small requests survive a slow moment on the Qdrant VM.
         for start in range(0, len(points), UPSERT_BATCH):
             self.client.upsert(COLLECTION, points[start : start + UPSERT_BATCH])
         return len(points)
@@ -135,8 +133,8 @@ if __name__ == "__main__":
     # Accept files, globs ("papers/*.pdf") and folders; PowerShell does not expand globs itself.
     pdfs = []
     for arg in sys.argv[1:]:
-        p = Path(arg)
-        pdfs += sorted(p.glob("*.pdf")) if p.is_dir() else sorted(Path().glob(arg))
+        pdf_path = Path(arg)
+        pdfs += sorted(pdf_path.glob("*.pdf")) if pdf_path.is_dir() else sorted(Path().glob(arg))
     if not pdfs:
         sys.exit("no PDFs found")
     store = Store()

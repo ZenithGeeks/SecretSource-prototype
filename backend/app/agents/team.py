@@ -1,11 +1,10 @@
-"""Multi-agent tree (Google ADK):
+"""Multi-agent tree (Google ADK).
 
-    coordinator (root, routes via transfer_to_agent)
-    ├── rag_agent       tools: answer_from_docs, add_paper (DSPy + ColBERT service)
-    ├── paper_agent     tools: claims, citations, fetch_source (Docling + GROBID)
-    ├── verify_agent    tool: verify_claim (retrieval over the cited paper + LLM judge)
-    └── retrieval MCP   the ColBERT/ColPali services also speak MCP at /mcp, attached to
-                        rag_agent so external MCP clients and this tree share one contract
+A coordinator routes requests to three specialists: rag_agent (answers from indexed
+papers, adds new PDFs), paper_agent (claims, citations, fetching cited papers), and
+verify_agent (checks whether a cited paper supports a claim). The ColBERT/ColPali
+services also speak MCP at /mcp, attached to rag_agent so external MCP clients and this
+tree share one set of tools.
 """
 
 from google.adk.agents import LlmAgent
@@ -22,8 +21,8 @@ from app.pipeline.rag import add_paper, answer_from_docs
 from app.pipeline.sources import fetch_source
 from app.pipeline.verify import verify_claim
 
-# The retrieval service's own MCP endpoint. Same tools the HTTP client wraps; letting the
-# agent call them directly keeps one contract for both agent and external MCP clients.
+# The retrieval service's own MCP endpoint. Same tools the HTTP client wraps. The agent
+# calls them directly, so agent and external MCP clients share one set of tools.
 colbert_mcp = McpToolset(
     # Trailing slash on purpose: /mcp 307-redirects, the MCP client does not follow it, and
     # the redirect drops the Authorization header.

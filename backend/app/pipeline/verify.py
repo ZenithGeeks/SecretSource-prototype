@@ -19,7 +19,10 @@ _judge = None  # lazy: needs dspy and a running LM
 
 def _evidence(claim: str, source_name: str) -> list[dict]:
     """Passages from one indexed paper, most relevant first, each keeping page and span."""
-    passages = [p for p in retrieval.colbert_search(claim, k=30) if p.get("source") == source_name]
+    passages = [
+        passage for passage in retrieval.colbert_search(claim, k=30)
+        if passage.get("source") == source_name
+    ]
     return [
         {key: passage[key] for key in ("text", "page", "start", "end", "score")}
         for passage in passages[:EVIDENCE_COUNT]
@@ -53,14 +56,11 @@ def _lock_for(name: str) -> threading.Lock:
 
 
 def _index_once(source: Path) -> dict | None:
-    """Put the cited paper in both stores, the first time this process is asked for it.
+    """Index a cited paper in both stores, only the first time we see it.
 
-    Both stores replace a source rather than merge into it, so re-indexing per check was
-    not just repeated work: with several checks in flight, one could search a source while
-    another sat between its delete and its upsert, retrieve nothing, and report the claim
-    unsupported. Holding the source's lock across indexing means a later check waits for
-    the first to finish rather than starting its own, so a search only ever sees a
-    complete index. Returns the failure when the text index could not be built.
+    Indexing deletes the old copy first. If two checks indexed the same paper at once, one
+    could search in the middle and find nothing. The lock makes the second check wait.
+    Returns the error if the text index failed.
     """
     from app.pipeline.rag import add_paper
 
@@ -131,9 +131,11 @@ def _build_judge():
 
 
 def unchecked_reason(verdict: dict, citation: dict) -> str:
-    """Why a claim went unchecked, separating our failures from the paper's. An unresolvable
-    citation that carries a link is usually a blog post or a spec: a fact about the
-    bibliography, not a lookup of ours that failed."""
+    """Why a claim went unchecked.
+
+    An unresolvable citation that has a link is usually a blog post or a spec. That is a
+    fact about the bibliography, not a lookup that failed on our side.
+    """
     reason = verdict.get("reason", "failed")
     return "web-source" if reason == "unresolvable" and citation.get("url") else reason
 

@@ -4,11 +4,10 @@
 
 A point is one image with its patch vectors (Qdrant multivector, MAX_SIM comparator): a
 cropped figure where the caller extracted them, or a whole rendered page where it could
-not. A crop is all signal, and it carries a caption and a name, so a hit is "Figure 3" —
-quotable and showable — rather than "look at page 7".
+not. A crop carries a caption and a name, so a hit is "Figure 3" rather than "page 7".
 
 Re-adding a paper replaces every point it already had. The collection name carries the
-vector width; swapping checkpoints with a different width needs a fresh collection.
+vector width; a checkpoint with a different width needs a fresh collection.
 """
 
 import os
@@ -59,7 +58,7 @@ class Store:
                     )
                 },
             )
-        # Idempotent; also covers a collection someone provisioned without the index.
+        # Safe to run twice; also covers a collection made without the index.
         self.client.create_payload_index(COLLECTION, "source", models.PayloadSchemaType.KEYWORD)
 
     def __len__(self) -> int:
@@ -80,9 +79,8 @@ class Store:
             models.PointStruct(id=uuid.uuid4().hex, vector={VECTOR_NAME: vector.tolist()}, payload=row)
             for row, vector in zip(rows, vectors, strict=True)
         ]
-        # In batches: one request for a whole paper's pages or crops was the write that timed
-        # out, even with a generous client timeout — many small requests survive a slow
-        # moment on the Qdrant VM that one large one does not.
+        # In batches: one big request for a whole paper timed out before, even with a
+        # long client timeout. Many small requests survive a slow moment on the Qdrant VM.
         for start in range(0, len(points), UPSERT_BATCH):
             self.client.upsert(COLLECTION, points[start : start + UPSERT_BATCH])
         return len(points)

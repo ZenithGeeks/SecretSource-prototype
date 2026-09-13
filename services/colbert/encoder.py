@@ -1,7 +1,7 @@
-"""ColBERTv2 (colbert-ir/colbertv2.0) on plain `transformers`: text -> one 128-d unit vector per token.
+"""ColBERTv2 (colbert-ir/colbertv2.0) on plain `transformers`.
 
-Score(query, doc) = MaxSim: every query token takes its best-matching doc token, and those are summed.
-Storing and scoring happens in store.py (LanceDB does MaxSim natively); this file only encodes.
+Encodes text into one 128-d unit vector per token. MaxSim scoring and storage live in
+store.py; this file only encodes.
 """
 
 import string

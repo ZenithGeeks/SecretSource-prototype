@@ -1,8 +1,8 @@
-"""What a paper shows rather than says: figure crops with captions, tables and formulas as text.
+"""What a paper shows rather than says: figure crops, tables, and formulas.
 
-Docling finds all of them. A figure is cropped and written beside the paper — a whole
-rendered page dilutes the figure's patches among prose — and the crop carries its caption,
-so a visual hit gives the judge something to quote. Tables stay markdown, formulas LaTeX.
+Docling finds all of them. Each figure is cropped and saved beside the paper with its
+caption, so a visual hit gives the judge something to quote. Tables stay markdown,
+formulas LaTeX.
 
     python -m app.pipeline.figures data/papers/colbertv2.pdf
 """
@@ -117,7 +117,7 @@ def _read_manifest(pdf: Path) -> dict | None:
     if not manifest.is_file():
         return None
     found = json.loads(manifest.read_text(encoding="utf-8"))
-    return found if all(Path(f["image"]).is_file() for f in found.get("figures", [])) else None
+    return found if all(Path(figure["image"]).is_file() for figure in found.get("figures", [])) else None
 
 
 def paper_media(pdf_path: str, refresh: bool = False) -> dict:

@@ -23,8 +23,7 @@ COLPALI_URL = os.getenv("COLPALI_URL") or "http://localhost:8894"  # optional; s
 GROBID_URL = os.getenv("GROBID_URL") or "http://localhost:8070"
 
 # How calls to the services above prove who they are. `google-id-token` attaches a Google
-# identity token to every *.run.app URL (app/clients/service_auth.py); `none` sends nothing,
-# which is all the compose containers need.
+# identity token to every *.run.app URL; `none` sends nothing, which compose needs.
 SERVICE_AUTH = os.getenv("SERVICE_AUTH") or "none"
 if SERVICE_AUTH not in ("none", "google-id-token"):
     raise ValueError(f"SERVICE_AUTH must be 'none' or 'google-id-token', got {SERVICE_AUTH!r}")
@@ -34,7 +33,7 @@ ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 
 # Persistence backend. With both set, the gateway stores analyses and source resolutions in
 # Supabase Postgres (whole-analysis JSON, service role) instead of the SQLite file above.
-# Unset means SQLite — the default for local runs and tests.
+# Unset means SQLite, the default for local runs and tests.
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 

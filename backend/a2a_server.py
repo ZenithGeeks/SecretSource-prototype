@@ -8,7 +8,7 @@ Serves the coordinator from app/agents/team.py: an agent card at
 runs a task. The same tree `python backend/cli.py` talks to, reached over the wire.
 
 A2A_HOST and A2A_PORT are the address the card advertises back to callers, not what the
-server binds — a client that cannot reach the URL in the card cannot send the task. From
+server binds. A client that cannot reach the URL in the card cannot send the task. From
 another compose service that is `a2a:8002`; from the host, `localhost:8002`.
 """
 
