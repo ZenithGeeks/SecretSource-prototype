@@ -10,7 +10,7 @@ secretsource-prototype-gateway python -m pytest tests/test_workflow_assemble.py
 
 import copy
 
-from app.workflow import fold_checks, pair_with_sources
+from app.workflow import finished_analysis, fold_checks, pair_with_sources
 
 CLAIMS = [
     {"claim": "Late interaction beats single-vector retrieval.", "citations": [{"doi": "10.1/a"}]},
@@ -68,3 +68,8 @@ def test_each_job_gets_the_prepared_source_it_cites():
     assert paired[2]["prepared"]["path"] == "data/papers/a.pdf"
     assert "prepared" not in jobs[0]  # the jobs passed in are not changed
 
+
+def test_a_finished_run_has_a_status_like_a_failed_one():
+    finished = finished_analysis(CHECKS, CLAIMS, "2112.01488", "data/papers/2112.01488.pdf")
+    assert finished["status"] == "ok"
+    assert finished["checked"] == 2
