@@ -305,6 +305,27 @@ reach it: `a2a:8002` from another compose service, `localhost:8002` from your ma
   Postgres with ADK's `DatabaseSessionService`, so a session continues after a restart
   (`python cli.py --session <id>`). ADK's tables go in the `adk` schema, not `public`,
   because Supabase serves `public` through its REST API to the browser's anon key.
+- Each analysis has an `owner`: the Supabase user who started it, or empty when login is off.
+  `backend/app/auth.py` checks the user's access token. A user only sees, opens and deletes
+  their own analyses.
+- Researcher projects (a name and a list of analysis ids) are in the `projects` table of the
+  same store, with an owner. Everything else on the researcher screens is computed from the
+  user's analyses when it is asked for; nothing else is stored.
+
+## Researcher screens
+
+The researcher role shows the user's own work. `backend/app/researcher.py` builds each screen
+from the user's analyses, without new LLM calls:
+
+| Screen | Route | Built from |
+| --- | --- | --- |
+| Home | `GET /researcher/home` | claim counts, claims a cited work contradicts, and works cited more than once that are not analysed yet (the reading queue) |
+| Library | `GET /researcher/projects`, `GET /researcher/projects/{id}/library` | the user's projects; `unsorted` holds analysed papers in no project |
+| Field consensus | `POST /researcher/consensus` | claims whose words match the question, with the verdicts and quotes already found |
+| Graph | `GET /researcher/graph` | papers, claims, and which cited works back or contradict each claim |
+
+`POST /researcher/projects` creates a project, and `POST /researcher/projects/{id}/papers`
+adds an analysis to it.
 
 ## Where to change what
 
@@ -320,3 +341,4 @@ reach it: `a2a:8002` from another compose service, `localhost:8002` from your ma
 | how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS` in `.env` |
 | the graph in `adk web` | `backend/app/workflow.py` |
 | the chat agents and their routing | `backend/app/agents/team.py` |
+| the researcher Home, Library, Field consensus or Graph | `backend/app/researcher.py`, `frontend/src/roles/researcher` |

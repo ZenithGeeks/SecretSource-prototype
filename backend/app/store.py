@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS sources (
 )
 """
 
+PROJECTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id    TEXT PRIMARY KEY,
+    owner TEXT,
+    data  TEXT NOT NULL
+)
+"""
+
 _db: sqlite3.Connection | None = None
 _db_path: str | None = None
 
@@ -68,6 +76,7 @@ def _connect() -> sqlite3.Connection:
         _db.row_factory = sqlite3.Row
         _db.execute(SCHEMA)
         _db.execute(SOURCES_SCHEMA)
+        _db.execute(PROJECTS_SCHEMA)
         _db_path = path
     return _db
 
@@ -129,3 +138,33 @@ def recall_source(key: str) -> dict | None:
         return rows[0]["data"] if rows else None
     row = _connect().execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
+
+
+def save_project(project: dict) -> None:
+    """A researcher's project: its name and the analyses in it. `owner` is the user id, or
+    None when login is off."""
+    if _use_supabase():
+        _supabase().table("projects").upsert(
+            {"id": project["id"], "owner": project.get("owner"), "data": project}
+        ).execute()
+        return
+    database = _connect()
+    database.execute(
+        "INSERT INTO projects (id, owner, data) VALUES (?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, data = excluded.data",
+        (project["id"], project.get("owner"), json.dumps(project)),
+    )
+    database.commit()
+
+
+def load_projects(owner: str | None) -> list[dict]:
+    """Every project of one owner. None means the projects made while login was off."""
+    if _use_supabase():
+        query = _supabase().table("projects").select("data")
+        query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
+        return [row["data"] for row in query.execute().data]
+    rows = _connect().execute(
+        "SELECT data FROM projects WHERE owner IS ?", (owner,)
+    ).fetchall()
+    return [json.loads(row["data"]) for row in rows]
+

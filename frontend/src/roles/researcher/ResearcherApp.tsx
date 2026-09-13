@@ -83,6 +83,11 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     setSelected(id)
     setWide(false)
   }
+  /** Open one analysis in History, from anywhere a paper or claim is listed. */
+  const openAnalysis = (id: string) => {
+    select(id)
+    navigate('history')
+  }
 
   return (
     <AppShell
@@ -99,9 +104,11 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         ) : undefined
       }
     >
-      {screen === 'home' && <Home onOpen={navigate} />}
-      {screen === 'library' && <Library onAddPaper={() => navigate('history')} />}
-      {screen === 'field-consensus' && <FieldConsensus />}
+      {screen === 'home' && <Home onOpen={navigate} onOpenAnalysis={openAnalysis} />}
+      {screen === 'library' && (
+        <Library onAddPaper={() => navigate('history')} onOpenAnalysis={openAnalysis} />
+      )}
+      {screen === 'field-consensus' && <FieldConsensus onOpenAnalysis={openAnalysis} />}
       {screen === 'graph' && <Graph />}
       {screen === 'history' && (
         <History selected={selected} onSelect={select} onTargetChange={setWide} />

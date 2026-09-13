@@ -24,6 +24,7 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
@@ -32,7 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app import store
+from app import researcher, store
 from app.auth import current_user
 from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
@@ -109,6 +110,9 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
         claims = extracted["claims"]
         analysis["file"] = extracted["file"]
+        analysis["title"] = extracted.get("title", "")
+        analysis["authors"] = extracted.get("authors", [])
+        analysis["year"] = extracted.get("year", "")
         analysis["claims"] = claims
         analysis["references"] = extracted.get("references", {})
         analysis["markers"] = extracted.get("markers", [])
@@ -332,6 +336,88 @@ async def find(name: str, q: str, page: int | None = None):
     path = _paper(name)
     found = await asyncio.to_thread(locate, path.as_posix(), q, page)
     return found or {"page": None, "boxes": []}
+
+
+# --- the researcher screens, built from the caller's own analyses (app/researcher.py) ---
+
+
+class ProjectRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+class ProjectPaperRequest(BaseModel):
+    analysis_id: str
+
+
+class ConsensusRequest(BaseModel):
+    question: str
+
+
+def _project(project_id: str, stored: list[dict]) -> dict:
+    project = next((project for project in stored if project["id"] == project_id), None)
+    if project is None:
+        raise HTTPException(404, "no such project")
+    return project
+
+
+@app.get("/researcher/home")
+async def researcher_home(user: str | None = Depends(current_user)):
+    return researcher.home(visible_to(user))
+
+
+@app.get("/researcher/projects")
+async def researcher_projects(user: str | None = Depends(current_user)):
+    stored = await asyncio.to_thread(store.load_projects, user)
+    return researcher.projects(stored, visible_to(user))
+
+
+@app.post("/researcher/projects")
+async def create_project(request: ProjectRequest, user: str | None = Depends(current_user)):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(400, "a project needs a name")
+    now = datetime.now(timezone.utc).isoformat()
+    project = {"id": uuid.uuid4().hex[:12], "owner": user, "name": name,
+               "description": request.description.strip(), "analyses": [], "created": now, "updated": now}
+    await asyncio.to_thread(store.save_project, project)
+    return researcher.projects([project], [])[0]
+
+
+@app.get("/researcher/projects/{project_id}/library")
+async def project_library(project_id: str, user: str | None = Depends(current_user)):
+    stored = await asyncio.to_thread(store.load_projects, user)
+    found = researcher.library(project_id, stored, visible_to(user))
+    if found is None:
+        raise HTTPException(404, "no such project")
+    return found
+
+
+@app.post("/researcher/projects/{project_id}/papers")
+async def add_to_project(
+    project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
+):
+    """Put one of the caller's analysed papers in one of their projects."""
+    _owned(request.analysis_id, user)
+    stored = await asyncio.to_thread(store.load_projects, user)
+    project = _project(project_id, stored)
+    if request.analysis_id not in project["analyses"]:
+        project["analyses"].append(request.analysis_id)
+    project["updated"] = datetime.now(timezone.utc).isoformat()
+    await asyncio.to_thread(store.save_project, project)
+    return researcher.projects([project], visible_to(user))[0]
+
+
+@app.post("/researcher/consensus")
+async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
+    """What the works cited in the caller's papers say about a question. Reuses the verdicts
+    already found; it makes no LLM calls."""
+    return researcher.consensus(request.question, visible_to(user))
+
+
+@app.get("/researcher/graph")
+async def knowledge_graph(user: str | None = Depends(current_user)):
+    return researcher.graph(visible_to(user))
 
 
 class VerifyRequest(BaseModel):

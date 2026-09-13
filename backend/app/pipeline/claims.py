@@ -429,6 +429,26 @@ def _parse_reference(reference) -> dict:
     }
 
 
+def _paper_header(tei) -> dict:
+    """The analysed paper's own title, authors and year, from GROBID's teiHeader. Empty values
+    when GROBID could not read them."""
+    header = tei.find(".//tei:teiHeader", TEI_NAMESPACE)
+    if header is None:
+        return {"title": "", "authors": [], "year": ""}
+    title = header.find(".//tei:titleStmt/tei:title", TEI_NAMESPACE)
+    source = header.find(".//tei:sourceDesc/tei:biblStruct", TEI_NAMESPACE)
+    date = header.find(".//tei:publicationStmt/tei:date[@when]", TEI_NAMESPACE)
+    if date is None and source is not None:
+        date = source.find(".//tei:date[@when]", TEI_NAMESPACE)
+    people = source.findall(".//tei:author/tei:persName", TEI_NAMESPACE) if source is not None else []
+    authors = [name for name in (_full_name(person) for person in people) if name]
+    return {
+        "title": " ".join((title.text or "").split()) if title is not None else "",
+        "authors": authors,
+        "year": date.get("when", "")[:4] if date is not None else "",
+    }
+
+
 def _findable(citation: dict) -> bool:
     """A reference with no title, id, or URL is a lookup that cannot succeed. Drop it counted."""
     return bool(citation["title"] or citation["doi"] or citation["arxiv"] or citation["url"])
@@ -759,6 +779,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         return {
             "status": "ok",
             "file": pdf_path,
+            **_paper_header(tei),
             "claims": claims,
             "extracted": len(found),  # before repeats, announcements and the cap
             "dropped": dropped,

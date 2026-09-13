@@ -130,6 +130,7 @@ export type Analysis = {
   status: 'running' | 'done' | 'error'
   message?: string
   file?: string
+  title?: string // the paper's own title, from GROBID; missing on older analyses
   claims: Claim[]
   figures?: PaperFigure[] // missing on analyses from before #85, and until the run has read them
   references?: Record<string, Citation> // the references the paper's markers point to (#47)
@@ -158,7 +159,7 @@ async function accessToken() {
   return data.session?.access_token ?? ''
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await accessToken()
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
