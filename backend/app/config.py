@@ -22,6 +22,13 @@ COLPALI_URL = os.getenv("COLPALI_URL") or "http://localhost:8894"  # optional; s
 
 GROBID_URL = os.getenv("GROBID_URL") or "http://localhost:8070"
 
+# How calls to the services above prove who they are. `google-id-token` attaches a Google
+# identity token to every *.run.app URL (app/clients/service_auth.py); `none` sends nothing,
+# which is all the compose containers need.
+SERVICE_AUTH = os.getenv("SERVICE_AUTH") or "none"
+if SERVICE_AUTH not in ("none", "google-id-token"):
+    raise ValueError(f"SERVICE_AUTH must be 'none' or 'google-id-token', got {SERVICE_AUTH!r}")
+
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 

@@ -1,7 +1,7 @@
 """RAG over indexed papers: DSPy + the ColBERT retrieval service.
 ADK builds each tool's schema from type hints + docstring."""
 
-from app.clients.retrieval import colbert_add
+from app.clients.retrieval import colbert_add, colbert_search
 
 _rag = None  # lazy: needs dspy, a running LM and the ColBERT service
 
@@ -9,11 +9,9 @@ _rag = None  # lazy: needs dspy, a running LM and the ColBERT service
 def _build_rag():
     import dspy
 
-    from app.config import COLBERT_URL
     from app.llm import dspy_lm
 
     language_model = dspy_lm()
-    retriever = dspy.ColBERTv2(url=f"{COLBERT_URL}/api/search")
 
     class GenerateAnswer(dspy.Signature):
         """Answer the question using only the retrieved context."""
@@ -29,7 +27,9 @@ def _build_rag():
             self.generate = dspy.ChainOfThought(GenerateAnswer)
 
         def forward(self, question: str):
-            passages = [passage["text"] for passage in retriever(question, k=self.k)]
+            # colbert_search rather than dspy.ColBERTv2: dspy's client cannot send the identity
+            # token the Cloud Run service requires.
+            passages = [passage["text"] for passage in colbert_search(question, k=self.k)]
             # dspy.context is thread-safe; dspy.configure is not (ADK runs tools in worker threads)
             with dspy.context(lm=language_model):
                 prediction = self.generate(context=passages, question=question)
