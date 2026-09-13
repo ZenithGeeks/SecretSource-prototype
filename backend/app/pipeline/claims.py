@@ -362,7 +362,7 @@ TITLE_PATHS = (
     "tei:monogr/tei:title[@level='m']",  # a book or proceedings, cited whole
     "tei:monogr/tei:title[@level='j']",  # a journal, when nothing finer was parsed
 )
-NAME_TOKEN = re.compile(r"^[A-Z][A-Za-z'’-]*\.?$")
+NAME_TOKEN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['’-])*\.?$")  # any alphabet, so "Stéphane" counts
 
 
 def _looks_like_authors(text: str) -> bool:
@@ -373,7 +373,8 @@ def _looks_like_authors(text: str) -> bool:
     """
     groups = [group.split() for group in re.split(r",|\band\b", text) if group.strip()]
     return len(groups) >= 2 and all(
-        2 <= len(group) <= 3 and all(NAME_TOKEN.match(word) for word in group) for group in groups
+        2 <= len(group) <= 3 and all(NAME_TOKEN.match(word) and word[0].isupper() for word in group)
+        for group in groups
     )
 
 
