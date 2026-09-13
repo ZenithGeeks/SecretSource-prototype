@@ -24,5 +24,8 @@ export function useAuth(): { session: Session | null; loading: boolean } {
 }
 
 export async function signOut(): Promise<void> {
-  await supabase?.auth.signOut()
+  // scope:'local' signs out only this browser (the default 'global' revokes the user's
+  // refresh tokens on every device). The SIGNED_OUT listener in main.tsx then clears the
+  // React Query cache and resets the settings store so the next user starts clean.
+  await supabase?.auth.signOut({ scope: 'local' })
 }
