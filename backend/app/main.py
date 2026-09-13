@@ -109,6 +109,8 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         claims = extracted["claims"]
         analysis["file"] = extracted["file"]
         analysis["claims"] = claims
+        analysis["references"] = extracted.get("references", {})
+        analysis["markers"] = extracted.get("markers", [])
         # We send both counts. If a cap cut the claims in half, the paper would look short.
         await _publish(
             analysis_id, "extracted", claims=len(claims),
@@ -208,7 +210,9 @@ async def upload_analysis(file: UploadFile = PDF_UPLOAD, verify: bool = True):
 
 @app.get("/analyses")
 async def list_analyses():
-    return [{k: v for k, v in a.items() if k != "stages"} for a in reversed(analyses.values())]
+    # The list leaves out what only one analysis's own view needs.
+    left_out = ("stages", "references", "markers")
+    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(analyses.values())]
 
 
 @app.get("/analyses/{analysis_id}")

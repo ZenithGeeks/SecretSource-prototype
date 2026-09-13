@@ -122,7 +122,13 @@ export function AnalysisView({
 
         {target && (
           <div className="xl:sticky xl:top-6 xl:self-start">
-            <PageViewer target={target} onClose={() => setTarget(null)} />
+            <PageViewer
+              target={target}
+              onClose={() => setTarget(null)}
+              // Markers belong to the analysed paper, not to a cited paper opened in the viewer.
+              markers={target.paper === file ? analysis.data.markers : undefined}
+              references={analysis.data.references}
+            />
           </div>
         )}
       </div>

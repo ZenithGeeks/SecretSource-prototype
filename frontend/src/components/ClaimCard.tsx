@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
+import { citationLink, reference } from '../lib/citations'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
@@ -64,11 +65,6 @@ function hitName(hit: { page: number; label?: string }) {
   return hit.label && hit.label.trim() ? hit.label : `page ${hit.page}`
 }
 
-function reference({ authors, year, title, arxiv }: Citation) {
-  const who = authors.length ? `${authors[0]}${authors.length > 1 ? ' et al.' : ''}` : 'Unknown'
-  return `${who}${year ? ` (${year})` : ''}. ${title || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
-}
-
 /**
  * The paper's sentence as the paper wrote it.
  *
@@ -125,13 +121,6 @@ function withFigureLinks(
   }
   parts.push(sentence.slice(last))
   return parts
-}
-
-/** Where this work lives, preferring the identifier that resolves exactly. */
-function citationLink({ doi, arxiv, url }: Citation) {
-  if (doi) return `https://doi.org/${doi}`
-  if (arxiv) return `https://arxiv.org/abs/${arxiv}`
-  return url || ''
 }
 
 /** A page reference the reader can click to see the page it names. */
@@ -428,7 +417,7 @@ export function ClaimCard({
                           onShow({
                             paper,
                             label: `Claim ${index + 1} in this paper`,
-                            quote: claim.sentence,
+                            quote: sentence,
                             source: claim.source ?? null,
                           })
                         }
