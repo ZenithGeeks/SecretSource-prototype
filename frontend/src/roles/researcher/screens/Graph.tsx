@@ -171,7 +171,7 @@ function NotIndexedKey({ pal, count }: { pal: Palette; count: number }) {
   return (
     <span
       className="flex items-center gap-1.5 text-xs text-ink-muted"
-      title="Semantic Scholar, arXiv and Unpaywall did not know this work. This is not a Scopus check."
+      title="Semantic Scholar, arXiv and Unpaywall found nothing for this reference as it is written. This is not a Scopus check."
     >
       <span className="size-2.5 rounded-full border-[1.5px] border-dashed" style={{ borderColor: pal.insufficient }} />
       {count} not found in a public index
