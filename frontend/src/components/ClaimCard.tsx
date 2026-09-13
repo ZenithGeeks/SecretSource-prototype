@@ -9,6 +9,7 @@ import { citationLink, citationNumber, reference } from '../lib/citations'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
+import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
 import { Card, StandingBadge, VerdictBadge } from './ui'
 
@@ -267,7 +268,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
                 .filter((hit) => hit.kind === 'figure' && hit.image)
                 .map((hit, k) => (
                   <figure key={k} className="max-w-56 space-y-1">
-                    <img
+                    <AuthorizedImage
                       src={figureImageUrl(verdict.source, hit.image as string)}
                       alt={hit.caption || `${hitName(hit)} of ${verdict.source}`}
                       loading="lazy"
@@ -461,7 +462,7 @@ export function ClaimCard({
                         disabled={!openFigure}
                         className="block rounded focus-visible:outline-2 focus-visible:outline-accent"
                       >
-                        <img
+                        <AuthorizedImage
                           src={figureImageUrl(paper, figure.image)}
                           alt={figure.caption}
                           loading="lazy"
