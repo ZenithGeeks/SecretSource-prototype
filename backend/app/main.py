@@ -27,12 +27,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import store
+from app.auth import current_user
 from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
@@ -186,44 +187,59 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         await streams[analysis_id].put(None)  # closes any open stream
 
 
-def _start(paper: str, verify: bool) -> dict:
+def _start(paper: str, verify: bool, owner: str | None) -> dict:
     analysis_id = uuid.uuid4().hex[:12]
     analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
-                             "stages": [], "claims": []}
+                             "owner": owner, "stages": [], "claims": []}
     streams[analysis_id] = asyncio.Queue()
     asyncio.create_task(_run(analysis_id, paper, verify))
     return {"id": analysis_id}
 
 
+def visible_to(user: str | None) -> list[dict]:
+    """The analyses this user may see, oldest first. Signed out, only analyses without an owner."""
+    return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
+
+
+def _owned(analysis_id: str, user: str | None) -> dict:
+    """The analysis, if this user may see it. Someone else's analysis is a 404, not a 403,
+    so an id does not tell anyone that it exists."""
+    analysis = analyses.get(analysis_id)
+    if analysis is None or analysis.get("owner") != user:
+        raise HTTPException(404, "no such analysis")
+    return analysis
+
+
 @app.post("/analyses")
-async def start_analysis(request: AnalysisRequest):
-    return _start(request.paper, request.verify)
+async def start_analysis(request: AnalysisRequest, user: str | None = Depends(current_user)):
+    return _start(request.paper, request.verify, user)
 
 
 @app.post("/analyses/upload")
-async def upload_analysis(file: UploadFile = PDF_UPLOAD, verify: bool = True):
+async def upload_analysis(
+    file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
+):
     PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     path = PAPERS_DIR / Path(file.filename).name
     path.write_bytes(await file.read())
-    return _start(path.as_posix(), verify)
+    return _start(path.as_posix(), verify, user)
 
 
 @app.get("/analyses")
-async def list_analyses():
+async def list_analyses(user: str | None = Depends(current_user)):
     # The list leaves out what only one analysis's own view needs.
     left_out = ("stages", "references", "markers")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(analyses.values())]
+    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
 
 
 @app.get("/analyses/{analysis_id}")
-async def get_analysis(analysis_id: str):
-    if analysis_id not in analyses:
-        raise HTTPException(404, "no such analysis")
-    return analyses[analysis_id]
+async def get_analysis(analysis_id: str, user: str | None = Depends(current_user)):
+    return _owned(analysis_id, user)
 
 
 @app.delete("/analyses/{analysis_id}")
-async def delete_analysis(analysis_id: str):
+async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
+    _owned(analysis_id, user)
     if not store.delete(analysis_id):
         raise HTTPException(404, "no such analysis")
     analyses.pop(analysis_id, None)
@@ -232,10 +248,10 @@ async def delete_analysis(analysis_id: str):
 
 
 @app.get("/analyses/{analysis_id}/events")
-async def analysis_events(analysis_id: str):
-    """Server-sent events: the stages already recorded, then each new one as it happens."""
-    if analysis_id not in analyses:
-        raise HTTPException(404, "no such analysis")
+async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
+    """Server-sent events: the stages already recorded, then each new one as it happens.
+    EventSource cannot send headers, so the web app passes its token as ?access_token=."""
+    _owned(analysis_id, user)
 
     async def stream():
         replayed = list(analyses[analysis_id]["stages"])

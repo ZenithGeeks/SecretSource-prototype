@@ -3,7 +3,7 @@
     START -> read_paper -+- ok ----> plan_checks -> prepare_sources -> plan_judging
                          |                -> check_sources -> assemble -> read_figures
                          |                -> audit_analysis
-                         \- error -> report_error
+                         `- error -> report_error
 
 prepare_sources downloads and indexes each cited work once, several at a time.
 check_sources then judges each claim against its prepared work, several at a time.

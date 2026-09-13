@@ -1,0 +1,59 @@
+"""Each signed-in user sees only their own analyses; signed out, only analyses without an owner.
+
+Supabase is not called: the token check is replaced by a table of known tokens. The client is
+used without its context manager, so the app's startup (which loads the store) does not run.
+"""
+
+import pytest
+from app import auth, main
+from fastapi.testclient import TestClient
+
+TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+    monkeypatch.setattr(auth, "_user_id_for", TOKENS.get)
+    monkeypatch.setattr(main.store, "delete", lambda analysis_id: True)
+    main.analyses.clear()
+    for analysis_id, owner in (("a1", "user-ada"), ("b1", "user-bo"), ("shared", None)):
+        main.analyses[analysis_id] = {"id": analysis_id, "paper": "x.pdf", "status": "done",
+                                      "owner": owner, "stages": [], "claims": []}
+    yield TestClient(main.app)
+    main.analyses.clear()
+
+
+def ids(response):
+    return sorted(analysis["id"] for analysis in response.json())
+
+
+def test_each_user_lists_only_their_own_analyses(client):
+    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-ada"})) == ["a1"]
+    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-bo"})) == ["b1"]
+
+
+def test_signed_out_sees_only_analyses_without_an_owner(client):
+    assert ids(client.get("/analyses")) == ["shared"]
+
+
+def test_someone_elses_analysis_is_not_found(client):
+    ada = {"Authorization": "Bearer token-ada"}
+    assert client.get("/analyses/b1", headers=ada).status_code == 404
+    assert client.delete("/analyses/b1", headers=ada).status_code == 404
+    assert client.get("/analyses/a1", headers=ada).status_code == 200
+
+
+def test_the_event_stream_takes_the_token_from_the_query(client):
+    assert client.get("/analyses/b1/events?access_token=token-ada").status_code == 404
+    assert client.get("/analyses/a1/events?access_token=token-ada").status_code == 200
+
+
+def test_a_token_supabase_rejects_is_a_401(client):
+    assert client.get("/analyses", headers={"Authorization": "Bearer expired"}).status_code == 401
+
+
+def test_without_supabase_a_token_is_ignored_and_the_space_is_shared(client, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL")
+    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-ada"})) == ["shared"]

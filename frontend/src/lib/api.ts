@@ -1,5 +1,7 @@
 /** Typed client for the gateway (api.py). Every call goes through the /api proxy. */
 
+import { supabase } from './supabase'
+
 export type Citation = {
   title: string
   authors: string[]
@@ -148,8 +150,19 @@ export function figureImageUrl(paper: string, image: string) {
   return `/api/papers/${encodeURIComponent(paper)}/figures/${encodeURIComponent(file)}.png`
 }
 
+/** The signed-in user's access token, so the gateway knows whose analyses to show.
+ * Empty when login is off. */
+async function accessToken() {
+  if (!supabase) return ''
+  const { data } = await supabase.auth.getSession()
+  return data.session?.access_token ?? ''
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, init)
+  const token = await accessToken()
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(`/api${path}`, { ...init, headers })
   if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`)
   return response.json()
 }
@@ -192,9 +205,19 @@ export const api = {
    * closes the connection for good, for the caller to call once it knows the run ended,
    * and for cleanup on unmount. */
   onStages: (id: string, onStage: (stage: Stage) => void, onOpen?: () => void) => {
-    const events = new EventSource(`/api/analyses/${id}/events`)
-    events.onmessage = (message) => onStage(JSON.parse(message.data))
-    if (onOpen) events.onopen = onOpen
-    return () => events.close()
+    // EventSource cannot send an Authorization header, so the token goes in the query.
+    let events: EventSource | null = null
+    let closed = false
+    accessToken().then((token) => {
+      if (closed) return
+      const query = token ? `?access_token=${encodeURIComponent(token)}` : ''
+      events = new EventSource(`/api/analyses/${id}/events${query}`)
+      events.onmessage = (message) => onStage(JSON.parse(message.data))
+      if (onOpen) events.onopen = onOpen
+    })
+    return () => {
+      closed = true
+      events?.close()
+    }
   },
 }
