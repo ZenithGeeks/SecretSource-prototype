@@ -25,6 +25,10 @@ export function useResearcherActions() {
       store.fileQueuePaper(title)
       qc.invalidateQueries({ queryKey: ['researcher', 'home'] })
     },
+    deleteProject: (projectId: string): void => {
+      store.deleteProject(projectId)
+      qc.invalidateQueries({ queryKey: ['researcher', 'projects'] })
+    },
   }
 }
 
@@ -52,5 +56,12 @@ export function useResearcherLibrary(projectId: string) {
   return useQuery({
     queryKey: ['researcher', 'library', projectId],
     queryFn: () => researcherApi.getLibrary(projectId),
+  })
+}
+
+export function useResearcherPaper(projectId: string, paperId: string) {
+  return useQuery({
+    queryKey: ['researcher', 'paper', projectId, paperId],
+    queryFn: () => researcherApi.getPaper(projectId, paperId),
   })
 }

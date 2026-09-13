@@ -16,11 +16,13 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { HistoryList } from '../../components/HistoryList'
 import { useAnalyses } from '../../lib/useAnalysis'
+import { useProjects } from '../../lib/useResearcher'
 import { FieldConsensus } from './screens/FieldConsensus'
 import { Graph } from './screens/Graph'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
+import { PaperDetail } from './screens/PaperDetail'
 import { Settings as SettingsScreen } from './screens/Settings'
 
 type NavKey = 'home' | 'library' | 'graph' | 'history' | 'settings'
@@ -70,13 +72,21 @@ function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
 export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [screen, setScreen] = useState<ResearcherScreen>(initialScreen)
   const [selected, setSelected] = useState<string | null>(initialAnalysis)
+  const [paper, setPaper] = useState<{ projectId: string; id: string } | null>(() => {
+    const p = new URLSearchParams(window.location.search)
+    const pid = p.get('project')
+    const paperId = p.get('paper')
+    return pid && paperId ? { projectId: pid, id: paperId } : null
+  })
   const [wide, setWide] = useState(false) // History has a page open beside the claims
   const analyses = useAnalyses()
+  const projects = useProjects().data ?? []
 
   useEffect(() => syncScreenParams(screen, selected), [screen, selected])
 
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
+    setPaper(null)
     setWide(false)
   }
   const select = (id: string | null) => {
@@ -100,8 +110,21 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         ) : undefined
       }
     >
-      {screen === 'home' && <Home onOpen={navigate} />}
-      {screen === 'library' && <Library onAddPaper={() => navigate('history')} />}
+      {paper && (
+        <PaperDetail
+          projectId={paper.projectId}
+          paperId={paper.id}
+          projectName={projects.find((p) => p.id === paper.projectId)?.name ?? 'Library'}
+          onBack={() => setPaper(null)}
+        />
+      )}
+      {!paper && screen === 'home' && <Home onOpen={navigate} />}
+      {!paper && screen === 'library' && (
+        <Library
+          onAddPaper={() => navigate('history')}
+          onOpenPaper={(projectId, id) => setPaper({ projectId, id })}
+        />
+      )}
       {screen === 'field-consensus' && <FieldConsensus />}
       {screen === 'graph' && <Graph />}
       {screen === 'history' && (

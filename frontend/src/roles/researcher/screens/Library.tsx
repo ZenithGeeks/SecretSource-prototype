@@ -101,16 +101,24 @@ function ProjectsLanding({
 function ProjectDetail({
   projectId,
   projectName,
+  canDelete,
   onBack,
   onAddPaper,
+  onOpenPaper,
+  onDeleteProject,
 }: {
   projectId: string
   projectName: string
+  canDelete: boolean
   onBack: () => void
   onAddPaper?: () => void
+  onOpenPaper: (paperId: string) => void
+  onDeleteProject: () => void
 }) {
   const [filter, setFilter] = useState('All')
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
+  const [showImport, setShowImport] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const library = useResearcherLibrary(projectId).data
   if (!library) return null
 
@@ -140,7 +148,16 @@ function ProjectDetail({
           <p className="text-sm text-ink-muted">{library.summary}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="ghost">
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-refutes hover:bg-refutes-soft"
+            >
+              Delete
+            </button>
+          )}
+          <Button variant="ghost" onClick={() => setShowImport(true)}>
             <Upload className="size-4" />
             Import .bib
           </Button>
@@ -191,6 +208,7 @@ function ProjectDetail({
           <button
             key={paper.title}
             type="button"
+            onClick={() => paper.id && onOpenPaper(paper.id)}
             className="flex w-full items-center gap-4 border-t border-border-subtle px-5 py-2.5 text-left hover:bg-accent-soft"
           >
             <div className="min-w-0 flex-1">
@@ -208,12 +226,38 @@ function ProjectDetail({
             <ChevronRight className="size-4 shrink-0 text-ink-muted" />
           </button>
         ))}
-        {shown.length === 0 && (
+        {shown.length === 0 && library.papers.length > 0 && (
           <p className="border-t border-border-subtle px-5 py-6 text-sm text-ink-muted">
-            No papers match.
+            No papers match “{query}”. Try broader wording or clear the filter.
           </p>
         )}
+        {library.papers.length === 0 && (
+          <div className="flex flex-col items-center gap-2 border-t border-border-subtle px-5 py-12 text-center">
+            <p className="text-sm font-medium text-ink">This project is empty</p>
+            <p className="max-w-sm text-xs text-ink-muted">
+              Add a paper by DOI, arXiv ID, URL, or upload a PDF. It’ll be checked as it’s added.
+            </p>
+            <Button className="mt-1" onClick={onAddPaper}>
+              <Plus className="size-4" />
+              Add paper
+            </Button>
+          </div>
+        )}
       </div>
+
+      {showImport && <ImportDialog onCancel={() => setShowImport(false)} onImport={() => setShowImport(false)} />}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete “${projectName}”?`}
+          body="This removes the project and unfiles its papers back to Unsorted. The papers and their checks are kept. This cannot be undone."
+          confirmLabel="Delete project"
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false)
+            onDeleteProject()
+          }}
+        />
+      )}
     </>
   )
 }
@@ -281,7 +325,86 @@ function NewProjectDialog({
   )
 }
 
-export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
+/** Modal shell — scrim + card, Esc/backdrop cancel. */
+function Modal({ onCancel, children }: { onCancel: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onKeyDown={(e) => e.key === 'Escape' && onCancel()}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div className="absolute inset-0 bg-ink/45" onClick={onCancel} />
+      <div className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/** Import .bib — dropzone modal (upload is stubbed for the prototype). */
+function ImportDialog({ onCancel, onImport }: { onCancel: () => void; onImport: () => void }) {
+  return (
+    <Modal onCancel={onCancel}>
+      <h2 className="font-serif text-xl font-semibold text-ink">Import references</h2>
+      <p className="mt-1 text-[13px] text-ink-muted">
+        Upload a .bib file — each entry is resolved and added to this project, then checked.
+      </p>
+      <div className="mt-4 flex flex-col items-center gap-1 rounded-xl border border-dashed border-accent bg-canvas py-8">
+        <p className="text-sm font-semibold text-ink">Drop a .bib file here</p>
+        <p className="text-xs text-ink-muted">or click to browse</p>
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button onClick={onImport}>Import</Button>
+      </div>
+    </Modal>
+  )
+}
+
+/** Generic confirm modal (used for destructive actions). */
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  title: string
+  body: string
+  confirmLabel: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Modal onCancel={onCancel}>
+      <h2 className="font-serif text-xl font-semibold text-ink">{title}</h2>
+      <p className="mt-1 text-[13px] text-ink-muted">{body}</p>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="rounded-lg bg-refutes px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+export function Library({
+  onAddPaper,
+  onOpenPaper,
+}: {
+  onAddPaper?: () => void
+  onOpenPaper?: (projectId: string, paperId: string) => void
+}) {
   const [openId, setOpenId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('project'),
   )
@@ -289,17 +412,28 @@ export function Library({ onAddPaper }: { onAddPaper?: () => void }) {
     () => new URLSearchParams(window.location.search).get('new') === '1',
   )
   const projects = useProjects().data
-  const { createProject } = useResearcherActions()
+  const { createProject, deleteProject } = useResearcherActions()
   if (!projects) return null
 
   if (openId) {
-    const name = projects.find((p) => p.id === openId)?.name ?? 'Project'
+    const project = projects.find((p) => p.id === openId)
+    // Project was deleted (or a stale ?project=) — fall back to the landing.
+    if (!project) {
+      setOpenId(null)
+      return null
+    }
     return (
       <ProjectDetail
         projectId={openId}
-        projectName={name}
+        projectName={project.name}
+        canDelete={!project.unsorted}
         onBack={() => setOpenId(null)}
         onAddPaper={onAddPaper}
+        onOpenPaper={(paperId) => onOpenPaper?.(openId, paperId)}
+        onDeleteProject={() => {
+          deleteProject(openId)
+          setOpenId(null)
+        }}
       />
     )
   }

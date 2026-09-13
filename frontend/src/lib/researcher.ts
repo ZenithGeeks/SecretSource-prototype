@@ -60,6 +60,7 @@ export type FieldConsensus = {
 }
 
 export type LibraryPaper = {
+  id?: string // slug of the title; assigned by the store when a library is read
   title: string
   cite: string
   cluster: string
@@ -67,6 +68,28 @@ export type LibraryPaper = {
   backed: number | null // null when the paper has not been verified yet
   contradicted: number | null
   linked: string[] // other library papers it cites or is cited by
+}
+
+export type PaperVerdict = 'supports' | 'refutes' | 'insufficient'
+
+/** One claim a paper makes, with how its cited source held up. */
+export type PaperClaim = {
+  claim: string
+  verdict: PaperVerdict
+  quote: string
+  linked: string[]
+}
+
+/** A single paper opened from the library: its metadata plus its claims and verdicts. */
+export type PaperDetail = {
+  id: string
+  projectId: string
+  title: string
+  cite: string
+  cluster: string
+  linked: string[]
+  tally: { claims: number; backed: number; contradicted: number; silent: number }
+  claimsDetail: PaperClaim[]
 }
 
 export type ResearcherLibrary = {
@@ -154,4 +177,8 @@ export const researcherApi = {
 
   // TODO gateway: GET /researcher/projects/{id}/library
   getLibrary: async (projectId: string): Promise<ResearcherLibrary> => store.library(projectId),
+
+  // TODO gateway: GET /researcher/projects/{projectId}/papers/{paperId}
+  getPaper: async (projectId: string, paperId: string): Promise<PaperDetail | null> =>
+    store.paper(projectId, paperId),
 }
