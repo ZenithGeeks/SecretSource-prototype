@@ -24,8 +24,8 @@ export function useAuth(): { session: Session | null; loading: boolean } {
 }
 
 export async function signOut(): Promise<void> {
-  // Clear this browser's Supabase session. Google's own session is untouched — the next
-  // "Continue with Google" shows the account chooser (prompt=select_account) so a different
-  // account can be picked.
-  await supabase?.auth.signOut()
+  // scope:'local' signs out only this browser (the default 'global' revokes the user's
+  // refresh tokens on every device). The SIGNED_OUT listener in main.tsx then clears the
+  // React Query cache and resets the settings store so the next user starts clean.
+  await supabase?.auth.signOut({ scope: 'local' })
 }
