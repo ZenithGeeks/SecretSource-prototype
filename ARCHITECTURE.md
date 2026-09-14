@@ -196,22 +196,35 @@ purpose, then check the results again on a paper you know.
 
 ### Chat agents
 
-`backend/app/agents/team.py`. One coordinator and three specialists.
+`backend/app/agents/team.py`. One coordinator, three specialists, and `check_claim`, a
+single-turn copy of `verify_agent` that the coordinator calls as a tool.
 
 ```mermaid
 flowchart TD
-    U(["cli.py, adk web, or A2A"]) --> C{{"coordinator<br/>only routes"}}
+    U(["cli.py, adk web, or A2A"]) --> C{{"coordinator<br/>routes, or combines checks"}}
     C -.->|"transfer_to_agent"| RA["rag_agent"]
     C -.->|"transfer_to_agent"| PA["paper_agent"]
     C -.->|"transfer_to_agent"| VA["verify_agent"]
+    C -->|"one call per paper,<br/>same turn"| CC["check_claim<br/>single_turn"]
     RA --> RT["answer_from_docs, add_paper,<br/>search_passages (ColBERT over MCP)"]
     PA --> PT["extract_claims, extract_citations,<br/>extract_claims_with_citations, fetch_source"]
     VA --> VT["verify_claim"]
+    CC --> VT
 ```
 
-The coordinator never answers by itself. It hands the conversation to one specialist with
-`transfer_to_agent`. Each specialist has its own instruction and tools. The tools are the
-same pipeline functions the gateway uses.
+- A request one specialist owns is handed over whole with `transfer_to_agent`. The
+  specialist then answers the user.
+- A claim to check against two or more papers is not handed over. The coordinator calls
+  `check_claim` once per paper in the same turn, ADK runs the calls at the same time, and
+  the coordinator writes one answer: a line per paper and one sentence on whether they
+  agree.
+- `check_claim` has `mode="single_turn"`, which ADK recommends over wrapping an agent in
+  `AgentTool`. An agent has one mode, so the tool and the transfer target are two agents
+  with the same instruction.
+- Each specialist has its own instruction and tools. The tools are the same pipeline
+  functions the gateway uses, wrapped by `off_the_loop` so they run in a worker thread. ADK
+  calls a plain function tool on its event loop, so without it parallel calls would take
+  turns.
 
 ### Analysis graph
 
@@ -250,12 +263,14 @@ flowchart LR
 | Feature | Where |
 | --- | --- |
 | A coordinator that routes to sub-agents | `team.py` |
+| A single-turn sub-agent called as a tool, several at once | `team.py`: `check_claim` |
 | Shared session state | `workflow.py` |
 | MCP tools | `team.py`: ColBERT's `search_passages` over MCP |
 | Parallel workers in a graph | `workflow.py`: `prepare_sources`, `check_sources` |
 | A2A server | `backend/a2a_server.py` |
 
-We do not use `AgentTool`, `LoopAgent`, `SequentialAgent` or `ParallelAgent`. The analysis
+We do not use `AgentTool` (`mode="single_turn"` does the same job), `LoopAgent`,
+`SequentialAgent` or `ParallelAgent`. The analysis
 pipeline is a graph of plain functions. The LLM is used inside two steps, reading the paper
 and judging a claim, and never to choose the next step. The next section explains why.
 
@@ -284,13 +299,15 @@ flowchart TD
     end
 
     subgraph CHAT ["Chat agents: coordinator, team.py"]
-        C{{"coordinator<br/>routes only"}}
+        C{{"coordinator<br/>routes, or combines checks"}}
         R["rag_agent"]
         PA["paper_agent"]
         V["verify_agent"]
+        CC["check_claim<br/>parallel, one per paper"]
         C --> R
         C --> PA
         C --> V
+        C --> CC
     end
 
     V -.->|"same code"| J
@@ -306,6 +323,7 @@ flowchart TD
 | Judging one claim | `JudgeClaim` in `verify.py` | One model call, not an agent | Code runs the searches first. The model only reads the passages and picks one of three verdicts. |
 | Checking the finished analysis | `audit` in `audit.py` | Review and critique, with code as the critic | The judge's quote must be in the evidence. Code can check that without a model. |
 | Chat agents | `root_agent` in `team.py` | Coordinator | A chat message can ask for many things, so a model has to pick the specialist. |
+| One claim against several papers, in chat | `check_claim` in `team.py` | Parallel, gathered by the coordinator | The checks do not depend on each other. The coordinator gets every verdict back and writes one answer. |
 
 - The gateway runs the steps with plain `asyncio` in `_run`, not the ADK graph, because it
   sends an event to the web app after every check. The guide calls this the custom logic
