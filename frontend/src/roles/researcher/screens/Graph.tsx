@@ -15,7 +15,7 @@
  */
 
 import cytoscape from 'cytoscape'
-import fcose from 'cytoscape-fcose'
+import cola from 'cytoscape-cola'
 import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
 import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
@@ -25,14 +25,14 @@ import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } f
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
-let _fcoseReady = false
-if (!_fcoseReady) {
+let _colaReady = false
+if (!_colaReady) {
   try {
-    cytoscape.use(fcose)
+    cytoscape.use(cola)
   } catch {
     /* already registered */
   }
-  _fcoseReady = true
+  _colaReady = true
 }
 
 type Palette = {
@@ -197,12 +197,23 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
         'text-background-color': surface, 'text-background-opacity': 0.85,
         'text-background-padding': '2px', 'text-background-shape': 'roundrectangle',
         'border-width': 1.5, 'border-color': accent, 'background-color': accentSoft,
-        // Papers view sizes by how connected a paper is; claims view is uniform.
-        width: view === 'papers' ? ('mapData(weight, 1, 5, 26, 48)' as unknown as number) : 30,
-        height: view === 'papers' ? ('mapData(weight, 1, 5, 26, 48)' as unknown as number) : 30,
+        // Bigger = more connected (Obsidian-style): sized by how many claims/works touch it.
+        width: 'mapData(weight, 1, 8, 26, 54)' as unknown as number,
+        height: 'mapData(weight, 1, 8, 26, 54)' as unknown as number,
       },
     },
-    { selector: 'edge', style: { 'curve-style': 'bezier', width: 2, 'target-arrow-shape': 'none', opacity: 0.9 } },
+    // Curved edges (a gentle bow) read better than straight lines when many meet at one paper.
+    {
+      selector: 'edge',
+      style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distances': '50',
+        'control-point-weights': '0.5',
+        width: 2,
+        'target-arrow-shape': 'none',
+        opacity: 0.9,
+      },
+    },
     // Claims view: colour by relation.
     { selector: 'edge[relation="backs"]', style: { 'line-color': pal.supports } },
     { selector: 'edge[relation="contradicts"]', style: { 'line-color': pal.refutes } },
@@ -237,20 +248,18 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
   return base
 }
 
-// Node positions are seeded on a circle (see seedPosition, applied in the elements) so this
-// fcose pass refines a real starting layout. With randomize:false fcose keeps that start, which
-// makes the result the same on every reload AND spread across the canvas — react-cytoscapejs
-// otherwise drops every node at (0,0), which collapses randomize:false into a diagonal strip.
-// (nodeSeparation only applies to fcose's spectral step, skipped here, and packComponents needs
-// cytoscape-layout-utilities, which we don't register — both were no-ops, so they're dropped.)
+// Live, draggable physics (Obsidian-style): the simulation keeps running, so dragging a node
+// makes its neighbours drift and re-settle. Nodes are seeded on a circle (in the elements) so it
+// opens spread out rather than piled at the origin. NOTE: with continuous physics the layout is
+// no longer identical on every reload.
 const LAYOUT = {
-  name: 'fcose', animate: false, randomize: false, fit: true, quality: 'proof',
-  nodeDimensionsIncludeLabels: true, idealEdgeLength: 95, padding: 40,
+  name: 'cola', animate: true, infinite: true, fit: false, randomize: false,
+  nodeDimensionsIncludeLabels: true, edgeLength: 170, nodeSpacing: 14, handleDisconnected: true,
 } as const
 
-/** A deterministic circle position for node i of n — the seed fcose refines. */
+/** A circle position for node i of n — where the physics simulation starts each node. */
 function seedPosition(i: number, n: number): { x: number; y: number } {
-  const radius = Math.max(200, 10 * n)
+  const radius = Math.max(340, 16 * n)
   const angle = (2 * Math.PI * i) / Math.max(1, n)
   return { x: Math.round(radius * Math.cos(angle)), y: Math.round(radius * Math.sin(angle)) }
 }
@@ -522,6 +531,8 @@ export function Graph() {
   const [pFilter, setPFilter] = useState<PapersFilter>('all')
   // Full label of the hovered node, positioned over the canvas — the on-node label is short.
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
+  // The hovered node id: like Obsidian, hovering spotlights that node's neighbours and dims the rest.
+  const [hovered, setHovered] = useState<string | null>(null)
 
   const paperIds = useMemo(
     () => (graph ? new Set(graph.edges.map((e) => e.source)) : new Set<string>()),
@@ -534,13 +545,17 @@ export function Graph() {
     if (!graph) return []
     if (view === 'claims') {
       const claimEdges: Record<string, GraphEdge[]> = {}
-      graph.edges.forEach((e) => (claimEdges[e.target] ??= []).push(e))
+      const deg: Record<string, number> = {}
+      graph.edges.forEach((e) => {
+        ;(claimEdges[e.target] ??= []).push(e)
+        deg[e.source] = (deg[e.source] ?? 0) + 1 // a paper's size = how many claims it touches
+      })
       const shown = graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id))
       return [
         ...shown.map((n, i) => ({
           data:
             n.kind === 'paper'
-              ? { ...n, short: paperShort(n) }
+              ? { ...n, short: paperShort(n), weight: deg[n.id] ?? 1 }
               : { ...n, standing: claimStanding(claimEdges[n.id] ?? []) },
           position: seedPosition(i, shown.length),
         })),
@@ -567,37 +582,41 @@ export function Graph() {
     ]
   }, [graph, view, pFilter, paperIds])
 
-  // Spotlight the selection's neighbourhood; fade the rest. Claims filter dims non-matches.
+  // Spotlight one node/edge's neighbourhood and fade the rest. A click selection wins; otherwise
+  // hovering spotlights (Obsidian-style); otherwise the claims filter dims non-matches.
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
     cy.batch(() => {
       cy.elements().removeClass('faded selected')
-      if (view === 'claims') {
-        if (filter.trim()) {
-          const q = filter.toLowerCase()
-          cy.nodes('[kind="claim"]').forEach((n) => {
-            if (!String(n.data('label')).toLowerCase().includes(q)) n.addClass('faded')
-          })
+      if (view === 'claims' && claimSel) {
+        const node = cy.$id(claimSel)
+        if (node.nonempty()) {
+          cy.elements().addClass('faded')
+          node.closedNeighborhood().removeClass('faded')
+          node.addClass('selected')
         }
-        if (claimSel) {
-          const node = cy.$id(claimSel)
-          if (node.nonempty()) {
-            cy.elements().addClass('faded')
-            node.closedNeighborhood().removeClass('faded')
-            node.addClass('selected')
-          }
-        }
-      } else if (pairSel) {
+      } else if (view === 'papers' && pairSel) {
         const edge = cy.$id(pairSel)
         if (edge.nonempty()) {
           cy.elements().addClass('faded')
           edge.removeClass('faded').addClass('selected')
           edge.connectedNodes().removeClass('faded')
         }
+      } else if (hovered) {
+        const node = cy.$id(hovered)
+        if (node.nonempty()) {
+          cy.elements().addClass('faded')
+          node.closedNeighborhood().removeClass('faded')
+        }
+      } else if (view === 'claims' && filter.trim()) {
+        const q = filter.toLowerCase()
+        cy.nodes('[kind="claim"]').forEach((n) => {
+          if (!String(n.data('label')).toLowerCase().includes(q)) n.addClass('faded')
+        })
       }
     })
-  }, [view, filter, claimSel, pairSel, elements, ready])
+  }, [view, filter, claimSel, pairSel, hovered, elements, ready])
 
   if (!graph) return null
 
@@ -741,17 +760,21 @@ export function Graph() {
                   setPairSel(null)
                 }
               })
-              // Full label on hover; drop it whenever the view moves so it can't hang stale.
+              // Hover: show the full label and spotlight this node's neighbourhood (Obsidian-style).
               cy.on('mouseover', 'node', (evt: cytoscape.EventObject) => {
                 const p = evt.target.renderedPosition()
                 setTip({ x: p.x, y: p.y, text: String(evt.target.data('label')) })
+                setHovered(evt.target.id())
               })
-              cy.on('mouseout', 'node', () => setTip(null))
+              cy.on('mouseout', 'node', () => {
+                setTip(null)
+                setHovered(null)
+              })
               cy.on('drag', 'node', () => setTip(null))
               cy.on('pan zoom', () => setTip(null))
-              // Fit once, after the layout settles — not on every render. Re-runs only when the
-              // element set changes (the layout re-runs then), e.g. switching Claims/Papers.
-              cy.on('layoutstop', () => fitReadable(cy))
+              // Live physics runs forever, so there is no layoutstop — frame the graph once it has
+              // had a moment to spread from the seed positions. After that the user pans/zooms/drags.
+              window.setTimeout(() => fitReadable(cy), 900)
               setReady(true)
             }}
           />
