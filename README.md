@@ -81,22 +81,20 @@ Writer draft check (sample data):
    ```sh
    git clone https://github.com/ZenithGeeks/SecretSource-prototype.git
    cd SecretSource-prototype
-   cp .env.example .env
+   cp .env.cloud .env
    ```
 
-3. **Fill in `.env`**. Everything else in `.env.example` can stay empty:
+   `.env.cloud` already has the shared URLs for the LLM, ColBERT, ColPali and Supabase, and
+   `SERVICE_AUTH=google-id-token`. `.env.example` explains every setting.
+
+3. **Fill in the empty secrets in `.env`**:
 
    | Variable | Value | Where it comes from |
    | --- | --- | --- |
-   | `VLLM_URL` | shared LLM endpoint, ends in `/v1` | `<from the team lead>` |
-   | `VLLM_MODEL` | model id the endpoint lists | `<from the team lead>` |
-   | `VLLM_API_KEY` | key for that endpoint | `<from the team lead>` |
-   | `COLBERT_URL` | shared ColBERT URL | `<from the team lead>` |
-   | `COLPALI_URL` | shared ColPali URL | `<from the team lead>` |
-   | `GROBID_URL` | shared GROBID URL | `<from the team lead>` |
-   | `SERVICE_AUTH` | `google-id-token` | type it |
-   | `GOOGLE_APPLICATION_CREDENTIALS` | `secrets/service-auth.json` | type it (the file itself comes from the team lead) |
+   | `VLLM_API_KEY` | key for the shared LLM endpoint | `<from the team lead>` |
    | `S2_API_KEY` | your own free Semantic Scholar key | https://www.semanticscholar.org/product/api (strongly recommended: without it most cited papers never resolve) |
+   | `SUPABASE_SERVICE_ROLE_KEY` | server key for the shared Supabase project | `<from the team lead>` |
+   | `VITE_SUPABASE_ANON_KEY` | optional, turns on sign-in | `<from the team lead>` |
 
    Optional settings:
    - `UNPAYWALL_EMAIL`: your email. It helps find free PDFs.
@@ -117,18 +115,26 @@ Writer draft check (sample data):
    This also starts a local `grobid` container. It is not used when `GROBID_URL` points to
    the cloud one.
 
-6. **Open the app:** go to http://localhost:5173 and paste an arXiv ID (for example `2112.01488`) or upload a PDF. Check the API is up with:
+6. **Check the setup:**
 
    ```sh
    curl http://localhost:8080/health
    ```
+
+   It lists each service the gateway uses (the LLM, GROBID, ColBERT, ColPali, Supabase) with its
+   URL and whether it answered. `"degraded": false` means every required one answered. The
+   gateway log shows the same list when it starts: `docker compose logs gateway`.
+
+7. **Open the app:** go to http://localhost:5173 and paste an arXiv ID (for example `2112.01488`) or upload a PDF.
 
 ## Run the retrieval services on your own GPU
 
 Use this when the cloud services are not available. ColBERT and ColPali run on your own
 NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 
-1. In `.env`, leave `COLBERT_URL`, `COLPALI_URL`, `GROBID_URL`, `QDRANT_URL` and `QDRANT_API_KEY` empty. Set `SERVICE_AUTH=none`. Keep the `VLLM_*` values for the shared LLM endpoint.
+1. Start from `cp .env.local-gpu .env`. It leaves every URL empty, so compose uses its own
+   containers, and sets `SERVICE_AUTH=none`. To keep the shared LLM endpoint instead of a local
+   vLLM, copy the `VLLM_*` values from `.env.cloud`.
 
 2. Start the services:
 
@@ -171,6 +177,7 @@ while it runs. Past analyses are in History.
 
 | Symptom | Fix |
 | --- | --- |
+| `/health` says `"degraded": true` | find the dependency with `"ok": false`. Its `url` is what the gateway calls and `detail` says what went wrong. Fix that URL or key in `.env`, then `docker compose up -d` |
 | 401 or 403 from colbert, colpali or grobid in the gateway logs | check `SERVICE_AUTH=google-id-token`, `GOOGLE_APPLICATION_CREDENTIALS=secrets/service-auth.json`, and that `backend/secrets/service-auth.json` exists; then `docker compose up -d` |
 | Gateway exits with "SERVICE_AUTH must be 'none' or 'google-id-token'" | typo in `SERVICE_AUTH` |
 | 503 from the cloud services | the services sleep when nobody uses them. The first request wakes them (ColBERT: a few seconds, ColPali: about a minute). If it does not stop, tell the team lead |
@@ -195,7 +202,7 @@ GET  /health
 ## Roadmap
 
 - [ ] One MCP server for SecretSource with API-key access, for editors and other agents (SCRUM-165)
-- [ ] Ready-made .env templates and a dependency report in /health (SCRUM-163)
+- [x] Ready-made .env templates and a dependency report in /health (SCRUM-163)
 - [ ] Papers and figures in cloud storage, so nothing lives on one machine (SCRUM-164)
 - [ ] Public web, gateway and MCP entry points (SCRUM-166)
 - [ ] Analyses that survive cloud restarts (SCRUM-167)

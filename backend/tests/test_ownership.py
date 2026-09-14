@@ -20,6 +20,7 @@ def client(monkeypatch):
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
     monkeypatch.setattr(auth, "_user_id_for", TOKENS.get)
     monkeypatch.setattr(main.store, "delete", lambda analysis_id: True)
+    monkeypatch.setattr(main.dependencies, "report", lambda: {"degraded": False, "dependencies": []})
     main.analyses.clear()
     for analysis_id, owner in (("a1", "user-ada"), ("b1", "user-bo"), ("shared", None)):
         main.analyses[analysis_id] = {"id": analysis_id, "paper": "x.pdf", "status": "done",

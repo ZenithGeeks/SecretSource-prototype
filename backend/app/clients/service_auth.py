@@ -34,6 +34,11 @@ def _audience(url: str) -> str | None:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+def signs(url: str) -> bool:
+    """Whether calls to this URL carry an identity token."""
+    return _audience(url) is not None
+
+
 def auth_headers(url: str) -> dict[str, str]:
     audience = _audience(url)
     if audience is None:
