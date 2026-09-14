@@ -1,4 +1,4 @@
-"""A check waits for its cited paper's figures FIGURE_WAIT seconds at most (#163).
+"""A check waits for its cited paper's figures, or FIGURE_WAIT seconds at most when it is set (#163).
 
 Indexing figures means Docling reading the whole PDF, up to 150 s per paper. The text index is
 what a verdict needs. No services: ColBERT, ColPali, the lookup and the judge are fakes, and
@@ -66,7 +66,7 @@ def services(monkeypatch):
     monkeypatch.setattr(verify, "_indexed", set())
     monkeypatch.setattr(verify, "_visual_indexing", {}, raising=False)
     monkeypatch.setattr(verify, "_figures_due", {}, raising=False)
-    monkeypatch.setattr(verify, "FIGURE_WAIT", 0.0, raising=False)  # tests that wait set their own
+    monkeypatch.setattr(verify, "FIGURE_WAIT", 0.0, raising=False)  # fast mode; tests that wait set their own
     monkeypatch.setattr(verify, "_locks", {})
     yield types.SimpleNamespace(calls=calls, release=release, text_results=text_results)
     release.set()  # never leave a pool thread blocked
@@ -112,6 +112,19 @@ def test_a_failed_text_index_is_tried_again_but_the_figures_only_once(services):
     verify._visual_indexing[PAPER.name].result(timeout=5)
     assert services.calls["add_paper"] == 2
     assert services.calls["index_figures"] == 1
+
+
+def test_by_default_a_check_waits_for_the_figures(services, monkeypatch):
+    """Empty FIGURE_WAIT: quality first. A caption turned one verdict in 15 from refutes into
+    supports, so the default waits for them however long Docling takes."""
+    monkeypatch.setattr(verify, "FIGURE_WAIT", None)
+    threading.Timer(0.5, services.release.set).start()
+    start = time.monotonic()
+    verify.prepare_source("2112.01488")
+    assert time.monotonic() - start >= 0.45
+
+    verdict = verify.check_prepared("ColBERT reduces the index 10x", "2112.01488", PAPER)
+    assert [page["label"] for page in verdict["pages"]] == ["Figure 2"]
 
 
 def test_figures_that_are_ready_within_figure_wait_are_used(services, monkeypatch):

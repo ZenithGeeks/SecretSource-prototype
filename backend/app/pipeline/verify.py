@@ -52,8 +52,8 @@ _indexed: set[str] = set()  # sources whose text this process has put in ColBERT
 _visual_indexing: dict[str, Future] = {}  # each source's figure indexing, started once
 _figures_due: dict[str, float] = {}  # when its checks stop waiting for them (monotonic time)
 # Indexing a cited paper's figures means Docling reading the whole PDF, a minute or more on a
-# CPU. Checks wait for it FIGURE_WAIT seconds at most (#163), so it runs here, at most
-# PARALLEL_SOURCES papers at a time, the same as when each check waited for its own.
+# CPU. It runs here, at most PARALLEL_SOURCES papers at a time, the same as when each check
+# indexed its own, so that FIGURE_WAIT can let a check go on without it (#163).
 _visual_pool = ThreadPoolExecutor(max_workers=PARALLEL_SOURCES, thread_name_prefix="figures")
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -71,11 +71,12 @@ def _index_once(source: Path, wait_for_figures: bool = False) -> dict | None:
     checks indexed the same paper at once, one could search in the middle and find nothing.
     The lock makes the second check wait.
 
-    The figures go into ColPali in the background, started at the same time as the text. They
-    took up to 150 s per paper on a CPU, and a verdict can do without them, so this waits for
-    them until FIGURE_WAIT seconds after they started, then returns without them (#163).
-    check_prepared searches the figures only once they are indexed. `wait_for_figures` waits
-    as long as it takes, for a single check that has nothing else to do.
+    The figures go into ColPali in the background, started at the same time as the text. By
+    default this waits for them too, because a figure caption can decide a verdict: without
+    them, one verdict in 15 went from supports to refutes (#163). With FIGURE_WAIT set to a
+    number, it waits at most that many seconds after they started, then returns without them,
+    and check_prepared searches the figures only once they are indexed. `wait_for_figures`
+    always waits, for a single check that has nothing else to do.
 
     Returns the error if the text index failed.
     """
@@ -87,7 +88,8 @@ def _index_once(source: Path, wait_for_figures: bool = False) -> dict | None:
         if figures is None:
             figures = _visual_pool.submit(_index_visually_if_available, source)
             _visual_indexing[source.name] = figures
-            _figures_due[source.name] = time.monotonic() + FIGURE_WAIT
+            if FIGURE_WAIT is not None:
+                _figures_due[source.name] = time.monotonic() + FIGURE_WAIT
         if source.name not in _indexed:
             indexed = add_paper(source.as_posix())
             if indexed["status"] == "error":
@@ -95,9 +97,10 @@ def _index_once(source: Path, wait_for_figures: bool = False) -> dict | None:
             else:
                 _indexed.add(source.name)
     if failure is None:
-        # Counted from when the figures started, so a later check of the same paper, or a slow
-        # text index, does not add another full wait.
-        wait = None if wait_for_figures else _figures_due[source.name] - time.monotonic()
+        # A number counts from when the figures started, so a later check of the same paper, or
+        # a slow text index, does not add another full wait.
+        due = _figures_due.get(source.name)
+        wait = None if wait_for_figures or due is None else due - time.monotonic()
         if wait is None or wait > 0:
             try:
                 figures.result(timeout=wait)

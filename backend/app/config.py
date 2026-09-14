@@ -58,8 +58,8 @@ PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 # keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.
 PARALLEL_SOURCES_TOTAL = int(os.getenv("PARALLEL_SOURCES_TOTAL") or PARALLEL_SOURCES)
 PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECKS)
-# Seconds a cited paper's checks wait for its figures to be indexed before they go on with the
-# text alone; a later check of the same paper gets the figures. The same 24 checks on a warm GPU
-# gateway took 86 s with 0 (no figures), 175 s with 20 (2 verdicts with figures), and 447 s
-# waiting for all of them (14 verdicts with figures). A large value brings that last one back.
-FIGURE_WAIT = float(os.getenv("FIGURE_WAIT") or "0")
+# How long a cited paper's checks wait for its figures to be indexed. Empty: until they are, so
+# every verdict can use the figure captions. A number of seconds is a fast mode: after that the
+# check is judged on the text alone, and a later run of the paper gets the figures. On the same
+# 15 checks, 0 took 85 s instead of 264 s, and one verdict out of 15 came out wrong (#163).
+FIGURE_WAIT = float(os.getenv("FIGURE_WAIT")) if os.getenv("FIGURE_WAIT") else None
