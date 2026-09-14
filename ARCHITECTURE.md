@@ -69,7 +69,9 @@ flowchart TD
    same paper, but each paper is prepared only once. Up to `PARALLEL_SOURCES` papers
    (default 3) are prepared at the same time.
 5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
-   `PARALLEL_CHECKS` claims (default 3) are judged at the same time.
+   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. When several analyses
+   run at once, `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` cap steps 4 and 5 across
+   all of them (default: the per-run values), and the runs take turns.
 6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
    `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
    keeps only figures whose caption gives their number, like "Figure 2: ...". The web app

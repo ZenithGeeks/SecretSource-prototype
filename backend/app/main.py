@@ -39,7 +39,13 @@ from pydantic import BaseModel
 
 from app import researcher, store
 from app.auth import current_user
-from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
+from app.config import (
+    PAPERS_DIR,
+    PARALLEL_CHECKS,
+    PARALLEL_CHECKS_TOTAL,
+    PARALLEL_SOURCES,
+    PARALLEL_SOURCES_TOTAL,
+)
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
@@ -63,6 +69,11 @@ FIGURE_NAME = re.compile(r"figure-\d+")
 
 analyses: dict[str, dict] = {}
 streams: dict[str, asyncio.Queue] = {}
+
+# Shared by every run, so N analyses at once are not N times the load on the retrieval
+# services and the LLM (#170). _run takes its own limit first, then one of these.
+all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
+all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
 
 
 def restore():
@@ -207,7 +218,9 @@ async def _run(analysis_id: str, paper: str, verify: bool):
             source_limit = asyncio.Semaphore(PARALLEL_SOURCES)
 
             async def prepare(source: str) -> dict:
-                async with source_limit:
+                # This run's limit first: a run then has at most PARALLEL_SOURCES jobs waiting
+                # on the shared limit, so a second run's first paper goes before this run's tenth.
+                async with source_limit, all_sources:
                     return await asyncio.to_thread(prepare_source, source)
 
             ready_sources = {}
@@ -220,7 +233,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
             async def check(index: int, claim: dict, citation: dict, source: str):
                 ready = await ready_sources[source]
-                async with check_limit:
+                async with check_limit, all_checks:  # in this order, as in prepare
                     await _publish(analysis_id, "verifying", claim=index, source=source)
                     if ready["status"] == "error":
                         verdict = {**ready, "claim": claim["claim"], "source": source}
