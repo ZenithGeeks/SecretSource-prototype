@@ -16,8 +16,8 @@
 
 import cytoscape from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize2, Search, ZoomIn, ZoomOut } from 'lucide-react'
-import { type ComponentType, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
 import { reasonText } from '../../../lib/api'
@@ -109,11 +109,13 @@ function truncate(text: string, max = 22): string {
   return `${(space > max - 8 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
-/** How a claim stands overall, worst-first, so its dot colour shows contradiction at a glance. */
+/** How a claim stands overall — same precedence as backend standing(): contradicted, then
+ * silent, then backed, else no verdict yet. (Silent before backed, so one silent + one backing
+ * source reads "silent" here as it does on the claim cards and stat tiles.) */
 function claimStanding(edges: GraphEdge[]): GraphRelation {
   if (edges.some((e) => e.relation === 'contradicts')) return 'contradicts'
-  if (edges.some((e) => e.relation === 'backs')) return 'backs'
   if (edges.some((e) => e.relation === 'silent')) return 'silent'
+  if (edges.some((e) => e.relation === 'backs')) return 'backs'
   return 'asserts'
 }
 
@@ -235,14 +237,33 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
   return base
 }
 
-// randomize:false makes fcose deterministic, so a reload lays the graph out the same way.
-// nodeDimensionsIncludeLabels keeps the short paper labels from overlapping. Edges are short so
-// each paper's claim dots sit close around it instead of flung across the canvas.
+// Node positions are seeded on a circle (see seedPosition, applied in the elements) so this
+// fcose pass refines a real starting layout. With randomize:false fcose keeps that start, which
+// makes the result the same on every reload AND spread across the canvas — react-cytoscapejs
+// otherwise drops every node at (0,0), which collapses randomize:false into a diagonal strip.
+// (nodeSeparation only applies to fcose's spectral step, skipped here, and packComponents needs
+// cytoscape-layout-utilities, which we don't register — both were no-ops, so they're dropped.)
 const LAYOUT = {
   name: 'fcose', animate: false, randomize: false, fit: true, quality: 'proof',
-  nodeDimensionsIncludeLabels: true, nodeSeparation: 130, idealEdgeLength: 95,
-  packComponents: true, padding: 40,
+  nodeDimensionsIncludeLabels: true, idealEdgeLength: 95, padding: 40,
 } as const
+
+/** A deterministic circle position for node i of n — the seed fcose refines. */
+function seedPosition(i: number, n: number): { x: number; y: number } {
+  const radius = Math.max(200, 10 * n)
+  const angle = (2 * Math.PI * i) / Math.max(1, n)
+  return { x: Math.round(radius * Math.cos(angle)), y: Math.round(radius * Math.sin(angle)) }
+}
+
+/** Fit the whole graph, but never so far out that it reads tiny: below 0.9 the labels blur, so
+ * clamp to 0.9 and centre and let the user pan or press Fit. */
+function fitReadable(cy: cytoscape.Core): void {
+  cy.resize()
+  cy.fit(undefined, 40)
+  if (cy.zoom() < 0.9) {
+    cy.zoom({ level: 0.9, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+  }
+}
 
 function InsightTile({ insight }: { insight: Insight }) {
   const { count, label, icon: Icon, tone } = insight
@@ -460,24 +481,39 @@ export function Graph() {
   const graph = useKnowledgeGraph().data
   const { pal, dark } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
-  const canvasRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
   const [ready, setReady] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
-  // Cytoscape reads a pixel size once; in a flex column that size is wrong until the layout
-  // settles (and again when the detail panel opens or the window resizes). Re-measure and re-fit
-  // whenever the canvas box changes so the graph is never drawn off-screen or oversized.
-  useEffect(() => {
-    const el = canvasRef.current
+  // Attach the ResizeObserver through a callback ref rather than an effect: an effect runs on the
+  // first render, while the query is still loading and Graph returns null, when the canvas div
+  // does not exist yet (and with [] deps it would never re-run). On resize we only cy.resize() —
+  // never fit — so opening the detail panel or changing the window width keeps the user's zoom.
+  const setCanvas = useCallback((el: HTMLDivElement | null) => {
+    canvasRef.current = el
+    observerRef.current?.disconnect()
     if (!el) return
-    const observer = new ResizeObserver(() => {
-      const cy = cyRef.current
-      if (!cy) return
-      cy.resize()
-      cy.fit(undefined, 40)
-    })
+    const observer = new ResizeObserver(() => cyRef.current?.resize())
     observer.observe(el)
-    return () => observer.disconnect()
+    observerRef.current = observer
   }, [])
+
+  // Keep fullscreen state in sync (Esc also exits) and re-fit when the canvas resizes into or out
+  // of fullscreen.
+  useEffect(() => {
+    const onChange = () => {
+      setFullscreen(Boolean(document.fullscreenElement))
+      const cy = cyRef.current
+      if (cy) {
+        cy.resize()
+        cy.fit(undefined, 40)
+      }
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
   const params = new URLSearchParams(window.location.search)
   const [view, setView] = useState<View>(params.get('view') === 'papers' ? 'papers' : 'claims')
   const [claimSel, setClaimSel] = useState<string | null>(params.get('claim'))
@@ -499,14 +535,15 @@ export function Graph() {
     if (view === 'claims') {
       const claimEdges: Record<string, GraphEdge[]> = {}
       graph.edges.forEach((e) => (claimEdges[e.target] ??= []).push(e))
+      const shown = graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id))
       return [
-        ...graph.nodes
-          .filter((n) => n.kind === 'claim' || paperIds.has(n.id))
-          .map((n) =>
+        ...shown.map((n, i) => ({
+          data:
             n.kind === 'paper'
-              ? { data: { ...n, short: paperShort(n) } }
-              : { data: { ...n, standing: claimStanding(claimEdges[n.id] ?? []) } },
-          ),
+              ? { ...n, short: paperShort(n) }
+              : { ...n, standing: claimStanding(claimEdges[n.id] ?? []) },
+          position: seedPosition(i, shown.length),
+        })),
         ...graph.edges.map((e) => ({ data: e })),
       ]
     }
@@ -518,10 +555,12 @@ export function Graph() {
     const edges = graph.paperEdges.filter((e) =>
       pFilter === 'strong' ? e.similarity >= 0.5 : pFilter === 'citations' ? e.cites : true,
     )
+    const papers = graph.nodes.filter((n) => n.kind === 'paper')
     return [
-      ...graph.nodes
-        .filter((n) => n.kind === 'paper')
-        .map((n) => ({ data: { ...n, weight: deg[n.id] ?? 1, short: paperShort(n) } })),
+      ...papers.map((n, i) => ({
+        data: { ...n, weight: deg[n.id] ?? 1, short: paperShort(n) },
+        position: seedPosition(i, papers.length),
+      })),
       ...edges.map((e) => ({
         data: { id: e.id, source: e.a, target: e.b, kind: 'paper', cites: e.cites ? 1 : 0, similarity: e.similarity },
       })),
@@ -621,12 +660,15 @@ export function Graph() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:flex-1 lg:flex-row">
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
+        {/* This screen is only the graph, so give the canvas the viewport height (height is the
+            binding constraint for fitting the whole graph), with a min so it can't collapse on a
+            short window. The role shell is `wide` for Graph, so it also uses the screen width. */}
         <div
-          ref={canvasRef}
-          className="relative h-[440px] min-w-0 overflow-hidden rounded-xl border border-border-subtle bg-canvas lg:h-auto lg:min-h-0 lg:flex-1"
+          ref={setCanvas}
+          className="relative min-h-[560px] min-w-0 flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas lg:h-[calc(100dvh-13rem)]"
         >
-          {/* Zoom + fit, so a dense library can be opened up and re-framed. factor 0 = fit. */}
+          {/* Zoom, fit and fullscreen, so a dense library can be opened up and re-framed. */}
           <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface">
             {[
               { icon: ZoomIn, label: 'Zoom in', factor: 1.3 },
@@ -649,6 +691,18 @@ export function Graph() {
                 <Icon className="size-4" />
               </button>
             ))}
+            <button
+              type="button"
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              onClick={() => {
+                if (document.fullscreenElement) void document.exitFullscreen()
+                else void canvasRef.current?.requestFullscreen?.()
+              }}
+              className="flex size-8 items-center justify-center border-t border-border-subtle text-ink-muted hover:bg-accent-soft hover:text-ink"
+            >
+              {fullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
+            </button>
           </div>
           {view === 'claims' ? (
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5">
@@ -670,8 +724,11 @@ export function Graph() {
             layout={LAYOUT}
             style={{ width: '100%', height: '100%' }}
             cy={(cy: cytoscape.Core) => {
+              // react-cytoscapejs calls this on every render (componentDidUpdate), not just mount.
+              // Only wire a given instance once, so a state change (filtering, selecting a claim)
+              // never re-runs fit and throws away the user's zoom.
+              if (cyRef.current === cy) return
               cyRef.current = cy
-              cy.removeAllListeners()
               cy.on('tap', 'node[kind="claim"]', (evt: cytoscape.EventObject) => {
                 setClaimSel(evt.target.id())
               })
@@ -692,12 +749,9 @@ export function Graph() {
               cy.on('mouseout', 'node', () => setTip(null))
               cy.on('drag', 'node', () => setTip(null))
               cy.on('pan zoom', () => setTip(null))
-              // The initial layout can run before the flex box has its final size (the ResizeObserver
-              // races cy readiness), leaving the graph unfitted. Re-fit once cy is ready.
-              requestAnimationFrame(() => {
-                cy.resize()
-                cy.fit(undefined, 40)
-              })
+              // Fit once, after the layout settles — not on every render. Re-runs only when the
+              // element set changes (the layout re-runs then), e.g. switching Claims/Papers.
+              cy.on('layoutstop', () => fitReadable(cy))
               setReady(true)
             }}
           />

@@ -117,7 +117,9 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
       onOpenSettings={() => navigate('settings')}
       settingsActive={screen === 'settings'}
-      wide={wide}
+      // Graph is a whole-screen canvas, so give it the wide shell too (History uses it for the
+      // page viewer).
+      wide={wide || screen === 'graph'}
       sidebar={
         screen === 'history' ? (
           <HistoryList
