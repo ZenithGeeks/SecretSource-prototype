@@ -211,7 +211,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listAnalyses: () => request<Analysis[]>('/analyses'),
 
-  getAnalysis: (id: string) => request<Analysis>(`/analyses/${id}`),
+  getAnalysis: (id: string, signal?: AbortSignal) => request<Analysis>(`/analyses/${id}`, { signal }),
 
   deleteAnalysis: (id: string) => request<{ deleted: string }>(`/analyses/${id}`, { method: 'DELETE' }),
 
