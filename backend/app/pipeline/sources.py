@@ -19,7 +19,12 @@ SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper"
 UNPAYWALL_URL = "https://api.unpaywall.org/v2"
 S2_FIELDS = "title,year,externalIds,openAccessPdf"
 TITLE_MATCH = 0.9  # a wrong paper is worse than no paper
-RETRY_WAITS = (2, 6, 15)  # a 429 means the service asks us to wait, so we wait, three times
+# A 429 is retried until RETRY_BUDGET seconds have passed, waiting these seconds between tries;
+# the last wait repeats. On 2026-09-14 Semantic Scholar refused 70 to 80% of calls with a key,
+# even one call every 5 s, and let the others through at random. Many short tries get an
+# answer, where 4 tries gave up on about 1 lookup in 4 (#173).
+RETRY_WAITS = (2, 3, 5, 8, 10)
+RETRY_BUDGET = 120.0
 # Semantic Scholar answers about one request a second, and never two at once.
 # Send three together and two get a 429, one gets an answer. The analysis graph
 # checks several cited sources in parallel, so every lookup waits its turn in _s2_get.
@@ -108,9 +113,11 @@ def _s2_get(path: str, params: dict):
 def _rate_limited() -> LookupUnavailable:
     """The error to raise when the lookup gave up to rate limiting."""
     if S2_API_KEY:
+        # Our calls already go out S2_MIN_INTERVAL apart, under the key's limit, so the refusals
+        # come from Semantic Scholar's side, or from someone else using the same key.
         return LookupUnavailable(
-            "Semantic Scholar kept rate limiting us even with S2_API_KEY set; a key allows "
-            "about one request a second and this run has more sources than that to look up"
+            f"Semantic Scholar refused every call for {RETRY_BUDGET:.0f} s with S2_API_KEY set and "
+            f"our calls {S2_MIN_INTERVAL} s apart; it is throttling on its side, try again later"
         )
     return LookupUnavailable("Semantic Scholar is rate limiting us; set S2_API_KEY for a higher limit")
 
@@ -125,13 +132,17 @@ def _retry_after(response, fallback: float) -> float:
 
 def _semantic_scholar(path: str, params: dict) -> dict:
     """One Semantic Scholar call; a 429 is retried, not treated as an answer about the paper."""
-    for wait in (*RETRY_WAITS, None):
+    give_up_at = time.monotonic() + RETRY_BUDGET
+    attempt = 0
+    while True:
         response = _s2_get(path, params)
         if response.status_code != 429:
             break
-        if wait is None:
+        wait = _retry_after(response, RETRY_WAITS[min(attempt, len(RETRY_WAITS) - 1)])
+        if time.monotonic() + wait > give_up_at:
             raise _rate_limited()
-        time.sleep(_retry_after(response, wait))
+        time.sleep(wait)
+        attempt += 1
     response.raise_for_status()
     return response.json()
 
