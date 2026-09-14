@@ -407,4 +407,33 @@ A failed check returns `status: "error"` with `message` and `reason`.
 
 #### `GET /health`
 
-Response: `{"ok": true, "analyses": <number of analyses held>}`.
+No login needed. `ok` means the gateway is up. The rest comes from `app/dependencies.py`, from a
+check at most 30 s old:
+
+```json
+{
+  "ok": true,
+  "analyses": 12,
+  "degraded": false,
+  "service_auth": "none",
+  "checked_at": 1789360000.0,
+  "dependencies": [
+    {"name": "llm", "url": "https://gateway.9arm.co/v1", "auth": "api key", "required": true, "ok": true, "detail": "HTTP 200"},
+    {"name": "grobid", "url": "http://grobid:8070", "auth": "none", "required": true, "ok": true, "detail": "HTTP 200"},
+    {"name": "colbert", "url": "http://colbert:8893", "auth": "none", "required": true, "ok": false, "detail": "ConnectionError: ..."},
+    {"name": "colpali", "url": "http://colpali:8894", "auth": "none", "required": false, "ok": true, "detail": "HTTP 200"},
+    {"name": "supabase", "url": "", "auth": "none", "required": false, "ok": null, "detail": "not set: analyses are stored in SQLite at ..."}
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `degraded` | a required dependency did not answer; analyses will fail until it does |
+| `url` | what the gateway calls, without any password or query string |
+| `auth` | `google-id-token` for a `*.run.app` URL with `SERVICE_AUTH=google-id-token`, `api key`, `service role key`, or `none` |
+| `required` | ColPali is not: checks go on with text passages when it is down. Supabase is only when it is set |
+| `ok` | answered with 2xx; for the LLM, also lists `VLLM_MODEL` in `/models`. `null` means not set |
+| `detail` | the HTTP status, or the error |
+
+The gateway logs the same list once at startup, and `python -m app.dependencies` prints it.

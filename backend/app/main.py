@@ -37,7 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app import researcher, store
+from app import dependencies, researcher, store
 from app.auth import current_user
 from app.config import (
     PAPERS_DIR,
@@ -93,6 +93,8 @@ def restore():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     restore()
+    # Log where each dependency is and whether it answers, without holding up startup.
+    app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))
     yield
 
 
@@ -559,7 +561,9 @@ async def verify(request: VerifyRequest):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "analyses": len(analyses)}
+    """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
+    check at most 30 s old. `degraded` is true when a required one did not answer."""
+    return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
 
 
 if __name__ == "__main__":
