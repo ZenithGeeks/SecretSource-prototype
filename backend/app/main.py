@@ -19,6 +19,8 @@ as they progress. A restart keeps the history.
 """
 
 import asyncio
+import copy
+import hashlib
 import json
 import logging
 import os
@@ -35,9 +37,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app import researcher, store
+from app import dependencies, researcher, store
 from app.auth import current_user
-from app.config import PAPERS_DIR, PARALLEL_CHECKS, PARALLEL_SOURCES
+from app.config import (
+    PAPERS_DIR,
+    PARALLEL_CHECKS,
+    PARALLEL_CHECKS_TOTAL,
+    PARALLEL_SOURCES,
+    PARALLEL_SOURCES_TOTAL,
+)
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
@@ -62,6 +70,11 @@ FIGURE_NAME = re.compile(r"figure-\d+")
 analyses: dict[str, dict] = {}
 streams: dict[str, asyncio.Queue] = {}
 
+# Shared by every run, so N analyses at once are not N times the load on the retrieval
+# services and the LLM (#170). _run takes its own limit first, then one of these.
+all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
+all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
+
 
 def restore():
     """Load stored analyses on startup. Ones still marked running were interrupted."""
@@ -80,6 +93,8 @@ def restore():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     restore()
+    # Log where each dependency is and whether it answers, without holding up startup.
+    app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))
     yield
 
 
@@ -96,6 +111,7 @@ class PathWithoutQuery(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PathWithoutQuery())
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
 app.add_middleware(
@@ -108,12 +124,52 @@ class AnalysisRequest(BaseModel):
     verify: bool = True
 
 
+_unsaved: set[str] = set()  # analyses changed since their last save started
+_savers: dict[str, asyncio.Task] = {}  # the task saving each analysis, while one runs
+
+
+def _save_soon(analysis_id: str) -> None:
+    """Save the analysis from a thread, not on the event loop.
+
+    A Supabase upsert takes 200-300 ms, and while the loop waits for it every request from
+    every user waits too (#169). One task per analysis does the saving. Changes made while it
+    is saving are written together by its next save, so an older state is never stored after
+    a newer one.
+    """
+    _unsaved.add(analysis_id)
+    if analysis_id not in _savers:
+        _savers[analysis_id] = asyncio.create_task(_save_while_unsaved(analysis_id))
+
+
+async def _save_while_unsaved(analysis_id: str) -> None:
+    try:
+        while analysis_id in _unsaved:
+            _unsaved.discard(analysis_id)
+            analysis = analyses.get(analysis_id)
+            if analysis is None:  # deleted meanwhile
+                return
+            # Copied on the loop: the run keeps changing the dict while the thread writes it.
+            snapshot = copy.deepcopy(analysis)
+            try:
+                await asyncio.to_thread(store.save, snapshot)
+            except Exception:
+                logger.exception("saving analysis %s failed", analysis_id)
+    finally:
+        _savers.pop(analysis_id, None)
+
+
+async def _saved(analysis_id: str) -> None:
+    """Wait until the analysis's latest state is stored."""
+    while (saver := _savers.get(analysis_id)) is not None:
+        await saver
+
+
 async def _publish(analysis_id: str, stage: str, **fields):
     """Record a stage on the analysis and send it to the open event stream. `at` is the Unix
     time, so the web app can show how long a run has taken."""
     event = {"stage": stage, **fields, "at": round(time.time(), 1)}
     analyses[analysis_id]["stages"].append(event)
-    store.save(analyses[analysis_id])
+    _save_soon(analysis_id)
     await streams[analysis_id].put(event)
 
 
@@ -133,6 +189,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         analysis["claims"] = claims
         analysis["references"] = extracted.get("references", {})
         analysis["markers"] = extracted.get("markers", [])
+        analysis["outline"] = extracted.get("outline", [])
         # We send both counts. If a cap cut the claims in half, the paper would look short.
         await _publish(
             analysis_id, "extracted", claims=len(claims),
@@ -163,7 +220,9 @@ async def _run(analysis_id: str, paper: str, verify: bool):
             source_limit = asyncio.Semaphore(PARALLEL_SOURCES)
 
             async def prepare(source: str) -> dict:
-                async with source_limit:
+                # This run's limit first: a run then has at most PARALLEL_SOURCES jobs waiting
+                # on the shared limit, so a second run's first paper goes before this run's tenth.
+                async with source_limit, all_sources:
                     return await asyncio.to_thread(prepare_source, source)
 
             ready_sources = {}
@@ -176,7 +235,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
 
             async def check(index: int, claim: dict, citation: dict, source: str):
                 ready = await ready_sources[source]
-                async with check_limit:
+                async with check_limit, all_checks:  # in this order, as in prepare
                     await _publish(analysis_id, "verifying", claim=index, source=source)
                     if ready["status"] == "error":
                         verdict = {**ready, "claim": claim["claim"], "source": source}
@@ -213,6 +272,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         await _publish(analysis_id, "error", message=str(error))
     finally:
         await streams[analysis_id].put(None)  # closes any open stream
+        await _saved(analysis_id)
 
 
 def _start(paper: str, verify: bool, owner: str | None) -> dict:
@@ -243,20 +303,39 @@ async def start_analysis(request: AnalysisRequest, user: str | None = Depends(cu
     return _start(request.paper, request.verify, user)
 
 
+def save_upload(content: bytes, filename: str | None) -> Path:
+    """Store an uploaded PDF under a name made from its bytes: <stem>-<12 hex of sha256>.pdf.
+
+    Everything after the upload goes by the file name: who may open the paper (papers_of), its
+    page renders and its figure crops. Under the name the browser sent, two users' paper.pdf
+    would be one file, the second upload replacing the first (#168). The same bytes uploaded
+    twice still share one file, which is right: their pages and figures are the same too.
+    """
+    original = Path(Path(filename or "").name)
+    stem = original.stem.lstrip(".") or "paper"
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    path = PAPERS_DIR / f"{stem}-{digest}{original.suffix or '.pdf'}"
+    if not path.is_file():
+        PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+        # Written aside, then renamed: a run that opens this name never reads half a file.
+        partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
+        partial.write_bytes(content)
+        os.replace(partial, path)
+    return path
+
+
 @app.post("/analyses/upload")
 async def upload_analysis(
     file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
 ):
-    PAPERS_DIR.mkdir(parents=True, exist_ok=True)
-    path = PAPERS_DIR / Path(file.filename).name
-    path.write_bytes(await file.read())
+    path = save_upload(await file.read(), file.filename)
     return _start(path.as_posix(), verify, user)
 
 
 @app.get("/analyses")
 async def list_analyses(user: str | None = Depends(current_user)):
     # The list leaves out what only one analysis's own view needs.
-    left_out = ("stages", "references", "markers")
+    left_out = ("stages", "references", "markers", "outline")
     return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
 
 
@@ -268,10 +347,12 @@ async def get_analysis(analysis_id: str, user: str | None = Depends(current_user
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
     _owned(analysis_id, user)
-    if not store.delete(analysis_id):
-        raise HTTPException(404, "no such analysis")
+    # Out of memory first, so no new save starts. A save already running would store the row
+    # again after the delete, so wait for it.
     analyses.pop(analysis_id, None)
     streams.pop(analysis_id, None)
+    await _saved(analysis_id)
+    await asyncio.to_thread(store.delete, analysis_id)
     return {"deleted": analysis_id}
 
 
@@ -480,7 +561,9 @@ async def verify(request: VerifyRequest):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "analyses": len(analyses)}
+    """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
+    check at most 30 s old. `degraded` is true when a required one did not answer."""
+    return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
 
 
 if __name__ == "__main__":

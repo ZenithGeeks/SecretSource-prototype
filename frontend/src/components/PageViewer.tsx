@@ -37,6 +37,7 @@ export type Target = {
   quote?: string // the text being pointed at, if there is one to show
   source: Source | null // null when it could not be located: the page shows unmarked
   page?: number // fall back to this when there is no source to take a page from
+  section?: string // the analysed paper's section this points into, for the table of contents
 }
 
 const ZOOMS = [1, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls

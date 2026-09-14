@@ -54,3 +54,7 @@ CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 ke
 PARALLEL_SOURCES = int(os.getenv("PARALLEL_SOURCES", "3"))
 # How many claims are judged at the same time. Judging only searches and asks the LLM.
 PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
+# The same two limits for the whole gateway, across every analysis running at once. Each run
+# keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.
+PARALLEL_SOURCES_TOTAL = int(os.getenv("PARALLEL_SOURCES_TOTAL") or PARALLEL_SOURCES)
+PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECKS)

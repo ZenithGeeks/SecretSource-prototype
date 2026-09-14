@@ -5,11 +5,15 @@ import { useEffect } from 'react'
 
 import { api, type Analysis } from './api'
 
+/** Checks that report within this long of each other share one refetch of the analysis. */
+const REFETCH_WINDOW_MS = 300
+
 export function useAnalysis(id: string | null) {
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['analysis', id],
-    queryFn: () => api.getAnalysis(id!),
+    // The signal aborts a refetch that a newer one replaced, so it does not reach the gateway.
+    queryFn: ({ signal }) => api.getAnalysis(id!, signal),
     enabled: Boolean(id),
   })
 
@@ -26,11 +30,23 @@ export function useAnalysis(id: string | null) {
       replayed = queryClient.getQueryData<Analysis>(['analysis', id])?.stages.length ?? 0
     }
     resync()
+    // At most one refetch per window. invalidateQueries cancels a refetch in flight and starts
+    // another, so calling it once per stage sent a request per stage: opening a run with 23
+    // finished checks sent about 30 identical requests in a third of a second (#165).
+    let pending: number | undefined
+    const refetchSoon = () => {
+      if (pending !== undefined) return
+      pending = window.setTimeout(() => {
+        pending = undefined
+        queryClient.invalidateQueries({ queryKey: ['analysis', id] })
+      }, REFETCH_WINDOW_MS)
+    }
     let closed = false
     const close = api.onStages(
       id,
       (stage) => {
-        if (replayed > 0) {
+        const replay = replayed > 0
+        if (replay) {
           replayed -= 1
         } else {
           // Stages stream in; claims and verdicts come from a refetch when the run ends.
@@ -41,20 +57,23 @@ export function useAnalysis(id: string | null) {
         // The stages that changed the analysis itself: the claims exist server-side from
         // `extracted` on, and each verdict is folded onto its claim before its stage is
         // published, so refetch and the reader gets them while the run is still going
-        // rather than all at once at the end. Concurrent refetches of one key are
-        // deduplicated, so several checks reporting together are not several requests.
+        // rather than all at once at the end. A replayed stage needs none: the analysis
+        // fetched before the stream opened already has what it changed.
         if (
-          stage.stage === 'extracted' ||
-          stage.stage === 'verified' ||
-          stage.stage === 'failed' ||
-          stage.stage === 'figures'
+          !replay &&
+          (stage.stage === 'extracted' ||
+            stage.stage === 'verified' ||
+            stage.stage === 'failed' ||
+            stage.stage === 'figures')
         ) {
-          queryClient.invalidateQueries({ queryKey: ['analysis', id] })
+          refetchSoon()
         }
         // A run that ended between the fetch and the stream replays its end too; act on
         // it, and close for good — nothing more is coming, so there is nothing left to
         // reconnect for.
         if (stage.stage === 'done' || stage.stage === 'error') {
+          window.clearTimeout(pending)
+          pending = undefined
           queryClient.invalidateQueries({ queryKey: ['analysis', id] })
           queryClient.invalidateQueries({ queryKey: ['analyses'] })
           if (!closed) {
@@ -65,7 +84,10 @@ export function useAnalysis(id: string | null) {
       },
       resync,
     )
-    return () => close()
+    return () => {
+      window.clearTimeout(pending)
+      close()
+    }
   }, [id, running, queryClient])
 
   return query

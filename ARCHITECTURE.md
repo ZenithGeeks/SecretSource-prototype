@@ -1,7 +1,7 @@
 # Architecture
 
 This page explains how SecretSource works inside: the parts, the steps of an analysis,
-and which file to change for a given job.
+which design pattern each part follows and why, and which file to change for a given job.
 
 ## The parts
 
@@ -69,7 +69,9 @@ flowchart TD
    same paper, but each paper is prepared only once. Up to `PARALLEL_SOURCES` papers
    (default 3) are prepared at the same time.
 5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
-   `PARALLEL_CHECKS` claims (default 3) are judged at the same time.
+   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. When several analyses
+   run at once, `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` cap steps 4 and 5 across
+   all of them (default: the per-run values), and the runs take turns.
 6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
    `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
    keeps only figures whose caption gives their number, like "Figure 2: ...". The web app
@@ -90,9 +92,11 @@ The code is in `backend/app/pipeline/verify.py`.
 
 **`prepare_source(source)`** gets a cited paper ready.
 
-1. `local_pdf` finds the PDF. The source can be a local path, a DOI, an arXiv ID, a PMID or
-   a URL. `sources.py` looks it up (arXiv first, then Semantic Scholar, then Unpaywall) and
-   downloads it into `PAPERS_DIR`.
+1. `local_pdf` finds the PDF. The source can be a local path, a DOI, an arXiv ID, a PMID, a
+   URL or a title. `sources.py` looks it up and downloads it into `PAPERS_DIR`. An arXiv ID
+   or a URL is used as it is. A DOI goes to Semantic Scholar, then to Unpaywall (only when
+   `UNPAYWALL_EMAIL` is set). A PMID goes to Semantic Scholar. A title goes to arXiv search,
+   then to Semantic Scholar search.
 2. `_index_once` indexes the paper in ColBERT (text passages) and, if it is running, in
    ColPali (cropped figures, or whole pages when no figures were found). Both are done at
    the same time.
@@ -194,22 +198,35 @@ purpose, then check the results again on a paper you know.
 
 ### Chat agents
 
-`backend/app/agents/team.py`. One coordinator and three specialists.
+`backend/app/agents/team.py`. One coordinator, three specialists, and `check_claim`, a
+single-turn copy of `verify_agent` that the coordinator calls as a tool.
 
 ```mermaid
 flowchart TD
-    U(["cli.py, adk web, or A2A"]) --> C{{"coordinator<br/>only routes"}}
+    U(["cli.py, adk web, or A2A"]) --> C{{"coordinator<br/>routes, or combines checks"}}
     C -.->|"transfer_to_agent"| RA["rag_agent"]
     C -.->|"transfer_to_agent"| PA["paper_agent"]
     C -.->|"transfer_to_agent"| VA["verify_agent"]
+    C -->|"one call per paper,<br/>same turn"| CC["check_claim<br/>single_turn"]
     RA --> RT["answer_from_docs, add_paper,<br/>search_passages (ColBERT over MCP)"]
     PA --> PT["extract_claims, extract_citations,<br/>extract_claims_with_citations, fetch_source"]
     VA --> VT["verify_claim"]
+    CC --> VT
 ```
 
-The coordinator never answers by itself. It hands the conversation to one specialist with
-`transfer_to_agent`. Each specialist has its own instruction and tools. The tools are the
-same pipeline functions the gateway uses.
+- A request one specialist owns is handed over whole with `transfer_to_agent`. The
+  specialist then answers the user.
+- A claim to check against two or more papers is not handed over. The coordinator calls
+  `check_claim` once per paper in the same turn, ADK runs the calls at the same time, and
+  the coordinator writes one answer: a line per paper and one sentence on whether they
+  agree.
+- `check_claim` has `mode="single_turn"`, which ADK recommends over wrapping an agent in
+  `AgentTool`. An agent has one mode, so the tool and the transfer target are two agents
+  with the same instruction.
+- Each specialist has its own instruction and tools. The tools are the same pipeline
+  functions the gateway uses, wrapped by `off_the_loop` so they run in a worker thread. ADK
+  calls a plain function tool on its event loop, so without it parallel calls would take
+  turns.
 
 ### Analysis graph
 
@@ -248,13 +265,88 @@ flowchart LR
 | Feature | Where |
 | --- | --- |
 | A coordinator that routes to sub-agents | `team.py` |
+| A single-turn sub-agent called as a tool, several at once | `team.py`: `check_claim` |
 | Shared session state | `workflow.py` |
 | MCP tools | `team.py`: ColBERT's `search_passages` over MCP |
 | Parallel workers in a graph | `workflow.py`: `prepare_sources`, `check_sources` |
 | A2A server | `backend/a2a_server.py` |
 
-We do not use `AgentTool`, `LoopAgent`, `SequentialAgent` or `ParallelAgent`. The analysis
-pipeline is a graph of plain functions, because only the judge needs an LLM.
+We do not use `AgentTool` (`mode="single_turn"` does the same job), `LoopAgent`,
+`SequentialAgent` or `ParallelAgent`. The analysis
+pipeline is a graph of plain functions. The LLM is used inside two steps, reading the paper
+and judging a claim, and never to choose the next step. The next section explains why.
+
+## Design pattern
+
+Google Cloud's guide
+[Choose a design pattern for your agentic AI system](https://docs.cloud.google.com/architecture/choose-design-pattern-agentic-ai-system)
+lists patterns for systems built on AI models. We compared SecretSource with it. One rule
+decided most choices: the model is used only for steps that read language (reading the
+paper, judging a claim), and plain code decides the order of the steps.
+
+```mermaid
+flowchart TD
+    subgraph ANALYSIS ["Analysis of a paper: sequential, custom code in _run / analysis_workflow"]
+        P["Read the paper<br/>parallel windows, EXTRACT_WORKERS = 3<br/>LLM"]
+        PL["Plan checks<br/>code"]
+        subgraph PREP ["Parallel: PARALLEL_SOURCES = 3"]
+            S["Get cited paper ready<br/>prepare_source, code"]
+        end
+        subgraph JUDGE ["Parallel: PARALLEL_CHECKS = 3"]
+            J["Judge one claim<br/>fixed search, then one LLM call<br/>not ReAct"]
+        end
+        F["Read figures<br/>code"]
+        A["Audit<br/>review and critique, code is the critic"]
+        P --> PL --> S --> J --> F --> A
+    end
+
+    subgraph CHAT ["Chat agents: coordinator, team.py"]
+        C{{"coordinator<br/>routes, or combines checks"}}
+        R["rag_agent"]
+        PA["paper_agent"]
+        V["verify_agent"]
+        CC["check_claim<br/>parallel, one per paper"]
+        C --> R
+        C --> PA
+        C --> V
+        C --> CC
+    end
+
+    V -.->|"same code"| J
+```
+
+### What we chose
+
+| Part | Code | Pattern | Why |
+| --- | --- | --- | --- |
+| Analysis of a paper | `_run` in `main.py`, `analysis_workflow` in `workflow.py` | Sequential | Every paper goes through the same steps in the same order. Nothing is decided while it runs. |
+| Getting cited papers ready, judging claims | `prepare_source`, `check_prepared` in `verify.py` | Parallel | Independent jobs. Running 3 at a time cut a run from 376 s to 246 s (commit `1b10b3a`). |
+| Reading the paper | `extract_claims_with_citations` in `claims.py` | Parallel | Parts of up to 12,000 characters. Up to 3 parts (`EXTRACT_WORKERS`) go to the model at once. |
+| Judging one claim | `JudgeClaim` in `verify.py` | One model call, not an agent | Code runs the searches first. The model only reads the passages and picks one of three verdicts. |
+| Checking the finished analysis | `audit` in `audit.py` | Review and critique, with code as the critic | The judge's quote must be in the evidence. Code can check that without a model. |
+| Chat agents | `root_agent` in `team.py` | Coordinator | A chat message can ask for many things, so a model has to pick the specialist. |
+| One claim against several papers, in chat | `check_claim` in `team.py` | Parallel, gathered by the coordinator | The checks do not depend on each other. The coordinator gets every verdict back and writes one answer. |
+
+- The gateway runs the steps with plain `asyncio` in `_run`, not the ADK graph, because it
+  sends an event to the web app after every check. The guide calls this the custom logic
+  pattern.
+- Verdicts are not merged. `fold_check` keeps each one, and the web app shows both when two
+  cited papers disagree.
+- The audit only reports findings. It never changes a verdict or asks the judge again, so it
+  is not a loop.
+- The critic is not a model, because a model costs one more call per check and can make the
+  same mistake as the judge.
+
+### Patterns we did not use
+
+| Pattern | Why not |
+| --- | --- |
+| Single agent for the whole analysis | A paper has up to 20 claims (`CLAIM_LIMIT`). One agent could skip a claim or a source, and nobody would see it. |
+| Hierarchical task decomposition, swarm | The guide suggests them for open problems, and they cost the most. Our task is not open: the paper gives the claims and sources. |
+| Coordinator for the analysis | There is nothing to route. Every paper takes the same path. |
+| Loop, iterative refinement | See the audit above. A loop costs a model call per round and needs a stop rule. |
+| ReAct | The search is the same for every claim, so code runs it, and the judge is one model call. |
+| Human in the loop | A run does not stop. Each verdict shows its quote, passages, and reasoning, so the reader decides after. |
 
 ## Services
 

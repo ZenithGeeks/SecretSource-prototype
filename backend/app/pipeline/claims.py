@@ -26,7 +26,6 @@ NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertio
 # each other. The cap keeps a long paper from opening a connection per window.
 EXTRACT_WORKERS = 3
 
-_converter = None  # lazy: loading docling's models takes seconds
 _claim_extractor = None  # lazy: needs dspy and a running LM
 _cited_claim_extractor = None
 
@@ -57,12 +56,10 @@ def _normalised_claim(claim: str) -> str:
 
 
 def _pdf_to_text(pdf_path: str) -> str:
-    global _converter
-    if _converter is None:
-        from docling.document_converter import DocumentConverter
+    from app.pipeline.figures import docling_converter, needs_ocr
 
-        _converter = DocumentConverter()
-    return _converter.convert(pdf_path).document.export_to_markdown()
+    converter = docling_converter(needs_ocr(pdf_path), pictures=False)
+    return converter.convert(pdf_path).document.export_to_markdown()
 
 
 # --- where a sentence sits on a page -------------------------------------------------
@@ -707,6 +704,139 @@ def _citation_markers(tei, references: dict) -> list[dict]:
     return markers
 
 
+def _outline(tei, pdf_path: str | None = None) -> list[dict]:
+    """The paper's numbered sections in document order, each with where its heading is:
+    {"n": "3.1", "title": "Architecture", "page": 4, "y": 158.93, "boxes": [...]}.
+
+    GROBID gives a section heading as <head n="3.1"> directly inside a <div> of the body. A head
+    without a number is a figure caption or a stray fragment, and is left out; so is a heading
+    GROBID gave no position (it needs `head` in teiCoordinates). GROBID can drop the letters of
+    a ligature ("ery & Document Encoders"), so when the PDF can be read, each title is read back
+    from its box on the page (#152).
+    """
+    body = tei.find(".//tei:body", TEI_NAMESPACE)
+    if body is None:
+        return []
+    headings = []
+    for div in body.iter(TEI_TAG + "div"):
+        head = div.find("tei:head", TEI_NAMESPACE)
+        number = (head.get("n") or "").strip() if head is not None else ""
+        boxes = _boxes(head.get("coords", "")) if number else []
+        if not boxes:
+            continue
+        title = " ".join("".join(head.itertext()).split())
+        headings.append({"n": number, "title": title, "page": boxes[0]["page"], "y": round(boxes[0]["y0"], 2),
+                         "boxes": boxes})
+    if pdf_path:
+        _read_titles_back(headings, pdf_path)
+        if headings and not any(heading["n"].split(".")[0] == "1" for heading in headings):
+            headings[:0] = _first_section_from_pdf(headings[0], pdf_path)
+    return headings
+
+
+def _first_section_from_pdf(first: dict, pdf_path: str) -> list[dict]:
+    """GROBID can miss the first heading ("1 INTRODUCTION" in ColBERT, SIGIR 2020), which leaves
+    every claim before section 2 without a section. Look for it on the page: a line before the
+    first heading GROBID found, set in the same font and size, that reads "1 <title>"."""
+    import pymupdf
+
+    try:
+        document = pymupdf.open(pdf_path)
+    except Exception:
+        return []
+    with document:
+        if not 1 <= first["page"] <= document.page_count:
+            return []
+
+        def spans(page_number: int) -> list[dict]:
+            page = document[page_number - 1]
+            return [
+                span
+                for block in page.get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                if line["dir"] == (1.0, 0.0)
+                for span in line["spans"]
+                if span["text"].strip()
+            ]
+
+        box = first["boxes"][0]
+        style = next(
+            (
+                (span["font"], span["size"])
+                for span in spans(first["page"])
+                if abs(span["bbox"][1] - box["y0"]) < 3 and span["bbox"][0] <= box["x1"]
+            ),
+            None,
+        )
+        if style is None:
+            return []
+        for page_number in range(1, first["page"] + 1):
+            rows: dict[int, list[dict]] = {}
+            for span in spans(page_number):
+                if span["font"] == style[0] and abs(span["size"] - style[1]) < 0.3:
+                    rows.setdefault(round(span["bbox"][1]), []).append(span)
+            for y, row in sorted(rows.items()):
+                if page_number == first["page"] and y >= box["y0"] - 1:
+                    break
+                row = sorted(row, key=lambda span: span["bbox"][0])
+                text = " ".join(" ".join(span["text"] for span in row).split())
+                if found := re.fullmatch(r"1\.?\s+([A-Z][^.]{2,60})", text):
+                    (left, top, _, _), (_, _, right, bottom) = row[0]["bbox"], row[-1]["bbox"]
+                    box = {"page": page_number, "x0": left, "y0": top, "x1": right, "y1": bottom}
+                    heading = {"n": "1", "title": found.group(1), "page": page_number, "y": round(top, 2)}
+                    return [{**heading, "boxes": [box]}]
+        return []
+
+
+def _read_titles_back(headings: list[dict], pdf_path: str) -> None:
+    """Replace each GROBID title with the text printed in its box, when that text contains
+    GROBID's: "ery & Document Encoders" becomes "Query & Document Encoders". A heading whose box
+    reads as something else keeps GROBID's title."""
+    import pymupdf
+
+    try:
+        document = pymupdf.open(pdf_path)
+    except Exception:
+        return
+    with document:
+        for heading in headings:
+            on_page = [box for box in heading["boxes"] if box["page"] == heading["page"]]
+            if not 1 <= heading["page"] <= document.page_count:
+                continue
+            area = pymupdf.Rect(
+                min(b["x0"] for b in on_page) - 2, min(b["y0"] for b in on_page) - 1,
+                max(b["x1"] for b in on_page) + 2, max(b["y1"] for b in on_page) + 1,
+            )
+            text = document[heading["page"] - 1].get_textbox(area)
+            printed = " ".join(unicodedata.normalize("NFKC", text).split())
+            printed = re.sub(rf"^{re.escape(heading['n'])}\.?\s+", "", printed)
+            fits = len(printed) <= 2 * len(heading["title"]) + 10
+            if printed and fits and _comparable(heading["title"]) in _comparable(printed):
+                heading["title"] = printed
+
+
+def _reading_position(page: int, x: float, y: float, page_width: float) -> tuple[int, int, float]:
+    """(page, column, y): the order a reader meets text in, on one- and two-column pages alike.
+    Text starting in the right half of the page is in the second column."""
+    return page, int(bool(page_width) and x >= page_width / 2), y
+
+
+def _section_of(source: dict | None, headings: list[dict], sizes: dict[int, tuple[float, float]]) -> str:
+    """The number of the section a claim's sentence is in: the last heading at or before where
+    the sentence starts, in reading order. Empty when the sentence was not found in the PDF, or
+    when it comes before the first heading."""
+    if not source or not source.get("boxes"):
+        return ""
+    width = source.get("page_width") or sizes.get(source["page"], (0, 0))[0]
+    start = min(_reading_position(source["page"], box["x0"], box["y0"], width) for box in source["boxes"])
+    before = [
+        (_reading_position(h["page"], h["boxes"][0]["x0"], h["y"], sizes.get(h["page"], (0, 0))[0]), h["n"])
+        for h in headings
+    ]
+    earlier = [entry for entry in before if entry[0] <= start]
+    return max(earlier)[1] if earlier else ""
+
+
 def _paragraph_text(paragraph) -> str:
     """Paragraph text with each citation <ref target="#b12"> rendered as [b12]."""
     parts = [paragraph.text or ""]
@@ -881,7 +1011,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
     given = pdf_path
     try:
         pdf_path = local_pdf(pdf_path)
-        tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref",))
+        tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref", "head"))
         _link_author_year_citations(tei)
         references, dropped = _references_by_id(tei)
         markers = _citation_markers(tei, references)
@@ -904,11 +1034,17 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         )
         header = _paper_header(tei)
         header["title"] = paper_title(pdf_path, header["title"], given)
+        headings, sizes = _outline(tei, pdf_path), _page_sizes(tei)
+        for claim in claims:
+            if section := _section_of(claim["source"], headings, sizes):
+                claim["section"] = section
         return {
             "status": "ok",
             "file": pdf_path,
             **header,
             "claims": claims,
+            # The numbered sections and where their headings are, for a table of contents.
+            "outline": [{key: heading[key] for key in ("n", "title", "page", "y")} for heading in headings],
             "extracted": len(found),  # before repeats, announcements and the cap
             "dropped": dropped,
             "windows": len(windows),

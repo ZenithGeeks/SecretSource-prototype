@@ -79,9 +79,12 @@ default".
 | `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
 | `PARALLEL_SOURCES` | `3` | cited papers downloaded and indexed at the same time |
 | `PARALLEL_CHECKS` | `3` | claims judged at the same time |
+| `PARALLEL_SOURCES_TOTAL` | `PARALLEL_SOURCES` | cited papers prepared at the same time across all running analyses |
+| `PARALLEL_CHECKS_TOTAL` | `PARALLEL_CHECKS` | claims judged at the same time across all running analyses |
 | `GATEWAY_PORT` | `8080` | port when started with `python -m app.main` |
 | `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
 | `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |
+| `DOCLING_OCR` | `auto` | `auto` runs OCR only on a PDF without a text layer (a scan); `always` or `never` overrides that |
 
 The service role key can read and write all data. Keep it on the server and never put it in
 the frontend or in git.
@@ -197,8 +200,8 @@ Response: `{"id": "<analysis id>"}`.
 
 #### `GET /analyses`
 
-Every analysis the caller may see, newest first, without `stages`, `references` and
-`markers`.
+Every analysis the caller may see, newest first, without `stages`, `references`,
+`markers` and `outline`.
 
 #### `GET /analyses/{id}`
 
@@ -219,6 +222,7 @@ One analysis with its results.
 | `figures` | the analysed paper's figures whose caption gives their number: `label`, `page`, `caption`, `image` |
 | `references` | the references the paper's citation markers point to, by GROBID id (like `b12`); each is a citation (see below) |
 | `markers` | where the paper cites a reference: `ref`, `text` (the marker as printed, like `[13]`), `page`, `x0`, `y0`, `x1`, `y1`, `page_width`, `page_height` in PDF points |
+| `outline` | the paper's numbered sections in order: `n` (like `3.1`), `title`, `page`, `y` (the top of the heading, in PDF points); missing on older analyses |
 
 Each claim has:
 
@@ -227,6 +231,7 @@ Each claim has:
 | `claim` | the claim in short form |
 | `sentence` | the sentence from the paper it came from |
 | `source` | where that sentence is in the PDF: `page`, `boxes`, `page_width`, `page_height`; `null` if not found |
+| `section` | the `n` of the outline section the sentence is in, like `3.1`; missing when the sentence was not found or comes before the first numbered heading |
 | `citations` | the works the sentence cites: `title`, `authors`, `year`, `doi`, `arxiv`, `url`, `ref` (GROBID's id, like `b12`) and `label` (the number the paper prints, like `13`) |
 | `verdicts` | one result per cited work that was checked (same shape as `POST /verify`), plus `cited` |
 | `unchecked` | one entry per cited work that could not be checked: `source`, `reason`, `message` |
@@ -402,4 +407,33 @@ A failed check returns `status: "error"` with `message` and `reason`.
 
 #### `GET /health`
 
-Response: `{"ok": true, "analyses": <number of analyses held>}`.
+No login needed. `ok` means the gateway is up. The rest comes from `app/dependencies.py`, from a
+check at most 30 s old:
+
+```json
+{
+  "ok": true,
+  "analyses": 12,
+  "degraded": false,
+  "service_auth": "none",
+  "checked_at": 1789360000.0,
+  "dependencies": [
+    {"name": "llm", "url": "https://gateway.9arm.co/v1", "auth": "api key", "required": true, "ok": true, "detail": "HTTP 200"},
+    {"name": "grobid", "url": "http://grobid:8070", "auth": "none", "required": true, "ok": true, "detail": "HTTP 200"},
+    {"name": "colbert", "url": "http://colbert:8893", "auth": "none", "required": true, "ok": false, "detail": "ConnectionError: ..."},
+    {"name": "colpali", "url": "http://colpali:8894", "auth": "none", "required": false, "ok": true, "detail": "HTTP 200"},
+    {"name": "supabase", "url": "", "auth": "none", "required": false, "ok": null, "detail": "not set: analyses are stored in SQLite at ..."}
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `degraded` | a required dependency did not answer; analyses will fail until it does |
+| `url` | what the gateway calls, without any password or query string |
+| `auth` | `google-id-token` for a `*.run.app` URL with `SERVICE_AUTH=google-id-token`, `api key`, `service role key`, or `none` |
+| `required` | ColPali is not: checks go on with text passages when it is down. Supabase is only when it is set |
+| `ok` | answered with 2xx; for the LLM, also lists `VLLM_MODEL` in `/models`. `null` means not set |
+| `detail` | the HTTP status, or the error |
+
+The gateway logs the same list once at startup, and `python -m app.dependencies` prints it.

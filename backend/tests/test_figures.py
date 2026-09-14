@@ -128,3 +128,59 @@ def test_a_manifest_written_with_counted_labels_is_named_again_when_read(monkeyp
     media = figures.paper_media("data/papers/x.pdf")
     assert media["cached"] is True
     assert media["figures"][0]["label"] == "Picture on page 5"
+
+
+def pdf_with_pages(path, texts: list[str]) -> str:
+    import pymupdf
+
+    document = pymupdf.open()
+    for text in texts:
+        page = document.new_page()
+        if text:
+            page.insert_textbox(pymupdf.Rect(50, 50, 550, 750), text, fontsize=9)
+    document.save(path)
+    return str(path)
+
+
+BODY = "Late interaction keeps a vector per token and matches them at query time. " * 8
+
+
+def test_a_paper_with_a_text_layer_is_read_without_ocr(tmp_path, monkeypatch):
+    monkeypatch.setattr(figures, "OCR", "auto")
+    # One page that is only a picture does not make a born-digital paper a scan.
+    assert figures.needs_ocr(pdf_with_pages(tmp_path / "paper.pdf", [BODY, BODY, ""])) is False
+
+
+def test_a_scan_without_a_text_layer_gets_ocr(tmp_path, monkeypatch):
+    monkeypatch.setattr(figures, "OCR", "auto")
+    assert figures.needs_ocr(pdf_with_pages(tmp_path / "scan.pdf", ["", "", BODY])) is True
+    # A long scan is judged from pages spread over it, not from its first pages only.
+    assert figures.needs_ocr(pdf_with_pages(tmp_path / "long-scan.pdf", [BODY] + [""] * 40)) is True
+    assert figures.needs_ocr(str(tmp_path / "unreadable.pdf")) is True
+
+
+def test_docling_ocr_overrides_the_check(tmp_path, monkeypatch):
+    paper = pdf_with_pages(tmp_path / "paper.pdf", [BODY])
+    monkeypatch.setattr(figures, "OCR", "always")
+    assert figures.needs_ocr(paper) is True
+    monkeypatch.setattr(figures, "OCR", "never")
+    assert figures.needs_ocr(str(tmp_path / "missing.pdf")) is False
+
+
+def test_paper_media_reads_with_the_ocr_setting_the_pdf_needs(monkeypatch, tmp_path):
+    asked = []
+
+    class Converter:
+        def convert(self, pdf):
+            raise RuntimeError("stop after choosing the converter")
+
+    monkeypatch.setattr(figures, "_read_manifest", lambda pdf: None)
+    monkeypatch.setattr(figures, "needs_ocr", lambda pdf_path: False)
+
+    def converter(ocr, pictures=True):
+        asked.append((ocr, pictures))
+        return Converter()
+
+    monkeypatch.setattr(figures, "docling_converter", converter)
+    assert figures.paper_media(str(tmp_path / "x.pdf"), refresh=True)["status"] == "error"
+    assert asked == [(False, True)]
