@@ -9,6 +9,8 @@ parts of them. So switching backends changes the storage calls here and nothing 
 import json
 import os
 import sqlite3
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -61,6 +63,10 @@ CREATE TABLE IF NOT EXISTS projects (
 
 _db: sqlite3.Connection | None = None
 _db_path: str | None = None
+# One connection for the whole process, used by one thread at a time. check_same_thread=False
+# only turns off Python's check: parallel checks reading the source cache while a run saves used
+# it at once and failed with "bad parameter or other API misuse", or crashed the process (#184).
+_lock = threading.RLock()
 
 
 def _connect() -> sqlite3.Connection:
@@ -81,6 +87,13 @@ def _connect() -> sqlite3.Connection:
     return _db
 
 
+@contextmanager
+def _sqlite():
+    """The open connection, held by this thread until the block ends."""
+    with _lock:
+        yield _connect()
+
+
 # Public API.
 def save(analysis: dict) -> None:
     if _use_supabase():
@@ -88,13 +101,13 @@ def save(analysis: dict) -> None:
             {"id": analysis["id"], "data": analysis}
         ).execute()
         return
-    database = _connect()
-    database.execute(
-        "INSERT INTO analyses (id, data) VALUES (?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-        (analysis["id"], json.dumps(analysis)),
-    )
-    database.commit()
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO analyses (id, data) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            (analysis["id"], json.dumps(analysis)),
+        )
+        database.commit()
 
 
 def load_all() -> dict[str, dict]:
@@ -103,7 +116,8 @@ def load_all() -> dict[str, dict]:
         rows = _supabase().table("analyses").select("data").order("started").execute().data
         analyses = [row["data"] for row in rows]
         return {analysis["id"]: analysis for analysis in analyses}
-    rows = _connect().execute("SELECT data FROM analyses ORDER BY started").fetchall()
+    with _sqlite() as database:
+        rows = database.execute("SELECT data FROM analyses ORDER BY started").fetchall()
     analyses = [json.loads(row["data"]) for row in rows]
     return {analysis["id"]: analysis for analysis in analyses}
 
@@ -112,9 +126,9 @@ def delete(analysis_id: str) -> bool:
     if _use_supabase():
         deleted = _supabase().table("analyses").delete().eq("id", analysis_id).execute().data
         return bool(deleted)
-    database = _connect()
-    deleted = database.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,)).rowcount
-    database.commit()
+    with _sqlite() as database:
+        deleted = database.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,)).rowcount
+        database.commit()
     return bool(deleted)
 
 
@@ -123,20 +137,21 @@ def remember_source(key: str, resolution: dict) -> None:
     if _use_supabase():
         _supabase().table("sources").upsert({"key": key, "data": resolution}).execute()
         return
-    database = _connect()
-    database.execute(
-        "INSERT INTO sources (key, data) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET data = excluded.data",
-        (key, json.dumps(resolution)),
-    )
-    database.commit()
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO sources (key, data) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET data = excluded.data",
+            (key, json.dumps(resolution)),
+        )
+        database.commit()
 
 
 def recall_source(key: str) -> dict | None:
     if _use_supabase():
         rows = _supabase().table("sources").select("data").eq("key", key).limit(1).execute().data
         return rows[0]["data"] if rows else None
-    row = _connect().execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
+    with _sqlite() as database:
+        row = database.execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
 
 
@@ -148,13 +163,13 @@ def save_project(project: dict) -> None:
             {"id": project["id"], "owner": project.get("owner"), "data": project}
         ).execute()
         return
-    database = _connect()
-    database.execute(
-        "INSERT INTO projects (id, owner, data) VALUES (?, ?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, data = excluded.data",
-        (project["id"], project.get("owner"), json.dumps(project)),
-    )
-    database.commit()
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO projects (id, owner, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, data = excluded.data",
+            (project["id"], project.get("owner"), json.dumps(project)),
+        )
+        database.commit()
 
 
 def load_projects(owner: str | None) -> list[dict]:
@@ -163,8 +178,9 @@ def load_projects(owner: str | None) -> list[dict]:
         query = _supabase().table("projects").select("data")
         query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
         return [row["data"] for row in query.execute().data]
-    rows = _connect().execute(
-        "SELECT data FROM projects WHERE owner IS ?", (owner,)
-    ).fetchall()
+    with _sqlite() as database:
+        rows = database.execute(
+            "SELECT data FROM projects WHERE owner IS ?", (owner,)
+        ).fetchall()
     return [json.loads(row["data"]) for row in rows]
 
