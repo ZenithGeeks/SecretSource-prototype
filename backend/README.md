@@ -86,6 +86,7 @@ default".
 | `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
 | `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |
 | `DOCLING_OCR` | `auto` | `auto` runs OCR only on a PDF without a text layer (a scan); `always` or `never` overrides that |
+| `FIGURE_WAIT` | `0` | seconds a cited paper's checks wait for its figures to be indexed; after that they are judged on the text alone, and later checks of that paper use the figures. `600` waits for them, as before, at about 5 times the run time |
 
 The service role key can read and write all data. Keep it on the server and never put it in
 the frontend or in git.
