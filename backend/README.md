@@ -79,6 +79,8 @@ default".
 | `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
 | `PARALLEL_SOURCES` | `3` | cited papers downloaded and indexed at the same time |
 | `PARALLEL_CHECKS` | `3` | claims judged at the same time |
+| `PARALLEL_SOURCES_TOTAL` | `PARALLEL_SOURCES` | cited papers prepared at the same time across all running analyses |
+| `PARALLEL_CHECKS_TOTAL` | `PARALLEL_CHECKS` | claims judged at the same time across all running analyses |
 | `GATEWAY_PORT` | `8080` | port when started with `python -m app.main` |
 | `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
 | `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |

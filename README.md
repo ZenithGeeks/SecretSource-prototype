@@ -103,6 +103,8 @@ Writer draft check (sample data):
    - `CLAIM_LIMIT`: the most claims to check per paper. Default `20`. `0` means all.
    - `PARALLEL_SOURCES`: how many cited papers are prepared at the same time. Default `3`.
    - `PARALLEL_CHECKS`: how many claims are judged at the same time. Default `3`.
+   - `PARALLEL_SOURCES_TOTAL`, `PARALLEL_CHECKS_TOTAL`: the same two limits across every analysis
+     running at once. Default: the per-run values.
 
 4. **Add the credentials file:** save the file from the team lead as
    `backend/secrets/service-auth.json`. Git ignores this folder, and Docker never copies it
