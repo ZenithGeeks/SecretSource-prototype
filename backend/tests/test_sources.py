@@ -34,6 +34,7 @@ def fast_and_free(monkeypatch):
     """No real waiting and no real network, and the gate starts open."""
     monkeypatch.setattr(sources, "S2_MIN_INTERVAL", 0.05)
     monkeypatch.setattr(sources, "RETRY_WAITS", (0.01, 0.01, 0.01))
+    monkeypatch.setattr(sources, "RETRY_BUDGET", 1.0)
     monkeypatch.setattr(sources, "_s2_free_at", 0.0)
 
 
@@ -74,13 +75,49 @@ def test_a_429_is_waited_out_then_answered(monkeypatch):
     assert not statuses  # all three attempts were used
 
 
+def test_many_refusals_in_a_row_are_still_waited_out(monkeypatch):
+    """Semantic Scholar refused 70 to 80% of calls at random (#173). Four tries gave up on
+    about 1 lookup in 4; retrying until the time budget is spent gets the answer."""
+    statuses = [429] * 9 + [200]
+
+    def get(url, params=None, headers=None, timeout=None):
+        return Response(statuses.pop(0), {"title": "T"})
+
+    fake_requests(monkeypatch, get)
+    monkeypatch.setattr(sources, "S2_MIN_INTERVAL", 0.01)
+    assert sources._semantic_scholar("/x", {})["title"] == "T"
+    assert not statuses
+
+
+def test_gives_up_when_the_budget_is_spent_not_after_a_count(monkeypatch):
+    calls = 0
+
+    def get(url, params=None, headers=None, timeout=None):
+        nonlocal calls
+        calls += 1
+        return Response(429)
+
+    fake_requests(monkeypatch, get)
+    monkeypatch.setattr(sources, "S2_MIN_INTERVAL", 0.01)
+    monkeypatch.setattr(sources, "RETRY_WAITS", (0.02, 0.05))  # the last wait repeats
+    monkeypatch.setattr(sources, "RETRY_BUDGET", 0.5)
+    start = time.monotonic()
+    with pytest.raises(sources.LookupUnavailable):
+        sources._semantic_scholar("/x", {})
+    took = time.monotonic() - start
+    assert calls > 4
+    assert 0.4 < took <= 0.6  # never sleeps past the budget
+
+
 def test_giving_up_names_the_real_reason(monkeypatch):
     fake_requests(monkeypatch, lambda url, params=None, headers=None, timeout=None: Response(429))
+    monkeypatch.setattr(sources, "RETRY_BUDGET", 0.2)
 
     monkeypatch.setattr(sources, "S2_API_KEY", "a-key")
     with pytest.raises(sources.LookupUnavailable) as with_key:
         sources._semantic_scholar("/x", {})
-    assert "even with S2_API_KEY set" in str(with_key.value)
+    assert "with S2_API_KEY set" in str(with_key.value)
+    assert "more sources" not in str(with_key.value)  # our own rate was never the cause
 
     monkeypatch.setattr(sources, "S2_API_KEY", "")
     with pytest.raises(sources.LookupUnavailable) as without_key:
