@@ -19,6 +19,7 @@ as they progress. A restart keeps the history.
 """
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -97,6 +98,7 @@ class PathWithoutQuery(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PathWithoutQuery())
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
 app.add_middleware(
@@ -109,12 +111,52 @@ class AnalysisRequest(BaseModel):
     verify: bool = True
 
 
+_unsaved: set[str] = set()  # analyses changed since their last save started
+_savers: dict[str, asyncio.Task] = {}  # the task saving each analysis, while one runs
+
+
+def _save_soon(analysis_id: str) -> None:
+    """Save the analysis from a thread, not on the event loop.
+
+    A Supabase upsert takes 200-300 ms, and while the loop waits for it every request from
+    every user waits too (#169). One task per analysis does the saving. Changes made while it
+    is saving are written together by its next save, so an older state is never stored after
+    a newer one.
+    """
+    _unsaved.add(analysis_id)
+    if analysis_id not in _savers:
+        _savers[analysis_id] = asyncio.create_task(_save_while_unsaved(analysis_id))
+
+
+async def _save_while_unsaved(analysis_id: str) -> None:
+    try:
+        while analysis_id in _unsaved:
+            _unsaved.discard(analysis_id)
+            analysis = analyses.get(analysis_id)
+            if analysis is None:  # deleted meanwhile
+                return
+            # Copied on the loop: the run keeps changing the dict while the thread writes it.
+            snapshot = copy.deepcopy(analysis)
+            try:
+                await asyncio.to_thread(store.save, snapshot)
+            except Exception:
+                logger.exception("saving analysis %s failed", analysis_id)
+    finally:
+        _savers.pop(analysis_id, None)
+
+
+async def _saved(analysis_id: str) -> None:
+    """Wait until the analysis's latest state is stored."""
+    while (saver := _savers.get(analysis_id)) is not None:
+        await saver
+
+
 async def _publish(analysis_id: str, stage: str, **fields):
     """Record a stage on the analysis and send it to the open event stream. `at` is the Unix
     time, so the web app can show how long a run has taken."""
     event = {"stage": stage, **fields, "at": round(time.time(), 1)}
     analyses[analysis_id]["stages"].append(event)
-    store.save(analyses[analysis_id])
+    _save_soon(analysis_id)
     await streams[analysis_id].put(event)
 
 
@@ -215,6 +257,7 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         await _publish(analysis_id, "error", message=str(error))
     finally:
         await streams[analysis_id].put(None)  # closes any open stream
+        await _saved(analysis_id)
 
 
 def _start(paper: str, verify: bool, owner: str | None) -> dict:
@@ -289,10 +332,12 @@ async def get_analysis(analysis_id: str, user: str | None = Depends(current_user
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
     _owned(analysis_id, user)
-    if not store.delete(analysis_id):
-        raise HTTPException(404, "no such analysis")
+    # Out of memory first, so no new save starts. A save already running would store the row
+    # again after the delete, so wait for it.
     analyses.pop(analysis_id, None)
     streams.pop(analysis_id, None)
+    await _saved(analysis_id)
+    await asyncio.to_thread(store.delete, analysis_id)
     return {"deleted": analysis_id}
 
 
