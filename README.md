@@ -147,6 +147,16 @@ NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 
 No LLM endpoint? `docker compose --profile gpu up -d --build` also runs vLLM on your GPU.
 
+The gateway reads each paper's figures and tables with Docling, on the CPU by default. To run
+Docling on the same GPU, rebuild the gateway with the GPU override:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build gateway
+```
+
+To keep using it, set `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` in `.env` (use `;`
+instead of `:` on Windows).
+
 ## Everyday use
 
 - Stop the stack: `docker compose down`

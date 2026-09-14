@@ -2,9 +2,12 @@
 FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
-# Torch from the CPU index first: docling needs torch, not a GPU (retrieval runs in the
-# colbert/colpali services), so pin the build here rather than let pip pick one.
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+# Torch first, from TORCH_INDEX, so pip does not pick a build for us. The CPU index is the
+# default: Cloud Run has no GPU. On a machine with an NVIDIA GPU, docker-compose.gpu.yml builds
+# with the cu130 index (RTX 50xx needs cu128 or newer), and Docling then runs its layout, table
+# and OCR models on the GPU. Its accelerator device is "auto", so nothing else changes.
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch torchvision --index-url ${TORCH_INDEX} \
     && pip install --no-cache-dir -r requirements.txt
 # Docling's table model imports opencv, which needs these native libraries; without them
 # converting a PDF dies with "ImportError: libxcb.so.1". graphviz is for `adk web`, which

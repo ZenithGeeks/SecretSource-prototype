@@ -20,6 +20,7 @@ as they progress. A restart keeps the history.
 
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -287,13 +288,32 @@ async def start_analysis(request: AnalysisRequest, user: str | None = Depends(cu
     return _start(request.paper, request.verify, user)
 
 
+def save_upload(content: bytes, filename: str | None) -> Path:
+    """Store an uploaded PDF under a name made from its bytes: <stem>-<12 hex of sha256>.pdf.
+
+    Everything after the upload goes by the file name: who may open the paper (papers_of), its
+    page renders and its figure crops. Under the name the browser sent, two users' paper.pdf
+    would be one file, the second upload replacing the first (#168). The same bytes uploaded
+    twice still share one file, which is right: their pages and figures are the same too.
+    """
+    original = Path(Path(filename or "").name)
+    stem = original.stem.lstrip(".") or "paper"
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    path = PAPERS_DIR / f"{stem}-{digest}{original.suffix or '.pdf'}"
+    if not path.is_file():
+        PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+        # Written aside, then renamed: a run that opens this name never reads half a file.
+        partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
+        partial.write_bytes(content)
+        os.replace(partial, path)
+    return path
+
+
 @app.post("/analyses/upload")
 async def upload_analysis(
     file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
 ):
-    PAPERS_DIR.mkdir(parents=True, exist_ok=True)
-    path = PAPERS_DIR / Path(file.filename).name
-    path.write_bytes(await file.read())
+    path = save_upload(await file.read(), file.filename)
     return _start(path.as_posix(), verify, user)
 
 
