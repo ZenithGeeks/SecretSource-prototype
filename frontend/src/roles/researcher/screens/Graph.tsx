@@ -16,8 +16,8 @@
 
 import cytoscape from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { Bookmark, Copy, ExternalLink, FileText, Maximize2, Search, ZoomIn, ZoomOut } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize2, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { type ComponentType, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
 import { reasonText } from '../../../lib/api'
@@ -117,6 +117,47 @@ function claimStanding(edges: GraphEdge[]): GraphRelation {
   return 'asserts'
 }
 
+/** The canvas label for a paper node: its short title with a two-digit year ("ColBERT ’20"). */
+function paperShort(node: { label: string; year?: string }): string {
+  return `${truncate(node.label, 18)}${node.year ? ` ${node.year}` : ''}`
+}
+
+type Insight = { key: string; count: number; label: string; icon: Icon; tone: string }
+type Icon = ComponentType<{ className?: string }>
+
+/** The four headline findings the graph exists to surface, all read off the returned graph so
+ * no extra endpoint is needed: claims that rest on one source, citation cycles between analysed
+ * papers, claims no cited work actually backs, and claims every cited work agrees on. */
+function computeInsights(graph: KnowledgeGraph): Insight[] {
+  const cited: Record<string, GraphEdge[]> = {}
+  for (const e of graph.edges) if (e.relation !== 'asserts') (cited[e.target] ??= []).push(e)
+
+  let singleSource = 0
+  let noPrimary = 0
+  let agreed = 0
+  for (const node of graph.nodes) {
+    if (node.kind !== 'claim') continue
+    const sources = cited[node.id] ?? []
+    if (sources.length === 1) singleSource++
+    if (sources.length > 0 && !sources.some((e) => e.relation === 'backs')) noPrimary++
+    if (sources.length > 0 && sources.every((e) => e.relation === 'backs')) agreed++
+  }
+
+  // A→B and B→A both present among the citation links between analysed papers.
+  const directed = new Set(graph.paperEdges.filter((e) => e.cites).map((e) => `${e.a}>${e.b}`))
+  const pairs = new Set<string>()
+  for (const e of graph.paperEdges) {
+    if (e.cites && directed.has(`${e.b}>${e.a}`)) pairs.add([e.a, e.b].sort().join('~'))
+  }
+
+  return [
+    { key: 'single', count: singleSource, label: 'claims rest on a single source', icon: AlertCircle, tone: 'text-insufficient' },
+    { key: 'circular', count: pairs.size, label: 'circular citation (A cites B cites A)', icon: GitFork, tone: 'text-accent' },
+    { key: 'no-primary', count: noPrimary, label: 'claims with no primary evidence', icon: HelpCircle, tone: 'text-insufficient' },
+    { key: 'agreed', count: agreed, label: 'claims every paper agrees on', icon: CheckCircle2, tone: 'text-supports' },
+  ]
+}
+
 type View = 'claims' | 'papers'
 type PapersFilter = 'all' | 'strong' | 'citations'
 
@@ -203,10 +244,12 @@ const LAYOUT = {
   packComponents: true, padding: 40,
 } as const
 
-function StatTile({ count, label }: { count: number; label: string }) {
+function InsightTile({ insight }: { insight: Insight }) {
+  const { count, label, icon: Icon, tone } = insight
   return (
-    <div className="flex flex-1 items-center gap-2 rounded-xl border border-border-subtle bg-surface px-3 py-2.5">
-      <span className="font-serif text-lg font-semibold text-ink">{count}</span>
+    <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-border-subtle bg-surface px-3.5 py-2.5">
+      <Icon className={cn('size-4 shrink-0', tone)} />
+      <span className={cn('font-serif text-lg font-semibold', tone)}>{count}</span>
       <span className="text-xs text-ink-muted">{label}</span>
     </div>
   )
@@ -226,25 +269,46 @@ function NotIndexedKey({ pal, count }: { pal: Palette; count: number }) {
   )
 }
 
+/** Two rows, as in Figma: what a claim dot's colour means, then what an edge's style means. */
 function ClaimsLegend({ pal, notIndexed }: { pal: Palette; notIndexed: number }) {
-  const items: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent', 'unchecked']
+  // Claim dot colours mirror node[standing] in the stylesheet; a grey dot is a claim no cited
+  // work has answered yet.
+  const dots: [GraphRelation, string][] = [
+    ['contradicts', 'contradicted'],
+    ['backs', 'backed'],
+    ['silent', 'silent'],
+    ['asserts', 'no verdict yet'],
+  ]
+  const lines: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent', 'unchecked']
   const lined = (r: GraphRelation) => r === 'asserts' || r === 'unchecked'
+  const row = 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur'
   return (
-    <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
-      {items.map((r) => (
-        <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted">
-          <span
-            className={cn(
-              'inline-block h-0.5 w-5',
-              r === 'asserts' && 'border-t border-dashed',
-              r === 'unchecked' && 'border-t-2 border-dotted',
-            )}
-            style={lined(r) ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
-          />
-          {RELATION_LABEL[r]}
-        </span>
-      ))}
-      <NotIndexedKey pal={pal} count={notIndexed} />
+    <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-1.5">
+      <div className={row}>
+        <span className="text-xs font-medium text-ink">claim</span>
+        {dots.map(([rel, label]) => (
+          <span key={label} className="flex items-center gap-1.5 text-xs text-ink-muted">
+            <span className="size-2.5 rounded-full" style={{ backgroundColor: relationColor(pal, rel) }} />
+            {label}
+          </span>
+        ))}
+      </div>
+      <div className={row}>
+        {lines.map((r) => (
+          <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted">
+            <span
+              className={cn(
+                'inline-block h-0.5 w-5',
+                r === 'asserts' && 'border-t border-dashed',
+                r === 'unchecked' && 'border-t-2 border-dotted',
+              )}
+              style={lined(r) ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
+            />
+            {RELATION_LABEL[r]}
+          </span>
+        ))}
+        <NotIndexedKey pal={pal} count={notIndexed} />
+      </div>
     </div>
   )
 }
@@ -299,15 +363,19 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
               <div className="min-w-0">
                 <p className="text-sm text-ink">
                   {p?.kind === 'paper' ? `${p.label}${p.year ? ` · 20${p.year.replace(/\D/g, '')}` : ''}` : e.source}{' '}
-                  <span className="text-xs text-ink-muted">
-                    {e.relation === 'unchecked' ? `couldn't check: ${reasonText(e.reason)}` : e.note}
+                  <span className="text-xs font-medium" style={{ color: relationColor(pal, e.relation) }}>
+                    {e.relation === 'asserts' ? 'origin — asserts' : RELATION_LABEL[e.relation]}
                   </span>
                 </p>
                 {e.relation !== 'asserts' && <IndexNote node={p} />}
-                {e.quote && (
-                  <p className="font-serif text-[13px] italic text-ink-muted">
-                    “{e.quote}” {e.page && <span className="not-italic">{e.page}</span>}
-                  </p>
+                {e.relation === 'unchecked' ? (
+                  <p className="text-xs text-ink-muted">couldn't check: {reasonText(e.reason)}</p>
+                ) : (
+                  e.quote && (
+                    <p className="font-serif text-[13px] italic text-ink-muted">
+                      “{e.quote}” {e.page && <span className="not-italic">{e.page}</span>}
+                    </p>
+                  )
                 )}
               </div>
             </li>
@@ -424,6 +492,8 @@ export function Graph() {
     [graph],
   )
 
+  const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
+
   const elements = useMemo(() => {
     if (!graph) return []
     if (view === 'claims') {
@@ -434,7 +504,7 @@ export function Graph() {
           .filter((n) => n.kind === 'claim' || paperIds.has(n.id))
           .map((n) =>
             n.kind === 'paper'
-              ? { data: { ...n, short: truncate(n.label) } }
+              ? { data: { ...n, short: paperShort(n) } }
               : { data: { ...n, standing: claimStanding(claimEdges[n.id] ?? []) } },
           ),
         ...graph.edges.map((e) => ({ data: e })),
@@ -451,7 +521,7 @@ export function Graph() {
     return [
       ...graph.nodes
         .filter((n) => n.kind === 'paper')
-        .map((n) => ({ data: { ...n, weight: deg[n.id] ?? 1, short: truncate(n.label) } })),
+        .map((n) => ({ data: { ...n, weight: deg[n.id] ?? 1, short: paperShort(n) } })),
       ...edges.map((e) => ({
         data: { id: e.id, source: e.a, target: e.b, kind: 'paper', cites: e.cites ? 1 : 0, similarity: e.similarity },
       })),
@@ -544,9 +614,9 @@ export function Graph() {
       </header>
 
       {view === 'claims' && (
-        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
-          {graph.stats.map((s) => (
-            <StatTile key={s.label} count={s.count} label={s.label} />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {insights.map((insight) => (
+            <InsightTile key={insight.key} insight={insight} />
           ))}
         </div>
       )}
