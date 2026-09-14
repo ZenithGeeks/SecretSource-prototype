@@ -20,6 +20,7 @@ logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
 
 from app.agents.team import root_agent  # noqa: E402
+from app.memory import AnalysisMemory  # noqa: E402
 from app.sessions import session_service  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.genai import types  # noqa: E402
@@ -43,7 +44,10 @@ async def ask(runner, session_id, text):
 
 async def main(prompts, session_id=None):
     sessions = session_service()
-    async with Runner(agent=root_agent, app_name=APP_NAME, session_service=sessions) as runner:
+    # The memory service lets load_memory answer from past analyses (app/memory.py).
+    async with Runner(
+        agent=root_agent, app_name=APP_NAME, session_service=sessions, memory_service=AnalysisMemory()
+    ) as runner:
         session = None
         if session_id:
             session = await sessions.get_session(app_name=APP_NAME, user_id=USER_ID, session_id=session_id)

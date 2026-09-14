@@ -16,8 +16,9 @@ def test_the_coordinator_routes_to_the_chat_specialists_and_calls_check_claim_as
         "paper_agent",
         "verify_agent",
     ]
-    assert [tool.name for tool in team.root_agent.tools] == ["check_claim"]
-    declaration = team.root_agent.tools[0]._get_declaration()
+    # load_memory searches past analyses (SCRUM-172); check_claim is the single-turn verify_agent.
+    assert [tool.name for tool in team.root_agent.tools] == ["load_memory", "check_claim"]
+    declaration = team.root_agent.tools[1]._get_declaration()
     assert declaration.parameters_json_schema["required"] == ["claim", "source"]
 
 
