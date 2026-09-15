@@ -14,6 +14,7 @@ export type Target = {
   quote?: string // the text being pointed at, if there is one to show
   source: Source | null // null when it could not be located: the page shows unmarked
   page?: number // fall back to this when there is no source to take a page from
+  error?: string // a lookup failure that should remain distinct from an unlocated passage
 }
 
 const ZOOMS = [1, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
@@ -60,6 +61,7 @@ function IconButton({
 
 export function PageViewer({ target, onClose }: { target: Target; onClose: () => void }) {
   const [loaded, setLoaded] = useState(false)
+  const [imageError, setImageError] = useState<{ paper: string; page: number } | null>(null)
   const [page, setPage] = useState(target.source?.page ?? target.page ?? 1)
   const [zoom, setZoom] = useState(1)
   const previousPaper = useRef(target.paper)
@@ -74,7 +76,7 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
 
   // Only the page changes the image URL. Resetting on zoom would hide it forever:
   // the src is unchanged, so the browser fires no second load event.
-  useEffect(() => setLoaded(false), [page])
+  useEffect(() => setLoaded(false), [page, target.paper])
 
   // Escape closes, arrows page: a reader checking a source should never feel trapped in it.
   useEffect(() => {
@@ -90,6 +92,7 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
   // Highlights belong to one page; paging away from it must not leave them behind.
   const onOriginalPage = page === (target.source?.page ?? target.page ?? 1)
   const zoomIndex = ZOOMS.indexOf(zoom)
+  const imageFailed = imageError?.paper === target.paper && imageError.page === page
 
   return (
     <aside
@@ -102,7 +105,7 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
           <p className="truncate text-xs text-ink-muted">
             {target.paper}
             {/* Only when there was a passage to find: opening the paper itself has none. */}
-            {!target.source && target.quote && onOriginalPage && ' · exact place not found, showing the page'}
+            {!target.error && !target.source && target.quote && onOriginalPage && ' · exact place not found, showing the page'}
           </p>
         </div>
         <IconButton label="Close the page view" onClick={onClose}>
@@ -116,6 +119,12 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
         </blockquote>
       )}
 
+      {target.error && (
+        <p role="alert" className="rounded-lg bg-refutes-soft px-3 py-2 text-sm leading-5 text-refutes">
+          {target.error}
+        </p>
+      )}
+
       <div className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-border-subtle bg-canvas">
         {!loaded && (
           <p className="absolute inset-x-0 top-0 flex items-center gap-2 p-4 text-sm text-ink-muted">
@@ -127,8 +136,14 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
           <img
             src={pageImageUrl(target.paper, page)}
             alt={`Page ${page} of ${target.paper}`}
-            onLoad={() => setLoaded(true)}
-            onError={() => setLoaded(true)}
+            onLoad={() => {
+              setLoaded(true)
+              setImageError(null)
+            }}
+            onError={() => {
+              setLoaded(true)
+              setImageError({ paper: target.paper, page })
+            }}
             className={cn('w-full transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
           />
           {loaded &&
@@ -137,6 +152,11 @@ export function PageViewer({ target, onClose }: { target: Target; onClose: () =>
               <Highlight key={i} box={box} source={target.source as Source} />
             ))}
         </div>
+        {imageFailed && (
+          <p role="alert" className="absolute inset-x-0 top-4 px-4 text-center text-sm text-refutes">
+            Could not load page {page}. The paper may not be available in the document service.
+          </p>
+        )}
       </div>
 
       <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2">

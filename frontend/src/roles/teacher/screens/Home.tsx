@@ -18,7 +18,7 @@ const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; to: TeacherScree
     title: 'Check student essays',
     hint: 'Upload a batch, get a verdict per citation',
     icon: ListChecks,
-    to: 'essay-check',
+    to: 'classes',
   },
   {
     title: 'Make reading questions',
@@ -92,7 +92,7 @@ export function Home({ onOpen }: { onOpen: (screen: TeacherScreen) => void }) {
             <Button
               type="button"
               variant="ghost"
-              onClick={() => onOpen('essay-check')}
+              onClick={() => onOpen('classes')}
               className="shrink-0 rounded-md p-0 text-xs text-accent hover:bg-transparent hover:text-accent"
             >
               {home.data.course} · {home.data.assignment}

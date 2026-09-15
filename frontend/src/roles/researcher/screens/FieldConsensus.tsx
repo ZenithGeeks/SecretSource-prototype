@@ -8,6 +8,7 @@ import { Bookmark, Copy, Download, Search, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Input, VerdictBadge } from '../../../components/ui'
+import { csvText, downloadText } from '../../../lib/csv'
 import { useFieldConsensus } from '../../../lib/useResearcher'
 
 export function FieldConsensus() {
@@ -31,18 +32,11 @@ export function FieldConsensus() {
   }
 
   const downloadCsv = () => {
-    const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
     const rows = [
       ['Paper', 'Cite', 'Verdict', 'Quote'],
       ...consensus.rows.map((r) => [r.paper, r.cite, r.verdict, r.quote]),
     ]
-    const csv = rows.map((r) => r.map(esc).join(',')).join('\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'field-consensus.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadText('field-consensus.csv', csvText(rows), 'text/csv;charset=utf-8')
   }
 
   const stats = [

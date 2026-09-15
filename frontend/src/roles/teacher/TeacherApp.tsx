@@ -12,11 +12,28 @@ import { useEffect, useState } from 'react'
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { EssayCheck } from './screens/EssayCheck'
+import { AssignmentDetail } from './screens/AssignmentDetail'
+import { Classes } from './screens/Classes'
+import { Classwork } from './screens/Classwork'
 import { Home } from './screens/Home'
 import { ReadingQuestions } from './screens/ReadingQuestions'
 
 type NavKey = 'home' | 'classes' | 'library' | 'graph' | 'settings'
-export type TeacherScreen = NavKey | 'essay-check' | 'reading-questions' | 'class-library' | 'class-note'
+export type TeacherScreen =
+  | NavKey
+  | 'essay-check'
+  | 'reading-questions'
+  | 'class-library'
+  | 'class-note'
+  | 'classwork'
+  | 'assignment-detail'
+
+type TeacherRoute = {
+  screen: TeacherScreen
+  courseId?: string
+  courseWorkId?: string
+  studentId?: string
+}
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
@@ -37,6 +54,8 @@ const NAV_FOR: Record<TeacherScreen, NavKey> = {
   'reading-questions': 'library',
   'class-library': 'library',
   'class-note': 'classes',
+  classwork: 'classes',
+  'assignment-detail': 'classes',
 }
 
 const PLACEHOLDER_TITLES: Record<Exclude<TeacherScreen, 'home'>, string> = {
@@ -48,26 +67,36 @@ const PLACEHOLDER_TITLES: Record<Exclude<TeacherScreen, 'home'>, string> = {
   'reading-questions': 'Make reading questions',
   'class-library': 'Class library',
   'class-note': 'Class note',
+  classwork: 'Classwork',
+  'assignment-detail': 'Assignment details',
 }
 
-function initialScreen(): TeacherScreen {
-  const screen = new URLSearchParams(window.location.search).get('screen') as TeacherScreen | null
-  if (screen && screen in NAV_FOR) return screen
-  return 'home'
+function initialRoute(): TeacherRoute {
+  const params = new URLSearchParams(window.location.search)
+  const screen = params.get('screen') as TeacherScreen | null
+  if (!screen || !(screen in NAV_FOR)) return { screen: 'home' }
+  return {
+    screen,
+    courseId: params.get('courseId') ?? undefined,
+    courseWorkId: params.get('courseWorkId') ?? undefined,
+    studentId: params.get('studentId') ?? undefined,
+  }
 }
 
 /** Keep refreshes on the same teacher destination without replacing Root's `?role=` param. */
-function syncScreenParam(screen: TeacherScreen) {
+function syncRoute(route: TeacherRoute) {
   const params = new URLSearchParams(window.location.search)
-  params.set('screen', screen)
+  params.set('screen', route.screen)
+  for (const key of ['courseId', 'courseWorkId', 'studentId'] as const) {
+    if (route[key]) params.set(key, route[key]!)
+    else params.delete(key)
+  }
   const query = params.toString()
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
 function screenForNav(key: NavKey): TeacherScreen {
-  // Classes owns the delivered essay-review destination. The remaining nav entries keep
-  // their own placeholder until those teacher pages are implemented.
-  return key === 'classes' ? 'essay-check' : key
+  return key
 }
 
 function Placeholder({ title }: { title: string }) {
@@ -80,16 +109,17 @@ function Placeholder({ title }: { title: string }) {
 }
 
 export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
-  const [screen, setScreen] = useState<TeacherScreen>(initialScreen)
+  const [route, setRoute] = useState<TeacherRoute>(initialRoute)
 
-  useEffect(() => syncScreenParam(screen), [screen])
+  useEffect(() => syncRoute(route), [route])
 
-  const navigate = (next: TeacherScreen) => setScreen(next)
+  const navigate = (next: TeacherScreen, context: Omit<TeacherRoute, 'screen'> = {}) =>
+    setRoute({ screen: next, ...context })
 
   return (
     <AppShell
       nav={NAV}
-      active={NAV_FOR[screen]}
+      active={NAV_FOR[route.screen]}
       onNavigate={(key) => navigate(screenForNav(key))}
       role="Teacher"
       roleIcon={GraduationCap}
@@ -97,14 +127,39 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       // The prototype teacher screens use the full available width of the role shell.
       wide
     >
-      {screen === 'home' ? (
+      {route.screen === 'home' ? (
         <Home onOpen={navigate} />
-      ) : screen === 'essay-check' ? (
-        <EssayCheck />
-      ) : screen === 'reading-questions' ? (
+      ) : route.screen === 'classes' ? (
+        <Classes onOpenCourse={(course) => navigate('classwork', { courseId: course.id })} />
+      ) : route.screen === 'classwork' ? (
+        <Classwork
+          courseId={route.courseId ?? ''}
+          onBack={() => navigate('classes')}
+          onOpenAssignment={(courseWorkId) => navigate('assignment-detail', { courseId: route.courseId, courseWorkId })}
+        />
+      ) : route.screen === 'assignment-detail' ? (
+        <AssignmentDetail
+          courseId={route.courseId ?? ''}
+          courseWorkId={route.courseWorkId ?? ''}
+          onBack={() => navigate('classwork', { courseId: route.courseId })}
+          onOpenEssay={(studentId) => navigate('essay-check', {
+            courseId: route.courseId,
+            courseWorkId: route.courseWorkId,
+            studentId,
+          })}
+        />
+      ) : route.screen === 'essay-check' ? (
+        <EssayCheck
+          studentId={route.studentId}
+          courseId={route.courseId}
+          courseWorkId={route.courseWorkId}
+          onNavigate={(student) => setRoute((current) => ({ ...current, studentId: student.id }))}
+          onBack={() => navigate('assignment-detail', { courseId: route.courseId, courseWorkId: route.courseWorkId })}
+        />
+      ) : route.screen === 'reading-questions' ? (
         <ReadingQuestions />
       ) : (
-        <Placeholder title={PLACEHOLDER_TITLES[screen]} />
+        <Placeholder title={PLACEHOLDER_TITLES[route.screen]} />
       )}
     </AppShell>
   )

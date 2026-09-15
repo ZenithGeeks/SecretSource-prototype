@@ -7,12 +7,13 @@
  */
 
 import { Copy, Download, FileText, Loader2, Pen, Sparkles, X } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Button, Card, Empty, Input } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { csvText, downloadText } from '../../../lib/csv'
 import {
   type ReadingQuestionLevel,
   type ReadingQuestionType,
@@ -32,6 +33,11 @@ const LEVEL_OPTIONS: { value: ReadingQuestionLevel; label: string }[] = [
   { value: 'graduate', label: 'Graduate' },
 ]
 
+const LEVEL_LABELS = Object.fromEntries(LEVEL_OPTIONS.map((option) => [option.value, option.label])) as Record<
+  ReadingQuestionLevel,
+  string
+>
+
 const TYPE_OPTIONS: { value: ReadingQuestionType; label: string }[] = [
   { value: 'comprehension', label: 'Comprehension' },
   { value: 'critique', label: 'Critique' },
@@ -45,9 +51,9 @@ const TYPE_LABELS: Record<ReadingQuestionType, string> = {
 }
 
 const TYPE_STYLES: Record<ReadingQuestionType, string> = {
-  comprehension: 'bg-supports-soft text-supports',
-  critique: 'bg-refutes-soft text-refutes',
-  discussion: 'bg-insufficient-soft text-insufficient',
+  comprehension: 'bg-accent-soft text-accent',
+  critique: 'bg-accent-soft text-accent',
+  discussion: 'bg-accent-soft text-accent',
 }
 
 function errorMessage(error: unknown) {
@@ -80,10 +86,6 @@ function QuestionTypeBadge({ type }: { type: ReadingQuestionType }) {
   )
 }
 
-function csvCell(value: string) {
-  return `"${value.replaceAll('"', '""')}"`
-}
-
 /** Export stays in the browser until the future teacher gateway owns worksheet exports. */
 function downloadWorksheet(
   paperTitle: string,
@@ -93,7 +95,7 @@ function downloadWorksheet(
     ['Number', 'Level', 'Type', 'Anchor', 'Question', 'Passage', 'Answer'],
     ...questions.map((question, index) => [
       String(index + 1),
-      question.level,
+      LEVEL_LABELS[question.level],
       TYPE_LABELS[question.type],
       question.anchor,
       question.prompt,
@@ -101,16 +103,11 @@ function downloadWorksheet(
       question.answer ?? '',
     ]),
   ]
-  const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n')
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-  const link = Object.assign(document.createElement('a'), {
-    href: url,
-    download: `${paperTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'reading-questions'}-worksheet.csv`,
-  })
-  document.body.append(link)
-  link.click()
-  link.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  downloadText(
+    `${paperTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'reading-questions'}-worksheet.csv`,
+    csvText(rows),
+    'text/csv;charset=utf-8',
+  )
 }
 
 function answerKeyText(questions: TeacherReadingQuestion[]) {
@@ -352,6 +349,7 @@ export function ReadingQuestions() {
   const [selectedTypes, setSelectedTypes] = useState<ReadingQuestionType[] | null>(null)
   const [paperTarget, setPaperTarget] = useState<Target | null>(null)
   const [findingQuestionId, setFindingQuestionId] = useState<string | null>(null)
+  const latestFindRequest = useRef(0)
 
   if (page.isPending) {
     return (
@@ -390,30 +388,57 @@ export function ReadingQuestions() {
 
   const regenerateQuestions = () => {
     if (activeTypes.length === 0) return
+    if (
+      page.data.questions.length > 0 &&
+      !window.confirm(
+        'Regenerating will replace the entire worksheet, including saved edits and questions at other levels/types. Continue?',
+      )
+    ) {
+      return
+    }
+    latestFindRequest.current += 1
     // The current question set is about to be replaced, so do not leave a stale target open.
     setPaperTarget(null)
-    regenerate.mutate({ paperId: page.data.paper.id, paperTitle: page.data.paper.title, level, types: activeTypes })
+    regenerate.mutate({ paperId: page.data.paper.id, level, types: activeTypes })
   }
 
   const saveQuestion = (input: UpdateReadingQuestionInput) => update.mutateAsync(input).then(() => undefined)
 
   const deleteQuestion = async (question: TeacherReadingQuestion) => {
+    latestFindRequest.current += 1
     setPaperTarget(null)
     await remove.mutateAsync(question.id)
   }
 
+  const closePaper = () => {
+    latestFindRequest.current += 1
+    setPaperTarget(null)
+  }
+
   /** Search for a highlight through the existing gateway, then always open the shared viewer. */
   const showInPaper = async (question: TeacherReadingQuestion) => {
+    const requestId = ++latestFindRequest.current
     setFindingQuestionId(question.id)
-    const found = question.excerpt
-      ? await api.findInPaper(page.data.paper.fileName, question.excerpt, question.page).catch(() => null)
-      : null
+    let found: Awaited<ReturnType<typeof api.findInPaper>> | null = null
+    let searchError: string | undefined
+
+    try {
+      if (question.excerpt) {
+        found = await api.findInPaper(page.data.paper.fileName, question.excerpt, question.page)
+      }
+    } catch (error) {
+      if (requestId !== latestFindRequest.current) return
+      searchError = `Could not search this paper: ${errorMessage(error)}`
+    }
+
+    if (requestId !== latestFindRequest.current) return
 
     setPaperTarget({
       paper: page.data.paper.fileName,
       label: `Question ${shownQuestions.indexOf(question) + 1} · ${page.data.paper.title}`,
       quote: question.excerpt ?? undefined,
       source: found && found.page !== null ? (found as Target['source']) : null,
+      error: searchError,
       page: question.page,
     })
     setFindingQuestionId(null)
@@ -516,7 +541,9 @@ export function ReadingQuestions() {
         </section>
 
         {paperTarget ? (
-          <PageViewer target={paperTarget} onClose={() => setPaperTarget(null)} />
+          <div className="lg:sticky lg:top-6 lg:self-start">
+            <PageViewer target={paperTarget} onClose={closePaper} />
+          </div>
         ) : (
           <AnswerKey questions={shownQuestions} />
         )}

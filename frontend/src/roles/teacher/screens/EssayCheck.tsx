@@ -7,15 +7,25 @@
  * the same interaction.
  */
 
-import { Check, ChevronLeft, ChevronRight, Copy, FileText, Loader2, Pencil } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, FileText, Loader2, Pencil, Save } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { Button, Card, StandingBadge } from '../../../components/ui'
-import type { EssayCheck as EssayCheckData, EssayReview, StudentNavigation } from '../../../lib/teacher'
-import { useSendTeacherFeedback, useTeacherEssayCheck } from '../../../lib/useTeacher'
+import { Button, Card, Empty, StandingBadge } from '../../../components/ui'
+import type {
+  EssayCheck as EssayCheckData,
+  EssayReview,
+  ProfessorReviewOutcome,
+  StudentNavigation,
+} from '../../../lib/teacher'
+import {
+  useSendTeacherFeedback,
+  useTeacherEssayCheck,
+  useUpdateProfessorReview,
+} from '../../../lib/useTeacher'
 import { cn } from '../../../lib/utils'
 
 const DEFAULT_STUDENT_ID = 'student-anan'
+const DEFAULT_COURSEWORK_ID = 'coursework-assignment-2'
 
 function feedbackPreview(body: string, citedPages: string[]) {
   const firstParagraph = body.split(/\n\s*\n/)[0]?.trim() || body.trim()
@@ -24,17 +34,37 @@ function feedbackPreview(body: string, citedPages: string[]) {
 
 function CitationReviewCard({
   review,
+  reviewCourseWorkId,
+  studentId,
   isShowingInPaper,
   isAddedToFeedback,
   onShowInPaper,
   onAddToFeedback,
 }: {
   review: EssayReview
+  reviewCourseWorkId: string
+  studentId: string
   isShowingInPaper: boolean
   isAddedToFeedback: boolean
   onShowInPaper: () => void
   onAddToFeedback: () => void
 }) {
+  const saveProfessorReview = useUpdateProfessorReview()
+  const [professorOutcome, setProfessorOutcome] = useState<ProfessorReviewOutcome>(review.professorReview.outcome)
+  const [professorNote, setProfessorNote] = useState(review.professorReview.note)
+  const professorReviewDirty =
+    professorOutcome !== review.professorReview.outcome || professorNote !== review.professorReview.note
+
+  const submitProfessorReview = () => {
+    saveProfessorReview.mutate({
+      courseWorkId: reviewCourseWorkId,
+      studentId,
+      reviewId: review.id,
+      outcome: professorOutcome,
+      note: professorNote,
+    })
+  }
+
   return (
     <Card
       className={cn(
@@ -58,6 +88,72 @@ function CitationReviewCard({
       </div>
 
       {review.explanation && <p className="mt-2 text-sm leading-5 text-ink-muted">{review.explanation}</p>}
+
+      <section className="mt-4 rounded-lg border border-border-subtle bg-canvas p-3" aria-label={`Professor's manual check for ${review.citation}`}>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-ink">Professor’s manual check</h3>
+            <p className="mt-1 text-xs text-ink-muted">Read the application-provided supporting URL, then record your own finding separately from the AI result above.</p>
+          </div>
+          <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
+            Professor result
+            <select
+              value={professorOutcome}
+              onChange={(event) => setProfessorOutcome(event.target.value as ProfessorReviewOutcome)}
+              className="rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              aria-label={`Professor result for ${review.citation}`}
+            >
+              <option value="not-reviewed">Not checked</option>
+              <option value="supports">Supports</option>
+              <option value="contradicts">Contradicts</option>
+              <option value="inconclusive">Inconclusive</option>
+            </select>
+          </label>
+        </div>
+
+        <label className="mt-3 block text-xs font-medium text-ink-muted" htmlFor={`professor-note-${review.id}`}>Professor note</label>
+        <textarea
+          id={`professor-note-${review.id}`}
+          value={professorNote}
+          onChange={(event) => setProfessorNote(event.target.value)}
+          rows={2}
+          placeholder="Explain your independent check…"
+          className="mt-1 w-full resize-y rounded-lg border border-border-subtle bg-surface p-2.5 text-sm leading-5 text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent"
+        />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-ink-muted">
+            {professorReviewDirty ? 'Unsaved changes' : 'Saved for this session'}
+          </span>
+          <Button type="button" variant="ghost" onClick={submitProfessorReview} disabled={!professorReviewDirty || saveProfessorReview.isPending} className="px-2 text-xs text-accent">
+            {saveProfessorReview.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            Save professor result
+          </Button>
+        </div>
+        {saveProfessorReview.isError && <p className="mt-1 text-xs text-refutes" role="alert">Could not save result: {(saveProfessorReview.error as Error).message}</p>}
+
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h4 className="text-xs font-semibold text-ink">Supporting URL</h4>
+          <p className="mt-1 text-xs text-ink-muted">Provided by SecretSource for this claim. Open it to inspect the source behind the flagged contradiction.</p>
+          {review.supportingUrls.length ? (
+            <ul className="mt-2 flex flex-col gap-2">
+              {review.supportingUrls.map((supportingUrl) => (
+                <li key={supportingUrl.id} className="rounded-lg border border-border-subtle bg-surface p-3">
+                  <a href={supportingUrl.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-start gap-1.5 text-sm font-medium text-accent underline-offset-2 hover:underline">
+                    <span className="break-words">{supportingUrl.title || supportingUrl.url}</span>
+                    <ExternalLink className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  </a>
+                  <p className="mt-1 break-all text-[11px] text-ink-muted">{supportingUrl.url}</p>
+                  {supportingUrl.location && <p className="mt-1 text-xs text-ink-muted">{supportingUrl.location}</p>}
+                  {supportingUrl.excerpt && <blockquote className="mt-2 border-l-2 border-accent pl-2 text-sm italic leading-5 text-ink-muted">{supportingUrl.excerpt}</blockquote>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-xs text-ink-muted">No supporting URL is available for this claim.</p>
+          )}
+
+        </div>
+      </section>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
         <Button
@@ -317,9 +413,11 @@ function SendConfirmation({
 function EssayCheckContent({
   data,
   onNavigate,
+  onBack,
 }: {
   data: EssayCheckData
   onNavigate: (student: StudentNavigation) => void
+  onBack?: () => void
 }) {
   const sendFeedback = useSendTeacherFeedback()
   const [feedbackBody, setFeedbackBody] = useState(data.feedback.body)
@@ -373,6 +471,7 @@ function EssayCheckContent({
   const send = () => {
     sendFeedback.mutate(
       {
+        courseWorkId: data.assignment.courseWorkId,
         studentId: data.student.id,
         body: feedbackBody,
         citationIds: [...new Set([...data.feedback.citationIds, ...addedReviewIds])],
@@ -401,6 +500,11 @@ function EssayCheckContent({
     <>
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
+          {onBack && (
+            <Button type="button" variant="ghost" onClick={onBack} className="mb-2 -ml-2 px-2 text-ink-muted">
+              <ChevronLeft className="size-4" /> Back to assignment
+            </Button>
+          )}
           <p className="flex flex-wrap items-center gap-1 text-xs text-accent">
             <span>{data.assignment.course}</span>
             <ChevronRight className="size-3 text-ink-muted" />
@@ -430,6 +534,8 @@ function EssayCheckContent({
             <CitationReviewCard
               key={review.id}
               review={review}
+              reviewCourseWorkId={data.assignment.courseWorkId}
+              studentId={data.student.id}
               isShowingInPaper={shownReviewId === review.id}
               isAddedToFeedback={addedReviewIds.includes(review.id)}
               onShowInPaper={() => showInPaper(review)}
@@ -467,9 +573,20 @@ function EssayCheckContent({
   )
 }
 
-export function EssayCheck() {
-  const [studentId, setStudentId] = useState(DEFAULT_STUDENT_ID)
-  const essay = useTeacherEssayCheck(studentId)
+export function EssayCheck({
+  studentId = DEFAULT_STUDENT_ID,
+  courseId,
+  courseWorkId,
+  onNavigate,
+  onBack,
+}: {
+  studentId?: string
+  courseId?: string
+  courseWorkId?: string
+  onNavigate: (student: StudentNavigation) => void
+  onBack?: () => void
+}) {
+  const essay = useTeacherEssayCheck(courseWorkId ?? DEFAULT_COURSEWORK_ID, studentId)
 
   if (essay.isPending) {
     return (
@@ -488,14 +605,26 @@ export function EssayCheck() {
     )
   }
 
-  if (!essay.data) return null
+  if (!essay.data) {
+    return (
+      <div className="flex flex-col gap-3">
+        <Empty title="Essay review unavailable" hint="This student does not have a review result for the selected assignment." />
+        {onBack && (
+          <Button type="button" variant="ghost" onClick={onBack} className="self-start px-2 text-accent">
+            <ChevronLeft className="size-4" /> Back to assignment
+          </Button>
+        )}
+      </div>
+    )
+  }
 
-  // A new key gives each student an isolated editable draft and confirmation state.
+  // Each assignment/student pair gets its own editable draft and confirmation state.
   return (
     <EssayCheckContent
-      key={essay.data.student.id}
+      key={`${essay.data.assignment.courseWorkId}:${essay.data.student.id}`}
       data={essay.data}
-      onNavigate={(student) => setStudentId(student.id)}
+      onNavigate={onNavigate}
+      onBack={courseId && courseWorkId ? onBack : undefined}
     />
   )
 }

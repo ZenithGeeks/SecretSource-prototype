@@ -11,6 +11,8 @@ import type {
   ReadingQuestionLevel,
   ReadingQuestionType,
   RegenerateReadingQuestionsInput,
+  TeacherCourse,
+  TeacherCourseWork,
   TeacherHome,
   TeacherReadingQuestion,
   TeacherReadingQuestionsPage,
@@ -97,6 +99,7 @@ const FEEDBACK_BODY = [
 
 export const MOCK_ESSAY_CHECK: EssayCheck = {
   assignment: {
+    courseWorkId: 'coursework-assignment-2',
     course: 'CPE 401',
     name: 'Assignment 2',
   },
@@ -121,6 +124,16 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
       sourceLocation: 'p.7',
       explanation:
         'The 6–10× result is from ColBERTv2 (2022). The cited paper reports an uncompressed 154 GiB index.',
+      supportingUrls: [
+        {
+          id: 'supporting-url-colbertv2',
+          url: 'https://arxiv.org/abs/2112.01488',
+          title: 'ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction',
+          location: 'Abstract and §1',
+          excerpt: 'ColBERTv2 reduces the memory footprint of the ColBERT index by 6–10×.',
+        },
+      ],
+      professorReview: { outcome: 'not-reviewed', note: '' },
     },
     {
       id: 'review-dpr',
@@ -130,6 +143,16 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
       sourceQuote: '“...BM25 remains a strong baseline and hybrid retrieval improves further.”',
       sourceLocation: 'p.6',
       explanation: 'Paper argues dense complements sparse, does not call it obsolete.',
+      supportingUrls: [
+        {
+          id: 'supporting-url-dpr',
+          url: 'https://arxiv.org/abs/2004.04906',
+          title: 'Dense Passage Retrieval for Open-Domain Question Answering',
+          location: '§5.2',
+          excerpt: 'BM25 remains a strong baseline, and combining sparse and dense retrieval improves performance.',
+        },
+      ],
+      professorReview: { outcome: 'not-reviewed', note: '' },
     },
     {
       id: 'review-beir',
@@ -139,6 +162,16 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
       sourceQuote: '“...no single model dominates across all domains.”',
       sourceLocation: 'p.9',
       explanation: 'Paper never ranks late interaction as best; result is mixed.',
+      supportingUrls: [
+        {
+          id: 'supporting-url-beir',
+          url: 'https://arxiv.org/abs/2104.08663',
+          title: 'BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models',
+          location: 'Abstract and §5',
+          excerpt: 'No single model dominates across all information retrieval tasks.',
+        },
+      ],
+      professorReview: { outcome: 'not-reviewed', note: '' },
     },
     {
       id: 'review-ms-marco',
@@ -147,6 +180,16 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
       claim: 'MS MARCO contains 8.8M passages (Nguyen et al., 2016).',
       sourceQuote: '“...8,841,823 passages.”',
       sourceLocation: 'p.3',
+      supportingUrls: [
+        {
+          id: 'supporting-url-ms-marco',
+          url: 'https://arxiv.org/abs/1611.09268',
+          title: 'MS MARCO: A Human Generated MAchine Reading COmprehension Dataset',
+          location: 'Abstract',
+          excerpt: 'The dataset contains 8,841,823 passages.',
+        },
+      ],
+      professorReview: { outcome: 'not-reviewed', note: '' },
     },
   ],
   feedback: {
@@ -156,26 +199,166 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
     citationIds: ['review-colbert', 'review-dpr', 'review-beir'],
   },
   navigation: {
-    previous: { id: 'student-dao', name: 'Dao K.' },
     next: { id: 'student-bee', name: 'Bee S.' },
   },
 }
 
-// A small navigation fixture keeps the Previous / Next controls demonstrable before the
-// submission query exists. The real response will contain the selected student's records.
+// Review navigation includes only submissions with an attached essay in this assignment.
 export const MOCK_ESSAY_CHECKS: Record<string, EssayCheck> = {
-  'student-anan': MOCK_ESSAY_CHECK,
-  'student-dao': {
-    ...MOCK_ESSAY_CHECK,
-    student: { ...MOCK_ESSAY_CHECK.student, id: 'student-dao', name: 'Dao K.' },
-    navigation: { next: { id: 'student-anan', name: 'Anan P.' } },
-  },
-  'student-bee': {
+  'coursework-assignment-2:student-anan': MOCK_ESSAY_CHECK,
+  'coursework-assignment-2:student-bee': {
     ...MOCK_ESSAY_CHECK,
     student: { ...MOCK_ESSAY_CHECK.student, id: 'student-bee', name: 'Bee S.' },
     navigation: { previous: { id: 'student-anan', name: 'Anan P.' } },
   },
 }
+
+/** Read-only Classroom Course resources used by the Classes hub. */
+export const MOCK_TEACHER_CLASSES: TeacherCourse[] = [
+  {
+    id: 'course-cpe401',
+    name: 'CPE 401',
+    section: '01',
+    room: 'Research Methods Lab',
+    teacher: 'Wittawat',
+    studentCount: 32,
+  },
+  {
+    id: 'course-cpe312',
+    name: 'CPE 312',
+    section: '02',
+    room: 'Systems Design',
+    teacher: 'Wittawat',
+    studentCount: 28,
+  },
+]
+
+/**
+ * Classroom-shaped fixtures: materials and submission attachments are read-only source data.
+ * Selection and queue values belong to this prototype app and are reset on a full reload.
+ */
+export const MOCK_TEACHER_COURSEWORK: TeacherCourseWork[] = [
+  {
+    id: 'coursework-assignment-2',
+    courseId: 'course-cpe401',
+    title: 'Assignment 2 · Evidence-based essay',
+    description: 'Evaluate claims from the assigned research papers and cite the evidence you use.',
+    dueAt: '2026-09-18T23:59:00+07:00',
+    materials: [
+      {
+        id: 'material-assignment-brief',
+        kind: 'driveFile',
+        title: 'Assignment 2 brief',
+        url: 'https://docs.google.com/document/d/example-assignment-brief/edit',
+        description: 'Google Drive file attached by the teacher',
+      },
+      {
+        id: 'material-colbert-paper',
+        kind: 'link',
+        title: 'ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction',
+        url: 'https://arxiv.org/abs/2004.12832',
+        description: 'Assigned research paper',
+      },
+    ],
+    submissions: [
+      {
+        id: 'submission-anan',
+        studentId: 'student-anan',
+        studentName: 'Anan P.',
+        state: 'TURNED_IN',
+        alternateLink: 'https://classroom.google.com/c/course-cpe401/a/coursework-assignment-2/submissions/student-anan',
+        submittedAt: '2026-09-12T16:42:00+07:00',
+        attachments: [
+          {
+            id: 'attachment-anan-essay',
+            title: 'essay-2.docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            url: 'https://drive.google.com/file/d/anan-essay-2/view',
+          },
+        ],
+      },
+      {
+        id: 'submission-bee',
+        studentId: 'student-bee',
+        studentName: 'Bee S.',
+        state: 'TURNED_IN',
+        alternateLink: 'https://classroom.google.com/c/course-cpe401/a/coursework-assignment-2/submissions/student-bee',
+        submittedAt: '2026-09-13T09:18:00+07:00',
+        attachments: [
+          {
+            id: 'attachment-bee-essay',
+            title: 'evidence-review.pdf',
+            mimeType: 'application/pdf',
+            url: 'https://drive.google.com/file/d/bee-evidence-review/view',
+          },
+        ],
+      },
+      {
+        id: 'submission-chai',
+        studentId: 'student-chai',
+        studentName: 'Chai W.',
+        state: 'TURNED_IN',
+        alternateLink: 'https://classroom.google.com/c/course-cpe401/a/coursework-assignment-2/submissions/student-chai',
+        submittedAt: '2026-09-13T11:05:00+07:00',
+        attachments: [],
+      },
+      {
+        id: 'submission-dao',
+        studentId: 'student-dao',
+        studentName: 'Dao K.',
+        state: 'NEW',
+        alternateLink: 'https://classroom.google.com/c/course-cpe401/a/coursework-assignment-2/submissions/student-dao',
+        attachments: [],
+      },
+    ],
+    analysisSelected: false,
+    analysisStatus: 'not-queued',
+  },
+  {
+    id: 'coursework-reading-response',
+    courseId: 'course-cpe401',
+    title: 'Reading response · Retrieval systems',
+    description: 'Summarize one finding and support it with a passage from the assigned reading.',
+    dueAt: '2026-09-22T23:59:00+07:00',
+    materials: [
+      {
+        id: 'material-dpr-paper',
+        kind: 'link',
+        title: 'Dense Passage Retrieval for Open-Domain Question Answering',
+        url: 'https://arxiv.org/abs/2004.04906',
+      },
+      {
+        id: 'material-video',
+        kind: 'youtubeVideo',
+        title: 'Research discussion: dense and sparse retrieval',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      },
+    ],
+    submissions: [
+      {
+        id: 'submission-reading-anan',
+        studentId: 'student-anan',
+        studentName: 'Anan P.',
+        state: 'CREATED',
+        alternateLink: 'https://classroom.google.com/c/course-cpe401/a/coursework-reading-response/submissions/student-anan',
+        attachments: [],
+      },
+    ],
+    analysisSelected: false,
+    analysisStatus: 'not-queued',
+  },
+  {
+    id: 'coursework-cpe312-project',
+    courseId: 'course-cpe312',
+    title: 'System design reflection',
+    description: 'Describe the design tradeoffs in your project proposal.',
+    dueAt: '2026-09-25T23:59:00+07:00',
+    materials: [],
+    submissions: [],
+    analysisSelected: false,
+    analysisStatus: 'not-queued',
+  },
+]
 
 /** Reference-shaped data for the teacher's generated worksheet and answer key. */
 export const MOCK_TEACHER_READING_QUESTIONS: TeacherReadingQuestionsPage = {
@@ -239,13 +422,14 @@ export const MOCK_TEACHER_READING_QUESTIONS: TeacherReadingQuestionsPage = {
       prompt: 'Given the 154 GiB index, would you deploy ColBERT in production? What trade-offs does the paper acknowledge?',
       anchor: 'p.7 §4.4',
       page: 7,
-      excerpt: null,
-      answer: null,
+      excerpt: '...154 GiB... we leave compression of the embeddings to future work.',
+      answer: 'p.7 - weigh the 154 GiB index and deferred compression against the requirements of a production deployment.',
     },
   ],
 }
 
 type MockQuestionTemplate = {
+  id: string
   level: ReadingQuestionLevel
   type: ReadingQuestionType
   prompt: string
@@ -257,6 +441,7 @@ type MockQuestionTemplate = {
 
 const MOCK_GENERATED_QUESTION_TEMPLATES: MockQuestionTemplate[] = [
   {
+    id: 'undergrad-comprehension-problem',
     level: 'undergrad',
     type: 'comprehension',
     prompt: 'Which central problem does {paper} address?',
@@ -266,6 +451,7 @@ const MOCK_GENERATED_QUESTION_TEMPLATES: MockQuestionTemplate[] = [
     answer: 'p.2 — identify the paper’s central problem and the method used to address it.',
   },
   {
+    id: 'undergrad-comprehension-method',
     level: 'undergrad',
     type: 'comprehension',
     prompt: 'What is the main method introduced in {paper}?',
@@ -275,6 +461,7 @@ const MOCK_GENERATED_QUESTION_TEMPLATES: MockQuestionTemplate[] = [
     answer: 'p.3 — summarize the proposed method and the part of the pipeline it changes.',
   },
   {
+    id: 'undergrad-critique-evidence',
     level: 'undergrad',
     type: 'critique',
     prompt: 'What evidence does {paper} provide for its main claim?',
@@ -284,6 +471,7 @@ const MOCK_GENERATED_QUESTION_TEMPLATES: MockQuestionTemplate[] = [
     answer: 'p.6 — connect the experiments and reported results to the paper’s main claim.',
   },
   {
+    id: 'undergrad-critique-limitation',
     level: 'undergrad',
     type: 'critique',
     prompt: 'Which limitation should a reader keep in mind when applying {paper} elsewhere?',
@@ -293,26 +481,78 @@ const MOCK_GENERATED_QUESTION_TEMPLATES: MockQuestionTemplate[] = [
     answer: 'p.8 — check whether the data, assumptions, and evaluation setting match the new context.',
   },
   {
+    id: 'undergrad-discussion-follow-up',
     level: 'undergrad',
     type: 'discussion',
     prompt: 'What follow-up experiment would most clearly test the boundaries of {paper}’s result?',
     anchor: 'p.8 §5',
     page: 8,
-    excerpt: null,
-    answer: null,
+    excerpt: '...limitations and future work...',
+    answer: 'p.8 - use a stated limitation or future-work direction to frame the experiment and its expected result.',
+  },
+  {
+    id: 'graduate-comprehension-problem',
+    level: 'graduate',
+    type: 'comprehension',
+    prompt: 'What problem does {paper} formalize, and which retrieval assumption does its formulation challenge?',
+    anchor: 'p.2 §1',
+    page: 2,
+    excerpt: '...the problem this work addresses...',
+    answer: 'p.2 - identify the formal problem and the retrieval assumption the paper changes.',
+  },
+  {
+    id: 'graduate-comprehension-method',
+    level: 'graduate',
+    type: 'comprehension',
+    prompt: "How does {paper}'s method decompose representation and scoring, and where does each computation occur?",
+    anchor: 'p.3 §2',
+    page: 3,
+    excerpt: '...the proposed method...',
+    answer: 'p.3 - trace the representation and scoring stages and distinguish offline from query-time computation.',
+  },
+  {
+    id: 'graduate-critique-evidence',
+    level: 'graduate',
+    type: 'critique',
+    prompt: 'Which empirical evidence in {paper} supports the central claim, and what alternative explanation remains?',
+    anchor: 'p.6 §4',
+    page: 6,
+    excerpt: '...the experimental results...',
+    answer: 'p.6 - connect the experiments to the central claim and identify an explanation the evidence does not rule out.',
+  },
+  {
+    id: 'graduate-critique-limitation',
+    level: 'graduate',
+    type: 'critique',
+    prompt: "What limitation in {paper}'s evaluation or system design constrains generalization to another setting?",
+    anchor: 'p.8 §5',
+    page: 8,
+    excerpt: '...limitations and future work...',
+    answer: 'p.8 - check whether the data, assumptions, and evaluation setting transfer to the proposed context.',
+  },
+  {
+    id: 'graduate-discussion-follow-up',
+    level: 'graduate',
+    type: 'discussion',
+    prompt: "Which follow-up experiment would most rigorously test the boundary of {paper}'s reported result?",
+    anchor: 'p.8 §5',
+    page: 8,
+    excerpt: '...limitations and future work...',
+    answer: "p.8 - use the paper's stated limitation or future-work direction to define the experiment and its expected result.",
   },
 ]
 
 /** Create deterministic regenerated records without putting fake data in a screen. */
 export function createMockReadingQuestions(input: RegenerateReadingQuestionsInput): TeacherReadingQuestion[] {
+  const paperTitle = MOCK_TEACHER_READING_QUESTIONS.paper.title
   return MOCK_GENERATED_QUESTION_TEMPLATES
-    .filter((template) => input.types.includes(template.type))
-    .map((template, index) => ({
-      id: `generated-${input.paperId}-${index + 1}`,
+    .filter((template) => template.level === input.level && input.types.includes(template.type))
+    .map((template) => ({
+      id: `generated-${input.paperId}-${template.id}`,
       paperId: input.paperId,
       level: input.level,
       type: template.type,
-      prompt: template.prompt.replace('{paper}', input.paperTitle),
+      prompt: template.prompt.replace('{paper}', paperTitle),
       anchor: template.anchor,
       page: template.page,
       excerpt: template.excerpt,

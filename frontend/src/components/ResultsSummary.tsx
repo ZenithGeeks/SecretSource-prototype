@@ -7,6 +7,7 @@ import { STANDING_LABELS, STANDING_MEANINGS, STANDINGS, toCsv, toMarkdown } from
 import type { Standing, Standings } from '../lib/claims'
 import type { Claim } from '../lib/api'
 import { cn } from '../lib/utils'
+import { downloadText } from '../lib/csv'
 import { Button } from './ui'
 
 /** Muted for the two standings that are not a verdict, so a colour always means an answer. */
@@ -16,13 +17,6 @@ const COUNT_STYLES: Record<Standing, string> = {
   supports: 'text-supports',
   unchecked: 'text-ink-muted',
   uncited: 'text-ink-muted',
-}
-
-function download(name: string, body: string, type: string) {
-  const url = URL.createObjectURL(new Blob([body], { type }))
-  const link = Object.assign(document.createElement('a'), { href: url, download: name })
-  link.click()
-  URL.revokeObjectURL(url)
 }
 
 export function ResultsSummary({
@@ -88,7 +82,7 @@ export function ResultsSummary({
           </Button>
           <Button
             variant="ghost"
-            onClick={() => download('claims.csv', toCsv(claims), 'text/csv')}
+            onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
             title="Download the claims, their verdicts and their pages as CSV"
           >
             <Download className="size-4" />
