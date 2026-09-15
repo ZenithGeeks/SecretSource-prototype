@@ -1,5 +1,7 @@
 # Teacher Role Frontend Implementation Plan
 
+> **Implementation status:** Complete on `SCRUM-161-teacher-page-reading-question`; the updated teacher routes, screens, local mock interactions, tests, and documentation below have been implemented and verified.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement every updated teacher-role Figma frame as an interactive React frontend backed by deterministic in-browser mock data.
@@ -156,7 +158,7 @@ export type TeacherClassImportPreview = {
 }
 ```
 
-- [ ] **Step 1: Write failing route tests.** Add tests that prove parsing, stale-context removal, and nav mapping.
+- [x] **Step 1: Write failing route tests.** Add tests that prove parsing, stale-context removal, and nav mapping.
 
 ```ts
 test('parses an assignment route with all context', () => {
@@ -181,7 +183,7 @@ test('Library navigation opens the scoped reading-question page', () => {
 })
 ```
 
-- [ ] **Step 2: Run the focused test entry and verify the route tests fail for missing exports.**
+- [x] **Step 2: Run the focused test entry and verify the route tests fail for missing exports.**
 
 Run from `frontend`:
 
@@ -191,9 +193,9 @@ npm test
 
 Expected: FAIL with module/export errors for `teacherRoutes.ts`; the existing tests may continue to pass.
 
-- [ ] **Step 3: Implement the route helpers.** Create the typed union and parse/serialize functions. Use `URLSearchParams`, accept only the route values in the union, preserve `role=teacher`, and serialize only the context keys consumed by each route.
+- [x] **Step 3: Implement the route helpers.** Create the typed union and parse/serialize functions. Use `URLSearchParams`, accept only the route values in the union, preserve `role=teacher`, and serialize only the context keys consumed by each route.
 
-- [ ] **Step 4: Write failing store and selector tests.** Add tests for clone safety, class import, selected-assignment counts, people/question filtering, feedback preview, and CSV escaping.
+- [x] **Step 4: Write failing store and selector tests.** Add tests for clone safety, class import, selected-assignment counts, people/question filtering, feedback preview, and CSV escaping.
 
 ```ts
 test('importing a class makes its workspace available without exposing mutable state', async () => {
@@ -218,25 +220,25 @@ test('worksheet export includes answers only when requested', () => {
 })
 ```
 
-- [ ] **Step 5: Run tests to verify the new store/selector tests fail for missing contracts.**
+- [x] **Step 5: Run tests to verify the new store/selector tests fail for missing contracts.**
 
 Run: `npm test`
 
 Expected: FAIL on the new imports or methods, not on a syntax error in the test.
 
-- [ ] **Step 6: Implement the new type contracts and fixtures.** Replace legacy CPE 401/old Classroom-shaped values with the updated Figma examples: Literary Analysis · 2B, Modern Writing · 1A, 25/22 students, assignment counts, 12 linked files, roster names, announcement, submissions, and the four scoped essay/review records. Keep the ColBERT reading-question fixture and add `paperUrl` for the browser-only Show in the paper action.
+- [x] **Step 6: Implement the new type contracts and fixtures.** Replace legacy CPE 401/old Classroom-shaped values with the updated Figma examples: Literary Analysis · 2B, Modern Writing · 1A, 25/22 students, assignment counts, 12 linked files, roster names, announcement, submissions, and the four scoped essay/review records. Keep the ColBERT reading-question fixture and add `paperUrl` for the browser-only Show in the paper action.
 
-- [ ] **Step 7: Implement the store and typed adapter.** Add clone-safe store methods for classes, import preview/import, workspace, assignment detail, essay check/review/feedback, reading questions, and local reset. Update `useTeacher.ts` with context-specific query keys and mutation hooks. Keep all legacy `courseWorkId` translation inside `teacherApi` or fixture conversion.
+- [x] **Step 7: Implement the store and typed adapter.** Add clone-safe store methods for classes, import preview/import, workspace, assignment detail, essay check/review/feedback, reading questions, and local reset. Update `useTeacher.ts` with context-specific query keys and mutation hooks. Keep all legacy `courseWorkId` translation inside `teacherApi` or fixture conversion.
 
 The adapter methods used by later tasks are `getHome()`, `getClasses()`, `getClassImportPreview(courseId)`, `importClass(courseId)`, `getWorkspace(courseId)`, `getAssignmentDetail(courseId, assignmentId)`, `getEssayCheck(assignmentId, studentId)`, `updateProfessorReview(input)`, `sendFeedback(input)`, `getReadingQuestions(paperId?)`, `regenerateReadingQuestions(input)`, `updateReadingQuestion(input)`, `deleteReadingQuestion(questionId)`, and `resetMockTeacherData()`.
 
-- [ ] **Step 8: Run the full frontend tests to verify the boundary is green.**
+- [x] **Step 8: Run the full frontend tests to verify the boundary is green.**
 
 Run: `npm test`
 
 Expected: PASS for all existing and new tests with zero failures.
 
-- [ ] **Step 9: Commit the foundation.**
+- [x] **Step 9: Commit the foundation.**
 
 ```bash
 git add frontend/src/lib frontend/src/mocks/teacher.ts frontend/tests
@@ -259,19 +261,19 @@ git commit -m "feat: add teacher frontend routes and mock contracts"
 - `TeacherDialog` accepts `{ open: boolean; title: string; description?: string; onClose: () => void; children: ReactNode }`, traps focus while open, closes on Escape, and restores focus to the opener.
 - `ClassWorkspaceHeader` accepts `{ workspace: TeacherWorkspace; activeTab: 'overview' | 'classwork' | 'people'; onTabChange; onRefresh; }` and emits tab changes without owning route state.
 
-- [ ] **Step 1: Add a failing route assertion for the complete nav map.** Assert that Teacher navigation contains Home, Classes, Library, Graph, and Settings and that detail pages highlight Classes while Reading Questions highlights Library.
+- [x] **Step 1: Add a failing route assertion for the complete nav map.** Assert that Teacher navigation contains Home, Classes, Library, Graph, and Settings and that detail pages highlight Classes while Reading Questions highlights Library.
 
-- [ ] **Step 2: Run `npm test` and verify the new assertion fails against the four-item legacy nav.**
+- [x] **Step 2: Run `npm test` and verify the new assertion fails against the four-item legacy nav.**
 
-- [ ] **Step 3: Add the optional `showProfileMenu` prop to `AppShell` and wire Teacher to pass `false`.** Keep all other role call sites on the default behavior. Add Settings to the teacher nav and route it through `teacherRouteForNav`.
+- [x] **Step 3: Add the optional `showProfileMenu` prop to `AppShell` and wire Teacher to pass `false`.** Keep all other role call sites on the default behavior. Add Settings to the teacher nav and route it through `teacherRouteForNav`.
 
-- [ ] **Step 4: Implement `TeacherUi.tsx` using existing tokens and native semantics.** Status pills use the existing verdict/status color tokens, avatars use `bg-accent-soft`, breadcrumbs are a list of links/buttons, tabs use `role="tablist"`/`role="tab"`, and the stepper marks completed/current steps without inventing new colors.
+- [x] **Step 4: Implement `TeacherUi.tsx` using existing tokens and native semantics.** Status pills use the existing verdict/status color tokens, avatars use `bg-accent-soft`, breadcrumbs are a list of links/buttons, tabs use `role="tablist"`/`role="tab"`, and the stepper marks completed/current steps without inventing new colors.
 
-- [ ] **Step 5: Implement `TeacherDialog` with an actual focusable close/action region.** Use the existing accessible-dialog behavior from the legacy Essay Check only as a behavioral reference; the new dialog must be independently owned and must not mutate global state.
+- [x] **Step 5: Implement `TeacherDialog` with an actual focusable close/action region.** Use the existing accessible-dialog behavior from the legacy Essay Check only as a behavioral reference; the new dialog must be independently owned and must not mutate global state.
 
-- [ ] **Step 6: Implement `ClassWorkspaceHeader` with the Figma course heading, Open in Classroom link, Refresh button, and three tabs.** It must render a loading-disabled Refresh state when `refreshing` is true and preserve the active tab styling.
+- [x] **Step 6: Implement `ClassWorkspaceHeader` with the Figma course heading, Open in Classroom link, Refresh button, and three tabs.** It must render a loading-disabled Refresh state when `refreshing` is true and preserve the active tab styling.
 
-- [ ] **Step 7: Run tests, build, and lint.**
+- [x] **Step 7: Run tests, build, and lint.**
 
 Run from `frontend`:
 
@@ -283,7 +285,7 @@ npm run lint
 
 Expected: all commands exit with code 0.
 
-- [ ] **Step 8: Commit the shell/primitives.**
+- [x] **Step 8: Commit the shell/primitives.**
 
 ```bash
 git add frontend/src/components/AppShell.tsx frontend/src/roles/teacher frontend/tests/teacher-routes.test.ts
@@ -306,29 +308,29 @@ git commit -m "feat: add teacher shell and shared page primitives"
 - `useTeacherClassImportPreview(courseId: string)` reads `teacherApi.getClassImportPreview` only when `courseId` exists.
 - `useImportTeacherClass()` calls `teacherApi.importClass` and invalidates `['teacher', 'classes']` and `['teacher', 'workspace', courseId]`.
 
-- [ ] **Step 1: Add failing store tests for import preview, course selection, and import.** Cover a missing course error and assert the imported course is returned by the class list.
+- [x] **Step 1: Add failing store tests for import preview, course selection, and import.** Cover a missing course error and assert the imported course is returned by the class list.
 
-- [ ] **Step 2: Run `npm test` and verify those tests fail because the methods do not exist.**
+- [x] **Step 2: Run `npm test` and verify those tests fail because the methods do not exist.**
 
-- [ ] **Step 3: Implement the store/adapter import methods and hooks.** Importing a known course marks it as available in the session store and returns its workspace-ready class record; it must not call `fetch` or imply a Google operation.
+- [x] **Step 3: Implement the store/adapter import methods and hooks.** Importing a known course marks it as available in the session store and returns its workspace-ready class record; it must not call `fetch` or imply a Google operation.
 
-- [ ] **Step 4: Implement the Classes page.** Match node `349:2417`: breadcrumb, heading, Add class button, ACTIVE CLASSES label, search input, count, two-column course cards, status/sync/count rows, Open class action, and read-only Classroom note. Filter the loaded list with `filterTeacherClasses`.
+- [x] **Step 4: Implement the Classes page.** Match node `349:2417`: breadcrumb, heading, Add class button, ACTIVE CLASSES label, search input, count, two-column course cards, status/sync/count rows, Open class action, and read-only Classroom note. Filter the loaded list with `filterTeacherClasses`.
 
-- [ ] **Step 5: Implement AddClass step `connect`.** Match node `349:2520`: three-step progress, Classroom and Drive access cards, read-only promise, Continue with Google button, and back breadcrumb. Continue changes only the local route to `add-class-course`.
+- [x] **Step 5: Implement AddClass step `connect`.** Match node `349:2520`: three-step progress, Classroom and Drive access cards, read-only promise, Continue with Google button, and back breadcrumb. Continue changes only the local route to `add-class-course`.
 
-- [ ] **Step 6: Implement AddClass step `course`.** Match node `349:2605`: searchable course cards, selected border/background, selected-course summary, read-only pill, and Review import disabled until a course is selected. Keep selection in `TeacherApp` route state.
+- [x] **Step 6: Implement AddClass step `course`.** Match node `349:2605`: searchable course cards, selected border/background, selected-course summary, read-only pill, and Review import disabled until a course is selected. Keep selection in `TeacherApp` route state.
 
-- [ ] **Step 7: Implement AddClass step `review`.** Match node `349:2698`: selected course header, four resource cards, counts/warnings, read-only import note, Back, and Import class. Import invokes the local mutation and navigates to `class-overview` with the selected `courseId`.
+- [x] **Step 7: Implement AddClass step `review`.** Match node `349:2698`: selected course header, four resource cards, counts/warnings, read-only import note, Back, and Import class. Import invokes the local mutation and navigates to `class-overview` with the selected `courseId`.
 
-- [ ] **Step 8: Wire the routes and missing-context states in `TeacherApp`.** Invalid/missing course context returns to Classes with a clear empty state; back buttons preserve the intended previous step.
+- [x] **Step 8: Wire the routes and missing-context states in `TeacherApp`.** Invalid/missing course context returns to Classes with a clear empty state; back buttons preserve the intended previous step.
 
-- [ ] **Step 9: Run tests, build, and lint.**
+- [x] **Step 9: Run tests, build, and lint.**
 
 Run: `npm test`, `npm run build`, `npm run lint`
 
 Expected: all commands pass.
 
-- [ ] **Step 10: Commit Classes/Add Class.**
+- [x] **Step 10: Commit Classes/Add Class.**
 
 ```bash
 git add frontend/src/roles/teacher frontend/src/lib/useTeacher.ts frontend/src/lib/teacherStore.ts frontend/tests/teacher-store.test.ts
@@ -353,29 +355,29 @@ git commit -m "feat: implement teacher classes and add-class flow"
 - `AssignmentDetail({ courseId, assignmentId, onOpenEssay }: { courseId: string; assignmentId: string; onOpenEssay: (studentId: string) => void })`.
 - `workspaceStats(workspace: TeacherWorkspace): { classworkCount: number; submissions: number; returned: number }` and `assignmentCanBeChecked(assignment: TeacherAssignment): boolean` are pure selectors.
 
-- [ ] **Step 1: Add failing selector tests for workspace statistics, pending counts, and assignment eligibility.** Use the Figma fixture values: 4 classwork items, 66 submissions, and 8 returned.
+- [x] **Step 1: Add failing selector tests for workspace statistics, pending counts, and assignment eligibility.** Use the Figma fixture values: 4 classwork items, 66 submissions, and 8 returned.
 
-- [ ] **Step 2: Run `npm test` and verify the new selector tests fail because the helpers are absent.**
+- [x] **Step 2: Run `npm test` and verify the new selector tests fail because the helpers are absent.**
 
-- [ ] **Step 3: Implement the selectors and workspace query hook.** `useTeacherWorkspace(courseId)` must return one context-keyed query and an explicit `null` result for an unknown class.
+- [x] **Step 3: Implement the selectors and workspace query hook.** `useTeacherWorkspace(courseId)` must return one context-keyed query and an explicit `null` result for an unknown class.
 
-- [ ] **Step 4: Implement the shared ClassWorkspace shell and Overview tab.** Match node `349:2825`: course heading, Classroom/Refresh actions, Overview/Classwork/People tabs, Course overview metrics, recent classwork, announcement, People preview, Materials, Topics, and Grades & submissions cards. Use `ClassWorkspaceHeader` and route tab changes in `TeacherApp`.
+- [x] **Step 4: Implement the shared ClassWorkspace shell and Overview tab.** Match node `349:2825`: course heading, Classroom/Refresh actions, Overview/Classwork/People tabs, Course overview metrics, recent classwork, announcement, People preview, Materials, Topics, and Grades & submissions cards. Use `ClassWorkspaceHeader` and route tab changes in `TeacherApp`.
 
-- [ ] **Step 5: Implement Classwork and grades.** Match node `349:2960`: three metrics, four assignment cards with submission/status counts, checkboxes, status pills, and the Add to Essay Check panel. Selection is session-local; the Analyze selected button updates selected assignments to `queued` and shows skipped/no-attachment feedback when relevant.
+- [x] **Step 5: Implement Classwork and grades.** Match node `349:2960`: three metrics, four assignment cards with submission/status counts, checkboxes, status pills, and the Add to Essay Check panel. Selection is session-local; the Analyze selected button updates selected assignments to `queued` and shows skipped/no-attachment feedback when relevant.
 
-- [ ] **Step 6: Implement People.** Match node `349:3085`: search input, roster table/card, initials avatars, course-owner/Teacher labels, remaining-student row, People from Classroom card, and Account visibility note.
+- [x] **Step 6: Implement People.** Match node `349:3085`: search input, roster table/card, initials avatars, course-owner/Teacher labels, remaining-student row, People from Classroom card, and Account visibility note.
 
-- [ ] **Step 7: Implement Assignment Detail.** Match node `459:3037`: assignment header/breadcrumb, Classwork/People tabs, enrolled/submitted/missing metrics, submission cards, attachment/status rows, Assignment materials, and Essay Check CTA. Open an eligible essay with `assignmentId` and `studentId`; external Classroom/Drive links use `target="_blank"` and `rel="noreferrer"`.
+- [x] **Step 7: Implement Assignment Detail.** Match node `459:3037`: assignment header/breadcrumb, Classwork/People tabs, enrolled/submitted/missing metrics, submission cards, attachment/status rows, Assignment materials, and Essay Check CTA. Open an eligible essay with `assignmentId` and `studentId`; external Classroom/Drive links use `target="_blank"` and `rel="noreferrer"`.
 
-- [ ] **Step 8: Add missing-course/assignment empty states and refresh behavior.** A missing `courseId` or `assignmentId` renders `Empty` with a route-safe recovery action. Refresh invalidates the workspace query and exposes the shared loading state without losing the active tab.
+- [x] **Step 8: Add missing-course/assignment empty states and refresh behavior.** A missing `courseId` or `assignmentId` renders `Empty` with a route-safe recovery action. Refresh invalidates the workspace query and exposes the shared loading state without losing the active tab.
 
-- [ ] **Step 9: Run tests, build, and lint.**
+- [x] **Step 9: Run tests, build, and lint.**
 
 Run: `npm test`, `npm run build`, `npm run lint`
 
 Expected: all commands pass.
 
-- [ ] **Step 10: Commit the workspace flow.**
+- [x] **Step 10: Commit the workspace flow.**
 
 ```bash
 git add frontend/src/roles/teacher frontend/src/lib frontend/tests/teacher-selectors.test.ts
@@ -397,23 +399,23 @@ git commit -m "feat: implement teacher class workspace and assignment detail"
 - Dashboard submission rows carry `courseId`, `assignmentId`, and `studentId` so a row can open the correct scoped Assignment Detail or Essay Check route.
 - `homeRouteForAction(action: 'check-essays' | 'reading-questions'): TeacherRoute` returns a scoped classwork/assignment route for the demo course or the reading-question route.
 
-- [ ] **Step 1: Add failing tests for Home action route mapping and empty dashboard data.** Assert Check student essays opens the demo classwork context and Make reading questions opens `reading-questions`.
+- [x] **Step 1: Add failing tests for Home action route mapping and empty dashboard data.** Assert Check student essays opens the demo classwork context and Make reading questions opens `reading-questions`.
 
-- [ ] **Step 2: Run `npm test` and verify the new tests fail for the absent helper.**
+- [x] **Step 2: Run `npm test` and verify the new tests fail for the absent helper.**
 
-- [ ] **Step 3: Implement the action mapping and update the Home fixture to match node `20:864`.** Use the Figma copy: Good morning, Vitawat; CPE 401 summary; three quick-action cards; Essays to review rows; Class library; Most misused source.
+- [x] **Step 3: Implement the action mapping and update the Home fixture to match node `20:864`.** Use the Figma copy: Good morning, Vitawat; CPE 401 summary; three quick-action cards; Essays to review rows; Class library; Most misused source.
 
-- [ ] **Step 4: Render the dashboard hierarchy and visual proportions.** Use a three-card quick-action row, two-column content below, status pills, file rows, empty states, and the existing `Card`/`Button` primitives. The Class library card remains informational because no standalone Class Library frame exists.
+- [x] **Step 4: Render the dashboard hierarchy and visual proportions.** Use a three-card quick-action row, two-column content below, status pills, file rows, empty states, and the existing `Card`/`Button` primitives. The Class library card remains informational because no standalone Class Library frame exists.
 
-- [ ] **Step 5: Wire scoped Home interactions.** The assignment header/essay rows open the corresponding class workspace or essay review route. The reading-question action opens the worksheet. The un-designed “Turn into a class note” control remains informational and does not create an un-designed page.
+- [x] **Step 5: Wire scoped Home interactions.** The assignment header/essay rows open the corresponding class workspace or essay review route. The reading-question action opens the worksheet. The un-designed “Turn into a class note” control remains informational and does not create an un-designed page.
 
-- [ ] **Step 6: Run tests, build, and lint.**
+- [x] **Step 6: Run tests, build, and lint.**
 
 Run: `npm test`, `npm run build`, `npm run lint`
 
 Expected: all commands pass.
 
-- [ ] **Step 7: Commit Home.**
+- [x] **Step 7: Commit Home.**
 
 ```bash
 git add frontend/src/roles/teacher frontend/src/lib/teacher.ts frontend/src/mocks/teacher.ts frontend/tests/teacher-selectors.test.ts
@@ -438,7 +440,7 @@ git commit -m "feat: implement teacher home dashboard"
 - `toggleFeedbackReview(ids: string[], reviewId: string): string[]` keeps citation IDs unique and toggles one review.
 - `feedbackPreview(body: string, citedPages: string[]): string` returns the first sentence plus `— N lines, cites ...` using actual line count.
 
-- [ ] **Step 1: Add failing tests for review updates, feedback citation toggling, preview text, and duplicate-send protection state.**
+- [x] **Step 1: Add failing tests for review updates, feedback citation toggling, preview text, and duplicate-send protection state.**
 
 ```ts
 test('updating a professor result changes only the selected review', async () => {
@@ -462,25 +464,25 @@ test('feedback preview reports the real line count and cited pages', () => {
 })
 ```
 
-- [ ] **Step 2: Run `npm test` and verify the new tests fail against the legacy `courseWorkId` contract or absent helpers.**
+- [x] **Step 2: Run `npm test` and verify the new tests fail against the legacy `courseWorkId` contract or absent helpers.**
 
-- [ ] **Step 3: Update the essay-review adapter/store contract to use `assignmentId` at the screen boundary.** Keep the four Figma review records, professor result state, supporting URL, source quote/location, and next/previous student navigation.
+- [x] **Step 3: Update the essay-review adapter/store contract to use `assignmentId` at the screen boundary.** Keep the four Figma review records, professor result state, supporting URL, source quote/location, and next/previous student navigation.
 
-- [ ] **Step 4: Implement the selector helpers and mutation hooks.** Update the query cache for the exact assignment/student pair after a professor result mutation; feedback send returns a local delivery record and never calls a backend.
+- [x] **Step 4: Implement the selector helpers and mutation hooks.** Update the query cache for the exact assignment/student pair after a professor result mutation; feedback send returns a local delivery record and never calls a backend.
 
-- [ ] **Step 5: Implement the Essay Check page to match node `23:1137`.** Render breadcrumbs, previous/next controls, citation cards, verdict pills, claim/source quote/explanation, Show in the paper, Add to feedback, professor-result select, supporting URL, Feedback panel, editable textarea, Copy, and Send to student.
+- [x] **Step 5: Implement the Essay Check page to match node `23:1137`.** Render breadcrumbs, previous/next controls, citation cards, verdict pills, claim/source quote/explanation, Show in the paper, Add to feedback, professor-result select, supporting URL, Feedback panel, editable textarea, Copy, and Send to student.
 
-- [ ] **Step 6: Implement `FeedbackDialog` to match node `39:1536`.** Render the scrim, summary, Keep editing, and Send actions. While sending, disable both actions, show progress text, close on successful local delivery, and keep the dialog open with an alert on failure. Ensure focus trapping, Escape, and restoration work.
+- [x] **Step 6: Implement `FeedbackDialog` to match node `39:1536`.** Render the scrim, summary, Keep editing, and Send actions. While sending, disable both actions, show progress text, close on successful local delivery, and keep the dialog open with an alert on failure. Ensure focus trapping, Escape, and restoration work.
 
-- [ ] **Step 7: Wire student navigation and missing-context recovery in `TeacherApp`.** Previous/next changes only `studentId`; Back returns to Assignment Detail with the same `courseId`/`assignmentId`.
+- [x] **Step 7: Wire student navigation and missing-context recovery in `TeacherApp`.** Previous/next changes only `studentId`; Back returns to Assignment Detail with the same `courseId`/`assignmentId`.
 
-- [ ] **Step 8: Run tests, build, and lint.**
+- [x] **Step 8: Run tests, build, and lint.**
 
 Run: `npm test`, `npm run build`, `npm run lint`
 
 Expected: all commands pass.
 
-- [ ] **Step 9: Commit Essay Check.**
+- [x] **Step 9: Commit Essay Check.**
 
 ```bash
 git add frontend/src/roles/teacher frontend/src/lib frontend/tests
@@ -504,15 +506,15 @@ git commit -m "feat: implement teacher essay review and feedback dialog"
 - `createQuestionDraft(question: TeacherReadingQuestion): { prompt: string; answer: string }` returns controlled editable values.
 - `worksheetText(page: TeacherReadingQuestionsPage, includeAnswers: boolean): string` returns a UTF-8 plain-text worksheet suitable for `downloadText`.
 
-- [ ] **Step 1: Add failing tests for combined level/type filtering, regeneration, edit/delete, and worksheet export.** Confirm the source collection remains unchanged when a filtered result is derived.
+- [x] **Step 1: Add failing tests for combined level/type filtering, regeneration, edit/delete, and worksheet export.** Confirm the source collection remains unchanged when a filtered result is derived.
 
-- [ ] **Step 2: Run `npm test` and verify the new tests fail for the missing/new signatures.**
+- [x] **Step 2: Run `npm test` and verify the new tests fail for the missing/new signatures.**
 
-- [ ] **Step 3: Update reading-question types and store methods.** Preserve the five Figma questions, answers/anchors/excerpts, selected paper, and deterministic undergrad/graduate generation. Updates change only prompt/answer; delete removes one question; regeneration replaces the set using selected filters.
+- [x] **Step 3: Update reading-question types and store methods.** Preserve the five Figma questions, answers/anchors/excerpts, selected paper, and deterministic undergrad/graduate generation. Updates change only prompt/answer; delete removes one question; regeneration replaces the set using selected filters.
 
-- [ ] **Step 4: Implement the page to match node `22:934`.** Render Library-active shell, heading/paper summary, Level and Type filter chips, Regenerate, Export worksheet, five question cards, Question Type badges, anchor/excerpt, Edit, Show in the paper, Remove, and Answer key card with Copy answer key.
+- [x] **Step 4: Implement the page to match node `22:934`.** Render Library-active shell, heading/paper summary, Level and Type filter chips, Regenerate, Export worksheet, five question cards, Question Type badges, anchor/excerpt, Edit, Show in the paper, Remove, and Answer key card with Copy answer key.
 
-- [ ] **Step 5: Implement local interactions.**
+- [x] **Step 5: Implement local interactions.**
 
   - Level/type filters derive visible questions without changing stored data.
   - Regenerate shows a pending state and replaces the list on success.
@@ -521,15 +523,15 @@ git commit -m "feat: implement teacher essay review and feedback dialog"
   - Show in the paper opens the fixture paper URL with `#page=N` in a new tab.
   - Export worksheet and Copy answer key use browser APIs and show a local success/error message.
 
-- [ ] **Step 6: Add loading, error, empty, and no-answer-key states.** Do not render an empty answer key as if a source answer exists.
+- [x] **Step 6: Add loading, error, empty, and no-answer-key states.** Do not render an empty answer key as if a source answer exists.
 
-- [ ] **Step 7: Run tests, build, and lint.**
+- [x] **Step 7: Run tests, build, and lint.**
 
 Run: `npm test`, `npm run build`, `npm run lint`
 
 Expected: all commands pass.
 
-- [ ] **Step 8: Commit Reading Questions.**
+- [x] **Step 8: Commit Reading Questions.**
 
 ```bash
 git add frontend/src/roles/teacher frontend/src/lib frontend/src/mocks/teacher.ts frontend/tests
@@ -552,7 +554,7 @@ git commit -m "feat: implement teacher reading questions worksheet"
 - `getTeacherPreferences(): TeacherPreferences`, `updateTeacherPreferences(patch: Partial<TeacherPreferences>): TeacherPreferences`, and `resetTeacherPreferences(): void` live in `teacherPreferences.ts` and use the key `secretsource.teacher-settings`.
 - `Settings()` reads shared account/theme fields from `useSettings()` and teacher-specific fields from `useTeacherPreferences()`.
 
-- [ ] **Step 1: Add failing preference tests.** Cover default values, partial updates, malformed storage fallback, reset, and preservation of shared settings.
+- [x] **Step 1: Add failing preference tests.** Cover default values, partial updates, malformed storage fallback, reset, and preservation of shared settings.
 
 ```ts
 test('teacher preferences merge updates without dropping defaults', () => {
@@ -563,23 +565,23 @@ test('teacher preferences merge updates without dropping defaults', () => {
 })
 ```
 
-- [ ] **Step 2: Run `npm test` and verify the new tests fail because the module is absent.**
+- [x] **Step 2: Run `npm test` and verify the new tests fail because the module is absent.**
 
-- [ ] **Step 3: Implement the preference store and hook.** Keep it isolated from researcher/writer-specific preference fields and notify React subscribers after updates.
+- [x] **Step 3: Implement the preference store and hook.** Keep it isolated from researcher/writer-specific preference fields and notify React subscribers after updates.
 
-- [ ] **Step 4: Implement Settings to match node `279:2358`.** Render Account, Role and home screen, Checking defaults, Class and marking, Notifications, Appearance, and Your data sections using the existing card/row spacing. Use native labelled inputs, selects, and buttons; use shared `useSettings` for display name, email, theme, and verdict colors.
+- [x] **Step 4: Implement Settings to match node `279:2358`.** Render Account, Role and home screen, Checking defaults, Class and marking, Notifications, Appearance, and Your data sections using the existing card/row spacing. Use native labelled inputs, selects, and buttons; use shared `useSettings` for display name, email, theme, and verdict colors.
 
-- [ ] **Step 5: Wire local actions.** Display name/theme/toggles/selects update their stores immediately. Account Change/Change password show a local informational notice that authentication changes are outside this frontend-only phase. Export class results calls `downloadText` with `classResultsCsv`; Delete all uploaded essays opens a confirmation dialog and resets only mock teacher essay data.
+- [x] **Step 5: Wire local actions.** Display name/theme/toggles/selects update their stores immediately. Account Change/Change password show a local informational notice that authentication changes are outside this frontend-only phase. Export class results calls `downloadText` with `classResultsCsv`; Delete all uploaded essays opens a confirmation dialog and resets only mock teacher essay data.
 
-- [ ] **Step 6: Add Settings to the teacher route and nav active state.** Opening Settings from the sidebar preserves `?role=teacher`, and changing role still returns to onboarding.
+- [x] **Step 6: Add Settings to the teacher route and nav active state.** Opening Settings from the sidebar preserves `?role=teacher`, and changing role still returns to onboarding.
 
-- [ ] **Step 7: Run tests, build, and lint.**
+- [x] **Step 7: Run tests, build, and lint.**
 
 Run: `npm test`, `npm run build`, `npm run lint`
 
 Expected: all commands pass.
 
-- [ ] **Step 8: Commit Settings.**
+- [x] **Step 8: Commit Settings.**
 
 ```bash
 git add frontend/src/lib/teacherPreferences.ts frontend/src/roles/teacher frontend/src/lib frontend/tests
@@ -592,9 +594,9 @@ git commit -m "feat: implement teacher settings"
 - Modify: `frontend/documentations/COMPONENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-15-teacher-frontend.md` to mark completed steps only after verification.
 
-- [ ] **Step 1: Update the component guide.** Replace the old “TeacherApp + Home, EssayCheck” inventory with the complete teacher route/page list, mock boundary, route context, shell exception, and frontend-only behavior.
+- [x] **Step 1: Update the component guide.** Replace the old “TeacherApp + Home, EssayCheck” inventory with the complete teacher route/page list, mock boundary, route context, shell exception, and frontend-only behavior.
 
-- [ ] **Step 2: Run the complete automated verification.**
+- [x] **Step 2: Run the complete automated verification.**
 
 From `frontend`:
 
@@ -606,7 +608,7 @@ npm run lint
 
 Expected: all commands exit 0; record the actual test count and build/lint result before claiming completion.
 
-- [ ] **Step 3: Run the browser smoke matrix on the current branch.** Start `npm run dev` and verify these URLs and transitions:
+- [x] **Step 3: Run the browser smoke matrix on the current branch.** Start `npm run dev` and verify these URLs and transitions:
 
 | Route | Required check |
 | --- | --- |
@@ -623,13 +625,13 @@ Expected: all commands exit 0; record the actual test count and build/lint resul
 | `/?role=teacher&screen=reading-questions` | Filters, edit/remove/regenerate, export/copy |
 | `/?role=teacher&screen=settings` | All sections, persistence, export/delete confirmation |
 
-- [ ] **Step 4: Compare each scoped route to the corresponding Figma node.** Check the 1200px Home/Settings frames and 1400px teacher workflow frames for sidebar width, heading hierarchy, card boundaries, spacing, status colors, text wrapping, and active navigation.
+- [x] **Step 4: Compare each scoped route to the corresponding Figma node.** Check the 1200px Home/Settings frames and 1400px teacher workflow frames for sidebar width, heading hierarchy, card boundaries, spacing, status colors, text wrapping, and active navigation.
 
-- [ ] **Step 5: Check responsive and keyboard behavior.** Verify the AppShell drawer below `lg`, stacked cards at narrow widths, tab/checkbox/toggle keyboard use, visible focus, Escape dialog close, focus restoration, and no horizontal clipping of assignment/roster content.
+- [x] **Step 5: Check responsive and keyboard behavior.** Verify the AppShell drawer below `lg`, stacked cards at narrow widths, tab/checkbox/toggle keyboard use, visible focus, Escape dialog close, focus restoration, and no horizontal clipping of assignment/roster content.
 
-- [ ] **Step 6: Fix only implementation defects found by the verification matrix, rerun all three automated commands, and inspect `git diff` for unrelated changes.**
+- [x] **Step 6: Fix only implementation defects found by the verification matrix, rerun all three automated commands, and inspect `git diff` for unrelated changes.**
 
-- [ ] **Step 7: Commit documentation and final polish on `SCRUM-161-teacher-page-reading-question`.**
+- [x] **Step 7: Commit documentation and final polish on `SCRUM-161-teacher-page-reading-question`.**
 
 ```bash
 git add frontend/documentations/COMPONENTS.md docs/superpowers/plans/2026-09-15-teacher-frontend.md

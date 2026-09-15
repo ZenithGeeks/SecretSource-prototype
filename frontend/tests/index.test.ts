@@ -1,2 +1,6 @@
 import './csv.test.ts'
 import './reading-questions.test.ts'
+import './teacher-routes.test.ts'
+import './teacher-selectors.test.ts'
+import './teacher-store.test.ts'
+import './teacher-preferences.test.ts'

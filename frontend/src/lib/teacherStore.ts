@@ -1,64 +1,228 @@
 /**
- * In-session mutable store for teacher screens. It is seeded from the mocks and owns the
- * prototype mutations until the teacher gateway is available, so the API client stays a
- * thin request-shaped boundary.
+ * Session-local mock database for the teacher role.
+ *
+ * Every read and write crosses a clone boundary. Screens can therefore behave like they are
+ * talking to an API without being able to mutate the fixtures or another screen's cache.
  */
 
 import {
   MOCK_ESSAY_CHECKS,
+  MOCK_TEACHER_ASSIGNMENT_DETAILS,
+  MOCK_TEACHER_ASSIGNMENTS,
   MOCK_TEACHER_CLASSES,
   MOCK_TEACHER_COURSEWORK,
+  MOCK_TEACHER_HOME,
+  MOCK_TEACHER_IMPORT_COURSES,
+  MOCK_TEACHER_IMPORT_PREVIEWS,
   MOCK_TEACHER_READING_QUESTIONS,
+  MOCK_TEACHER_WORKSPACES,
   createMockReadingQuestions,
 } from '../mocks/teacher'
 import type {
   EssayCheck,
   QueueCourseWorkResult,
   RegenerateReadingQuestionsInput,
-  TeacherCourse,
+  TeacherAssignment,
+  TeacherAssignmentDetail,
+  TeacherClass,
+  TeacherClassImportPreview,
   TeacherCourseWork,
+  TeacherHome,
   TeacherReadingQuestion,
   TeacherReadingQuestionsPage,
+  TeacherWorkspace,
   UpdateProfessorReviewRequest,
   UpdateReadingQuestionInput,
+  SendFeedbackRequest,
 } from './teacher'
 
-/** Deep clone so callers cannot mutate the fixture or the in-session database directly. */
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
-const essayCheckKey = (courseWorkId: string, studentId: string) => `${courseWorkId}:${studentId}`
-
-const db = {
-  essayChecks: clone(MOCK_ESSAY_CHECKS) as Record<string, EssayCheck>,
-  courseWork: clone(MOCK_TEACHER_COURSEWORK) as TeacherCourseWork[],
-  readingQuestions: clone(MOCK_TEACHER_READING_QUESTIONS) as TeacherReadingQuestionsPage,
+type TeacherDb = {
+  home: TeacherHome
+  classes: TeacherClass[]
+  workspaces: Record<string, TeacherWorkspace>
+  assignments: TeacherAssignment[]
+  assignmentDetails: Record<string, TeacherAssignmentDetail>
+  essayChecks: Record<string, EssayCheck>
+  readingQuestions: TeacherReadingQuestionsPage
+  courseWork: TeacherCourseWork[]
 }
 
-export const store = {
-  getClasses: (): TeacherCourse[] => clone(MOCK_TEACHER_CLASSES),
+const initialDb = (): TeacherDb => ({
+  home: clone(MOCK_TEACHER_HOME),
+  classes: clone(MOCK_TEACHER_CLASSES),
+  workspaces: clone(MOCK_TEACHER_WORKSPACES),
+  assignments: clone(MOCK_TEACHER_ASSIGNMENTS),
+  assignmentDetails: clone(MOCK_TEACHER_ASSIGNMENT_DETAILS),
+  essayChecks: clone(MOCK_ESSAY_CHECKS),
+  readingQuestions: clone(MOCK_TEACHER_READING_QUESTIONS),
+  courseWork: clone(MOCK_TEACHER_COURSEWORK),
+})
 
-  getEssayCheck(courseWorkId: string, studentId: string): EssayCheck | null {
-    const essay = db.essayChecks[essayCheckKey(courseWorkId, studentId)]
+let db = initialDb()
+
+function resolveAssignmentId(id: string): string {
+  return id === 'coursework-assignment-2' ? 'assignment-essay' : id
+}
+
+function essayKey(assignmentId: string, studentId: string): string {
+  return `${resolveAssignmentId(assignmentId)}:${studentId}`
+}
+
+function assignmentDetailKey(courseId: string, assignmentId: string): string {
+  return `${courseId}:${resolveAssignmentId(assignmentId)}`
+}
+
+function feedbackPreview(body: string, citedPages: string[]): string {
+  const firstLine = body.split(/\r?\n/).find((line) => line.trim())?.trim() ?? 'No feedback added yet.'
+  const sentence = firstLine.match(/^.*?[.!?](?:\s|$)/)?.[0].trim() ?? firstLine
+  const lines = body ? body.split(/\r?\n/).length : 0
+  const pages = citedPages.length > 0 ? `, cites ${citedPages.join(', ')}` : ''
+  return `"${sentence.replace(/^['"]|['"]$/g, '')}" - ${lines} lines${pages}`
+}
+
+export const teacherStore = {
+  async getHome(): Promise<TeacherHome> {
+    return clone(db.home)
+  },
+
+  async getClasses(): Promise<TeacherClass[]> {
+    return clone(db.classes)
+  },
+
+  async getImportableClasses(): Promise<TeacherClass[]> {
+    return clone(MOCK_TEACHER_IMPORT_COURSES)
+  },
+
+  async getClassImportPreview(courseId: string): Promise<TeacherClassImportPreview | null> {
+    const preview = MOCK_TEACHER_IMPORT_PREVIEWS[courseId]
+    return preview ? clone(preview) : null
+  },
+
+  async importClass(courseId: string): Promise<TeacherClass> {
+    const course = MOCK_TEACHER_IMPORT_COURSES.find((candidate) => candidate.id === courseId)
+    if (!course) throw new Error('That class could not be found in the available courses.')
+
+    if (!db.classes.some((candidate) => candidate.id === courseId)) {
+      db.classes.push(clone(course))
+    }
+    if (!db.workspaces[courseId]) {
+      const workspace = MOCK_TEACHER_WORKSPACES[courseId]
+      if (workspace) db.workspaces[courseId] = clone(workspace)
+    }
+    return clone(course)
+  },
+
+  async getWorkspace(courseId: string): Promise<TeacherWorkspace | null> {
+    const workspace = db.workspaces[courseId]
+    return workspace ? clone(workspace) : null
+  },
+
+  async getAssignments(courseId: string): Promise<TeacherAssignment[]> {
+    return db.assignments.filter((assignment) => assignment.courseId === courseId).map(clone)
+  },
+
+  async getAssignmentDetail(courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> {
+    const detail = db.assignmentDetails[assignmentDetailKey(courseId, assignmentId)]
+    if (detail) return clone(detail)
+
+    const assignment = db.assignments.find(
+      (candidate) => candidate.courseId === courseId && candidate.id === resolveAssignmentId(assignmentId),
+    )
+    return assignment ? { assignment: clone(assignment), submissions: [] } : null
+  },
+
+  async getEssayCheck(assignmentId: string, studentId: string): Promise<EssayCheck | null> {
+    const essay = db.essayChecks[essayKey(assignmentId, studentId)]
     return essay ? clone(essay) : null
   },
 
-  updateProfessorReview({
-    courseWorkId,
-    studentId,
-    reviewId,
-    outcome,
-    note,
-  }: UpdateProfessorReviewRequest): EssayCheck {
-    const essay = db.essayChecks[essayCheckKey(courseWorkId, studentId)]
-    const review = essay?.reviews.find((candidate) => candidate.id === reviewId)
-    if (!essay || !review) throw new Error('That claim could not be found.')
+  async updateProfessorReview(input: UpdateProfessorReviewRequest & { assignmentId: string }): Promise<EssayCheck> {
+    const assignmentId = resolveAssignmentId(input.assignmentId)
+    const essay = db.essayChecks[essayKey(assignmentId, input.studentId)]
+    const review = essay?.reviews.find((candidate) => candidate.id === input.reviewId)
+    if (!essay || !review) throw new Error('That citation could not be found.')
 
-    review.professorReview = { outcome, note }
+    review.professorReview = { outcome: input.outcome, note: input.note }
     return clone(essay)
   },
 
+  async saveFeedback(
+    assignmentId: string,
+    studentId: string,
+    input: { body: string; citationIds: string[] },
+  ): Promise<EssayCheck> {
+    const essay = db.essayChecks[essayKey(assignmentId, studentId)]
+    if (!essay) throw new Error('That essay could not be found.')
+    const citedPages = essay.reviews
+      .filter((review) => input.citationIds.includes(review.id))
+      .map((review) => review.sourceLocation)
+
+    essay.feedback = {
+      ...essay.feedback,
+      body: input.body,
+      citationIds: [...new Set(input.citationIds)],
+      citedPages,
+      preview: feedbackPreview(input.body, citedPages),
+    }
+    return clone(essay)
+  },
+
+  async sendFeedback(input: SendFeedbackRequest & { assignmentId: string }): Promise<{
+    assignmentId: string
+    studentId: string
+    status: 'sent'
+    sentAt: string
+  }> {
+    await this.saveFeedback(input.assignmentId, input.studentId, {
+      body: input.body,
+      citationIds: input.citationIds,
+    })
+    return {
+      assignmentId: resolveAssignmentId(input.assignmentId),
+      studentId: input.studentId,
+      status: 'sent',
+      sentAt: new Date().toISOString(),
+    }
+  },
+
+  getReadingQuestions(paperId = 'paper-colbert'): TeacherReadingQuestionsPage {
+    if (paperId !== db.readingQuestions.paper.id) throw new Error('That paper could not be found.')
+    return clone(db.readingQuestions)
+  },
+
+  async regenerateReadingQuestions(input: RegenerateReadingQuestionsInput): Promise<TeacherReadingQuestionsPage> {
+    if (db.readingQuestions.paper.id !== input.paperId) throw new Error('That paper could not be found.')
+    db.readingQuestions = { ...db.readingQuestions, questions: createMockReadingQuestions(input) }
+    return clone(db.readingQuestions)
+  },
+
+  async updateReadingQuestion(input: UpdateReadingQuestionInput): Promise<TeacherReadingQuestion> {
+    const question = db.readingQuestions.questions.find((candidate) => candidate.id === input.id)
+    if (!question) throw new Error('That reading question could not be found.')
+    question.prompt = input.prompt
+    question.answer = input.answer
+    return clone(question)
+  },
+
+  async deleteReadingQuestion(questionId: string): Promise<{ deleted: string }> {
+    const exists = db.readingQuestions.questions.some((question) => question.id === questionId)
+    if (!exists) throw new Error('That reading question could not be found.')
+    db.readingQuestions = {
+      ...db.readingQuestions,
+      questions: db.readingQuestions.questions.filter((question) => question.id !== questionId),
+    }
+    return { deleted: questionId }
+  },
+
+  async resetMockTeacherData(): Promise<void> {
+    db = initialDb()
+  },
+
+  // Compatibility methods for the old classwork screen until that route is replaced.
   getCourseWork(courseId: string): TeacherCourseWork[] {
-    return db.courseWork.filter((item) => item.courseId === courseId).map((item) => clone(item))
+    return db.courseWork.filter((item) => item.courseId === courseId).map(clone)
   },
 
   setCourseWorkAnalysisSelected(courseWorkId: string, selected: boolean): TeacherCourseWork {
@@ -84,38 +248,10 @@ export const store = {
     }
     return result
   },
+}
 
-  getReadingQuestions(): TeacherReadingQuestionsPage {
-    return clone(db.readingQuestions)
-  },
-
-  regenerateReadingQuestions(input: RegenerateReadingQuestionsInput): TeacherReadingQuestionsPage {
-    if (db.readingQuestions.paper.id !== input.paperId) throw new Error('That paper could not be found.')
-
-    db.readingQuestions = {
-      ...db.readingQuestions,
-      questions: createMockReadingQuestions(input),
-    }
-    return clone(db.readingQuestions)
-  },
-
-  updateReadingQuestion(input: UpdateReadingQuestionInput): TeacherReadingQuestion {
-    const question = db.readingQuestions.questions.find((candidate) => candidate.id === input.id)
-    if (!question) throw new Error('That reading question could not be found.')
-
-    question.prompt = input.prompt
-    question.answer = input.answer
-    return clone(question)
-  },
-
-  deleteReadingQuestion(questionId: string): { deleted: string } {
-    const exists = db.readingQuestions.questions.some((question) => question.id === questionId)
-    if (!exists) throw new Error('That reading question could not be found.')
-
-    db.readingQuestions = {
-      ...db.readingQuestions,
-      questions: db.readingQuestions.questions.filter((question) => question.id !== questionId),
-    }
-    return { deleted: questionId }
-  },
+/** Public alias used by tests and the Settings reset action. */
+export const store = teacherStore
+export const resetTeacherStore = () => {
+  db = initialDb()
 }
