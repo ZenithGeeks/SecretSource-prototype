@@ -1,16 +1,17 @@
 /**
  * 16/07 Knowledge graph (Researcher). Two modes on one canvas:
  *  - Claims ("What rests on what"): claims and the papers that back / contradict / ignore them.
- *  - Papers ("How your library relates"): papers clustered by meaning; edges are passage
- *    similarity (solid) and citations (dashed); a selected pair shows its closest passages.
+ *  - Papers ("How your library relates"): the papers you analysed and the works they cite;
+ *    dashed edges are citations, solid edges join two of your papers that cite the same works,
+ *    and a selected pair shows the quotes behind the link.
  *
- * Rendered with Cytoscape + fcose. Data from useKnowledgeGraph (mock until the gateway
- * endpoint exists). Cytoscape's style parser rejects oklch(), so colours are concrete hex
- * mirroring the index.css tokens, in both themes.
+ * In both, a cited work no public index knew (Semantic Scholar, arXiv, Unpaywall) has a dashed
+ * amber ring, so a reader can see which verdicts rest on a source outside the index. We never
+ * say Scopus: none of those services can tell us whether a work is in it.
  *
- * Scope: GLOBAL. Like History, the graph spans every analysis in the store — all roles
- * (researcher / writer / teacher), not just the researcher's. It's a shared screen; other
- * roles render the same one.
+ * Rendered with Cytoscape + fcose. Data from useKnowledgeGraph, built from every paper the
+ * signed-in user analysed. Cytoscape's style parser rejects oklch(), so colours are concrete
+ * hex mirroring the index.css tokens, in both themes.
  */
 
 import cytoscape from 'cytoscape'
@@ -19,7 +20,8 @@ import { Bookmark, Copy, ExternalLink, FileText, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
-import type { GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import { reasonText } from '../../../lib/api'
+import type { GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
@@ -68,7 +70,7 @@ function usePalette(): { pal: Palette; dark: boolean } {
 }
 
 const RELATION_LABEL: Record<GraphRelation, string> = {
-  asserts: 'asserts', backs: 'backs', contradicts: 'contradicts', silent: 'silent',
+  asserts: 'asserts', backs: 'backs', contradicts: 'contradicts', silent: 'silent', unchecked: "couldn't check",
 }
 
 function relationColor(pal: Palette, relation: GraphRelation): string {
@@ -123,6 +125,7 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
     { selector: 'edge[relation="contradicts"]', style: { 'line-color': pal.refutes } },
     { selector: 'edge[relation="silent"]', style: { 'line-color': pal.insufficient } },
     { selector: 'edge[relation="asserts"]', style: { 'line-color': inkMuted, 'line-style': 'dashed' } },
+    { selector: 'edge[relation="unchecked"]', style: { 'line-color': inkMuted, 'line-style': 'dotted', opacity: 0.7 } },
     { selector: 'node.selected', style: { 'border-color': accent, 'border-width': 2.5 } },
     { selector: '.faded', style: { opacity: 0.12 } },
   ]
@@ -143,6 +146,11 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
       { selector: 'edge.selected', style: { 'line-color': accent, width: 5, opacity: 1 } },
     )
   }
+  // Last, so it wins over the cluster colours.
+  base.push({
+    selector: 'node[kind="paper"][indexed="no"]',
+    style: { 'border-style': 'dashed', 'border-width': 2, 'border-color': pal.insufficient, 'background-color': surface },
+  })
   return base
 }
 
@@ -157,34 +165,65 @@ function StatTile({ count, label }: { count: number; label: string }) {
   )
 }
 
-function ClaimsLegend({ pal }: { pal: Palette }) {
-  const items: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent']
+/** The legend key for the dashed amber ring, with how many works carry it. */
+function NotIndexedKey({ pal, count }: { pal: Palette; count: number }) {
+  if (!count) return null
   return (
-    <div className="absolute bottom-3 left-3 flex gap-3 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
+    <span
+      className="flex items-center gap-1.5 text-xs text-ink-muted"
+      title="Semantic Scholar, arXiv and Unpaywall found nothing for this reference as it is written. This is not a Scopus check."
+    >
+      <span className="size-2.5 rounded-full border-[1.5px] border-dashed" style={{ borderColor: pal.insufficient }} />
+      {count} not found in a public index
+    </span>
+  )
+}
+
+function ClaimsLegend({ pal, notIndexed }: { pal: Palette; notIndexed: number }) {
+  const items: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent', 'unchecked']
+  const lined = (r: GraphRelation) => r === 'asserts' || r === 'unchecked'
+  return (
+    <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
       {items.map((r) => (
         <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted">
           <span
-            className={cn('inline-block h-0.5 w-5', r === 'asserts' && 'border-t border-dashed')}
-            style={r === 'asserts' ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
+            className={cn(
+              'inline-block h-0.5 w-5',
+              r === 'asserts' && 'border-t border-dashed',
+              r === 'unchecked' && 'border-t-2 border-dotted',
+            )}
+            style={lined(r) ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
           />
           {RELATION_LABEL[r]}
         </span>
       ))}
+      <NotIndexedKey pal={pal} count={notIndexed} />
     </div>
   )
 }
 
-function ClusterLegend({ pal, clusters }: { pal: Palette; clusters: string[] }) {
+function ClusterLegend({ pal, clusters, notIndexed }: { pal: Palette; clusters: string[]; notIndexed: number }) {
   const colors = clusterColors(pal)
   return (
-    <div className="absolute left-3 top-3 z-10 flex flex-wrap gap-3 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
+    <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-3 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
       {clusters.map((c, i) => (
         <span key={c} className="flex items-center gap-1.5 text-xs text-ink-muted">
           <span className="size-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }} />
           {c}
         </span>
       ))}
+      <NotIndexedKey pal={pal} count={notIndexed} />
     </div>
+  )
+}
+
+/** Under a cited work in a detail panel: which index knew it, or that none did. */
+function IndexNote({ node }: { node: GraphNode | undefined }) {
+  if (node?.kind !== 'paper' || !node.indexed) return null
+  return node.indexed === 'no' ? (
+    <p className="text-xs font-medium text-insufficient">Not found in a public index</p>
+  ) : (
+    <p className="text-xs text-ink-muted">Found in {node.index || 'a public index'}</p>
   )
 }
 
@@ -197,7 +236,7 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
   const singleOrigin = edges.filter((e) => e.relation === 'asserts').length <= 1
 
   return (
-    <aside className="w-80 shrink-0 overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5">
+    <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
       <p className="mb-2 inline-block rounded bg-refutes-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-refutes">
         {contradicts ? 'Source contradicts' : 'Traced'}
       </p>
@@ -212,9 +251,12 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
               <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ backgroundColor: relationColor(pal, e.relation) }} />
               <div className="min-w-0">
                 <p className="text-sm text-ink">
-                  {p?.kind === 'paper' ? `${p.label} · 20${p.year.replace(/\D/g, '')}` : e.source}{' '}
-                  <span className="text-xs text-ink-muted">{e.note}</span>
+                  {p?.kind === 'paper' ? `${p.label}${p.year ? ` · 20${p.year.replace(/\D/g, '')}` : ''}` : e.source}{' '}
+                  <span className="text-xs text-ink-muted">
+                    {e.relation === 'unchecked' ? `couldn't check: ${reasonText(e.reason)}` : e.note}
+                  </span>
                 </p>
+                {e.relation !== 'asserts' && <IndexNote node={p} />}
                 {e.quote && (
                   <p className="font-serif text-[13px] italic text-ink-muted">
                     “{e.quote}” {e.page && <span className="not-italic">{e.page}</span>}
@@ -241,20 +283,30 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
 }
 
 function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge }) {
+  const node = (id: string) => graph.nodes.find((x) => x.id === id)
   const label = (id: string) => {
-    const n = graph.nodes.find((x) => x.id === id)
+    const n = node(id)
     return n?.kind === 'paper' ? n.label : id
   }
   const a = label(edge.a)
   const b = label(edge.b)
+  const outside = [edge.a, edge.b].filter((id) => {
+    const n = node(id)
+    return n?.kind === 'paper' && n.indexed === 'no'
+  })
   const stats = [
-    { value: edge.similarity.toFixed(2), label: 'similarity' },
-    { value: String(edge.sharedPassages), label: 'shared passages' },
-    { value: String(edge.citations), label: 'citations' },
+    { value: edge.similarity.toFixed(2), label: edge.cites ? 'share of claims' : 'overlap' },
+    { value: String(edge.citations), label: edge.cites ? 'claims citing it' : 'works both cite' },
+    { value: String(edge.contradicted ?? 0), label: 'contradicted' },
   ]
   return (
-    <aside className="w-80 shrink-0 overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5">
+    <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
       <h2 className="font-serif text-lg font-semibold text-ink">{a} and {b}</h2>
+      {outside.map((id) => (
+        <p key={id} className="mt-1 text-xs font-medium text-insufficient">
+          {label(id)} was not found in a public index
+        </p>
+      ))}
       <div className="mt-3 flex gap-2">
         {stats.map((s) => (
           <div key={s.label} className="flex-1 rounded-lg border border-border-subtle px-2.5 py-2">
@@ -370,18 +422,19 @@ export function Graph() {
   const subtitle =
     view === 'claims'
       ? 'Claims and the papers that back, contradict, or ignore them. Click a claim to follow it back to the evidence it was born from.'
-      : 'Edges = shared meaning between passages (ColBERT similarity). Dashed = one cites the other. Click a link to compare a pair.'
+      : 'Dashed = a paper you analysed cites the other. Solid = two of your papers cite the same works. Thicker = more in common. Click a link to compare a pair.'
   const paperCount = graph.nodes.filter((n) => n.kind === 'paper').length
+  const notIndexed = graph.nodes.filter((n) => n.kind === 'paper' && n.indexed === 'no').length
   const selectedEdge = pairSel ? graph.paperEdges.find((e) => e.id === pairSel) : undefined
 
   return (
     <>
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
           <p className="max-w-2xl text-sm text-ink-muted">{subtitle}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
           <div className="flex rounded-lg border border-border-subtle p-0.5 text-xs font-medium">
             {(['claims', 'papers'] as View[]).map((v) => (
               <button
@@ -395,7 +448,7 @@ export function Graph() {
             ))}
           </div>
           {view === 'papers' && (
-            <div className="flex gap-1.5 text-xs font-medium">
+            <div className="flex flex-wrap gap-1.5 text-xs font-medium">
               {([['all', `All ${paperCount} papers`], ['strong', 'Strong links only'], ['citations', 'Citations']] as [PapersFilter, string][]).map(
                 ([key, label]) => (
                   <button
@@ -417,15 +470,15 @@ export function Graph() {
       </header>
 
       {view === 'claims' && (
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
           {graph.stats.map((s) => (
             <StatTile key={s.label} count={s.count} label={s.label} />
           ))}
         </div>
       )}
 
-      <div className="flex gap-4">
-        <div className="relative h-[560px] flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas">
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="relative h-[420px] flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas sm:h-[560px]">
           {view === 'claims' ? (
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5">
               <Search className="size-3.5 text-ink-muted" />
@@ -437,7 +490,7 @@ export function Graph() {
               />
             </div>
           ) : (
-            <ClusterLegend pal={pal} clusters={graph.clusters} />
+            <ClusterLegend pal={pal} clusters={graph.clusters} notIndexed={notIndexed} />
           )}
           <CytoscapeComponent
             key={`${view}-${dark}`}
@@ -463,7 +516,7 @@ export function Graph() {
               setReady(true)
             }}
           />
-          {view === 'claims' && <ClaimsLegend pal={pal} />}
+          {view === 'claims' && <ClaimsLegend pal={pal} notIndexed={notIndexed} />}
         </div>
 
         {view === 'claims' && claimSel && <ClaimDetail graph={graph} claimId={claimSel} pal={pal} />}

@@ -1,32 +1,63 @@
-"""Multi-agent tree (Google ADK):
+"""Multi-agent tree (Google ADK).
 
-    coordinator (root, routes via transfer_to_agent)
-    ├── rag_agent       tools: answer_from_docs, add_paper (DSPy + ColBERT service)
-    ├── paper_agent     tools: claims, citations, fetch_source (Docling + GROBID)
-    ├── verify_agent    tool: verify_claim (retrieval over the cited paper + LLM judge)
-    └── retrieval MCP   the ColBERT/ColPali services also speak MCP at /mcp, attached to
-                        rag_agent so external MCP clients and this tree share one contract
+A coordinator sends requests to three specialists: rag_agent (answers from indexed
+papers, adds new PDFs), paper_agent (claims, citations, fetching cited papers), and
+verify_agent (checks whether a cited paper supports a claim). The ColBERT/ColPali
+services also offer MCP at /mcp. We attach it to rag_agent, so external MCP clients
+and this tree share one set of tools.
+
+A request that one specialist owns is handed over whole with transfer_to_agent. A claim to
+check against several papers is not: the coordinator calls check_claim once per paper in
+the same turn, ADK runs the calls at the same time, and the coordinator combines the
+verdicts into one answer (SCRUM-171).
 """
+
+import asyncio
+import functools
 
 from google.adk.agents import LlmAgent
 from google.adk.tools.mcp_tool import (
     McpToolset,
     StreamableHTTPConnectionParams,
 )
+from pydantic import BaseModel, Field
 
+from app.clients.service_auth import mcp_http_client_factory
 from app.config import COLBERT_URL
 from app.llm import adk_model
-from app.pipeline.claims import extract_citations, extract_claims, extract_claims_with_citations
-from app.pipeline.rag import add_paper, answer_from_docs
-from app.pipeline.sources import fetch_source
-from app.pipeline.verify import verify_claim
+from app.pipeline import claims, rag, sources, verify
 
-# The retrieval service's own MCP endpoint. Same tools the HTTP client wraps; letting the
-# agent call them directly keeps one contract for both agent and external MCP clients.
+
+def off_the_loop(function):
+    """The same tool, run in a worker thread. ADK calls a plain function tool on its event loop,
+    and these block for seconds to minutes, so parallel calls would take turns and hold up
+    every other request. The name, docstring and signature stay, so the model sees the same tool."""
+
+    @functools.wraps(function)
+    async def run(*args, **kwargs):
+        return await asyncio.to_thread(function, *args, **kwargs)
+
+    return run
+
+
+extract_citations = off_the_loop(claims.extract_citations)
+extract_claims = off_the_loop(claims.extract_claims)
+extract_claims_with_citations = off_the_loop(claims.extract_claims_with_citations)
+add_paper = off_the_loop(rag.add_paper)
+answer_from_docs = off_the_loop(rag.answer_from_docs)
+fetch_source = off_the_loop(sources.fetch_source)
+verify_claim = off_the_loop(verify.verify_claim)
+
+# The retrieval service's own MCP endpoint. The HTTP client uses the same tools.
+# The agent calls them directly, so the agent and external MCP clients share one set.
 colbert_mcp = McpToolset(
-    # Trailing slash on purpose: /mcp 307-redirects, the MCP client does not follow it, and
-    # the redirect drops the Authorization header when the service is behind the gcloud proxy.
-    connection_params=StreamableHTTPConnectionParams(url=f"{COLBERT_URL}/mcp/"),
+    # Trailing slash on purpose: /mcp gives a 307 redirect. The MCP client does not
+    # follow it. The redirect drops the Authorization header.
+    connection_params=StreamableHTTPConnectionParams(
+        url=f"{COLBERT_URL}/mcp/",
+        # Signs each request, including tool listing with no context (A2A agent card, adk web).
+        httpx_client_factory=mcp_http_client_factory(COLBERT_URL),
+    ),
     tool_filter=["search_passages"],
 )
 
@@ -60,31 +91,59 @@ paper_agent = LlmAgent(
     tools=[extract_claims, extract_citations, extract_claims_with_citations, fetch_source],
 )
 
+VERIFY_INSTRUCTION = (
+    "Use verify_claim with the claim and the cited paper's PDF path.\n"
+    "Report the verdict (supports / refutes / insufficient), then the quote it relies on,\n"
+    "then the one-sentence reason. Never judge the claim yourself.\n"
+    "If status is error, say so briefly."
+)
+
 verify_agent = LlmAgent(
     name="verify_agent",
     description="Checks whether a cited paper actually supports a claim made about it.",
     model=adk_model(),
-    instruction=(
-        "Use verify_claim with the claim and the cited paper's PDF path.\n"
-        "Report the verdict (supports / refutes / insufficient), then the quote it relies on,\n"
-        "then the one-sentence reason. Never judge the claim yourself.\n"
-        "If status is error, say so briefly."
-    ),
+    instruction=VERIFY_INSTRUCTION,
     tools=[verify_claim],
+)
+
+
+class ClaimAndSource(BaseModel):
+    claim: str = Field(description="The claim to check, in the user's words")
+    source: str = Field(description="One cited paper: a PDF path, DOI, arXiv ID, PMID or URL")
+
+
+# The same specialist as a tool. An agent has one parent and one mode, so routing to
+# verify_agent and calling it as a tool need two agents. single_turn is ADK's recommended
+# way to do what AgentTool did: the coordinator gets the result back instead of handing the
+# conversation over, and can call it several times in one turn.
+check_claim = LlmAgent(
+    name="check_claim",
+    description=(
+        "Checks one claim against one cited paper and returns the verdict, the quote and the reason. "
+        "To check a claim against several papers, call this once per paper in the same turn."
+    ),
+    model=adk_model(),
+    instruction=VERIFY_INSTRUCTION,
+    tools=[verify_claim],
+    mode="single_turn",
+    input_schema=ClaimAndSource,
 )
 
 root_agent = LlmAgent(
     name="coordinator",
-    description="Routes user requests to the right specialist.",
+    description="Routes user requests to the right specialist, and combines checks against several papers.",
     model=adk_model(),
     instruction=(
-        "You are a router. Do not answer yourself.\n"
-        "- whether a paper supports / backs / contradicts a given claim, or any request to\n"
+        "You route requests. Never judge a claim or answer from your own knowledge.\n"
+        "- a claim to check against TWO OR MORE papers -> call check_claim once for each paper,\n"
+        "  all in the same turn. Then answer with one line per paper: the paper, the verdict\n"
+        "  and the quote. End with one sentence on whether the papers agree.\n"
+        "- whether ONE paper supports / backs / contradicts a claim, or any other request to\n"
         "  verify, check or fact-check a claim -> transfer_to_agent(verify_agent)\n"
         "- list the claims or the citations found in a paper -> transfer_to_agent(paper_agent)\n"
         "- download / fetch a paper by DOI, arXiv ID, PMID or URL -> transfer_to_agent(paper_agent)\n"
         "- questions about the indexed documents / knowledge base -> transfer_to_agent(rag_agent)\n"
         "If the request fits none, say so briefly."
     ),
-    sub_agents=[rag_agent, paper_agent, verify_agent],
+    sub_agents=[rag_agent, paper_agent, verify_agent, check_claim],
 )

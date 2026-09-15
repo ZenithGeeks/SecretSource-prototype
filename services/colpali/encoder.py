@@ -1,19 +1,19 @@
 """ColPali-family retrievers on `colpali-engine`: page image -> one vector per image patch.
 
-The same late-interaction idea as ColBERT, but the "tokens" of a document are the patches of
-a rendered page, so a query can match a number inside a table or a trend inside a figure.
-Scoring is MaxSim, done in store.py; this file only encodes.
+The document "tokens" are the patches of a rendered page. A query can match a number
+inside a table or a trend inside a figure. Scoring (MaxSim) is in store.py. This file
+only encodes.
 
 Pick a model with COLPALI_MODEL. ViDoRe scores and rough bf16 footprints:
 
-    athrael-soju/colqwen3.5-4.5B-v3   90.9   ~9 GB   best, needs the GPU mostly to itself
+    athrael-soju/colqwen3.5-4.5B-v3   90.9   ~9 GB   best. Needs the GPU mostly to itself
     TomoroAI/tomoro-colqwen3-embed-4b 90.6   ~8 GB
     vidore/colqwen2.5-v0.2            89.4   ~6 GB
-    vidore/colqwen2-v1.0              89.3   ~4 GB   the default: most of the quality, half the memory
-    vidore/colSmol-500M               82.3   ~1 GB   when memory is tight
+    vidore/colqwen2-v1.0              89.3   ~4 GB   the default. Most of the quality, half the memory
+    vidore/colSmol-500M               82.3   ~1 GB   for when memory is tight
 
-The default shares a 16 GB card with vLLM. For the 4-billion models, lower vLLM's
---gpu-memory-utilization to about 0.35 first, or give this service its own GPU.
+The default shares a 16 GB card with vLLM. For the 4-billion models, first lower vLLM's
+--gpu-memory-utilization to about 0.35. Or give this service its own GPU.
 """
 
 import os
@@ -24,7 +24,7 @@ CHECKPOINT = os.getenv("COLPALI_MODEL", "vidore/colqwen2-v1.0")
 
 
 def _classes(checkpoint: str):
-    """(model class, processor class) for a checkpoint — each family has its own pair."""
+    """The (model class, processor class) pair for a checkpoint. Each family has its own pair."""
     import colpali_engine.models as models
 
     name = checkpoint.lower()
@@ -37,7 +37,7 @@ def _classes(checkpoint: str):
         ("colpali", "ColPali", "ColPaliProcessor"),
     ):
         if marker in name:
-            if not hasattr(models, model):  # never fall through: the next marker is a near-miss
+            if not hasattr(models, model):  # do not fall through: the next marker is a close miss
                 raise ValueError(f"{checkpoint} needs {model}; upgrade colpali-engine")
             return getattr(models, model), getattr(models, processor)
     raise ValueError(f"unknown ColPali-family checkpoint: {checkpoint}")
@@ -49,7 +49,7 @@ class Encoder:
 
         default_device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device or os.getenv("COLPALI_DEVICE") or default_device
-        # bfloat16 on GPU halves the footprint; CPU keeps float32 because bf16 matmuls are slow there.
+        # bfloat16 on GPU cuts the memory in half. CPU keeps float32, because bf16 matmuls are slow there.
         dtype = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
         self.model = model_class.from_pretrained(
             CHECKPOINT, torch_dtype=dtype, device_map=self.device
@@ -58,7 +58,7 @@ class Encoder:
 
     @property
     def dim(self) -> int:
-        """Width of one patch vector — 128 across the family, but read it rather than assume."""
+        """Width of one patch vector. 128 across the family, but read it instead of assuming."""
         return getattr(self.model.config, "embedding_dim", 128)
 
     @torch.no_grad()

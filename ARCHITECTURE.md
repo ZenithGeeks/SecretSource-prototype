@@ -1,209 +1,380 @@
 # Architecture
 
-SecretSource reads a research paper, pulls out the claims that cite other work, and checks
-each claim against the paper it cites. This document covers how the parts fit together:
-which entry point serves the product, what the pipeline actually calls, and where a change
-belongs.
+This page explains how SecretSource works inside: the parts, the steps of an analysis,
+which design pattern each part follows and why, and which file to change for a given job.
 
-## Three entry points, one pipeline
-
-The same pipeline modules are driven three different ways. Only the first one serves the
-web app.
-
-| Entry point | Code | Used by | Emits SSE |
-| --- | --- | --- | --- |
-| HTTP gateway | `backend/app/main.py` (`_run`) | the frontend, `POST /analyses` | yes |
-| Analysis graph | `backend/app/workflow.py` | `adk web`, via `backend/adk_agents/analysis` | no |
-| Chat tree | `backend/app/agents/team.py` | `backend/cli.py`, and `adk web` via `backend/adk_agents/chat` | no |
-
-`backend/adk_agents/analysis` and `backend/adk_agents/chat` are two-line modules that
-re-export `analysis_workflow` and `root_agent` under the names ADK's dev UI expects
-(`docker compose --profile dev up -d adk-web`, then port 8001).
-
-For a product-facing fix, change the gateway. The graph and the chat tree are development
-and exploration surfaces; the graph is intended to eventually back the gateway (see
-`workflow.py`'s own docstring), but does not today.
-
-## What a run does
+## The parts
 
 ```mermaid
-flowchart TD
-    POST["POST /analyses<br/>main.py::_start"] --> RUN["_run: async task per analysis"]
-    RUN --> EXTRACT["extract_claims_with_citations<br/>pipeline/claims.py"]
-    EXTRACT --> DOCLING["Docling: PDF to text"]
-    EXTRACT --> GROBID["GROBID: references"]
-    EXTRACT --> DSPY1["DSPy extractor: claims + their markers"]
-    RUN --> JOBS["one job per claim and cited work<br/>lookup_key, pipeline/sources.py"]
-    JOBS --> VERIFY["verify_claim x3 at a time<br/>pipeline/verify.py"]
-    VERIFY --> INDEX["indexed once per source<br/>per-source lock"]
-    INDEX --> COLBERT["colbert service: passages"]
-    INDEX --> COLPALI["colpali service: figures or pages"]
-    VERIFY --> JUDGE["DSPy judge: supports / refutes / insufficient"]
-    JUDGE --> AUDIT["audit: is the analysis consistent<br/>pipeline/audit.py"]
-    RUN --> PUBLISH["_publish: SSE stage + store.save"]
+flowchart LR
+    B["Browser"] --> W["web<br/>React UI"]
+    W --> G["gateway<br/>FastAPI"]
+    G --> GR["GROBID<br/>reads references"]
+    G --> CB["ColBERT<br/>text search"]
+    G --> CP["ColPali<br/>figure and page search"]
+    G --> L["LLM<br/>OpenAI-compatible"]
+    CB --> Q[("Qdrant")]
+    CP --> Q
+    G --> S[("SQLite or Supabase")]
 ```
 
-Stage by stage:
+- `web` is the user interface. It sends every `/api` request to the gateway.
+- `gateway` runs the analysis. The code is in `backend/`.
+- ColBERT and ColPali are separate services in `services/`. Both store their indexes in Qdrant.
+- Docling is not a service. It is a library inside the gateway that turns a PDF into text
+  and cuts out figures.
 
-1. `_start` creates the analysis (a 12-character id), registers a stream queue, and spawns
-   `_run` as a task. The response is just `{"id"}`; everything after is watched over SSE.
-2. `extract_claims_with_citations` (`pipeline/claims.py`) converts the PDF with Docling,
-   parses the bibliography from GROBID's TEI, asks a DSPy extractor for claims that cite
-   something, and locates each claim's sentence back in the PDF (`locate`, giving page and
-   boxes) so the viewer can show the place rather than describe it.
-3. Every claim and cited work that resolves to something lookupable (`lookup_key`) becomes
-   one job, and the jobs run through `asyncio.gather` behind a `Semaphore(PARALLEL_CHECKS)`.
-   `verify_claim` downloads and indexes the cited paper, retrieves the passages that bear
-   on the claim, and asks the judge.
-4. `audit` reads the assembled analysis before it is marked done and reports where it
-   disagrees with itself — most usefully, a verdict whose quote is not in the evidence that
-   verdict was given. It reports; it never rewrites a verdict.
-5. Every step calls `_publish`, which appends a stage to the analysis, saves it, and pushes
-   it onto that analysis's queue for `GET /analyses/{id}/events`.
+## Three ways to run the pipeline
 
-Both entry points now check three sources at a time: the gateway with that semaphore, the
-graph with `max_parallel_workers=PARALLEL_CHECKS`. Extraction is concurrent too — a paper
-is split into windows and `claims.py` maps them over a thread pool capped at
-`EXTRACT_WORKERS`, since each window is its own model call.
+The same pipeline code (`backend/app/pipeline/`) is used in three places.
 
-Stages arrive in whatever order the checks finish rather than in claim order, which is why
-every stage names its own claim.
+| Way | Code | Used by |
+| --- | --- | --- |
+| HTTP gateway | `backend/app/main.py` | the web app |
+| Analysis graph | `backend/app/workflow.py` | `adk web`, for development |
+| Chat agents | `backend/app/agents/team.py` | `backend/cli.py`, `adk web`, and A2A |
 
-## Verification, in detail
+Only the gateway serves the web app. If you fix something for users, fix it there.
+Because all three use the same pipeline functions, a fix in `backend/app/pipeline/`
+reaches all three.
 
-`verify_claim(claim, source_pdf_path)` in `backend/app/pipeline/verify.py`:
+To open the ADK development UI: `docker compose --profile dev up -d adk-web`, then go to
+http://localhost:8001.
 
-1. `local_pdf` resolves the source — a local path, or a DOI / arXiv ID / PMID / URL that
-   `pipeline/sources.py` looks up (arXiv directly; otherwise Semantic Scholar, then
-   Unpaywall) and downloads into `PAPERS_DIR`.
-2. `_index_once` indexes it in the ColBERT service (text passages) and, when the service is
-   up, the ColPali service (cropped figures, or whole rendered pages when no figures could
-   be cropped) — once per process, behind a per-source lock. Both stores replace a source
-   rather than merge into it, so without that lock a second check could search a source
-   while the first sat between its delete and its upsert, retrieve nothing, and report the
-   claim unsupported.
-3. `_evidence` retrieves passages for the claim from ColBERT, filtered to that source.
-   `_visual` retrieves matching figures or pages from ColPali; their captions are folded
-   into the evidence, since a caption is a line the judge can read and quote.
-4. The judge decides. The verdict also carries `indexed_in`, which index resolved the work
-   and the ids it gave, read back from the resolution cache at no extra request. Failures
-   return `status: "error"` with a `reason`, which `unchecked_reason` maps to a code the UI
-   can show — a claim nobody could check must not look like one nobody tried.
-
-The judge is a DSPy `ChainOfThought` over a `JudgeClaim` signature, built lazily inside
-`_build_judge` and cached in a module global. It is not an ADK agent node: no graph node
-and no chat agent decides a verdict, they all call this same function.
-
-## The two graphs
-
-### The chat tree
-
-`backend/app/agents/team.py`. A root LLM agent that only routes, three specialists that only
-work. Dashed edges are delegation — the coordinator handing the conversation over with
-`transfer_to_agent`; solid edges are an agent calling one of its own tools.
+## What happens when you analyze a paper
 
 ```mermaid
 flowchart TD
-    U(["cli.py, or adk web"]) --> C
+    A["POST /analyses"] --> B["Read the paper<br/>claims.py"]
+    B --> C["Make one job per claim and cited paper"]
+    C --> D["Prepare each cited paper once<br/>download and index"]
+    D --> E["Judge each claim<br/>search and ask the LLM"]
+    B --> P["Read the paper's own figures<br/>figures.py"]
+    E --> F["Audit the result<br/>audit.py"]
+    P --> F
+    F --> G["Done"]
+```
 
-    C{{"coordinator<br/>LlmAgent, routes only"}}
+1. **Start.** `POST /analyses` creates an analysis with a 12-character id and returns the
+   id right away. The work runs in the background. The web app follows it through
+   `GET /analyses/{id}/events` (server-sent events).
+2. **Read the paper.** `extract_claims_with_citations` in `claims.py` does four things.
+   Docling turns the PDF into text. GROBID reads the reference list. The LLM finds the
+   claims that cite other papers. `locate` finds each claim's sentence in the PDF, so the
+   web app can highlight it. GROBID also gives the place of each citation marker, like
+   "[13]", so the page viewer can open the reference when you click the marker.
+3. **Make jobs.** Each pair of (claim, cited paper) becomes one job.
+4. **Prepare each cited paper once.** `prepare_source` downloads the paper if needed. Then
+   it indexes the paper in ColBERT and ColPali at the same time. Many claims can cite the
+   same paper, but each paper is prepared only once. Up to `PARALLEL_SOURCES` papers
+   (default 3) are prepared at the same time.
+5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
+   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. When several analyses
+   run at once, `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` cap steps 4 and 5 across
+   all of them (default: the per-run values), and the runs take turns.
+6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
+   `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
+   keeps only figures whose caption gives their number, like "Figure 2: ...". The web app
+   then turns "Figure 2" in a claim's sentence into a link to that crop. If Docling fails,
+   the list is empty and the rest of the analysis is not affected.
+7. **Audit.** `audit.py` checks the finished analysis for problems, for example a quote
+   that is not in the evidence. It only reports problems. It never changes a verdict.
+
+After every step the gateway calls `_publish`. This saves the analysis and sends one event
+to the web app. Checks finish in any order, so every event says which claim it is about.
+
+Reading the paper is also split into parts. Up to 3 parts (`EXTRACT_WORKERS`) go to the
+LLM at the same time.
+
+## How a claim is checked
+
+The code is in `backend/app/pipeline/verify.py`.
+
+**`prepare_source(source)`** gets a cited paper ready.
+
+1. `local_pdf` finds the PDF. The source can be a local path, a DOI, an arXiv ID, a PMID, a
+   URL or a title. `sources.py` looks it up and downloads it into `PAPERS_DIR`. An arXiv ID
+   or a URL is used as it is. A DOI goes to Semantic Scholar, then to Unpaywall (only when
+   `UNPAYWALL_EMAIL` is set). A PMID goes to Semantic Scholar. A title goes to arXiv search,
+   then to Semantic Scholar search.
+2. `_index_once` indexes the paper in ColBERT (text passages) and, if it is running, in
+   ColPali (cropped figures, or whole pages when no figures were found). Both are done at
+   the same time.
+
+Indexing a paper first deletes its old copy. If two checks indexed the same paper at the
+same time, one check could search in the middle and find nothing. So each paper has a lock,
+and a paper is indexed only once per process.
+
+**`check_prepared(claim, source, path)`** judges the claim.
+
+1. It searches ColBERT for passages about the claim, and ColPali for matching figures or
+   pages. Both searches run at the same time.
+2. Figure captions are added to the evidence, because the judge can read and quote them.
+3. The DSPy judge returns `supports`, `refutes` or `insufficient`, the quote it used, and
+   one sentence of reasoning.
+
+**`verify_claim(claim, source)`** calls `prepare_source` and then `check_prepared`. The chat
+agents and `POST /verify` use it.
+
+When a check fails, the result has `status: "error"` and a `reason`, for example
+`no-open-access`. The web app shows the reason. A claim we could not check must not look
+like a claim nobody tried.
+
+**Papers outside a public index.** The papers we work with (the analysed paper, the works
+it cites, the library, the benchmark) should be in a public index. A paper that is not is
+still analysed and still gets a verdict. The web app marks it, so a reader can see that the
+verdict rests on a source outside the index. We record which index answered instead of
+guessing: each verdict has `indexed_in` with the index that found the paper
+(`semantic-scholar`, `arxiv`, `unpaywall`, or empty) and the ids it gave. We never say
+Scopus, because Semantic Scholar and arXiv cannot tell us whether a paper is in Scopus.
+Only an Elsevier key could.
+
+The knowledge graph (`researcher.graph`) turns this into `indexed` on each cited work:
+`yes` when a verdict names an index or the lookup found the work without a free copy, `no`
+when no index knew it (`unresolvable`, a web page, or a bare link), and empty when the run
+does not say (a download that failed, or the analysed papers themselves). A work cited
+several times keeps its strongest answer. The graph draws `no` as a dashed amber ring.
+"Not found" means our lookup found nothing for the reference as written, so a reference
+GROBID read badly can be marked too. The Library rows are not marked yet (#21): nothing
+records whether the analysed paper itself is indexed.
+
+## How DSPy is used
+
+DSPy is a Python library for calling an LLM from code.
+
+Without DSPy, you write a prompt as a string, send it, and then parse the text that comes
+back. With DSPy, you describe the task as a **Signature**: input fields, output fields, and
+a short instruction. DSPy writes the prompt, calls the LLM, and gives you back the output
+fields. You read them like normal Python values, for example `prediction.verdict`.
+
+**ADK and DSPy do different jobs.**
+
+- Google ADK runs the agents and the order of steps (`team.py`, `workflow.py`).
+- DSPy is used inside a step, for one LLM call that must return exact data.
+- Both use the same LLM. `backend/app/llm.py` creates `adk_model()` for ADK and `dspy_lm()`
+  for DSPy, both pointed at `VLLM_URL`.
+
+**Our four DSPy programs**
+
+| Signature | File | Gets | Returns | Used by |
+| --- | --- | --- | --- | --- |
+| `ExtractCitedClaims` | `claims.py` | part of a paper, with markers like `[b12]` | claims, each with its markers and its exact sentence | every analysis |
+| `ExtractClaims` | `claims.py` | part of a paper | 3 to 6 short claims | the `extract_claims` agent tool |
+| `JudgeClaim` | `verify.py` | a claim and passages from the cited paper | verdict, quote, reasoning | every check, and `POST /verify` |
+| `GenerateAnswer` | `rag.py` | a question and passages | a short answer | the `answer_from_docs` agent tool |
+
+All four use `dspy.ChainOfThought`. It asks the LLM to think step by step before it gives
+the answer.
+
+**Why we use DSPy**
+
+- **We need exact values, not free text.** A verdict must be one of three words. A sentence
+  must match the PDF word for word, so we can find and highlight it. DSPy returns these as
+  fields, so we do not write fragile code to parse the reply.
+- **The LLM can change without rewriting prompts.** Change `VLLM_URL` and `VLLM_MODEL`, and
+  the same programs work with another OpenAI-compatible model.
+- **Each LLM step is small and has a name.** It is easy to find, test and improve.
+- **Later, DSPy can improve the prompts for us.** DSPy has optimizers that learn from
+  labelled examples, such as our benchmark dataset. We do not use this yet.
+
+**Settings in our code**
+
+- The claim extractors and the judge use `dspy.JSONAdapter()`, so the LLM must answer in
+  JSON. Without it, the LLM split the claim list over several lines and only one claim was
+  read.
+- The judge uses `temperature=0.0`, so the same input gives the same verdict as much as
+  possible. If the LLM returns a word that is not one of the three verdicts, we use
+  `insufficient`.
+- We call `dspy.context(...)` around each LLM call, not `dspy.configure(...)`. The pipeline
+  judges several claims in parallel threads, and only `dspy.context` is safe for that.
+- `dspy_lm()` sends `enable_thinking: false`. A Qwen3 model that "thinks" can use all its
+  tokens for thinking and return an empty answer.
+
+**Be careful:** the Signature's docstring and the `desc` text of each field are the
+instructions the LLM reads. If you edit them, the verdicts can change. Change them on
+purpose, then check the results again on a paper you know.
+
+## Google ADK: chat agents and the analysis graph
+
+### Chat agents
+
+`backend/app/agents/team.py`. One coordinator, three specialists, and `check_claim`, a
+single-turn copy of `verify_agent` that the coordinator calls as a tool.
+
+```mermaid
+flowchart TD
+    U(["cli.py, adk web, or A2A"]) --> C{{"coordinator<br/>routes, or combines checks"}}
     C -.->|"transfer_to_agent"| RA["rag_agent"]
     C -.->|"transfer_to_agent"| PA["paper_agent"]
     C -.->|"transfer_to_agent"| VA["verify_agent"]
-
-    RA --> RT["answer_from_docs, add_paper"]
-    RA --> CMCP["colbert MCP, streamable HTTP<br/>search_passages"]
+    C -->|"one call per paper,<br/>same turn"| CC["check_claim<br/>single_turn"]
+    RA --> RT["answer_from_docs, add_paper,<br/>search_passages (ColBERT over MCP)"]
     PA --> PT["extract_claims, extract_citations,<br/>extract_claims_with_citations, fetch_source"]
     VA --> VT["verify_claim"]
-
-    RT --> PIPE[["app/pipeline"]]
-    PT --> PIPE
-    VT --> PIPE
+    CC --> VT
 ```
 
-Every specialist is an `LlmAgent` with its own instruction and its own tools, and the
-coordinator's instruction forbids it from answering anything itself. The tools are the same
-functions the gateway calls directly, which is why a fix in `app/pipeline` reaches all three
-entry points at once.
+- A request one specialist owns is handed over whole with `transfer_to_agent`. The
+  specialist then answers the user.
+- A claim to check against two or more papers is not handed over. The coordinator calls
+  `check_claim` once per paper in the same turn, ADK runs the calls at the same time, and
+  the coordinator writes one answer: a line per paper and one sentence on whether they
+  agree.
+- `check_claim` has `mode="single_turn"`, which ADK recommends over wrapping an agent in
+  `AgentTool`. An agent has one mode, so the tool and the transfer target are two agents
+  with the same instruction.
+- Each specialist has its own instruction and tools. The tools are the same pipeline
+  functions the gateway uses, wrapped by `off_the_loop` so they run in a worker thread. ADK
+  calls a plain function tool on its event loop, so without it parallel calls would take
+  turns.
 
-### The analysis graph
+### Analysis graph
 
-`backend/app/workflow.py`. Not an agent tree: plain functions as nodes, with one node that
-fans out. `read_paper` returns a routed `Event`, so the graph branches on `ok` / `error`.
+`backend/app/workflow.py`. The same steps as the gateway, written as an ADK `Workflow`
+graph, so `adk web` can draw it and show the events of a run.
 
 ```mermaid
 flowchart LR
     S(["START"]) --> RP["read_paper"]
-    RP -->|ok| PC["plan_checks<br/>one job per claim and cited work"]
+    RP -->|ok| PC["plan_checks"]
     RP -->|error| RE["report_error"]
-
-    PC --> W1["check_source"]
-    PC --> W2["check_source"]
-    PC --> W3["check_source"]
-    W1 --> AS["assemble"]
-    W2 --> AS
-    W3 --> AS
-
-    ST[("ctx.state<br/>paper, file, claims")] -.-> PC
-    RP -.-> ST
+    PC --> PS["prepare_sources<br/>up to PARALLEL_SOURCES"]
+    PS --> PJ["plan_judging"]
+    PJ --> CS["check_sources<br/>up to PARALLEL_CHECKS"]
+    CS --> AS["assemble"]
+    AS --> RF["read_figures"]
+    RF --> AU["audit_analysis"]
 ```
 
-`check_sources` is one node declared with `parallel_worker=True` and
-`max_parallel_workers=PARALLEL_CHECKS` (3); the three boxes above are that node's workers,
-not three separate nodes. `assemble` folds verdicts and failures back onto their claims the
-same way `_run` does. Session state carries the run between nodes — `read_paper` writes
-`paper`, `file` and `claims`; the session key `verify` set to false makes `plan_checks`
-return nothing, which stops the run after extraction.
+- We keep the graph and the gateway's `_run` in step. Both use the same pipeline
+  functions, `fold_check` to add a result to its claim, `paper_figures` and `audit`. If
+  you change the steps in one, change the other. The graph reads the figures after the
+  checks; the gateway reads them while it checks.
+- The gateway does not run through the graph, because it sends an event to the web app
+  after every check.
+- A run ends with `status` `ok` and the same fields the gateway stores (`paper`, `file`,
+  `claims`, `figures`, `audit`), or with `status` `error` and a `message`.
+- The nodes are plain Python functions, not agents.
+- `prepare_sources` and `check_sources` are parallel workers: they run once for each item
+  in a list, several at a time.
+- Nodes share data through session state: `paper`, `file`, `claims` and `jobs`.
+- Set the session state key `verify` to `false` to stop after reading the paper.
 
-### ADK patterns, mapped
+### ADK features we use
 
-For a reader arriving from Google's ADK multi-agent guide, this system uses:
-
-| Pattern | Where |
+| Feature | Where |
 | --- | --- |
-| LLM-driven delegation (coordinator / dispatcher) | `team.py`: `sub_agents=[...]` on the root, routing by `transfer_to_agent` |
-| Shared session state | `workflow.py`: `ctx.state["paper" / "file" / "claims"]`, and the `verify` key |
-| MCP toolsets | DuckDuckGo over stdio, the colbert service over streamable HTTP at `/mcp` |
-| Parallel fan-out | `workflow.py`: the `check_sources` worker node |
+| A coordinator that routes to sub-agents | `team.py` |
+| A single-turn sub-agent called as a tool, several at once | `team.py`: `check_claim` |
+| Shared session state | `workflow.py` |
+| MCP tools | `team.py`: ColBERT's `search_passages` over MCP |
+| Parallel workers in a graph | `workflow.py`: `prepare_sources`, `check_sources` |
+| A2A server | `backend/a2a_server.py` |
 
-And deliberately does not use `AgentTool` (no agent is wrapped as another agent's tool),
-`LoopAgent` (nothing iterates to a condition), or the `SequentialAgent` / `ParallelAgent`
-classes — the analysis pipeline is a `Workflow` graph of functions instead, because its
-steps are deterministic and only the judge inside `verify_claim` needs a model.
+We do not use `AgentTool` (`mode="single_turn"` does the same job), `LoopAgent`,
+`SequentialAgent` or `ParallelAgent`. The analysis
+pipeline is a graph of plain functions. The LLM is used inside two steps, reading the paper
+and judging a claim, and never to choose the next step. The next section explains why.
+
+## Design pattern
+
+Google Cloud's guide
+[Choose a design pattern for your agentic AI system](https://docs.cloud.google.com/architecture/choose-design-pattern-agentic-ai-system)
+lists patterns for systems built on AI models. We compared SecretSource with it. One rule
+decided most choices: the model is used only for steps that read language (reading the
+paper, judging a claim), and plain code decides the order of the steps.
+
+```mermaid
+flowchart TD
+    subgraph ANALYSIS ["Analysis of a paper: sequential, custom code in _run / analysis_workflow"]
+        P["Read the paper<br/>parallel windows, EXTRACT_WORKERS = 3<br/>LLM"]
+        PL["Plan checks<br/>code"]
+        subgraph PREP ["Parallel: PARALLEL_SOURCES = 3"]
+            S["Get cited paper ready<br/>prepare_source, code"]
+        end
+        subgraph JUDGE ["Parallel: PARALLEL_CHECKS = 3"]
+            J["Judge one claim<br/>fixed search, then one LLM call<br/>not ReAct"]
+        end
+        F["Read figures<br/>code"]
+        A["Audit<br/>review and critique, code is the critic"]
+        P --> PL --> S --> J --> F --> A
+    end
+
+    subgraph CHAT ["Chat agents: coordinator, team.py"]
+        C{{"coordinator<br/>routes, or combines checks"}}
+        R["rag_agent"]
+        PA["paper_agent"]
+        V["verify_agent"]
+        CC["check_claim<br/>parallel, one per paper"]
+        C --> R
+        C --> PA
+        C --> V
+        C --> CC
+    end
+
+    V -.->|"same code"| J
+```
+
+### What we chose
+
+| Part | Code | Pattern | Why |
+| --- | --- | --- | --- |
+| Analysis of a paper | `_run` in `main.py`, `analysis_workflow` in `workflow.py` | Sequential | Every paper goes through the same steps in the same order. Nothing is decided while it runs. |
+| Getting cited papers ready, judging claims | `prepare_source`, `check_prepared` in `verify.py` | Parallel | Independent jobs. Running 3 at a time cut a run from 376 s to 246 s (commit `1b10b3a`). |
+| Reading the paper | `extract_claims_with_citations` in `claims.py` | Parallel | Parts of up to 12,000 characters. Up to 3 parts (`EXTRACT_WORKERS`) go to the model at once. |
+| Judging one claim | `JudgeClaim` in `verify.py` | One model call, not an agent | Code runs the searches first. The model only reads the passages and picks one of three verdicts. |
+| Checking the finished analysis | `audit` in `audit.py` | Review and critique, with code as the critic | The judge's quote must be in the evidence. Code can check that without a model. |
+| Chat agents | `root_agent` in `team.py` | Coordinator | A chat message can ask for many things, so a model has to pick the specialist. |
+| One claim against several papers, in chat | `check_claim` in `team.py` | Parallel, gathered by the coordinator | The checks do not depend on each other. The coordinator gets every verdict back and writes one answer. |
+
+- The gateway runs the steps with plain `asyncio` in `_run`, not the ADK graph, because it
+  sends an event to the web app after every check. The guide calls this the custom logic
+  pattern.
+- Verdicts are not merged. `fold_check` keeps each one, and the web app shows both when two
+  cited papers disagree.
+- The audit only reports findings. It never changes a verdict or asks the judge again, so it
+  is not a loop.
+- The critic is not a model, because a model costs one more call per check and can make the
+  same mistake as the judge.
+
+### Patterns we did not use
+
+| Pattern | Why not |
+| --- | --- |
+| Single agent for the whole analysis | A paper has up to 20 claims (`CLAIM_LIMIT`). One agent could skip a claim or a source, and nobody would see it. |
+| Hierarchical task decomposition, swarm | The guide suggests them for open problems, and they cost the most. Our task is not open: the paper gives the claims and sources. |
+| Coordinator for the analysis | There is nothing to route. Every paper takes the same path. |
+| Loop, iterative refinement | See the audit above. A loop costs a model call per round and needs a stop rule. |
+| ReAct | The search is the same for every claim, so code runs it, and the judge is one model call. |
+| Human in the loop | A run does not stop. Each verdict shows its quote, passages, and reasoning, so the reader decides after. |
 
 ## Services
 
 | Service | What it does | Where it runs |
 | --- | --- | --- |
-| `colbert` | ColBERT passage index and search; also serves MCP at `/mcp` | `services/colbert`, GPU profile locally, Cloud Run in the cloud |
-| `colpali` | ColQwen2 index over figure crops and rendered pages | `services/colpali`, vision profile locally, Cloud Run in the cloud |
-| `grobid` | Reference parsing from the PDF | compose container, port 8070 |
-| `qdrant` | Vector store behind both retrieval services | compose container locally, a GCE VM in the cloud |
-| LLM endpoint | One OpenAI-compatible server behind both frameworks | compose `vllm`, or whatever `VLLM_URL` points at |
-| `gateway` | The HTTP API above | `backend/`, port 8080 |
-| `web` | Built frontend served by nginx, proxying `/api` to the gateway | `frontend/`, port 5173 |
-| `a2a` | The chat tree over A2A, for callers that are agents | `backend/a2a_server.py`, port 8002, `--profile a2a` |
+| `colbert` | text index and search; also MCP at `/mcp/` | `services/colbert`; local GPU or Cloud Run |
+| `colpali` | index and search over figures and pages | `services/colpali`; local GPU or Cloud Run |
+| `grobid` | reads references and full text from PDFs | compose container (port 8070) or Cloud Run |
+| `qdrant` | stores the ColBERT and ColPali indexes | compose container, or a VM in the cloud |
+| LLM | extracts claims and judges them | any OpenAI-compatible endpoint (`VLLM_URL`) |
+| `gateway` | the HTTP API | `backend/`, port 8080 |
+| `web` | the user interface (nginx) | `frontend/`, port 5173 |
+| `a2a` | the chat agents over A2A | `backend/a2a_server.py`, port 8002, `--profile a2a` |
 
-`backend/app/llm.py` is the single place the model is configured: ADK agents get a
-`LiteLlm`, DSPy programs get a `dspy.LM`, both pointed at `VLLM_URL`. `backend/app/config.py`
-reads every setting from the environment, and `.env` covers host runs and compose alike, so
-pointing `COLBERT_URL` / `COLPALI_URL` / `VLLM_URL` at deployed services replaces the local
-containers without a code change.
+- Every setting is an environment variable, read in `backend/app/config.py`. Change `.env`
+  to point at local containers or cloud services. No code change is needed.
+- `web` and `gateway` are built images. After a code change, run
+  `docker compose up -d --build <service>`.
 
-`web` and `gateway` are built images with no source mount, so a code change needs
-`docker compose up -d --build <service>`. For iteration, run that one service on the host
-instead (`npm run dev`, or `uvicorn app.main:app --reload`) and let the rest stay in compose.
+## MCP and A2A
 
-## Two ways in for machines
+There are two ways for other programs to use SecretSource.
 
-The retrieval services speak **MCP** at `/mcp/` alongside their HTTP API, which is
-tool-level access: a client calls `search_passages` and gets passages back. The trailing
-slash matters — `/mcp` redirects.
-
-The `a2a` service speaks **A2A**, which is agent-level access: a caller sends a task in
-natural language and the coordinator decides which specialist handles it. It serves an
-agent card describing the whole tree, so a client discovers the skills rather than being
-told them:
+- **MCP** gives access to single tools. ColBERT and ColPali serve MCP at `/mcp/`. A client
+  calls a tool such as `search_passages` and gets the result. Keep the trailing slash:
+  `/mcp` without it redirects and fails.
+- **A2A** gives access to the whole agent team. A client sends a task in normal language,
+  and the coordinator picks the specialist.
 
 ```sh
 docker compose --profile a2a up -d a2a
@@ -215,32 +386,60 @@ curl -X POST http://localhost:8002/ -H 'Content-Type: application/json' -d '{
     "parts": [{"kind": "text", "text": "List the claims in data/papers/paper.pdf"}]}}}'
 ```
 
-The reply is a task with `status.state` and the answer as an artifact. `A2A_HOST` and
-`A2A_PORT` set the URL the card advertises back to callers, which has to be an address
-they can actually reach — `a2a:8002` from another compose service, `localhost:8002` from
-the host.
+`A2A_HOST` and `A2A_PORT` set the address written in the agent card. Callers must be able to
+reach it: `a2a:8002` from another compose service, `localhost:8002` from your machine.
 
-## State
+## Where data is stored
 
-A running analysis lives in the `analyses` dict in `main.py`, with an `asyncio.Queue` per
-analysis in `streams` for its SSE listeners. Every `_publish` also writes the whole analysis
-to SQLite through `backend/app/store.py`, so history survives a restart; `restore()` reloads
-them at startup and marks anything still "running" as interrupted.
+- While an analysis runs, it lives in memory in `main.py` (`analyses`, and one event queue
+  per analysis in `streams`).
+- Every `_publish` also saves the whole analysis through `backend/app/store.py`. So history
+  survives a restart. On startup, analyses that were still running are marked as
+  interrupted.
+- The store is SQLite by default. If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set,
+  it uses Supabase Postgres. The service role key must stay on the server.
+- The store also caches resolved sources, so running the same paper again does not repeat
+  the lookups.
+- Downloaded PDFs and figure crops are files in `data/papers/`.
+- Chat agent sessions (`backend/cli.py`, the A2A server) live in memory by default. If
+  `SESSION_DB_URL` is set to a Postgres URL, `backend/app/sessions.py` keeps them in
+  Postgres with ADK's `DatabaseSessionService`, so a session continues after a restart
+  (`python cli.py --session <id>`). ADK's tables go in the `adk` schema, not `public`,
+  because Supabase serves `public` through its REST API to the browser's anon key.
+- Each analysis has an `owner`: the Supabase user who started it, or empty when login is off.
+  `backend/app/auth.py` checks the user's access token. A user only sees, opens and deletes
+  their own analyses.
+- Researcher projects (a name and a list of analysis ids) are in the `projects` table of the
+  same store, with an owner. Everything else on the researcher screens is computed from the
+  user's analyses when it is asked for; nothing else is stored.
 
-`store.py` keeps whole analyses as JSON — the gateway reads and writes them entire, never in
-parts — and separately caches resolved sources (`remember_source` / `recall_source`) so a
-re-run costs no lookup API call.
+## Researcher screens
+
+The researcher role shows the user's own work. `backend/app/researcher.py` builds each screen
+from the user's analyses, without new LLM calls:
+
+| Screen | Route | Built from |
+| --- | --- | --- |
+| Home | `GET /researcher/home` | claim counts, claims a cited work contradicts, and works cited more than once that are not analysed yet (the reading queue) |
+| Library | `GET /researcher/projects`, `GET /researcher/projects/{id}/library` | the user's projects; `unsorted` holds analysed papers in no project |
+| Field consensus | `POST /researcher/consensus` | claims whose words match the question, with the verdicts and quotes already found |
+| Graph | `GET /researcher/graph` | papers, claims, and which cited works back or contradict each claim |
+
+`POST /researcher/projects` creates a project, and `POST /researcher/projects/{id}/papers`
+adds an analysis to it.
 
 ## Where to change what
 
-| Change | Where |
+| I want to change... | File |
 | --- | --- |
-| Anything the web app does | `backend/app/main.py` and `frontend/src` |
-| How claims are found, or where a sentence sits in the PDF | `backend/app/pipeline/claims.py` |
-| How a citation resolves to a downloadable PDF | `backend/app/pipeline/sources.py` |
-| What counts as evidence, or how a verdict is decided | `backend/app/pipeline/verify.py` |
-| Figure and table extraction | `backend/app/pipeline/figures.py` |
-| Retrieval behaviour (chunking, batching, collections) | `services/colbert`, `services/colpali` |
-| The model, or how it is addressed | `backend/app/llm.py`, `backend/app/config.py` |
-| The graph drawn by `adk web` | `backend/app/workflow.py` |
-| The chat specialists and their routing | `backend/app/agents/team.py` |
+| anything the web app does | `backend/app/main.py`, `frontend/src` |
+| how claims are found, or how a sentence is found in the PDF | `backend/app/pipeline/claims.py` |
+| how a citation becomes a downloaded PDF | `backend/app/pipeline/sources.py` |
+| what counts as evidence, or how a verdict is decided | `backend/app/pipeline/verify.py` |
+| figure extraction | `backend/app/pipeline/figures.py` |
+| search behaviour (chunks, batches, collections) | `services/colbert`, `services/colpali` |
+| which LLM is used, or how it is called | `backend/app/llm.py`, `backend/app/config.py` |
+| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS` in `.env` |
+| the graph in `adk web` | `backend/app/workflow.py` |
+| the chat agents and their routing | `backend/app/agents/team.py` |
+| the researcher Home, Library, Field consensus or Graph | `backend/app/researcher.py`, `frontend/src/roles/researcher` |

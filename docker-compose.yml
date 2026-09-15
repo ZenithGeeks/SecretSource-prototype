@@ -8,6 +8,11 @@
 #
 # Only backend/cli.py stays on the host: it is the interactive REPL and spawns the
 # DuckDuckGo MCP server via uvx. It reaches every service on localhost.
+#
+# Ports are published on 127.0.0.1 only, because none of these services checks who is
+# calling: on café or campus Wi-Fi, 0.0.0.0 would open them to everyone on the network.
+# Containers reach each other by service name, so this changes nothing between them. To share
+# the stack with teammates over Tailscale, set BIND_ADDRESS to this machine's Tailscale IP.
 services:
   vllm:
     profiles: [gpu]
@@ -47,7 +52,7 @@ services:
       - '{"enable_thinking": false}'
       - --enable-prefix-caching
     ports:
-      - "8000:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:8000:8000"
     volumes:
       - hf-cache:/root/.cache/huggingface
     environment:
@@ -61,7 +66,9 @@ services:
     profiles: [gpu, vision]
     image: qdrant/qdrant:v1.13.4
     ports:
-      - "6333:6333"
+      # Always local, even with BIND_ADDRESS set: anyone who reaches it can read or delete
+      # every index. Use a Qdrant with an API key (QDRANT_URL) for anything shared.
+      - "127.0.0.1:6333:6333"
     volumes:
       - qdrant-storage:/qdrant/storage # both retrieval indexes survive rebuilds
     restart: unless-stopped
@@ -69,14 +76,14 @@ services:
   grobid:
     image: lfoppiano/grobid:0.8.2
     ports:
-      - "8070:8070"
+      - "${BIND_ADDRESS:-127.0.0.1}:8070:8070"
     restart: unless-stopped
 
   colbert:
     profiles: [gpu]
     build: ./services/colbert
     ports:
-      - "8893:8893"
+      - "${BIND_ADDRESS:-127.0.0.1}:8893:8893"
     volumes:
       - hf-cache:/root/.cache/huggingface
       - ./data/papers:/app/data/papers # so add("data/papers/x.pdf") resolves in both worlds
@@ -98,7 +105,7 @@ services:
     profiles: [vision]
     build: ./services/colpali
     ports:
-      - "8894:8894"
+      - "${BIND_ADDRESS:-127.0.0.1}:8894:8894"
     volumes:
       - hf-cache:/root/.cache/huggingface
       - ./data/papers:/app/data/papers
@@ -115,7 +122,7 @@ services:
   gateway:
     build: ./backend
     ports:
-      - "8080:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
     environment: &gateway-env
       # Set VLLM_URL in .env to point at a vLLM somewhere else — a Cloud Run service, say —
       # and the local vllm container stops being used. VLLM_API_KEY is what that one wants.
@@ -127,13 +134,26 @@ services:
       COLBERT_URL: ${COLBERT_URL:-http://colbert:8893}
       COLPALI_URL: ${COLPALI_URL:-http://colpali:8894} # optional; visual hints are skipped when it is not running
       GROBID_URL: ${GROBID_URL:-http://grobid:8070}
+      SERVICE_AUTH: ${SERVICE_AUTH:-none} # google-id-token for the shared Cloud Run services
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-} # e.g. secrets/service-auth.json
       PAPERS_DIR: data/papers
       ANALYSES_DB: /app/data/db/analyses.db
       S2_API_KEY: ${S2_API_KEY:-} # without one, Semantic Scholar 429s most lookups
       UNPAYWALL_EMAIL: ${UNPAYWALL_EMAIL:-}
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
+      PARALLEL_SOURCES: ${PARALLEL_SOURCES:-3} # cited papers downloaded and indexed at the same time
+      PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims judged at the same time
+      PARALLEL_SOURCES_TOTAL: ${PARALLEL_SOURCES_TOTAL:-} # the same, across all runs; empty = PARALLEL_SOURCES
+      PARALLEL_CHECKS_TOTAL: ${PARALLEL_CHECKS_TOTAL:-} # the same, across all runs; empty = PARALLEL_CHECKS
+      DOCLING_OCR: ${DOCLING_OCR:-auto} # auto: OCR only PDFs without a text layer
+      # Both set: analyses are stored in Supabase Postgres instead of SQLite (supabase/README.md).
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # A Postgres URL keeps the chat agents' sessions after a restart (app/sessions.py).
+      SESSION_DB_URL: ${SESSION_DB_URL:-${DIRECT_URL:-}}
     volumes:
       - ./data/papers:/app/data/papers # shared with the retrieval services
+      - ./backend/secrets:/app/secrets:ro # identity-token credentials, see .env.example
       - analyses:/app/data/db # run history survives a rebuild
       - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
     depends_on:
@@ -148,12 +168,13 @@ services:
     build: ./backend
     command: adk web --host 0.0.0.0 --port 8001 adk_agents
     ports:
-      - "8001:8001"
+      - "${BIND_ADDRESS:-127.0.0.1}:8001:8001"
     environment:
       <<: *gateway-env
       PYTHONPATH: /app # adk_agents/ imports the app package
     volumes:
       - ./data/papers:/app/data/papers
+      - ./backend/secrets:/app/secrets:ro
       - hf-cache:/root/.cache/huggingface
     depends_on:
       - grobid
@@ -167,7 +188,7 @@ services:
     build: ./backend
     command: python -m uvicorn a2a_server:app --host 0.0.0.0 --port 8002
     ports:
-      - "8002:8002"
+      - "${BIND_ADDRESS:-127.0.0.1}:8002:8002"
     environment:
       <<: *gateway-env
       # What the agent card advertises back to callers, not what the server binds.
@@ -175,17 +196,23 @@ services:
       A2A_PORT: "8002"
     volumes:
       - ./data/papers:/app/data/papers
+      - ./backend/secrets:/app/secrets:ro
       - hf-cache:/root/.cache/huggingface
     depends_on:
       - grobid
     restart: unless-stopped
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Both set: users sign in, and each sees only their own analyses (SCRUM-177).
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     environment:
       GATEWAY_URL: http://gateway:8080
     ports:
-      - "5173:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:5173:80"
     depends_on:
       - gateway
     restart: unless-stopped

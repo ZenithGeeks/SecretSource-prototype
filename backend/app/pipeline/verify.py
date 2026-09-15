@@ -6,6 +6,7 @@ Visual evidence (ColPali) is optional and skipped when that service is down.
 """
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from app.clients import retrieval
@@ -14,12 +15,15 @@ EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
 LABELS = ("supports", "refutes", "insufficient")
 
-_judge = None  # lazy: needs dspy and a running LM
+_judge = None  # built on first use: needs dspy and a running LM
 
 
 def _evidence(claim: str, source_name: str) -> list[dict]:
     """Passages from one indexed paper, most relevant first, each keeping page and span."""
-    passages = [p for p in retrieval.colbert_search(claim, k=30) if p.get("source") == source_name]
+    passages = [
+        passage for passage in retrieval.colbert_search(claim, k=30)
+        if passage.get("source") == source_name
+    ]
     return [
         {key: passage[key] for key in ("text", "page", "start", "end", "score")}
         for passage in passages[:EVIDENCE_COUNT]
@@ -53,30 +57,36 @@ def _lock_for(name: str) -> threading.Lock:
 
 
 def _index_once(source: Path) -> dict | None:
-    """Put the cited paper in both stores, the first time this process is asked for it.
+    """Index a cited paper in both stores, only the first time we see it.
 
-    Both stores replace a source rather than merge into it, so re-indexing per check was
-    not just repeated work: with several checks in flight, one could search a source while
-    another sat between its delete and its upsert, retrieve nothing, and report the claim
-    unsupported. Holding the source's lock across indexing means a later check waits for
-    the first to finish rather than starting its own, so a search only ever sees a
-    complete index. Returns the failure when the text index could not be built.
+    Indexing deletes the old copy first. If two checks indexed the same paper at once, one
+    could search in the middle and find nothing. The lock makes the second check wait.
+    Returns the error if the text index failed.
     """
     from app.pipeline.rag import add_paper
 
     with _lock_for(source.name):
         if source.name in _indexed:
             return None
-        indexed = add_paper(source.as_posix())
+        # ColBERT and ColPali are separate services, so we index in both at the same time.
+        # We wait for both before we release the lock, so a search always sees full indexes.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            visual_indexing = pool.submit(_index_visually_if_available, source)
+            indexed = add_paper(source.as_posix())
+            visual_indexing.result()
         if indexed["status"] == "error":
             return indexed  # not remembered: the next check should try again
-        try:
-            if retrieval.colpali_available():
-                _index_visually(source)
-        except Exception:
-            pass  # visual hints are optional, and _visual reports nothing when they are missing
         _indexed.add(source.name)
         return None
+
+
+def _index_visually_if_available(source: Path):
+    """Index figures or pages in ColPali. Visual hints are optional, so errors are ignored."""
+    try:
+        if retrieval.colpali_available():
+            _index_visually(source)
+    except Exception:
+        pass  # _visual reports nothing when the visual index is missing
 
 
 def _visual(claim: str, source: Path) -> tuple[list[dict], str]:
@@ -131,32 +141,76 @@ def _build_judge():
 
 
 def unchecked_reason(verdict: dict, citation: dict) -> str:
-    """Why a claim went unchecked, separating our failures from the paper's. An unresolvable
-    citation that carries a link is usually a blog post or a spec: a fact about the
-    bibliography, not a lookup of ours that failed."""
+    """Why a claim went unchecked.
+
+    A citation we could not find that has a link is usually a blog post or a spec. That is
+    a fact about the source list, not a lookup that failed on our side.
+    """
     reason = verdict.get("reason", "failed")
     return "web-source" if reason == "unresolvable" and citation.get("url") else reason
+
+
+def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
+    """Add the result of one check to its claim. The gateway and the graph both use this.
+
+    A verdict goes under `verdicts`, keyed by the name the source was looked up by, so the
+    card can show it next to its citation. A failure goes under `unchecked` with a reason,
+    because a claim we could not check must not look like one nobody tried.
+    """
+    if verdict["status"] == "ok":
+        claim.setdefault("verdicts", []).append({**verdict, "cited": source})
+    else:
+        claim.setdefault("unchecked", []).append(
+            {"source": source, "reason": unchecked_reason(verdict, citation),
+             "message": verdict.get("message", "")}
+        )
 
 
 def verify_claim(claim: str, source_pdf_path: str) -> dict:
     """Check whether a cited paper actually supports a claim made about it.
 
     Args:
-        claim: the claim to check, e.g. "ColBERT reduces index size by 10x".
-        source_pdf_path: the cited paper — a local PDF path, or a DOI, arXiv ID, PMID,
-            or URL to download, e.g. "data/papers/colbertv2.pdf" or "2112.01488".
+        claim: the claim to check. For example "ColBERT reduces index size by 10x".
+        source_pdf_path: the cited paper. A local PDF path, or a DOI, arXiv ID, PMID,
+            or URL to download. For example "data/papers/colbertv2.pdf" or "2112.01488".
     """
-    global _judge
+    prepared = prepare_source(source_pdf_path)
+    if prepared["status"] == "error":
+        return {**prepared, "claim": claim, "source": source_pdf_path}
+    return check_prepared(claim, source_pdf_path, Path(prepared["path"]))
+
+
+def prepare_source(source_pdf_path: str) -> dict:
+    """Get a cited paper ready: download it if needed and index it once.
+
+    Returns {"status": "ok", "path": ...} or an error with a reason. Safe to call many
+    times for the same paper: the work is done only once.
+    """
     try:
-        from app.pipeline.sources import known_index, local_pdf
+        from app.pipeline.sources import local_pdf
 
         source = Path(local_pdf(source_pdf_path))
         if failure := _index_once(source):
             return failure
+        return {"status": "ok", "path": source.as_posix()}
+    except Exception as error:
+        from app.pipeline.sources import reason_for
 
-        evidence = _evidence(claim, source.name)
-        passages = [item["text"] for item in evidence]  # the judge reads text, not provenance
-        pages, page_model = _visual(claim, source)
+        return {"status": "error", "message": str(error), "reason": reason_for(error)}
+
+
+def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
+    """Judge a claim against a paper that prepare_source already made ready."""
+    global _judge
+    try:
+        from app.pipeline.sources import known_index
+
+        # Text search (ColBERT) and visual search (ColPali) are independent, so run both at once.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            visual_search = pool.submit(_visual, claim, source)
+            evidence = _evidence(claim, source.name)
+            pages, page_model = visual_search.result()
+        passages = [item["text"] for item in evidence]  # the judge reads text, not where it came from
         # A caption is evidence like any other line.
         passages += _captions(pages)
         indexed_in = known_index(source_pdf_path)

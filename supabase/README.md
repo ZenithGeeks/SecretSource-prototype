@@ -28,6 +28,24 @@ SUPABASE_SERVICE_ROLE_KEY=<Dashboard → Settings → API → service_role>
 
 then `pip install -r backend/requirements.txt` (adds `supabase`).
 
+## Agent sessions (optional)
+
+The chat agents (`backend/cli.py`, the A2A server) can keep their sessions in the same
+database, so a conversation continues after a restart. This uses a Postgres connection, not
+the REST API:
+
+```
+SESSION_DB_URL=postgresql://postgres.hecmskknxyssewgnflvy:<database password>@<session pooler host>:5432/postgres
+```
+
+Take the URL from Dashboard → Connect → **Session pooler**. The direct connection host is
+IPv6 only and does not work from Docker Desktop. `DIRECT_URL` is read too.
+
+ADK creates its own tables (`sessions`, `events`, `app_states`, `user_states`,
+`adk_internal_metadata`) on first use. `backend/app/sessions.py` puts them in the `adk`
+schema. The REST API does not serve that schema, and `anon` / `authenticated` have no
+access to it.
+
 ## Migrations
 
 `supabase/migrations/` — apply via the Supabase SQL Editor, `supabase db push`, or the

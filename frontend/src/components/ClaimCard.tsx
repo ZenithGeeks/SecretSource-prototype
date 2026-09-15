@@ -3,11 +3,13 @@
 import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 
-import type { Citation, Claim, Unchecked, Verdict } from '../lib/api'
+import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
+import { citationLink, citationNumber, reference } from '../lib/citations'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
+import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
 import { Card, StandingBadge, VerdictBadge } from './ui'
 
@@ -19,6 +21,30 @@ const VERDICT_BORDER = {
   refutes: 'border-refutes',
   insufficient: 'border-insufficient',
 } as const
+
+/** The verdict as a statement about the claim. A bare "refutes" does not say who refutes whom. */
+const VERDICT_TEXT = {
+  supports: 'backs the claim',
+  refutes: 'contradicts the claim',
+  insufficient: 'not enough evidence',
+} as const
+
+/** A small heading that says where the text under it comes from. */
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[11px] leading-4 font-semibold tracking-wide text-ink-muted uppercase">
+      {children}
+    </p>
+  )
+}
+
+/** The page of the retrieved passage that contains the quote, if one does. */
+function quotePage(verdict: Verdict) {
+  const flat = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const start = flat(verdict.quote).slice(0, 80)
+  if (!start) return undefined
+  return verdict.evidence.find((passage) => flat(passage.text).includes(start))?.page
+}
 
 /** "vidore/colqwen2-v1.0" -> "ColQwen2 v1.0": the reader wants the model, not the repo path. */
 function modelName(checkpoint: string) {
@@ -40,26 +66,74 @@ function hitName(hit: { page: number; label?: string }) {
   return hit.label && hit.label.trim() ? hit.label : `page ${hit.page}`
 }
 
-function reference({ authors, year, title, arxiv }: Citation) {
-  const who = authors.length ? `${authors[0]}${authors.length > 1 ? ' et al.' : ''}` : 'Unknown'
-  return `${who}${year ? ` (${year})` : ''}. ${title || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
-}
-
 /**
  * The paper's sentence as the paper wrote it.
  *
- * The gateway renders each citation as a "[b13]" marker so a claim can be traced back to the
- * works it cites. That is machinery, and it belongs nowhere near a reader.
+ * The gateway writes each citation as a "[b12]" marker, GROBID's id for the reference. We put
+ * back the number the paper prints ("[13]"), so the sentence reads as it does in the PDF.
+ * Markers next to each other become one list, "[5, 25]". A marker whose number we do not know
+ * is removed.
  */
-function asWritten(sentence: string) {
-  return sentence.replace(/\s*\[b\d+\]/g, '').trim()
+function asWritten(sentence: string, citations: Citation[] = []) {
+  const numbers = new Map(
+    citations.filter((c) => c.ref && citationNumber(c)).map((c) => [c.ref, citationNumber(c)]),
+  )
+  return sentence
+    .replace(/(?:\s*\[b\d+\])+/g, (run) => {
+      const printed = [...run.matchAll(/\[(b\d+)\]/g)]
+        .map((marker) => numbers.get(marker[1]))
+        .filter(Boolean)
+      return printed.length ? ` [${printed.join(', ')}]` : ''
+    })
+    .trim()
 }
 
-/** Where this work lives, preferring the identifier that resolves exactly. */
-function citationLink({ doi, arxiv, url }: Citation) {
-  if (doi) return `https://doi.org/${doi}`
-  if (arxiv) return `https://arxiv.org/abs/${arxiv}`
-  return url || ''
+/** "Figure 2", "Fig. 2" or "Fig 2b" in a sentence. The number is group 1. */
+const FIGURE_MENTION = /\bFig(?:ure|\.)?\s*(\d+[a-z]?)\b/gi
+
+function figureByNumber(figures: PaperFigure[], number: string) {
+  return figures.find((figure) => figure.label.toLowerCase() === `figure ${number.toLowerCase()}`)
+}
+
+/** The paper's own figures that a sentence names, once each, in the order it names them. */
+function figuresNamedIn(sentence: string, figures: PaperFigure[]) {
+  const named: PaperFigure[] = []
+  for (const mention of sentence.matchAll(FIGURE_MENTION)) {
+    const figure = figureByNumber(figures, mention[1])
+    if (figure && !named.includes(figure)) named.push(figure)
+  }
+  return named
+}
+
+/**
+ * The sentence with each "Figure N" as a link, but only where the paper has that figure.
+ * A mention of a figure we did not extract stays plain text, so it never opens the wrong one.
+ */
+function withFigureLinks(
+  sentence: string,
+  figures: PaperFigure[],
+  open?: (figure: PaperFigure) => void,
+) {
+  if (!open || figures.length === 0) return sentence
+  const parts: React.ReactNode[] = []
+  let last = 0
+  for (const mention of sentence.matchAll(FIGURE_MENTION)) {
+    const figure = figureByNumber(figures, mention[1])
+    if (!figure) continue
+    parts.push(sentence.slice(last, mention.index))
+    parts.push(
+      <button
+        key={mention.index}
+        onClick={() => open(figure)}
+        className="rounded text-accent underline underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        {mention[0]}
+      </button>,
+    )
+    last = mention.index + mention[0].length
+  }
+  parts.push(sentence.slice(last))
+  return parts
 }
 
 /** A page reference the reader can click to see the page it names. */
@@ -118,41 +192,46 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
   }
 
   const hasAside = (verdict.pages && verdict.pages.length > 0) || verdict.evidence.length > 0
+  const page = verdict.quote ? quotePage(verdict) : undefined
 
   return (
     // The left rule repeats the badge's verdict colour on the block that holds the
     // evidence for it, so a reader scrolling past a closed card still sees which sources
     // contradicted a claim without opening one (#22).
     <div className={cn('mt-2 rounded-lg border-l-[3px] bg-canvas p-3', VERDICT_BORDER[verdict.verdict])}>
-      <div className="flex flex-wrap items-center gap-2">
-        <VerdictBadge verdict={verdict.verdict} />
-        <span className="text-xs text-ink-muted">read from {verdict.source}</span>
-      </div>
+      <VerdictBadge verdict={verdict.verdict} text={VERDICT_TEXT[verdict.verdict]} />
 
       {verdict.quote && (
-        <blockquote className="mt-2 border-l-2 border-accent pl-3 text-sm italic">
-          “{verdict.quote}”
-          {onShow && (
-            <button
-              onClick={() => showInCitedPaper(`Deciding quote in ${verdict.source}`, verdict.quote)}
-              className="ml-2 rounded text-xs font-medium text-accent not-italic hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-            >
-              show in the paper
-            </button>
-          )}
-        </blockquote>
+        <div className="mt-2 border-l-2 border-accent pl-3">
+          <Label>What the cited paper says{page ? ` · page ${page}` : ''}</Label>
+          <blockquote className="text-sm italic">
+            “{verdict.quote}”
+            {onShow && (
+              <button
+                onClick={() =>
+                  showInCitedPaper(`Deciding quote in ${verdict.source}`, verdict.quote, page)
+                }
+                className="ml-2 rounded text-xs font-medium text-accent not-italic hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                show in the cited paper
+              </button>
+            )}
+          </blockquote>
+        </div>
       )}
 
-      {/* Full ink, not muted: the paper's own words above are a quote and read as one;
-          this is the model's working, and it has to look like a different kind of text,
-          not a continuation of the same paragraph (#22). */}
-      <p className="mt-2 text-sm text-ink">{verdict.reasoning}</p>
+      {/* Full ink, not muted, and labelled: this is the model's reasoning, not text from
+          either paper (#22). */}
+      <div className="mt-2">
+        <Label>AI explanation</Label>
+        <p className="text-sm text-ink">{verdict.reasoning}</p>
+      </div>
 
       {hasAside && (
         <div className="mt-2 space-y-2 rounded-lg bg-accent-soft p-3">
           {verdict.pages && verdict.pages.length > 0 && (
             <p className="text-sm text-ink-muted">
-              Also worth reading by eye:{' '}
+              Also look at{' '}
               {verdict.pages.map((hit, k) => (
                 <span key={k}>
                   {k > 0 && ' and '}
@@ -175,10 +254,8 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
                   )}
                 </span>
               ))}{' '}
-              — matched by what the paper shows rather than what it says.
-              {verdict.page_model && (
-                <span className="text-ink-muted"> Matched by {modelName(verdict.page_model)}.</span>
-              )}
+              in the cited paper. Found by searching page images
+              {verdict.page_model ? ` with ${modelName(verdict.page_model)}` : ''}.
             </p>
           )}
 
@@ -191,7 +268,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
                 .filter((hit) => hit.kind === 'figure' && hit.image)
                 .map((hit, k) => (
                   <figure key={k} className="max-w-56 space-y-1">
-                    <img
+                    <AuthorizedImage
                       src={figureImageUrl(verdict.source, hit.image as string)}
                       alt={hit.caption || `${hitName(hit)} of ${verdict.source}`}
                       loading="lazy"
@@ -213,7 +290,9 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
               aria-expanded={showEvidence}
               className="rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
             >
-              {showEvidence ? 'Hide' : 'Show'} {verdict.evidence.length} retrieved passages
+              {showEvidence
+                ? 'Hide the passages from the cited paper'
+                : `Show ${verdict.evidence.length} more passages from the cited paper`}
             </button>
           )}
         </div>
@@ -259,6 +338,7 @@ function CitedWork({
   const link = citationLink(citation)
   return (
     <li className="border-l-2 border-border-subtle pl-4">
+      <Label>Cited paper</Label>
       <p className="text-sm text-ink-muted">
         {link ? (
           <a
@@ -271,6 +351,10 @@ function CitedWork({
           </a>
         ) : (
           reference(citation)
+        )}
+        {/* The number the PDF prints for this work, to find it in the paper's reference list. */}
+        {citationNumber(citation) && (
+          <span className="ml-1.5 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
         )}
       </p>
       {verdict && <Answer verdict={verdict} onShow={onShow} />}
@@ -287,16 +371,35 @@ export function ClaimCard({
   index,
   standing,
   paper,
+  section,
+  figures = [],
+  references = {},
   onShow,
 }: {
   claim: Claim
   index: number
   standing: Standing
   paper?: string
+  /** Where in the paper the claim comes from, e.g. "Section 3.3 · Representation" (#153). */
+  section?: string
+  /** The analysed paper's numbered figures, so "Figure 2" in its sentence can be shown. */
+  figures?: PaperFigure[]
+  /** Every reference the paper's markers point to, by id, to print their numbers. */
+  references?: Record<string, Citation>
   onShow?: (target: Target) => void
 }) {
   const [open, setOpen] = useState(opensByDefault(standing))
   const loose = unpaired(claim)
+  // The analysis-wide references too: a sentence can carry a marker its claim did not keep.
+  const sentence = claim.sentence
+    ? asWritten(claim.sentence, [...claim.citations, ...Object.values(references)])
+    : ''
+  const ownFigures = paper ? figuresNamedIn(sentence, figures) : []
+  const openFigure =
+    paper && onShow
+      ? (figure: PaperFigure) =>
+          onShow({ paper, label: `${figure.label} in this paper`, source: null, page: figure.page })
+      : undefined
 
   return (
     <Card className="p-0">
@@ -309,7 +412,10 @@ export function ClaimCard({
       >
         <span className="mt-1 text-xs font-semibold tabular-nums text-ink-muted">{index + 1}</span>
         <span className="flex-1 space-y-2">
-          <StandingBadge standing={standing} title={STANDING_MEANINGS[standing]} />
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <StandingBadge standing={standing} title={STANDING_MEANINGS[standing]} />
+            {section && <span className="text-xs text-ink-muted">{section}</span>}
+          </span>
           <span className={cn('block max-w-[68ch] leading-relaxed', !open && 'line-clamp-2')}>
             {claim.claim}
           </span>
@@ -327,30 +433,56 @@ export function ClaimCard({
           {/* The paper's own words are evidence; the paraphrase above them is not, so the
               two do not look alike (#46). */}
           {claim.sentence && (
-            <blockquote className="border-l-2 border-border-subtle pl-4 text-sm italic text-ink-muted">
-              “{asWritten(claim.sentence)}”
-              {claim.source && (
-                <span className="ml-2 not-italic">
-                  {paper && onShow ? (
-                    <PageLink
-                      page={claim.source.page}
-                      onClick={() =>
-                        onShow({
-                          paper,
-                          label: `Claim ${index + 1} in this paper`,
-                          quote: claim.sentence,
-                          source: claim.source ?? null,
-                        })
-                      }
-                    >
-                      page {claim.source.page}
-                    </PageLink>
-                  ) : (
-                    <span className="text-xs">page {claim.source.page}</span>
-                  )}
-                </span>
+            <div className="border-l-2 border-border-subtle pl-4">
+              <Label>In this paper</Label>
+              <blockquote className="text-sm italic text-ink-muted">
+                “{withFigureLinks(sentence, ownFigures, openFigure)}”
+                {claim.source && (
+                  <span className="ml-2 not-italic">
+                    {paper && onShow ? (
+                      <PageLink
+                        page={claim.source.page}
+                        onClick={() =>
+                          onShow({
+                            paper,
+                            label: `Claim ${index + 1} in this paper`,
+                            quote: sentence,
+                            source: claim.source ?? null,
+                          })
+                        }
+                      >
+                        page {claim.source.page}
+                      </PageLink>
+                    ) : (
+                      <span className="text-xs">page {claim.source.page}</span>
+                    )}
+                  </span>
+                )}
+              </blockquote>
+              {paper && ownFigures.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {ownFigures.map((figure) => (
+                    <figure key={figure.image} className="max-w-56 space-y-1">
+                      <button
+                        onClick={() => openFigure?.(figure)}
+                        disabled={!openFigure}
+                        className="block rounded focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <AuthorizedImage
+                          src={figureImageUrl(paper, figure.image)}
+                          alt={figure.caption}
+                          loading="lazy"
+                          className="max-h-40 rounded border border-border-subtle bg-surface object-contain"
+                        />
+                      </button>
+                      <figcaption className="line-clamp-3 text-xs text-ink-muted" title={figure.caption}>
+                        {figure.caption}
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
               )}
-            </blockquote>
+            </div>
           )}
 
           {claim.citations.length > 0 && (
@@ -367,11 +499,19 @@ export function ClaimCard({
           )}
 
           {/* Anything naming no citation we hold still has to appear somewhere. */}
+          {/* No reference line here, so the file name is the only way to name the source. */}
           {loose.verdicts.map((verdict, i) => (
-            <Answer key={`loose-verdict-${i}`} verdict={verdict} onShow={onShow} />
+            <div key={`loose-verdict-${i}`}>
+              <Label>Cited paper</Label>
+              <p className="truncate text-sm text-ink-muted" title={verdict.source}>
+                {verdict.source}
+              </p>
+              <Answer verdict={verdict} onShow={onShow} />
+            </div>
           ))}
           {loose.failures.map((failure, i) => (
             <div key={`loose-failure-${i}`}>
+              <Label>Cited paper</Label>
               <p className="truncate text-sm text-ink-muted" title={failure.source}>
                 {failure.source}
               </p>

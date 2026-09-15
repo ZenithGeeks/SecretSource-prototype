@@ -1,15 +1,15 @@
 /**
  * 09 Home (Researcher) — greeting, quick actions, conflicts, reading queue, library
- * summary. Data comes from useResearcherHome (mock-backed until the gateway endpoint
- * exists); `onOpen` navigates to another researcher screen. Analyze a paper opens History,
- * the one screen wired to the gateway.
+ * summary, all from the user's own analyses (useResearcherHome). `onOpen` navigates to
+ * another researcher screen; a conflict opens its analysis, and a queued paper is analysed.
  */
 
 import { FileSearch, FileText, Library, Plus, Search, Waypoints } from 'lucide-react'
 import type { ComponentType } from 'react'
+import { useState } from 'react'
 
 import { Card } from '../../../components/ui'
-import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
+import type { ClaimStanding, ClaimTally, QueueEntry } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
 import { useResearcherActions, useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
@@ -18,11 +18,10 @@ import type { ResearcherScreen } from '../ResearcherApp'
 type Icon = ComponentType<{ className?: string }>
 
 const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; to: ResearcherScreen }[] = [
-  // The one action that reaches the working gateway today; the flow lives on History.
   { title: 'Analyze a paper', hint: 'DOI, arXiv ID, URL, or a PDF you upload', icon: FileSearch, to: 'history' },
-  { title: 'Map my field', hint: 'Cluster library by meaning, see who agrees', icon: Waypoints, to: 'graph' },
-  { title: 'What does the field say about…', hint: "One claim, every paper's answer", icon: Search, to: 'field-consensus' },
-  { title: 'Add papers', hint: 'DOI, arXiv, PDF, or a whole bibliography', icon: Library, to: 'library' },
+  { title: 'Map my field', hint: 'Which works back or contradict your claims', icon: Waypoints, to: 'graph' },
+  { title: 'What does the field say about…', hint: 'Ask a question, see the verdicts found so far', icon: Search, to: 'field-consensus' },
+  { title: 'Organise papers', hint: 'Group the papers you analysed into projects', icon: Library, to: 'library' },
 ]
 
 /** Display order and colour for the library tally; the bar and legend both follow it. */
@@ -53,11 +52,27 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
   )
 }
 
-export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void }) {
+export function Home({
+  onOpen,
+  onOpenAnalysis,
+}: {
+  onOpen: (screen: ResearcherScreen) => void
+  onOpenAnalysis: (id: string) => void
+}) {
   const home = useResearcherHome().data
   const { displayName } = useSettings()
-  const { fileQueuePaper } = useResearcherActions()
+  const { analyseQueued } = useResearcherActions()
+  const [starting, setStarting] = useState<string | null>(null)
   if (!home) return null
+
+  const analyse = async (entry: QueueEntry) => {
+    setStarting(entry.identifier)
+    try {
+      onOpenAnalysis(await analyseQueued(entry))
+    } finally {
+      setStarting(null)
+    }
+  }
 
   return (
     <>
@@ -93,16 +108,19 @@ export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void })
               see all
             </button>
           </div>
+          {home.conflicts.length === 0 && (
+            <p className="mt-2 text-sm text-ink-muted">No claim in your papers is contradicted by its sources.</p>
+          )}
           <ul>
             {home.conflicts.map((c) => (
-              <li key={c.claim} className="border-t border-border-subtle first:mt-2">
+              <li key={`${c.analysis}-${c.claimIndex}`} className="border-t border-border-subtle first:mt-2">
                 <button
                   type="button"
-                  onClick={() => onOpen('field-consensus')}
+                  onClick={() => onOpenAnalysis(c.analysis)}
                   className="flex w-full flex-col gap-1 py-2 text-left"
                 >
                   <p className="text-sm text-ink">{c.claim}</p>
-                  <span className="flex gap-3 text-xs">
+                  <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
                     <span className="flex gap-1">
                       <span className="font-medium text-supports">for</span>
                       <span className="text-ink-muted">{c.for.join(', ') || '—'}</span>
@@ -123,6 +141,11 @@ export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void })
             <h2 className="text-sm font-semibold text-ink">Reading queue</h2>
             <span className="text-xs text-accent">{home.queue.length} papers</span>
           </div>
+          {home.queue.length === 0 && (
+            <p className="mt-2 text-sm text-ink-muted">
+              Works that your papers cite more than once show up here.
+            </p>
+          )}
           <ul className="mt-2.5 flex flex-col gap-2.5">
             {home.queue.map((entry) => (
               <li key={entry.paper} className="flex items-start gap-2">
@@ -133,11 +156,13 @@ export function Home({ onOpen }: { onOpen: (screen: ResearcherScreen) => void })
                 </div>
                 <button
                   type="button"
-                  onClick={() => fileQueuePaper(entry.paper)}
-                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-accent-soft hover:text-ink"
+                  onClick={() => analyse(entry)}
+                  disabled={starting !== null}
+                  title="Analyse this paper"
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50"
                 >
                   <Plus className="size-4" />
-                  Add
+                  {starting === entry.identifier ? 'Starting…' : 'Analyse'}
                 </button>
               </li>
             ))}

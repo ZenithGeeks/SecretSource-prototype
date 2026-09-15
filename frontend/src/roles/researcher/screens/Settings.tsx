@@ -5,7 +5,7 @@
  */
 
 import { Button, Input } from '../../../components/ui'
-import { store } from '../../../lib/researcherStore'
+import { researcherApi } from '../../../lib/researcher'
 import type { Settings as SettingsType } from '../../../lib/settings'
 import { updateSettings, useSettings } from '../../../lib/settings'
 import { cn } from '../../../lib/utils'
@@ -31,12 +31,12 @@ function Row({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-5 py-3.5">
+    <div className="flex flex-col items-start gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5">
       <div className="min-w-0">
         <p className="text-sm text-ink">{label}</p>
         {hint && <p className="text-xs text-ink-muted">{hint}</p>}
       </div>
-      <div className="flex shrink-0 items-center">{children}</div>
+      <div className="flex max-w-full flex-wrap items-center sm:shrink-0">{children}</div>
     </div>
   )
 }
@@ -101,9 +101,12 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
     if (window.prompt('New password (min 8 characters)')) window.alert('Password updated.')
   }
 
-  const exportLibrary = () => {
-    const libraries = Object.fromEntries(store.projects().map((p) => [p.id, store.library(p.id)]))
-    const data = JSON.stringify({ projects: store.projects(), libraries }, null, 2)
+  const exportLibrary = async () => {
+    const projects = await researcherApi.getProjects()
+    const libraries = Object.fromEntries(
+      await Promise.all(projects.map(async (p) => [p.id, await researcherApi.getLibrary(p.id)] as const)),
+    )
+    const data = JSON.stringify({ projects, libraries }, null, 2)
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     const a = document.createElement('a')
     a.href = url
@@ -133,7 +136,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
           <Input
             value={s.displayName}
             onChange={(e) => set('displayName', e.target.value)}
-            className="w-56"
+            className="w-full sm:w-56"
           />
         </Row>
         <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">

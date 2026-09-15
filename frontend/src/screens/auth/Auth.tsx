@@ -141,7 +141,14 @@ export function Auth() {
   const redirectTo = window.location.origin
 
   const google = () =>
-    run(() => supabase!.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } }))
+    run(() =>
+      supabase!.auth.signInWithOAuth({
+        provider: 'google',
+        // Force Google's account chooser every time, so after signing out a user can pick a
+        // different account instead of being silently re-logged into the last one.
+        options: { redirectTo, queryParams: { prompt: 'select_account' } },
+      }),
+    )
   const signIn = () => run(() => supabase!.auth.signInWithPassword({ email, password }))
   const signUp = () =>
     run(
