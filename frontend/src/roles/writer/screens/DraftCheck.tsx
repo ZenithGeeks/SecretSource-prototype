@@ -271,10 +271,15 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
           </section>
 
           <section className="flex w-[400px] shrink-0 flex-col gap-3.5 rounded-xl border border-border-subtle bg-surface p-5">
-            {issues.length === 0 ? (
+            {issues.length === 0 && filterKinds.length === 0 ? (
+              <Empty title="Every filter is off" hint="Toggle a chip above to see this draft's issues." />
+            ) : issues.length === 0 ? (
               <Empty title="No issues left" hint="Every citation in this draft checks out." />
             ) : !activeIssue ? (
-              <Empty title="Claim not shown" hint="That claim isn't in the current filter — toggle the chips above to find it." />
+              <Empty
+                title="Claim not shown"
+                hint="That claim isn't in the current filter, or doesn't exist in this draft — toggle the chips above, or pick one from the text."
+              />
             ) : (
               <>
                 <div className="flex flex-wrap items-center gap-2">
