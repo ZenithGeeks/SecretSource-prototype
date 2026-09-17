@@ -40,8 +40,12 @@ export type Source = {
   isBestMatch: boolean
 }
 
-/** Which "search in" scopes are active. Omitted/undefined scopes are treated as active
- * (matching Find a source's all-on-by-default toggles). */
+/** Which "search in" scopes are active — each true key ORs its results in rather than
+ * restricting to it (so `{ libraryOnly: true }` alone still returns only in-library results,
+ * but adding `openAccess: true` widens the set, it doesn't narrow it further). Omitted keys
+ * count as off; when every key is omitted/false, the store falls back to showing everything
+ * rather than nothing. `citedByLibrary` starts false in Find a source, so the toggles are not
+ * all-on by default — only `libraryOnly`/`openAccess` are. */
 export type SearchScope = { libraryOnly?: boolean; openAccess?: boolean; citedByLibrary?: boolean }
 
 /**
