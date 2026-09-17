@@ -6,6 +6,7 @@
 
 import { CheckCircle2, ChevronRight, Download, Loader2, Search, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { Button, Card, Empty, StandingBadge } from '../../../components/ui'
 import { useDraftCheck, useWriterActions } from '../../../lib/useWriter'
@@ -60,36 +61,56 @@ function writeParams(next: { claimId?: string; filterKinds: VerdictKind[] }) {
   window.history.replaceState(null, '', `?${params.toString()}`)
 }
 
+/** A run of consecutive claim-linked words collapses into one interactive element, so a
+ * 13-word claim is one tab stop with one accessible name, not 13 buttons named "reduces",
+ * "index", "size"... */
 function DraftParagraph({ words, onSelectClaim }: { words: DraftWord[]; onSelectClaim: (claimId: string) => void }) {
+  const nodes: ReactNode[] = []
+  let i = 0
+  while (i < words.length) {
+    const word = words[i]
+    if (!word.mark) {
+      nodes.push(
+        <span key={i} className="text-ink">
+          {word.text}
+        </span>,
+      )
+      i++
+      continue
+    }
+    if (!word.claimId) {
+      nodes.push(
+        <mark key={i} className={cn('rounded-none border-b-2 px-0.5 text-ink', MARK_STYLES[word.mark])}>
+          {word.text}
+        </mark>,
+      )
+      i++
+      continue
+    }
+    const claimId = word.claimId
+    const mark = word.mark
+    const run = [word]
+    let j = i + 1
+    while (j < words.length && words[j].claimId === claimId) {
+      run.push(words[j])
+      j++
+    }
+    nodes.push(
+      <button
+        key={i}
+        type="button"
+        onClick={() => onSelectClaim(claimId)}
+        aria-label={`Claim: ${run.map((w) => w.text).join(' ')}`}
+        className={cn('rounded-none border-b-2 px-0.5 text-ink', MARK_STYLES[mark])}
+      >
+        {run.map((w) => w.text).join(' ')}
+      </button>,
+    )
+    i = j
+  }
   return (
     <p className="flex flex-wrap items-start gap-x-1.5 gap-y-1.5">
-      {words.map((word, index) => {
-        if (!word.mark) {
-          return (
-            <span key={index} className="text-ink">
-              {word.text}
-            </span>
-          )
-        }
-        if (word.claimId) {
-          const claimId = word.claimId
-          return (
-            <button
-              key={index}
-              type="button"
-              onClick={() => onSelectClaim(claimId)}
-              className={cn('rounded-none border-b-2 px-0.5 text-ink', MARK_STYLES[word.mark])}
-            >
-              {word.text}
-            </button>
-          )
-        }
-        return (
-          <mark key={index} className={cn('rounded-none border-b-2 px-0.5 text-ink', MARK_STYLES[word.mark])}>
-            {word.text}
-          </mark>
-        )
-      })}
+      {nodes}
     </p>
   )
 }
