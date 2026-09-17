@@ -183,12 +183,19 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
 
   const recheck = () => {
     if (!activeIssue) return
-    // Re-check never changes which claim is selected, so it has no business dismissing a
-    // pending replacement toast — that toast may belong to an entirely different claim.
+    const claimIdBeingRechecked = activeIssue.id
+    // Re-check never changes which claim is selected before it resolves, so it has no business
+    // dismissing a pending replacement toast — that toast may belong to an entirely different
+    // claim.
     setIsRechecking(true)
     recheckTimer.current = setTimeout(() => {
-      actions.recheckClaim(activeIssue.id)
+      actions.recheckClaim(claimIdBeingRechecked)
       setIsRechecking(false)
+      // The recheck may have moved this claim's verdict outside the current filter, dropping it
+      // from `issues`. Clear the selection so the default-to-first-issue logic above picks up
+      // whatever's left, instead of dead-ending on "Claim not shown" for a claim we ourselves
+      // just resolved — the same "move on" behaviour "Keep mine" already has via goToIssue.
+      setClaimId(undefined)
     }, 700)
   }
 
