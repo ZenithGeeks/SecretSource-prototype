@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button, Card, Empty, StandingBadge } from '../../../components/ui'
 import { useDraftCheck, useWriterActions } from '../../../lib/useWriter'
-import { VERDICT_LEGEND_TEXT } from '../../../lib/writer'
+import { DEFAULT_FILTER_KINDS, VERDICT_LEGEND_TEXT } from '../../../lib/writer'
 import type { DraftWord, Issue, VerdictKind } from '../../../lib/writer'
 import { cn } from '../../../lib/utils'
 
@@ -27,24 +27,36 @@ const SWATCH_STYLES: Record<VerdictKind, string> = {
   insufficient: 'bg-insufficient',
 }
 
+/** `?filter=` is missing (never set) vs. present-but-empty (`?filter=`, every chip explicitly
+ * toggled off) are different states and have to round-trip differently: missing falls back to
+ * the default, present-but-empty stays empty. A present-but-garbled value (`?filter=bogus`,
+ * nothing on the whitelist survives) also falls back to the default rather than silently
+ * showing zero issues. */
 function readParams() {
   const params = new URLSearchParams(window.location.search)
   const draftId = params.get('draft') ?? undefined
   const claimId = params.get('claim') ?? undefined
   const filterRaw = params.get('filter')
-  const filterKinds: VerdictKind[] = filterRaw
-    ? filterRaw.split(',').filter((k): k is VerdictKind => (LEGEND_KINDS as string[]).includes(k))
-    : ['refutes', 'insufficient']
+  let filterKinds: VerdictKind[]
+  if (filterRaw === null) {
+    filterKinds = DEFAULT_FILTER_KINDS
+  } else if (filterRaw === '') {
+    filterKinds = []
+  } else {
+    const parsed = filterRaw.split(',').filter((k): k is VerdictKind => (LEGEND_KINDS as string[]).includes(k))
+    filterKinds = parsed.length > 0 ? parsed : DEFAULT_FILTER_KINDS
+  }
   return { draftId, claimId, filterKinds }
 }
 
-/** Writes claim/filter into the URL without touching `screen`, `draft`, or other params. */
+/** Writes claim/filter into the URL without touching `screen`, `draft`, or other params.
+ * `filter` is always written explicitly (even `?filter=` for "every chip off"), never deleted —
+ * deleting it would round-trip back to the default instead of the all-off state it represented. */
 function writeParams(next: { claimId?: string; filterKinds: VerdictKind[] }) {
   const params = new URLSearchParams(window.location.search)
   if (next.claimId) params.set('claim', next.claimId)
   else params.delete('claim')
-  if (next.filterKinds.length > 0) params.set('filter', next.filterKinds.join(','))
-  else params.delete('filter')
+  params.set('filter', next.filterKinds.join(','))
   window.history.replaceState(null, '', `?${params.toString()}`)
 }
 
