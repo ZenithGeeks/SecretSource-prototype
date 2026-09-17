@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { store } from './writerStore'
 import { writerApi } from './writer'
-import type { SearchScope } from './writer'
 
 export function useWriterHome() {
   return useQuery({ queryKey: ['writer', 'home'], queryFn: writerApi.getHome })
@@ -38,10 +37,13 @@ export function useReplaceCitation() {
   })
 }
 
-export function useSourceSearch(query: string, scope?: SearchScope) {
+/** Text-searches sources; the "search in" scope is applied client-side by the caller over this
+ * one cached result set (see matchesSearchScope) rather than being part of the query key —
+ * scope is a handful of booleans over three-ish mock rows, not worth a fetch per combination. */
+export function useSourceSearch(query: string) {
   return useQuery({
-    queryKey: ['writer', 'search', query, scope],
-    queryFn: () => writerApi.searchSources(query, scope),
+    queryKey: ['writer', 'search', query],
+    queryFn: () => writerApi.searchSources(query),
   })
 }
 

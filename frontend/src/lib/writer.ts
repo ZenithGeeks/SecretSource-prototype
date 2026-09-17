@@ -48,6 +48,21 @@ export type Source = {
  * all-on by default — only `libraryOnly`/`openAccess` are. */
 export type SearchScope = { libraryOnly?: boolean; openAccess?: boolean; citedByLibrary?: boolean }
 
+/** True when a source counts as visible under the given "search in" scope. The current
+ * citation always shows — it's context for the swap, not a candidate competing for the scope
+ * filters. Shared by store.search's text search and Find a source's client-side scope filter
+ * over that one cached result set (see SearchScope for the OR-in semantics). */
+export function matchesSearchScope(source: Source, scope: SearchScope = {}): boolean {
+  const noScopeActive = !scope.libraryOnly && !scope.openAccess && !scope.citedByLibrary
+  return (
+    source.isCurrentCitation ||
+    noScopeActive ||
+    Boolean(scope.libraryOnly && source.inLibrary) ||
+    Boolean(scope.openAccess && source.openAccess) ||
+    Boolean(scope.citedByLibrary && source.citedByLibrary)
+  )
+}
+
 /**
  * One claim in a draft, and how its citation stood up. `draftId` scopes it to its draft.
  * `citation` absent = nothing was cited (uncited). `verdict` absent = not checked yet.

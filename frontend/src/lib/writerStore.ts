@@ -12,6 +12,7 @@ import {
   MOCK_HOME,
   MOCK_SEARCH,
 } from '../mocks/writer'
+import { matchesSearchScope } from './writer'
 import type { Citation, Claim, Draft, CheckRun, SearchResponse, SearchScope, Source, WriterHome } from './writer'
 
 /** Deep clone so mutations never touch the shared mock module. */
@@ -59,16 +60,12 @@ export const store = {
    * showing everything rather than nothing. */
   search: (query = '', scope: SearchScope = {}): SearchResponse => {
     const q = query.trim().toLowerCase()
-    const noScopeActive = !scope.libraryOnly && !scope.openAccess && !scope.citedByLibrary
-    const matchesScope = (s: Source) =>
-      s.isCurrentCitation ||
-      noScopeActive ||
-      (scope.libraryOnly && s.inLibrary) ||
-      (scope.openAccess && s.openAccess) ||
-      (scope.citedByLibrary && s.citedByLibrary)
     const matchesQuery = (s: Source) =>
       q.length === 0 || s.title.toLowerCase().includes(q) || s.citation.toLowerCase().includes(q)
-    return { ...db.search, results: clone(db.search.results.filter((s) => matchesScope(s) && matchesQuery(s))) }
+    return {
+      ...db.search,
+      results: clone(db.search.results.filter((s) => matchesSearchScope(s, scope) && matchesQuery(s))),
+    }
   },
 
   /** Create an empty draft and return its id. */

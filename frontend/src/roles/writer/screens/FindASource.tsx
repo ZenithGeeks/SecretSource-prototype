@@ -4,10 +4,11 @@
  * hands back to `onReplaced`; without it, "Cite this" copies the cite key instead. */
 
 import { Copy, Download, Loader2, Search, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { Button, Card, Empty, Input, StandingBadge } from '../../../components/ui'
 import { useSourceSearch, useWriterActions } from '../../../lib/useWriter'
+import { matchesSearchScope } from '../../../lib/writer'
 import type { Source } from '../../../lib/writer'
 import { cn } from '../../../lib/utils'
 
@@ -63,8 +64,15 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
   // actually typed does a real substring filter over title and citation (not authors, venue,
   // or year individually — see #106 for extending the match fields).
   const effectiveQuery = submittedQuery.trim() === INITIAL_QUERY.trim() ? '' : submittedQuery
-  const search = useSourceSearch(effectiveQuery, { libraryOnly, openAccess, citedByLibrary })
+  const search = useSourceSearch(effectiveQuery)
   const actions = useWriterActions()
+  // Scope is a handful of booleans over three-ish mock rows — filter client-side over the one
+  // cached query instead of keying a separate fetch per chip combination, which used to unmount
+  // the results (and the chip the user just clicked) into a spinner on every first toggle.
+  const results = useMemo(
+    () => search.data?.results.filter((r) => matchesSearchScope(r, { libraryOnly, openAccess, citedByLibrary })) ?? [],
+    [search.data, libraryOnly, openAccess, citedByLibrary],
+  )
 
   const copy = (id: string, text: string) => {
     try {
@@ -157,11 +165,11 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
             </p>
           </div>
 
-          {search.data.results.length === 0 ? (
+          {results.length === 0 ? (
             <Empty title="No sources found" hint="Try a different phrasing, or search open access too." />
           ) : (
             <div className="flex flex-col gap-3">
-              {search.data.results.map((result) => (
+              {results.map((result) => (
                 <article
                   key={result.id}
                   className={cn(
