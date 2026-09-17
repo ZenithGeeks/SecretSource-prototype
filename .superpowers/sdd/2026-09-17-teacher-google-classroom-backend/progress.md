@@ -69,5 +69,8 @@ Baseline: `py -m pytest -x -vv` from `backend` collected 123 tests, reached 32 p
 
 Task 4A review: the delegated reviewer hit the platform usage cap before returning; local diff inspection and the focused suite found no open findings. The adapter uses the actual stored Classroom Drive attachment shape, the existing lazy pipeline boundary, explicit owner-scoped persistence, and the forward-only citation-ID migration.
 Task 4A: complete (commit adcf553, focused tests 5 passed; local review clean).
+Task 4B: complete (commit 529a478, focused route/integration tests 39 passed across the Teacher backend slice).
+Task 5: complete for the approved opt-in remote Teacher adapter (commit 274bd4e; TypeScript build passes). Existing reading-question/legacy classwork methods remain mock-backed because no corresponding backend routes were in the approved Classroom API surface.
+Task 6: backend verification complete; frontend Vite/Vitest execution is environment-blocked by Windows `EPERM` and a missing Tailwind native binary, while `npx tsc -b --pretty false` passes.
 
 Task 1 review finding: the enabled configuration accepted any non-empty encryption key instead of validating Fernet format; the reviewer confirmed this as Important. The original worker also did not capture RED evidence because it hung in pytest cleanup; the fix round will add the missing validation test and record a new RED/GREEN run.
