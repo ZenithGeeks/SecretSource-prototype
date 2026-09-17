@@ -89,6 +89,7 @@ def test_start_authorization_persists_only_a_hashed_owner_bound_pkce_state():
     assert query["redirect_uri"] == ["https://secret-source.test/teacher/google/callback"]
     assert query["response_type"] == ["code"]
     assert query["access_type"] == ["offline"]
+    assert query["prompt"] == ["consent"]
     assert query["code_challenge_method"] == ["S256"]
     assert query["scope"] == ["openid scope.classroom"]
     assert query["state"] == [authorization.state]
@@ -157,7 +158,7 @@ def test_callback_without_refresh_token_keeps_the_existing_encrypted_token():
         FakeGoogleTransport(
             GoogleTokenResponse(
                 refresh_token=None,
-                subject="new-subject",
+                subject="old-subject",
                 email="teacher@example.test",
                 scopes=("openid", "scope.classroom"),
                 access_token_expires_at=None,
@@ -171,6 +172,44 @@ def test_callback_without_refresh_token_keeps_the_existing_encrypted_token():
     service.complete_callback(state=authorization.state, code="another-code")
 
     assert repository.connections["teacher-42"].refresh_token_ciphertext == existing_ciphertext
+
+
+def test_callback_without_refresh_token_rejects_a_different_google_subject_without_overwriting():
+    """Break caught: a token-less callback attaches another Google account to this owner."""
+    from app.teacher.models import GoogleTokenResponse, TeacherGoogleConnection
+
+    now = datetime(2026, 9, 17, 4, 0, tzinfo=UTC)
+    key = Fernet.generate_key()
+    repository = FakeRepository()
+    existing = TeacherGoogleConnection(
+        owner="teacher-42",
+        google_subject="original-subject",
+        google_email="original@example.test",
+        refresh_token_ciphertext=Fernet(key).encrypt(b"previous-refresh-token").decode(),
+        scopes=("openid",),
+        access_token_expires_at=None,
+    )
+    repository.connections["teacher-42"] = existing
+    service, _ = oauth_service(
+        repository,
+        FakeGoogleTransport(
+            GoogleTokenResponse(
+                refresh_token=None,
+                subject="different-subject",
+                email="different@example.test",
+                scopes=("openid", "scope.classroom"),
+                access_token_expires_at=None,
+            )
+        ),
+        key,
+        now,
+    )
+    authorization = service.start_authorization("teacher-42")
+
+    with pytest.raises(ValueError, match="reconnect"):
+        service.complete_callback(state=authorization.state, code="another-code")
+
+    assert repository.connections["teacher-42"] == existing
 
 
 @pytest.mark.parametrize("advance", [timedelta(minutes=11), timedelta()])

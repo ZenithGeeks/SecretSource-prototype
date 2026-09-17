@@ -44,6 +44,10 @@ class FakeQuery:
         self.action, self.payload = "update", payload
         return self
 
+    def delete(self):
+        self.action = "delete"
+        return self
+
     def eq(self, column, value):
         self.filters.append((column, value))
         return self
@@ -83,6 +87,9 @@ class FakeQuery:
         if self.action == "update":
             for row in matched:
                 row.update(self.payload)
+            return FakeResponse([row.copy() for row in matched])
+        if self.action == "delete":
+            self.client.rows[self.table_name] = [row for row in rows if row not in matched]
             return FakeResponse([row.copy() for row in matched])
 
         resource_keys = {
@@ -128,6 +135,46 @@ def test_connection_reads_are_scoped_to_the_requested_owner():
     assert connection is not None
     assert connection.owner == "teacher-a"
     assert connection.refresh_token_ciphertext == "cipher-a"
+
+
+def test_connection_status_is_owner_scoped_and_omits_refresh_token_ciphertext():
+    """Break caught: a status endpoint leaks credentials or another teacher's connection."""
+    from app.teacher.models import TeacherGoogleConnection
+    from app.teacher.repository import TeacherGoogleRepository
+
+    repository = TeacherGoogleRepository(FakeSupabase())
+    repository.save_connection(
+        TeacherGoogleConnection("teacher-a", "subject-a", "a@example.test", "cipher-a", ("openid",), None)
+    )
+    repository.save_connection(
+        TeacherGoogleConnection("teacher-b", "subject-b", "b@example.test", "cipher-b", ("openid",), None)
+    )
+
+    status = repository.get_connection_status("teacher-a")
+
+    assert status is not None
+    assert status.owner == "teacher-a"
+    assert status.google_subject == "subject-a"
+    assert not hasattr(status, "refresh_token_ciphertext")
+
+
+def test_disconnect_deletes_only_the_requested_owner_connection():
+    """Break caught: disconnect leaves credentials behind or deletes another teacher's connection."""
+    from app.teacher.models import TeacherGoogleConnection
+    from app.teacher.repository import TeacherGoogleRepository
+
+    repository = TeacherGoogleRepository(FakeSupabase())
+    repository.save_connection(
+        TeacherGoogleConnection("teacher-a", "subject-a", "a@example.test", "cipher-a", ("openid",), None)
+    )
+    repository.save_connection(
+        TeacherGoogleConnection("teacher-b", "subject-b", "b@example.test", "cipher-b", ("openid",), None)
+    )
+
+    assert repository.disconnect("teacher-a") is True
+    assert repository.get_connection("teacher-a") is None
+    assert repository.get_connection("teacher-b") is not None
+    assert repository.disconnect("teacher-a") is False
 
 
 def test_state_can_be_consumed_once_before_its_expiry():
