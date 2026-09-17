@@ -105,10 +105,11 @@ export const store = {
     db.pendingReplacements[claimId] = { previousCitation: claim.citation }
     claim.citation = { id: source.id, label: source.citation }
     claim.verdict = undefined
-    // Keep the search screen's "current citation" context pointed at the source that now
-    // backs this claim, not the one it replaced.
-    db.search.currentCitation = { id: source.id, label: source.citation }
-    for (const s of db.search.results) s.isCurrentCitation = s.id === source.id
+    // Deliberately doesn't touch db.search.currentCitation/isCurrentCitation: that's a single
+    // global singleton, not scoped per claim or draft, so writing it here would leak whichever
+    // claim was last replaced into every other claim's Find a source session and go stale again
+    // on undoReplacement. Pre-existing gap (the banner was already wrong for any claim but the
+    // scripted c1 case before this PR) — out of scope to fix properly here.
     return true
   },
 

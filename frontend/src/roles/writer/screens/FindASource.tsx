@@ -48,7 +48,7 @@ function toBibTeX(source: Source): string {
     .split(/\s+(?:et al\.|&)/)[0]
     .toLowerCase()
     .replace(/[^a-z]/g, '')
-  const authorList = source.citation.replace(/\s*\(\d{4}\)\s*$/, '').replace(/\s+&\s+/, ' and ')
+  const authorList = source.citation.replace(/\s*\(\d{4}\)\s*$/, '').replace(/\s+&\s+/g, ' and ')
   const fields = [`title={${escapeBibTeX(source.title)}}`, `author={${escapeBibTeX(authorList)}}`, `year={${year}}`]
   if (source.venue) fields.push(`journal={${escapeBibTeX(source.venue)}}`)
   return `@article{${authorKey}${year}${source.id},\n  ${fields.join(',\n  ')}\n}`

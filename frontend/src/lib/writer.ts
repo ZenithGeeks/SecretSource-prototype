@@ -144,6 +144,8 @@ export const writerApi = {
   // sourceId for the Find-a-source flow (#4/#5), and is the version future screens should use.
   replaceCitation: async (claimId: string): Promise<CheckRun> => store.replaceCitationWithSuggestion(claimId),
 
-  // TODO gateway: GET /writer/search?q=...&library=&openAccess=&citedByLibrary=
+  // TODO gateway: GET /writer/search?q=... — scope stays a client-side filter (see
+  // matchesSearchScope), not a query param; useSourceSearch never passes it, so this only
+  // still accepts `scope` for the day something server-side wants to pre-filter it too.
   searchSources: async (query: string, scope?: SearchScope): Promise<SearchResponse> => store.search(query, scope),
 }
