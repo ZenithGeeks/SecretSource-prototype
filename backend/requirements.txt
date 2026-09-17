@@ -11,3 +11,10 @@ python-dotenv>=1.0  # so host runs read the same .env compose does
 requests>=2.31
 supabase>=2.0  # optional persistence backend (app/store.py); SQLite is used when unset
 asyncpg>=0.29  # Postgres driver for agent sessions (app/sessions.py), only used when SESSION_DB_URL is set
+
+# Teacher Google Classroom OAuth/API integration (optional at runtime).
+google-api-python-client>=2.0
+google-auth>=2.0
+google-auth-httplib2>=0.2
+google-auth-oauthlib>=1.0
+cryptography>=42.0
