@@ -156,7 +156,15 @@ def select_supported_attachments(attachments: Iterable[dict[str, Any]]) -> list[
     """Return PDFs followed by Google Docs, ordered predictably within each type."""
     selected: list[dict[str, Any]] = []
     for attachment in attachments:
-        item = dict(attachment.get("driveFile", attachment))
+        item = dict(attachment)
+        shared_drive_file = item.get("driveFile")
+        if isinstance(shared_drive_file, dict):
+            drive_file = shared_drive_file.get("driveFile")
+            if isinstance(drive_file, dict):
+                item.update(shared_drive_file)
+                item.update(drive_file)
+            else:
+                item = dict(shared_drive_file)
         mime_type = item.get("mimeType")
         if mime_type == PDF_MIME_TYPE:
             item["download_strategy"] = "download"
@@ -165,4 +173,4 @@ def select_supported_attachments(attachments: Iterable[dict[str, Any]]) -> list[
         else:
             continue
         selected.append(item)
-    return sorted(selected, key=lambda item: (item["download_strategy"] != "download", item.get("name", ""), item.get("id", "")))
+    return sorted(selected, key=lambda item: (item["download_strategy"] != "download", item.get("name") or item.get("title", ""), item.get("id", "")))
