@@ -96,6 +96,9 @@ class ConnectedTeacher:
     google_subject: str
     google_email: str | None
     scopes: tuple[str, ...]
+    last_synced_at: datetime | None = None
+    last_sync_status: str | None = None
+    last_sync_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +162,7 @@ class TeacherProfessorReview:
     analysis_id: str | None
     verdict: str
     reasoning: str
+    review_id: str = ""
 
     def to_row(self) -> dict[str, Any]:
         return self.__dict__.copy()

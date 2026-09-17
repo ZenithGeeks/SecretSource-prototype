@@ -55,7 +55,7 @@ def _review_from_row(row: dict[str, Any]) -> TeacherProfessorReview:
     return TeacherProfessorReview(
         owner=row["owner"], course_id=row["course_id"], coursework_id=row["coursework_id"],
         submission_id=row["submission_id"], student_id=row["student_id"], analysis_id=row.get("analysis_id"),
-        verdict=row["verdict"], reasoning=row["reasoning"],
+        verdict=row["verdict"], reasoning=row["reasoning"], review_id=row.get("review_id") or "",
     )
 
 
@@ -122,7 +122,7 @@ class TeacherGoogleRepository:
     def get_connection_status(self, owner: str) -> ConnectedTeacher | None:
         rows = (
             self._client.table("teacher_google_connections")
-            .select("owner, google_subject, google_email, scopes")
+            .select("owner, google_subject, google_email, scopes, last_synced_at, last_sync_status, last_sync_error")
             .eq("owner", owner)
             .limit(1)
             .execute()
@@ -136,6 +136,9 @@ class TeacherGoogleRepository:
             google_subject=row["google_subject"],
             google_email=row.get("google_email"),
             scopes=tuple(row.get("scopes") or ()),
+            last_synced_at=_datetime_or_none(row.get("last_synced_at")),
+            last_sync_status=row.get("last_sync_status"),
+            last_sync_error=row.get("last_sync_error"),
         )
 
     def disconnect(self, owner: str) -> bool:
@@ -238,6 +241,21 @@ class TeacherGoogleRepository:
         )
         return _review_from_row(rows[0]) if rows else None
 
+    def get_professor_reviews(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+    ) -> list[TeacherProfessorReview]:
+        rows = (
+            self._client.table("teacher_professor_reviews")
+            .select("*")
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+            .eq("coursework_id", coursework_id)
+            .eq("submission_id", submission_id)
+            .execute()
+            .data
+        )
+        return [_review_from_row(row) for row in rows]
+
     def get_feedback(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str
     ) -> TeacherFeedback | None:
@@ -255,7 +273,21 @@ class TeacherGoogleRepository:
         return _feedback_from_row(rows[0]) if rows else None
 
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
-        self._upsert("teacher_professor_reviews", review.to_row(), "owner,submission_id")
+        conflict = "owner,submission_id,review_id" if review.review_id else "owner,submission_id"
+        self._upsert("teacher_professor_reviews", review.to_row(), conflict)
+
+    def delete_owner_data(self, owner: str) -> None:
+        """Remove server-side Classroom snapshots and OAuth state for one owner."""
+        for table in (
+            "teacher_feedback",
+            "teacher_professor_reviews",
+            "teacher_submissions",
+            "teacher_coursework",
+            "teacher_courses",
+            "teacher_google_oauth_states",
+            "teacher_google_connections",
+        ):
+            self._client.table(table).delete().eq("owner", owner).execute()
 
     def save_feedback(self, feedback: TeacherFeedback) -> None:
         self._upsert("teacher_feedback", feedback.to_row(), "owner,submission_id")

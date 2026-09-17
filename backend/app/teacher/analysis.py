@@ -99,7 +99,13 @@ class TeacherEssayAnalysisService:
     ) -> dict[str, Any]:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         snapshot = self._analysis(submission.analysis_id)
-        reviews = self._reviews(snapshot, self.repository.get_professor_review(owner, course_id, coursework_id, submission_id))
+        get_reviews = getattr(self.repository, "get_professor_reviews", None)
+        saved_reviews = (
+            get_reviews(owner, course_id, coursework_id, submission_id)
+            if get_reviews is not None
+            else self.repository.get_professor_review(owner, course_id, coursework_id, submission_id)
+        )
+        reviews = self._reviews(snapshot, saved_reviews)
         feedback = self.repository.get_feedback(owner, course_id, coursework_id, submission_id)
         return {
             "assignment": {
@@ -126,12 +132,14 @@ class TeacherEssayAnalysisService:
         }
 
     def save_review(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str, verdict: str, reasoning: str
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str, verdict: str, reasoning: str,
+        *, review_id: str = "",
     ) -> TeacherProfessorReview:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         review = TeacherProfessorReview(
             owner, course_id, coursework_id, submission_id, submission.student_id,
             submission.analysis_id, verdict, reasoning,
+            review_id,
         )
         self.repository.save_professor_review(review)
         return review
@@ -195,8 +203,14 @@ class TeacherEssayAnalysisService:
         return snapshot or {"status": "missing", "message": "analysis not found", "claims": []}
 
     def _reviews(
-        self, snapshot: dict[str, Any], professor_review: TeacherProfessorReview | None
+        self, snapshot: dict[str, Any], professor_reviews: TeacherProfessorReview | list[TeacherProfessorReview] | None
     ) -> list[dict[str, Any]]:
+        if isinstance(professor_reviews, list):
+            saved_by_id = {review.review_id: review for review in professor_reviews if review.review_id}
+            fallback_review = next((review for review in professor_reviews if not review.review_id), None)
+        else:
+            saved_by_id = {}
+            fallback_review = professor_reviews
         cards: list[dict[str, Any]] = []
         for claim_index, claim in enumerate(snapshot.get("claims") or []):
             verdicts = {str(item.get("cited")): item for item in claim.get("verdicts") or []}
@@ -212,6 +226,7 @@ class TeacherEssayAnalysisService:
                 location = _source_location(verdict)
                 url = _citation_url(citation)
                 title = str(citation.get("title") or key)
+                professor_review = saved_by_id.get(citation_id) or fallback_review
                 cards.append({
                     "id": citation_id,
                     "standing": standing,

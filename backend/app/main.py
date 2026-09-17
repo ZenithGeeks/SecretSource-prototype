@@ -57,6 +57,7 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
+from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
@@ -117,6 +118,7 @@ app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+app.include_router(teacher_router)
 
 
 class AnalysisRequest(BaseModel):

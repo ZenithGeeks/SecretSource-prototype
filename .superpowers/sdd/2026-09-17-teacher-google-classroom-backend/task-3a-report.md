@@ -30,3 +30,34 @@ The first implementation run exposed request recreation during retries and a mis
 py -m pytest tests/test_teacher_google_client.py -q -p no:cacheprovider
 9 passed in 0.29s
 ```
+
+## Task 3A fix round 1: native Classroom Drive attachments
+
+### Fix details
+
+- `select_supported_attachments` now unwraps the native Classroom Material shape: `driveFile -> driveFile` (SharedDriveFile wrapping DriveFile).
+- The selected item exposes the inner DriveFile metadata (`id`, `title`, `mimeType`, and `alternateLink`) while retaining wrapper metadata when present.
+- Existing direct fake Drive-file payloads remain supported. Ordering uses `name` or native Drive `title`, with PDFs before Google Docs.
+
+### RED evidence
+
+Before the production change, ran:
+
+```text
+py -m pytest tests/test_teacher_google_client.py -q -p no:cacheprovider
+........F.                                                               [100%]
+FAILED tests/test_teacher_google_client.py::test_supported_attachments_unwrap_native_classroom_drive_files
+1 failed, 9 passed in 0.48s
+```
+
+The native nested fixtures selected no attachments, reproducing the reported wrapper mismatch.
+
+### GREEN evidence
+
+After the unwrapping change, ran:
+
+```text
+py -m pytest tests/test_teacher_google_client.py -q -p no:cacheprovider
+..........                                                               [100%]
+10 passed in 0.31s
+```
