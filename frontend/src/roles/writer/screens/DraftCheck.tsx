@@ -167,7 +167,7 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
   if (!draftCheck.data) return null
 
   return (
-    <div className="relative">
+    <div className="relative flex flex-1 flex-col gap-5">
       <header className="flex items-center justify-between gap-4">
         <div>
           <h1 className="font-serif text-xl font-semibold tracking-tight text-ink">Check a draft</h1>
@@ -191,7 +191,7 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
       {draftCheck.data.draft.paragraphs.length === 0 ? (
         <Empty title="Nothing to check yet" hint="Paste or upload a draft to see every citation get a verdict." />
       ) : (
-        <div className="mt-4 flex flex-1 items-stretch gap-4">
+        <div className="flex flex-1 items-stretch gap-4">
           <section className="flex flex-1 flex-col gap-4 rounded-xl border border-border-subtle bg-surface p-7">
             <h2 className="font-serif text-lg font-semibold tracking-tight text-ink">
               {draftCheck.data.draft.heading}
