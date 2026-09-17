@@ -4,7 +4,7 @@
  * hands back to `onReplaced`; without it, "Cite this" copies the cite key instead. */
 
 import { Copy, Download, Loader2, Search, Sparkles } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button, Card, Empty, Input, StandingBadge } from '../../../components/ui'
 import { useSourceSearch, useWriterActions } from '../../../lib/useWriter'
@@ -74,14 +74,21 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
     [search.data, libraryOnly, openAccess, citedByLibrary],
   )
 
-  const copy = (id: string, text: string) => {
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => clearTimeout(copyTimer.current ?? undefined), [])
+
+  // Sets "Copied!" only once the write actually resolves — navigator.clipboard is undefined on
+  // a non-secure origin (throws synchronously) and writeText can reject (denied permission,
+  // unfocused document); both used to still flip the button to "Copied!" with nothing copied.
+  const copy = async (id: string, text: string) => {
     try {
-      navigator.clipboard.writeText(text).catch(() => {})
+      await navigator.clipboard.writeText(text)
     } catch {
       return
     }
     setCopiedId(id)
-    setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500)
+    clearTimeout(copyTimer.current ?? undefined)
+    copyTimer.current = setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500)
   }
 
   const citeSource = (result: Source) => {
