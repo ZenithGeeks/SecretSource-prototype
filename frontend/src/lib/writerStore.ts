@@ -68,7 +68,7 @@ export const store = {
       (scope.citedByLibrary && s.citedByLibrary)
     const matchesQuery = (s: Source) =>
       q.length === 0 || s.title.toLowerCase().includes(q) || s.citation.toLowerCase().includes(q)
-    return { ...db.search, results: db.search.results.filter((s) => matchesScope(s) && matchesQuery(s)) }
+    return { ...db.search, results: clone(db.search.results.filter((s) => matchesScope(s) && matchesQuery(s))) }
   },
 
   /** Create an empty draft and return its id. */
