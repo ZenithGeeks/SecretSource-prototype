@@ -185,7 +185,8 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
             <Sparkles className="mt-0.5 size-4 shrink-0 text-accent" />
             <p className="text-[13px] text-ink">
               Your current citation for this sentence is {search.data.currentCitation.label}, which{' '}
-              {VERDICT_VERB[search.data.currentCitationVerdict]} it. Best match below says it directly.
+              {VERDICT_VERB[search.data.currentCitationVerdict]} it.
+              {results.some((r) => r.isBestMatch) && ' Best match below says it directly.'}
             </p>
           </div>
 
