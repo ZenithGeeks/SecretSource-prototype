@@ -60,7 +60,8 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
   // The mock only "knows" how to semantically match the current sentence (the scripted
   // default results) — it has no real embedding search. Treat the untouched default query
   // as "no text filter" so the demo's baked-in match set still shows; a query the user
-  // actually typed does a real title/citation substring filter (title/authors/venue/year).
+  // actually typed does a real substring filter over title and citation (not authors, venue,
+  // or year individually — see #106 for extending the match fields).
   const effectiveQuery = submittedQuery.trim() === INITIAL_QUERY.trim() ? '' : submittedQuery
   const search = useSourceSearch(effectiveQuery, { libraryOnly, openAccess, citedByLibrary })
   const actions = useWriterActions()
