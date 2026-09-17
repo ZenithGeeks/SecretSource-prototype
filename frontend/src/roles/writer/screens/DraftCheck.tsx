@@ -105,19 +105,11 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
   }
 
   const issues = draftCheck.data?.issues ?? []
-  const activeIndex = Math.max(
-    issues.findIndex((i) => i.id === claimId),
-    0,
-  )
-  const activeIssue: Issue | undefined = issues[activeIndex]
-
-  // Stale `?claim=` (e.g. after a filter change drops it from the list): resync during render
-  // to whatever actually ended up active, instead of leaving the URL pointing at a claim no
-  // longer shown.
-  if (claimId && activeIssue && activeIssue.id !== claimId) {
-    setClaimIdState(activeIssue.id)
-    writeParams({ claimId: activeIssue.id, filterKinds })
-  }
+  // No claim requested: default to the first issue. A claim requested but not found among the
+  // current (filtered) issues stays unselected rather than silently falling back to whichever
+  // issue happens to be at index 0 — the panel below tells the user nothing matched instead.
+  const activeIndex = claimId === undefined ? (issues.length > 0 ? 0 : -1) : issues.findIndex((i) => i.id === claimId)
+  const activeIssue: Issue | undefined = activeIndex >= 0 ? issues[activeIndex] : undefined
 
   const dismissPendingToast = () => {
     if (draftCheck.data?.pendingReplacement) actions.dismissReplacement(draftCheck.data.pendingReplacement.claimId)
@@ -233,7 +225,9 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
           <section className="flex w-[400px] shrink-0 flex-col gap-3.5 rounded-xl border border-border-subtle bg-surface p-5">
             {issues.length === 0 ? (
               <Empty title="No issues left" hint="Every citation in this draft checks out." />
-            ) : !activeIssue ? null : (
+            ) : !activeIssue ? (
+              <Empty title="Claim not shown" hint="That claim isn't in the current filter — toggle the chips above to find it." />
+            ) : (
               <>
                 <div className="flex items-center gap-2">
                   <StandingBadge standing={activeIssue.verdict} />
