@@ -12,7 +12,7 @@ import {
   MOCK_HOME,
   MOCK_SEARCH,
 } from '../mocks/writer'
-import type { Citation, Claim, Draft, CheckRun, SearchResponse, VerdictKind, WriterHome } from './writer'
+import type { Citation, Claim, Draft, DraftWord, CheckRun, SearchResponse, VerdictKind, WriterHome } from './writer'
 
 /** Deep clone so mutations never touch the shared mock module. */
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -26,7 +26,12 @@ const db = {
   // can show the 08b "citation replaced" toast.
   pendingReplacements: {} as Record<
     string,
-    { previousCitation: Citation | undefined; previousVerdict: VerdictKind | undefined; newCitationLabel: string }
+    {
+      previousCitation: Citation | undefined
+      previousVerdict: VerdictKind | undefined
+      previousParagraphs: DraftWord[][]
+      newCitationLabel: string
+    }
   >,
 }
 
@@ -97,25 +102,29 @@ export const store = {
     const claim = db.claims.find((c) => c.id === claimId)
     if (!claim) return buildCheckRun(DEFAULT_DRAFT_ID)
     const source = db.search.results.find((s) => s.id === sourceId)
+    const draft = findDraft(claim.draftId)
     db.pendingReplacements[claimId] = {
       previousCitation: claim.citation,
       previousVerdict: claim.verdict,
+      previousParagraphs: clone(draft.paragraphs),
       newCitationLabel: source?.citation ?? claim.citation?.label ?? '',
     }
     if (source) claim.citation = { id: source.id, label: source.citation }
     claim.verdict = undefined
     // Scripted paragraph swap for the c1 -> s1 (Santhanam) demo case only — see mocks/writer.ts.
-    if (claimId === 'c1' && sourceId === 's1') findDraft(claim.draftId).paragraphs = clone(D1_PARAGRAPHS_AFTER_C1_REPLACED)
+    if (claimId === 'c1' && sourceId === 's1') draft.paragraphs = clone(D1_PARAGRAPHS_AFTER_C1_REPLACED)
     return buildCheckRun(claim.draftId)
   },
 
-  /** Undo a pending citation replacement, restoring the previous citation and verdict. */
+  /** Undo a pending citation replacement, restoring the previous citation, verdict, and
+   * paragraphs (the scripted c1/s1 swap rewrites the whole draft body, not just the claim). */
   undoReplacement(claimId: string): CheckRun {
     const claim = db.claims.find((c) => c.id === claimId)
     const pending = db.pendingReplacements[claimId]
     if (claim && pending) {
       claim.citation = pending.previousCitation
       claim.verdict = pending.previousVerdict
+      findDraft(claim.draftId).paragraphs = pending.previousParagraphs
       delete db.pendingReplacements[claimId]
     }
     return buildCheckRun(claim?.draftId ?? DEFAULT_DRAFT_ID)
