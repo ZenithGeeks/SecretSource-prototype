@@ -20,7 +20,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
   onNavigate: (studentId: string) => void
   onBack: () => void
 }) {
-  const essay = useTeacherEssayCheck(assignmentId, studentId)
+  const essay = useTeacherEssayCheck(courseId, assignmentId, studentId)
   const updateReview = useUpdateProfessorReview()
   const saveFeedback = useSaveTeacherFeedback()
   const sendFeedback = useSendTeacherFeedback()
@@ -46,7 +46,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
   const preview = feedbackPreview(body, pages)
 
   const handleReviewChange = (review: EssayReview, outcome: ProfessorReviewOutcome) => {
-    updateReview.mutate({ assignmentId, studentId, reviewId: review.id, outcome, note: review.professorReview.note })
+    updateReview.mutate({ courseId, assignmentId, studentId, reviewId: review.id, outcome, note: review.professorReview.note })
   }
 
   const copy = async (text: string, message: string) => {
@@ -61,8 +61,8 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
   }
 
   const send = async () => {
-    await saveFeedback.mutateAsync({ assignmentId, studentId, body, citationIds })
-    await sendFeedback.mutateAsync({ assignmentId, studentId, body, citationIds })
+    await saveFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds })
+    await sendFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds })
   }
 
   return (

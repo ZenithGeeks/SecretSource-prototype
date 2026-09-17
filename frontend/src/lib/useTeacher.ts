@@ -68,11 +68,11 @@ export function useTeacherAssignmentDetail(courseId: string, assignmentId: strin
   })
 }
 
-export function useTeacherEssayCheck(assignmentId: string, studentId: string) {
+export function useTeacherEssayCheck(courseId: string, assignmentId: string, studentId: string) {
   return useQuery<EssayCheck | null>({
     queryKey: teacherEssayCheckKey(assignmentId, studentId),
-    queryFn: () => teacherApi.getEssayCheck(assignmentId, studentId),
-    enabled: Boolean(assignmentId && studentId),
+    queryFn: () => teacherApi.getEssayCheck(assignmentId, studentId, courseId),
+    enabled: Boolean(courseId && assignmentId && studentId),
   })
 }
 
@@ -91,7 +91,7 @@ export function useUpdateProfessorReview() {
 export function useSaveTeacherFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
       teacherApi.saveFeedback(input),
     onSuccess: (essay) => updateEssayCache(queryClient, essay),
   })
