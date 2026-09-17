@@ -174,6 +174,9 @@ class TeacherFeedback:
     feedback_text: str
     status: str
     sent_at: datetime | None
+    citation_ids: tuple[str, ...] = ()
 
     def to_row(self) -> dict[str, Any]:
-        return self.__dict__.copy()
+        row = self.__dict__.copy()
+        row["citation_ids"] = list(self.citation_ids)
+        return row
