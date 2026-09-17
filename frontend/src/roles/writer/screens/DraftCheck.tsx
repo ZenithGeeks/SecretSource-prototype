@@ -117,7 +117,10 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
 
   const goToIssue = (index: number) => {
     const next = issues[Math.min(Math.max(index, 0), issues.length - 1)]
-    dismissPendingToast()
+    // Only dismiss when the selection actually moves — index clamps at the ends (e.g. "Next
+    // issue" on the last issue), and a no-op click shouldn't kill the only record of a pending
+    // replacement (Undo stops working once dismissReplacement deletes it).
+    if (next && next.id !== activeIssue?.id) dismissPendingToast()
     if (next) setClaimId(next.id)
   }
 
@@ -139,7 +142,8 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
 
   const recheck = () => {
     if (!activeIssue) return
-    dismissPendingToast()
+    // Re-check never changes which claim is selected, so it has no business dismissing a
+    // pending replacement toast — that toast may belong to an entirely different claim.
     setIsRechecking(true)
     recheckTimer.current = setTimeout(() => {
       actions.recheckClaim(activeIssue.id)
