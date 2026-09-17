@@ -79,8 +79,12 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
 
   /** Plain nav (sidebar, Home's shortcuts, etc.) — strips `claim`/`q` so a screen reached this
    * way never inherits a stale claim from wherever the user was before. Screens reached via an
-   * explicit hand-off (openDraftCheck, backToDraftCheck) set those params themselves. */
+   * explicit hand-off (openDraftCheck, backToDraftCheck) set those params themselves. Re-nav to
+   * the screen already showing (e.g. sidebar "Library" while on Find a source) leaves them be —
+   * there's no screen transition to inherit staleness from, and stripping mid-session would
+   * silently swap "Cite this" from replacing a claim to copying under the user. */
   const navigate = (next: WriterScreen) => {
+    if (next === screen) return
     const params = new URLSearchParams(window.location.search)
     if (params.has('claim') || params.has('q')) {
       params.delete('claim')
