@@ -104,6 +104,11 @@ Writer draft check (sample data):
    - `PARALLEL_SOURCES_TOTAL`, `PARALLEL_CHECKS_TOTAL`: the same two limits across every analysis
      running at once. Default: the per-run values.
 
+   Teacher Google Classroom is optional. Keep `TEACHER_GOOGLE_ENABLED=false` and
+   `VITE_TEACHER_BACKEND=mock` for the existing local teacher experience. For Google Cloud OAuth
+   setup, required scopes, callback registration, encryption-key generation, and the opt-in
+   remote adapter, see [Teacher Google Classroom setup](backend/README.md#teacher-google-classroom).
+
 4. **Add the credentials file:** save the file from the team lead as
    `backend/secrets/service-auth.json`. Git ignores this folder, and Docker never copies it
    into an image.

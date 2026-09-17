@@ -86,9 +86,52 @@ default".
 | `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
 | `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |
 | `DOCLING_OCR` | `auto` | `auto` runs OCR only on a PDF without a text layer (a scan); `always` or `never` overrides that |
+| `TEACHER_GOOGLE_ENABLED` | `false` | validates and enables the optional Classroom OAuth connection |
+| `TEACHER_GOOGLE_CLIENT_ID` | empty | Google OAuth web-client id |
+| `TEACHER_GOOGLE_CLIENT_SECRET` | empty | Google OAuth web-client secret; server-only |
+| `TEACHER_GOOGLE_REDIRECT_URI` | empty | exact allowlisted OAuth callback |
+| `TEACHER_GOOGLE_ENCRYPTION_KEY` | empty | Fernet key used to encrypt stored refresh tokens; server-only |
+| `TEACHER_GOOGLE_SCOPES` | built-in minimum | comma- or whitespace-separated OAuth scope override |
+| `TEACHER_GOOGLE_STATE_TTL_SECONDS` | `600` | lifetime of one-time OAuth state/PKCE records |
+| `TEACHER_GOOGLE_RETRY_ATTEMPTS` | `3` | bounded attempts for transient Google API failures |
+| `TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS` | `0.5` | initial retry backoff |
+| `TEACHER_GOOGLE_REQUEST_TIMEOUT_SECONDS` | `30` | Google API request timeout |
 
 The service role key can read and write all data. Keep it on the server and never put it in
 the frontend or in git.
+
+### Teacher Google Classroom
+
+The Classroom integration is disabled by default, so local mock teacher development and tests
+do not need Google credentials. To enable it for the backend, set `TEACHER_GOOGLE_ENABLED=true`
+and all of the required OAuth/encryption variables above.
+
+Set up Google Cloud before enabling the flag:
+
+1. Enable the Google Classroom API and Google Drive API in the selected Cloud project.
+2. Configure the OAuth consent screen and add teacher accounts as test users while the app is
+   still in testing.
+3. Create a Web application OAuth client and register the exact value of
+   `TEACHER_GOOGLE_REDIRECT_URI`. The default local callback is
+   `http://localhost:8080/api/teacher/google/callback`.
+4. The built-in scopes cover Classroom courses, rosters, coursework/submissions, materials,
+   announcements, topics, Drive read access, and the signed-in Google subject/email. Request
+   only the scopes needed by the deployment if overriding `TEACHER_GOOGLE_SCOPES`.
+5. Generate the encryption key from the backend environment with:
+
+   ```sh
+   py -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+   Keep the result in `TEACHER_GOOGLE_ENCRYPTION_KEY`; changing it makes existing encrypted
+   refresh tokens unreadable.
+6. Apply `supabase/migrations/20260917120000_teacher_classroom.sql` with the Supabase CLI or
+   SQL editor. The tables have RLS enabled and no browser policies; only the service role is
+   intended to access them.
+
+The frontend remains on its local mock adapter unless `VITE_TEACHER_BACKEND=remote` is set at
+frontend build time. `VITE_TEACHER_BACKEND=mock` is the safe default. Never expose the Google
+client secret, encryption key, or Supabase service-role key through a `VITE_*` variable.
 
 ## Login
 
