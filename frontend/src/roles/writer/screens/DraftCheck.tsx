@@ -193,10 +193,6 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
             <Download className="size-4" />
             Export issues
           </Button>
-          <Button onClick={recheck} disabled={!activeIssue || isRechecking}>
-            {isRechecking ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-            Re-check
-          </Button>
         </div>
       </header>
 
@@ -241,9 +237,13 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
               <Empty title="Claim not shown" hint="That claim isn't in the current filter — toggle the chips above to find it." />
             ) : (
               <>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <StandingBadge standing={activeIssue.verdict} />
                   <p className="text-xs text-ink-muted">{activeIssue.citation?.label}</p>
+                  <Button variant="ghost" onClick={recheck} disabled={isRechecking} className="ml-auto shrink-0">
+                    {isRechecking ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                    Re-check
+                  </Button>
                 </div>
 
                 <p className="text-sm text-ink-muted">{activeIssue.explanation}</p>
