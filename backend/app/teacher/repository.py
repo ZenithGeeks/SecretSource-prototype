@@ -18,6 +18,39 @@ from app.teacher.models import (
 )
 
 
+def _datetime_or_none(value: datetime | str | None) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _course_from_row(row: dict[str, Any]) -> TeacherCourse:
+    return TeacherCourse(
+        owner=row["owner"], course_id=row["course_id"], name=row["name"],
+        section=row.get("section"), description=row.get("description"), room=row.get("room"),
+        course_state=row.get("course_state"), raw=dict(row.get("raw") or {}),
+    )
+
+
+def _coursework_from_row(row: dict[str, Any]) -> TeacherCoursework:
+    return TeacherCoursework(
+        owner=row["owner"], course_id=row["course_id"], coursework_id=row["coursework_id"],
+        resource_type=row["resource_type"], title=row.get("title"), description=row.get("description"),
+        state=row.get("state"), due_at=_datetime_or_none(row.get("due_at")), raw=dict(row.get("raw") or {}),
+    )
+
+
+def _submission_from_row(row: dict[str, Any]) -> TeacherSubmission:
+    assigned_grade = row.get("assigned_grade")
+    return TeacherSubmission(
+        owner=row["owner"], course_id=row["course_id"], coursework_id=row["coursework_id"],
+        submission_id=row["submission_id"], student_id=row["student_id"], student_name=row.get("student_name"),
+        state=row.get("state"), assigned_grade=float(assigned_grade) if assigned_grade is not None else None,
+        attachments=list(row.get("attachments") or []), sync_state=row["sync_state"],
+        sync_error=row.get("sync_error"), analysis_id=row.get("analysis_id"), raw=dict(row.get("raw") or {}),
+    )
+
+
 class TeacherGoogleRepository:
     """Tables are server-only: the default client comes from ``store._supabase()``."""
 
@@ -105,9 +138,17 @@ class TeacherGoogleRepository:
             "teacher_submissions", submission.to_row(), "owner,course_id,coursework_id,submission_id"
         )
 
+    def record_sync_status(
+        self, owner: str, status: str, error: str | None, synced_at: datetime | None
+    ) -> None:
+        values: dict[str, Any] = {"last_sync_status": status, "last_sync_error": error}
+        if synced_at is not None:
+            values["last_synced_at"] = synced_at
+        self._client.table("teacher_google_connections").update(values).eq("owner", owner).execute()
+
     def list_courses(self, owner: str) -> list[TeacherCourse]:
         rows = self._client.table("teacher_courses").select("*").eq("owner", owner).execute().data
-        return [TeacherCourse(**row) for row in rows]
+        return [_course_from_row(row) for row in rows]
 
     def list_coursework(self, owner: str, course_id: str) -> list[TeacherCoursework]:
         rows = (
@@ -118,7 +159,7 @@ class TeacherGoogleRepository:
             .execute()
             .data
         )
-        return [TeacherCoursework(**row) for row in rows]
+        return [_coursework_from_row(row) for row in rows]
 
     def list_submissions(
         self, owner: str, course_id: str, coursework_id: str | None = None
@@ -131,7 +172,23 @@ class TeacherGoogleRepository:
         )
         if coursework_id is not None:
             query = query.eq("coursework_id", coursework_id)
-        return [TeacherSubmission(**row) for row in query.execute().data]
+        return [_submission_from_row(row) for row in query.execute().data]
+
+    def get_submission(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+    ) -> TeacherSubmission | None:
+        rows = (
+            self._client.table("teacher_submissions")
+            .select("*")
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+            .eq("coursework_id", coursework_id)
+            .eq("submission_id", submission_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return _submission_from_row(rows[0]) if rows else None
 
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
         self._upsert("teacher_professor_reviews", review.to_row(), "owner,submission_id")

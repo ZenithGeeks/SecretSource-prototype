@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 class FakeGoogle:
     def list_courses(self): return [{"id": "c1", "name": "English", "courseState": "ACTIVE"}]
@@ -21,6 +23,7 @@ class FakeGoogle:
 class FakeRepository:
     def __init__(self):
         self.courses, self.coursework, self.submissions = [], [], []
+        self.sync_statuses = []
 
     def save_course(self, value): self.courses.append(value)
     def save_coursework(self, value): self.coursework.append(value)
@@ -28,6 +31,17 @@ class FakeRepository:
     def list_courses(self, owner): return self.courses
     def list_coursework(self, owner, course_id): return self.coursework
     def list_submissions(self, owner, course_id, coursework_id=None): return self.submissions
+    def get_submission(self, owner, course_id, coursework_id, submission_id):
+        return next(
+            (
+                item for item in self.submissions
+                if (item.owner, item.course_id, item.coursework_id, item.submission_id)
+                == (owner, course_id, coursework_id, submission_id)
+            ),
+            None,
+        )
+    def record_sync_status(self, owner, status, error, synced_at):
+        self.sync_statuses.append((owner, status, error, synced_at))
 
 
 def test_import_upserts_owner_typed_raw_resources_and_prefers_pdf_attachment():
@@ -48,6 +62,7 @@ def test_import_upserts_owner_typed_raw_resources_and_prefers_pdf_attachment():
     assert submission.attachments[0]["id"] == "pdf"
     assert submission.attachments[0]["download_strategy"] == "download"
     assert submission.attachments[1]["download_strategy"] == "export_pdf"
+    assert repository.sync_statuses[-1][0:3] == ("teacher-a", "synced", None)
 
 
 def test_preview_refresh_and_workspace_are_scoped_to_the_requested_owner_and_course():
@@ -100,8 +115,8 @@ def test_import_records_attachment_metadata_failure_without_dropping_the_submiss
 
     class MetadataFailureGoogle(FakeGoogle):
         def get_drive_metadata(self, file_id):
-            if file_id == "pdf":
-                raise RuntimeError("Drive metadata unavailable")
+            if file_id in {"doc", "pdf"}:
+                raise RuntimeError(f"Drive metadata unavailable for {file_id}")
             return super().get_drive_metadata(file_id)
 
     repository = FakeRepository()
@@ -109,17 +124,40 @@ def test_import_records_attachment_metadata_failure_without_dropping_the_submiss
 
     submission = repository.submissions[0]
     assert submission.sync_state == "error"
-    assert submission.sync_error == "Drive metadata unavailable"
-    assert submission.attachments == [
-        {
-            "id": "doc",
-            "name": "draft",
-            "mimeType": "application/vnd.google-apps.document",
-            "webViewLink": "https://doc",
-            "download_strategy": "export_pdf",
-        }
-    ]
+    assert submission.sync_error == "Drive metadata unavailable for doc; Drive metadata unavailable for pdf"
+    assert submission.attachments == []
     assert submission.raw["id"] == "sub1"
+
+
+def test_import_marks_connection_error_and_reraises_a_non_drive_google_failure():
+    """Break caught: a failed import leaves the owner connection marked healthy."""
+    from app.teacher.sync import TeacherGoogleSyncService
+
+    class CourseworkFailureGoogle(FakeGoogle):
+        def list_coursework(self, course_id):
+            raise RuntimeError("Classroom unavailable")
+
+    repository = FakeRepository()
+    with pytest.raises(RuntimeError, match="Classroom unavailable"):
+        TeacherGoogleSyncService(client=CourseworkFailureGoogle(), repository=repository).import_course("teacher-a", "c1")
+
+    assert repository.courses[0].course_id == "c1"
+    assert repository.sync_statuses[-1][0:3] == ("teacher-a", "error", "Classroom unavailable")
+
+
+def test_refresh_preserves_the_existing_scoped_submission_analysis_id():
+    """Break caught: a Google refresh erases local analysis linked to the same submission."""
+    from app.teacher.models import TeacherSubmission
+    from app.teacher.sync import TeacherGoogleSyncService
+
+    repository = FakeRepository()
+    repository.submissions = [
+        TeacherSubmission("teacher-a", "c1", "cw1", "sub1", "s1", None, None, None, [], "synced", None, "analysis-1", {})
+    ]
+
+    TeacherGoogleSyncService(client=FakeGoogle(), repository=repository).refresh_course("teacher-a", "c1")
+
+    assert repository.submissions[-1].analysis_id == "analysis-1"
 
 
 class FakeScopedRowsQuery:
@@ -127,8 +165,15 @@ class FakeScopedRowsQuery:
         self.client = client
         self.table_name = table
         self.filters = []
+        self.payload = None
+        self.action = "select"
 
     def select(self, *_columns):
+        return self
+
+    def update(self, payload):
+        self.payload = payload
+        self.action = "update"
         return self
 
     def eq(self, column, value):
@@ -137,7 +182,11 @@ class FakeScopedRowsQuery:
 
     def execute(self):
         rows = self.client.rows.get(self.table_name, [])
-        return type("Response", (), {"data": [row.copy() for row in rows if all(row.get(column) == value for column, value in self.filters)]})()
+        matched = [row for row in rows if all(row.get(column) == value for column, value in self.filters)]
+        if self.action == "update":
+            for row in matched:
+                row.update(self.payload)
+        return type("Response", (), {"data": [row.copy() for row in matched]})()
 
 
 class FakeScopedRowsClient:
@@ -152,27 +201,37 @@ def test_repository_read_methods_filter_by_owner_and_course():
     """Break caught: a workspace query returns another teacher's course, coursework, or submission."""
     from app.teacher.repository import TeacherGoogleRepository
 
-    repository = TeacherGoogleRepository(
-        FakeScopedRowsClient(
-            {
+    client = FakeScopedRowsClient(
+        {
                 "teacher_courses": [
-                    {"owner": "teacher-a", "course_id": "c1", "name": "English", "section": None, "description": None, "room": None, "course_state": "ACTIVE", "raw": {}},
+                    {"id": "course-row", "synced_at": "2026-09-17T00:00:00Z", "created_at": "2026-09-17T00:00:00Z", "updated_at": "2026-09-17T00:00:00Z", "owner": "teacher-a", "course_id": "c1", "name": "English", "section": None, "description": None, "room": None, "course_state": "ACTIVE", "raw": {}},
                     {"owner": "teacher-b", "course_id": "c1", "name": "Hidden", "section": None, "description": None, "room": None, "course_state": "ACTIVE", "raw": {}},
                 ],
                 "teacher_coursework": [
-                    {"owner": "teacher-a", "course_id": "c1", "coursework_id": "cw1", "resource_type": "coursework", "title": "Essay", "description": None, "state": None, "due_at": None, "raw": {}},
+                    {"id": "coursework-row", "synced_at": "2026-09-17T00:00:00Z", "created_at": "2026-09-17T00:00:00Z", "updated_at": "2026-09-17T00:00:00Z", "owner": "teacher-a", "course_id": "c1", "coursework_id": "cw1", "resource_type": "coursework", "title": "Essay", "description": None, "state": None, "due_at": "2026-09-20T00:00:00Z", "raw": {}},
                     {"owner": "teacher-b", "course_id": "c1", "coursework_id": "cw2", "resource_type": "coursework", "title": "Hidden", "description": None, "state": None, "due_at": None, "raw": {}},
                 ],
                 "teacher_submissions": [
-                    {"owner": "teacher-a", "course_id": "c1", "coursework_id": "cw1", "submission_id": "sub1", "student_id": "s1", "student_name": "Ada", "state": "TURNED_IN", "assigned_grade": None, "attachments": [], "sync_state": "synced", "sync_error": None, "analysis_id": None, "raw": {}},
+                    {"id": "submission-row", "synced_at": "2026-09-17T00:00:00Z", "created_at": "2026-09-17T00:00:00Z", "updated_at": "2026-09-17T00:00:00Z", "owner": "teacher-a", "course_id": "c1", "coursework_id": "cw1", "submission_id": "sub1", "student_id": "s1", "student_name": "Ada", "state": "TURNED_IN", "assigned_grade": 4, "attachments": [], "sync_state": "synced", "sync_error": None, "analysis_id": None, "raw": {}},
                     {"owner": "teacher-a", "course_id": "c2", "coursework_id": "cw1", "submission_id": "sub2", "student_id": "s2", "student_name": "Grace", "state": "TURNED_IN", "assigned_grade": None, "attachments": [], "sync_state": "synced", "sync_error": None, "analysis_id": None, "raw": {}},
                     {"owner": "teacher-b", "course_id": "c1", "coursework_id": "cw3", "submission_id": "sub3", "student_id": "s3", "student_name": "Hidden", "state": "TURNED_IN", "assigned_grade": None, "attachments": [], "sync_state": "synced", "sync_error": None, "analysis_id": None, "raw": {}},
                 ],
+                "teacher_google_connections": [
+                    {"owner": "teacher-a", "last_sync_status": None, "last_sync_error": None, "last_synced_at": None},
+                    {"owner": "teacher-b", "last_sync_status": None, "last_sync_error": None, "last_synced_at": None},
+                ],
             }
-        )
     )
+    repository = TeacherGoogleRepository(client)
 
     assert [course.course_id for course in repository.list_courses("teacher-a")] == ["c1"]
     assert [coursework.coursework_id for coursework in repository.list_coursework("teacher-a", "c1")] == ["cw1"]
     assert [submission.submission_id for submission in repository.list_submissions("teacher-a", "c1")] == ["sub1"]
     assert repository.list_submissions("teacher-a", "c1", "missing") == []
+    assert repository.list_coursework("teacher-a", "c1")[0].due_at.isoformat() == "2026-09-20T00:00:00+00:00"
+    assert repository.list_submissions("teacher-a", "c1")[0].assigned_grade == 4.0
+    repository.record_sync_status("teacher-a", "synced", None, "2026-09-17T01:00:00Z")
+    assert client.rows["teacher_google_connections"] == [
+        {"owner": "teacher-a", "last_sync_status": "synced", "last_sync_error": None, "last_synced_at": "2026-09-17T01:00:00Z"},
+        {"owner": "teacher-b", "last_sync_status": None, "last_sync_error": None, "last_synced_at": None},
+    ]
