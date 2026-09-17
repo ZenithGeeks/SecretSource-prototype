@@ -58,9 +58,10 @@ export type Claim = {
 /** A claim known to have a verdict — the shape of a draft's "needs work" issues. */
 export type Issue = Claim & { verdict: VerdictKind }
 
-export function hasVerdict(claim: Claim): claim is Issue {
-  return claim.verdict === 'refutes' || claim.verdict === 'insufficient'
-}
+/** Draft check's default "needs work" filter — a claim whose source contradicts or is silent
+ * on it, as opposed to backing it (supports) or not being checked yet (verdict absent). Shared
+ * so the same spelling isn't duplicated across the store, Draft check, and Home. */
+export const DEFAULT_FILTER_KINDS: VerdictKind[] = ['refutes', 'insufficient']
 
 /** `claimId` links a marked run of words back to the claim it belongs to, so Draft check
  * can select/scroll to a claim when its text is clicked. Only set on issue-holding claims
@@ -78,13 +79,12 @@ export type Draft = {
   lastCheckedLabel: string // "checked 2h ago"
 }
 
-/** A draft plus the claims still needing attention, worst (or next) issue first.
+/** A draft plus the claims still needing attention.
  * `pendingReplacement` is set right after a citation swap, for the 08b "citation replaced"
  * state — a state of this screen, not a separate one. */
 export type CheckRun = {
   draft: Draft
   issues: Issue[]
-  currentIssueIndex: number
   pendingReplacement?: { claimId: string; newCitationLabel: string }
 }
 

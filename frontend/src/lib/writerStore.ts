@@ -12,6 +12,7 @@ import {
   MOCK_HOME,
   MOCK_SEARCH,
 } from '../mocks/writer'
+import { DEFAULT_FILTER_KINDS } from './writer'
 import type { Citation, Claim, Draft, DraftWord, CheckRun, SearchResponse, VerdictKind, WriterHome } from './writer'
 
 /** Deep clone so mutations never touch the shared mock module. */
@@ -48,8 +49,6 @@ function claimsFor(draftId: string): Claim[] {
   return db.claims.filter((c) => c.draftId === draftId)
 }
 
-const DEFAULT_FILTER_KINDS: VerdictKind[] = ['refutes', 'insufficient']
-
 function buildCheckRun(draftId: string, filterKinds: VerdictKind[] = DEFAULT_FILTER_KINDS): CheckRun {
   const draft = findDraft(draftId)
   const issues = claimsFor(draftId).filter(
@@ -59,7 +58,7 @@ function buildCheckRun(draftId: string, filterKinds: VerdictKind[] = DEFAULT_FIL
   const pendingReplacement = pendingClaim
     ? { claimId: pendingClaim.id, newCitationLabel: db.pendingReplacements[pendingClaim.id].newCitationLabel }
     : undefined
-  return { draft, issues, currentIssueIndex: 0, pendingReplacement }
+  return { draft, issues, pendingReplacement }
 }
 
 export const store = {

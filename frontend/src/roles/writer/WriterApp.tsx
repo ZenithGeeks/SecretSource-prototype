@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { useWriterActions } from '../../lib/useWriter'
+import { DEFAULT_FILTER_KINDS } from '../../lib/writer'
 import { CitationReplaced } from './screens/CitationReplaced'
 import { DraftCheck } from './screens/DraftCheck'
 import { FindASource } from './screens/FindASource'
@@ -129,7 +130,7 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
         <Home
           onNewDraft={newDraft}
           onOpenFindSource={() => navigate('find-source')}
-          onFixReferences={() => openDraftCheck({ filter: 'refutes,insufficient' })}
+          onFixReferences={() => openDraftCheck({ filter: DEFAULT_FILTER_KINDS.join(',') })}
           onOpenClaim={(claimId) => openDraftCheck({ claimId })}
         />
       )}
