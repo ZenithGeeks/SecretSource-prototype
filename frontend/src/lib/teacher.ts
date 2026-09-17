@@ -7,6 +7,7 @@
  */
 
 import { store } from './teacherStore'
+import { request } from './api'
 
 export type TeacherStanding = 'supports' | 'refutes' | 'insufficient' | 'unchecked'
 
@@ -191,6 +192,7 @@ export type EssayCheck = {
 }
 
 export type UpdateProfessorReviewRequest = {
+  courseId?: string
   assignmentId?: string
   /** Legacy URL/query name; converted inside the adapter only. */
   courseWorkId?: string
@@ -201,6 +203,7 @@ export type UpdateProfessorReviewRequest = {
 }
 
 export type SendFeedbackRequest = {
+  courseId?: string
   assignmentId?: string
   courseWorkId?: string
   studentId: string
@@ -311,7 +314,7 @@ function normalizedAssignmentId(input: { assignmentId?: string; courseWorkId?: s
   return input.assignmentId ?? input.courseWorkId ?? ''
 }
 
-export const teacherApi = {
+const mockTeacherApi = {
   getHome: async (): Promise<TeacherHome> => store.getHome(),
   getClasses: async (): Promise<TeacherClass[]> => store.getClasses(),
   getImportableClasses: async (): Promise<TeacherClass[]> => store.getImportableClasses(),
@@ -321,9 +324,9 @@ export const teacherApi = {
   getWorkspace: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
   getAssignmentDetail: async (courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> =>
     store.getAssignmentDetail(courseId, assignmentId),
-  getEssayCheck: async (assignmentId: string, studentId: string): Promise<EssayCheck | null> =>
+  getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
-  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
+  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[]; courseId?: string }): Promise<EssayCheck> =>
     store.saveFeedback(input.assignmentId, input.studentId, {
       body: input.body,
       citationIds: input.citationIds,
@@ -352,3 +355,48 @@ export const teacherApi = {
   queueSelectedCourseWork: async (courseId: string): Promise<QueueCourseWorkResult> =>
     store.queueSelectedCourseWork(courseId),
 }
+
+const remoteTeacherApi = {
+  getHome: () => request<TeacherHome>('/teacher/home'),
+  getClasses: () => request<TeacherClass[]>('/teacher/classes'),
+  getImportableClasses: () => request<TeacherClass[]>('/teacher/classes/importable'),
+  getClassImportPreview: (courseId: string) => request<TeacherClassImportPreview>(`/teacher/classes/importable/${encodeURIComponent(courseId)}/preview`),
+  importClass: async (courseId: string) => (await request<{ course: TeacherClass }>(`/teacher/classes/${encodeURIComponent(courseId)}/import`, { method: 'POST' })).course,
+  getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),
+  getAssignmentDetail: (courseId: string, assignmentId: string) => request<TeacherAssignmentDetail>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}`),
+  getEssayCheck: (assignmentId: string, studentId: string, courseId?: string) => {
+    if (!courseId) throw new Error('A course is required for remote Essay Check')
+    return request<EssayCheck>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/essay-check`)
+  },
+  saveFeedback: (input: { assignmentId: string; studentId: string; body: string; citationIds: string[]; courseId?: string }) => {
+    if (!input.courseId) throw new Error('A course is required for remote feedback')
+    return request<EssayCheck>(`/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/essay-check/feedback`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+    })
+  },
+  updateProfessorReview: (input: UpdateProfessorReviewRequest) => {
+    const courseId = input.courseId
+    if (!courseId) throw new Error('A course is required for remote review')
+    return request<EssayCheck>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(normalizedAssignmentId(input))}/essay-check/reviews/${encodeURIComponent(input.reviewId)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: input.studentId, outcome: input.outcome, note: input.note }),
+    })
+  },
+  sendFeedback: (input: SendFeedbackRequest) => {
+    const courseId = input.courseId
+    if (!courseId) throw new Error('A course is required for remote feedback')
+    return request<FeedbackDelivery>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(normalizedAssignmentId(input))}/students/${encodeURIComponent(input.studentId)}/essay-check/feedback/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+    })
+  },
+  // Reading questions and legacy classwork remain mock-only until their gateway routes exist.
+  getReadingQuestions: mockTeacherApi.getReadingQuestions,
+  regenerateReadingQuestions: mockTeacherApi.regenerateReadingQuestions,
+  updateReadingQuestion: mockTeacherApi.updateReadingQuestion,
+  deleteReadingQuestion: mockTeacherApi.deleteReadingQuestion,
+  resetMockTeacherData: mockTeacherApi.resetMockTeacherData,
+  getCourseWork: mockTeacherApi.getCourseWork,
+  setCourseWorkAnalysisSelected: mockTeacherApi.setCourseWorkAnalysisSelected,
+  queueSelectedCourseWork: mockTeacherApi.queueSelectedCourseWork,
+}
+
+export const teacherApi = import.meta.env.VITE_TEACHER_BACKEND === 'remote' ? remoteTeacherApi : mockTeacherApi
