@@ -124,6 +124,9 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
     if (next) setClaimId(next.id)
   }
 
+  // Exports the currently filtered issues, not the draft's full reference list (uncited and
+  // supports-verdict claims are never included) — "Export issues" says so; don't relabel this
+  // "Export references" without also changing what it exports.
   const exportCsv = () => {
     if (!draftCheck.data) return
     const rows = [
@@ -136,8 +139,13 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
     const a = document.createElement('a')
     a.href = url
     a.download = `${draftCheck.data.draft.fileName.replace(/\.\w+$/, '')}-verdicts.csv`
+    // Append before clicking and revoke on a later tick — some browsers (Firefox, Safari) treat
+    // a detached anchor whose object URL is revoked on the same tick as click() as a cancelled
+    // download.
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
   const recheck = () => {
@@ -183,7 +191,7 @@ export function DraftCheck({ onGoToFindSource }: { onGoToFindSource: (claimId: s
         <div className="flex items-start gap-2">
           <Button variant="ghost" onClick={exportCsv}>
             <Download className="size-4" />
-            Export references
+            Export issues
           </Button>
           <Button onClick={recheck} disabled={!activeIssue || isRechecking}>
             {isRechecking ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
