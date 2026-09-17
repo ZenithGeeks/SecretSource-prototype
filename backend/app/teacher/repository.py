@@ -7,6 +7,7 @@ from typing import Any
 
 from app import store
 from app.teacher.models import (
+    ConnectedTeacher,
     OAuthState,
     TeacherCourse,
     TeacherCoursework,
@@ -67,6 +68,31 @@ class TeacherGoogleRepository:
         self._client.table("teacher_google_connections").upsert(
             connection.to_row(), on_conflict="owner"
         ).execute()
+
+    def get_connection_status(self, owner: str) -> ConnectedTeacher | None:
+        rows = (
+            self._client.table("teacher_google_connections")
+            .select("owner, google_subject, google_email, scopes")
+            .eq("owner", owner)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return ConnectedTeacher(
+            owner=row["owner"],
+            google_subject=row["google_subject"],
+            google_email=row.get("google_email"),
+            scopes=tuple(row.get("scopes") or ()),
+        )
+
+    def disconnect(self, owner: str) -> bool:
+        deleted = (
+            self._client.table("teacher_google_connections").delete().eq("owner", owner).execute().data
+        )
+        return bool(deleted)
 
     def save_course(self, course: TeacherCourse) -> None:
         self._upsert("teacher_courses", course.to_row(), "owner,course_id")

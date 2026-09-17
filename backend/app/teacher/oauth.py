@@ -148,6 +148,7 @@ class TeacherGoogleOAuthService:
                 "response_type": "code",
                 "scope": " ".join(self._settings.scopes),
                 "access_type": "offline",
+                "prompt": "consent",
                 "include_granted_scopes": "true",
                 "code_challenge": _pkce_challenge(verifier),
                 "code_challenge_method": "S256",
@@ -169,6 +170,10 @@ class TeacherGoogleOAuthService:
         if token.refresh_token:
             ciphertext = self._cipher.encrypt(token.refresh_token)
         elif existing is not None:
+            if existing.google_subject != token.subject:
+                raise ValueError(
+                    "Google account changed during reauthorization; reconnect with the original account"
+                )
             ciphertext = existing.refresh_token_ciphertext
         else:
             raise ValueError("Google did not return a refresh token for this new connection")
