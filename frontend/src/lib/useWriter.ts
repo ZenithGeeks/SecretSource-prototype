@@ -61,10 +61,15 @@ export function useWriterActions() {
       qc.invalidateQueries({ queryKey: ['writer', 'draft', draftId] })
       qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
     },
-    replaceCitation: (claimId: string, sourceId: string): void => {
-      store.replaceCitation(claimId, sourceId)
-      qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
-      qc.invalidateQueries({ queryKey: ['writer', 'home'] })
+    /** Returns whether the replacement applied, so the caller can branch on a stale claim id. */
+    replaceCitation: (claimId: string, sourceId: string): boolean => {
+      const applied = store.replaceCitation(claimId, sourceId)
+      if (applied) {
+        qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
+        qc.invalidateQueries({ queryKey: ['writer', 'home'] })
+        qc.invalidateQueries({ queryKey: ['writer', 'search'] })
+      }
+      return applied
     },
     undoReplacement: (claimId: string): void => {
       store.undoReplacement(claimId)

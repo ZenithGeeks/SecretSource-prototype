@@ -77,8 +77,7 @@ export function FindASource({ onReplaced }: { onReplaced: (claimId: string) => v
 
   const citeSource = (result: Source) => {
     if (claimId) {
-      actions.replaceCitation(claimId, result.id)
-      onReplaced(claimId)
+      if (actions.replaceCitation(claimId, result.id)) onReplaced(claimId)
     } else {
       copy(result.id, result.citation)
     }

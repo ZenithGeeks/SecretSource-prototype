@@ -98,15 +98,21 @@ export const store = {
     }
   },
 
-  /** Replace a claim's citation with an explicit source (Find a source's "Use this source"). */
-  replaceCitation(claimId: string, sourceId: string): CheckRun {
+  /** Replace a claim's citation with an explicit source (Find a source's "Use this source").
+   * Returns whether it actually applied, so callers can tell a stale claim/source id (nothing
+   * changed) apart from a real replacement. */
+  replaceCitation(claimId: string, sourceId: string): boolean {
     const claim = db.claims.find((c) => c.id === claimId)
-    if (!claim) return buildCheckRun(DEFAULT_DRAFT_ID)
     const source = db.search.results.find((s) => s.id === sourceId)
+    if (!claim || !source) return false
     db.pendingReplacements[claimId] = { previousCitation: claim.citation }
-    if (source) claim.citation = { id: source.id, label: source.citation }
+    claim.citation = { id: source.id, label: source.citation }
     claim.verdict = undefined
-    return buildCheckRun(claim.draftId)
+    // Keep the search screen's "current citation" context pointed at the source that now
+    // backs this claim, not the one it replaced.
+    db.search.currentCitation = { id: source.id, label: source.citation }
+    for (const s of db.search.results) s.isCurrentCitation = s.id === source.id
+    return true
   },
 
   /** Back-compat for DraftCheck's existing "Replace citation" button, which applies the
