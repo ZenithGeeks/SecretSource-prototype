@@ -50,6 +50,7 @@ function claimsFor(draftId: string): Claim[] {
 }
 
 function buildCheckRun(draftId: string, filterKinds: VerdictKind[] = DEFAULT_FILTER_KINDS): CheckRun {
+  const seededDraft = findDraft(draftId)
   const claims = claimsFor(draftId)
   const issues = claims.filter(
     (c): c is CheckRun['issues'][number] => c.verdict !== undefined && filterKinds.includes(c.verdict),
@@ -58,15 +59,17 @@ function buildCheckRun(draftId: string, filterKinds: VerdictKind[] = DEFAULT_FIL
   const pendingReplacement = pendingClaim
     ? { claimId: pendingClaim.id, newCitationLabel: db.pendingReplacements[pendingClaim.id].newCitationLabel }
     : undefined
-  // Derived live from the claims, not the mock's static counts — otherwise the header keeps
-  // reading e.g. "5 citations found, 2 need work" after a Re-check resolves an issue, while the
-  // panel right next to it already says "1 of 1 issues". issuesRemaining always counts against
-  // refutes/insufficient regardless of the active filterKinds — it's the ground truth "needs
-  // work" count, not a reflection of what's currently shown.
+  // Derived live, not the mock's static counts — otherwise the header keeps reading e.g. "5
+  // citations found, 2 need work" after a Re-check resolves an issue, while the panel right next
+  // to it already says "1 of 1 issues". citationsFound counts actual \cite{} markers in the
+  // source (there are more citation marks in the draft than claims — e.g. d1's own current
+  // citation, never a Claim — so counting claims-with-a-citation undercounts). issuesRemaining
+  // always counts against DEFAULT_FILTER_KINDS regardless of the active filterKinds — it's the
+  // ground truth "needs work" count, not a reflection of what's currently shown.
   const draft: Draft = {
-    ...findDraft(draftId),
-    citationsFound: claims.filter((c) => c.citation).length,
-    issuesRemaining: claims.filter((c) => c.verdict === 'refutes' || c.verdict === 'insufficient').length,
+    ...seededDraft,
+    citationsFound: (seededDraft.latexSource.match(/\\cite\{/g) ?? []).length,
+    issuesRemaining: claims.filter((c) => c.verdict && DEFAULT_FILTER_KINDS.includes(c.verdict)).length,
   }
   return { draft, issues, pendingReplacement }
 }
