@@ -50,14 +50,24 @@ function claimsFor(draftId: string): Claim[] {
 }
 
 function buildCheckRun(draftId: string, filterKinds: VerdictKind[] = DEFAULT_FILTER_KINDS): CheckRun {
-  const draft = findDraft(draftId)
-  const issues = claimsFor(draftId).filter(
+  const claims = claimsFor(draftId)
+  const issues = claims.filter(
     (c): c is CheckRun['issues'][number] => c.verdict !== undefined && filterKinds.includes(c.verdict),
   )
-  const pendingClaim = claimsFor(draftId).find((c) => c.id in db.pendingReplacements)
+  const pendingClaim = claims.find((c) => c.id in db.pendingReplacements)
   const pendingReplacement = pendingClaim
     ? { claimId: pendingClaim.id, newCitationLabel: db.pendingReplacements[pendingClaim.id].newCitationLabel }
     : undefined
+  // Derived live from the claims, not the mock's static counts — otherwise the header keeps
+  // reading e.g. "5 citations found, 2 need work" after a Re-check resolves an issue, while the
+  // panel right next to it already says "1 of 1 issues". issuesRemaining always counts against
+  // refutes/insufficient regardless of the active filterKinds — it's the ground truth "needs
+  // work" count, not a reflection of what's currently shown.
+  const draft: Draft = {
+    ...findDraft(draftId),
+    citationsFound: claims.filter((c) => c.citation).length,
+    issuesRemaining: claims.filter((c) => c.verdict === 'refutes' || c.verdict === 'insufficient').length,
+  }
   return { draft, issues, pendingReplacement }
 }
 
