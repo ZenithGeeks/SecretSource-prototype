@@ -1,0 +1,45 @@
+# Review package: dec843b..adcf553
+
+## Scope
+
+Task 4A analysis/persistence adapter only. Review the implementation against
+`task-4a-brief.md`, the design/spec and the existing Teacher frontend contract.
+The implementation commit is `adcf553 feat(teacher): add essay analysis adapter`.
+
+## Files changed
+
+Inspect the exact range with:
+
+```text
+git diff --stat dec843b..adcf553
+git diff --find-renames dec843b..adcf553
+```
+
+Expected scope is `backend/app/teacher/analysis.py`, corresponding model and
+repository persistence helpers, the feedback citation migration, focused tests,
+and the task report. Do not review or edit router/main/frontend files in this
+slice.
+
+## Review priorities
+
+- Owner/course/coursework/submission scoping must be enforced for every read and
+  write; no cross-tenant analysis or feedback access.
+- Google Classroom Drive attachment selection must use the actual stored
+  attachment shape and preserve PDF-first / Google Doc export behavior.
+- The existing `app.main` upload/start/snapshot boundary must be reused without
+  importing it at module load or duplicating the analysis pipeline.
+- EssayCheck output must retain claim/verdict/source evidence, stable citation
+  IDs, analysis status/error, and saved review/feedback state.
+- Feedback send must remain internal and persist citation IDs; the migration must
+  be safe and forward-only.
+- Repository parsing must tolerate Supabase-managed columns in `select("*")`
+  rows and not construct dataclasses from arbitrary database fields.
+- Tests should cover behavior that would regress at the Google/persistence
+  boundaries, and the implementation must pass the focused test command.
+
+## Verification command
+
+```text
+cd backend
+py -m pytest tests/test_teacher_analysis.py -q -p no:cacheprovider
+```
