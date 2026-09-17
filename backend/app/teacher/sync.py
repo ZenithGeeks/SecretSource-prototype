@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app.teacher.google_client import select_supported_attachments
@@ -42,6 +42,15 @@ class TeacherGoogleSyncService:
         return self.import_course(owner, course_id)
 
     def import_course(self, owner: str, course_id: str) -> dict[str, Any]:
+        try:
+            result = self._import_course(owner, course_id)
+        except Exception as error:
+            self.repository.record_sync_status(owner, "error", str(error), None)
+            raise
+        self.repository.record_sync_status(owner, "synced", None, datetime.now(UTC))
+        return result
+
+    def _import_course(self, owner: str, course_id: str) -> dict[str, Any]:
         course = next((item for item in self.client.list_courses() if item.get("id") == course_id), None)
         if course is None:
             raise ValueError("course not found")
@@ -99,6 +108,7 @@ class TeacherGoogleSyncService:
                 if not submission_id or not student_id:
                     continue
                 attachments, error = self._attachments(submission)
+                existing = self.repository.get_submission(owner, course_id, coursework_id, submission_id)
                 self.repository.save_submission(
                     TeacherSubmission(
                         owner=owner,
@@ -112,7 +122,7 @@ class TeacherGoogleSyncService:
                         attachments=attachments,
                         sync_state="error" if error else "synced",
                         sync_error=error,
-                        analysis_id=None,
+                        analysis_id=existing.analysis_id if existing is not None else None,
                         raw=submission,
                     )
                 )
@@ -140,7 +150,7 @@ class TeacherGoogleSyncService:
 
     def _attachments(self, submission: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
         metadata: list[dict[str, Any]] = []
-        error: str | None = None
+        errors: list[str] = []
         assignment = submission.get("assignmentSubmission")
         for attachment in assignment.get("attachments", []) if isinstance(assignment, dict) else []:
             drive_file = attachment.get("driveFile") if isinstance(attachment, dict) else None
@@ -150,5 +160,5 @@ class TeacherGoogleSyncService:
             try:
                 metadata.append(self.client.get_drive_metadata(file_id))
             except Exception as exc:
-                error = str(exc)
-        return select_supported_attachments(metadata), error
+                errors.append(str(exc))
+        return select_supported_attachments(metadata), "; ".join(errors) or None
