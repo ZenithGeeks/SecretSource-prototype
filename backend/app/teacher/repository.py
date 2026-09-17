@@ -105,6 +105,34 @@ class TeacherGoogleRepository:
             "teacher_submissions", submission.to_row(), "owner,course_id,coursework_id,submission_id"
         )
 
+    def list_courses(self, owner: str) -> list[TeacherCourse]:
+        rows = self._client.table("teacher_courses").select("*").eq("owner", owner).execute().data
+        return [TeacherCourse(**row) for row in rows]
+
+    def list_coursework(self, owner: str, course_id: str) -> list[TeacherCoursework]:
+        rows = (
+            self._client.table("teacher_coursework")
+            .select("*")
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+            .execute()
+            .data
+        )
+        return [TeacherCoursework(**row) for row in rows]
+
+    def list_submissions(
+        self, owner: str, course_id: str, coursework_id: str | None = None
+    ) -> list[TeacherSubmission]:
+        query = (
+            self._client.table("teacher_submissions")
+            .select("*")
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+        )
+        if coursework_id is not None:
+            query = query.eq("coursework_id", coursework_id)
+        return [TeacherSubmission(**row) for row in query.execute().data]
+
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
         self._upsert("teacher_professor_reviews", review.to_row(), "owner,submission_id")
 
