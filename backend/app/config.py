@@ -6,6 +6,7 @@
 import os
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -153,6 +154,11 @@ def validate_teacher_google_settings() -> None:
     if missing:
         names = ", ".join(missing)
         raise ValueError(f"TEACHER_GOOGLE_ENABLED is true but required settings are missing: {names}")
+
+    try:
+        Fernet(TEACHER_GOOGLE_ENCRYPTION_KEY.encode())
+    except ValueError as error:
+        raise ValueError("TEACHER_GOOGLE_ENCRYPTION_KEY must be a valid Fernet key") from error
 
 
 validate_teacher_google_settings()

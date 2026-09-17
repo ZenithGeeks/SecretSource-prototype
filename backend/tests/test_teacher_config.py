@@ -4,6 +4,7 @@ import importlib
 
 import pytest
 from app import config
+from cryptography.fernet import Fernet
 
 GOOGLE_ENV = (
     "TEACHER_GOOGLE_ENABLED",
@@ -29,6 +30,10 @@ def _reload_config(monkeypatch):
     return importlib.reload(config)
 
 
+def _fernet_key() -> str:
+    return Fernet.generate_key().decode()
+
+
 def test_google_classroom_settings_are_optional_for_local_mock(monkeypatch):
     _clear_google_env(monkeypatch)
 
@@ -52,10 +57,22 @@ def test_enabled_google_classroom_requires_oauth_settings(monkeypatch):
     monkeypatch.setenv("TEACHER_GOOGLE_CLIENT_ID", "client-id")
     monkeypatch.setenv("TEACHER_GOOGLE_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("TEACHER_GOOGLE_REDIRECT_URI", "https://example.test/oauth/callback")
-    monkeypatch.setenv("TEACHER_GOOGLE_ENCRYPTION_KEY", "test-key")
+    monkeypatch.setenv("TEACHER_GOOGLE_ENCRYPTION_KEY", _fernet_key())
     settings = _reload_config(monkeypatch)
 
     assert settings.TEACHER_GOOGLE_ENABLED is True
+
+
+def test_enabled_google_classroom_rejects_an_invalid_fernet_key(monkeypatch):
+    _clear_google_env(monkeypatch)
+    monkeypatch.setenv("TEACHER_GOOGLE_ENABLED", "true")
+    monkeypatch.setenv("TEACHER_GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("TEACHER_GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("TEACHER_GOOGLE_REDIRECT_URI", "https://example.test/oauth/callback")
+    monkeypatch.setenv("TEACHER_GOOGLE_ENCRYPTION_KEY", "not-a-fernet-key")
+
+    with pytest.raises(ValueError, match="TEACHER_GOOGLE_ENCRYPTION_KEY must be a valid Fernet key"):
+        _reload_config(monkeypatch)
 
 
 def test_google_classroom_settings_parse_scopes_and_retry_values(monkeypatch):
@@ -64,7 +81,7 @@ def test_google_classroom_settings_parse_scopes_and_retry_values(monkeypatch):
     monkeypatch.setenv("TEACHER_GOOGLE_CLIENT_ID", "client-id")
     monkeypatch.setenv("TEACHER_GOOGLE_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("TEACHER_GOOGLE_REDIRECT_URI", "https://example.test/oauth/callback")
-    monkeypatch.setenv("TEACHER_GOOGLE_ENCRYPTION_KEY", "test-key")
+    monkeypatch.setenv("TEACHER_GOOGLE_ENCRYPTION_KEY", _fernet_key())
     monkeypatch.setenv("TEACHER_GOOGLE_SCOPES", "scope.one, scope.two scope.three")
     monkeypatch.setenv("TEACHER_GOOGLE_STATE_TTL_SECONDS", "900")
     monkeypatch.setenv("TEACHER_GOOGLE_RETRY_ATTEMPTS", "4")
