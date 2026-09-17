@@ -151,10 +151,14 @@ export const store = {
     return buildCheckRun(claim?.draftId ?? DEFAULT_DRAFT_ID)
   },
 
-  /** Flip a candidate source's in-library flag ("Add to library" in Find a source). */
+  /** Flip a candidate source's in-library flag ("Add to library" in Find a source). Bumps
+   * libraryCount so the "My library (n)" chip doesn't fall behind the row it just added. */
   markInLibrary(sourceId: string): SearchResponse {
     const source = db.search.results.find((s) => s.id === sourceId)
-    if (source) source.inLibrary = true
+    if (source && !source.inLibrary) {
+      source.inLibrary = true
+      db.search.libraryCount += 1
+    }
     return db.search
   },
 
