@@ -26,15 +26,32 @@ function sourceMeta(result: { inLibrary: boolean; openAccess: boolean; isCurrent
   return `· ${parts.join(' · ')}`
 }
 
-/** Best-effort BibTeX from what a Source has — there's no raw BibTeX field in the mock data. */
+/** Escapes characters BibTeX treats specially, so a title/venue containing one doesn't break
+ * the entry or need hand-fixing before it compiles. */
+function escapeBibTeX(value: string): string {
+  return value.replace(/[&%$#_{}~^\\]/g, (char) => {
+    if (char === '~') return '\\textasciitilde{}'
+    if (char === '^') return '\\textasciicircum{}'
+    if (char === '\\') return '\\textbackslash{}'
+    return `\\${char}`
+  })
+}
+
+/** Best-effort BibTeX from what a Source has — there's no raw BibTeX field or full author list
+ * in the mock data, so `author` stays the citation's own name group rather than a real
+ * "and"-joined list beyond the two-author "&" case. The cite key includes the source id so two
+ * same-author, same-year sources (the mock's s1/s2, both "Santhanam et al. (2022)") don't
+ * collide and silently drop one entry when copied into the same .bib file. */
 function toBibTeX(source: Source): string {
   const year = source.citation.match(/\((\d{4})\)/)?.[1] ?? ''
   const authorKey = source.citation
     .split(/\s+(?:et al\.|&)/)[0]
     .toLowerCase()
     .replace(/[^a-z]/g, '')
-  const author = source.citation.replace(/\s*\(\d{4}\)\s*$/, '')
-  return `@article{${authorKey}${year},\n  title={${source.title}},\n  author={${author}},\n  year={${year}}\n}`
+  const authorList = source.citation.replace(/\s*\(\d{4}\)\s*$/, '').replace(/\s+&\s+/, ' and ')
+  const fields = [`title={${escapeBibTeX(source.title)}}`, `author={${escapeBibTeX(authorList)}}`, `year={${year}}`]
+  if (source.venue) fields.push(`journal={${escapeBibTeX(source.venue)}}`)
+  return `@article{${authorKey}${year}${source.id},\n  ${fields.join(',\n  ')}\n}`
 }
 
 function readQueryParam() {
