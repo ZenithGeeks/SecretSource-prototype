@@ -43,15 +43,18 @@ src/
 ├─ roles/                 one folder per role — no cross-role imports
 │  ├─ researcher/         ResearcherApp + screens/ (Home, Library, FieldConsensus, Graph, History, Settings)
 │  ├─ writer/             WriterApp + screens/ (Home, DraftCheck, FindASource, CitationReplaced)
-│  └─ teacher/            TeacherApp + screens/ (Home, EssayCheck)
+│  └─ teacher/            TeacherApp + screens/ (Home, Classes, AddClass, ClassWorkspace,
+│                          Classwork, People, AssignmentDetail, EssayCheck, ReadingQuestions,
+│                          Settings) + role-local components
 ├─ lib/
 │  ├─ api.ts              gateway client for the analysis app
 │  ├─ supabase.ts         Supabase browser client (auth)      · useAuth.ts   live session
 │  ├─ settings.ts         account settings store (localStorage) + useSettings + applyTheme
 │  ├─ researcher.ts / writer.ts / teacher.ts   per-role typed clients (researcher.ts calls the gateway; writer.ts / teacher.ts read mocks)
 │  ├─ useResearcher.ts / useWriter.ts / useTeacher.ts   per-role query hooks
-│  │                       (+ useResearcherActions / writer actions — mutations; teacher has none yet)
+│  │                       (+ useResearcherActions / writer actions; teacher reads and mutations)
 │  ├─ writerStore.ts   in-session mutable store (writer only)
+│  ├─ teacherStore.ts / teacherPreferences.ts  local teacher data and settings stores
 │  └─ claims.ts · useAnalysis.ts · utils.ts (cn)
 └─ mocks/<role>.ts        per-role mock payloads (until gateway endpoints exist)
 
@@ -223,6 +226,26 @@ const NAV: NavEntry<'home' | 'library'>[] = [
 Active nav item gets the plum-wash background automatically. Nav is data-driven — add/remove
 entries in the array.
 
+## Teacher role implementation
+
+The updated teacher frames are wired through `roles/teacher/TeacherApp.tsx` and share the
+existing `AppShell`. Its nav is Home, Classes, Library, Graph, and Settings; Teacher hides the
+generic profile menu because Settings is a direct nav destination in the reference shell.
+
+Implemented teacher destinations:
+
+- Home dashboard: quick actions, essay review queue, class library summary, and misused-source insight.
+- Classes and Add class: active-class search plus Connect Google, Choose a course, and Review import states.
+- Class workspace: Overview, Classwork and grades, and People tabs.
+- Assignment detail and Essay Check: local submission records, citation review, feedback editing, and send confirmation.
+- Reading questions: level/type filters, regeneration, edit/remove dialogs, paper anchors, worksheet export, and answer-key copy.
+- Settings: shared account/theme controls plus teacher checking, class, notification, and local-data preferences.
+
+Teacher routes use `courseId`, `assignmentId`, `studentId`, and `paperId` query context. The data
+flows through `useTeacher.ts` to `teacher.ts` and the clone-safe `teacherStore.ts`; screens never
+import mock fixtures directly. Google Classroom, Drive, OAuth, email delivery, grades, roster
+changes, and real essay analysis are intentionally not performed in this frontend-only phase.
+
 ## Screen composition (how a role fits together)
 
 ```
@@ -267,7 +290,8 @@ The other calls: `getProjects` → `GET /researcher/projects`, `getLibrary(id)` 
 analyses (`backend/app/researcher.py`). `request()` sends the Supabase access token when login
 is on.
 
-Writer still uses a store and mocks. Teacher reads mocks directly.
+Writer still uses a store and mocks. Teacher uses the typed `teacherApi` adapter and clone-safe
+`teacherStore` for every page read and local mutation.
 
 ### Mutations
 
@@ -307,7 +331,10 @@ Supabase dashboard. The anon key is public (safe in the browser). See `frontend/
 ## Settings & theme
 
 `lib/settings.ts` is a localStorage-backed account-settings store (`useSettings()` +
-`updateSettings()` via `useSyncExternalStore`), consumed by `roles/researcher/screens/Settings.tsx`.
+`updateSettings()` via `useSyncExternalStore`), consumed by the shared account/theme controls.
+Teacher-only fields live separately in `lib/teacherPreferences.ts` under
+`secretsource.teacher-settings`, so checking, class, notification, and student-visibility
+preferences do not overwrite another role's settings.
 Effects that actually apply:
 
 - **Theme** — `applyTheme()` sets `data-theme` on `<html>`; `index.css` has the light/dark
@@ -343,10 +370,9 @@ scrim + a `bg-surface` card; Esc/backdrop cancel, Enter/submit confirms.
 
 ## Adding a new role (checklist)
 
-**Researcher is the complete example to copy** — it has all six screen types, gateway-backed
-reads, and actions. (Writer is also converted but smaller and still reads mocks; teacher has no
-actions yet, and both have `graph`/`history`/`settings` nav keys that still fall through to the
-"Not built yet" `Placeholder` — don't copy those as finished patterns.)
+**Researcher is the complete gateway-backed example to copy** — it has all six screen types and
+actions. Writer and Teacher are store-backed role examples; Teacher's updated route set and
+local mutations are documented above. Keep role-specific data behind its typed client and hooks.
 
 1. `src/roles/<role>/screens/` — build your Figma screens as content-only components.
 2. `src/roles/<role>/<Role>App.tsx` — copy `ResearcherApp.tsx`, swap the `NAV` array,
@@ -380,6 +406,10 @@ The **writer** and **teacher** roles are complete working examples to copy from.
 | Knowledge graph                 | `roles/researcher/screens/Graph.tsx` (Cytoscape + fcose) |
 | Library + Projects + New-project modal | `roles/researcher/screens/Library.tsx` |
 | Settings + theme                | `roles/researcher/screens/Settings.tsx` + `lib/settings.ts` |
+| Teacher shell + primitives      | `roles/teacher/TeacherApp.tsx` + `roles/teacher/components/` |
+| Teacher classes/workspace       | `roles/teacher/screens/Classes.tsx`, `AddClass.tsx`, `ClassWorkspace.tsx`, `Classwork.tsx`, `People.tsx` |
+| Teacher essay workflow           | `roles/teacher/screens/AssignmentDetail.tsx`, `EssayCheck.tsx`, `FeedbackDialog.tsx` |
+| Teacher reading questions/settings | `roles/teacher/screens/ReadingQuestions.tsx`, `Settings.tsx` + `lib/teacherPreferences.ts` |
 | SubmitForm, AnalysisView, HistoryList | analysis components — also reused by researcher's History screen, so shared, not app-only |
 | ClaimCard, PageViewer, PipelineStages, ResultsSummary | analysis app (`?role=app`) |
 | Stamps (Brand)                  | not built — share-card feature only |

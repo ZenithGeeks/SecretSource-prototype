@@ -144,6 +144,7 @@ export function AppShell<K extends string>({
   onChangeRole,
   onOpenSettings,
   settingsActive = false,
+  showProfileMenu = true,
   sidebar,
   wide = false,
   children,
@@ -158,6 +159,7 @@ export function AppShell<K extends string>({
   /** True while the role's Settings screen (opened from the profile menu) is showing, so the
    * profile button gets the active highlight — Settings has no nav item to light. */
   settingsActive?: boolean
+  showProfileMenu?: boolean
   sidebar?: ReactNode
   wide?: boolean
   children: ReactNode
@@ -220,13 +222,15 @@ export function AppShell<K extends string>({
             change
           </button>
         </div>
-        <ProfileMenu
-          active={settingsActive}
-          onOpenSettings={onOpenSettings && (() => {
-            setMenuOpen(false)
-            onOpenSettings()
-          })}
-        />
+        {showProfileMenu && (
+          <ProfileMenu
+            active={settingsActive}
+            onOpenSettings={onOpenSettings && (() => {
+              setMenuOpen(false)
+              onOpenSettings()
+            })}
+          />
+        )}
       </div>
     </>
   )
