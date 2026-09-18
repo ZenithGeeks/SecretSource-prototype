@@ -154,6 +154,6 @@ export const store = {
       },
     ]
     db.claims = []
-    db.home = { ...db.home, attention: [], recentPapers: [] }
+    db.home = { ...db.home, alert: '', draftFileName: 'No draft', draftLastCheckedLabel: 'not checked yet', attention: [] }
   },
 }
