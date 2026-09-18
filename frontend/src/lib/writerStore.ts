@@ -136,9 +136,23 @@ export const store = {
     return db.search
   },
 
-  /** Clear every draft and claim back to empty (writer Settings "Delete all"). */
+  /** Clear every draft and claim back to empty (writer Settings "Delete all"). Reseeds one
+   * empty draft rather than leaving `db.drafts` empty, since `findDraft`'s fallback assumes
+   * there's always at least one — an empty `db.drafts` makes `CheckRun.draft` undefined and
+   * crashes DraftCheck/CitationReplaced on their next render. */
   deleteAll(): void {
-    db.drafts = []
+    db.drafts = [
+      {
+        id: `draft-${seq++}`,
+        fileName: 'No draft',
+        heading: 'No draft',
+        latexSource: '',
+        paragraphs: [],
+        citationsFound: 0,
+        issuesRemaining: 0,
+        lastCheckedLabel: 'not checked yet',
+      },
+    ]
     db.claims = []
     db.home = { ...db.home, attention: [], recentPapers: [] }
   },
