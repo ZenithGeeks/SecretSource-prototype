@@ -18,6 +18,10 @@ export function useDraft(draftId: string) {
   return useQuery({ queryKey: ['writer', 'draft', draftId], queryFn: () => writerApi.getDraft(draftId) })
 }
 
+export function useClaims() {
+  return useQuery({ queryKey: ['writer', 'claims'], queryFn: writerApi.getClaims })
+}
+
 export function useDraftCheck(draftId?: string) {
   return useQuery({
     queryKey: ['writer', 'draft-check', draftId],

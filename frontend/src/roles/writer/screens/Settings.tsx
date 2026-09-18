@@ -9,7 +9,7 @@
 
 import { Button, Input } from '../../../components/ui'
 import { Row, Section, Select, Toggle } from '../../../components/settings'
-import { useWriterActions } from '../../../lib/useWriter'
+import { useClaims, useWriterActions } from '../../../lib/useWriter'
 import { store } from '../../../lib/writerStore'
 import { download } from '../../../lib/utils'
 import type { Settings as SettingsType } from '../../../lib/settings'
@@ -19,6 +19,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
   // TODO gateway: GET/PATCH /settings. Persisted to localStorage until then.
   const s = useSettings()
   const actions = useWriterActions()
+  const claims = useClaims()
   const set = <K extends keyof SettingsType>(key: K, value: SettingsType[K]) =>
     updateSettings({ [key]: value } as Partial<SettingsType>)
 
@@ -28,7 +29,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
   }
 
   const exportData = () => {
-    const data = JSON.stringify({ drafts: store.drafts(), claims: store.claims() }, null, 2)
+    const data = JSON.stringify({ drafts: store.drafts(), claims: claims.data ?? [] }, null, 2)
     download(data, 'secretsource-writer-data.json', 'application/json')
   }
 
