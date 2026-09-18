@@ -6,7 +6,9 @@ import { useState } from 'react'
 import { STANDING_LABELS, STANDING_MEANINGS, STANDINGS, toCsv, toMarkdown } from '../lib/claims'
 import type { Standing, Standings } from '../lib/claims'
 import type { Claim } from '../lib/api'
+import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
+import { downloadText } from '../lib/csv'
 import { Button } from './ui'
 
 /** Muted for the two standings that are not a verdict, so a colour always means an answer. */
@@ -16,13 +18,6 @@ const COUNT_STYLES: Record<Standing, string> = {
   supports: 'text-supports',
   unchecked: 'text-ink-muted',
   uncited: 'text-ink-muted',
-}
-
-function download(name: string, body: string, type: string) {
-  const url = URL.createObjectURL(new Blob([body], { type }))
-  const link = Object.assign(document.createElement('a'), { href: url, download: name })
-  link.click()
-  URL.revokeObjectURL(url)
 }
 
 export function ResultsSummary({
@@ -44,6 +39,8 @@ export function ResultsSummary({
   onOpenPaper?: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  // Only fetched when there is no page viewer to open it in; the link needs the user's token.
+  const pdf = useAuthorizedUrl(paper && !onOpenPaper ? `/api/papers/${encodeURIComponent(paper)}` : undefined)
 
   async function copyMarkdown() {
     await navigator.clipboard.writeText(toMarkdown(claims, paper))
@@ -52,7 +49,7 @@ export function ResultsSummary({
   }
 
   return (
-    <div className="sticky top-0 z-10 -mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur">
+    <div className="-mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur lg:sticky lg:top-0 lg:z-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium" title={paper}>
@@ -71,9 +68,9 @@ export function ResultsSummary({
               The PDF
             </Button>
           )}
-          {paper && !onOpenPaper && (
+          {pdf.url && (
             <a
-              href={`/api/papers/${encodeURIComponent(paper)}`}
+              href={pdf.url}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
@@ -88,7 +85,7 @@ export function ResultsSummary({
           </Button>
           <Button
             variant="ghost"
-            onClick={() => download('claims.csv', toCsv(claims), 'text/csv')}
+            onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
             title="Download the claims, their verdicts and their pages as CSV"
           >
             <Download className="size-4" />

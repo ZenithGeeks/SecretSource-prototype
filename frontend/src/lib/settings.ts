@@ -74,6 +74,19 @@ export function updateSettings(patch: Partial<Settings>): void {
   listeners.forEach((notify) => notify())
 }
 
+/** Wipe the stored settings back to defaults — call on sign-out so the next user on this
+ * browser doesn't inherit the previous user's name, email, or preferences. */
+export function resetSettings(): void {
+  settings = { ...DEFAULTS }
+  try {
+    localStorage.removeItem(KEY)
+  } catch {
+    /* storage unavailable */
+  }
+  applyTheme(settings.theme)
+  listeners.forEach((notify) => notify())
+}
+
 /** Manual theme wins over the OS: set data-theme for Light/Dark, clear it for Match system
  * (which falls back to prefers-color-scheme). Called on load and on every theme change. */
 export function applyTheme(theme: ThemeChoice = settings.theme): void {

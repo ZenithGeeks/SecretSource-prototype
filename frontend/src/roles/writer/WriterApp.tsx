@@ -5,7 +5,7 @@
  * to Citation replaced for its toast.
  */
 
-import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Pen, Settings, Waypoints } from 'lucide-react'
+import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Pen, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -16,7 +16,8 @@ import { FindASource } from './screens/FindASource'
 import { Home } from './screens/Home'
 import { Settings as SettingsScreen } from './screens/Settings'
 
-type NavKey = 'home' | 'library' | 'graph' | 'history' | 'settings'
+type NavKey = 'home' | 'library' | 'graph' | 'history'
+// Settings is screen-only — opened from the profile menu, not the nav (as in Figma).
 export type WriterScreen = 'home' | 'draft-check' | 'citation-replaced' | 'find-source' | 'graph' | 'history' | 'settings'
 
 const NAV: NavEntry<NavKey>[] = [
@@ -24,20 +25,20 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'library', label: 'Library', icon: LibraryIcon },
   { key: 'graph', label: 'Graph', icon: Waypoints },
   { key: 'history', label: 'History', icon: HistoryIcon },
-  { key: 'settings', label: 'Settings', icon: Settings },
 ]
 
 // Draft check and Citation replaced are reached from Home's "Check a draft" action and
 // count as the Home section in the nav, same as the old router's isActive did. Library's
-// one screen is Find a source, so its nav key routes straight there.
-const NAV_FOR: Record<WriterScreen, NavKey> = {
+// one screen is Find a source, so its nav key routes straight there. Settings lights nothing
+// (the profile button carries its own active state).
+const NAV_FOR: Record<WriterScreen, NavKey | null> = {
   home: 'home',
   'draft-check': 'home',
   'citation-replaced': 'home',
   'find-source': 'library',
   graph: 'graph',
   history: 'history',
-  settings: 'settings',
+  settings: null,
 }
 
 function screenForNav(key: NavKey): WriterScreen {
@@ -90,6 +91,8 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Writer"
       roleIcon={Pen}
       onChangeRole={onChangeRole}
+      onOpenSettings={() => navigate('settings')}
+      settingsActive={screen === 'settings'}
     >
       {screen === 'home' && (
         <Home onOpenDraftCheck={() => navigate('draft-check')} onOpenFindSource={() => navigate('find-source')} />

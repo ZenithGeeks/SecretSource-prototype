@@ -1,12 +1,9 @@
 /**
- * Typed client for the researcher-role data. The gateway has no researcher endpoints yet,
- * so every call resolves mock payloads from src/mocks/researcher.ts. When an endpoint
- * lands, replace that call's body with a request() to it (see the TODO on each) — the
- * types, hooks and screens stay as they are.
+ * Typed client for the researcher screens. Every call goes to the gateway's /researcher routes,
+ * which build the answer from the signed-in user's own analyses (backend/app/researcher.py).
  */
 
-import { MOCK_CONSENSUS, MOCK_GRAPH } from '../mocks/researcher'
-import { store } from './researcherStore'
+import { request } from './api'
 
 export type ClaimStanding = 'backed' | 'silent' | 'contradicted' | 'unchecked'
 
@@ -17,11 +14,14 @@ export type Conflict = {
   claim: string
   for: string[] // papers backing the claim
   against: string[] // papers contradicting it
+  analysis: string // the analysis the claim is in
+  claimIndex: number
 }
 
 export type QueueEntry = {
   paper: string
   note: string // why it is suggested, in a reader's words
+  identifier: string // DOI, arXiv ID or title, to analyse it
 }
 
 export type LibrarySummary = {
@@ -32,7 +32,6 @@ export type LibrarySummary = {
 }
 
 export type ResearcherHome = {
-  user: string
   alert: string // the one-line "what changed" under the greeting
   conflicts: Conflict[]
   queue: QueueEntry[]
@@ -46,6 +45,9 @@ export type ConsensusRow = {
   cite: string
   verdict: ConsensusVerdict
   quote: string // the deciding passage
+  claim: string // the claim in the user's paper this verdict answers
+  analysis: string
+  claimIndex: number
 }
 
 export type FieldConsensus = {
@@ -60,6 +62,7 @@ export type FieldConsensus = {
 }
 
 export type LibraryPaper = {
+  id: string // the analysis
   title: string
   cite: string
   cluster: string
@@ -87,20 +90,33 @@ export type Project = {
   claims: number
   clusters: number
   tally: ClaimTally // drives the card's mini bar
-  updated: string // human line, e.g. "Updated today" (or "New uploads land here")
+  updated: string // ISO time of the last change; empty for Unsorted
   unsorted?: boolean // the catch-all for new uploads
 }
 
 /**
- * The knowledge graph ("What rests on what" / "How your library relates"). GLOBAL — like the
- * History tab it spans every analysis in the store (all projects and roles), not one project.
- * Papers and claims are the two node kinds; edges are typed relations (claims view) or
- * paper-to-paper similarity/citation links (papers view).
+ * The knowledge graph ("What rests on what" / "How your library relates"), built from every
+ * paper the user analysed. Papers and claims are the two node kinds; edges are typed relations
+ * (claims view) or paper-to-paper links (papers view).
  */
-export type GraphRelation = 'asserts' | 'backs' | 'contradicts' | 'silent'
+export type GraphRelation = 'asserts' | 'backs' | 'contradicts' | 'silent' | 'unchecked'
+
+/**
+ * Whether a public index (Semantic Scholar, arXiv, Unpaywall) knew a cited work: 'yes', 'no',
+ * or '' when the run does not say, as for the analysed papers themselves. Not a Scopus check.
+ */
+export type Indexed = 'yes' | 'no' | ''
 
 export type GraphNode =
-  | { id: string; kind: 'paper'; label: string; year: string; cluster: string }
+  | {
+      id: string
+      kind: 'paper'
+      label: string
+      year: string
+      cluster: string
+      indexed: Indexed
+      index: string // the index that answered, e.g. "Semantic Scholar"; '' when not known
+    }
   | { id: string; kind: 'claim'; label: string }
 
 export type GraphEdge = {
@@ -108,6 +124,7 @@ export type GraphEdge = {
   source: string // paper node id
   target: string // claim node id
   relation: GraphRelation
+  reason?: string // why the check could not run, for 'unchecked'
   note?: string
   quote?: string
   page?: string
@@ -117,9 +134,9 @@ export type PaperEdge = {
   id: string
   a: string
   b: string
-  similarity: number // 0..1, ColBERT passage similarity
-  sharedPassages: number
-  citations: number
+  similarity: number // 0..1: share of a paper's claims that cite the other, or of cited works both share
+  sharedPassages: number // quotes shown for the pair
+  citations: number // claims that cite the other paper, or works both cite
   cites: boolean // one cites the other → drawn dashed
   contradicted?: number
   passages: { paper: string; page: string; quote: string }[]
@@ -135,23 +152,37 @@ export type KnowledgeGraph = {
   paperEdges: PaperEdge[] // paper ↔ paper (papers view)
 }
 
+const json = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
 export const researcherApi = {
-  // TODO gateway: GET /graph — GLOBAL, built from every analysis in the store (all projects
-  // and roles), the same set History lists. Not scoped to one project.
-  getGraph: async (): Promise<KnowledgeGraph> => MOCK_GRAPH,
+  getGraph: () => request<KnowledgeGraph>('/researcher/graph'),
 
-  // TODO gateway: GET /researcher/home
-  getHome: async (): Promise<ResearcherHome> => store.home(),
+  getHome: () => request<ResearcherHome>('/researcher/home'),
 
-  // TODO gateway: POST /researcher/consensus {"question": ...}
-  askConsensus: async (question: string): Promise<FieldConsensus> => ({
-    ...MOCK_CONSENSUS,
-    question: question || MOCK_CONSENSUS.question,
-  }),
+  askConsensus: (question: string) => request<FieldConsensus>('/researcher/consensus', json({ question })),
 
-  // TODO gateway: GET /researcher/projects
-  getProjects: async (): Promise<Project[]> => store.projects(),
+  getProjects: () => request<Project[]>('/researcher/projects'),
 
-  // TODO gateway: GET /researcher/projects/{id}/library
-  getLibrary: async (projectId: string): Promise<ResearcherLibrary> => store.library(projectId),
+  getLibrary: (projectId: string) =>
+    request<ResearcherLibrary>(`/researcher/projects/${encodeURIComponent(projectId)}/library`),
+
+  createProject: (name: string, description: string) =>
+    request<Project>('/researcher/projects', json({ name, description })),
+
+  addToProject: (projectId: string, analysisId: string) =>
+    request<Project>(`/researcher/projects/${encodeURIComponent(projectId)}/papers`, json({ analysis_id: analysisId })),
+}
+
+/** "Updated today", "Updated 3 days ago", from a project's ISO time. */
+export function updatedText(project: Project) {
+  if (project.unsorted) return 'New analyses land here'
+  if (!project.updated) return ''
+  const days = Math.floor((Date.now() - new Date(project.updated).getTime()) / 86_400_000)
+  if (days <= 0) return 'Updated today'
+  if (days === 1) return 'Updated yesterday'
+  return `Updated ${days} days ago`
 }

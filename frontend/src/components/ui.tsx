@@ -50,7 +50,14 @@ const VERDICT_STYLES = {
   insufficient: 'bg-insufficient-soft text-insufficient',
 } as const
 
-export function VerdictBadge({ verdict }: { verdict: keyof typeof VERDICT_STYLES }) {
+export function VerdictBadge({
+  verdict,
+  text,
+}: {
+  verdict: keyof typeof VERDICT_STYLES
+  /** Shown instead of the verdict name, e.g. "contradicts the claim". */
+  text?: string
+}) {
   // The Settings "Colour the verdict badges" toggle: off shows plain text (for print/export).
   const { colorBadges } = useSettings()
   return (
@@ -60,7 +67,7 @@ export function VerdictBadge({ verdict }: { verdict: keyof typeof VERDICT_STYLES
         colorBadges ? VERDICT_STYLES[verdict] : 'text-ink',
       )}
     >
-      {verdict}
+      {text ?? verdict}
     </span>
   )
 }

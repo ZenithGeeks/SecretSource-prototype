@@ -9,14 +9,131 @@
  * Figma: NavItem (default/active) and RoleChip from the Components page.
  */
 
+import { LogOut, Menu, Settings as SettingsIcon, X } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
+import { useSettings } from '../lib/settings'
+import { authEnabled } from '../lib/supabase'
+import { useAuth, signOut } from '../lib/useAuth'
 import { cn } from '../lib/utils'
 import { Brand } from './Brand'
 
 type Icon = ComponentType<{ className?: string }>
 
 export type NavEntry<K extends string = string> = { key: K; label: string; icon: Icon }
+
+/** Avatar initials from the display name ("Wittawat S." → "WS"). */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
+}
+
+/** The profile button + upward menu at the sidebar bottom: identity, Settings (when the role
+ * passes onOpenSettings), and Sign out (only when auth is on — with no Supabase configured
+ * signOut is a no-op). `active` highlights the button while its Settings screen is showing. */
+function ProfileMenu({ onOpenSettings, active }: { onOpenSettings?: () => void; active?: boolean }) {
+  const { displayName } = useSettings()
+  const { session } = useAuth()
+  // Prefer the signed-in identity: full_name is set on sign-up (Auth.tsx) and by Google. The
+  // settings display name is the fallback, since its default is shared across accounts. Same
+  // for the email — the session address, not the settings one, is who is actually signed in.
+  const metaName = session?.user?.user_metadata?.full_name as string | undefined
+  const name = metaName?.trim() || displayName
+  const email = session?.user?.email ?? 'Signed in locally'
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    // Escape closes the menu without bubbling to AppShell's own handler (which would close the
+    // whole mobile drawer instead).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-2.5 rounded-lg border px-2 py-2 text-left transition-colors',
+          open || active
+            ? 'border-accent bg-accent-soft'
+            : 'border-border-subtle hover:border-accent',
+        )}
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
+          {initials(name)}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{name}</span>
+      </button>
+      {/* Rendered after the button so Tab reaches Settings/Sign out; bottom-full keeps it above. */}
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-border-subtle bg-surface p-1.5 shadow-xl"
+        >
+          <div className="flex items-center gap-2.5 px-2 py-2">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
+              {initials(name)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-semibold text-ink">{name}</p>
+              <p className="truncate text-[11px] text-ink-muted">{email}</p>
+            </div>
+          </div>
+          <div className="my-1 h-px bg-border-subtle" />
+          {onOpenSettings && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                onOpenSettings()
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink hover:bg-accent-soft"
+            >
+              <SettingsIcon className="size-4" />
+              Settings
+            </button>
+          )}
+          {authEnabled && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                void signOut()
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-refutes hover:bg-refutes-soft"
+            >
+              <LogOut className="size-4" />
+              Sign out
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function AppShell<K extends string>({
   nav,
@@ -25,61 +142,144 @@ export function AppShell<K extends string>({
   role,
   roleIcon: RoleIcon,
   onChangeRole,
+  onOpenSettings,
+  settingsActive = false,
+  showProfileMenu = true,
   sidebar,
   wide = false,
   children,
 }: {
   nav: NavEntry<K>[]
-  active: K
+  active: K | null
   onNavigate: (key: K) => void
   role: string
   roleIcon: Icon
   onChangeRole?: () => void
+  onOpenSettings?: () => void
+  /** True while the role's Settings screen (opened from the profile menu) is showing, so the
+   * profile button gets the active highlight — Settings has no nav item to light. */
+  settingsActive?: boolean
+  showProfileMenu?: boolean
   sidebar?: ReactNode
   wide?: boolean
   children: ReactNode
 }) {
-  return (
-    <div
-      className={cn(
-        'mx-auto flex min-h-screen gap-8 p-6 transition-[max-width] duration-200',
-        wide ? 'max-w-[110rem]' : 'max-w-6xl',
-      )}
-    >
-      <aside className="flex w-64 shrink-0 flex-col gap-4">
-        <Brand />
+  // Below the lg breakpoint the sidebar would leave a phone almost no room, so it moves into
+  // a drawer opened from a top bar.
+  const [menuOpen, setMenuOpen] = useState(false)
 
-        <nav className="flex flex-col gap-0.5">
-          {nav.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onNavigate(key)}
-              aria-current={active === key ? 'page' : undefined}
-              className={cn(
-                'flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium',
-                active === key
-                  ? 'bg-accent-soft text-ink'
-                  : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
-              )}
-            >
-              <Icon className="size-4" />
-              {label}
-            </button>
-          ))}
-        </nav>
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setMenuOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuOpen])
 
+  const navigate = (key: K) => {
+    setMenuOpen(false)
+    onNavigate(key)
+  }
+
+  const sidebarContent = (
+    <>
+      <nav className="flex flex-col gap-0.5">
+        {nav.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => navigate(key)}
+            aria-current={active === key ? 'page' : undefined}
+            className={cn(
+              'flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-medium lg:py-2',
+              active === key
+                ? 'bg-accent-soft text-ink'
+                : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
+            )}
+          >
+            <Icon className="size-4" />
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Opening an analysis from the drawer closes it, so the analysis is not left covered.
+          Other clicks, like deleting one, keep the drawer open. */}
+      <div
+        onClick={(event) => {
+          if ((event.target as Element).closest('[data-closes-menu]')) setMenuOpen(false)
+        }}
+      >
         {sidebar}
+      </div>
 
-        <div className="mt-auto flex items-center gap-2 px-3">
+      <div className="mt-auto flex flex-col gap-3 px-3">
+        <div className="flex items-center gap-2">
           <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
             <RoleIcon className="size-4" />
             {role}
           </span>
-          <button type="button" onClick={onChangeRole} className="text-xs text-accent hover:underline">
+          <button type="button" onClick={onChangeRole} className="py-2 text-xs text-accent hover:underline">
             change
           </button>
         </div>
+        {showProfileMenu && (
+          <ProfileMenu
+            active={settingsActive}
+            onOpenSettings={onOpenSettings && (() => {
+              setMenuOpen(false)
+              onOpenSettings()
+            })}
+          />
+        )}
+      </div>
+    </>
+  )
+
+  return (
+    <div
+      className={cn(
+        'mx-auto flex min-h-screen flex-col gap-4 px-4 pb-6 transition-[max-width] duration-200 sm:px-6 lg:flex-row lg:gap-8 lg:pt-6',
+        wide ? 'max-w-[110rem]' : 'max-w-6xl',
+      )}
+    >
+      <header className="sticky top-0 z-30 -mx-4 flex items-center justify-between border-b border-border-subtle bg-canvas/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:hidden">
+        <Brand compact />
+        <button
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Open the menu"
+          aria-expanded={menuOpen}
+          className="flex size-11 items-center justify-center rounded-lg text-ink hover:bg-accent-soft"
+        >
+          <Menu className="size-5" />
+        </button>
+      </header>
+
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+          <div className="absolute inset-0 bg-ink/45" onClick={() => setMenuOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col gap-4 overflow-y-auto bg-surface p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <Brand compact />
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                aria-label="Close the menu"
+                className="flex size-11 items-center justify-center rounded-lg text-ink hover:bg-accent-soft"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            {sidebarContent}
+          </aside>
+        </div>
+      )}
+
+      {/* Sticky + viewport-height so the profile block stays pinned to the bottom of the screen,
+          not the bottom of a long page (top-6 matches the container's lg:pt-6). */}
+      <aside className="hidden w-64 shrink-0 flex-col gap-4 lg:flex lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:overflow-y-auto">
+        <Brand />
+        {sidebarContent}
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col gap-5">{children}</main>

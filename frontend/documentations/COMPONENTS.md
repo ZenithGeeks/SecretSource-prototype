@@ -6,7 +6,7 @@ anyone. Everything here maps to the Figma **Components** and **Brand** pages.
 - Figma Components: `node-id=1-19`
 - Figma Brand (palette + type): `node-id=26-1236`
 - Stack: React 19, Vite, TypeScript, Tailwind v4 (tokens in `index.css`), TanStack Query,
-  lucide-react icons, oxlint.
+  lucide-react icons, **Cytoscape** (graph), **Supabase** (auth + persistence), oxlint.
 
 ## Golden rules
 
@@ -15,37 +15,64 @@ anyone. Everything here maps to the Figma **Components** and **Brand** pages.
 2. **Colours come from tokens, never hex.** Use `text-accent`, `bg-surface`, … (see Tokens).
    No `#6A2E6F` in components — light/dark both break if you hardcode.
 3. **Your role lives in `src/roles/<role>/`.** Screens, and a `<Role>App` that wires them.
-   The only shared file you edit is one line in `Root.tsx`.
+   Wiring a new role touches two shared files: `screens/Onboarding.tsx` (the `Role` union +
+   the `ROLES` array) and `Root.tsx` (the `Screen` union, `initialScreen()`'s allow-list, and
+   the render case). See the checklist for the exact edits.
 4. **No hardcoded data in screens.** Data comes through a hook → client → mock (see Data layer).
 
 ## Folder map
 
 ```
 src/
-├─ components/          shared, every role uses these
+├─ main.tsx             entry: QueryClient + providers, applyTheme() bootstrap
+├─ App.tsx              the analysis app, shown at ?role=app
+├─ Root.tsx             auth gate → onboarding → role app / analysis app
+├─ index.css            design tokens (see Tokens — four blocks, incl. data-theme)
+├─ vite-env.d.ts · assets/
+├─ components/          shared UI
 │  ├─ ui.tsx              Button, Input, Card, VerdictBadge, StandingBadge, Empty
 │  ├─ Brand.tsx           logo + wordmark (sidebar + hero)
-│  └─ AppShell.tsx        sidebar layout: nav items + role chip (Figma NavItem + RoleChip)
+│  ├─ AppShell.tsx        sidebar layout: nav items + role chip (Figma NavItem + RoleChip)
+│  └─ AnalysisView, ClaimCard, HistoryList, PageViewer, PipelineStages,
+│     ResultsSummary, SubmitForm — the analysis UI. Built for ?role=app, but the
+│     researcher role reuses AnalysisView / SubmitForm / HistoryList on its History
+│     screen — so treat them as shared, not app-only.
 ├─ screens/
-│  └─ Onboarding.tsx      role picker (Figma 05 Onboarding)
-├─ roles/
-│  └─ researcher/         one folder per role — no cross-role imports
-│     ├─ ResearcherApp.tsx  role router (screen state) inside AppShell
-│     └─ screens/           Home, FieldConsensus, Library
+│  ├─ Onboarding.tsx      role picker (Figma 05 Onboarding)
+│  └─ auth/Auth.tsx       sign in / sign up / forgot / reset / check-email (Supabase Auth)
+├─ roles/                 one folder per role — no cross-role imports
+│  ├─ researcher/         ResearcherApp + screens/ (Home, Library, FieldConsensus, Graph, History, Settings)
+│  ├─ writer/             WriterApp + screens/ (Home, DraftCheck, FindASource, CitationReplaced)
+│  └─ teacher/            TeacherApp + screens/ (Home, Classes, AddClass, ClassWorkspace,
+│                          Classwork, People, AssignmentDetail, EssayCheck, ReadingQuestions,
+│                          Settings) + role-local components
 ├─ lib/
-│  ├─ api.ts              gateway client for the analysis app (existing)
-│  ├─ researcher.ts       researcher types + client (mock-backed)
-│  ├─ useResearcher.ts    researcher query hooks
-│  └─ utils.ts            cn() — class merge
-├─ mocks/
-│  └─ researcher.ts       researcher mock payloads (backend not built yet)
-└─ Root.tsx             role switch (onboarding → role app / analysis app)
+│  ├─ api.ts              gateway client for the analysis app
+│  ├─ supabase.ts         Supabase browser client (auth)      · useAuth.ts   live session
+│  ├─ settings.ts         account settings store (localStorage) + useSettings + applyTheme
+│  ├─ researcher.ts / writer.ts / teacher.ts   per-role typed clients (researcher.ts calls the gateway; writer.ts / teacher.ts read mocks)
+│  ├─ useResearcher.ts / useWriter.ts / useTeacher.ts   per-role query hooks
+│  │                       (+ useResearcherActions / writer actions; teacher reads and mutations)
+│  ├─ writerStore.ts   in-session mutable store (writer only)
+│  ├─ teacherStore.ts / teacherPreferences.ts  local teacher data and settings stores
+│  └─ claims.ts · useAnalysis.ts · utils.ts (cn)
+└─ mocks/<role>.ts        per-role mock payloads (until gateway endpoints exist)
+
+supabase/  (repo root, NOT under frontend/) — DB migrations + README. Server-only:
+           the gateway connects with SUPABASE_SERVICE_ROLE_KEY from backend/.env; that
+           key never goes in the frontend. Only the anon key + URL (VITE_*) are safe here.
 ```
 
 ## Tokens (Figma "Brand" palette → CSS variable)
 
-Defined in `src/index.css` (`@theme` = light; `@media (prefers-color-scheme: dark)` = dark).
-Use the Tailwind utility, not the hex.
+Defined in `src/index.css`, which now has **four** blocks: `@theme` (light baseline),
+`@media (prefers-color-scheme: dark) :root:not([data-theme])` (auto-dark when the OS is dark
+and no manual choice), `:root[data-theme='dark']` and `:root[data-theme='light']` (the manual
+Settings → Theme override). Use the Tailwind utility, not the hex.
+
+> ⚠️ A new token must be defined in **both** dark blocks — the media query *and*
+> `:root[data-theme='dark']`. If you add it to only the `@theme`/media pair, anyone who forced
+> **Dark** in Settings silently gets its light value.
 
 | Figma name   | Hex (light) | CSS var / Tailwind class            | Use for |
 |--------------|-------------|-------------------------------------|---------|
@@ -61,7 +88,9 @@ Use the Tailwind utility, not the hex.
 | Silent       | `#8A6414`   | `--color-insufficient` → `text-insufficient` | insufficient / silent |
 
 Each verdict colour also has a `-soft` fill: `bg-supports-soft`, `bg-refutes-soft`,
-`bg-insufficient-soft`. Dark mode is automatic — use the class and it just works.
+`bg-insufficient-soft`. Dark mode is automatic (OS) and can be forced: Settings → Theme sets
+`data-theme="light|dark"` on `<html>` (via `applyTheme` in `lib/settings.ts`), which
+`index.css` overrides read. Always use the token class — light/dark/forced all just work.
 
 ## Typography
 
@@ -134,8 +163,11 @@ Surface panel: rounded, subtle border, padding. The default container for groupe
 ```tsx
 import { VerdictBadge } from '../components/ui'
 <VerdictBadge verdict="supports" />   // "refutes" | "insufficient"
+<VerdictBadge verdict="refutes" text="contradicts the claim" />
 ```
 The per-source verdict pill (SUPPORTS / REFUTES / INSUFFICIENT), soft fill + verdict colour.
+`text` replaces the verdict name; the claim card uses it to say what the cited paper does to
+the claim.
 
 ### StandingBadge (Figma `Badge` — Kind=backs/contradicts/silent/unchecked/uncited)
 ```tsx
@@ -194,6 +226,26 @@ const NAV: NavEntry<'home' | 'library'>[] = [
 Active nav item gets the plum-wash background automatically. Nav is data-driven — add/remove
 entries in the array.
 
+## Teacher role implementation
+
+The updated teacher frames are wired through `roles/teacher/TeacherApp.tsx` and share the
+existing `AppShell`. Its nav is Home, Classes, Library, Graph, and Settings; Teacher hides the
+generic profile menu because Settings is a direct nav destination in the reference shell.
+
+Implemented teacher destinations:
+
+- Home dashboard: quick actions, essay review queue, class library summary, and misused-source insight.
+- Classes and Add class: active-class search plus Connect Google, Choose a course, and Review import states.
+- Class workspace: Overview, Classwork and grades, and People tabs.
+- Assignment detail and Essay Check: local submission records, citation review, feedback editing, and send confirmation.
+- Reading questions: level/type filters, regeneration, edit/remove dialogs, paper anchors, worksheet export, and answer-key copy.
+- Settings: shared account/theme controls plus teacher checking, class, notification, and local-data preferences.
+
+Teacher routes use `courseId`, `assignmentId`, `studentId`, and `paperId` query context. The data
+flows through `useTeacher.ts` to `teacher.ts` and the clone-safe `teacherStore.ts`; screens never
+import mock fixtures directly. Google Classroom, Drive, OAuth, email delivery, grades, roster
+changes, and real essay analysis are intentionally not performed in this frontend-only phase.
+
 ## Screen composition (how a role fits together)
 
 ```
@@ -208,40 +260,134 @@ and reads data from a hook.
 
 ## Data layer (no hardcoded data; backend-ready)
 
-Three files, one direction:
+Four files, one direction. Both reads **and** writes go through the in-session store — that's
+what makes a created item show up after invalidation:
 
 ```
 mocks/<role>.ts     payloads shaped like the future gateway response
-   ↓
-lib/<role>.ts       typed client; each call returns a mock today, notes its TODO endpoint
+   ↓ (seeds)
+lib/<role>Store.ts  in-session mutable store, seeded from the mocks
+   ↓ (client reads AND writes the store)
+lib/<role>.ts       typed client; each call reads the store, notes its TODO endpoint
    ↓
 lib/use<Role>.ts    TanStack Query hooks the screens call
    ↓
 screens             read data only through the hook
 ```
 
-Wiring the real backend later = one line per call in `lib/<role>.ts`:
+The researcher role reads and writes go to the gateway. `researcher.ts` calls the gateway with
+`request()` from `lib/api.ts`:
+
 ```ts
-// TODO gateway: GET /researcher/home
-getHome: async (): Promise<ResearcherHome> => MOCK_HOME,
-// →
 getHome: () => request<ResearcherHome>('/researcher/home'),
 ```
-Types, hooks and screens don't change.
+
+The other calls: `getProjects` → `GET /researcher/projects`, `getLibrary(id)` →
+`GET /researcher/projects/{id}/library`, `askConsensus(question)` → `POST /researcher/consensus`,
+`getGraph` → `GET /researcher/graph`, `createProject(name, description)` → `POST
+/researcher/projects`, `addToProject(projectId, analysisId)` → `POST
+/researcher/projects/{id}/papers`. The gateway builds these from the signed-in user's own
+analyses (`backend/app/researcher.py`). `request()` sends the Supabase access token when login
+is on.
+
+Writer still uses a store and mocks. Teacher uses the typed `teacherApi` adapter and clone-safe
+`teacherStore` for every page read and local mutation.
+
+### Mutations
+
+Writes go through `useResearcherActions()`, which calls the gateway and then invalidates the
+TanStack Query keys it changed (`['researcher', ...]` or `['analyses']`). The graph query key is
+`['researcher', 'graph']`.
+
+```ts
+const { createProject, addToProject, analyseQueued } = useResearcherActions()
+createProject('Retrieval survey', '')  // returns the new project id
+addToProject(projectId, analysisId)  // files a finished analysis into a project
+analyseQueued(entry)                 // starts an analysis of a reading-queue paper, returns the analysis id
+```
+
+## Auth (Supabase)
+
+Sign in / sign up / forgot / check-email live in `src/screens/auth/Auth.tsx` (email + password
+and **Google** OAuth via Supabase Auth). A fifth **reset** view exists in the component but
+**isn't reachable yet**: `resetPasswordForEmail` redirects to `window.location.origin` with no
+`?auth=reset`, so supabase-js turns the recovery token into a session and `Root` renders the
+app, never `<Auth/>` — the `PASSWORD_RECOVERY` → `setView('reset')` listener lives inside the
+skipped component. To wire it, set `redirectTo` to `${origin}?auth=reset`.
+
+- `lib/supabase.ts` — browser client from `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
+  `authEnabled` is true only when both are set.
+- `lib/useAuth.ts` — `useAuth()` returns the live `{ session, loading }`; `signOut()`.
+- `Root.tsx` gates the app: **auth on** → no session shows `<Auth/>`, then onboarding → role.
+  **auth off** (env unset) → the app runs open (prototype default).
+- `?auth` (any value, or bare `?auth`) is checked **before** the session gate, so it forces the
+  Auth screens even for a signed-in user and nothing clears it — signing in from `?auth=signin`
+  leaves you pinned on the card until you remove the param by hand. It's a preview switch, not a
+  route; drop it in normal use.
+
+Turn it on: set the two `VITE_` vars in `frontend/.env`, and enable the Google provider in the
+Supabase dashboard. The anon key is public (safe in the browser). See `frontend/.env.example`.
+
+## Settings & theme
+
+`lib/settings.ts` is a localStorage-backed account-settings store (`useSettings()` +
+`updateSettings()` via `useSyncExternalStore`), consumed by the shared account/theme controls.
+Teacher-only fields live separately in `lib/teacherPreferences.ts` under
+`secretsource.teacher-settings`, so checking, class, notification, and student-visibility
+preferences do not overwrite another role's settings.
+Effects that actually apply:
+
+- **Theme** — `applyTheme()` sets `data-theme` on `<html>`; `index.css` has the light/dark
+  overrides. Called on load (`main.tsx`) and on change. `?theme=light|dark|system` deep-links.
+- **Colour verdict badges** — `VerdictBadge` reads `useSettings().colorBadges` (plain text when off).
+- **Display name** feeds the Home greeting; toggles/selects persist across reloads.
+
+## Graph (Cytoscape)
+
+`roles/researcher/screens/Graph.tsx` — the knowledge graph, **Cytoscape + fcose** (chosen over
+sigma.js for rich styling/interaction at this scale). Two modes on one canvas: **Claims**
+("what rests on what") and **Papers** ("how your library relates"), toggled in the header.
+
+- Cytoscape's style parser rejects `oklch`, so the graph uses **concrete hex** mirroring the
+  index.css tokens, with a light/dark set (see `LIGHT`/`DARK` in the file). Keep them in step
+  with `index.css` if the palette changes.
+- Type shims: `cytoscape-fcose.d.ts`, `react-cytoscapejs.d.ts`.
+- Data via `useKnowledgeGraph()` — built from the user's own analyses (gateway `GET
+  /researcher/graph`), not a global mock. The two clusters are **Analysed** and **Cited**.
+
+## Projects (Library)
+
+`roles/researcher/screens/Library.tsx` is project-first: a landing grid of project cards →
+open one → its papers (search + cluster filters + table). Projects come from the gateway.
+**New project** opens `NewProjectDialog` (modal in the same file) and calls `createProject`.
+**Unsorted** lists the user's analysed papers that are in no project. **Add paper** in a
+project opens a dialog that lists the user's finished analyses; picking one calls
+`addToProject`. A paper row opens its analysis. Deep-links: `?project=<id>`, `&q=<search>`,
+`&new=1`.
+
+Modal pattern to reuse: `fixed inset-0 z-50 flex items-center justify-center` + `bg-ink/45`
+scrim + a `bg-surface` card; Esc/backdrop cancel, Enter/submit confirms.
 
 ## Adding a new role (checklist)
+
+**Researcher is the complete gateway-backed example to copy** — it has all six screen types and
+actions. Writer and Teacher are store-backed role examples; Teacher's updated route set and
+local mutations are documented above. Keep role-specific data behind its typed client and hooks.
 
 1. `src/roles/<role>/screens/` — build your Figma screens as content-only components.
 2. `src/roles/<role>/<Role>App.tsx` — copy `ResearcherApp.tsx`, swap the `NAV` array,
    `role="…"`, `roleIcon={…}`.
-3. `src/mocks/<role>.ts` + `src/lib/<role>.ts` + `src/lib/use<Role>.ts` — copy the researcher
-   trio, put your payloads + types in.
-4. `src/Root.tsx` — replace your role's `ComingSoon` case with `<YourRoleApp onChangeRole=… />`.
-   **This is the only shared-file edit.**
+3. `src/lib/<role>.ts` + `src/lib/use<Role>.ts` — the typed client and query hooks. A role
+   without gateway endpoints yet can start from `src/mocks/<role>.ts` like writer. Add a
+   `use<Role>Actions()` hook if the role has create/add interactions.
+4. Wire it into the two shared routing files:
+   - `src/screens/Onboarding.tsx` — add the role to the `Role` union and the `ROLES` array.
+   - `src/Root.tsx` — add it to the `Screen` union, to `initialScreen()`'s allow-list, and add
+     the render case `<YourRoleApp onChangeRole=… />`.
 5. Preview: `npm run dev` → `http://localhost:5173/?role=<role>`.
 
-Reuse `AppShell`, `Brand`, `ui.tsx`, tokens, lucide. Don't add a second sidebar, button, or
-CSS system.
+The **writer** and **teacher** roles are complete working examples to copy from. Reuse
+`AppShell`, `Brand`, `ui.tsx`, tokens, lucide. Don't add a second sidebar, button, or CSS system.
 
 ## Figma → code index
 
@@ -256,7 +402,16 @@ CSS system.
 | Icons (Components)              | lucide-react (table above) |
 | Palette (Brand)                 | tokens in `index.css` |
 | Type (Brand)                    | `font-serif` (Fraunces) / `font-sans` (Geist) |
-| HistoryItem, StageRow, SubmitForm | belong to the analysis app (`components/*.tsx`, `?role=app`) |
+| Onboarding + Auth screens       | `screens/Onboarding.tsx`, `screens/auth/Auth.tsx` |
+| Knowledge graph                 | `roles/researcher/screens/Graph.tsx` (Cytoscape + fcose) |
+| Library + Projects + New-project modal | `roles/researcher/screens/Library.tsx` |
+| Settings + theme                | `roles/researcher/screens/Settings.tsx` + `lib/settings.ts` |
+| Teacher shell + primitives      | `roles/teacher/TeacherApp.tsx` + `roles/teacher/components/` |
+| Teacher classes/workspace       | `roles/teacher/screens/Classes.tsx`, `AddClass.tsx`, `ClassWorkspace.tsx`, `Classwork.tsx`, `People.tsx` |
+| Teacher essay workflow           | `roles/teacher/screens/AssignmentDetail.tsx`, `EssayCheck.tsx`, `FeedbackDialog.tsx` |
+| Teacher reading questions/settings | `roles/teacher/screens/ReadingQuestions.tsx`, `Settings.tsx` + `lib/teacherPreferences.ts` |
+| SubmitForm, AnalysisView, HistoryList | analysis components — also reused by researcher's History screen, so shared, not app-only |
+| ClaimCard, PageViewer, PipelineStages, ResultsSummary | analysis app (`?role=app`) |
 | Stamps (Brand)                  | not built — share-card feature only |
 
 ## Shared-file etiquette

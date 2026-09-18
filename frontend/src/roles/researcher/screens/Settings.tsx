@@ -6,7 +6,7 @@
 
 import { Button, Input } from '../../../components/ui'
 import { Row, Section, Select, Toggle } from '../../../components/settings'
-import { store } from '../../../lib/researcherStore'
+import { researcherApi } from '../../../lib/researcher'
 import type { Settings as SettingsType } from '../../../lib/settings'
 import { updateSettings, useSettings } from '../../../lib/settings'
 
@@ -21,9 +21,12 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
     if (email) set('email', email)
   }
 
-  const exportLibrary = () => {
-    const libraries = Object.fromEntries(store.projects().map((p) => [p.id, store.library(p.id)]))
-    const data = JSON.stringify({ projects: store.projects(), libraries }, null, 2)
+  const exportLibrary = async () => {
+    const projects = await researcherApi.getProjects()
+    const libraries = Object.fromEntries(
+      await Promise.all(projects.map(async (p) => [p.id, await researcherApi.getLibrary(p.id)] as const)),
+    )
+    const data = JSON.stringify({ projects, libraries }, null, 2)
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     const a = document.createElement('a')
     a.href = url
@@ -53,7 +56,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
           <Input
             value={s.displayName}
             onChange={(e) => set('displayName', e.target.value)}
-            className="w-56"
+            className="w-full sm:w-56"
           />
         </Row>
         <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">

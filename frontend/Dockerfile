@@ -4,6 +4,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# Login is on when both are set (src/lib/supabase.ts). Vite bakes them into the bundle at
+# build time, so they are build arguments, not runtime environment. The anon key is public.
+ARG VITE_SUPABASE_URL=
+ARG VITE_SUPABASE_ANON_KEY=
 RUN npm run build
 
 FROM nginx:alpine

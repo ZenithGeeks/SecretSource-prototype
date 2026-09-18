@@ -168,7 +168,7 @@ build_and_push gateway ./backend
 deploy gateway --port 8080 --memory 4Gi --allow-unauthenticated \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
     --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
-    --set-env-vars "GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV"
+    --set-env-vars "SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV"
 
 build_and_push web ./frontend
 # 127.0.0.11 is Docker's DNS and does not exist here; nginx is pointed at the metadata

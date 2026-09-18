@@ -1,192 +1,66 @@
-/**
- * 12 Home (Teacher) — teaching overview with essay review, class-library activity, and the
- * most-misused-source insight. Data comes through useTeacherHome so the screen remains ready
- * for the future teacher gateway endpoint.
- */
+import { ArrowUpRight, BookOpen, ChevronRight, FileCheck2, FileText, LibraryBig, Sparkles } from 'lucide-react'
 
-import { FileText, GraduationCap, ListChecks, Loader2, Pen, Sparkles } from 'lucide-react'
-import type { ComponentType } from 'react'
-
-import { Button, Card, Empty, StandingBadge } from '../../../components/ui'
-import type { TeacherScreen } from '../TeacherApp'
+import { Button, Card, Empty } from '../../../components/ui'
+import { homeRouteForAction } from '../../../lib/teacherSelectors'
+import type { TeacherHomeSubmission } from '../../../lib/teacher'
+import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import { useTeacherHome } from '../../../lib/useTeacher'
+import { InitialAvatar, LoadingState, PageHeading, StatusPill } from '../components/TeacherUi'
 
-type Icon = ComponentType<{ className?: string }>
-
-const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; to: TeacherScreen }[] = [
-  {
-    title: 'Check student essays',
-    hint: 'Upload a batch, get a verdict per citation',
-    icon: ListChecks,
-    to: 'essay-check',
-  },
-  {
-    title: 'Make reading questions',
-    hint: 'From any paper in the class library',
-    icon: Sparkles,
-    to: 'reading-questions',
-  },
-  {
-    title: 'Class library',
-    hint: 'Papers you assigned, and what students open',
-    icon: GraduationCap,
-    to: 'class-library',
-  },
-]
-
-export function Home({ onOpen }: { onOpen: (screen: TeacherScreen) => void }) {
+export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
   const home = useTeacherHome()
+  if (home.isPending) return <LoadingState label="Loading your teaching overview..." />
+  if (home.isError || !home.data) return <Empty title="Your overview could not load" hint="Refresh the page to reload the local teacher data." />
 
-  if (home.isPending) {
-    return (
-      <p className="flex items-center gap-2 text-sm text-ink-muted">
-        <Loader2 className="size-4 animate-spin" />
-        Loading your teaching workspace…
-      </p>
-    )
-  }
-
-  if (home.isError) {
-    return (
-      <Card className="border-refutes text-refutes">
-        Could not load your teaching workspace: {(home.error as Error).message}
-      </Card>
-    )
-  }
-
-  if (!home.data) return null
-
+  const data = home.data
   return (
-    <>
-      <header className="flex flex-col gap-1">
-        <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          Good morning, {home.data.user}
-        </h1>
-        <p className="text-sm text-ink-muted">
-          {home.data.course} · {home.data.checkedEssays} of {home.data.totalEssays} essays checked ·{' '}
-          {home.data.citationsNeedingAttention} cite sources that do not say that.
-        </p>
-      </header>
+    <div className="space-y-8">
+      <PageHeading
+        eyebrow="Teacher home"
+        title={`Good morning, ${data.user}`}
+        description={`${data.course} · ${data.checkedEssays} of ${data.totalEssays} essays checked · ${data.citationsNeedingAttention} cite sources that do not say that.`}
+      />
 
-      {/* The three actions are destinations only; their future workflows are not part of Home. */}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        {QUICK_ACTIONS.map(({ title, hint, icon: Icon, to }) => (
-          <Button
-            key={title}
-            type="button"
-            variant="ghost"
-            onClick={() => onOpen(to)}
-            className="flex flex-1 flex-col items-start justify-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent hover:bg-surface"
-          >
-            <Icon className="size-4 text-accent" />
-            <p className="text-sm font-medium text-ink">{title}</p>
-            <p className="text-xs text-ink-muted">{hint}</p>
-          </Button>
-        ))}
-      </div>
+      <section className="grid gap-4 md:grid-cols-3" aria-label="Quick actions">
+        <QuickAction icon={FileCheck2} title="Check student essays" detail="Review citations and prepare feedback." onClick={() => onOpen(homeRouteForAction('check-essays', data))} />
+        <QuickAction icon={Sparkles} title="Make reading questions" detail="Turn a paper into a class worksheet." onClick={() => onOpen(homeRouteForAction('reading-questions', data))} />
+        <QuickAction icon={LibraryBig} title="Class library" detail="See the sources your classes are using." />
+      </section>
 
-      <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start">
-        <Card className="min-w-0">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-ink">Essays to review</h2>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpen('essay-check')}
-              className="shrink-0 rounded-md p-0 text-xs text-accent hover:bg-transparent hover:text-accent"
-            >
-              {home.data.course} · {home.data.assignment}
-            </Button>
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+        <Card className="p-0">
+          <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5 sm:p-6"><div><h2 className="font-serif text-2xl font-semibold">Essays to review</h2><p className="mt-1 text-sm text-ink-muted">{data.assignment} · a local review queue</p></div><StatusPill label={`${data.citationsNeedingAttention} need attention`} tone="warning" /></div>
+          <div className="divide-y divide-border-subtle">
+            {data.submissions.length === 0 ? <div className="p-6"><Empty title="Nothing to review" hint="Submitted essays will appear here." /></div> : data.submissions.map((submission) => <ReviewRow key={submission.id} submission={submission} onOpen={() => onOpen(submission.state === 'submitted' ? { screen: 'essay-check', courseId: submissionCourse(submission, data), assignmentId: data.assignmentId, studentId: submission.studentId } : { screen: 'assignment-detail', courseId: submissionCourse(submission, data), assignmentId: data.assignmentId })} />)}
           </div>
-
-          {home.data.submissions.length === 0 ? (
-            <div className="mt-2">
-              <Empty title="No essays to review" hint="Submitted student essays will appear here." />
-            </div>
-          ) : (
-            <ul>
-              {home.data.submissions.map((submission) => (
-                <li
-                  key={submission.id}
-                  className="flex items-center gap-2.5 border-t border-border-subtle py-3.5 first:mt-2"
-                >
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-medium text-accent">
-                    {submission.initial}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-ink">{submission.student}</p>
-                    <p className="text-xs text-ink-muted">{submission.summary}</p>
-                  </div>
-                  <span className="shrink-0 whitespace-nowrap">
-                    <StandingBadge standing={submission.standing} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="border-t border-border-subtle p-5 sm:p-6"><Button type="button" variant="ghost" onClick={() => onOpen({ screen: 'assignment-detail', courseId: data.courseId, assignmentId: data.assignmentId })}>Open assignment <ChevronRight className="size-4" /></Button></div>
         </Card>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <Card>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-ink">Class library</h2>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => onOpen('class-library')}
-                className="shrink-0 rounded-md p-0 text-xs text-accent hover:bg-transparent hover:text-accent"
-              >
-                {home.data.library.paperCount} papers · {home.data.library.visibility}
-              </Button>
-            </div>
-
-            {home.data.library.papers.length === 0 ? (
-              <div className="mt-3">
-                <Empty title="No papers yet" hint="Assigned papers will appear in the class library." />
-              </div>
-            ) : (
-              <ul className="mt-3 flex flex-col gap-3">
-                {home.data.library.papers.map((paper) => (
-                  <li key={paper.id} className="flex items-start gap-2.5">
-                    <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
-                    <div className="min-w-0">
-                      <p className="text-sm text-ink">
-                        {paper.title} <span className="text-ink-muted">({paper.citation})</span>
-                      </p>
-                      <p className="text-xs text-ink-muted">{paper.note}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card>
-            <h2 className="text-sm font-semibold text-ink">Most misused source this week</h2>
-            {home.data.mostMisusedSource ? (
-              <>
-                <p className="mt-3 text-sm leading-5 text-ink-muted">
-                  <span className="text-ink">{home.data.mostMisusedSource.title}</span> —{' '}
-                  {home.data.mostMisusedSource.detail}
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onOpen('class-note')}
-                  className="mt-3 rounded-md p-0 text-sm text-ink-muted hover:bg-transparent hover:text-ink"
-                >
-                  <Pen className="size-4" />
-                  Turn into a class note
-                </Button>
-              </>
-            ) : (
-              <div className="mt-3">
-                <Empty title="No source insight yet" hint="Source activity will be summarized here." />
-              </div>
-            )}
-          </Card>
-        </div>
+        <Card>
+          <div className="flex items-start justify-between gap-3"><div><h2 className="font-serif text-2xl font-semibold">Class library</h2><p className="mt-1 text-sm text-ink-muted">{data.library.visibility}</p></div><BookOpen className="size-5 text-accent" /></div>
+          <p className="mt-5 text-3xl font-semibold text-ink">{data.library.paperCount}<span className="ml-2 text-sm font-normal text-ink-muted">papers available</span></p>
+          <div className="mt-5 space-y-3">
+            {data.library.papers.map((paper) => <div key={paper.id} className="flex w-full items-center gap-3 rounded-lg p-2"><span className="flex size-8 items-center justify-center rounded-md bg-canvas text-accent"><FileText className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{paper.title}</span><span className="mt-0.5 block text-xs text-ink-muted">{paper.citation} · {paper.note}</span></span></div>)}
+          </div>
+          <p className="mt-4 text-xs leading-5 text-ink-muted">The library card is informational in this frontend; no separate class-note page is created.</p>
+        </Card>
       </div>
-    </>
+
+      {data.mostMisusedSource && <Card className="border-insufficient bg-insufficient-soft/35"><div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-insufficient">Most misused source</p><h2 className="mt-2 font-serif text-2xl font-semibold">{data.mostMisusedSource.title}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{data.mostMisusedSource.detail}</p></div><span className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-accent">Turn into a class note <ArrowUpRight className="size-4" /></span></div></Card>}
+    </div>
   )
+}
+
+function QuickAction({ icon: Icon, title, detail, onClick }: { icon: typeof FileCheck2; title: string; detail: string; onClick?: () => void }) {
+  const content = <><span className="flex size-10 items-center justify-center rounded-lg bg-accent-soft text-accent"><Icon className="size-5" /></span><span className="mt-5 block font-serif text-xl font-semibold">{title}</span><span className="mt-1 block text-sm leading-6 text-ink-muted">{detail}</span><span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-accent">{onClick ? <>Open <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" /></> : 'Shared reference'}</span></>
+  return onClick ? <button type="button" onClick={onClick} className="group rounded-xl border border-border-subtle bg-surface p-5 text-left transition-shadow hover:border-accent hover:shadow-md">{content}</button> : <div className="rounded-xl border border-border-subtle bg-surface p-5">{content}</div>
+}
+
+function ReviewRow({ submission, onOpen }: { submission: TeacherHomeSubmission; onOpen: () => void }) {
+  const tone = submission.standing === 'supports' ? 'success' : submission.standing === 'refutes' ? 'danger' : submission.standing === 'insufficient' ? 'warning' : 'neutral'
+  return <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 p-5 text-left hover:bg-canvas sm:p-6"><InitialAvatar initials={submission.initial} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{submission.studentName}</span><span className="mt-1 block truncate text-xs text-ink-muted">{submission.fileName} · {submission.summary}</span></span><span className="hidden sm:block"><StatusPill label={submission.standing === 'refutes' ? 'Needs review' : submission.standing === 'supports' ? 'Backed' : submission.standing === 'insufficient' ? 'Silent' : 'Not checked'} tone={tone} /></span><ChevronRight className="size-4 shrink-0 text-ink-muted" /></button>
+}
+
+function submissionCourse(_submission: TeacherHomeSubmission, home: { courseId: string }): string {
+  return home.courseId
 }

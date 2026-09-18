@@ -20,12 +20,12 @@ export function Section({ title, children }: { title: string; children: ReactNod
 export function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   const labelId = useId()
   return (
-    <div className="flex items-center justify-between gap-6 px-5 py-3.5">
+    <div className="flex flex-col items-start gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5">
       <div className="min-w-0">
         <p id={labelId} className="text-sm text-ink">{label}</p>
         {hint && <p className="text-xs text-ink-muted">{hint}</p>}
       </div>
-      <div className="flex shrink-0 items-center">
+      <div className="flex max-w-full flex-wrap items-center sm:shrink-0">
         {isValidElement(children)
           ? cloneElement(children as ReactElement<{ 'aria-labelledby'?: string }>, { 'aria-labelledby': labelId })
           : children}

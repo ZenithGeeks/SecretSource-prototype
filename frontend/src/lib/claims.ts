@@ -8,6 +8,7 @@
 
 import type { Citation, Claim, Unchecked, Verdict } from './api'
 import { reasonText } from './api'
+import { csvText } from './csv'
 
 /** One claim's standing, worst first: that order is the reading order. */
 export const STANDINGS = ['refutes', 'insufficient', 'unchecked', 'supports', 'uncited'] as const
@@ -107,10 +108,6 @@ function rows(claims: Claim[]) {
   })
 }
 
-function csvCell(value: string) {
-  return `"${value.replace(/"/g, '""')}"`
-}
-
 /**
  * The claims as CSV, one row per answered citation.
  *
@@ -119,12 +116,8 @@ function csvCell(value: string) {
  */
 export function toCsv(claims: Claim[]) {
   const header = ['claim', 'standing', 'cited_source', 'outcome', 'quote', 'claim_page']
-  const body = rows(claims).map((row) =>
-    [row.claim.claim, row.standing, row.source, row.outcome, row.quote, row.page]
-      .map(csvCell)
-      .join(','),
-  )
-  return [header.join(','), ...body].join('\n')
+  const body = rows(claims).map((row) => [row.claim.claim, row.standing, row.source, row.outcome, row.quote, row.page])
+  return csvText([header, ...body])
 }
 
 /** The claims as markdown, for pasting into a literature review. */

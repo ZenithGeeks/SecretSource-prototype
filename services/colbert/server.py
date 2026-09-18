@@ -1,16 +1,8 @@
-"""ColBERTv2 retrieval service: plain HTTP under /api, MCP under /mcp.
+"""ColBERTv2 retrieval service.
 
-    python server.py            # http://0.0.0.0:8893  (COLBERT_PORT to change)
-
-HTTP (the contract dspy.ColBERTv2 expects):
-    GET  /api/search?query=...&k=10      -> {"topk": [{"rank", "score", "text", "title", "source",
-                                                       "page", "start", "end"}, ...]}
-    POST /api/search {"query", "k"}      -> same
-    POST /api/add    {"path": "x.pdf"}   -> {"added": n, "total": m}   (a path on this machine)
-    POST /api/upload multipart "file"    -> same, for a caller that does not share our disk
-    GET  /health
-
-MCP (streamable HTTP at /mcp): tools search_passages, add_paper — same store, same results.
+Serves the same store over two protocols: plain HTTP under /api (the agreement
+dspy.ColBERTv2 expects) and MCP under /mcp. Run with `python server.py`
+(http://0.0.0.0:8893, COLBERT_PORT to change).
 """
 
 import os
@@ -36,9 +28,8 @@ def store() -> Store:
     return _store
 
 
-# The SDK's DNS-rebinding guard only admits localhost Host headers, which 421s every request
-# that arrives through Cloud Run or a compose service name. Nothing here is bound to a
-# loopback address, so the guard is off.
+# The SDK's DNS-rebinding guard only accepts localhost Host headers. It would 421 every
+# request from Cloud Run or a compose service name. Nothing here is on loopback, so it is off.
 mcp = FastMCP(
     "colbert-retrieval",
     stateless_http=True,
@@ -50,7 +41,7 @@ mcp = FastMCP(
 
 @mcp.tool()
 def search_passages(query: str, k: int = 10) -> dict:
-    """Search the indexed papers; returns the top-k passages with page and span provenance."""
+    """Search the indexed papers. Returns the top-k passages with page and span for each."""
     return {"topk": store().search(query, min(k, 100))}
 
 
@@ -102,8 +93,8 @@ def add(body: AddBody):
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
-    """Write an uploaded file under `folder` and return where it landed. Only the base name
-    is kept: it is a file name that arrived over HTTP, not a path."""
+    """Write an uploaded file under `folder` and return its path. Only the base name
+    is kept. It is a file name from an HTTP upload, not a path."""
     name = Path(upload.filename or "").name
     if not name:
         raise HTTPException(400, "the upload needs a file name")
@@ -115,9 +106,8 @@ def receive(upload: UploadFile, folder: Path) -> Path:
 
 @app.post("/api/upload")
 def upload(file: UploadFile = PDF_UPLOAD):
-    """Index a PDF sent in the request body. /api/add takes a path, which only means the
-    same thing on both sides when the caller shares this disk (the compose bind-mount);
-    a gateway on another machine, or on Cloud Run, sends the file instead."""
+    """Index a PDF sent in the request body. Use this instead of /api/add when the caller
+    does not share this disk (a gateway on another machine, or on Cloud Run)."""
     path = receive(file, PAPERS_DIR)
     return {"added": store().add_pdf(path), "total": len(store())}
 

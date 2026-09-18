@@ -1,6 +1,7 @@
 /** Live pipeline progress: one line per stage, newest last. */
 
 import { AlertCircle, CheckCircle2, Loader2, SearchX } from 'lucide-react'
+import { useState } from 'react'
 
 import type { Stage } from '../lib/api'
 import { reasonText } from '../lib/api'
@@ -18,6 +19,12 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   failed: (stage) =>
     `Claim ${(stage.claim ?? 0) + 1}: could not check ${stage.source} — ` +
     `${reasonText(stage.reason)}`,
+  planned: (stage) =>
+    `Planned ${stage.checks} checks against ${stage.sources} cited ${stage.sources === 1 ? 'work' : 'works'}`,
+  figures: (stage) =>
+    stage.figures
+      ? `Found ${stage.figures} numbered figures in the paper`
+      : 'Found no numbered figures in the paper',
   audited: (stage) =>
     stage.findings
       ? `Checked the results: ${stage.findings} to look at`
@@ -26,12 +33,40 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   error: (stage) => stage.message ?? 'Failed',
 }
 
-export function PipelineStages({ stages, running }: { stages: Stage[]; running: boolean }) {
+/** A finished run can have forty lines; past this many only the last few show until asked. */
+const FOLDED_AFTER = 8
+const SHOWN_WHEN_FOLDED = 3
+
+export function PipelineStages({
+  stages,
+  running,
+  fold = true,
+}: {
+  stages: Stage[]
+  running: boolean
+  fold?: boolean // false shows every step, for a caller that already offers a summary
+}) {
+  const [showAll, setShowAll] = useState(false)
   if (!stages.length) return null
 
+  const folded = fold && !running && !showAll && stages.length > FOLDED_AFTER
+  const shown = folded ? stages.slice(-SHOWN_WHEN_FOLDED) : stages
+  const offset = stages.length - shown.length
+
   return (
+    <>
+    {folded && (
+      <button
+        type="button"
+        onClick={() => setShowAll(true)}
+        className="mb-2 rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        Show all {stages.length} steps
+      </button>
+    )}
     <ol className="space-y-1.5 text-sm" aria-live="polite" aria-busy={running}>
-      {stages.map((stage, index) => {
+      {shown.map((stage, shownIndex) => {
+        const index = offset + shownIndex
         const isLast = index === stages.length - 1
         const pending = running && isLast
         return (
@@ -47,11 +82,13 @@ export function PipelineStages({ stages, running }: { stages: Stage[]; running: 
               <CheckCircle2 className="size-4 shrink-0 text-supports" />
             )}
             <span className={stage.stage === 'error' ? 'text-refutes' : 'text-ink-muted'}>
-              {LABELS[stage.stage](stage)}
+              {/* A stage this build does not know yet shows its name instead of crashing. */}
+              {LABELS[stage.stage]?.(stage) ?? stage.stage}
             </span>
           </li>
         )
       })}
     </ol>
+    </>
   )
 }

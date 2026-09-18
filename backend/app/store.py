@@ -1,29 +1,31 @@
-"""Analyses and resolved sources that outlive a restart.
+"""Analyses and resolved sources that stay after a restart.
 
 Two backends behind one API: SQLite for local runs and tests (the default), or Supabase
 Postgres when SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set. Both keep one row per
-analysis with the result as JSON — the gateway reads and writes whole analyses, never
-parts of them, so switching backends changes the storage calls here and nothing above.
+analysis with the result as JSON. The gateway reads and writes whole analyses, never
+parts of them. So switching backends changes the storage calls here and nothing above.
 """
 
 import json
 import os
 import sqlite3
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 
-# ── Backend selection ────────────────────────────────────────────────────────────
-# Read at call time (not import) so tests can set the environment before the first use.
+# Backend selection.
+# Read at call time, not import: tests set the environment before the first use.
 def _use_supabase() -> bool:
     return bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
 
 
-# ── Supabase (blob tables: analyses(id, started, data), sources(key, data)) ────────
+# Supabase. Blob tables: analyses(id, started, data), sources(key, data).
 _client = None
 
 
 def _supabase():
-    """The Supabase client, created once. Uses the service role, which bypasses RLS —
+    """The Supabase client, created once. Uses the service role, which skips RLS:
     these tables are server-only and have no policies."""
     global _client
     if _client is None:
@@ -35,7 +37,7 @@ def _supabase():
     return _client
 
 
-# ── SQLite ─────────────────────────────────────────────────────────────────────
+# SQLite.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS analyses (
     id      TEXT PRIMARY KEY,
@@ -51,12 +53,24 @@ CREATE TABLE IF NOT EXISTS sources (
 )
 """
 
+PROJECTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id    TEXT PRIMARY KEY,
+    owner TEXT,
+    data  TEXT NOT NULL
+)
+"""
+
 _db: sqlite3.Connection | None = None
 _db_path: str | None = None
+# One connection for the whole process, used by one thread at a time. check_same_thread=False
+# only turns off Python's check: parallel checks reading the source cache while a run saves used
+# it at once and failed with "bad parameter or other API misuse", or crashed the process (#184).
+_lock = threading.RLock()
 
 
 def _connect() -> sqlite3.Connection:
-    """The open connection, reopened if ANALYSES_DB changed since last time."""
+    """The open connection. Reopens it if ANALYSES_DB changed since last time."""
     global _db, _db_path
 
     path = os.getenv("ANALYSES_DB", "data/analyses.db")
@@ -68,24 +82,32 @@ def _connect() -> sqlite3.Connection:
         _db.row_factory = sqlite3.Row
         _db.execute(SCHEMA)
         _db.execute(SOURCES_SCHEMA)
+        _db.execute(PROJECTS_SCHEMA)
         _db_path = path
     return _db
 
 
-# ── Public API ───────────────────────────────────────────────────────────────────
+@contextmanager
+def _sqlite():
+    """The open connection, held by this thread until the block ends."""
+    with _lock:
+        yield _connect()
+
+
+# Public API.
 def save(analysis: dict) -> None:
     if _use_supabase():
         _supabase().table("analyses").upsert(
             {"id": analysis["id"], "data": analysis}
         ).execute()
         return
-    database = _connect()
-    database.execute(
-        "INSERT INTO analyses (id, data) VALUES (?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-        (analysis["id"], json.dumps(analysis)),
-    )
-    database.commit()
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO analyses (id, data) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+            (analysis["id"], json.dumps(analysis)),
+        )
+        database.commit()
 
 
 def load_all() -> dict[str, dict]:
@@ -94,7 +116,8 @@ def load_all() -> dict[str, dict]:
         rows = _supabase().table("analyses").select("data").order("started").execute().data
         analyses = [row["data"] for row in rows]
         return {analysis["id"]: analysis for analysis in analyses}
-    rows = _connect().execute("SELECT data FROM analyses ORDER BY started").fetchall()
+    with _sqlite() as database:
+        rows = database.execute("SELECT data FROM analyses ORDER BY started").fetchall()
     analyses = [json.loads(row["data"]) for row in rows]
     return {analysis["id"]: analysis for analysis in analyses}
 
@@ -103,29 +126,61 @@ def delete(analysis_id: str) -> bool:
     if _use_supabase():
         deleted = _supabase().table("analyses").delete().eq("id", analysis_id).execute().data
         return bool(deleted)
-    database = _connect()
-    deleted = database.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,)).rowcount
-    database.commit()
+    with _sqlite() as database:
+        deleted = database.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,)).rowcount
+        database.commit()
     return bool(deleted)
 
 
 def remember_source(key: str, resolution: dict) -> None:
-    """Where a cited work's PDF lives, so a re-run does not re-ask a rate-limited API."""
+    """Where a cited work's PDF lives, so a re-run does not ask a rate-limited API again."""
     if _use_supabase():
         _supabase().table("sources").upsert({"key": key, "data": resolution}).execute()
         return
-    database = _connect()
-    database.execute(
-        "INSERT INTO sources (key, data) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET data = excluded.data",
-        (key, json.dumps(resolution)),
-    )
-    database.commit()
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO sources (key, data) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET data = excluded.data",
+            (key, json.dumps(resolution)),
+        )
+        database.commit()
 
 
 def recall_source(key: str) -> dict | None:
     if _use_supabase():
         rows = _supabase().table("sources").select("data").eq("key", key).limit(1).execute().data
         return rows[0]["data"] if rows else None
-    row = _connect().execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
+    with _sqlite() as database:
+        row = database.execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
+
+
+def save_project(project: dict) -> None:
+    """A researcher's project: its name and the analyses in it. `owner` is the user id, or
+    None when login is off."""
+    if _use_supabase():
+        _supabase().table("projects").upsert(
+            {"id": project["id"], "owner": project.get("owner"), "data": project}
+        ).execute()
+        return
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO projects (id, owner, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, data = excluded.data",
+            (project["id"], project.get("owner"), json.dumps(project)),
+        )
+        database.commit()
+
+
+def load_projects(owner: str | None) -> list[dict]:
+    """Every project of one owner. None means the projects made while login was off."""
+    if _use_supabase():
+        query = _supabase().table("projects").select("data")
+        query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
+        return [row["data"] for row in query.execute().data]
+    with _sqlite() as database:
+        rows = database.execute(
+            "SELECT data FROM projects WHERE owner IS ?", (owner,)
+        ).fetchall()
+    return [json.loads(row["data"]) for row in rows]
+

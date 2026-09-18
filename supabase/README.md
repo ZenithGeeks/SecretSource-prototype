@@ -6,16 +6,19 @@ Optional Postgres persistence for the gateway. Project: `secretsource`
 ## Model — document/blob, matching `backend/app/store.py`
 
 The gateway reads and writes **whole analyses** (one JSON document per run) plus a small
-source-resolution cache. Two tables:
+source-resolution cache and the researcher's projects. Three tables:
 
 | Table | Columns | Holds |
 |-------|---------|-------|
 | `analyses` | `id text pk`, `started timestamptz`, `data jsonb` | one analysis per row |
 | `sources`  | `key text pk`, `data jsonb` | resolved cited-work lookups (cache) |
+| `projects` | `id text pk`, `owner text`, `data jsonb` | a user's grouping of analysed papers |
 
 - **Server-only**: RLS enabled with **no policies**; the gateway connects with the **service
   role**, which bypasses RLS. Browsers get nothing.
 - Mirrors `store.py` so switching SQLite → Supabase is a connection change, not a schema one.
+- `analyses` keeps its `owner` inside the `data` blob (filtered in the gateway); `projects` has
+  a real `owner` column (nullable when login is off) and is queried by it — hence `projects_owner_idx`.
 
 ## Enable it
 
@@ -28,8 +31,32 @@ SUPABASE_SERVICE_ROLE_KEY=<Dashboard → Settings → API → service_role>
 
 then `pip install -r backend/requirements.txt` (adds `supabase`).
 
+## Agent sessions (optional)
+
+The chat agents (`backend/cli.py`, the A2A server) can keep their sessions in the same
+database, so a conversation continues after a restart. This uses a Postgres connection, not
+the REST API:
+
+```
+SESSION_DB_URL=postgresql://postgres.hecmskknxyssewgnflvy:<database password>@<session pooler host>:5432/postgres
+```
+
+Take the URL from Dashboard → Connect → **Session pooler**. The direct connection host is
+IPv6 only and does not work from Docker Desktop. `DIRECT_URL` is read too.
+
+ADK creates its own tables (`sessions`, `events`, `app_states`, `user_states`,
+`adk_internal_metadata`) on first use. `backend/app/sessions.py` puts them in the `adk`
+schema. The REST API does not serve that schema, and the `20260914120000_adk_sessions.sql`
+migration also revokes it from `anon` / `authenticated`, so browsers have no access to it even
+if a table-level grant slips in.
+
 ## Migrations
 
 `supabase/migrations/` — apply via the Supabase SQL Editor, `supabase db push`, or the
-Supabase MCP `apply_migration`. `20260909150239_blob_store.sql` creates the two tables
-(idempotent: `create table if not exists`).
+Supabase MCP `apply_migration`. All are idempotent (`create ... if not exists`), so applying
+them again is safe. In order:
+
+- `20260909150239_blob_store.sql` — `analyses` + `sources`.
+- `20260913160000_researcher_projects.sql` — `projects` (+ `projects_owner_idx`).
+- `20260914120000_adk_sessions.sql` — the `adk` schema for chat sessions, locked away from the
+  browser roles (ADK creates its own tables inside it at runtime).

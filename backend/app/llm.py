@@ -1,15 +1,16 @@
-"""One model behind two frameworks: ADK agents get a LiteLlm, DSPy programs get a dspy.LM.
-Both speak OpenAI wire format, which is what vLLM serves."""
+"""One model behind two frameworks. ADK agents get a LiteLlm.
+DSPy programs get a dspy.LM. Both use the OpenAI wire format,
+which is what vLLM serves."""
 
 from google.adk.models.lite_llm import LiteLlm
 
 from app.config import VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 
 # Qwen3 thinks before it answers unless told not to. The compose vLLM is started with
-# `--default-chat-template-kwargs '{"enable_thinking": false}'`; a vLLM somewhere else may
-# not be, and then the model spends its whole max_tokens budget on reasoning_content and
-# returns content=None ("The LM returned an empty or null response." from DSPy). Asking per
-# request works against both.
+# `--default-chat-template-kwargs '{"enable_thinking": false}'`. A vLLM somewhere else
+# may not be. Then the model spends its whole max_tokens budget on reasoning_content
+# and returns content=None ("The LM returned an empty or null response." from DSPy).
+# Asking per request works against both.
 NO_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
 
 
