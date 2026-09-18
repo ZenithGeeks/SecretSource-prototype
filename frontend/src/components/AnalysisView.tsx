@@ -164,7 +164,9 @@ export function AnalysisView({
         </section>
 
         {target && (
-          <div className="xl:sticky xl:top-6 xl:self-start">
+          // Sticky starts its own stacking context, so the viewer's z-50 only counts inside this
+          // box. z-20 lifts the box, full-window viewer included, above the sticky summary card (#160).
+          <div className="xl:sticky xl:top-6 xl:z-20 xl:self-start">
             <PageViewer
               key={target.paper}
               target={target}
