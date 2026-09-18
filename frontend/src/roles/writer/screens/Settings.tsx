@@ -11,6 +11,7 @@ import { Button, Input } from '../../../components/ui'
 import { Row, Section, Select, Toggle } from '../../../components/settings'
 import { useWriterActions } from '../../../lib/useWriter'
 import { store } from '../../../lib/writerStore'
+import { download } from '../../../lib/utils'
 import type { Settings as SettingsType } from '../../../lib/settings'
 import { updateSettings, useSettings } from '../../../lib/settings'
 
@@ -28,12 +29,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
 
   const exportData = () => {
     const data = JSON.stringify({ drafts: store.drafts(), claims: store.claims() }, null, 2)
-    const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'secretsource-writer-data.json'
-    a.click()
-    URL.revokeObjectURL(url)
+    download(data, 'secretsource-writer-data.json', 'application/json')
   }
 
   const deleteAll = () => {
