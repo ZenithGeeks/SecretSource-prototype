@@ -11,8 +11,8 @@ function w(text: string): DraftWord {
   return { text }
 }
 
-function m(text: string, mark: VerdictKind): DraftWord {
-  return { text, mark }
+function m(text: string, mark: VerdictKind, claimId?: string): DraftWord {
+  return { text, mark, claimId }
 }
 
 export const MOCK_CLAIMS: Claim[] = [
@@ -102,14 +102,14 @@ const D1_PARAGRAPHS: DraftWord[][] = [
     w('into'), w('token-level'), w('vectors'), w('and'), w('score'), w('them'), w('with'), w('MaxSim'),
     m('[Khattab', 'supports'), m('&', 'supports'), m('Zaharia,', 'supports'), m('2020].', 'supports'),
     w('ColBERTv2'), w('further'),
-    m('reduces', 'refutes'), m('index', 'refutes'), m('size', 'refutes'), m('by', 'refutes'),
-    m('6–10×', 'refutes'), m('while', 'refutes'), m('matching', 'refutes'), m('retrieval', 'refutes'),
-    m('quality', 'refutes'), m('[Khattab', 'refutes'), m('&', 'refutes'), m('Zaharia,', 'refutes'),
-    m('2020].', 'refutes'),
+    m('reduces', 'refutes', 'c1'), m('index', 'refutes', 'c1'), m('size', 'refutes', 'c1'), m('by', 'refutes', 'c1'),
+    m('6–10×', 'refutes', 'c1'), m('while', 'refutes', 'c1'), m('matching', 'refutes', 'c1'), m('retrieval', 'refutes', 'c1'),
+    m('quality', 'refutes', 'c1'), m('[Khattab', 'refutes', 'c1'), m('&', 'refutes', 'c1'), m('Zaharia,', 'refutes', 'c1'),
+    m('2020].', 'refutes', 'c1'),
     w('On'), w('out-of-domain'), w('data'), w('these'), w('models'),
-    m('outperform', 'insufficient'), m('single-vector', 'insufficient'), m('retrievers', 'insufficient'),
-    m('on', 'insufficient'), m('BEIR', 'insufficient'), m('[Thakur', 'insufficient'), m('et', 'insufficient'),
-    m('al.,', 'insufficient'), m('2021].', 'insufficient'),
+    m('outperform', 'insufficient', 'c2'), m('single-vector', 'insufficient', 'c2'), m('retrievers', 'insufficient', 'c2'),
+    m('on', 'insufficient', 'c2'), m('BEIR', 'insufficient', 'c2'), m('[Thakur', 'insufficient', 'c2'), m('et', 'insufficient', 'c2'),
+    m('al.,', 'insufficient', 'c2'), m('2021].', 'insufficient', 'c2'),
   ],
   [
     w('Denoised'), w('supervision'), w('from'), w('a'), w('cross-encoder'), w('teacher'), w('improves'),
@@ -138,9 +138,9 @@ export const D1_PARAGRAPHS_AFTER_C1_REPLACED: DraftWord[][] = [
     m('quality', 'supports'), m('[Santhanam', 'supports'), m('al.,', 'supports'), m('al.,', 'supports'),
     m('2022].', 'supports'),
     w('On'), w('out-of-domain'), w('data'), w('these'), w('models'),
-    m('outperform', 'insufficient'), m('single-vector', 'insufficient'), m('retrievers', 'insufficient'),
-    m('on', 'insufficient'), m('BEIR', 'insufficient'), m('[Thakur', 'insufficient'), m('et', 'insufficient'),
-    m('al.,', 'insufficient'), m('2021].', 'insufficient'),
+    m('outperform', 'insufficient', 'c2'), m('single-vector', 'insufficient', 'c2'), m('retrievers', 'insufficient', 'c2'),
+    m('on', 'insufficient', 'c2'), m('BEIR', 'insufficient', 'c2'), m('[Thakur', 'insufficient', 'c2'), m('et', 'insufficient', 'c2'),
+    m('al.,', 'insufficient', 'c2'), m('2021].', 'insufficient', 'c2'),
   ],
   [
     w('Denoised'), w('supervision'), w('from'), w('a'), w('cross-encoder'), w('teacher'), w('improves'),

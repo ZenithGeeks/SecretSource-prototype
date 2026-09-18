@@ -1,10 +1,11 @@
 /** Query hooks for the writer screens, mirroring useResearcher. Screens read data only
  * through these, so swapping writerApi's mocks for gateway calls touches nothing else. */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { store } from './writerStore'
 import { writerApi } from './writer'
+import type { VerdictKind } from './writer'
 
 export function useWriterHome() {
   return useQuery({ queryKey: ['writer', 'home'], queryFn: writerApi.getHome })
@@ -18,22 +19,10 @@ export function useDraft(draftId: string) {
   return useQuery({ queryKey: ['writer', 'draft', draftId], queryFn: () => writerApi.getDraft(draftId) })
 }
 
-export function useDraftCheck(draftId?: string) {
+export function useDraftCheck(draftId?: string, filterKinds?: VerdictKind[]) {
   return useQuery({
-    queryKey: ['writer', 'draft-check', draftId],
-    queryFn: () => writerApi.getDraftCheck(draftId),
-  })
-}
-
-/** Replaces a claim's citation with its suggested source, resolving that issue. Existing
- * behaviour, kept for DraftCheck's "Replace citation" button — see writerApi.replaceCitation. */
-export function useReplaceCitation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: writerApi.replaceCitation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['writer'] })
-    },
+    queryKey: ['writer', 'draft-check', draftId, filterKinds?.join(',')],
+    queryFn: () => writerApi.getDraftCheck(draftId, filterKinds),
   })
 }
 
@@ -67,6 +56,10 @@ export function useWriterActions() {
     },
     undoReplacement: (claimId: string): void => {
       store.undoReplacement(claimId)
+      qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
+    },
+    dismissReplacement: (claimId: string): void => {
+      store.dismissReplacement(claimId)
       qc.invalidateQueries({ queryKey: ['writer', 'draft-check'] })
     },
     recheckClaim: (claimId: string): void => {
