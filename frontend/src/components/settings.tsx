@@ -69,11 +69,13 @@ export function Select({
   value,
   options,
   onChange,
+  disabled,
   'aria-labelledby': ariaLabelledBy,
 }: {
   value: string
   options: string[]
   onChange: (v: string) => void
+  disabled?: boolean
   'aria-labelledby'?: string
 }) {
   return (
@@ -81,7 +83,8 @@ export function Select({
       aria-labelledby={ariaLabelledBy}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-lg border border-border-subtle bg-canvas px-3 py-1.5 text-sm text-ink outline-none focus-visible:border-accent"
+      disabled={disabled}
+      className="rounded-lg border border-border-subtle bg-canvas px-3 py-1.5 text-sm text-ink outline-none focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50"
     >
       {options.map((o) => (
         <option key={o} value={o}>

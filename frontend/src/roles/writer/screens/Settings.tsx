@@ -93,6 +93,7 @@ export function Settings({ onChangeRole }: { onChangeRole?: () => void }) {
             value={s.digestDay}
             options={['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']}
             onChange={(v) => set('digestDay', v)}
+            disabled={!s.weeklyDigest}
           />
         </Row>
         <Row label="When a re-check finishes" hint="Only for claims you left running.">
