@@ -1,20 +1,108 @@
 /**
- * Typed client for teacher-role data.
+ * The frontend contract for the teacher role.
  *
- * The teacher gateway is not available yet, so these methods return the reference-shaped
- * fixtures from `src/mocks/teacher.ts`. Keeping the request boundary here means the screen
- * will not need to change when the database-backed endpoints arrive.
+ * The shapes intentionally resemble the updated Figma screens rather than a future HTTP
+ * response. The mock adapter below is the only place screens need to change when a gateway is
+ * introduced.
  */
 
-import { MOCK_ESSAY_CHECK, MOCK_ESSAY_CHECKS, MOCK_TEACHER_HOME } from '../mocks/teacher'
+import { store } from './teacherStore'
 
-/** The reader-facing standing shown beside a student's citation. */
 export type TeacherStanding = 'supports' | 'refutes' | 'insufficient' | 'unchecked'
+
+export type ClassroomMaterial = {
+  id: string
+  kind: 'driveFile' | 'link' | 'youtubeVideo' | 'form'
+  title: string
+  url: string
+  description?: string
+}
+
+export type ClassroomAttachment = {
+  id: string
+  title: string
+  mimeType: string
+  url: string
+}
+
+export type TeacherClass = {
+  id: string
+  name: string
+  section: string
+  subject: string
+  status: 'active'
+  teacherName: string
+  studentCount: number
+  assignmentCount: number
+  topicCount: number
+  announcementCount: number
+  linkedFileCount: number
+  lastSyncedAt: string
+}
 
 export type TeacherSubmission = {
   id: string
+  assignmentId: string
+  studentId: string
+  studentName: string
+  fileName: string
+  state: 'submitted' | 'missing' | 'returned'
+  submittedAt?: string
+  attachments: ClassroomAttachment[]
+}
+
+export type TeacherAssignment = {
+  id: string
+  courseId: string
+  title: string
+  dueAt: string
+  enrolledCount: number
+  submittedCount: number
+  missingCount: number
+  returnedCount: number
+  pendingReviewCount: number
+  status: 'returned' | 'pending' | 'not-started'
+  materials: ClassroomMaterial[]
+}
+
+export type TeacherAssignmentDetail = {
+  assignment: TeacherAssignment
+  submissions: TeacherSubmission[]
+}
+
+export type TeacherRosterMember = {
+  id: string
+  name: string
+  initials: string
+  role: 'Teacher' | 'Student'
+  isCourseOwner: boolean
+}
+
+export type TeacherWorkspace = {
+  course: TeacherClass
+  description: string
+  assignments: TeacherAssignment[]
+  /** A compact preview used by the Overview tab; detail screens load the full list. */
+  submissions: TeacherSubmission[]
+  people: TeacherRosterMember[]
+  latestAnnouncement: { title: string; postedBy: string; postedAt: string; body: string } | null
+  materials: { id: string; title: string; kind: 'drive-file' | 'link'; accessible: boolean }[]
+  topics: { id: string; name: string; assignmentCount: number }[]
+}
+
+export type TeacherClassImportPreview = {
+  course: TeacherClass
+  resources: {
+    key: 'course' | 'classwork' | 'people' | 'drive'
+    label: string
+    count: number
+    detail: string
+    warning?: boolean
+  }[]
+}
+
+export type TeacherHomeSubmission = TeacherSubmission & {
   initial: string
-  student: string
   summary: string
   standing: TeacherStanding
 }
@@ -31,21 +119,37 @@ export type MostMisusedSource = {
   detail: string
 }
 
-/** Data contract for the prototype teacher overview that owns the essay-check action. */
 export type TeacherHome = {
   user: string
   course: string
+  courseId: string
   checkedEssays: number
   totalEssays: number
   citationsNeedingAttention: number
   assignment: string
-  submissions: TeacherSubmission[]
+  assignmentId: string
+  submissions: TeacherHomeSubmission[]
   library: {
     paperCount: number
     visibility: string
     papers: ClassPaper[]
   }
   mostMisusedSource: MostMisusedSource | null
+}
+
+export type SupportingUrl = {
+  id: string
+  url: string
+  title?: string
+  excerpt?: string
+  location?: string
+}
+
+export type ProfessorReviewOutcome = 'not-reviewed' | 'supports' | 'contradicts' | 'inconclusive'
+
+export type ProfessorReview = {
+  outcome: ProfessorReviewOutcome
+  note: string
 }
 
 export type EssayReview = {
@@ -56,11 +160,9 @@ export type EssayReview = {
   sourceQuote: string
   sourceLocation: string
   explanation?: string
-}
-
-export type StudentNavigation = {
-  id: string
-  name: string
+  supportingUrls: SupportingUrl[]
+  paperUrl?: string
+  professorReview: ProfessorReview
 }
 
 export type FeedbackDraft = {
@@ -70,54 +172,183 @@ export type FeedbackDraft = {
   citationIds: string[]
 }
 
+export type StudentNavigation = { id: string; name: string }
+
 export type EssayCheck = {
   assignment: {
+    assignmentId: string
+    courseId: string
     course: string
     name: string
+    /** Kept for a short compatibility window with the retired screen. */
+    courseWorkId?: string
   }
-  student: {
-    id: string
-    name: string
-    fileName: string
-  }
-  citationSummary: {
-    total: number
-    contradicted: number
-    silent: number
-    backed: number
-  }
+  student: { id: string; name: string; fileName: string }
+  citationSummary: { total: number; contradicted: number; silent: number; backed: number }
   reviews: EssayReview[]
   feedback: FeedbackDraft
-  navigation: {
-    previous?: StudentNavigation
-    next?: StudentNavigation
-  }
+  navigation: { previous?: StudentNavigation; next?: StudentNavigation }
+}
+
+export type UpdateProfessorReviewRequest = {
+  assignmentId?: string
+  /** Legacy URL/query name; converted inside the adapter only. */
+  courseWorkId?: string
+  studentId: string
+  reviewId: string
+  outcome: ProfessorReviewOutcome
+  note: string
 }
 
 export type SendFeedbackRequest = {
+  assignmentId?: string
+  courseWorkId?: string
   studentId: string
   body: string
   citationIds: string[]
 }
 
 export type FeedbackDelivery = {
+  assignmentId: string
   studentId: string
   status: 'sent'
   sentAt: string
 }
 
+export type ReadingQuestionLevel = 'undergrad' | 'graduate'
+export type ReadingQuestionType = 'comprehension' | 'critique' | 'discussion'
+
+export type ReadingQuestionPaper = {
+  id: string
+  title: string
+  citation: string
+  fileName: string
+  verifiedClaims: number
+  paperUrl: string
+}
+
+export type TeacherReadingQuestion = {
+  id: string
+  paperId: string
+  level: ReadingQuestionLevel
+  type: ReadingQuestionType
+  prompt: string
+  anchor: string
+  page: number
+  excerpt: string | null
+  answer: string | null
+}
+
+export type TeacherReadingQuestionsPage = {
+  paper: ReadingQuestionPaper
+  questions: TeacherReadingQuestion[]
+}
+
+export type RegenerateReadingQuestionsInput = {
+  paperId: string
+  level: ReadingQuestionLevel
+  types: ReadingQuestionType[]
+}
+
+export type UpdateReadingQuestionInput = {
+  id: string
+  prompt: string
+  answer: string
+}
+
+// Retained while the old teacher screens are replaced one route at a time.
+export type TeacherCourse = {
+  id: string
+  name: string
+  section: string
+  room: string
+  teacher: string
+  studentCount: number
+}
+
+export type ClassroomSubmissionState = 'NEW' | 'CREATED' | 'TURNED_IN' | 'RETURNED' | 'RECLAIMED_BY_STUDENT'
+
+export type ClassroomStudentSubmission = {
+  id: string
+  studentId: string
+  studentName: string
+  state: ClassroomSubmissionState
+  alternateLink: string
+  submittedAt?: string
+  attachments: ClassroomAttachment[]
+}
+
+export type TeacherCourseWork = {
+  id: string
+  courseId: string
+  title: string
+  description: string
+  dueAt: string
+  materials: ClassroomMaterial[]
+  submissions: ClassroomStudentSubmission[]
+  analysisSelected: boolean
+  analysisStatus: 'not-queued' | 'queued'
+}
+
+export type QueueCourseWorkResult = { queued: string[]; skipped: { id: string; reason: string }[] }
+
+export const TEACHER_HOME_KEY = ['teacher', 'home'] as const
+export const TEACHER_CLASSES_KEY = ['teacher', 'classes'] as const
+export const READING_QUESTIONS_KEY = ['teacher', 'reading-questions'] as const
+export const teacherClassImportKey = (courseId: string) => ['teacher', 'class-import', courseId] as const
+export const teacherWorkspaceKey = (courseId: string) => ['teacher', 'workspace', courseId] as const
+export const teacherAssignmentKey = (courseId: string, assignmentId: string) =>
+  ['teacher', 'assignment', courseId, assignmentId] as const
+export const teacherEssayCheckKey = (assignmentId: string, studentId: string) =>
+  ['teacher', 'essay-check', assignmentId, studentId] as const
+export const teacherReadingQuestionsKey = (paperId?: string) =>
+  ['teacher', 'reading-questions', paperId] as const
+
+// Legacy cache key retained for older screens during the migration.
+export const teacherCourseWorkKey = (courseId: string) => ['teacher', 'coursework', courseId] as const
+
+function normalizedAssignmentId(input: { assignmentId?: string; courseWorkId?: string }): string {
+  return input.assignmentId ?? input.courseWorkId ?? ''
+}
+
 export const teacherApi = {
-  // TODO gateway: GET /teacher/home, scoped by the authenticated teacher and active class.
-  getHome: async (): Promise<TeacherHome> => MOCK_TEACHER_HOME,
+  getHome: async (): Promise<TeacherHome> => store.getHome(),
+  getClasses: async (): Promise<TeacherClass[]> => store.getClasses(),
+  getImportableClasses: async (): Promise<TeacherClass[]> => store.getImportableClasses(),
+  getClassImportPreview: async (courseId: string): Promise<TeacherClassImportPreview | null> =>
+    store.getClassImportPreview(courseId),
+  importClass: async (courseId: string): Promise<TeacherClass> => store.importClass(courseId),
+  getWorkspace: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
+  getAssignmentDetail: async (courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> =>
+    store.getAssignmentDetail(courseId, assignmentId),
+  getEssayCheck: async (assignmentId: string, studentId: string): Promise<EssayCheck | null> =>
+    store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
+  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
+    store.saveFeedback(input.assignmentId, input.studentId, {
+      body: input.body,
+      citationIds: input.citationIds,
+    }),
+  updateProfessorReview: async (input: UpdateProfessorReviewRequest): Promise<EssayCheck> =>
+    store.updateProfessorReview({ ...input, assignmentId: normalizedAssignmentId(input) }),
+  sendFeedback: async (input: SendFeedbackRequest): Promise<FeedbackDelivery> =>
+    store.sendFeedback({ ...input, assignmentId: normalizedAssignmentId(input) }),
+  getReadingQuestions: async (paperId?: string): Promise<TeacherReadingQuestionsPage> =>
+    store.getReadingQuestions(paperId),
+  regenerateReadingQuestions: async (
+    input: RegenerateReadingQuestionsInput,
+  ): Promise<TeacherReadingQuestionsPage> => store.regenerateReadingQuestions(input),
+  updateReadingQuestion: async (input: UpdateReadingQuestionInput): Promise<TeacherReadingQuestion> =>
+    store.updateReadingQuestion(input),
+  deleteReadingQuestion: async (questionId: string): Promise<{ deleted: string }> =>
+    store.deleteReadingQuestion(questionId),
+  resetMockTeacherData: async (): Promise<void> => store.resetMockTeacherData(),
 
-  // TODO gateway: GET /teacher/assignments/{assignmentId}/submissions/{studentId}/essay-check
-  getEssayCheck: async (studentId: string): Promise<EssayCheck> =>
-    MOCK_ESSAY_CHECKS[studentId] ?? MOCK_ESSAY_CHECK,
-
-  // TODO gateway: POST /teacher/submissions/{studentId}/feedback
-  sendFeedback: async ({ studentId }: SendFeedbackRequest): Promise<FeedbackDelivery> => ({
-    studentId,
-    status: 'sent',
-    sentAt: new Date().toISOString(),
-  }),
+  // Compatibility methods for the legacy screens while their routes are replaced.
+  getCourseWork: async (courseId: string): Promise<TeacherCourseWork[]> => store.getCourseWork(courseId),
+  setCourseWorkAnalysisSelected: async (
+    courseWorkId: string,
+    selected: boolean,
+  ): Promise<TeacherCourseWork> => store.setCourseWorkAnalysisSelected(courseWorkId, selected),
+  queueSelectedCourseWork: async (courseId: string): Promise<QueueCourseWorkResult> =>
+    store.queueSelectedCourseWork(courseId),
 }

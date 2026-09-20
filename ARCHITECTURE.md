@@ -227,6 +227,12 @@ flowchart TD
   functions the gateway uses, wrapped by `off_the_loop` so they run in a worker thread. ADK
   calls a plain function tool on its event loop, so without it parallel calls would take
   turns.
+- A question about earlier work ("did we already check this?") goes to the coordinator's
+  `load_memory` tool. The runners in `cli.py` and `a2a_server.py` pass `AnalysisMemory`
+  (`app/memory.py`), which searches the saved analyses for the claims, cited papers and
+  quotes that share the most words with the question. It writes nothing. It reads analyses
+  without an owner and those owned by `MEMORY_OWNER`, never the caller's own user id,
+  because the chat agents do not know who is asking.
 
 ### Analysis graph
 

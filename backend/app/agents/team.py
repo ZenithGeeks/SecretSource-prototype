@@ -10,12 +10,16 @@ A request that one specialist owns is handed over whole with transfer_to_agent. 
 check against several papers is not: the coordinator calls check_claim once per paper in
 the same turn, ADK runs the calls at the same time, and the coordinator combines the
 verdicts into one answer (SCRUM-171).
+
+A question about earlier work goes to load_memory, which searches the saved analyses
+through the runner's memory service, app/memory.py (SCRUM-172).
 """
 
 import asyncio
 import functools
 
 from google.adk.agents import LlmAgent
+from google.adk.tools import load_memory
 from google.adk.tools.mcp_tool import (
     McpToolset,
     StreamableHTTPConnectionParams,
@@ -135,6 +139,10 @@ root_agent = LlmAgent(
     model=adk_model(),
     instruction=(
         "You route requests. Never judge a claim or answer from your own knowledge.\n"
+        "- what an EARLIER analysis found ('did we already check ...', 'what did we find for ...')\n"
+        "  -> call load_memory with the claim or the paper's title. Answer from what it returns:\n"
+        "  the analysis id, the cited paper, the verdict and the quote. If it returns nothing,\n"
+        "  say no earlier analysis matched, and offer to check the claim now.\n"
         "- a claim to check against TWO OR MORE papers -> call check_claim once for each paper,\n"
         "  all in the same turn. Then answer with one line per paper: the paper, the verdict\n"
         "  and the quote. End with one sentence on whether the papers agree.\n"
@@ -145,5 +153,7 @@ root_agent = LlmAgent(
         "- questions about the indexed documents / knowledge base -> transfer_to_agent(rag_agent)\n"
         "If the request fits none, say so briefly."
     ),
+    # Searches past analyses (app/memory.py) when the runner has a memory service.
+    tools=[load_memory],
     sub_agents=[rag_agent, paper_agent, verify_agent, check_claim],
 )

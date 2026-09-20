@@ -37,6 +37,7 @@ export type Target = {
   quote?: string // the text being pointed at, if there is one to show
   source: Source | null // null when it could not be located: the page shows unmarked
   page?: number // fall back to this when there is no source to take a page from
+  error?: string // a lookup failure that should remain distinct from an unlocated passage
   section?: string // the analysed paper's section this points into, for the table of contents
 }
 
@@ -140,7 +141,6 @@ function useNarrowScreen() {
   }, [])
   return narrow
 }
-
 function targetPage(target: Target) {
   return target.source?.page ?? target.page ?? 1
 }
@@ -277,7 +277,7 @@ export function PageViewer({
             <p className="truncate text-xs text-ink-muted">
               {target.paper}
               {/* Only when there was a passage to find: opening the paper itself has none. */}
-              {!target.source && target.quote && ' · exact place not found, showing the page'}
+              {!target.error && !target.source && target.quote && ' · exact place not found, showing the page'}
             </p>
           </div>
           <div className="flex shrink-0 items-center">
@@ -299,6 +299,12 @@ export function PageViewer({
           <blockquote className="max-h-20 shrink-0 overflow-y-auto border-l-2 border-accent pl-3 text-sm italic text-ink-muted">
             “{target.quote}”
           </blockquote>
+        )}
+
+        {target.error && (
+          <p role="alert" className="rounded-lg bg-refutes-soft px-3 py-2 text-sm leading-5 text-refutes">
+            {target.error}
+          </p>
         )}
 
         <div

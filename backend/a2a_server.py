@@ -19,23 +19,24 @@ conversation survives a restart.
 import os
 
 from app.agents.team import root_agent
+from app.memory import AnalysisMemory
 from app.sessions import session_service
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.auth.credential_service.in_memory_credential_service import InMemoryCredentialService
-from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner
 
 HOST = os.getenv("A2A_HOST", "localhost")
 PORT = int(os.getenv("A2A_PORT", "8002"))
 
-# The same services to_a2a builds by default, except sessions, which can be kept in Postgres.
+# The same services to_a2a builds by default, except sessions, which can be kept in Postgres,
+# and memory, which reads the saved analyses (app/memory.py).
 runner = Runner(
     agent=root_agent,
     app_name=root_agent.name,
     session_service=session_service(),
     artifact_service=InMemoryArtifactService(),
-    memory_service=InMemoryMemoryService(),
+    memory_service=AnalysisMemory(),
     credential_service=InMemoryCredentialService(),
 )
 app = to_a2a(root_agent, host=HOST, port=PORT, runner=runner)
