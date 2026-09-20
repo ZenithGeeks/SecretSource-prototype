@@ -12,8 +12,10 @@ import { csvText, downloadText } from '../../../lib/csv'
 import { useFieldConsensus } from '../../../lib/useResearcher'
 
 export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
-  const [draft, setDraft] = useState('')
-  const [question, setQuestion] = useState('')
+  // A claim carried from the Library's Field Consensus card (?ask=) prefills and runs on open.
+  const initialAsk = new URLSearchParams(window.location.search).get('ask') ?? ''
+  const [draft, setDraft] = useState(initialAsk)
+  const [question, setQuestion] = useState(initialAsk)
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
   const consensus = useFieldConsensus(question).data

@@ -106,6 +106,14 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     select(id)
     navigate('history')
   }
+  /** Open Field consensus, carrying the typed claim via `?ask=` so the screen prefills it. */
+  const openConsensus = (query?: string) => {
+    const params = new URLSearchParams(window.location.search)
+    if (query) params.set('ask', query)
+    else params.delete('ask')
+    window.history.replaceState(null, '', params.toString() ? `?${params.toString()}` : window.location.pathname)
+    navigate('field-consensus')
+  }
 
   return (
     <AppShell
@@ -131,7 +139,11 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     >
       {screen === 'home' && <Home onOpen={navigate} onOpenAnalysis={openAnalysis} />}
       {screen === 'library' && (
-        <Library onAddPaper={() => navigate('history')} onOpenAnalysis={openAnalysis} />
+        <Library
+          onAddPaper={() => navigate('history')}
+          onOpenAnalysis={openAnalysis}
+          onOpenConsensus={openConsensus}
+        />
       )}
       {screen === 'field-consensus' && <FieldConsensus onOpenAnalysis={openAnalysis} />}
       {screen === 'graph' && <Graph />}

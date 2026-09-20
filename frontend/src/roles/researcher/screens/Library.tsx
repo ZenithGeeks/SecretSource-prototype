@@ -5,7 +5,7 @@
  * analysed papers; in Unsorted it hands off to History, where a paper is analysed.
  */
 
-import { ChevronRight, Plus } from 'lucide-react'
+import { BarChart3, ChevronRight, Plus, Search } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Input } from '../../../components/ui'
@@ -65,22 +65,68 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: strin
   )
 }
 
+/** Field Consensus — the named entry to the cross-paper claim view (10 Field consensus). It
+ * lives on the Library page, since consensus is asked across the library, and hands the typed
+ * claim to the field-consensus screen. Naming it (not "Ask the field") makes the feature legible. */
+function FieldConsensusCard({ onOpen }: { onOpen: (query?: string) => void }) {
+  const [q, setQ] = useState('')
+  return (
+    <section className="flex flex-col gap-3 rounded-xl bg-accent-soft p-5">
+      <div className="flex items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
+          <BarChart3 className="size-[18px]" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-base font-semibold text-ink">Field Consensus</p>
+          <p className="text-xs font-medium text-accent">Where your whole library stands on one claim</p>
+        </div>
+      </div>
+      <p className="text-[13px] leading-relaxed text-ink-muted">
+        Type a claim. Every analysed paper is sorted into supports · contradicts · silent, each with
+        the deciding quote — the field&rsquo;s verdict at a glance.
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          onOpen(q.trim() || undefined)
+        }}
+        className="flex flex-col gap-2 sm:flex-row"
+      >
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="e.g. batch normalization reduces internal covariate shift"
+            className="w-full pl-9"
+          />
+        </div>
+        <Button type="submit" className="shrink-0">
+          Check consensus
+        </Button>
+      </form>
+    </section>
+  )
+}
+
 function ProjectsLanding({
   projects,
   onOpen,
   onNew,
+  onOpenConsensus,
 }: {
   projects: Project[]
   onOpen: (id: string) => void
   onNew: () => void
+  onOpenConsensus: (query?: string) => void
 }) {
   return (
     <>
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Projects</h1>
+          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Library</h1>
           <p className="text-sm text-ink-muted">
-            Group the papers you analysed into projects.
+            Group the papers you analysed into projects — or ask the whole library one question.
           </p>
         </div>
         <Button onClick={onNew} className="self-start sm:self-auto">
@@ -88,6 +134,8 @@ function ProjectsLanding({
           New project
         </Button>
       </header>
+
+      <FieldConsensusCard onOpen={onOpenConsensus} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((p) => (
@@ -370,9 +418,11 @@ function NewProjectDialog({
 export function Library({
   onAddPaper,
   onOpenAnalysis,
+  onOpenConsensus,
 }: {
   onAddPaper?: () => void
   onOpenAnalysis: (id: string) => void
+  onOpenConsensus: (query?: string) => void
 }) {
   const [openId, setOpenId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('project'),
@@ -399,7 +449,12 @@ export function Library({
   }
   return (
     <>
-      <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} />
+      <ProjectsLanding
+        projects={projects}
+        onOpen={setOpenId}
+        onNew={() => setShowNew(true)}
+        onOpenConsensus={onOpenConsensus}
+      />
       {showNew && (
         <NewProjectDialog
           onCancel={() => setShowNew(false)}
