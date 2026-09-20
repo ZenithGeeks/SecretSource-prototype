@@ -49,6 +49,7 @@ function buildCheckRun(draftId: string): CheckRun {
 
 export const store = {
   drafts: (): Draft[] => db.drafts,
+  claims: (): Claim[] => db.claims,
   draft: (id: string): Draft => findDraft(id),
   checkRun: (draftId: string = DEFAULT_DRAFT_ID): CheckRun => buildCheckRun(draftId),
   home: (): WriterHome => db.home,
@@ -135,10 +136,34 @@ export const store = {
     return db.search
   },
 
-  /** Clear every draft and claim back to empty (writer Settings "Delete all"). */
+  /** Clear every draft and claim back to empty (writer Settings "Delete all").
+   *
+   * Reseeds one empty draft rather than leaving `db.drafts` empty: `findDraft`'s fallback is
+   * `db.drafts[0]`, which would otherwise become `undefined` while `CheckRun.draft`'s type
+   * still promises a `Draft` — the next "Check a draft" visit would read `.fileName` off
+   * `undefined` and crash. An empty draft with no paragraphs sends DraftCheck to its existing
+   * "Nothing to check yet" state instead. Also clears home's draft/alert fields, which
+   * `attention`/`recentPapers` alone left describing a draft that no longer exists. */
   deleteAll(): void {
-    db.drafts = []
+    const empty: Draft = {
+      id: DEFAULT_DRAFT_ID,
+      fileName: 'No draft',
+      heading: '',
+      latexSource: '',
+      paragraphs: [],
+      citationsFound: 0,
+      issuesRemaining: 0,
+      lastCheckedLabel: '',
+    }
+    db.drafts = [empty]
     db.claims = []
-    db.home = { ...db.home, attention: [], recentPapers: [] }
+    db.home = {
+      ...db.home,
+      alert: '',
+      draftFileName: empty.fileName,
+      draftLastCheckedLabel: '',
+      attention: [],
+      recentPapers: [],
+    }
   },
 }

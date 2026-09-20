@@ -114,6 +114,9 @@ export const writerApi = {
   // TODO gateway: GET /writer/drafts
   getDrafts: async (): Promise<Draft[]> => store.drafts(),
 
+  // TODO gateway: GET /writer/claims
+  getClaims: async (): Promise<Claim[]> => store.claims(),
+
   // TODO gateway: POST /writer/draft-check/replace-citation {"claimId": ...}
   // Kept as the one-arg shim DraftCheck's "Replace citation" button already calls (it applies
   // the claim's own `suggestion`). useWriterActions.replaceCitation below takes an explicit
