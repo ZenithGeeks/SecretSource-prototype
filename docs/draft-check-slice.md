@@ -1,6 +1,7 @@
 # Draft-check: first real slice
 
-Status: in progress. Kept updated as work lands — this is not a point-in-time proposal.
+Status: backend done and green (`app/main.py`, `tests/test_checks.py`). Frontend not
+started — stopping here for review per SCRUM-236. Kept updated as work lands.
 
 ## Scope boundary
 
@@ -75,6 +76,18 @@ researcher's list.
 Auth/ownership: zero new code. `_owned`, `visible_to`, `current_user` are already generic
 over the `analyses` dict; a check row with an `owner` field works through the existing
 checks unchanged.
+
+## Implementation notes (backend)
+
+Landed as planned, with two small additions made while implementing:
+
+- `_forget(item_id)` factors the pop/pop/wait/delete sequence `delete_analysis` already
+  had, now shared with `delete_check` — avoids a second copy of that sequence rather than
+  duplicating it onto the new route.
+- `_event_stream(item_id)` factors the SSE replay-then-follow generator out of
+  `analysis_events` the same way, shared with `check_events`. Both refactors are
+  behavior-preserving (existing `/analyses` tests still pass unchanged); done so the new
+  `/checks` routes reuse the same stream/delete code path instead of a second copy.
 
 ## Frontend (not started yet — backend lands and is reviewed first)
 
