@@ -5,6 +5,7 @@
  * the types, hooks and screens stay as they are.
  */
 
+import { followEvents, request } from './api'
 import { store } from './writerStore'
 
 export type VerdictKind = 'supports' | 'refutes' | 'insufficient'
@@ -101,6 +102,38 @@ export type SearchResponse = {
   results: Source[]
 }
 
+/**
+ * One claim checked against one citation (SCRUM-236) — the real, gateway-backed path, not
+ * the mocked draft-check above. `source` is the resolvable key the check was run against
+ * (DOI, arXiv id, or title), not the author-year label a citation displays (#204 finding B).
+ */
+export type CheckStage = {
+  stage: 'resolving' | 'done' | 'error'
+  message?: string
+  verdict?: VerdictKind
+  reason?: string
+  at?: number
+}
+
+export type CheckResult = {
+  id: string
+  status: 'running' | 'done' | 'error'
+  claim: string
+  source: string
+  verdict?: VerdictKind
+  quote?: string
+  reasoning?: string
+  reason?: string
+  message?: string
+  stages: CheckStage[]
+}
+
+const json = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
 export const writerApi = {
   // TODO gateway: GET /writer/home
   getHome: async (): Promise<WriterHome> => store.home(),
@@ -122,4 +155,15 @@ export const writerApi = {
 
   // TODO gateway: GET /writer/search?q=...
   searchSources: async (_query: string): Promise<SearchResponse> => store.search(),
+
+  // Real, not mocked (SCRUM-236): POST /checks {claim, source} -> {id}
+  checkClaim: (claim: string, source: string) => request<{ id: string }>('/checks', json({ claim, source })),
+
+  // GET /checks/{id}
+  getCheck: (id: string) => request<CheckResult>(`/checks/${encodeURIComponent(id)}`),
+
+  /** Follows a check's stages over SSE. See `followEvents` for the mechanics — one
+   * connection type, shared with the researcher analysis flow. */
+  onCheckStages: (id: string, onStage: (stage: CheckStage) => void, onOpen?: () => void) =>
+    followEvents<CheckStage>(`/checks/${id}/events`, onStage, onOpen),
 }

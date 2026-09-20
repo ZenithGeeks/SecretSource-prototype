@@ -238,40 +238,44 @@ export const api = {
         (page ? `&page=${page}` : ''),
     ),
 
-  /** Follows an analysis's stages over SSE. A dropped connection is usually transient, so
-   * this does not stop on error: it reconnects after a pause, as EventSource would, and the
-   * backend replays every stage from the start on each new connection (#133). `onOpen` fires
-   * on the initial connection and on every reconnect, so a caller can resync its own
-   * bookkeeping (e.g. how much of that replay to skip) each time. Returns a function that
-   * closes the connection for good, for the caller to call once it knows the run ended,
-   * and for cleanup on unmount.
-   *
-   * This reads the stream with fetch() rather than EventSource, because EventSource cannot
-   * send the Authorization header, and a token in the URL ends up in access logs (#134). */
-  onStages: (id: string, onStage: (stage: Stage) => void, onOpen?: () => void) => {
-    const controller = new AbortController()
-    const follow = async () => {
-      while (!controller.signal.aborted) {
-        try {
-          const token = await accessToken()
-          const response = await fetch(`/api/analyses/${id}/events`, {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            signal: controller.signal,
-          })
-          // Like EventSource, a refused stream (401, 404) is not retried.
-          await signOutIfRefused(response)
-          if (!response.ok || !response.body) return
-          onOpen?.()
-          await readEvents(response.body, (data) => onStage(JSON.parse(data)))
-        } catch (error) {
-          if (controller.signal.aborted || error instanceof SignedOut) return
-        }
-        await new Promise((resolve) => setTimeout(resolve, RECONNECT_MS))
+  /** Follows an analysis's stages over SSE. See `followEvents` for the mechanics. */
+  onStages: (id: string, onStage: (stage: Stage) => void, onOpen?: () => void) =>
+    followEvents<Stage>(`/analyses/${id}/events`, onStage, onOpen),
+}
+
+/** Follows a gateway SSE endpoint (an analysis's or a check's stages). A dropped connection
+ * is usually transient, so this does not stop on error: it reconnects after a pause, as
+ * EventSource would, and the backend replays every event from the start on each new
+ * connection (#133). `onOpen` fires on the initial connection and on every reconnect, so a
+ * caller can resync its own bookkeeping (e.g. how much of that replay to skip) each time.
+ * Returns a function that closes the connection for good, for the caller to call once it
+ * knows the run ended, and for cleanup on unmount.
+ *
+ * This reads the stream with fetch() rather than EventSource, because EventSource cannot
+ * send the Authorization header, and a token in the URL ends up in access logs (#134). */
+export function followEvents<T>(path: string, onEvent: (event: T) => void, onOpen?: () => void) {
+  const controller = new AbortController()
+  const follow = async () => {
+    while (!controller.signal.aborted) {
+      try {
+        const token = await accessToken()
+        const response = await fetch(`/api${path}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        })
+        // Like EventSource, a refused stream (401, 404) is not retried.
+        await signOutIfRefused(response)
+        if (!response.ok || !response.body) return
+        onOpen?.()
+        await readEvents(response.body, (data) => onEvent(JSON.parse(data)))
+      } catch (error) {
+        if (controller.signal.aborted || error instanceof SignedOut) return
       }
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_MS))
     }
-    void follow()
-    return () => controller.abort()
-  },
+  }
+  void follow()
+  return () => controller.abort()
 }
 
 /** EventSource's own default pause before it reconnects. */

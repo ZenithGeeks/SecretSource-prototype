@@ -1,7 +1,7 @@
 # Draft-check: first real slice
 
-Status: backend done and green (`app/main.py`, `tests/test_checks.py`). Frontend not
-started — stopping here for review per SCRUM-236. Kept updated as work lands.
+Status: backend and frontend both done and green. Backend reviewed and approved
+(139/139 in Docker). Frontend not yet committed — stopping here for review per SCRUM-236.
 
 ## Scope boundary
 
@@ -89,25 +89,36 @@ Landed as planned, with two small additions made while implementing:
   behavior-preserving (existing `/analyses` tests still pass unchanged); done so the new
   `/checks` routes reuse the same stream/delete code path instead of a second copy.
 
-## Frontend (not started yet — backend lands and is reviewed first)
+## Frontend
 
-`writer.ts`'s existing `TODO gateway:` comments don't anticipate a *submit* action (they're
-all `GET`s against a pre-existing draft). Adding two **new** methods rather than replacing
-one of the TODO-marked ones: `checkClaim(claim, source) -> {id}` and `getCheck(id)`, plus a
-hook that follows `/checks/{id}/events`. `getDraftCheck` and the rest of the mock stay
-exactly as they are.
+Landed as planned:
 
-`api.ts`'s `onStages`/`readEvents` SSE loop is generalized into a `followEvents(path,
-onEvent, onOpen)` helper; `api.onStages` becomes a thin wrapper over it. One SSE
-implementation, two callers (`/analyses/{id}/events` and `/checks/{id}/events`) — not a
-second progress mechanism.
+- `api.ts`: `onStages`/`readEvents`'s SSE loop is generalized into an exported
+  `followEvents<T>(path, onEvent, onOpen)`; `api.onStages` is now a thin wrapper over it
+  (`followEvents<Stage>('/analyses/${id}/events', ...)`). One SSE implementation, two
+  callers.
+- `writer.ts`: two **new** methods, not a replacement of an existing `TODO gateway:` one —
+  those all anticipate a `GET` against a pre-existing draft, and nothing in the mock ever
+  modeled a *submit* action. Added `CheckStage`/`CheckResult` types, `checkClaim(claim,
+  source) -> {id}`, `getCheck(id)`, and `onCheckStages(id, onStage, onOpen)` (built on
+  `followEvents`). `getDraftCheck` and the rest of the mock are untouched.
+- `useWriter.ts`: `useCheckClaim()` (mutation) and `useCheck(id)` (query + SSE-follow,
+  mirroring `useAnalysis.ts`'s replay/resync logic — a check only ever has two stages, so
+  it skips the refetch-batching `useAnalysis` needs for a paper's many rapid-fire stages).
+- `DraftCheck.tsx`: a new `ClaimCheckCard` component (claim + citation-key inputs, adapted
+  from `SubmitForm.tsx`'s mutation pattern) renders unconditionally above the existing
+  mocked draft view — the component's three early-return branches (`isPending`/`isError`/
+  `data`) became inline conditional blocks so the card shows regardless of the mock's
+  state. Real verdict/quote/reasoning render through `StandingBadge`, reused as-is.
+  `suggestion` and `quoteLocation` are never referenced by the new card — nothing to
+  degrade, since nothing tries to show them.
 
-`DraftCheck.tsx` gets a small submit card (claim textarea + citation-key input, adapted
-from `SubmitForm.tsx`'s mutation pattern) above the existing, untouched mocked draft view.
-Real verdict/quote/reasoning render in a panel reusing `StandingBadge`. `suggestion` and
-`quoteLocation` are already optional on the `Issue`/`Claim` type, so a real result with
-neither degrades through the existing `issue.quote &&` / `issue.suggestion &&` guards
-without any type change.
+Tests: `frontend/tests/checks.test.tsx` — `followEvents`'s path + JSON parsing, `api.onStages`
+still targeting `/analyses/{id}/events` post-refactor, `checkClaim`/`getCheck`'s request
+shapes, and `useCheck`/`useCheckClaim` including one test of the full running-to-done
+replay flow (a real backend replays every already-recorded stage before new ones, which the
+test's mock SSE stream has to reproduce or the hook's replay-dedup misreads a live event as
+a replay — hit this as a real bug in the test's first draft, not the hook).
 
 ## Tests
 
