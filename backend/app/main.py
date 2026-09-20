@@ -18,6 +18,10 @@ POST /user/avatar        multipart image -> {"url"}
 DELETE /user/avatar
 GET  /user/avatar/me     -> the avatar image
 POST /verify            {"claim", "source"} -> one verdict, outside any analysis
+POST /checks            {"claim", "source"} -> {"id"}, same async shape as /analyses
+GET  /checks/{id}               -> one check with its verdict, once done
+GET  /checks/{id}/events        -> SSE: resolving, then done/error (no stage in between)
+DELETE /checks/{id}
 GET  /health
 
 Analyses live in memory while they run. They are also written to SQLite (app/store.py)
@@ -152,6 +156,11 @@ app.include_router(teacher_router)
 class AnalysisRequest(BaseModel):
     paper: str
     verify: bool = True
+
+
+class CheckRequest(BaseModel):
+    claim: str
+    source: str  # a DOI, arXiv id, or title — not the author-year label the UI shows (#204)
 
 
 _unsaved: set[str] = set()  # analyses changed since their last save started
@@ -344,6 +353,50 @@ def team_visible(user: str | None) -> list[dict]:
     return list(analyses.values())
 
 
+async def _run_check(check_id: str, claim: str, source: str):
+    """One claim against one citation, outside any paper analysis (SCRUM-236).
+
+    A single verify_claim call, not the prepare/check split _run uses for a paper's many
+    claims — that split parallelizes across claims and cited works, which one claim has
+    none of. Coarser progress than a paper analysis: verify_claim is one call we do not
+    instrument further, so the stream has only a start (`resolving`) and an end
+    (`done`/`error`), no stage in between while it runs.
+    """
+    check = analyses[check_id]
+    try:
+        await _publish(check_id, "resolving", message=f"resolving {source}")
+        result = await asyncio.to_thread(verify_claim, claim, source)
+        if result["status"] == "ok":
+            check["verdict"] = result["verdict"]
+            check["quote"] = result["quote"]
+            check["reasoning"] = result["reasoning"]
+            check["evidence"] = result.get("evidence", [])
+            check["indexed_in"] = result.get("indexed_in", {})
+            check["status"] = "done"
+            await _publish(check_id, "done", verdict=result["verdict"])
+        else:
+            check["status"] = "error"
+            check["reason"] = result.get("reason", "failed")
+            check["message"] = result.get("message", "")
+            await _publish(check_id, "error", reason=check["reason"], message=check["message"])
+    except Exception as error:
+        check["status"] = "error"
+        check["message"] = str(error)
+        await _publish(check_id, "error", message=str(error))
+    finally:
+        await streams[check_id].put(None)
+        await _saved(check_id)
+
+
+def _start_check(claim: str, source: str, owner: str | None) -> dict:
+    check_id = uuid.uuid4().hex[:12]
+    analyses[check_id] = {"id": check_id, "kind": "check", "claim": claim, "source": source,
+                          "status": "running", "owner": owner, "stages": []}
+    streams[check_id] = asyncio.Queue()
+    asyncio.create_task(_run_check(check_id, claim, source))
+    return {"id": check_id}
+
+
 def visible_to(user: str | None) -> list[dict]:
     """The analyses this exact user owns. Kept owner-scoped even in the shared team library, for
     the one place sharing must stop: deleting a user's own data must never touch a teammate's."""
@@ -405,9 +458,14 @@ async def upload_analysis(
 
 @app.get("/analyses")
 async def list_analyses(user: str | None = Depends(current_user)):
-    # The list leaves out what only one analysis's own view needs.
+    # The list leaves out what only one analysis's own view needs. Rows with no "kind" are
+    # older paper analyses, from before checks (SCRUM-236) existed alongside them.
     left_out = ("stages", "references", "markers", "outline")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(team_visible(user))]
+    return [
+        {k: v for k, v in a.items() if k not in left_out}
+        for a in reversed(team_visible(user))
+        if a.get("kind", "paper") == "paper"
+    ]
 
 
 @app.get("/analyses/{analysis_id}")
@@ -424,6 +482,23 @@ async def _delete_one(analysis_id: str) -> None:
     await asyncio.to_thread(store.delete, analysis_id)
 
 
+async def _event_stream(item_id: str):
+    """Server-sent events: the stages already recorded, then each new one as it happens.
+    Shared by analyses and checks — both keep their stages on the same `analyses` dict and
+    publish to the same `streams` queue."""
+    replayed = list(analyses[item_id]["stages"])
+    for event in replayed:
+        yield f"data: {json.dumps(event)}\n\n"
+    if analyses[item_id]["status"] != "running":
+        return
+    # the queue still holds everything replayed above, in the same order
+    while (event := await streams[item_id].get()) is not None:
+        if replayed:
+            replayed.pop(0)
+            continue
+        yield f"data: {json.dumps(event)}\n\n"
+
+
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
     _mine(analysis_id, user)
@@ -433,24 +508,37 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
 
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
-    """Server-sent events: the stages already recorded, then each new one as it happens.
-    The web app reads this with fetch(), so its token travels in the Authorization header."""
+    """The web app reads this with fetch(), so its token travels in the Authorization header."""
     _owned(analysis_id, user)
+    return StreamingResponse(_event_stream(analysis_id), media_type="text/event-stream")
 
-    async def stream():
-        replayed = list(analyses[analysis_id]["stages"])
-        for event in replayed:
-            yield f"data: {json.dumps(event)}\n\n"
-        if analyses[analysis_id]["status"] != "running":
-            return
-        # the queue still holds everything replayed above, in the same order
-        while (event := await streams[analysis_id].get()) is not None:
-            if replayed:
-                replayed.pop(0)
-                continue
-            yield f"data: {json.dumps(event)}\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+# --- checks: one claim against one citation, outside any paper analysis (SCRUM-236) ---
+
+
+@app.post("/checks")
+async def start_check(request: CheckRequest, user: str | None = Depends(current_user)):
+    return _start_check(request.claim, request.source, user)
+
+
+# A check is one author's own work, not a team paper: unlike analyses (shared through
+# team_visible) every check route is owner-scoped, so `_mine` rather than `_owned`.
+@app.get("/checks/{check_id}")
+async def get_check(check_id: str, user: str | None = Depends(current_user)):
+    return _mine(check_id, user)
+
+
+@app.delete("/checks/{check_id}")
+async def delete_check(check_id: str, user: str | None = Depends(current_user)):
+    _mine(check_id, user)
+    await _delete_one(check_id)
+    return {"deleted": check_id}
+
+
+@app.get("/checks/{check_id}/events")
+async def check_events(check_id: str, user: str | None = Depends(current_user)):
+    _mine(check_id, user)
+    return StreamingResponse(_event_stream(check_id), media_type="text/event-stream")
 
 
 # --- the paper itself, so the UI can show the page a claim or a passage came from ---
