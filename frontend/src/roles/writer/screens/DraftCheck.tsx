@@ -1,12 +1,18 @@
 /** Writer Draft check — the draft with every citation marked, and a fix panel for the
  * current issue. `onReplaceCitation` hands off to Citation replaced with the new label. */
 
+import { EditorContent, useEditor } from '@tiptap/react'
+import TiptapDocument from '@tiptap/extension-document'
+import TiptapParagraph from '@tiptap/extension-paragraph'
+import TiptapText from '@tiptap/extension-text'
 import { ChevronRight, Download, Loader2, Search, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { Button, Card, Empty, StandingBadge } from '../../../components/ui'
-import { useDraftCheck, useReplaceCitation } from '../../../lib/useWriter'
-import type { DraftWord, VerdictKind } from '../../../lib/writer'
+import { ClaimVerdict } from '../../../lib/claimVerdictMark'
+import { draftToDoc } from '../../../lib/draftToProseMirror'
+import { useDraftCheck, useDraftClaims, useReplaceCitation } from '../../../lib/useWriter'
+import type { Claim, Draft, VerdictKind } from '../../../lib/writer'
 import { cn } from '../../../lib/utils'
 
 const LEGEND: { kind: VerdictKind; label: string }[] = [
@@ -15,41 +21,26 @@ const LEGEND: { kind: VerdictKind; label: string }[] = [
   { kind: 'insufficient', label: 'source is silent' },
 ]
 
-const MARK_STYLES: Record<VerdictKind, string> = {
-  supports: 'bg-supports-soft border-supports',
-  refutes: 'bg-refutes-soft border-refutes',
-  insufficient: 'bg-insufficient-soft border-insufficient',
-}
-
 const SWATCH_STYLES: Record<VerdictKind, string> = {
   supports: 'bg-supports',
   refutes: 'bg-refutes',
   insufficient: 'bg-insufficient',
 }
 
-function DraftParagraph({ words }: { words: DraftWord[] }) {
-  return (
-    <p className="flex flex-wrap items-start gap-x-1.5 gap-y-1.5">
-      {words.map((word, index) =>
-        word.mark ? (
-          <mark
-            key={index}
-            className={cn('rounded-none border-b-2 px-0.5 text-ink', MARK_STYLES[word.mark])}
-          >
-            {word.text}
-          </mark>
-        ) : (
-          <span key={index} className="text-ink">
-            {word.text}
-          </span>
-        ),
-      )}
-    </p>
-  )
+const DRAFT_EDITOR_EXTENSIONS = [TiptapDocument, TiptapParagraph, TiptapText, ClaimVerdict]
+
+/** Read-only ProseMirror render of a draft (Phase 0, docs/draft-editor-assessment.md) —
+ * replaces the old per-word DraftParagraph. No editing, no toolbar; the doc is rebuilt
+ * whenever the draft or its claims change. */
+function DraftDocument({ draft, claims }: { draft: Draft; claims: Claim[] }) {
+  const doc = useMemo(() => draftToDoc(draft, claims), [draft, claims])
+  const editor = useEditor({ editable: false, extensions: DRAFT_EDITOR_EXTENSIONS, content: doc }, [doc])
+  return <EditorContent editor={editor} className="flex flex-col gap-4 text-ink [&_p]:leading-relaxed" />
 }
 
 export function DraftCheck({ onReplaceCitation }: { onReplaceCitation: (citationLabel: string) => void }) {
   const draftCheck = useDraftCheck()
+  const claims = useDraftClaims(draftCheck.data?.draft.id)
   const replaceCitation = useReplaceCitation()
   const [issueIndex, setIssueIndex] = useState(0)
 
@@ -106,11 +97,7 @@ export function DraftCheck({ onReplaceCitation }: { onReplaceCitation: (citation
               {draftCheck.data.draft.heading}
             </h2>
 
-            <div className="flex flex-col gap-4">
-              {draftCheck.data.draft.paragraphs.map((words, index) => (
-                <DraftParagraph words={words} key={index} />
-              ))}
-            </div>
+            <DraftDocument draft={draftCheck.data.draft} claims={claims.data ?? []} />
 
             <div className="flex flex-wrap items-center gap-3.5">
               {LEGEND.map(({ kind, label }) => (

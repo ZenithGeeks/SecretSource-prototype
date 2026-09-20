@@ -111,6 +111,11 @@ export const writerApi = {
   // TODO gateway: GET /writer/drafts/{id}
   getDraft: async (draftId: string): Promise<Draft> => store.draft(draftId),
 
+  // TODO gateway: GET /writer/drafts/{id}/claims. Added for the read-only editor render
+  // (docs/draft-editor-assessment.md Phase 0) — checkRun's issues only carry the
+  // refutes/insufficient subset, but the claimId-guessing adapter needs supports claims too.
+  getDraftClaims: async (draftId: string): Promise<Claim[]> => store.claims(draftId),
+
   // TODO gateway: GET /writer/drafts
   getDrafts: async (): Promise<Draft[]> => store.drafts(),
 

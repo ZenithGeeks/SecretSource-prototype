@@ -25,6 +25,17 @@ export function useDraftCheck(draftId?: string) {
   })
 }
 
+/** All claims for a draft, including `supports` ones — draft-check's issues only carry the
+ * refutes/insufficient subset. Used by the read-only editor render to guess a marked run's
+ * claimId (docs/draft-editor-assessment.md Phase 0). */
+export function useDraftClaims(draftId?: string) {
+  return useQuery({
+    queryKey: ['writer', 'draft-claims', draftId],
+    queryFn: () => writerApi.getDraftClaims(draftId as string),
+    enabled: Boolean(draftId),
+  })
+}
+
 /** Replaces a claim's citation with its suggested source, resolving that issue. Existing
  * behaviour, kept for DraftCheck's "Replace citation" button — see writerApi.replaceCitation. */
 export function useReplaceCitation() {
