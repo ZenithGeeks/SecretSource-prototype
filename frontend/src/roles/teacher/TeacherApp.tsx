@@ -1,11 +1,12 @@
 /** Teacher role route owner. Every destination is URL-backed so refresh keeps the current page. */
 
 import { useQueryClient } from '@tanstack/react-query'
-import { BookOpen, GraduationCap, Home as HomeIcon, Settings as SettingsIcon, Waypoints } from 'lucide-react'
+import { BookOpen, GraduationCap, Home as HomeIcon, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { SettingsModal } from '../../components/SettingsModal'
 import { teacherWorkspaceKey } from '../../lib/teacher'
 import {
   parseTeacherRoute,
@@ -26,7 +27,6 @@ import { ClassWorkspace } from './screens/ClassWorkspace'
 import { EssayCheck } from './screens/EssayCheck'
 import { Home } from './screens/Home'
 import { ReadingQuestions } from './screens/ReadingQuestions'
-import { Settings } from './screens/Settings'
 
 export type { TeacherRoute, TeacherScreen }
 
@@ -35,7 +35,6 @@ const TEACHER_NAV: NavEntry<TeacherNavKey>[] = [
   { key: 'classes', label: 'Classes', icon: GraduationCap },
   { key: 'library', label: 'Library', icon: BookOpen },
   { key: 'graph', label: 'Graph', icon: Waypoints },
-  { key: 'settings', label: 'Settings', icon: SettingsIcon },
 ]
 
 function placeholderTitle(screen: TeacherScreen): string {
@@ -55,6 +54,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const queryClient = useQueryClient()
   const [route, setRoute] = useState<TeacherRoute>(() => parseTeacherRoute(window.location.search))
   const [connectionError, setConnectionError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const importClass = useImportTeacherClass()
 
   useEffect(() => {
@@ -93,7 +93,8 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Teacher"
       roleIcon={GraduationCap}
       onChangeRole={onChangeRole}
-      showProfileMenu={false}
+      onOpenSettings={() => setSettingsOpen(true)}
+      settingsActive={settingsOpen}
       wide
     >
       {route.screen === 'home' ? (
@@ -114,11 +115,15 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onNavigate={(studentId) => navigate({ ...route, studentId })} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} />
       ) : route.screen === 'reading-questions' ? (
         <ReadingQuestions paperId={route.paperId} />
-      ) : route.screen === 'settings' ? (
-        <Settings />
       ) : (
         <Placeholder title={placeholderTitle(route.screen)} />
       )}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        currentRole="teacher"
+        onSwitchRole={onChangeRole ?? (() => {})}
+      />
     </AppShell>
   )
 }

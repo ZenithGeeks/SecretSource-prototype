@@ -12,10 +12,9 @@ export type TeacherScreen =
   | 'assignment-detail'
   | 'essay-check'
   | 'reading-questions'
-  | 'settings'
   | 'graph'
 
-export type TeacherNavKey = 'home' | 'classes' | 'library' | 'graph' | 'settings'
+export type TeacherNavKey = 'home' | 'classes' | 'library' | 'graph'
 
 export type TeacherRoute = {
   screen: TeacherScreen
@@ -25,7 +24,7 @@ export type TeacherRoute = {
   paperId?: string
 }
 
-export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'library', 'graph', 'settings']
+export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'library', 'graph']
 
 const SCREENS: readonly TeacherScreen[] = [
   'home',
@@ -39,7 +38,6 @@ const SCREENS: readonly TeacherScreen[] = [
   'assignment-detail',
   'essay-check',
   'reading-questions',
-  'settings',
   'graph',
 ]
 
@@ -204,8 +202,6 @@ export function teacherNavForScreen(screen: TeacherScreen): TeacherNavKey | null
       return 'library'
     case 'graph':
       return 'graph'
-    case 'settings':
-      return 'settings'
     default:
       return screen === 'add-class-connect' || screen === 'add-class-course' || screen === 'add-class-review'
         ? 'classes'
