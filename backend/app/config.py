@@ -42,6 +42,15 @@ ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
+# Optional, teacher-page-only Google Classroom connection. These credentials are never sent to
+# the browser; the public callback goes through the web server's existing /api proxy.
+TEACHER_GOOGLE_ENABLED = os.getenv("TEACHER_GOOGLE_ENABLED", "false").lower() in {"1", "true", "yes"}
+TEACHER_GOOGLE_CLIENT_ID = os.getenv("TEACHER_GOOGLE_CLIENT_ID", "")
+TEACHER_GOOGLE_CLIENT_SECRET = os.getenv("TEACHER_GOOGLE_CLIENT_SECRET", "")
+TEACHER_GOOGLE_REDIRECT_URI = os.getenv("TEACHER_GOOGLE_REDIRECT_URI", "")
+TEACHER_GOOGLE_SUCCESS_REDIRECT = os.getenv("TEACHER_GOOGLE_SUCCESS_REDIRECT", "/?role=teacher&screen=add-class-course")
+TEACHER_GOOGLE_ENCRYPTION_KEY = os.getenv("TEACHER_GOOGLE_ENCRYPTION_KEY", "")
+
 # Source lookups. Without S2_API_KEY, Semantic Scholar rate-limits most calls.
 # UNPAYWALL_EMAIL lets Unpaywall answer instead. It is a contact address, not a key.
 S2_API_KEY = os.getenv("S2_API_KEY", "")

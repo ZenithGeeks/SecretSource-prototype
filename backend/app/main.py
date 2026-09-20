@@ -39,6 +39,7 @@ from pydantic import BaseModel
 
 from app import dependencies, researcher, store
 from app.auth import current_user
+from app.teacher_google import router as teacher_google_router
 from app.config import (
     PAPERS_DIR,
     PARALLEL_CHECKS,
@@ -117,6 +118,7 @@ app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+app.include_router(teacher_google_router)
 
 
 class AnalysisRequest(BaseModel):

@@ -7,6 +7,7 @@
  */
 
 import { store } from './teacherStore'
+import { request } from './api'
 
 export type TeacherStanding = 'supports' | 'refutes' | 'insufficient' | 'unchecked'
 
@@ -311,7 +312,7 @@ function normalizedAssignmentId(input: { assignmentId?: string; courseWorkId?: s
   return input.assignmentId ?? input.courseWorkId ?? ''
 }
 
-export const teacherApi = {
+const mockTeacherApi = {
   getHome: async (): Promise<TeacherHome> => store.getHome(),
   getClasses: async (): Promise<TeacherClass[]> => store.getClasses(),
   getImportableClasses: async (): Promise<TeacherClass[]> => store.getImportableClasses(),
@@ -351,4 +352,23 @@ export const teacherApi = {
   ): Promise<TeacherCourseWork> => store.setCourseWorkAnalysisSelected(courseWorkId, selected),
   queueSelectedCourseWork: async (courseId: string): Promise<QueueCourseWorkResult> =>
     store.queueSelectedCourseWork(courseId),
+  getGoogleConnection: async (): Promise<{ connected: boolean; email: string | null }> => ({ connected: false, email: null }),
+  startGoogleConnection: async (): Promise<{ authorizationUrl: string }> => {
+    throw new Error('Google Classroom is unavailable in mock mode.')
+  },
 }
+
+export const teacherRemoteEnabled = import.meta.env.VITE_TEACHER_BACKEND === 'remote'
+
+const remoteTeacherApi = {
+  ...mockTeacherApi,
+  getClasses: () => request<TeacherClass[]>('/teacher/classes'),
+  getImportableClasses: () => request<TeacherClass[]>('/teacher/classes/importable'),
+  getClassImportPreview: (courseId: string) => request<TeacherClassImportPreview>(`/teacher/classes/importable/${encodeURIComponent(courseId)}/preview`),
+  importClass: async (courseId: string) => (await request<{ course: TeacherClass }>(`/teacher/classes/${encodeURIComponent(courseId)}/import`, { method: 'POST' })).course,
+  getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),
+  getGoogleConnection: () => request<{ connected: boolean; email: string | null }>('/teacher/google/status'),
+  startGoogleConnection: (email?: string, switchAccount = false) => request<{ authorizationUrl: string }>(`/teacher/google/connect?${new URLSearchParams({ ...(email ? { loginHint: email } : {}), ...(switchAccount ? { switch: 'true' } : {}) })}`),
+}
+
+export const teacherApi = teacherRemoteEnabled ? remoteTeacherApi : mockTeacherApi

@@ -17,6 +17,8 @@ import {
   type TeacherScreen,
 } from '../../lib/teacherRoutes'
 import { useImportTeacherClass } from '../../lib/useTeacher'
+import { teacherApi, teacherRemoteEnabled } from '../../lib/teacher'
+import { supabase } from '../../lib/supabase'
 import { AssignmentDetail } from './screens/AssignmentDetail'
 import { AddClass } from './screens/AddClass'
 import { Classes } from './screens/Classes'
@@ -70,6 +72,12 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const handleImport = (courseId: string) => {
     importClass.mutate(courseId, { onSuccess: () => navigate({ screen: 'class-overview', courseId }) })
   }
+  const connectGoogle = async () => {
+    if (!teacherRemoteEnabled) return navigate({ screen: 'add-class-course' })
+    const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
+    const { authorizationUrl } = await teacherApi.startGoogleConnection(data.session?.user.email)
+    window.location.assign(authorizationUrl)
+  }
 
   return (
     <AppShell
@@ -87,7 +95,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       ) : route.screen === 'classes' ? (
         <Classes onOpenClass={(courseId) => navigate({ screen: 'class-overview', courseId })} onAddClass={() => navigate({ screen: 'add-class-connect' })} />
       ) : route.screen === 'add-class-connect' ? (
-        <AddClass step="connect" onBack={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-course' })} onSelectCourse={() => undefined} onImport={handleImport} />
+        <AddClass step="connect" onBack={() => navigate({ screen: 'classes' })} onContinue={() => void connectGoogle()} onSelectCourse={() => undefined} onImport={handleImport} />
       ) : route.screen === 'add-class-course' ? (
         <AddClass step="course" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-connect' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
       ) : route.screen === 'add-class-review' ? (
