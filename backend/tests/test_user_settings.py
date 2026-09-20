@@ -1,0 +1,108 @@
+"""The Settings modal's backend: a per-user preferences blob, bulk delete, and an avatar
+image. Same ownership rules as analyses — each user only ever reads or writes their own.
+"""
+
+import pytest
+from app import auth, main
+from fastapi.testclient import TestClient
+
+TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "test.db"))
+    monkeypatch.setattr(auth, "_user_id_for", TOKENS.get)
+    # SUPABASE_URL above is only to turn login on (auth._supabase_configured); storage still
+    # goes to the tmp SQLite db, not a real Supabase project.
+    monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
+    monkeypatch.setattr(main, "AVATARS_DIR", tmp_path / "avatars")
+    main.analyses.clear()
+    yield TestClient(main.app)
+    main.analyses.clear()
+
+
+ADA = {"Authorization": "Bearer token-ada"}
+BO = {"Authorization": "Bearer token-bo"}
+
+
+def test_preferences_start_empty_and_a_patch_merges_and_persists(client):
+    assert client.get("/user/preferences", headers=ADA).json() == {}
+
+    first = client.patch("/user/preferences", headers=ADA, json={"patch": {"theme": "Dark"}})
+    assert first.json() == {"theme": "Dark"}
+
+    second = client.patch(
+        "/user/preferences", headers=ADA, json={"patch": {"weeklyDigest": False}}
+    )
+    assert second.json() == {"theme": "Dark", "weeklyDigest": False}
+    assert client.get("/user/preferences", headers=ADA).json() == {
+        "theme": "Dark",
+        "weeklyDigest": False,
+    }
+
+
+def test_each_users_preferences_are_their_own(client):
+    client.patch("/user/preferences", headers=ADA, json={"patch": {"theme": "Dark"}})
+    client.patch("/user/preferences", headers=BO, json={"patch": {"theme": "Light"}})
+    assert client.get("/user/preferences", headers=ADA).json() == {"theme": "Dark"}
+    assert client.get("/user/preferences", headers=BO).json() == {"theme": "Light"}
+
+
+def test_a_request_without_a_token_is_refused(client):
+    assert client.get("/user/preferences").status_code == 401
+    assert client.patch("/user/preferences", json={"patch": {}}).status_code == 401
+    assert client.delete("/user/data").status_code == 401
+
+
+def test_delete_all_data_removes_only_the_callers_analyses(client):
+    for analysis_id, owner in (("a1", "user-ada"), ("a2", "user-ada"), ("b1", "user-bo")):
+        main.analyses[analysis_id] = {
+            "id": analysis_id, "paper": "x.pdf", "status": "done",
+            "owner": owner, "stages": [], "claims": [],
+        }
+
+    response = client.delete("/user/data", headers=ADA)
+    assert response.json() == {"deleted": 2}
+    assert sorted(main.analyses) == ["b1"]
+
+
+def test_avatar_upload_download_and_remove_round_trip(client):
+    assert client.get("/user/avatar/me", headers=ADA).status_code == 404
+
+    upload = client.post(
+        "/user/avatar", headers=ADA, files={"file": ("me.png", b"\x89PNG fake bytes", "image/png")}
+    )
+    assert upload.status_code == 200
+    assert upload.json()["url"].startswith("/api/user/avatar/me")
+
+    got = client.get("/user/avatar/me", headers=ADA)
+    assert got.status_code == 200
+    assert got.content == b"\x89PNG fake bytes"
+
+    # Someone else's avatar is not this user's, even at the same fixed path.
+    assert client.get("/user/avatar/me", headers=BO).status_code == 404
+
+    client.delete("/user/avatar", headers=ADA)
+    assert client.get("/user/avatar/me", headers=ADA).status_code == 404
+
+
+def test_avatar_upload_rejects_the_wrong_type_or_too_large(client):
+    text = client.post(
+        "/user/avatar", headers=ADA, files={"file": ("me.txt", b"not an image", "text/plain")}
+    )
+    assert text.status_code == 400
+
+    huge = client.post(
+        "/user/avatar", headers=ADA,
+        files={"file": ("me.png", b"0" * (main.MAX_AVATAR_BYTES + 1), "image/png")},
+    )
+    assert huge.status_code == 413
+
+
+def test_a_re_upload_replaces_the_old_file_instead_of_stacking(client):
+    client.post("/user/avatar", headers=ADA, files={"file": ("a.png", b"one", "image/png")})
+    client.post("/user/avatar", headers=ADA, files={"file": ("b.jpg", b"two", "image/jpeg")})
+    assert client.get("/user/avatar/me", headers=ADA).content == b"two"
