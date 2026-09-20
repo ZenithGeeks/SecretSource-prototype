@@ -1,5 +1,6 @@
 /** Typed client for the gateway (api.py). Every call goes through the /api proxy. */
 
+import { mockFor, mocksEnabled } from './mocks'
 import { supabase } from './supabase'
 import { endSession } from './useAuth'
 
@@ -199,6 +200,11 @@ export async function fetchFile(url: string) {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Dev-only: with VITE_USE_MOCKS=1 the researcher screens run from fixtures, no backend needed.
+  if (mocksEnabled) {
+    const mock = await mockFor(path, init)
+    if (mock.hit) return mock.data as T
+  }
   const token = await accessToken()
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)

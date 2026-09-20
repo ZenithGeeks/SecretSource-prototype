@@ -9,7 +9,9 @@ import { createClient } from '@supabase/supabase-js'
 const url = import.meta.env.VITE_SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-export const authEnabled = Boolean(url && anonKey)
+// VITE_USE_MOCKS=1 is a no-backend dev mode; skip the login gate too, so the whole app runs
+// from fixtures with one command and no Supabase.
+export const authEnabled = Boolean(url && anonKey) && import.meta.env.VITE_USE_MOCKS !== '1'
 
 export const supabase = authEnabled ? createClient(url as string, anonKey as string) : null
 
