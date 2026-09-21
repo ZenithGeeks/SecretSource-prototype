@@ -182,6 +182,11 @@ class TeacherFeedback:
     feedback_text: str
     status: str
     sent_at: datetime | None
+    citation_ids: tuple[str, ...] = ()
 
     def to_row(self) -> dict[str, Any]:
-        return {**self.__dict__, "sent_at": _timestamp(self.sent_at)}
+        return {
+            **self.__dict__,
+            "sent_at": _timestamp(self.sent_at),
+            "citation_ids": list(self.citation_ids),
+        }

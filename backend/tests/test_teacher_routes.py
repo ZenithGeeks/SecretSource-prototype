@@ -31,6 +31,8 @@ class FakeRepository:
         self.reviews = []
         self.feedback = None
         self.deleted = False
+        self.disconnected = []
+        self.list_submissions_calls = 0
 
     def list_courses(self, owner):
         return [self.course] if owner == "teacher-a" else []
@@ -39,12 +41,20 @@ class FakeRepository:
         return [self.assignment] if owner == "teacher-a" and course_id == "course-1" else []
 
     def list_submissions(self, owner, course_id, coursework_id=None):
+        self.list_submissions_calls += 1
         if owner != "teacher-a" or course_id != "course-1" or coursework_id not in (None, "work-1"):
             return []
         return [self.submission]
 
     def get_submission(self, owner, course_id, coursework_id, submission_id):
-        return next((item for item in self.list_submissions(owner, course_id, coursework_id) if item.submission_id == submission_id), None)
+        if (
+            owner == "teacher-a"
+            and course_id == "course-1"
+            and coursework_id == "work-1"
+            and submission_id == self.submission.submission_id
+        ):
+            return self.submission
+        return None
 
     def get_professor_reviews(self, *args):
         return list(self.reviews)
@@ -66,10 +76,8 @@ class FakeRepository:
         return None
 
     def disconnect(self, owner):
+        self.disconnected.append(owner)
         return True
-
-    def delete_owner_data(self, owner):
-        self.deleted = True
 
 
 class FakeGoogle:
@@ -162,6 +170,36 @@ def test_teacher_review_feedback_and_grade_return_mutations_are_scoped(teacher_c
     assert graded.status_code == 200
     assert google.patched == [("course-1", "work-1", "submission-1", 9.0)]
     assert google.returned == [("course-1", "work-1", "submission-1")]
+
+
+def test_update_review_resolves_the_submission_once(teacher_client):
+    client, repository, _ = teacher_client
+    essay = client.get("/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check")
+    review_id = essay.json()["reviews"][0]["id"]
+    repository.list_submissions_calls = 0
+
+    response = client.patch(
+        f"/teacher/classes/course-1/assignments/work-1/essay-check/reviews/{quote(review_id, safe='')}",
+        json={"studentId": "student-1", "outcome": "supports", "note": "Checked."},
+    )
+
+    assert response.status_code == 200
+    assert repository.list_submissions_calls == 1
+
+
+def test_google_disconnect_removes_the_connection_without_deleting_imported_data(teacher_client):
+    client, repository, _ = teacher_client
+
+    response = client.delete("/teacher/google")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "connected": False,
+        "connectionDeleted": True,
+        "importedDataDeleted": False,
+    }
+    assert repository.disconnected == ["teacher-a"]
+    assert repository.deleted is False
 
 
 def test_grade_and_return_reports_partial_failure_after_grade_patch(teacher_client):

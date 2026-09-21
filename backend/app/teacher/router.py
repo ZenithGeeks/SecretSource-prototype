@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
@@ -350,8 +349,9 @@ def _submission_id(
     return submission.submission_id
 
 
-def _essay_or_error(service: TeacherEssayAnalysisService, owner: str, course_id: str, assignment_id: str, student_id: str) -> dict[str, Any]:
-    submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
+def _essay_or_error(
+    service: TeacherEssayAnalysisService, owner: str, course_id: str, assignment_id: str, submission_id: str
+) -> dict[str, Any]:
     try:
         return service.essay_check(owner, course_id, assignment_id, submission_id)
     except ValueError as error:
@@ -415,12 +415,12 @@ def google_disconnect(
     owner: str = Depends(require_teacher_user),
     repository: TeacherGoogleRepository = Depends(get_repository),
 ) -> dict[str, Any]:
-    delete_owner_data: Callable[[str], None] | None = getattr(repository, "delete_owner_data", None)
-    if delete_owner_data is not None:
-        delete_owner_data(owner)
-    else:
-        repository.disconnect(owner)
-    return {"connected": False, "deleted": True}
+    connection_deleted = repository.disconnect(owner)
+    return {
+        "connected": False,
+        "connectionDeleted": connection_deleted,
+        "importedDataDeleted": False,
+    }
 
 
 @router.get("/home")
@@ -601,7 +601,8 @@ def essay_check(
     owner: str = Depends(require_teacher_user),
     service: TeacherEssayAnalysisService = Depends(get_analysis_read_service),
 ) -> dict[str, Any]:
-    return _essay_or_error(service, owner, course_id, assignment_id, student_id)
+    submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
+    return _essay_or_error(service, owner, course_id, assignment_id, submission_id)
 
 
 @router.patch("/classes/{course_id}/assignments/{assignment_id}/essay-check/reviews/{review_id:path}")
@@ -613,16 +614,17 @@ def update_review(
     owner: str = Depends(require_teacher_user),
     service: TeacherEssayAnalysisService = Depends(get_analysis_read_service),
 ) -> dict[str, Any]:
-    essay = _essay_or_error(service, owner, course_id, assignment_id, request.student_id)
+    submission_id = _submission_id(service, owner, course_id, assignment_id, request.student_id)
+    essay = _essay_or_error(service, owner, course_id, assignment_id, submission_id)
     if review_id not in {review["id"] for review in essay.get("reviews", [])}:
         raise HTTPException(status_code=404, detail="review not found")
     if request.outcome not in {"not-reviewed", "supports", "contradicts", "inconclusive"}:
         raise HTTPException(status_code=422, detail="invalid professor review outcome")
     try:
-        service.save_review(owner, course_id, assignment_id, _submission_id(service, owner, course_id, assignment_id, request.student_id), request.outcome, request.note, review_id=review_id)
+        service.save_review(owner, course_id, assignment_id, submission_id, request.outcome, request.note, review_id=review_id)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return _essay_or_error(service, owner, course_id, assignment_id, request.student_id)
+    return _essay_or_error(service, owner, course_id, assignment_id, submission_id)
 
 
 @router.put("/classes/{course_id}/assignments/{assignment_id}/essay-check/feedback")
@@ -633,15 +635,16 @@ def save_feedback(
     owner: str = Depends(require_teacher_user),
     service: TeacherEssayAnalysisService = Depends(get_analysis_read_service),
 ) -> dict[str, Any]:
-    essay = _essay_or_error(service, owner, course_id, assignment_id, request.student_id)
+    submission_id = _submission_id(service, owner, course_id, assignment_id, request.student_id)
+    essay = _essay_or_error(service, owner, course_id, assignment_id, submission_id)
     allowed = {review["id"] for review in essay.get("reviews", [])}
     if not set(request.citation_ids).issubset(allowed):
         raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
     try:
-        service.save_feedback(owner, course_id, assignment_id, _submission_id(service, owner, course_id, assignment_id, request.student_id), request.body, request.citation_ids)
+        service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return _essay_or_error(service, owner, course_id, assignment_id, request.student_id)
+    return _essay_or_error(service, owner, course_id, assignment_id, submission_id)
 
 
 @router.post("/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/essay-check/feedback/send")
@@ -653,17 +656,18 @@ def send_feedback(
     owner: str = Depends(require_teacher_user),
     service: TeacherEssayAnalysisService = Depends(get_analysis_read_service),
 ) -> dict[str, Any]:
+    submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
     if request is not None:
-        essay = _essay_or_error(service, owner, course_id, assignment_id, student_id)
+        essay = _essay_or_error(service, owner, course_id, assignment_id, submission_id)
         allowed = {review["id"] for review in essay.get("reviews", [])}
         if not set(request.citation_ids).issubset(allowed):
             raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
         try:
-            service.save_feedback(owner, course_id, assignment_id, _submission_id(service, owner, course_id, assignment_id, student_id), request.body, request.citation_ids)
+            service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
     try:
-        sent = service.send_feedback(owner, course_id, assignment_id, _submission_id(service, owner, course_id, assignment_id, student_id))
+        sent = service.send_feedback(owner, course_id, assignment_id, submission_id)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return {

@@ -15,6 +15,7 @@ class FakeSupabase:
 
     def __init__(self):
         self.rows: dict[str, list[dict]] = {}
+        self.upsert_conflicts: list[tuple[str, str | None]] = []
 
     def table(self, table):
         return FakeQuery(self, table)
@@ -32,8 +33,9 @@ class FakeQuery:
         self.action, self.payload = "insert", payload
         return self
 
-    def upsert(self, payload, **_kwargs):
+    def upsert(self, payload, **kwargs):
         self.action, self.payload = "upsert", payload
+        self.client.upsert_conflicts.append((self.table_name, kwargs.get("on_conflict")))
         return self
 
     def select(self, *_columns):
@@ -65,15 +67,18 @@ class FakeQuery:
 
     def execute(self):
         rows = self.client.rows.setdefault(self.table_name, [])
+
+        def matches(row, filter_):
+            if len(filter_) != 3:
+                return row.get(filter_[0]) == filter_[1]
+            value, expected = row.get(filter_[0]), filter_[2]
+            if isinstance(value, datetime) and isinstance(expected, str):
+                expected = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+            return value > expected
+
         matched = [
             row
-            for row in rows
-            if all(
-                row.get(filter_[0]) > filter_[2]
-                if len(filter_) == 3
-                else row.get(filter_[0]) == filter_[1]
-                for filter_ in self.filters
-            )
+            for row in rows if all(matches(row, filter_) for filter_ in self.filters)
         ]
         if self.action == "select":
             response = FakeResponse([row.copy() for row in matched])
@@ -97,7 +102,7 @@ class FakeQuery:
             "teacher_courses": ("owner", "course_id"),
             "teacher_coursework": ("owner", "course_id", "coursework_id"),
             "teacher_submissions": ("owner", "course_id", "coursework_id", "submission_id"),
-            "teacher_professor_reviews": ("owner", "submission_id"),
+            "teacher_professor_reviews": ("owner", "submission_id", "review_id"),
             "teacher_feedback": ("owner", "submission_id"),
         }
         keys = resource_keys[self.table_name]
@@ -257,3 +262,95 @@ def test_course_upsert_keeps_raw_google_json_and_owner_key_for_later_sync_tasks(
             "raw": {"id": "course-99", "name": "Research Methods", "teacherFolder": {"id": "folder-1"}},
         }
     ]
+
+
+def test_professor_review_upsert_uses_the_review_id_schema_conflict_target():
+    """Break caught: review updates fail after the review-ID migration removes the old unique key."""
+    from app.teacher.models import TeacherProfessorReview
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    repository = TeacherGoogleRepository(client)
+
+    repository.save_professor_review(
+        TeacherProfessorReview(
+            "teacher-a",
+            "course-1",
+            "work-1",
+            "submission-1",
+            "student-1",
+            "analysis-1",
+            "supports",
+            "Checked.",
+            "claim-1",
+        )
+    )
+
+    assert client.upsert_conflicts == [
+        ("teacher_professor_reviews", "owner,submission_id,review_id")
+    ]
+
+
+def test_link_submission_analysis_updates_only_the_owned_submission():
+    """Break caught: starting analysis crashes or links an analysis to the wrong submission."""
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    client.rows["teacher_submissions"] = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1"},
+        {"owner": "teacher-b", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1"},
+    ]
+
+    TeacherGoogleRepository(client).link_submission_analysis("teacher-a", "course-1", "work-1", "sub-1", "analysis-1")
+
+    assert client.rows["teacher_submissions"] == [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "analysis_id": "analysis-1"},
+        {"owner": "teacher-b", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1"},
+    ]
+
+
+def test_get_professor_reviews_returns_only_the_submission_reviews():
+    """Break caught: essay checks crash or show another submission's review cards."""
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    client.rows["teacher_professor_reviews"] = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "student_id": "student-1", "analysis_id": "analysis-1", "verdict": "supports", "reasoning": "Checked.", "review_id": "citation-1"},
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-2", "student_id": "student-2", "analysis_id": "analysis-2", "verdict": "contradicts", "reasoning": "Hidden.", "review_id": "citation-2"},
+    ]
+
+    reviews = TeacherGoogleRepository(client).get_professor_reviews("teacher-a", "course-1", "work-1", "sub-1")
+
+    assert [(review.review_id, review.verdict) for review in reviews] == [("citation-1", "supports")]
+
+
+def test_get_professor_review_returns_the_legacy_submission_review():
+    """Break caught: the single-review compatibility lookup is absent from the real repository."""
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    client.rows["teacher_professor_reviews"] = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "student_id": "student-1", "analysis_id": "analysis-1", "verdict": "supports", "reasoning": "Checked.", "review_id": ""},
+    ]
+
+    review = TeacherGoogleRepository(client).get_professor_review("teacher-a", "course-1", "work-1", "sub-1")
+
+    assert review is not None
+    assert review.verdict == "supports"
+
+
+def test_get_feedback_returns_saved_citation_ids_for_the_owned_submission():
+    """Break caught: essay checks crash or lose citation selections when reading feedback."""
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    client.rows["teacher_feedback"] = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "student_id": "student-1", "feedback_text": "Good work.", "status": "draft", "sent_at": None, "citation_ids": ["citation-1"]},
+        {"owner": "teacher-b", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "student_id": "student-2", "feedback_text": "Hidden.", "status": "draft", "sent_at": None, "citation_ids": ["citation-2"]},
+    ]
+
+    feedback = TeacherGoogleRepository(client).get_feedback("teacher-a", "course-1", "work-1", "sub-1")
+
+    assert feedback is not None
+    assert feedback.feedback_text == "Good work."
+    assert feedback.citation_ids == ("citation-1",)

@@ -51,6 +51,24 @@ def _submission_from_row(row: dict[str, Any]) -> TeacherSubmission:
     )
 
 
+def _professor_review_from_row(row: dict[str, Any]) -> TeacherProfessorReview:
+    return TeacherProfessorReview(
+        owner=row["owner"], course_id=row["course_id"], coursework_id=row["coursework_id"],
+        submission_id=row["submission_id"], student_id=row["student_id"],
+        analysis_id=row.get("analysis_id"), verdict=row["verdict"], reasoning=row["reasoning"],
+        review_id=row.get("review_id") or "",
+    )
+
+
+def _feedback_from_row(row: dict[str, Any]) -> TeacherFeedback:
+    return TeacherFeedback(
+        owner=row["owner"], course_id=row["course_id"], coursework_id=row["coursework_id"],
+        submission_id=row["submission_id"], student_id=row["student_id"],
+        feedback_text=row["feedback_text"], status=row["status"], sent_at=_datetime_or_none(row.get("sent_at")),
+        citation_ids=tuple(row.get("citation_ids") or ()),
+    )
+
+
 class TeacherGoogleRepository:
     """Tables are server-only: the default client comes from ``store._supabase()``."""
 
@@ -80,7 +98,7 @@ class TeacherGoogleRepository:
             .update({"consumed_at": now.isoformat()})
             .eq("state_hash", state_hash)
             .is_("consumed_at", "null")
-            .gt("expires_at", now)
+            .gt("expires_at", now.isoformat())
             .execute()
             .data
         )
@@ -139,11 +157,11 @@ class TeacherGoogleRepository:
         )
 
     def record_sync_status(
-        self, owner: str, status: str, error: str | None, synced_at: datetime | None
+        self, owner: str, status: str, error: str | None, synced_at: datetime | str | None
     ) -> None:
         values: dict[str, Any] = {"last_sync_status": status, "last_sync_error": error}
         if synced_at is not None:
-            values["last_synced_at"] = synced_at.isoformat()
+            values["last_synced_at"] = synced_at.isoformat() if isinstance(synced_at, datetime) else synced_at
         self._client.table("teacher_google_connections").update(values).eq("owner", owner).execute()
 
     def list_courses(self, owner: str) -> list[TeacherCourse]:
@@ -190,11 +208,61 @@ class TeacherGoogleRepository:
         )
         return _submission_from_row(rows[0]) if rows else None
 
+    def link_submission_analysis(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str, analysis_id: str
+    ) -> None:
+        (
+            self._client.table("teacher_submissions")
+            .update({"analysis_id": analysis_id})
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+            .eq("coursework_id", coursework_id)
+            .eq("submission_id", submission_id)
+            .execute()
+        )
+
+    def get_professor_reviews(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+    ) -> list[TeacherProfessorReview]:
+        rows = (
+            self._client.table("teacher_professor_reviews")
+            .select("*")
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+            .eq("coursework_id", coursework_id)
+            .eq("submission_id", submission_id)
+            .execute()
+            .data
+        )
+        return [_professor_review_from_row(row) for row in rows]
+
+    def get_professor_review(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+    ) -> TeacherProfessorReview | None:
+        reviews = self.get_professor_reviews(owner, course_id, coursework_id, submission_id)
+        return reviews[0] if reviews else None
+
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
-        self._upsert("teacher_professor_reviews", review.to_row(), "owner,submission_id")
+        self._upsert("teacher_professor_reviews", review.to_row(), "owner,submission_id,review_id")
 
     def save_feedback(self, feedback: TeacherFeedback) -> None:
         self._upsert("teacher_feedback", feedback.to_row(), "owner,submission_id")
+
+    def get_feedback(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+    ) -> TeacherFeedback | None:
+        rows = (
+            self._client.table("teacher_feedback")
+            .select("*")
+            .eq("owner", owner)
+            .eq("course_id", course_id)
+            .eq("coursework_id", coursework_id)
+            .eq("submission_id", submission_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return _feedback_from_row(rows[0]) if rows else None
 
     def _upsert(self, table: str, row: dict[str, Any], conflict_keys: str) -> None:
         self._client.table(table).upsert(row, on_conflict=conflict_keys).execute()

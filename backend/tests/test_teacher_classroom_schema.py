@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 MIGRATION = Path(__file__).parents[2] / "supabase" / "migrations" / "20260917120000_teacher_classroom.sql"
+FEEDBACK_CITATIONS_MIGRATION = Path(__file__).parents[2] / "supabase" / "migrations" / "20260921120000_teacher_feedback_citation_ids.sql"
 TABLES = (
     "teacher_google_connections",
     "teacher_google_oauth_states",
@@ -48,3 +49,10 @@ def test_teacher_classroom_resources_have_owner_scoped_identity_constraints():
     assert _has(sql, r"teacher_google_oauth_states.*?state_hash\s+text.*?unique")
     assert _has(sql, r"teacher_submissions.*?analysis_id\s+text")
     assert _has(sql, r"teacher_submissions.*?attachments\s+jsonb")
+
+
+def test_teacher_feedback_persists_selected_citation_ids():
+    assert FEEDBACK_CITATIONS_MIGRATION.exists(), f"missing migration: {FEEDBACK_CITATIONS_MIGRATION}"
+    sql = FEEDBACK_CITATIONS_MIGRATION.read_text(encoding="utf-8")
+
+    assert _has(sql, r"alter\s+table\s+public\.teacher_feedback.*?add\s+column.*?citation_ids\s+text\[\]")
