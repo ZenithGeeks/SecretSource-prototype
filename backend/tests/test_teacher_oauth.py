@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import json
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -71,6 +72,25 @@ def oauth_service(repository, transport, key, now):
         ),
         now=now_fn,
     ), GoogleTokenResponse
+
+
+def test_oauth_rows_are_json_serializable_for_supabase():
+    """Break caught: OAuth timestamps must not reach the HTTP client as datetime objects."""
+    from app.teacher.models import OAuthState, TeacherGoogleConnection
+
+    now = datetime(2026, 9, 21, 2, 45, tzinfo=UTC)
+    state = OAuthState("state", "teacher-42", "verifier", "https://secret-source.test/callback", now)
+    connection = TeacherGoogleConnection(
+        owner="teacher-42",
+        google_subject="google-42",
+        google_email="teacher@example.test",
+        refresh_token_ciphertext="ciphertext",
+        scopes=("openid",),
+        access_token_expires_at=now,
+    )
+
+    json.dumps(state.to_row())
+    json.dumps(connection.to_row())
 
 
 def test_start_authorization_persists_only_a_hashed_owner_bound_pkce_state():

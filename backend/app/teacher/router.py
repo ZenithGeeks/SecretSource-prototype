@@ -25,7 +25,8 @@ from app.teacher.repository import TeacherGoogleRepository
 from app.teacher.sync import TeacherGoogleSyncService
 
 
-router = APIRouter(prefix="/api/teacher", tags=["teacher"])
+# The browser uses /api/teacher; Vite/nginx remove /api before forwarding to FastAPI.
+router = APIRouter(prefix="/teacher", tags=["teacher"])
 
 
 class ReviewUpdate(BaseModel):

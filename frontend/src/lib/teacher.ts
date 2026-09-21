@@ -192,6 +192,7 @@ export type EssayCheck = {
 }
 
 export type UpdateProfessorReviewRequest = {
+  courseId?: string
   assignmentId?: string
   /** Legacy URL/query name; converted inside the adapter only. */
   courseWorkId?: string
@@ -202,6 +203,7 @@ export type UpdateProfessorReviewRequest = {
 }
 
 export type SendFeedbackRequest = {
+  courseId?: string
   assignmentId?: string
   courseWorkId?: string
   studentId: string
@@ -322,7 +324,7 @@ const mockTeacherApi = {
   getWorkspace: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
   getAssignmentDetail: async (courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> =>
     store.getAssignmentDetail(courseId, assignmentId),
-  getEssayCheck: async (assignmentId: string, studentId: string): Promise<EssayCheck | null> =>
+  getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
   saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
     store.saveFeedback(input.assignmentId, input.studentId, {
@@ -367,6 +369,8 @@ const remoteTeacherApi = {
   getClassImportPreview: (courseId: string) => request<TeacherClassImportPreview>(`/teacher/classes/importable/${encodeURIComponent(courseId)}/preview`),
   importClass: async (courseId: string) => (await request<{ course: TeacherClass }>(`/teacher/classes/${encodeURIComponent(courseId)}/import`, { method: 'POST' })).course,
   getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),
+  getAssignmentDetail: (courseId: string, assignmentId: string) =>
+    request<TeacherAssignmentDetail>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}`),
   getGoogleConnection: () => request<{ connected: boolean; email: string | null }>('/teacher/google/status'),
   startGoogleConnection: (email?: string, switchAccount = false) => request<{ authorizationUrl: string }>(`/teacher/google/connect?${new URLSearchParams({ ...(email ? { loginHint: email } : {}), ...(switchAccount ? { switch: 'true' } : {}) })}`),
 }

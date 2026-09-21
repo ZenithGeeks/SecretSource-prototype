@@ -77,7 +77,7 @@ class TeacherGoogleRepository:
             return None
         updated = (
             self._client.table("teacher_google_oauth_states")
-            .update({"consumed_at": now})
+            .update({"consumed_at": now.isoformat()})
             .eq("state_hash", state_hash)
             .is_("consumed_at", "null")
             .gt("expires_at", now)
@@ -143,7 +143,7 @@ class TeacherGoogleRepository:
     ) -> None:
         values: dict[str, Any] = {"last_sync_status": status, "last_sync_error": error}
         if synced_at is not None:
-            values["last_synced_at"] = synced_at
+            values["last_synced_at"] = synced_at.isoformat()
         self._client.table("teacher_google_connections").update(values).eq("owner", owner).execute()
 
     def list_courses(self, owner: str) -> list[TeacherCourse]:

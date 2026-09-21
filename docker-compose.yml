@@ -74,6 +74,8 @@ services:
     restart: unless-stopped
 
   grobid:
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:-UseContainerSupport
     image: lfoppiano/grobid:0.8.2
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8070:8070"
@@ -149,6 +151,14 @@ services:
       # Both set: analyses are stored in Supabase Postgres instead of SQLite (supabase/README.md).
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Google Classroom OAuth is handled only by the gateway; the browser never sees these.
+      TEACHER_GOOGLE_ENABLED: ${TEACHER_GOOGLE_ENABLED:-false}
+      TEACHER_GOOGLE_CLIENT_ID: ${TEACHER_GOOGLE_CLIENT_ID:-}
+      TEACHER_GOOGLE_CLIENT_SECRET: ${TEACHER_GOOGLE_CLIENT_SECRET:-}
+      TEACHER_GOOGLE_REDIRECT_URI: ${TEACHER_GOOGLE_REDIRECT_URI:-}
+      TEACHER_GOOGLE_SUCCESS_REDIRECT: ${TEACHER_GOOGLE_SUCCESS_REDIRECT:-}
+      TEACHER_GOOGLE_ENCRYPTION_KEY: ${TEACHER_GOOGLE_ENCRYPTION_KEY:-}
+      TEACHER_GOOGLE_SCOPES: ${TEACHER_GOOGLE_SCOPES:-}
       # A Postgres URL keeps the chat agents' sessions after a restart (app/sessions.py).
       SESSION_DB_URL: ${SESSION_DB_URL:-${DIRECT_URL:-}}
     volumes:
@@ -211,6 +221,8 @@ services:
         # Both set: users sign in, and each sees only their own analyses (SCRUM-177).
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+        # Vite reads this only while compiling the browser bundle.
+        VITE_TEACHER_BACKEND: ${VITE_TEACHER_BACKEND:-mock}
     environment:
       GATEWAY_URL: http://gateway:8080
     ports:

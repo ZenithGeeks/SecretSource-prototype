@@ -8,6 +8,7 @@ COPY . .
 # build time, so they are build arguments, not runtime environment. The anon key is public.
 ARG VITE_SUPABASE_URL=
 ARG VITE_SUPABASE_ANON_KEY=
+ARG VITE_TEACHER_BACKEND=mock
 RUN npm run build
 
 FROM nginx:alpine

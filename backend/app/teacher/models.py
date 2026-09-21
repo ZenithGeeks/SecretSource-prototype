@@ -13,6 +13,10 @@ def _datetime(value: datetime | str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _timestamp(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
 @dataclass(frozen=True)
 class OAuthState:
     state_hash: str
@@ -28,8 +32,8 @@ class OAuthState:
             "owner": self.owner,
             "code_verifier": self.code_verifier,
             "redirect_uri": self.redirect_uri,
-            "expires_at": self.expires_at,
-            "consumed_at": self.consumed_at,
+            "expires_at": _timestamp(self.expires_at),
+            "consumed_at": _timestamp(self.consumed_at),
         }
 
     @classmethod
@@ -73,7 +77,7 @@ class TeacherGoogleConnection:
             "google_email": self.google_email,
             "refresh_token_ciphertext": self.refresh_token_ciphertext,
             "scopes": list(self.scopes),
-            "access_token_expires_at": self.access_token_expires_at,
+            "access_token_expires_at": _timestamp(self.access_token_expires_at),
         }
 
     @classmethod
@@ -129,7 +133,7 @@ class TeacherCoursework:
     raw: dict[str, Any]
 
     def to_row(self) -> dict[str, Any]:
-        return self.__dict__.copy()
+        return {**self.__dict__, "due_at": _timestamp(self.due_at)}
 
 
 @dataclass(frozen=True)
@@ -180,4 +184,4 @@ class TeacherFeedback:
     sent_at: datetime | None
 
     def to_row(self) -> dict[str, Any]:
-        return self.__dict__.copy()
+        return {**self.__dict__, "sent_at": _timestamp(self.sent_at)}
