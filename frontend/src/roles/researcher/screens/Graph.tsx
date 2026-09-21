@@ -248,12 +248,12 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
   return base
 }
 
-// Live, draggable physics (Obsidian-style): the simulation keeps running, so dragging a node
-// makes its neighbours drift and re-settle. Nodes are seeded on a circle (in the elements) so it
-// opens spread out rather than piled at the origin. NOTE: with continuous physics the layout is
-// no longer identical on every reload.
+// Deterministic settle-then-stop layout. Nodes start from a seeded circle (see seedPosition,
+// applied in the elements) and cola runs a finite, non-random simulation, so every reload lays
+// the graph out identically (SCRUM-182's "reload gives the same layout"). Nodes stay draggable
+// once it settles; the initial fit runs on the layout's `layoutstop`, not a timer.
 const LAYOUT = {
-  name: 'cola', animate: true, infinite: true, fit: false, randomize: false,
+  name: 'cola', animate: false, infinite: false, fit: false, randomize: false,
   nodeDimensionsIncludeLabels: true, edgeLength: 170, nodeSpacing: 14, handleDisconnected: true,
 } as const
 
@@ -772,9 +772,10 @@ export function Graph() {
               })
               cy.on('drag', 'node', () => setTip(null))
               cy.on('pan zoom', () => setTip(null))
-              // Live physics runs forever, so there is no layoutstop — frame the graph once it has
-              // had a moment to spread from the seed positions. After that the user pans/zooms/drags.
-              window.setTimeout(() => fitReadable(cy), 900)
+              // Fit once the layout has actually settled (cola emits layoutstop), not on a fixed
+              // timer that can fire while nodes are still bunched. It re-runs only when the element
+              // set changes (e.g. switching Claims/Papers), which re-runs the layout.
+              cy.on('layoutstop', () => fitReadable(cy))
               setReady(true)
             }}
           />
