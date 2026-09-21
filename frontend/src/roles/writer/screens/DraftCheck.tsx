@@ -82,7 +82,10 @@ function ClaimCheckCard() {
           placeholder="DOI, arXiv ID, or paper title"
           aria-label="Citation to check it against"
         />
-        <Button type="submit" disabled={!claim.trim() || !source.trim() || start.isPending}>
+        <Button
+          type="submit"
+          disabled={!claim.trim() || !source.trim() || start.isPending || check.data?.status === 'running'}
+        >
           {start.isPending ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
           Check
         </Button>
