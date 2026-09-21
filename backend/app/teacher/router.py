@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -23,7 +24,6 @@ from app.teacher.oauth import (
 )
 from app.teacher.repository import TeacherGoogleRepository
 from app.teacher.sync import TeacherGoogleSyncService
-
 
 # The browser uses /api/teacher; Vite/nginx remove /api before forwarding to FastAPI.
 router = APIRouter(prefix="/teacher", tags=["teacher"])

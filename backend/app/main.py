@@ -39,7 +39,6 @@ from pydantic import BaseModel
 
 from app import dependencies, researcher, store
 from app.auth import current_user
-from app.teacher.router import router as teacher_router
 from app.config import (
     PAPERS_DIR,
     PARALLEL_CHECKS,
@@ -58,6 +57,7 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
+from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)

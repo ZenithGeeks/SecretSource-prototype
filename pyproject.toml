@@ -5,6 +5,10 @@ exclude = ["venv", "frontend"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+"backend/app/teacher/*.py" = ["B008", "E501"]
+"backend/tests/test_teacher_*.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 pythonpath = ["backend"]

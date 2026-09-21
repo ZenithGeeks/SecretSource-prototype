@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterable
 from time import sleep as default_sleep
 from typing import Any
 
-
 GOOGLE_DOCUMENT_MIME_TYPE = "application/vnd.google-apps.document"
 PDF_MIME_TYPE = "application/pdf"
 
@@ -73,7 +72,7 @@ def list_all_pages(
     items: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
-        page = execute(lambda: resource.list(**params, pageToken=page_token))
+        page = execute(lambda page_token=page_token: resource.list(**params, pageToken=page_token))
         items.extend(page.get(item_key, []))
         page_token = page.get("nextPageToken")
         if not page_token:
@@ -106,7 +105,7 @@ class GoogleClassroomClient:
         scopes: Iterable[str],
         service_builder: Callable[..., Any] | None = None,
         **kwargs: Any,
-    ) -> "GoogleClassroomClient":
+    ) -> GoogleClassroomClient:
         from google.oauth2.credentials import Credentials
 
         if service_builder is None:
