@@ -20,6 +20,11 @@ const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
  * disambiguate that case, it just returns the first match. Phase 1 must replace this with a
  * real claim id carried in the data (e.g. on DraftWord, or wherever claims get attached to
  * text going forward) instead of inferring it at render time from text + verdict alone.
+ *
+ * TODO(Phase 1): run-grouping below only checks words[j].mark === mark, so two adjacent
+ * claims with the same verdict merge into one highlight run and lose their separate
+ * claimIds. Fixing guessClaimId alone won't cover this — grouping must also break a run on
+ * claimId change, once a real claimId exists on DraftWord.
  */
 function guessClaimId(runText: string, verdict: VerdictKind, claims: Claim[]): string | null {
   const key = normalize(runText)
