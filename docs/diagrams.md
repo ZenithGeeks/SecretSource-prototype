@@ -1,85 +1,14 @@
-# SecretSource — Diagrams
+# SecretSource — ER Diagram
 
-Every diagram below is Mermaid, so GitHub renders it on this page. Static PNG copies for
-slides / the report are in [`docs/img/`](img/).
+The data model, as Mermaid so GitHub renders it. Two views: the **logical model** (how the
+domain is normalized) and the **physical storage** (how the gateway actually keeps it). PNG
+copies are in [`docs/img/`](img/): [logical](img/er-logical.png) · [physical](img/er-physical.png).
 
-SecretSource is a multi-agent, multimodal citation-verification tool: give it a paper and it
-extracts each claim, finds the works that claim cites, and checks whether those sources actually
-support the claim — returning per-claim verdicts, a field-consensus view, and a knowledge graph.
+## Logical model (normalized)
 
----
-
-## 1. System architecture
-
-```mermaid
-flowchart LR
-  subgraph Client
-    WEB["Web app<br/>React + Vite"]
-  end
-  subgraph Gateway
-    GW["FastAPI gateway<br/>app/main.py"]
-    PIPE["Analysis pipeline<br/>extract → resolve → verify → audit"]
-    AG["ADK agents<br/>coordinator + specialists"]
-  end
-  subgraph Retrieval["Retrieval & parsing"]
-    GROBID["GROBID<br/>parse PDF → claims, refs"]
-    COLBERT["ColBERT<br/>text retrieval"]
-    COLPALI["ColPali<br/>page / figure retrieval"]
-    QDRANT[("Qdrant<br/>vector store")]
-  end
-  LLM["vLLM<br/>claim extraction & verdicts"]
-  subgraph Data
-    SUPA[("Supabase Postgres<br/>analyses · sources · projects · adk")]
-    DISK[("Disk<br/>PDFs · figures · page renders")]
-  end
-  IDX["Public indexes<br/>Semantic Scholar · arXiv · Unpaywall"]
-
-  WEB -- "/api (proxy)" --> GW
-  WEB -- "sign in" --> AUTH["Supabase Auth"]
-  GW --> PIPE
-  GW --> AG
-  PIPE --> GROBID
-  PIPE --> IDX
-  PIPE --> COLBERT --> QDRANT
-  PIPE --> COLPALI --> QDRANT
-  PIPE --> LLM
-  AG --> LLM
-  GW --> SUPA
-  GW --> DISK
-  GW -- "verify token" --> AUTH
-```
-
-## 2. Use-case diagram
-
-Researcher / Author / Teacher inherit a base **User**, so the shared use cases apply to every
-role. **Graph** and **History** aggregate every role's work — one account can hold several roles.
-
-```mermaid
-flowchart TB
-  R([Researcher]):::role --> U([User]):::role
-  A([Author]):::role --> U
-  T([Teacher]):::role --> U
-
-  U --> SI(Sign in) & AN(Analyze a paper) & KG(Knowledge graph) & HI(History) & ST(Settings)
-  R --> FC(Field Consensus) & MP(Manage projects)
-  A --> CD(Check draft) & FR(Find &amp; replace source)
-  T --> MC(Manage classes) & CE(Check essay) & RQ(Reading questions)
-
-  AN -. include .-> VC(Verify claim) -. include .-> RS(Retrieve source)
-  CD -. include .-> VC
-  CE -. include .-> VC
-  VC --- ANL([Analyzer • multi-agent]):::ext
-  RS --- IDX([Public indexes]):::ext
-
-  classDef role fill:#F1E4F2,stroke:#6A2E6F,color:#1E1A22;
-  classDef ext fill:#EFE9DF,stroke:#6B6370,color:#1E1A22;
-```
-
-## 3. Domain model — logical ER (normalized)
-
-The domain in third normal form. The paper↔project many-to-many is resolved by the
-**PROJECT_PAPER** join entity; a **REFERENCE** (an in-text citation) resolves to a deduplicated
-**SOURCE**; each (claim, source) pair yields one **VERDICT**.
+Third normal form. The paper↔project many-to-many is resolved by the **PROJECT_PAPER** join
+entity; a **REFERENCE** (an in-text citation) resolves to a deduplicated **SOURCE**; each
+(claim, source) pair yields one **VERDICT**.
 
 ```mermaid
 erDiagram
@@ -144,12 +73,12 @@ erDiagram
   }
 ```
 
-## 4. Physical storage (as built, Supabase)
+## Physical storage (Supabase, as built)
 
 The gateway stores each analysis as one JSON document rather than the normalized tables above —
-it reads and writes whole analyses, and it matches the ADK runtime. So the logical entities
-(CLAIM, REFERENCE, VERDICT …) live **inside** `analyses.data`. Three blob tables in `public`
-plus the ADK-managed `adk` schema for chat sessions.
+it reads and writes whole analyses. So the logical entities (CLAIM, REFERENCE, VERDICT …) live
+**inside** `analyses.data`. Three blob tables in `public` plus the ADK-managed `adk` schema for
+chat sessions.
 
 ```mermaid
 erDiagram
@@ -177,128 +106,3 @@ erDiagram
 > No DB-level foreign keys: rows are opaque JSON, access is filtered in the gateway (analyses by
 > the `owner` inside `data`, projects by the `owner` column). RLS is on with no policies; the
 > gateway connects with the service role.
-
-## 5. Analyze-a-paper pipeline (sequence)
-
-```mermaid
-sequenceDiagram
-  actor U as User
-  participant W as Web app
-  participant G as Gateway
-  participant GR as GROBID
-  participant IX as Public indexes
-  participant R as ColBERT / Qdrant
-  participant L as vLLM
-  participant DB as Supabase
-
-  U->>W: submit paper (DOI / arXiv / PDF)
-  W->>G: POST /analyses
-  G->>GR: parse PDF
-  GR-->>G: sections, references
-  G->>L: extract claims + citations (per window)
-  L-->>G: claims
-  loop each cited work
-    G->>IX: resolve (Semantic Scholar / arXiv / Unpaywall)
-    IX-->>G: PDF / metadata
-    G->>R: index passages
-  end
-  loop each claim × source
-    G->>R: retrieve top passages
-    G->>L: verdict (supports / refutes / insufficient) + quote
-    L-->>G: verdict
-  end
-  G->>G: audit verdicts (quote real?)
-  G->>DB: save analysis
-  G-->>W: stream stages (SSE) → results
-```
-
-## 6. Multi-agent architecture
-
-The tree in `backend/app/agents/team.py`: a **coordinator** (root) routes to three specialists
-with `transfer_to_agent`, and calls **check_claim** as a tool once per paper in the same turn so
-several papers are checked in parallel (SCRUM-171). `load_memory` searches past analyses.
-
-```mermaid
-flowchart TB
-  COORD["coordinator (root)<br/>routes requests · combines multi-paper checks"]
-  RAG["rag_agent<br/>answer_from_docs · add_paper"]
-  PAP["paper_agent<br/>extract_claims · extract_citations · fetch_source"]
-  VER["verify_agent<br/>verify_claim"]
-  CHK["check_claim (single_turn)<br/>one claim × one paper"]
-  MEM[("Memory service<br/>past analyses · app/memory.py")]
-  MCP["ColBERT MCP<br/>search_passages"]
-
-  COORD -- load_memory --> MEM
-  COORD -- transfer_to_agent --> RAG
-  COORD -- transfer_to_agent --> PAP
-  COORD -- transfer_to_agent --> VER
-  COORD -- "tool, once per paper (parallel)" --> CHK
-  RAG --> MCP
-  CHK -. shares verify_claim .-> VER
-```
-
-## 7. Analysis lifecycle (state)
-
-```mermaid
-stateDiagram-v2
-  [*] --> extracting
-  extracting --> planned: claims found
-  extracting --> error: parse failed
-  planned --> verifying: sources resolved
-  verifying --> audited: all checks done
-  audited --> done
-  verifying --> error: run interrupted
-  done --> [*]
-  error --> [*]
-```
-
-## 8. Authentication & per-user access
-
-```mermaid
-sequenceDiagram
-  actor U as User
-  participant W as Web app
-  participant AU as Supabase Auth
-  participant G as Gateway
-  participant DB as Supabase DB
-
-  U->>W: sign in (email / Google)
-  W->>AU: authenticate
-  AU-->>W: session + access token
-  W->>G: request + Bearer token
-  G->>AU: verify token → user id
-  AU-->>G: user id
-  G->>DB: read/write with service role
-  DB-->>G: only this user's analyses / projects
-  G-->>W: data
-  Note over W,G: no token → 401 → app signs out
-```
-
-## 9. Deployment (Docker Compose services)
-
-Docker Compose services (`docker-compose.yml`), labelled with their profile. Default profile =
-`web + gateway + grobid`; the heavy retrieval/LLM services sit behind `gpu` / `vision`; `adk-web`
-and `a2a` are dev/optional.
-
-```mermaid
-flowchart TB
-  web["web · nginx"]
-  gateway["gateway · FastAPI"]
-  grobid["grobid"]
-  vllm["vllm — gpu"]
-  colbert["colbert — gpu"]
-  colpali["colpali — vision"]
-  qdrant[("qdrant — gpu/vision")]
-  adkweb["adk-web — dev"]
-  a2a["a2a — a2a"]
-  ext[("Supabase<br/>Postgres + Auth")]
-
-  web --> gateway
-  gateway --> grobid & colbert & colpali & vllm
-  colbert --> qdrant
-  colpali --> qdrant
-  colbert -. MCP /mcp .-> gateway
-  gateway --> ext
-  adkweb --> gateway
-  a2a --> gateway
-```
