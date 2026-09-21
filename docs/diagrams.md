@@ -214,25 +214,27 @@ sequenceDiagram
 
 ## 6. Multi-agent architecture
 
+The tree in `backend/app/agents/team.py`: a **coordinator** (root) routes to three specialists
+with `transfer_to_agent`, and calls **check_claim** as a tool once per paper in the same turn so
+several papers are checked in parallel (SCRUM-171). `load_memory` searches past analyses.
+
 ```mermaid
 flowchart TB
-  COORD["Coordinator agent"]
-  subgraph Specialists
-    RAG["rag_agent<br/>retrieve + read sources"]
-    VER["verify_agent<br/>rule on the claim"]
-    SRC["source_agent<br/>find the cited work"]
-  end
-  TOOLS["Retrieval tools<br/>ColBERT · ColPali (MCP)"]
-  MEM[("ADK session / memory<br/>Supabase adk schema")]
-  A2A["A2A server<br/>exposes the agent tree"]
+  COORD["coordinator (root)<br/>routes requests · combines multi-paper checks"]
+  RAG["rag_agent<br/>answer_from_docs · add_paper"]
+  PAP["paper_agent<br/>extract_claims · extract_citations · fetch_source"]
+  VER["verify_agent<br/>verify_claim"]
+  CHK["check_claim (single_turn)<br/>one claim × one paper"]
+  MEM[("Memory service<br/>past analyses · app/memory.py")]
+  MCP["ColBERT MCP<br/>search_passages"]
 
-  COORD -- AgentTool --> RAG
-  COORD -- AgentTool --> VER
-  COORD -- AgentTool --> SRC
-  RAG --> TOOLS
-  SRC --> TOOLS
-  COORD --- MEM
-  A2A --- COORD
+  COORD -- load_memory --> MEM
+  COORD -- transfer_to_agent --> RAG
+  COORD -- transfer_to_agent --> PAP
+  COORD -- transfer_to_agent --> VER
+  COORD -- "tool, once per paper (parallel)" --> CHK
+  RAG --> MCP
+  CHK -. shares verify_claim .-> VER
 ```
 
 ## 7. Analysis lifecycle (state)
@@ -274,27 +276,29 @@ sequenceDiagram
 
 ## 9. Deployment (Docker Compose services)
 
+Docker Compose services (`docker-compose.yml`), labelled with their profile. Default profile =
+`web + gateway + grobid`; the heavy retrieval/LLM services sit behind `gpu` / `vision`; `adk-web`
+and `a2a` are dev/optional.
+
 ```mermaid
 flowchart TB
-  subgraph Public
-    web["web (nginx)"]
-    gateway["gateway (FastAPI)"]
-    mcp["secretsource-mcp"]
-  end
-  subgraph Private["Private / IAM-only"]
-    grobid["grobid"]
-    colbert["colbert"]
-    colpali["colpali"]
-    qdrant[("qdrant")]
-    vllm["vllm"]
-    adkweb["adk-web"]
-  end
+  web["web · nginx"]
+  gateway["gateway · FastAPI"]
+  grobid["grobid"]
+  vllm["vllm — gpu"]
+  colbert["colbert — gpu"]
+  colpali["colpali — vision"]
+  qdrant[("qdrant — gpu/vision")]
+  adkweb["adk-web — dev"]
+  a2a["a2a — a2a"]
   ext[("Supabase<br/>Postgres + Auth")]
 
   web --> gateway
-  gateway --> grobid & colbert & colpali & vllm & adkweb
+  gateway --> grobid & colbert & colpali & vllm
   colbert --> qdrant
   colpali --> qdrant
+  colbert -. MCP /mcp .-> gateway
   gateway --> ext
-  mcp --> gateway
+  adkweb --> gateway
+  a2a --> gateway
 ```
