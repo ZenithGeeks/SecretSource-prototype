@@ -296,7 +296,7 @@ export function AppearanceSection() {
   )
 }
 
-function ResearcherYourData() {
+function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
@@ -351,11 +351,15 @@ function ResearcherYourData() {
       </Row>
       <Row
         label="Delete all uploaded papers"
-        hint="Removes the files and every check made on them. This cannot be undone."
+        hint={
+          isPreview
+            ? 'Removes the files and every check made on them. Switch to Researcher to delete.'
+            : 'Removes the files and every check made on them. This cannot be undone.'
+        }
       >
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || isPreview}
           onClick={() => void deleteAll()}
           className="text-sm font-medium text-refutes hover:underline disabled:opacity-50"
         >
@@ -366,7 +370,7 @@ function ResearcherYourData() {
   )
 }
 
-function WriterYourData() {
+function WriterYourData({ isPreview }: { isPreview: boolean }) {
   const drafts = useDrafts()
   const claims = useClaims()
   const actions = useWriterActions()
@@ -406,10 +410,17 @@ function WriterYourData() {
           Export
         </button>
       </Row>
-      <Row label="Delete all drafts" hint="Removes every draft and check made on them. This cannot be undone.">
+      <Row
+        label="Delete all drafts"
+        hint={
+          isPreview
+            ? 'Removes every draft and check made on them. Switch to Author to delete.'
+            : 'Removes every draft and check made on them. This cannot be undone.'
+        }
+      >
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || isPreview}
           onClick={deleteAll}
           className="text-sm font-medium text-refutes hover:underline disabled:opacity-50"
         >
@@ -420,7 +431,7 @@ function WriterYourData() {
   )
 }
 
-function TeacherYourData() {
+function TeacherYourData({ isPreview }: { isPreview: boolean }) {
   const teacher = useTeacherPreferences()
   const workspace = useTeacherWorkspace(teacher.defaultClassId)
   const resetData = useResetMockTeacherData()
@@ -452,10 +463,17 @@ function TeacherYourData() {
           Export
         </button>
       </Row>
-      <Row label="Delete local essay data" hint="Resets the mock essay review data in this browser. This cannot be undone.">
+      <Row
+        label="Delete local essay data"
+        hint={
+          isPreview
+            ? 'Resets the mock essay review data in this browser. Switch to Teacher to delete.'
+            : 'Resets the mock essay review data in this browser. This cannot be undone.'
+        }
+      >
         <button
           type="button"
-          disabled={resetData.isPending}
+          disabled={resetData.isPending || isPreview}
           onClick={deleteAll}
           className="text-sm font-medium text-refutes hover:underline disabled:opacity-50"
         >
@@ -466,10 +484,10 @@ function TeacherYourData() {
   )
 }
 
-export function YourDataSection({ role }: { role: Role }) {
-  if (role === 'researcher') return <ResearcherYourData />
-  if (role === 'writer') return <WriterYourData />
-  return <TeacherYourData />
+export function YourDataSection({ role, isPreview }: { role: Role; isPreview: boolean }) {
+  if (role === 'researcher') return <ResearcherYourData isPreview={isPreview} />
+  if (role === 'writer') return <WriterYourData isPreview={isPreview} />
+  return <TeacherYourData isPreview={isPreview} />
 }
 
 export function FieldMapSection() {

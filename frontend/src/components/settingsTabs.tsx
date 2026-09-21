@@ -41,7 +41,12 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
     { id: 'checking', label: 'Checking', icon: CircleCheck, content: <CheckingSection /> },
     { id: 'notifications', label: 'Notifications', icon: Bell, content: <NotificationsSection /> },
     { id: 'appearance', label: 'Appearance', icon: Sparkles, content: <AppearanceSection /> },
-    { id: 'data', label: 'Your data', icon: Download, content: <YourDataSection role={viewingRole} /> },
+    {
+      id: 'data',
+      label: 'Your data',
+      icon: Download,
+      content: <YourDataSection role={viewingRole} isPreview={viewingRole !== currentRole} />,
+    },
   ]
 
   if (viewingRole === 'researcher') {
