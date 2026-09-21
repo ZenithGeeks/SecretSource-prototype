@@ -58,3 +58,8 @@ PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 # keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.
 PARALLEL_SOURCES_TOTAL = int(os.getenv("PARALLEL_SOURCES_TOTAL") or PARALLEL_SOURCES)
 PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECKS)
+# How long a cited paper's checks wait for its figures to be indexed. Empty: until they are, so
+# every verdict can use the figure captions. A number of seconds is a fast mode: after that the
+# check is judged on the text alone, and a later run of the paper gets the figures. On the same
+# 15 checks, 0 took 85 s instead of 264 s, and one verdict out of 15 came out wrong (#163).
+FIGURE_WAIT = float(os.getenv("FIGURE_WAIT")) if os.getenv("FIGURE_WAIT") else None

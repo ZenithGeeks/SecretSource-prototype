@@ -146,6 +146,7 @@ services:
       PARALLEL_SOURCES_TOTAL: ${PARALLEL_SOURCES_TOTAL:-} # the same, across all runs; empty = PARALLEL_SOURCES
       PARALLEL_CHECKS_TOTAL: ${PARALLEL_CHECKS_TOTAL:-} # the same, across all runs; empty = PARALLEL_CHECKS
       DOCLING_OCR: ${DOCLING_OCR:-auto} # auto: OCR only PDFs without a text layer
+      FIGURE_WAIT: ${FIGURE_WAIT:-} # empty: checks wait for the cited paper's figures; seconds: fast mode
       # Both set: analyses are stored in Supabase Postgres instead of SQLite (supabase/README.md).
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
