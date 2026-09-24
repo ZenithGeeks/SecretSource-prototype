@@ -293,6 +293,25 @@ is on.
 Writer still uses a store and mocks. Teacher uses the typed `teacherApi` adapter and clone-safe
 `teacherStore` for every page read and local mutation.
 
+### Author data layer (Draft check + LaTeX editor)
+
+The Author screens (Figma 08 / 08c) share one chain, separate from the writer files until
+the writer → author rename lands:
+
+```
+types/draftCheck.ts   Draft, ProjectFile, Citation, ParseWarning, SearchResult, Verdict
+lib/verdict.ts        the ONE Verdict → badge text / legend text / colour classes map
+lib/bibtex.ts         .bib reader + writer      lib/latexProject.ts  \cite scan, warnings, key swap
+mocks/author.ts       every demo item once (drafts, files, citations, search results)
+lib/authorStore.ts    in-session store; replaceCitation rewrites the .tex and merges the .bib
+lib/author.ts         service layer with mock latency (`?mock-fail=check` etc. for errors)
+lib/useAuthor.ts      query hooks + useAuthorActions
+```
+
+Parse warnings are derived from the project text, not listed in the mock, so an edit in the
+editor changes them the same way a real parse would. Use `VERDICTS[verdict]` for any word or
+colour tied to a verdict — never a local map.
+
 ### Mutations
 
 Writes go through `useResearcherActions()`, which calls the gateway and then invalidates the
