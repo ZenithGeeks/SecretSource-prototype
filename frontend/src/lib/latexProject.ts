@@ -91,6 +91,20 @@ export function parseProject(files: ProjectFile[]): ParseResult {
   return { texFiles: tex.length, citeCommands: cites.length, bibEntries: entries.length, warnings }
 }
 
+/** The first line of the sentence that ends on `line`: walks up while the line above runs
+ * on (no sentence-ending punctuation, not blank, not a command or comment line). The editor
+ * shades these lines for a refuted citation and the preview underlines the same sentence. */
+export function sentenceStart(content: string, line: number): number {
+  const lines = content.split('\n')
+  let i = Math.min(line, lines.length) - 1
+  while (i > 0) {
+    const above = lines[i - 1].trim()
+    if (above === '' || /[.!?]$/.test(above) || above.startsWith('\\') || above.startsWith('%')) break
+    i -= 1
+  }
+  return i + 1
+}
+
 /** Swaps one key for another inside the \cite on the given line. Other keys in the same
  * command are kept. Returns the content unchanged when the key is not on that line. */
 export function replaceCiteKey(content: string, line: number, from: string, to: string): string {
