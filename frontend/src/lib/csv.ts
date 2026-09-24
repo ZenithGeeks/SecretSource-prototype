@@ -11,7 +11,12 @@ export function csvText(rows: readonly (readonly string[])[]): string {
 }
 
 export function downloadText(name: string, body: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([body], { type }))
+  downloadBlob(name, new Blob([body], { type }))
+}
+
+/** Saves any blob (a .zip, a PDF) under `name` through a temporary link. */
+export function downloadBlob(name: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob)
   const link = Object.assign(document.createElement('a'), { href: url, download: name })
   document.body.append(link)
   link.click()
