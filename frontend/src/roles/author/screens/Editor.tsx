@@ -13,13 +13,17 @@ import { Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button, Card } from '../../../components/ui'
+import { ReportUnavailable } from '../../../lib/author'
+import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
+import { downloadBlob, downloadText } from '../../../lib/csv'
 import { bibEntries, findCites, sentenceStart } from '../../../lib/latexProject'
-import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorParse, useRecheck } from '../../../lib/useAuthor'
+import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorParse, useExportReport, useRecheck } from '../../../lib/useAuthor'
 import { authorStore } from '../../../lib/authorStore'
 import { isOpenIssue, summarize } from '../../../lib/verdict'
 import type { Citation, ProjectFile } from '../../../types/draftCheck'
 import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark } from '../components/editor/CodeEditor'
 import { EditorTopBar, type EditorTab } from '../components/editor/EditorTopBar'
+import { ExportMenu, type ExportKind } from '../components/editor/ExportMenu'
 import { FileTabs } from '../components/editor/FileTabs'
 import { PreviewPane } from '../components/editor/PreviewPane'
 import { SplitPane } from '../components/editor/SplitPane'
@@ -48,6 +52,7 @@ export function Editor({
   const check = useAuthorCheck(draftId)
   const parse = useAuthorParse(draftId)
   const recheck = useRecheck()
+  const exportReport = useExportReport()
   const actions = useAuthorActions()
 
   const files: ProjectFile[] = useMemo(() => draft.data?.files ?? [], [draft.data])
@@ -144,6 +149,45 @@ export function Editor({
     setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
   }
 
+  // The Export menu. Text exports use what is on screen right now (pending edits included);
+  // the PDF report goes through the service, which has no endpoint yet.
+  const [exporting, setExporting] = useState<ExportKind | null>(null)
+  const exportAs = async (kind: ExportKind): Promise<boolean | void> => {
+    if (!draft.data || !active) return
+    const current: typeof draft.data = {
+      ...draft.data,
+      files: draft.data.files.map((f) => ({ ...f, content: texts[f.name] ?? f.content })),
+    }
+    const name = slug(current.title)
+    switch (kind) {
+      case 'bib':
+        downloadText(`${name}.bib`, buildUpdatedBib(current), 'application/x-bibtex')
+        setToast(`Downloaded ${name}.bib`)
+        return
+      case 'tex': {
+        const file = current.files.find((f) => f.name === active.name)!
+        downloadText(file.name, buildAnnotatedTex(file, check.data?.citations ?? []), 'application/x-tex')
+        setToast(`Downloaded ${file.name} with SecretSource comments`)
+        return
+      }
+      case 'zip':
+        downloadBlob(`${name}.zip`, buildProjectZip(current))
+        setToast(`Downloaded ${name}.zip`)
+        return
+      case 'report':
+        setExporting('report')
+        try {
+          const pdf = await exportReport.mutateAsync(draftId)
+          downloadBlob(`${name}-report.pdf`, pdf)
+          setToast('Downloaded the verification report')
+        } catch (error) {
+          setToast(error instanceof ReportUnavailable ? error.message : `Could not build the report: ${(error as Error).message}`)
+        } finally {
+          setExporting(null)
+        }
+    }
+  }
+
   const text = active ? (texts[active.name] ?? active.content) : ''
   const fileCitations = useMemo(
     () => (check.data?.citations ?? []).filter((c) => c.file === active?.name),
@@ -221,6 +265,7 @@ export function Editor({
           recheck.mutate(draftId)
         }}
         rechecking={recheck.isPending}
+        exportSlot={<ExportMenu openIssues={draft.data.status.open} busy={exporting} onExport={exportAs} />}
       />
       {recheck.isError && (
         <p role="alert" className="border-b border-refutes bg-refutes-soft px-4 py-1.5 text-xs text-refutes">
