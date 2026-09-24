@@ -1,0 +1,33 @@
+# Rebuilds and restarts the gateway + web containers on ss-core (CPE Cloud) on every push to
+# main that touches backend/. Runs on a self-hosted runner installed directly on ss-core,
+# because ss-core's address (10.35.109.71) is KMUTT-internal only — GitHub-hosted runners
+# cannot reach it, so the job has to run on the box itself rather than SSH into it.
+#
+# Secrets stay off GitHub entirely: .env lives only on ss-core (~/app/.env) and is copied into
+# the checkout before `docker compose` reads it, the same file used for the manual deploys this
+# replaces.
+#
+# Setup (one-time, on ss-core itself — see the runner registration steps in the PR/issue that
+# introduced this file):
+#   1. Install a GitHub Actions self-hosted runner for this repo, labeled "ss-core".
+#   2. Confirm ~/app/.env exists with the gateway's real config (S2_API_KEY, SUPABASE_*, etc).
+name: deploy-backend
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", "docker-compose.yml"]
+  workflow_dispatch:
+
+jobs:
+  ss-core:
+    runs-on: [self-hosted, ss-core]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load persistent secrets
+        run: cp ~/app/.env .env
+      - name: Build and restart gateway + web
+        # --no-deps: grobid runs on a separate VM (ss-grobid) here, not as a local container.
+        run: docker compose up -d --build --no-deps gateway web
+      - name: Clean up old images
+        run: docker image prune -f
