@@ -25,6 +25,7 @@
     "clsx": "^2.1.1",
     "cytoscape": "^3.34.3",
     "cytoscape-fcose": "^2.2.0",
+    "fflate": "^0.8.3",
     "latex.js": "^0.12.6",
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
