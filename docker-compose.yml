@@ -153,7 +153,11 @@ services:
       # A Postgres URL keeps the chat agents' sessions after a restart (app/sessions.py).
       SESSION_DB_URL: ${SESSION_DB_URL:-${DIRECT_URL:-}}
     volumes:
-      - ./data/papers:/app/data/papers # shared with the retrieval services
+      # Override with an absolute path when the compose project directory is a CI checkout
+      # that gets wiped/reset between deploys (see .github/workflows/deploy-backend.yml):
+      # papers the container writes as its own (non-host) user would otherwise leave files a
+      # checkout's `git clean` can't remove, breaking every deploy after the first paper.
+      - ${PAPERS_HOST_DIR:-./data/papers}:/app/data/papers # shared with the retrieval services
       - ./backend/secrets:/app/secrets:ro # identity-token credentials, see .env.example
       - analyses:/app/data/db # run history survives a rebuild
       - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
