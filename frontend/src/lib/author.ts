@@ -40,7 +40,9 @@ function failing(op: Operation): boolean {
 async function simulate<T>(op: Operation, read: () => T): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, LATENCY_MS[op] * latencyScale))
   if (failing(op)) throw new Error(`The ${op} service did not answer. Try again in a moment.`)
-  return read()
+  // A snapshot, not the store's live objects: the gateway will hand back fresh JSON too, and
+  // TanStack Query can only notice a change when the new data differs from what it cached.
+  return structuredClone(read())
 }
 
 export class ReportUnavailable extends Error {
