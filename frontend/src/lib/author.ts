@@ -54,13 +54,15 @@ export const authorApi = {
   getDrafts: (): Promise<Draft[]> => simulate('drafts', () => authorStore.drafts()),
 
   // TODO gateway: GET /author/drafts/{id}
-  getDraft: (draftId: string): Promise<Draft | undefined> => simulate('drafts', () => authorStore.draft(draftId)),
+  // Resolves null, not undefined, for a draft that does not exist: TanStack Query treats an
+  // undefined result as an error, and "gone" is an empty state, not a failure.
+  getDraft: (draftId: string): Promise<Draft | null> => simulate('drafts', () => authorStore.draft(draftId) ?? null),
 
   // TODO gateway: POST /author/drafts/{id}/parse
   parseDraft: (draftId: string): Promise<ParseResult> => simulate('parse', () => authorStore.parse(draftId)),
 
   // TODO gateway: GET /author/drafts/{id}/check
-  getCheck: (draftId: string): Promise<CheckRun | undefined> => simulate('check', () => authorStore.checkRun(draftId)),
+  getCheck: (draftId: string): Promise<CheckRun | null> => simulate('check', () => authorStore.checkRun(draftId) ?? null),
 
   // TODO gateway: POST /author/drafts/{id}/check — async with progress events (see #204)
   recheck: (draftId: string): Promise<CheckRun> => simulate('check', () => authorStore.recheck(draftId)),

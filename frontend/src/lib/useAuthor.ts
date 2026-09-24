@@ -35,14 +35,11 @@ export function useAuthorParse(draftId: string) {
   return useQuery({ queryKey: AUTHOR_KEYS.parse(draftId), queryFn: () => authorApi.parseDraft(draftId) })
 }
 
-/** Runs only once there is a query, so an empty search box shows the empty state, not a spinner. */
+/** An empty query lists the suggested fixes for the draft's open issues (Figma shows results
+ * before anything is typed), so the card is never blank. */
 export function useAuthorSearch(query: string) {
   const trimmed = query.trim()
-  return useQuery({
-    queryKey: AUTHOR_KEYS.search(trimmed),
-    queryFn: () => authorApi.search(trimmed),
-    enabled: trimmed.length > 0,
-  })
+  return useQuery({ queryKey: AUTHOR_KEYS.search(trimmed), queryFn: () => authorApi.search(trimmed) })
 }
 
 /** "Re-check" — the one action with real latency, so it is a mutation with isPending. */
