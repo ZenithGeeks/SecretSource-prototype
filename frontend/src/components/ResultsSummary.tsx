@@ -5,7 +5,7 @@ import { useState } from 'react'
 
 import { STANDING_LABELS, STANDING_MEANINGS, STANDINGS, toCsv, toMarkdown } from '../lib/claims'
 import type { Standing, Standings } from '../lib/claims'
-import type { Claim } from '../lib/api'
+import { API_BASE, type Claim } from '../lib/api'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
 import { downloadText } from '../lib/csv'
@@ -40,7 +40,9 @@ export function ResultsSummary({
 }) {
   const [copied, setCopied] = useState(false)
   // Only fetched when there is no page viewer to open it in; the link needs the user's token.
-  const pdf = useAuthorizedUrl(paper && !onOpenPaper ? `/api/papers/${encodeURIComponent(paper)}` : undefined)
+  const pdf = useAuthorizedUrl(
+    paper && !onOpenPaper ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined,
+  )
 
   async function copyMarkdown() {
     await navigator.clipboard.writeText(toMarkdown(claims, paper))

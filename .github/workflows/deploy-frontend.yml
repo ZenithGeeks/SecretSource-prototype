@@ -1,0 +1,38 @@
+# Deploys frontend/ to Vercel on every push to main that touches it.
+#
+# Uses the Vercel CLI rather than Vercel's native GitHub integration: the repo is private and
+# owned by an org, which the team's Vercel plan does not support for the native integration.
+# The CLI has no such restriction — it just needs a token.
+#
+# Required repository secrets:
+#   VERCEL_TOKEN       from vercel.com/account/settings/tokens, scoped to this project
+#   VERCEL_ORG_ID      the team id (starts with team_)
+#   VERCEL_PROJECT_ID  the project id (starts with prj_)
+#
+# VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY / VITE_GATEWAY_URL are Vercel project env vars
+# (Settings > Environment Variables), pulled in by `vercel pull` below.
+name: deploy-frontend
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**"]
+  workflow_dispatch:
+
+jobs:
+  vercel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Pull Vercel project settings and env vars
+        run: npx vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build (Vercel-driven, uses pulled env vars)
+        run: npx vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy prebuilt output
+        run: npx vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
