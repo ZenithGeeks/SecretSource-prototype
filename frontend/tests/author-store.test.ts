@@ -161,7 +161,7 @@ test('authorApi resolves through the store and the report is unavailable', async
   assert.equal(drafts.length, 3)
   const check = await authorApi.getCheck('d1')
   assert.equal(check?.issues.length, 3)
-  assert.equal(await authorApi.getCheck('nope'), undefined)
+  assert.equal(await authorApi.getCheck('nope'), null)
   assert.equal((await authorApi.search('beir'))[0].key, 'thakur2021')
   await assert.rejects(() => authorApi.exportReport('d1'), ReportUnavailable)
 })
