@@ -17,14 +17,16 @@ import { bibEntries, findCites, sentenceStart } from '../../../lib/latexProject'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorParse, useRecheck } from '../../../lib/useAuthor'
 import { authorStore } from '../../../lib/authorStore'
 import { isOpenIssue, summarize } from '../../../lib/verdict'
-import type { ProjectFile } from '../../../types/draftCheck'
+import type { Citation, ProjectFile } from '../../../types/draftCheck'
 import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark } from '../components/editor/CodeEditor'
 import { EditorTopBar, type EditorTab } from '../components/editor/EditorTopBar'
 import { FileTabs } from '../components/editor/FileTabs'
 import { PreviewPane } from '../components/editor/PreviewPane'
 import { SplitPane } from '../components/editor/SplitPane'
 import { StatusBar } from '../components/editor/StatusBar'
+import { Toast } from '../components/Toast'
 import type { EditorTarget } from '../editorTarget'
+import { replacementLabel } from '../labels'
 
 const COMMIT_DELAY_MS = 300
 
@@ -128,6 +130,19 @@ export function Editor({
   }
 
   const [verdictColors, setVerdictColors] = useState(true)
+  const [toast, setToast] = useState<string | null>(null)
+  const closeToast = useCallback(() => setToast(null), [])
+
+  // The popover's actions: the same store calls Draft check makes, so both screens agree.
+  const replaceFromPopover = (citation: Citation) => {
+    if (!citation.suggestedReplacement) return
+    actions.replaceCitation(citation.id, citation.suggestedReplacement)
+    setToast(`Citation replaced with ${replacementLabel(citation.suggestedReplacement)}`)
+  }
+  const keepMine = (citation: Citation, note: string) => {
+    actions.overrideCitation(citation.id, note)
+    setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+  }
 
   const text = active ? (texts[active.name] ?? active.content) : ''
   const fileCitations = useMemo(
@@ -148,15 +163,15 @@ export function Editor({
   const citeCount = useMemo(() => (active ? findCites({ name: active.name, content: text }).length : 0), [active, text])
   const warningCount = (parse.data?.warnings ?? []).filter((w) => w.file === active?.name).length
 
+  const entries = useMemo(() => bibEntries(files), [files])
   const completions: CiteCompletionSource = useMemo(() => {
-    const entries = bibEntries(files)
     const seen = new Set<string>()
     const bibKeys = entries
       .filter((e) => (seen.has(e.key) ? false : (seen.add(e.key), true)))
       .map((e) => ({ key: e.key, detail: `${e.file} · ${(e.fields.title ?? '').split(':')[0].slice(0, 28)}` }))
     const suggested = draft.data ? authorStore.suggestedKeys(draftId).map((r) => ({ key: r.key, detail: 'suggested · not in .bib' })) : []
     return { bibKeys, suggested, onSearch }
-  }, [files, draft.data, draftId, onSearch])
+  }, [entries, draft.data, draftId, onSearch])
 
   if (draft.isPending) {
     return (
@@ -235,8 +250,19 @@ export function Editor({
             <StatusBar counts={counts} cursor={cursor} citeCount={citeCount} warningCount={warningCount} />
           </div>
         }
-        right={<PreviewPane verdictColors={verdictColors} onToggleVerdictColors={() => setVerdictColors((v) => !v)} />}
+        right={
+          <PreviewPane
+            content={text}
+            citations={fileCitations}
+            bibEntries={entries}
+            verdictColors={verdictColors}
+            onToggleVerdictColors={() => setVerdictColors((v) => !v)}
+            onReplace={replaceFromPopover}
+            onKeepMine={keepMine}
+          />
+        }
       />
+      <Toast message={toast} onClose={closeToast} />
     </div>
   )
 }

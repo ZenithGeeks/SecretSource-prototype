@@ -1,0 +1,158 @@
+/* The rendered page inside the Author editor's preview. LaTeX.js emits plain classes
+   (.body, .title, .list, .small, .bf …); these give them a paper look with the palette tokens
+   instead of the library's own stylesheet, which would pull in 8 MB of Computer Modern fonts.
+   KaTeX's layout stylesheet is imported separately by the pane. */
+
+.ss-preview {
+  font-family: 'Libertinus Serif', 'Linux Libertine', Georgia, 'Times New Roman', serif;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-ink);
+}
+
+.ss-preview .body > p,
+.ss-preview .body > div > p {
+  margin: 0 0 0.6em;
+  text-align: justify;
+  hyphens: auto;
+}
+
+.ss-preview p.continue {
+  text-indent: 0;
+}
+
+.ss-preview h2 {
+  margin: 1.4em 0 0.6em;
+  font-size: 1.35em;
+  font-weight: 700;
+}
+
+.ss-preview h3 {
+  margin: 1.1em 0 0.45em;
+  font-size: 1.1em;
+  font-weight: 700;
+}
+
+.ss-preview h4 {
+  margin: 0.9em 0 0.35em;
+  font-size: 1em;
+  font-weight: 700;
+}
+
+.ss-preview .list.center {
+  text-align: center;
+}
+
+.ss-preview .title {
+  font-size: 1.6em;
+  font-weight: 700;
+}
+
+.ss-preview .author {
+  font-size: 1.1em;
+}
+
+.ss-preview .date {
+  color: var(--color-ink-muted);
+}
+
+.ss-preview .vspace {
+  display: block;
+}
+
+.ss-preview .small {
+  font-size: 0.92em;
+}
+
+.ss-preview .bf {
+  font-weight: 700;
+}
+
+.ss-preview .it,
+.ss-preview .em {
+  font-style: italic;
+}
+
+.ss-preview ul,
+.ss-preview ol {
+  margin: 0.4em 0 0.6em;
+  padding-left: 1.6em;
+}
+
+.ss-preview .katex {
+  font-size: 1em;
+}
+
+/* Citation markers and the sentences they end. Colours only when the toggle is on. */
+.ss-preview .ss-cite {
+  color: var(--color-accent);
+  text-decoration: none;
+  cursor: default;
+  border-radius: 2px;
+}
+
+.ss-preview .ss-cite[role='button'] {
+  cursor: pointer;
+}
+
+.ss-preview .ss-cite[role='button']:hover,
+.ss-preview .ss-cite[role='button']:focus-visible {
+  background: var(--color-accent-soft);
+  outline: none;
+}
+
+.ss-preview.ss-verdicts .ss-cite[data-verdict] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ss-preview.ss-verdicts .ss-cite[data-verdict='supports'] {
+  color: var(--color-supports);
+}
+
+.ss-preview.ss-verdicts .ss-cite[data-verdict='insufficient'] {
+  color: var(--color-insufficient);
+}
+
+.ss-preview.ss-verdicts .ss-cite[data-verdict='refutes'] {
+  color: var(--color-refutes);
+}
+
+.ss-preview.ss-verdicts .ss-cite[data-verdict='unavailable'],
+.ss-preview.ss-verdicts .ss-cite[data-verdict='unchecked'] {
+  color: var(--color-ink-muted);
+}
+
+/* A refuted claim reads wrong as a whole sentence, so the sentence is marked, not only [n]. */
+.ss-preview.ss-verdicts .ss-sentence[data-verdict='refutes'] {
+  color: var(--color-refutes);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ss-preview .ss-sentence.ss-active {
+  background: var(--color-accent-soft);
+  border-radius: 2px;
+}
+
+.ss-preview .ss-refs-title {
+  margin-top: 1.6em;
+}
+
+.ss-preview .ss-refs {
+  list-style: none;
+  padding-left: 0;
+  font-size: 0.96em;
+}
+
+.ss-preview .ss-refs li {
+  margin-bottom: 0.5em;
+  padding-left: 2.2em;
+  text-indent: -2.2em;
+}
+
+.ss-preview .ss-ref-n {
+  display: inline-block;
+  min-width: 2em;
+  text-indent: 0;
+}
