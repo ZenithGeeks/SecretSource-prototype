@@ -142,10 +142,9 @@ export type PaperEdge = {
   passages: { paper: string; page: string; quote: string }[]
 }
 
-export type GraphStat = { count: number; label: string }
-
+// The graph's headline numbers are derived on the client in Graph.tsx (computeInsights), so the
+// backend's `stats` field is no longer read here and is intentionally left off this type.
 export type KnowledgeGraph = {
-  stats: GraphStat[]
   clusters: string[]
   nodes: GraphNode[]
   edges: GraphEdge[] // paper → claim (claims view)

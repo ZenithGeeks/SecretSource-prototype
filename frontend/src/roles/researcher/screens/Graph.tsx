@@ -9,7 +9,8 @@
  * amber ring, so a reader can see which verdicts rest on a source outside the index. We never
  * say Scopus: none of those services can tell us whether a work is in it.
  *
- * Rendered with Cytoscape + fcose. Data from useKnowledgeGraph, built from every paper the
+ * Rendered with Cytoscape + cola (a deterministic settle-then-stop layout). Data from
+ * useKnowledgeGraph, built from every paper the
  * signed-in user analysed. Cytoscape's style parser rejects oklch(), so colours are concrete
  * hex mirroring the index.css tokens, in both themes.
  */
@@ -22,6 +23,7 @@ import CytoscapeComponent from 'react-cytoscapejs'
 
 import { reasonText } from '../../../lib/api'
 import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import { useSettings } from '../../../lib/settings'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
@@ -58,28 +60,19 @@ const DARK: Palette = {
   insufficient: '#D8B45F',
 }
 
-/** Follows the app theme: the Settings choice (`data-theme` on <html>) wins, and with no choice
- * set it falls back to the OS preference — matching how index.css applies the palette. Cytoscape
- * can't read CSS variables, so the graph mirrors the same decision to pick its hex palette. */
+/** Follows the app theme from `useSettings()`, the same source the rest of the app reads: the
+ * Settings choice wins, and "Match system" falls back to the OS preference. Cytoscape can't read
+ * CSS variables, so the graph mirrors that decision to pick its hex palette. */
 function usePalette(): { pal: Palette; dark: boolean } {
-  const isDark = () => {
-    const attr = document.documentElement.getAttribute('data-theme')
-    if (attr === 'dark') return true
-    if (attr === 'light') return false
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-  }
-  const [dark, setDark] = useState(isDark)
+  const { theme } = useSettings()
+  const [sysDark, setSysDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
   useEffect(() => {
-    const update = () => setDark(isDark())
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = (e: MediaQueryListEvent) => setSysDark(e.matches)
     mq.addEventListener('change', update)
-    const observer = new MutationObserver(update)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-    return () => {
-      mq.removeEventListener('change', update)
-      observer.disconnect()
-    }
+    return () => mq.removeEventListener('change', update)
   }, [])
+  const dark = theme === 'Dark' || (theme === 'Match system' && sysDark)
   return { pal: dark ? DARK : LIGHT, dark }
 }
 
@@ -488,7 +481,7 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
 
 export function Graph() {
   const graph = useKnowledgeGraph().data
-  const { pal, dark } = usePalette()
+  const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -618,6 +611,14 @@ export function Graph() {
     })
   }, [view, filter, claimSel, pairSel, hovered, elements, ready])
 
+  // Recolour the existing graph on a theme change instead of rebuilding it. The CytoscapeComponent
+  // key is `view` only (not the theme), so flipping light/dark keeps the instance and the user's
+  // zoom, pan and dragged positions — this just re-applies the palette to the live stylesheet.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (cy && graph) cy.style(stylesheet(pal, graph.clusters, view))
+  }, [pal, view, graph])
+
   if (!graph) return null
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
@@ -737,7 +738,7 @@ export function Graph() {
             <ClusterLegend pal={pal} clusters={graph.clusters} notIndexed={notIndexed} />
           )}
           <CytoscapeComponent
-            key={`${view}-${dark}`}
+            key={view}
             elements={elements}
             stylesheet={stylesheet(pal, graph.clusters, view)}
             layout={LAYOUT}
@@ -781,9 +782,14 @@ export function Graph() {
           />
           {view === 'claims' && <ClaimsLegend pal={pal} notIndexed={notIndexed} />}
           {tip && (
+            // Near the top edge the above-the-node tooltip would render past y=0 and be clipped by
+            // the overflow-hidden canvas, so flip it below the node there.
             <div
-              className="pointer-events-none absolute z-20 max-w-xs -translate-x-1/2 -translate-y-full rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs leading-snug text-ink shadow-lg"
-              style={{ left: tip.x, top: tip.y - 10 }}
+              className={cn(
+                'pointer-events-none absolute z-20 max-w-xs -translate-x-1/2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs leading-snug text-ink shadow-lg',
+                tip.y < 56 ? 'translate-y-2' : '-translate-y-full',
+              )}
+              style={{ left: tip.x, top: tip.y < 56 ? tip.y + 12 : tip.y - 10 }}
             >
               {tip.text}
             </div>
