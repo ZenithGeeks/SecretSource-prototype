@@ -153,12 +153,17 @@ export function paperName(file: string) {
   return file.split(/[\/]/).pop() ?? file
 }
 
+/** Where the gateway lives. Empty (the default) means same-origin behind a reverse proxy, as
+ * on the docker-compose and CPE Cloud deployments. Set VITE_GATEWAY_URL to call a gateway on a
+ * different origin, e.g. when the frontend is hosted separately (Vercel) from the gateway. */
+export const API_BASE = import.meta.env.VITE_GATEWAY_URL ?? ''
+
 /** A figure crop, from the `image` path a verdict's `pages` entry carries. Only the file
  * name travels: the gateway builds the directory from the paper and rejects anything that
  * is not a figure-<n>. */
 export function figureImageUrl(paper: string, image: string) {
   const file = image.split('/').pop()?.replace(/\.png$/, '') ?? ''  // figures.py writes as_posix()
-  return `/api/papers/${encodeURIComponent(paper)}/figures/${encodeURIComponent(file)}.png`
+  return `${API_BASE}/api/papers/${encodeURIComponent(paper)}/figures/${encodeURIComponent(file)}.png`
 }
 
 /** A request that could not say who is asking. The session is gone, and the app has signed out
@@ -202,7 +207,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await accessToken()
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const response = await fetch(`/api${path}`, { ...init, headers })
+  const response = await fetch(`${API_BASE}/api${path}`, { ...init, headers })
   await signOutIfRefused(response)
   if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`)
   return response.json()
@@ -254,7 +259,7 @@ export const api = {
       while (!controller.signal.aborted) {
         try {
           const token = await accessToken()
-          const response = await fetch(`/api/analyses/${id}/events`, {
+          const response = await fetch(`${API_BASE}/api/analyses/${id}/events`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
             signal: controller.signal,
           })

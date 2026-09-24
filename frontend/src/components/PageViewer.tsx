@@ -23,7 +23,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-import type { Citation, CitationMarker, Source } from '../lib/api'
+import { API_BASE, type Citation, type CitationMarker, type Source } from '../lib/api'
 import { citationLink, reference } from '../lib/citations'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
@@ -254,7 +254,7 @@ export function PageViewer({
   const highlightPage = target.source ? target.source.page : null
   // The gateway serves a paper only with the user's token, so pdf.js and the links below
   // get an in-memory copy fetched with it (#135).
-  const pdf = useAuthorizedUrl(`/api/papers/${encodeURIComponent(target.paper)}`)
+  const pdf = useAuthorizedUrl(`${API_BASE}/api/papers/${encodeURIComponent(target.paper)}`)
   const cannotOpen = failed || pdf.failed
 
   return (
