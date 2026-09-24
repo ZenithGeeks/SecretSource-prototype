@@ -14,6 +14,7 @@ import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import type { EditorTarget } from '../author/editorTarget'
 import { DraftCheck } from '../author/screens/DraftCheck'
+import { Editor } from '../author/screens/Editor'
 import { FindASource } from './screens/FindASource'
 import { Home } from './screens/Home'
 
@@ -76,11 +77,11 @@ function syncParams(screen: WriterScreen, draftId: string, target: EditorTarget 
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
-function Placeholder({ title, detail }: { title: string; detail?: string }) {
+function Placeholder({ title }: { title: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
       <p className="font-serif text-2xl font-semibold text-ink">{title}</p>
-      <p className="text-sm text-ink-muted">{detail ?? 'Not built yet.'}</p>
+      <p className="text-sm text-ink-muted">Not built yet.</p>
     </div>
   )
 }
@@ -105,6 +106,19 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
     navigate('editor')
   }
 
+  // The editor is full-bleed with its own top bar, so it renders outside the sidebar shell.
+  if (screen === 'editor') {
+    return (
+      <Editor
+        key={draftId}
+        target={editorTarget ?? { draftId }}
+        onFileChange={(file) => setEditorTarget({ draftId, file })}
+        onNavigate={(next) => navigate(next === 'editor' ? 'editor' : next)}
+        onSearch={() => navigate('find-source')}
+      />
+    )
+  }
+
   return (
     <AppShell
       nav={NAV}
@@ -126,14 +140,6 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
           onSelectDraft={setDraftId}
           onOpenEditor={openEditor}
           onOpenHistory={() => navigate('history')}
-        />
-      )}
-      {screen === 'editor' && (
-        <Placeholder
-          title="LaTeX editor"
-          detail={`Arrives in the next PR. Draft ${draftId}${editorTarget?.file ? ` · ${editorTarget.file}` : ''}${
-            editorTarget?.line ? ` L${editorTarget.line}` : ''
-          }`}
         />
       )}
       {screen === 'find-source' && <FindASource onCiteBestMatch={() => navigate('draft-check')} />}
