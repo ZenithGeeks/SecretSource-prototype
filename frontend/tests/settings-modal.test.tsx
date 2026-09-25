@@ -2,7 +2,7 @@
  * role's tabs from the Roles group, and keyboard travel along the settings tab list. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -27,10 +27,13 @@ function renderModal(currentRole: 'writer' | 'researcher' | 'teacher') {
   return renderWithQuery(<SettingsModal open onClose={vi.fn()} currentRole={currentRole} onSwitchRole={vi.fn()} />)
 }
 
-/** The Roles group in the aside: plain buttons (role="tab" but outside the Settings tablist),
- * found by their label. */
+/** The Roles group in the aside: its own tablist, separate from the Settings one. */
+function roleTabs() {
+  return within(screen.getByRole('tablist', { name: 'Roles' }))
+}
+
 function previewRole(label: 'Author' | 'Researcher' | 'Teacher') {
-  fireEvent.click(screen.getByRole('tab', { name: label }))
+  fireEvent.click(roleTabs().getByRole('tab', { name: label }))
 }
 
 beforeEach(() => {
@@ -303,5 +306,59 @@ describe('search and the Roles group', () => {
     expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('heading', { name: 'Account' })).toBeInTheDocument()
     expect(screen.queryByText(/No settings match/)).not.toBeInTheDocument()
+  })
+})
+
+describe('roles group keyboard travel', () => {
+  function roleButtons() {
+    return Array.from(screen.getByRole('tablist', { name: 'Roles' }).querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+  }
+
+  test('is a roving tabindex: only the previewed role is in the Tab order', () => {
+    renderModal('researcher')
+    expect(roleButtons().filter((t) => t.tabIndex === 0).map((t) => t.textContent)).toEqual(['Researcher'])
+    previewRole('Teacher')
+    expect(roleButtons().filter((t) => t.tabIndex === 0).map((t) => t.textContent)).toEqual(['Teacher'])
+  })
+
+  test('arrow keys move the preview and DOM focus together, wrapping at both ends', () => {
+    renderModal('writer')
+    const author = roleTabs().getByRole('tab', { name: 'Author' })
+    author.focus()
+
+    fireEvent.keyDown(author, { key: 'ArrowDown' })
+    const researcher = roleTabs().getByRole('tab', { name: 'Researcher' })
+    expect(document.activeElement).toBe(researcher)
+    expect(researcher).toHaveAttribute('aria-selected', 'true')
+    expect(author).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Field map' })).toBeInTheDocument() // the tab set swapped
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(researcher, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(author)
+    expect(author).toHaveAttribute('aria-selected', 'true')
+
+    const teacher = roleTabs().getByRole('tab', { name: 'Teacher' })
+    fireEvent.keyDown(author, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(teacher)
+    expect(screen.getByRole('tab', { name: 'Class and marking' })).toBeInTheDocument()
+    fireEvent.keyDown(teacher, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(author)
+  })
+
+  test('Home and End jump to the first and last role, and the Settings list is untouched', () => {
+    renderModal('researcher')
+    const researcher = roleTabs().getByRole('tab', { name: 'Researcher' })
+    researcher.focus()
+
+    fireEvent.keyDown(researcher, { key: 'End' })
+    const teacher = roleTabs().getByRole('tab', { name: 'Teacher' })
+    expect(document.activeElement).toBe(teacher)
+    expect(teacher).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(teacher, { key: 'Home' })
+    expect(document.activeElement).toBe(roleTabs().getByRole('tab', { name: 'Author' }))
+    // Settings tabs keep their own selection: still Account.
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
   })
 })

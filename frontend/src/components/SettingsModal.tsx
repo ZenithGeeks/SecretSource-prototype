@@ -67,8 +67,9 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState('account')
   const [search, setSearch] = useState('')
   const dialogRef = useRef<HTMLDivElement>(null)
-  // One ref per settings tab button, so arrow keys can move DOM focus along with the
-  // selection (roving tabindex: only the active tab is in the Tab order).
+  // One ref per settings tab button and per role button, so arrow keys can move DOM focus
+  // along with the selection (roving tabindex: only the active tab is in the Tab order).
+  // Role buttons are keyed `role:<id>`, so they never collide with a tab id.
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const [wasOpen, setWasOpen] = useState(open)
 
@@ -141,18 +142,25 @@ export function SettingsModal({
     setSearch('')
   }
 
-  const onTabKeyDown = (e: React.KeyboardEvent, list: string[], index: number) => {
+  // Arrow/Home/End travel for a roving-tabindex list. `keys` are the tabRefs keys in list
+  // order; `select` applies the selection (a settings tab, or a role preview).
+  const onTabKeyDown = (e: React.KeyboardEvent, keys: string[], index: number, select: (key: string) => void) => {
     let next: number
-    if (e.key === 'ArrowDown') next = (index + 1) % list.length
-    else if (e.key === 'ArrowUp') next = (index - 1 + list.length) % list.length
+    if (e.key === 'ArrowDown') next = (index + 1) % keys.length
+    else if (e.key === 'ArrowUp') next = (index - 1 + keys.length) % keys.length
     else if (e.key === 'Home') next = 0
-    else if (e.key === 'End') next = list.length - 1
+    else if (e.key === 'End') next = keys.length - 1
     else return
     e.preventDefault()
-    setActiveTab(list[next])
+    select(keys[next])
     // Selection and focus must travel together: otherwise Enter/Tab still act on the button
     // that was focused before, not the one that now looks selected.
-    tabRefs.current.get(list[next])?.focus()
+    tabRefs.current.get(keys[next])?.focus()
+  }
+
+  const bindRef = (key: string) => (node: HTMLButtonElement | null) => {
+    if (node) tabRefs.current.set(key, node)
+    else tabRefs.current.delete(key)
   }
 
   if (!open) return null
@@ -181,16 +189,13 @@ export function SettingsModal({
               <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-ink-muted">Settings</p>
               <div role="tablist" aria-label="Settings sections" className="flex flex-col gap-0.5">
                 {visibleTabs.map((tab, i) => (
-                  <div key={tab.id} onKeyDown={(e) => onTabKeyDown(e, visibleTabs.map((t) => t.id), i)}>
+                  <div key={tab.id} onKeyDown={(e) => onTabKeyDown(e, visibleTabs.map((t) => t.id), i, setActiveTab)}>
                     <NavButton
                       label={tab.label}
                       icon={tab.icon}
                       active={tab.id === active?.id}
                       onClick={() => setActiveTab(tab.id)}
-                      buttonRef={(node) => {
-                        if (node) tabRefs.current.set(tab.id, node)
-                        else tabRefs.current.delete(tab.id)
-                      }}
+                      buttonRef={bindRef(tab.id)}
                     />
                   </div>
                 ))}
@@ -200,15 +205,22 @@ export function SettingsModal({
           {visibleRoles.length > 0 && (
             <>
               <p className="mt-4 px-3 pb-1 text-[11px] font-medium tracking-wide text-ink-muted">Roles</p>
-              <div className="flex flex-col gap-0.5">
-                {visibleRoles.map((role) => (
-                  <NavButton
+              <div role="tablist" aria-label="Roles" className="flex flex-col gap-0.5">
+                {visibleRoles.map((role, i) => (
+                  <div
                     key={role.id}
-                    label={role.label}
-                    icon={role.icon}
-                    active={role.id === viewingRole}
-                    onClick={() => previewRole(role.id)}
-                  />
+                    onKeyDown={(e) =>
+                      onTabKeyDown(e, visibleRoles.map((r) => `role:${r.id}`), i, (key) => previewRole(key.slice('role:'.length) as Role))
+                    }
+                  >
+                    <NavButton
+                      label={role.label}
+                      icon={role.icon}
+                      active={role.id === viewingRole}
+                      onClick={() => previewRole(role.id)}
+                      buttonRef={bindRef(`role:${role.id}`)}
+                    />
+                  </div>
                 ))}
               </div>
             </>
