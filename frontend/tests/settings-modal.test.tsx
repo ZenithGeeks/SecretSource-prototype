@@ -362,3 +362,25 @@ describe('roles group keyboard travel', () => {
     expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
   })
 })
+
+describe('researcher Delete all', () => {
+  test('reports papers still being checked that the gateway kept', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/data') && init?.method === 'DELETE') {
+          return Promise.resolve(new Response(JSON.stringify({ deleted: 2, skipped: 1 }), { status: 200 }))
+        }
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+    renderModal('researcher')
+    fireEvent.click(screen.getByRole('tab', { name: 'Your data' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '2 papers deleted. 1 paper still being checked was kept; delete again once it finishes.',
+    )
+  })
+})

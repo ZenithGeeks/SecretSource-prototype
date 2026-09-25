@@ -65,7 +65,7 @@ def test_delete_all_data_removes_only_the_callers_analyses(client):
         }
 
     response = client.delete("/user/data", headers=ADA)
-    assert response.json() == {"deleted": 2}
+    assert response.json() == {"deleted": 2, "skipped": 0}
     assert sorted(main.analyses) == ["b1"]
 
 
@@ -225,3 +225,34 @@ def test_concurrent_uploads_leave_exactly_one_avatar_file(client, monkeypatch):
     files = sorted(p.name for p in main.AVATARS_DIR.glob("user-ada.*"))
     assert len(files) == 1, files
     assert client.get("/user/avatar/me", headers=ADA).content in (b"two", b"three")
+
+
+# --- delete all: a running analysis is left to finish ---
+
+
+def test_delete_all_data_skips_a_running_analysis_and_its_run_can_still_publish(client, monkeypatch):
+    """Popping a running analysis out from under its `_run` task makes the next `_publish`
+    raise KeyError inside the task, after the caller already got a 200. Running ones are
+    skipped and reported instead."""
+    import asyncio
+
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    for analysis_id, status in (("done1", "done"), ("run1", "running")):
+        main.analyses[analysis_id] = {
+            "id": analysis_id, "paper": "x.pdf", "status": status,
+            "owner": "user-ada", "stages": [], "claims": [],
+        }
+    main.streams["run1"] = asyncio.Queue()
+
+    response = client.delete("/user/data", headers=ADA)
+    assert response.json() == {"deleted": 1, "skipped": 1}
+    assert sorted(main.analyses) == ["run1"]
+
+    async def publish_then_close():
+        await main._publish("run1", "verifying", claim=0)
+        await main.streams["run1"].put(None)
+        await main._saved("run1")
+
+    asyncio.run(publish_then_close())  # no KeyError: the run's dicts are still there
+    assert main.analyses["run1"]["stages"][0]["stage"] == "verifying"
+    main.streams.clear()

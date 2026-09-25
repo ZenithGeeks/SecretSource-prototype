@@ -607,12 +607,17 @@ async def patch_preferences(request: PreferencesPatch, user: str | None = Depend
 @app.delete("/user/data")
 async def delete_all_data(user: str | None = Depends(current_user)):
     """Every analysis (and researcher project) this user owns — Settings → Your data →
-    Delete all. The confirm dialog is the UI's job; this call is unconditional."""
-    ids = [analysis["id"] for analysis in visible_to(user)]
+    Delete all. The confirm dialog is the UI's job; this call is unconditional.
+
+    An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
+    indexing `analyses`/`streams`, so popping them here would make its next `_publish`
+    raise inside the task after this call already answered 200."""
+    mine = visible_to(user)
+    ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
     await asyncio.to_thread(store.delete_projects, user)
-    return {"deleted": len(ids)}
+    return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 
 def _avatar_path(user: str | None) -> Path | None:

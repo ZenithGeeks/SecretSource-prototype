@@ -326,6 +326,10 @@ export function AppearanceSection() {
   )
 }
 
+function papers(n: number): string {
+  return `${n} ${n === 1 ? 'paper' : 'papers'}`
+}
+
 function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
@@ -355,10 +359,14 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
     if (!window.confirm('Delete all uploaded papers? This removes the files and every check made on them. This cannot be undone.')) return
     setBusy(true)
     try {
-      await accountApi.deleteAllData()
+      const { deleted, skipped } = await accountApi.deleteAllData()
       await queryClient.invalidateQueries({ queryKey: ['researcher'] })
       await queryClient.invalidateQueries({ queryKey: ['analyses'] })
-      setNotice('Every uploaded paper was deleted.')
+      setNotice(
+        skipped > 0
+          ? `${papers(deleted)} deleted. ${papers(skipped)} still being checked ${skipped === 1 ? 'was' : 'were'} kept; delete again once ${skipped === 1 ? 'it finishes' : 'they finish'}.`
+          : 'Every uploaded paper was deleted.',
+      )
     } catch {
       setNotice('Delete failed — the papers are still there. Try again.')
     } finally {
