@@ -195,6 +195,21 @@ backend/
 If you change what a user sees, change `app/main.py` or `app/pipeline/`. The gateway is the
 only part the web app uses.
 
+## Profiling
+
+`py-spy` is installed in the gateway image so a slow or stuck request can be diagnosed on a
+live container, no restart or code change needed:
+
+```bash
+docker exec <gateway-container> py-spy dump --pid 1   # one snapshot of every thread's stack
+docker exec <gateway-container> py-spy top --pid 1     # live, updating view of what's using CPU
+```
+
+`py-spy dump` on a request that's hanging shows the exact call it's blocked on — this is what
+would have caught #224/#228 (`asyncio.to_thread` missing on a synchronous route) directly,
+instead of by reading `main.py` line by line. Needs `SYS_PTRACE` (docker-compose.yml grants it
+to the `gateway` service); without it py-spy fails with a permission error, not a hang.
+
 ## Tests
 
 The tests need `google-adk` and `pymupdf`, so run them inside the gateway image:
