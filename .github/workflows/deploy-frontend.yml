@@ -42,6 +42,15 @@ jobs:
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      # EXPERIMENT: blank these so the Vercel CLI can't tell it's running in GitHub Actions
+      # against a specific commit, testing whether that's what triggers its commit-author check.
+      CI: ""
+      GITHUB_ACTIONS: ""
+      GITHUB_SHA: ""
+      GITHUB_REF: ""
+      GITHUB_REPOSITORY: ""
+      GITHUB_ACTOR: ""
+      GITHUB_EVENT_NAME: ""
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
