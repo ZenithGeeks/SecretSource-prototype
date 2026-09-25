@@ -14,7 +14,7 @@ import { accountApi } from '../lib/accountApi'
 import { API_BASE } from '../lib/api'
 import { downloadText } from '../lib/csv'
 import { researcherApi } from '../lib/researcher'
-import { updateSettings, useSettings } from '../lib/settings'
+import { getSettings, updateSettings, useSettings } from '../lib/settings'
 import type { ThemeChoice } from '../lib/settings'
 import { authEnabled, supabase } from '../lib/supabase'
 import { useTeacherPreferences } from '../lib/teacherPreferences'
@@ -80,12 +80,17 @@ export function AccountSection() {
       return
     }
     setBusy(true)
+    // Optimistic local write, rolled back if the PATCH fails, the same contract as
+    // useSetSetting — otherwise the store would show the new photo while the server blob
+    // still had the old one, until the next open quietly reverted it.
+    const previous = getSettings().avatarUrl
     try {
       const { url } = await accountApi.uploadAvatar(file)
       updateSettings({ avatarUrl: url })
       await accountApi.patchPreferences({ avatarUrl: url })
       setNotice('')
     } catch {
+      updateSettings({ avatarUrl: previous })
       setNotice('The avatar could not be uploaded. Try again.')
     } finally {
       setBusy(false)
@@ -94,11 +99,14 @@ export function AccountSection() {
 
   const removeAvatar = async () => {
     setBusy(true)
+    const previous = getSettings().avatarUrl
     try {
       await accountApi.removeAvatar()
       updateSettings({ avatarUrl: '' })
       await accountApi.patchPreferences({ avatarUrl: '' })
     } catch {
+      // The file may already be gone; the url then fails to load and Avatar shows initials.
+      updateSettings({ avatarUrl: previous })
       setNotice('The avatar could not be removed. Try again.')
     } finally {
       setBusy(false)

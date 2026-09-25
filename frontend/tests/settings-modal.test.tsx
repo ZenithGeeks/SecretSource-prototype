@@ -12,7 +12,7 @@ import { SettingsModal } from '../src/components/SettingsModal'
 // Signed-out, no Supabase: request() then sends without a token instead of throwing
 // SignedOut, whatever a local .env says (the same env dependency as SCRUM-245).
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
-import { getSettings, greeting, resetSettings } from '../src/lib/settings'
+import { getSettings, greeting, resetSettings, updateSettings } from '../src/lib/settings'
 import { resetTeacherPreferences } from '../src/lib/teacherPreferences'
 import { resetTeacherStore } from '../src/lib/teacherStore'
 
@@ -237,5 +237,52 @@ describe('avatar image', () => {
     revoke.mockClear()
     unmount()
     expect(revoke).toHaveBeenCalledWith('blob:vitest') // and on unmount
+  })
+})
+
+describe('avatar upload and remove roll back like every other row', () => {
+  const stored = '/api/user/avatar/me?v=1'
+
+  /** A gateway where the file calls succeed, the preferences PATCH fails, and the avatar
+   * file itself is not there to fetch. */
+  function gateway() {
+    return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/user/preferences') && method === 'GET') return Promise.resolve(new Response('{}', { status: 200 }))
+      if (url.endsWith('/api/user/preferences') && method === 'PATCH') return Promise.resolve(new Response('down', { status: 500 }))
+      if (url.endsWith('/api/user/avatar') && method === 'POST') return Promise.resolve(new Response(JSON.stringify({ url: stored }), { status: 200 }))
+      if (url.endsWith('/api/user/avatar') && method === 'DELETE') return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }))
+      return Promise.resolve(new Response('no avatar', { status: 404 }))
+    })
+  }
+
+  test('a failed PATCH after a successful upload restores the previous avatarUrl and shows initials', async () => {
+    vi.stubGlobal('fetch', gateway())
+    const { container } = renderModal('researcher')
+    expect(getSettings().avatarUrl).toBe('')
+
+    const file = new File(['png'], 'me.png', { type: 'image/png' })
+    const picker = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(picker, { target: { files: [file] } })
+
+    expect(await screen.findByRole('status')).toHaveTextContent('could not be uploaded')
+    expect(getSettings().avatarUrl).toBe('') // rolled back, not left pointing at the new file
+    expect(screen.getByText('W')).toBeInTheDocument() // initials fallback
+    expect(screen.queryByRole('img', { name: 'Profile photo' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
+  })
+
+  test('a failed PATCH after a successful remove restores the previous avatarUrl and shows initials', async () => {
+    updateSettings({ avatarUrl: stored })
+    vi.stubGlobal('fetch', gateway())
+    renderModal('researcher')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('could not be removed')
+    expect(getSettings().avatarUrl).toBe(stored) // rolled back to what the server blob still has
+    expect(await screen.findByText('W')).toBeInTheDocument() // the file is gone, so initials
+    expect(screen.queryByRole('img', { name: 'Profile photo' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
   })
 })
