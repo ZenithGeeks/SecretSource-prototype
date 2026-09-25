@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from inspect import iscoroutinefunction
 from urllib.parse import quote
 
 import pytest
@@ -200,6 +201,13 @@ def test_google_disconnect_removes_the_connection_without_deleting_imported_data
     }
     assert repository.disconnected == ["teacher-a"]
     assert repository.deleted is False
+
+
+def test_analyze_submission_runs_on_the_event_loop():
+    """Break caught: the analysis route runs in FastAPI's worker thread without an event loop."""
+    from app.teacher.router import analyze_submission
+
+    assert iscoroutinefunction(analyze_submission)
 
 
 def test_grade_and_return_reports_partial_failure_after_grade_patch(teacher_client):

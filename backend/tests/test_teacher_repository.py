@@ -163,6 +163,31 @@ def test_connection_status_is_owner_scoped_and_omits_refresh_token_ciphertext():
     assert not hasattr(status, "refresh_token_ciphertext")
 
 
+def test_connection_status_includes_the_last_recorded_sync_details():
+    """Break caught: the connection-status route always reports an unsynced Classroom account."""
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    client.rows["teacher_google_connections"] = [
+        {
+            "owner": "teacher-a",
+            "google_subject": "subject-a",
+            "google_email": "a@example.test",
+            "scopes": ["openid"],
+            "last_synced_at": "2026-09-17T01:00:00Z",
+            "last_sync_status": "synced",
+            "last_sync_error": None,
+        }
+    ]
+
+    status = TeacherGoogleRepository(client).get_connection_status("teacher-a")
+
+    assert status is not None
+    assert status.last_synced_at == datetime(2026, 9, 17, 1, 0, tzinfo=UTC)
+    assert status.last_sync_status == "synced"
+    assert status.last_sync_error is None
+
+
 def test_disconnect_deletes_only_the_requested_owner_connection():
     """Break caught: disconnect leaves credentials behind or deletes another teacher's connection."""
     from app.teacher.models import TeacherGoogleConnection

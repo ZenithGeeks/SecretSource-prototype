@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import timedelta
 from typing import Any
 
@@ -360,11 +359,15 @@ def _essay_or_error(
 
 @router.get("/google/connect")
 def google_connect(
+    login_hint: str | None = Query(None, alias="loginHint"),
+    switch_account: bool = Query(False, alias="switch"),
     owner: str = Depends(require_teacher_user),
     service: TeacherGoogleOAuthService = Depends(get_oauth_service),
 ) -> dict[str, str]:
     try:
-        authorization = service.start_authorization(owner)
+        authorization = service.start_authorization(
+            owner, login_hint=login_hint, switch_account=switch_account
+        )
     except Exception as error:
         raise HTTPException(status_code=502, detail="could not start Google OAuth") from error
     return {"authorizationUrl": authorization.url}
@@ -387,7 +390,7 @@ def google_callback(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Google OAuth callback failed") from exc
-    return RedirectResponse(os.getenv("TEACHER_GOOGLE_SUCCESS_REDIRECT", "/"), status_code=303)
+    return RedirectResponse(config.TEACHER_GOOGLE_SUCCESS_REDIRECT, status_code=303)
 
 
 @router.get("/google/status")
@@ -569,7 +572,7 @@ def assignment_detail(
 
 
 @router.post("/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/analyze")
-def analyze_submission(
+async def analyze_submission(
     course_id: str,
     assignment_id: str,
     student_id: str,

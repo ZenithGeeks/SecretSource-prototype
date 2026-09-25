@@ -121,6 +121,20 @@ def test_start_authorization_persists_only_a_hashed_owner_bound_pkce_state():
     assert authorization.state not in vars(saved).values()
 
 
+def test_start_authorization_forwards_login_hint_and_account_switch_prompt():
+    """Break caught: the account selected in the Teacher UI is silently ignored by Google OAuth."""
+    now = datetime(2026, 9, 17, 4, 0, tzinfo=UTC)
+    service, _ = oauth_service(FakeRepository(), FakeGoogleTransport(None), Fernet.generate_key(), now)
+
+    authorization = service.start_authorization(
+        "teacher-42", login_hint="other@example.test", switch_account=True
+    )
+
+    query = parse_qs(urlparse(authorization.url).query)
+    assert query["login_hint"] == ["other@example.test"]
+    assert query["prompt"] == ["consent select_account"]
+
+
 def test_callback_encrypts_refresh_token_and_returns_only_safe_connection_data():
     """Break caught: persisting plaintext refresh credentials or returning them to callers."""
     from app.teacher.models import GoogleTokenResponse

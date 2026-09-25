@@ -362,7 +362,7 @@ const mockTeacherApi = {
 
 export const teacherRemoteEnabled = import.meta.env.VITE_TEACHER_BACKEND === 'remote'
 
-const remoteTeacherApi = {
+export const createRemoteTeacherApi = () => ({
   ...mockTeacherApi,
   getClasses: () => request<TeacherClass[]>('/teacher/classes'),
   getImportableClasses: () => request<TeacherClass[]>('/teacher/classes/importable'),
@@ -371,8 +371,47 @@ const remoteTeacherApi = {
   getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),
   getAssignmentDetail: (courseId: string, assignmentId: string) =>
     request<TeacherAssignmentDetail>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}`),
+  getEssayCheck: (assignmentId: string, studentId: string, courseId?: string) =>
+    courseId
+      ? request<EssayCheck>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/essay-check`)
+      : Promise.resolve(null),
+  updateProfessorReview: (input: UpdateProfessorReviewRequest) => {
+    if (!input.courseId) throw new Error('courseId is required for a remote professor review')
+    const assignmentId = normalizedAssignmentId(input)
+    return request<EssayCheck>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(assignmentId)}/essay-check/reviews/${encodeURIComponent(input.reviewId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: input.studentId, outcome: input.outcome, note: input.note }),
+      },
+    )
+  },
+  saveFeedback: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+    request<EssayCheck>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/essay-check/feedback`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+      },
+    ),
+  sendFeedback: (input: SendFeedbackRequest) => {
+    if (!input.courseId) throw new Error('courseId is required for remote feedback')
+    const assignmentId = normalizedAssignmentId(input)
+    return request<FeedbackDelivery>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(input.studentId)}/essay-check/feedback/send`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: input.body, citationIds: input.citationIds }),
+      },
+    )
+  },
   getGoogleConnection: () => request<{ connected: boolean; email: string | null }>('/teacher/google/status'),
   startGoogleConnection: (email?: string, switchAccount = false) => request<{ authorizationUrl: string }>(`/teacher/google/connect?${new URLSearchParams({ ...(email ? { loginHint: email } : {}), ...(switchAccount ? { switch: 'true' } : {}) })}`),
-}
+})
+
+const remoteTeacherApi = createRemoteTeacherApi()
 
 export const teacherApi = teacherRemoteEnabled ? remoteTeacherApi : mockTeacherApi

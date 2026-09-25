@@ -6,6 +6,7 @@
 import os
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -131,14 +132,12 @@ TEACHER_GOOGLE_CLIENT_ID = os.getenv("TEACHER_GOOGLE_CLIENT_ID", "").strip()
 TEACHER_GOOGLE_CLIENT_SECRET = os.getenv("TEACHER_GOOGLE_CLIENT_SECRET", "").strip()
 TEACHER_GOOGLE_REDIRECT_URI = os.getenv("TEACHER_GOOGLE_REDIRECT_URI", "").strip()
 TEACHER_GOOGLE_ENCRYPTION_KEY = os.getenv("TEACHER_GOOGLE_ENCRYPTION_KEY", "").strip()
+TEACHER_GOOGLE_SUCCESS_REDIRECT = os.getenv("TEACHER_GOOGLE_SUCCESS_REDIRECT", "").strip() or "/"
 TEACHER_GOOGLE_SCOPES = _env_scopes("TEACHER_GOOGLE_SCOPES", _DEFAULT_TEACHER_GOOGLE_SCOPES)
 TEACHER_GOOGLE_STATE_TTL_SECONDS = _env_int("TEACHER_GOOGLE_STATE_TTL_SECONDS", 600, minimum=1)
 TEACHER_GOOGLE_RETRY_ATTEMPTS = _env_int("TEACHER_GOOGLE_RETRY_ATTEMPTS", 3, minimum=1)
 TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS = _env_float(
     "TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS", 0.5, minimum=0.0
-)
-TEACHER_GOOGLE_REQUEST_TIMEOUT_SECONDS = _env_float(
-    "TEACHER_GOOGLE_REQUEST_TIMEOUT_SECONDS", 30.0, minimum=0.1
 )
 
 
@@ -153,6 +152,8 @@ def validate_teacher_google_settings() -> None:
         "TEACHER_GOOGLE_CLIENT_SECRET": TEACHER_GOOGLE_CLIENT_SECRET,
         "TEACHER_GOOGLE_REDIRECT_URI": TEACHER_GOOGLE_REDIRECT_URI,
         "TEACHER_GOOGLE_ENCRYPTION_KEY": TEACHER_GOOGLE_ENCRYPTION_KEY,
+        "SUPABASE_URL": SUPABASE_URL,
+        "SUPABASE_SERVICE_ROLE_KEY": SUPABASE_SERVICE_ROLE_KEY,
     }
     missing = [name for name, value in required.items() if not value]
     if not TEACHER_GOOGLE_SCOPES:
@@ -160,6 +161,10 @@ def validate_teacher_google_settings() -> None:
     if missing:
         names = ", ".join(missing)
         raise ValueError(f"TEACHER_GOOGLE_ENABLED is true but required settings are missing: {names}")
+    try:
+        Fernet(TEACHER_GOOGLE_ENCRYPTION_KEY.encode())
+    except (TypeError, ValueError) as error:
+        raise ValueError("TEACHER_GOOGLE_ENCRYPTION_KEY must be a valid Fernet key") from error
 
 
 validate_teacher_google_settings()

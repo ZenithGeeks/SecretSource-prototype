@@ -92,11 +92,11 @@ default".
 | `TEACHER_GOOGLE_CLIENT_SECRET` | empty | Google OAuth web-client secret; server-only |
 | `TEACHER_GOOGLE_REDIRECT_URI` | empty | exact allowlisted OAuth callback |
 | `TEACHER_GOOGLE_ENCRYPTION_KEY` | empty | Fernet key used to encrypt stored refresh tokens; server-only |
+| `TEACHER_GOOGLE_SUCCESS_REDIRECT` | `/` | local teacher page to open after a successful OAuth callback |
 | `TEACHER_GOOGLE_SCOPES` | built-in minimum | comma- or whitespace-separated OAuth scope override |
 | `TEACHER_GOOGLE_STATE_TTL_SECONDS` | `600` | lifetime of one-time OAuth state/PKCE records |
 | `TEACHER_GOOGLE_RETRY_ATTEMPTS` | `3` | bounded attempts for transient Google API failures |
 | `TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS` | `0.5` | initial retry backoff |
-| `TEACHER_GOOGLE_REQUEST_TIMEOUT_SECONDS` | `30` | Google API request timeout |
 
 The service role key can read and write all data. Keep it on the server and never put it in
 the frontend or in git.

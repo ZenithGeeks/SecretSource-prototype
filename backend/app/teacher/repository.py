@@ -123,7 +123,10 @@ class TeacherGoogleRepository:
     def get_connection_status(self, owner: str) -> ConnectedTeacher | None:
         rows = (
             self._client.table("teacher_google_connections")
-            .select("owner, google_subject, google_email, scopes")
+            .select(
+                "owner, google_subject, google_email, scopes, last_synced_at, "
+                "last_sync_status, last_sync_error"
+            )
             .eq("owner", owner)
             .limit(1)
             .execute()
@@ -137,6 +140,9 @@ class TeacherGoogleRepository:
             google_subject=row["google_subject"],
             google_email=row.get("google_email"),
             scopes=tuple(row.get("scopes") or ()),
+            last_synced_at=_datetime_or_none(row.get("last_synced_at")),
+            last_sync_status=row.get("last_sync_status"),
+            last_sync_error=row.get("last_sync_error"),
         )
 
     def disconnect(self, owner: str) -> bool:

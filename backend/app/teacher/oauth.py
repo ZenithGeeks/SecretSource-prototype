@@ -128,7 +128,9 @@ class TeacherGoogleOAuthService:
         self._settings = settings
         self._now = now or (lambda: datetime.now(UTC))
 
-    def start_authorization(self, owner: str) -> AuthorizationStart:
+    def start_authorization(
+        self, owner: str, *, login_hint: str | None = None, switch_account: bool = False
+    ) -> AuthorizationStart:
         state = secrets.token_urlsafe(32)
         verifier = secrets.token_urlsafe(64)
         now = self._now()
@@ -141,20 +143,21 @@ class TeacherGoogleOAuthService:
                 expires_at=now + self._settings.state_ttl,
             )
         )
-        query = urlencode(
-            {
+        parameters = {
                 "client_id": self._settings.client_id,
                 "redirect_uri": self._settings.redirect_uri,
                 "response_type": "code",
                 "scope": " ".join(self._settings.scopes),
                 "access_type": "offline",
-                "prompt": "consent",
+                "prompt": "consent select_account" if switch_account else "consent",
                 "include_granted_scopes": "true",
                 "code_challenge": _pkce_challenge(verifier),
                 "code_challenge_method": "S256",
                 "state": state,
-            }
-        )
+        }
+        if login_hint:
+            parameters["login_hint"] = login_hint
+        query = urlencode(parameters)
         return AuthorizationStart(url=f"{GOOGLE_AUTHORIZATION_URL}?{query}", state=state)
 
     def complete_callback(self, *, state: str, code: str) -> ConnectedTeacher:
