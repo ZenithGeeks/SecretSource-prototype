@@ -9,6 +9,10 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { getSettings, resetSettings } from '../src/lib/settings'
 import { usePreferencesSync, useSetSetting } from '../src/lib/useAccountSettings'
 
+// Signed-out, no Supabase: request() sends without a token instead of throwing SignedOut,
+// whatever a local .env says (SCRUM-245 / #239).
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
