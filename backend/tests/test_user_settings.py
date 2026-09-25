@@ -106,3 +106,35 @@ def test_a_re_upload_replaces_the_old_file_instead_of_stacking(client):
     client.post("/user/avatar", headers=ADA, files={"file": ("a.png", b"one", "image/png")})
     client.post("/user/avatar", headers=ADA, files={"file": ("b.jpg", b"two", "image/jpeg")})
     assert client.get("/user/avatar/me", headers=ADA).content == b"two"
+
+
+def test_concurrent_patches_to_different_keys_both_survive(client, monkeypatch):
+    """Two PATCHes in flight at once must not lose each other's key. The read step is slowed
+    so both requests are guaranteed to interleave: without a lock around load→merge→save,
+    both read `{}` and the last save wins, dropping the other key."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    real_load = main.store.load_preferences
+
+    def slow_load(owner):
+        current = real_load(owner)
+        time.sleep(0.2)  # on a worker thread, so the other request's handler can run meanwhile
+        return current
+
+    monkeypatch.setattr(main.store, "load_preferences", slow_load)
+
+    def patch(key, value):
+        return client.patch("/user/preferences", headers=ADA, json={"patch": {key: value}})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(patch, "theme", "Dark")
+        second = pool.submit(patch, "weeklyDigest", False)
+        assert first.result().status_code == 200
+        assert second.result().status_code == 200
+
+    monkeypatch.setattr(main.store, "load_preferences", real_load)
+    assert client.get("/user/preferences", headers=ADA).json() == {
+        "theme": "Dark",
+        "weeklyDigest": False,
+    }

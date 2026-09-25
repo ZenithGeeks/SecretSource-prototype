@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -572,6 +573,24 @@ class PreferencesPatch(BaseModel):
     patch: dict[str, Any]
 
 
+# patch_preferences is a read-modify-write of the whole blob. Two PATCHes for different keys
+# in flight at once (two settings changed within one round trip) could both read the same
+# `current`, and the later save would silently drop the earlier key. Serialising the
+# load→merge→save keeps both. It runs on a worker thread (the store calls block), so this is
+# a threading.Lock, held only for that section. This assumes a single gateway process
+# (uvicorn.run(app) below); a multi-instance deploy would need the merge in SQL instead
+# (SQLite json_patch, a Supabase RPC doing `data || excluded.data`).
+_preferences_lock = threading.Lock()
+
+
+def _merge_preferences(user: str | None, patch: dict[str, Any]) -> dict[str, Any]:
+    with _preferences_lock:
+        current = store.load_preferences(user) or {}
+        merged = {**current, **patch}
+        store.save_preferences(user, merged)
+    return merged
+
+
 @app.get("/user/preferences")
 async def get_preferences(user: str | None = Depends(current_user)):
     """The signed-in user's stored settings patch — checking/notification/appearance
@@ -582,10 +601,7 @@ async def get_preferences(user: str | None = Depends(current_user)):
 
 @app.patch("/user/preferences")
 async def patch_preferences(request: PreferencesPatch, user: str | None = Depends(current_user)):
-    current = await asyncio.to_thread(store.load_preferences, user) or {}
-    merged = {**current, **request.patch}
-    await asyncio.to_thread(store.save_preferences, user, merged)
-    return merged
+    return await asyncio.to_thread(_merge_preferences, user, request.patch)
 
 
 @app.delete("/user/data")
