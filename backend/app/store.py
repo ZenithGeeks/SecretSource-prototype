@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS projects (
 )
 """
 
+# One row per user (owner "" when login is off, the same shared space analyses/projects use
+# for their own NULL — a plain TEXT key here instead, see _pref_key below).
+PREFERENCES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS preferences (
+    owner TEXT PRIMARY KEY,
+    data  TEXT NOT NULL
+)
+"""
+
 _db: sqlite3.Connection | None = None
 _db_path: str | None = None
 # One connection for the whole process, used by one thread at a time. check_same_thread=False
@@ -83,6 +92,7 @@ def _connect() -> sqlite3.Connection:
         _db.execute(SCHEMA)
         _db.execute(SOURCES_SCHEMA)
         _db.execute(PROJECTS_SCHEMA)
+        _db.execute(PREFERENCES_SCHEMA)
         _db_path = path
     return _db
 
@@ -183,4 +193,47 @@ def load_projects(owner: str | None) -> list[dict]:
             "SELECT data FROM projects WHERE owner IS ?", (owner,)
         ).fetchall()
     return [json.loads(row["data"]) for row in rows]
+
+
+def delete_projects(owner: str | None) -> None:
+    """Every project of one owner, for account-level "delete all" (#194's fix elsewhere reuses
+    this for researcher; writer/teacher have no projects, so this is a no-op for them)."""
+    if _use_supabase():
+        query = _supabase().table("projects").delete()
+        query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
+        query.execute()
+        return
+    with _sqlite() as database:
+        database.execute("DELETE FROM projects WHERE owner IS ?", (owner,))
+        database.commit()
+
+
+# Account preferences: one JSON blob per user (owner "" when login is off — a plain TEXT key
+# side-steps SQL's "every NULL is distinct" rule, which would break the upsert below).
+def _pref_key(owner: str | None) -> str:
+    return owner or ""
+
+
+def save_preferences(owner: str | None, data: dict) -> None:
+    key = _pref_key(owner)
+    if _use_supabase():
+        _supabase().table("preferences").upsert({"owner": key, "data": data}).execute()
+        return
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO preferences (owner, data) VALUES (?, ?) "
+            "ON CONFLICT(owner) DO UPDATE SET data = excluded.data",
+            (key, json.dumps(data)),
+        )
+        database.commit()
+
+
+def load_preferences(owner: str | None) -> dict | None:
+    key = _pref_key(owner)
+    if _use_supabase():
+        rows = _supabase().table("preferences").select("data").eq("owner", key).limit(1).execute().data
+        return rows[0]["data"] if rows else None
+    with _sqlite() as database:
+        row = database.execute("SELECT data FROM preferences WHERE owner = ?", (key,)).fetchone()
+    return json.loads(row["data"]) if row else None
 

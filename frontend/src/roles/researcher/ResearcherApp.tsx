@@ -16,6 +16,7 @@ import type { SectionJump } from '../../components/AnalysisView'
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { HistoryList } from '../../components/HistoryList'
+import { SettingsModal } from '../../components/SettingsModal'
 import { AnalysisContents } from '../../components/TableOfContents'
 import type { ContentsRow } from '../../lib/outline'
 import { useAnalyses } from '../../lib/useAnalysis'
@@ -24,12 +25,11 @@ import { Graph } from './screens/Graph'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
-import { Settings as SettingsScreen } from './screens/Settings'
 
 type NavKey = 'home' | 'library' | 'graph' | 'history'
-// Settings and field-consensus are screen-only — reachable and deep-linkable, but with no nav
-// entry of their own. Settings is account-level, opened from the profile menu (as in Figma).
-export type ResearcherScreen = NavKey | 'field-consensus' | 'settings'
+// field-consensus is screen-only — reachable and deep-linkable, but with no nav entry of its
+// own. Settings is a modal (Figma 22), opened from the profile menu, not a screen.
+export type ResearcherScreen = NavKey | 'field-consensus'
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
@@ -38,15 +38,13 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'history', label: 'History', icon: HistoryIcon },
 ]
 
-// Which nav item lights for each screen; null means none (field-consensus lights Library,
-// Settings lights nothing — the profile button carries its own active state instead).
+// Which nav item lights for each screen; null means none (field-consensus lights Library).
 const NAV_FOR: Record<ResearcherScreen, NavKey | null> = {
   home: 'home',
   library: 'library',
   'field-consensus': 'library',
   graph: 'graph',
   history: 'history',
-  settings: null,
 }
 
 function initialScreen(): ResearcherScreen {
@@ -80,6 +78,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [section, setSection] = useState<string | null>(null) // claims narrowed to one section
   const [current, setCurrent] = useState<string | null>(null) // section open in the page viewer
   const [jump, setJump] = useState<SectionJump | null>(null) // section page to open
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const analyses = useAnalyses()
 
   useEffect(() => syncScreenParams(screen, selected), [screen, selected])
@@ -115,8 +114,8 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Researcher"
       roleIcon={Microscope}
       onChangeRole={onChangeRole}
-      onOpenSettings={() => navigate('settings')}
-      settingsActive={screen === 'settings'}
+      onOpenSettings={() => setSettingsOpen(true)}
+      settingsActive={settingsOpen}
       // Graph is a whole-screen canvas, so give it the wide shell too (History uses it for the
       // page viewer).
       wide={wide || screen === 'graph'}
@@ -148,7 +147,12 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
           onCurrentSection={setCurrent}
         />
       )}
-      {screen === 'settings' && <SettingsScreen onChangeRole={onChangeRole} />}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        currentRole="researcher"
+        onSwitchRole={onChangeRole ?? (() => {})}
+      />
     </AppShell>
   )
 }

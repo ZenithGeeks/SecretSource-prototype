@@ -1,33 +1,28 @@
 import { useSyncExternalStore } from 'react'
 
+import { pickMatching } from './utils'
+
+// Checking defaults (citation style, strictness, check-on-add, flag-quotes) and notifications
+// (weekly digest, digest day, check-finished) moved to the shared lib/settings.ts Settings
+// store when Settings became one modal shared by every role (Figma 22): they were duplicate
+// state with no other reader. What's left here is genuinely teacher-only — the "Class and
+// marking" tab, which has no equivalent for writer or researcher.
 export type TeacherPreferences = {
-  citationStyle: string
-  matchStrictness: string
-  checkOnSubmit: boolean
-  flagQuotes: boolean
   defaultClassId: string
   hideStudentNames: boolean
   studentReportVisibility: boolean
   sendReportsAs: string
-  weeklyDigest: boolean
-  digestDay: string
-  batchFinishedNotification: boolean
 }
 
 export const TEACHER_PREFERENCES_KEY = 'secretsource.teacher-settings'
 
-const DEFAULTS: TeacherPreferences = {
-  citationStyle: 'APA 7th',
-  matchStrictness: 'Balanced',
-  checkOnSubmit: true,
-  flagQuotes: true,
+/** Exported so the Settings modal's server sync (lib/useAccountSettings.ts) can tell which
+ * keys of a fetched preferences blob belong in this store. */
+export const TEACHER_PREFERENCES_DEFAULTS: TeacherPreferences = {
   defaultClassId: 'class-literary-2b',
   hideStudentNames: false,
   studentReportVisibility: true,
   sendReportsAs: 'Wittawat S.',
-  weeklyDigest: true,
-  digestDay: 'Monday',
-  batchFinishedNotification: true,
 }
 
 const listeners = new Set<() => void>()
@@ -40,24 +35,14 @@ function storage(): Storage | null {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function load(): TeacherPreferences {
   const saved = storage()?.getItem(TEACHER_PREFERENCES_KEY)
-  if (!saved) return { ...DEFAULTS }
+  if (!saved) return { ...TEACHER_PREFERENCES_DEFAULTS }
   try {
     const parsed: unknown = JSON.parse(saved)
-    if (!isRecord(parsed)) return { ...DEFAULTS }
-    const next = { ...DEFAULTS }
-    for (const key of Object.keys(DEFAULTS) as (keyof TeacherPreferences)[]) {
-      const value = parsed[key]
-      if (typeof value === typeof DEFAULTS[key]) next[key] = value as never
-    }
-    return next
+    return { ...TEACHER_PREFERENCES_DEFAULTS, ...pickMatching(TEACHER_PREFERENCES_DEFAULTS, parsed) }
   } catch {
-    return { ...DEFAULTS }
+    return { ...TEACHER_PREFERENCES_DEFAULTS }
   }
 }
 
@@ -79,7 +64,7 @@ export function updateTeacherPreferences(patch: Partial<TeacherPreferences>): Te
 }
 
 export function resetTeacherPreferences(): void {
-  preferences = { ...DEFAULTS }
+  preferences = { ...TEACHER_PREFERENCES_DEFAULTS }
   try {
     storage()?.removeItem(TEACHER_PREFERENCES_KEY)
   } catch {
