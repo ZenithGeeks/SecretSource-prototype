@@ -9,30 +9,32 @@
  * amber ring, so a reader can see which verdicts rest on a source outside the index. We never
  * say Scopus: none of those services can tell us whether a work is in it.
  *
- * Rendered with Cytoscape + fcose. Data from useKnowledgeGraph, built from every paper the
+ * Rendered with Cytoscape + cola (a deterministic settle-then-stop layout). Data from
+ * useKnowledgeGraph, built from every paper the
  * signed-in user analysed. Cytoscape's style parser rejects oklch(), so colours are concrete
  * hex mirroring the index.css tokens, in both themes.
  */
 
 import cytoscape from 'cytoscape'
-import fcose from 'cytoscape-fcose'
-import { Bookmark, Copy, ExternalLink, FileText, Search } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import cola from 'cytoscape-cola'
+import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
 import { reasonText } from '../../../lib/api'
-import type { GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import { useSettings } from '../../../lib/settings'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
-let _fcoseReady = false
-if (!_fcoseReady) {
+let _colaReady = false
+if (!_colaReady) {
   try {
-    cytoscape.use(fcose)
+    cytoscape.use(cola)
   } catch {
     /* already registered */
   }
-  _fcoseReady = true
+  _colaReady = true
 }
 
 type Palette = {
@@ -58,14 +60,19 @@ const DARK: Palette = {
   insufficient: '#D8B45F',
 }
 
+/** Follows the app theme from `useSettings()`, the same source the rest of the app reads: the
+ * Settings choice wins, and "Match system" falls back to the OS preference. Cytoscape can't read
+ * CSS variables, so the graph mirrors that decision to pick its hex palette. */
 function usePalette(): { pal: Palette; dark: boolean } {
-  const [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const { theme } = useSettings()
+  const [sysDark, setSysDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = (e: MediaQueryListEvent) => setDark(e.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
+    const update = (e: MediaQueryListEvent) => setSysDark(e.matches)
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
   }, [])
+  const dark = theme === 'Dark' || (theme === 'Match system' && sysDark)
   return { pal: dark ? DARK : LIGHT, dark }
 }
 
@@ -85,6 +92,67 @@ function clusterColors(pal: Palette): string[] {
   return [pal.accent, pal.supports, pal.insufficient, pal.inkMuted, pal.refutes]
 }
 
+/** A short node label for the canvas — the full title would overlap everything. Cuts on a word
+ * boundary near the limit so it does not end mid-word. The full text stays in `data(label)` for
+ * the hover tooltip and the detail panel. */
+function truncate(text: string, max = 22): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max - 8 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
+/** How a claim stands overall — same precedence as backend standing(): contradicted, then
+ * silent, then backed, else no verdict yet. (Silent before backed, so one silent + one backing
+ * source reads "silent" here as it does on the claim cards and stat tiles.) */
+function claimStanding(edges: GraphEdge[]): GraphRelation {
+  if (edges.some((e) => e.relation === 'contradicts')) return 'contradicts'
+  if (edges.some((e) => e.relation === 'silent')) return 'silent'
+  if (edges.some((e) => e.relation === 'backs')) return 'backs'
+  return 'asserts'
+}
+
+/** The canvas label for a paper node: its short title with a two-digit year ("ColBERT ’20"). */
+function paperShort(node: { label: string; year?: string }): string {
+  return `${truncate(node.label, 18)}${node.year ? ` ${node.year}` : ''}`
+}
+
+type Insight = { key: string; count: number; label: string; icon: Icon; tone: string }
+type Icon = ComponentType<{ className?: string }>
+
+/** The four headline findings the graph exists to surface, all read off the returned graph so
+ * no extra endpoint is needed: claims that rest on one source, citation cycles between analysed
+ * papers, claims no cited work actually backs, and claims every cited work agrees on. */
+function computeInsights(graph: KnowledgeGraph): Insight[] {
+  const cited: Record<string, GraphEdge[]> = {}
+  for (const e of graph.edges) if (e.relation !== 'asserts') (cited[e.target] ??= []).push(e)
+
+  let singleSource = 0
+  let noPrimary = 0
+  let agreed = 0
+  for (const node of graph.nodes) {
+    if (node.kind !== 'claim') continue
+    const sources = cited[node.id] ?? []
+    if (sources.length === 1) singleSource++
+    if (sources.length > 0 && !sources.some((e) => e.relation === 'backs')) noPrimary++
+    if (sources.length > 0 && sources.every((e) => e.relation === 'backs')) agreed++
+  }
+
+  // A→B and B→A both present among the citation links between analysed papers.
+  const directed = new Set(graph.paperEdges.filter((e) => e.cites).map((e) => `${e.a}>${e.b}`))
+  const pairs = new Set<string>()
+  for (const e of graph.paperEdges) {
+    if (e.cites && directed.has(`${e.b}>${e.a}`)) pairs.add([e.a, e.b].sort().join('~'))
+  }
+
+  return [
+    { key: 'single', count: singleSource, label: 'claims rest on a single source', icon: AlertCircle, tone: 'text-insufficient' },
+    { key: 'circular', count: pairs.size, label: 'circular citation (A cites B cites A)', icon: GitFork, tone: 'text-accent' },
+    { key: 'no-primary', count: noPrimary, label: 'claims with no primary evidence', icon: HelpCircle, tone: 'text-insufficient' },
+    { key: 'agreed', count: agreed, label: 'claims every paper agrees on', icon: CheckCircle2, tone: 'text-supports' },
+  ]
+}
+
 type View = 'claims' | 'papers'
 type PapersFilter = 'all' | 'strong' | 'citations'
 
@@ -95,31 +163,50 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
     {
       selector: 'node',
       style: {
-        label: 'data(label)', color: ink, 'font-size': 11,
+        color: ink, 'font-size': 11,
         'font-family': 'ui-sans-serif, system-ui, sans-serif',
         'text-wrap': 'wrap', 'text-valign': 'center', 'text-halign': 'center',
       },
     },
     {
+      // A claim is a fixed-size dot (the full sentence would overlap everything). Its colour is
+      // the claim's overall standing; the sentence shows on hover and in the detail panel.
       selector: 'node[kind="claim"]',
       style: {
-        shape: 'round-rectangle', 'background-color': surface, 'border-width': 1,
-        'border-color': border, 'text-max-width': '150px', width: 'label', height: 'label',
-        padding: '10px',
+        shape: 'ellipse', width: 16, height: 16, label: '', 'border-width': 1.5,
+        'border-color': surface, 'background-color': inkMuted,
       },
     },
+    { selector: 'node[standing="backs"]', style: { 'background-color': pal.supports } },
+    { selector: 'node[standing="contradicts"]', style: { 'background-color': pal.refutes } },
+    { selector: 'node[standing="silent"]', style: { 'background-color': pal.insufficient } },
     {
       selector: 'node[kind="paper"]',
       style: {
-        shape: 'ellipse', color: inkMuted, 'font-size': 10, 'text-valign': 'bottom',
-        'text-margin-y': 5, 'border-width': 1.5, 'border-color': accent,
-        'background-color': accentSoft,
-        // Papers view sizes by how connected a paper is; claims view is uniform.
-        width: view === 'papers' ? ('mapData(weight, 1, 5, 26, 48)' as unknown as number) : 30,
-        height: view === 'papers' ? ('mapData(weight, 1, 5, 26, 48)' as unknown as number) : 30,
+        // A short label sits below the node on a surface chip, so it stays readable over edges
+        // and neighbours; the full title is on hover and in the panel.
+        label: 'data(short)', shape: 'ellipse', color: ink, 'font-size': 10,
+        'text-valign': 'bottom', 'text-margin-y': 5, 'text-max-width': '120px',
+        'text-background-color': surface, 'text-background-opacity': 0.85,
+        'text-background-padding': '2px', 'text-background-shape': 'roundrectangle',
+        'border-width': 1.5, 'border-color': accent, 'background-color': accentSoft,
+        // Bigger = more connected (Obsidian-style): sized by how many claims/works touch it.
+        width: 'mapData(weight, 1, 8, 26, 54)' as unknown as number,
+        height: 'mapData(weight, 1, 8, 26, 54)' as unknown as number,
       },
     },
-    { selector: 'edge', style: { 'curve-style': 'bezier', width: 2, 'target-arrow-shape': 'none', opacity: 0.9 } },
+    // Curved edges (a gentle bow) read better than straight lines when many meet at one paper.
+    {
+      selector: 'edge',
+      style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distances': '50',
+        'control-point-weights': '0.5',
+        width: 2,
+        'target-arrow-shape': 'none',
+        opacity: 0.9,
+      },
+    },
     // Claims view: colour by relation.
     { selector: 'edge[relation="backs"]', style: { 'line-color': pal.supports } },
     { selector: 'edge[relation="contradicts"]', style: { 'line-color': pal.refutes } },
@@ -154,12 +241,38 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
   return base
 }
 
-const LAYOUT = { name: 'fcose', animate: false, randomize: true, fit: true, nodeSeparation: 150, idealEdgeLength: 140, padding: 36 } as const
+// Deterministic settle-then-stop layout. Nodes start from a seeded circle (see seedPosition,
+// applied in the elements) and cola runs a finite, non-random simulation, so every reload lays
+// the graph out identically (SCRUM-182's "reload gives the same layout"). Nodes stay draggable
+// once it settles; the initial fit runs on the layout's `layoutstop`, not a timer.
+const LAYOUT = {
+  name: 'cola', animate: false, infinite: false, fit: false, randomize: false,
+  nodeDimensionsIncludeLabels: true, edgeLength: 170, nodeSpacing: 14, handleDisconnected: true,
+} as const
 
-function StatTile({ count, label }: { count: number; label: string }) {
+/** A circle position for node i of n — where the physics simulation starts each node. */
+function seedPosition(i: number, n: number): { x: number; y: number } {
+  const radius = Math.max(340, 16 * n)
+  const angle = (2 * Math.PI * i) / Math.max(1, n)
+  return { x: Math.round(radius * Math.cos(angle)), y: Math.round(radius * Math.sin(angle)) }
+}
+
+/** Fit the whole graph, but never so far out that it reads tiny: below 0.9 the labels blur, so
+ * clamp to 0.9 and centre and let the user pan or press Fit. */
+function fitReadable(cy: cytoscape.Core): void {
+  cy.resize()
+  cy.fit(undefined, 40)
+  if (cy.zoom() < 0.9) {
+    cy.zoom({ level: 0.9, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+  }
+}
+
+function InsightTile({ insight }: { insight: Insight }) {
+  const { count, label, icon: Icon, tone } = insight
   return (
-    <div className="flex flex-1 items-center gap-2 rounded-xl border border-border-subtle bg-surface px-3 py-2.5">
-      <span className="font-serif text-lg font-semibold text-ink">{count}</span>
+    <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-border-subtle bg-surface px-3.5 py-2.5">
+      <Icon className={cn('size-4 shrink-0', tone)} />
+      <span className={cn('font-serif text-lg font-semibold', tone)}>{count}</span>
       <span className="text-xs text-ink-muted">{label}</span>
     </div>
   )
@@ -179,25 +292,46 @@ function NotIndexedKey({ pal, count }: { pal: Palette; count: number }) {
   )
 }
 
+/** Two rows, as in Figma: what a claim dot's colour means, then what an edge's style means. */
 function ClaimsLegend({ pal, notIndexed }: { pal: Palette; notIndexed: number }) {
-  const items: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent', 'unchecked']
+  // Claim dot colours mirror node[standing] in the stylesheet; a grey dot is a claim no cited
+  // work has answered yet.
+  const dots: [GraphRelation, string][] = [
+    ['contradicts', 'contradicted'],
+    ['backs', 'backed'],
+    ['silent', 'silent'],
+    ['asserts', 'no verdict yet'],
+  ]
+  const lines: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent', 'unchecked']
   const lined = (r: GraphRelation) => r === 'asserts' || r === 'unchecked'
+  const row = 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur'
   return (
-    <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
-      {items.map((r) => (
-        <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted">
-          <span
-            className={cn(
-              'inline-block h-0.5 w-5',
-              r === 'asserts' && 'border-t border-dashed',
-              r === 'unchecked' && 'border-t-2 border-dotted',
-            )}
-            style={lined(r) ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
-          />
-          {RELATION_LABEL[r]}
-        </span>
-      ))}
-      <NotIndexedKey pal={pal} count={notIndexed} />
+    <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-1.5">
+      <div className={row}>
+        <span className="text-xs font-medium text-ink">claim</span>
+        {dots.map(([rel, label]) => (
+          <span key={label} className="flex items-center gap-1.5 text-xs text-ink-muted">
+            <span className="size-2.5 rounded-full" style={{ backgroundColor: relationColor(pal, rel) }} />
+            {label}
+          </span>
+        ))}
+      </div>
+      <div className={row}>
+        {lines.map((r) => (
+          <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted">
+            <span
+              className={cn(
+                'inline-block h-0.5 w-5',
+                r === 'asserts' && 'border-t border-dashed',
+                r === 'unchecked' && 'border-t-2 border-dotted',
+              )}
+              style={lined(r) ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
+            />
+            {RELATION_LABEL[r]}
+          </span>
+        ))}
+        <NotIndexedKey pal={pal} count={notIndexed} />
+      </div>
     </div>
   )
 }
@@ -252,15 +386,19 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
               <div className="min-w-0">
                 <p className="text-sm text-ink">
                   {p?.kind === 'paper' ? `${p.label}${p.year ? ` · 20${p.year.replace(/\D/g, '')}` : ''}` : e.source}{' '}
-                  <span className="text-xs text-ink-muted">
-                    {e.relation === 'unchecked' ? `couldn't check: ${reasonText(e.reason)}` : e.note}
+                  <span className="text-xs font-medium" style={{ color: relationColor(pal, e.relation) }}>
+                    {e.relation === 'asserts' ? 'origin — asserts' : RELATION_LABEL[e.relation]}
                   </span>
                 </p>
                 {e.relation !== 'asserts' && <IndexNote node={p} />}
-                {e.quote && (
-                  <p className="font-serif text-[13px] italic text-ink-muted">
-                    “{e.quote}” {e.page && <span className="not-italic">{e.page}</span>}
-                  </p>
+                {e.relation === 'unchecked' ? (
+                  <p className="text-xs text-ink-muted">couldn't check: {reasonText(e.reason)}</p>
+                ) : (
+                  e.quote && (
+                    <p className="font-serif text-[13px] italic text-ink-muted">
+                      “{e.quote}” {e.page && <span className="not-italic">{e.page}</span>}
+                    </p>
+                  )
                 )}
               </div>
             </li>
@@ -343,26 +481,77 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
 
 export function Graph() {
   const graph = useKnowledgeGraph().data
-  const { pal, dark } = usePalette()
+  const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
   const [ready, setReady] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+
+  // Attach the ResizeObserver through a callback ref rather than an effect: an effect runs on the
+  // first render, while the query is still loading and Graph returns null, when the canvas div
+  // does not exist yet (and with [] deps it would never re-run). On resize we only cy.resize() —
+  // never fit — so opening the detail panel or changing the window width keeps the user's zoom.
+  const setCanvas = useCallback((el: HTMLDivElement | null) => {
+    canvasRef.current = el
+    observerRef.current?.disconnect()
+    if (!el) return
+    const observer = new ResizeObserver(() => cyRef.current?.resize())
+    observer.observe(el)
+    observerRef.current = observer
+  }, [])
+
+  // Keep fullscreen state in sync (Esc also exits) and re-fit when the canvas resizes into or out
+  // of fullscreen.
+  useEffect(() => {
+    const onChange = () => {
+      setFullscreen(Boolean(document.fullscreenElement))
+      const cy = cyRef.current
+      if (cy) {
+        cy.resize()
+        cy.fit(undefined, 40)
+      }
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
   const params = new URLSearchParams(window.location.search)
   const [view, setView] = useState<View>(params.get('view') === 'papers' ? 'papers' : 'claims')
   const [claimSel, setClaimSel] = useState<string | null>(params.get('claim'))
   const [pairSel, setPairSel] = useState<string | null>(params.get('pair'))
   const [filter, setFilter] = useState('')
   const [pFilter, setPFilter] = useState<PapersFilter>('all')
+  // Full label of the hovered node, positioned over the canvas — the on-node label is short.
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
+  // The hovered node id: like Obsidian, hovering spotlights that node's neighbours and dims the rest.
+  const [hovered, setHovered] = useState<string | null>(null)
 
   const paperIds = useMemo(
     () => (graph ? new Set(graph.edges.map((e) => e.source)) : new Set<string>()),
     [graph],
   )
 
+  const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
+
   const elements = useMemo(() => {
     if (!graph) return []
     if (view === 'claims') {
+      const claimEdges: Record<string, GraphEdge[]> = {}
+      const deg: Record<string, number> = {}
+      graph.edges.forEach((e) => {
+        ;(claimEdges[e.target] ??= []).push(e)
+        deg[e.source] = (deg[e.source] ?? 0) + 1 // a paper's size = how many claims it touches
+      })
+      const shown = graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id))
       return [
-        ...graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id)).map((n) => ({ data: n })),
+        ...shown.map((n, i) => ({
+          data:
+            n.kind === 'paper'
+              ? { ...n, short: paperShort(n), weight: deg[n.id] ?? 1 }
+              : { ...n, standing: claimStanding(claimEdges[n.id] ?? []) },
+          position: seedPosition(i, shown.length),
+        })),
         ...graph.edges.map((e) => ({ data: e })),
       ]
     }
@@ -374,47 +563,61 @@ export function Graph() {
     const edges = graph.paperEdges.filter((e) =>
       pFilter === 'strong' ? e.similarity >= 0.5 : pFilter === 'citations' ? e.cites : true,
     )
+    const papers = graph.nodes.filter((n) => n.kind === 'paper')
     return [
-      ...graph.nodes
-        .filter((n) => n.kind === 'paper')
-        .map((n) => ({ data: { ...n, weight: deg[n.id] ?? 1 } })),
+      ...papers.map((n, i) => ({
+        data: { ...n, weight: deg[n.id] ?? 1, short: paperShort(n) },
+        position: seedPosition(i, papers.length),
+      })),
       ...edges.map((e) => ({
         data: { id: e.id, source: e.a, target: e.b, kind: 'paper', cites: e.cites ? 1 : 0, similarity: e.similarity },
       })),
     ]
   }, [graph, view, pFilter, paperIds])
 
-  // Spotlight the selection's neighbourhood; fade the rest. Claims filter dims non-matches.
+  // Spotlight one node/edge's neighbourhood and fade the rest. A click selection wins; otherwise
+  // hovering spotlights (Obsidian-style); otherwise the claims filter dims non-matches.
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
     cy.batch(() => {
       cy.elements().removeClass('faded selected')
-      if (view === 'claims') {
-        if (filter.trim()) {
-          const q = filter.toLowerCase()
-          cy.nodes('[kind="claim"]').forEach((n) => {
-            if (!String(n.data('label')).toLowerCase().includes(q)) n.addClass('faded')
-          })
+      if (view === 'claims' && claimSel) {
+        const node = cy.$id(claimSel)
+        if (node.nonempty()) {
+          cy.elements().addClass('faded')
+          node.closedNeighborhood().removeClass('faded')
+          node.addClass('selected')
         }
-        if (claimSel) {
-          const node = cy.$id(claimSel)
-          if (node.nonempty()) {
-            cy.elements().addClass('faded')
-            node.closedNeighborhood().removeClass('faded')
-            node.addClass('selected')
-          }
-        }
-      } else if (pairSel) {
+      } else if (view === 'papers' && pairSel) {
         const edge = cy.$id(pairSel)
         if (edge.nonempty()) {
           cy.elements().addClass('faded')
           edge.removeClass('faded').addClass('selected')
           edge.connectedNodes().removeClass('faded')
         }
+      } else if (hovered) {
+        const node = cy.$id(hovered)
+        if (node.nonempty()) {
+          cy.elements().addClass('faded')
+          node.closedNeighborhood().removeClass('faded')
+        }
+      } else if (view === 'claims' && filter.trim()) {
+        const q = filter.toLowerCase()
+        cy.nodes('[kind="claim"]').forEach((n) => {
+          if (!String(n.data('label')).toLowerCase().includes(q)) n.addClass('faded')
+        })
       }
     })
-  }, [view, filter, claimSel, pairSel, elements, ready])
+  }, [view, filter, claimSel, pairSel, hovered, elements, ready])
+
+  // Recolour the existing graph on a theme change instead of rebuilding it. The CytoscapeComponent
+  // key is `view` only (not the theme), so flipping light/dark keeps the instance and the user's
+  // zoom, pan and dragged positions — this just re-applies the palette to the live stylesheet.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (cy && graph) cy.style(stylesheet(pal, graph.clusters, view))
+  }, [pal, view, graph])
 
   if (!graph) return null
 
@@ -470,15 +673,57 @@ export function Graph() {
       </header>
 
       {view === 'claims' && (
-        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
-          {graph.stats.map((s) => (
-            <StatTile key={s.label} count={s.count} label={s.label} />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {insights.map((insight) => (
+            <InsightTile key={insight.key} insight={insight} />
           ))}
         </div>
       )}
 
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <div className="relative h-[420px] flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas sm:h-[560px]">
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
+        {/* This screen is only the graph, so give the canvas the viewport height (height is the
+            binding constraint for fitting the whole graph), with a min so it can't collapse on a
+            short window. The role shell is `wide` for Graph, so it also uses the screen width. */}
+        <div
+          ref={setCanvas}
+          className="relative min-h-[560px] min-w-0 flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas lg:h-[calc(100dvh-13rem)]"
+        >
+          {/* Zoom, fit and fullscreen, so a dense library can be opened up and re-framed. */}
+          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface">
+            {[
+              { icon: ZoomIn, label: 'Zoom in', factor: 1.3 },
+              { icon: ZoomOut, label: 'Zoom out', factor: 1 / 1.3 },
+              { icon: Maximize2, label: 'Fit to view', factor: 0 },
+            ].map(({ icon: Icon, label, factor }) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                title={label}
+                onClick={() => {
+                  const cy = cyRef.current
+                  if (!cy) return
+                  if (factor === 0) cy.fit(undefined, 40)
+                  else cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+                }}
+                className="flex size-8 items-center justify-center text-ink-muted hover:bg-accent-soft hover:text-ink"
+              >
+                <Icon className="size-4" />
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              onClick={() => {
+                if (document.fullscreenElement) void document.exitFullscreen()
+                else void canvasRef.current?.requestFullscreen?.()
+              }}
+              className="flex size-8 items-center justify-center border-t border-border-subtle text-ink-muted hover:bg-accent-soft hover:text-ink"
+            >
+              {fullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
+            </button>
+          </div>
           {view === 'claims' ? (
             <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5">
               <Search className="size-3.5 text-ink-muted" />
@@ -493,14 +738,17 @@ export function Graph() {
             <ClusterLegend pal={pal} clusters={graph.clusters} notIndexed={notIndexed} />
           )}
           <CytoscapeComponent
-            key={`${view}-${dark}`}
+            key={view}
             elements={elements}
             stylesheet={stylesheet(pal, graph.clusters, view)}
             layout={LAYOUT}
             style={{ width: '100%', height: '100%' }}
             cy={(cy: cytoscape.Core) => {
+              // react-cytoscapejs calls this on every render (componentDidUpdate), not just mount.
+              // Only wire a given instance once, so a state change (filtering, selecting a claim)
+              // never re-runs fit and throws away the user's zoom.
+              if (cyRef.current === cy) return
               cyRef.current = cy
-              cy.removeAllListeners()
               cy.on('tap', 'node[kind="claim"]', (evt: cytoscape.EventObject) => {
                 setClaimSel(evt.target.id())
               })
@@ -513,10 +761,39 @@ export function Graph() {
                   setPairSel(null)
                 }
               })
+              // Hover: show the full label and spotlight this node's neighbourhood (Obsidian-style).
+              cy.on('mouseover', 'node', (evt: cytoscape.EventObject) => {
+                const p = evt.target.renderedPosition()
+                setTip({ x: p.x, y: p.y, text: String(evt.target.data('label')) })
+                setHovered(evt.target.id())
+              })
+              cy.on('mouseout', 'node', () => {
+                setTip(null)
+                setHovered(null)
+              })
+              cy.on('drag', 'node', () => setTip(null))
+              cy.on('pan zoom', () => setTip(null))
+              // Fit once the layout has actually settled (cola emits layoutstop), not on a fixed
+              // timer that can fire while nodes are still bunched. It re-runs only when the element
+              // set changes (e.g. switching Claims/Papers), which re-runs the layout.
+              cy.on('layoutstop', () => fitReadable(cy))
               setReady(true)
             }}
           />
           {view === 'claims' && <ClaimsLegend pal={pal} notIndexed={notIndexed} />}
+          {tip && (
+            // Near the top edge the above-the-node tooltip would render past y=0 and be clipped by
+            // the overflow-hidden canvas, so flip it below the node there.
+            <div
+              className={cn(
+                'pointer-events-none absolute z-20 max-w-xs -translate-x-1/2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs leading-snug text-ink shadow-lg',
+                tip.y < 56 ? 'translate-y-2' : '-translate-y-full',
+              )}
+              style={{ left: tip.x, top: tip.y < 56 ? tip.y + 12 : tip.y - 10 }}
+            >
+              {tip.text}
+            </div>
+          )}
         </div>
 
         {view === 'claims' && claimSel && <ClaimDetail graph={graph} claimId={claimSel} pal={pal} />}
