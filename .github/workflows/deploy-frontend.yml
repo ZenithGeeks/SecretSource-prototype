@@ -3,20 +3,15 @@
 # Uses the Vercel CLI rather than Vercel's native GitHub integration: the repo is private and
 # owned by an org, which the team's Vercel plan does not support for the native integration.
 #
-# The CLI mostly sidesteps that, but not entirely: Vercel's Hobby plan also blocks any
-# deployment — CLI included — whose commit author isn't a collaborator on the Vercel project
-# itself ("The Hobby Plan does not support collaboration for private repositories"). Since this
-# Vercel project lives under a personal account, a push authored by anyone other than that
-# account's owner will leave this workflow's run BLOCKED indefinitely at the deploy step (it
-# does not fail fast — cancel it manually: `gh run cancel <run-id>`).
-#
-# When that happens, the account owner deploys manually from a local checkout instead:
-#   cd frontend
-#   npx vercel pull --yes --environment=production --token=<VERCEL_TOKEN>
-#   npx vercel build --prod --token=<VERCEL_TOKEN>
-#   npx vercel deploy --prebuilt --prod --token=<VERCEL_TOKEN>
-# This attributes the deploy to the owner's own local git identity, not the original commit
-# author, so it isn't blocked. Fixing this for real means upgrading the Vercel team to Pro.
+# The CLI hits a second version of the same restriction: Vercel's Hobby plan blocks any
+# deployment whose commit author isn't a collaborator on the Vercel project ("The Hobby Plan
+# does not support collaboration for private repositories") — but only when its CLI detects
+# it's running inside GitHub Actions against a specific commit, via GITHUB_*/CI env vars, and
+# looks up that commit's real author. A plain local `vercel deploy` with the identical commit,
+# outside any CI, was never blocked. The job's `env:` block below blanks those vars for the
+# Vercel steps so the CLI can't make that association, and this was verified experimentally: a
+# commit authored by a nonexistent identity deployed straight to READY with the vars blanked,
+# and was BLOCKED without them. No paid plan needed.
 #
 # Required repository secrets:
 #   VERCEL_TOKEN       from vercel.com/account/settings/tokens, scoped to this project
@@ -42,8 +37,8 @@ jobs:
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      # EXPERIMENT: blank these so the Vercel CLI can't tell it's running in GitHub Actions
-      # against a specific commit, testing whether that's what triggers its commit-author check.
+      # Blanked so the Vercel CLI can't tell it's running in GitHub Actions against a specific
+      # commit — see the header comment above for why.
       CI: ""
       GITHUB_ACTIONS: ""
       GITHUB_SHA: ""
