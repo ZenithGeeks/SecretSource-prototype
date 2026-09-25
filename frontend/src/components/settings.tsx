@@ -13,8 +13,8 @@
 import type { ReactNode } from 'react'
 import { cloneElement, isValidElement, useId } from 'react'
 
+import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
-import { AuthorizedImage } from './AuthorizedImage'
 
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -138,13 +138,17 @@ export function Avatar({
   photoUrl?: string
   size?: number
 }) {
+  // Fetched with the token like AuthorizedImage, but without its failure state: a stale or
+  // unreachable photo shows the initials badge, not the words "Profile photo" in a 32px circle.
+  // The hook revokes the blob URL when photoUrl changes and on unmount.
+  const image = useAuthorizedUrl(photoUrl)
   return (
     <span
       style={{ width: size, height: size }}
       className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border-subtle bg-accent-soft"
     >
-      {photoUrl ? (
-        <AuthorizedImage src={photoUrl} alt="Profile photo" className="size-full object-cover" />
+      {image.url ? (
+        <img src={image.url} alt="Profile photo" className="size-full object-cover" />
       ) : (
         <span className="text-[13px] font-semibold text-accent">{initials}</span>
       )}

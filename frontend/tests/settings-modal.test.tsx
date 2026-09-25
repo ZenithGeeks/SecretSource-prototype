@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { Avatar } from '../src/components/settings'
 import { SettingsModal } from '../src/components/SettingsModal'
 
 // Signed-out, no Supabase: request() then sends without a token instead of throwing
@@ -202,5 +203,39 @@ describe('display name', () => {
     expect(greeting('  Ada ')).toBe('Good morning, Ada')
     expect(greeting('')).toBe('Good morning')
     expect(greeting('   ')).toBe('Good morning')
+  })
+})
+
+describe('avatar image', () => {
+  const photo = '/api/user/avatar/me?v=1'
+
+  test('falls back to the initials badge when the photo fails to load, not the alt text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('gone', { status: 404 })))
+    render(<Avatar initials="AL" photoUrl={photo} />)
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByText('AL')).toBeInTheDocument())
+    expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  test('shows the photo once fetched, and revokes the blob URL on change and unmount', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => Promise.resolve(new Response(new Blob(['png']), { status: 200 }))),
+    )
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+
+    const { rerender, unmount } = render(<Avatar initials="AL" photoUrl={photo} />)
+    const img = await screen.findByRole('img', { name: 'Profile photo' })
+    expect(img).toHaveAttribute('src', 'blob:vitest')
+
+    rerender(<Avatar initials="AL" photoUrl="/api/user/avatar/me?v=2" />)
+    expect(revoke).toHaveBeenCalledWith('blob:vitest') // the old copy goes when the url changes
+    await screen.findByRole('img', { name: 'Profile photo' })
+
+    revoke.mockClear()
+    unmount()
+    expect(revoke).toHaveBeenCalledWith('blob:vitest') // and on unmount
   })
 })
