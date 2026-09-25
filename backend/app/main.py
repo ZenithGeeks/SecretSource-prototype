@@ -624,7 +624,12 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
     ext = AVATAR_TYPES.get(file.content_type or "")
     if not ext:
         raise HTTPException(400, "avatar must be a PNG, JPEG or WebP image")
-    content = await file.read()
+    # The cap is checked before anything is buffered: on the declared size when the client
+    # sent one, and otherwise by reading at most one byte past the cap, so an oversized body
+    # is never read whole.
+    if file.size is not None and file.size > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "avatar must be under 2MB")
+    content = await file.read(MAX_AVATAR_BYTES + 1)
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(413, "avatar must be under 2MB")
     key = user or "anon"

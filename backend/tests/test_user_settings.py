@@ -138,3 +138,55 @@ def test_concurrent_patches_to_different_keys_both_survive(client, monkeypatch):
         "theme": "Dark",
         "weeklyDigest": False,
     }
+
+
+# --- avatar upload: the size cap is enforced before the body is buffered ---
+
+
+def test_an_oversized_avatar_with_a_known_size_is_refused_before_it_is_read(client, monkeypatch):
+    from starlette.datastructures import UploadFile
+
+    reads = []
+    real_read = UploadFile.read
+
+    async def counting_read(self, size=-1):
+        reads.append(size)
+        return await real_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", counting_read)
+    huge = client.post(
+        "/user/avatar", headers=ADA,
+        files={"file": ("me.png", b"0" * (main.MAX_AVATAR_BYTES + 1), "image/png")},
+    )
+    assert huge.status_code == 413
+    assert reads == []  # rejected on file.size alone
+
+
+def test_an_avatar_with_an_unknown_size_is_read_no_further_than_the_cap(client, monkeypatch):
+    """Without a size (chunked upload) the body is read up to one byte past the cap, never
+    whole: an oversized one is refused and a normal one is stored."""
+    from starlette.datastructures import UploadFile
+
+    no_size = property(lambda self: None, lambda self, value: None)
+    monkeypatch.setattr(UploadFile, "size", no_size, raising=False)
+    reads = []
+    real_read = UploadFile.read
+
+    async def counting_read(self, size=-1):
+        reads.append(size)
+        return await real_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", counting_read)
+
+    huge = client.post(
+        "/user/avatar", headers=ADA,
+        files={"file": ("me.png", b"0" * (main.MAX_AVATAR_BYTES + 1), "image/png")},
+    )
+    assert huge.status_code == 413
+    assert reads == [main.MAX_AVATAR_BYTES + 1]
+
+    reads.clear()
+    ok = client.post("/user/avatar", headers=ADA, files={"file": ("me.png", b"small", "image/png")})
+    assert ok.status_code == 200
+    assert reads == [main.MAX_AVATAR_BYTES + 1]
+    assert client.get("/user/avatar/me", headers=ADA).content == b"small"
