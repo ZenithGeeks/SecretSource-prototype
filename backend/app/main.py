@@ -554,7 +554,7 @@ class VerifyRequest(BaseModel):
 
 
 @app.post("/verify")
-async def verify(request: VerifyRequest):
+async def verify(request: VerifyRequest, user: str | None = Depends(current_user)):
     """Check one claim against one source, without running a whole analysis."""
     return await asyncio.to_thread(verify_claim, request.claim, request.source)
 
