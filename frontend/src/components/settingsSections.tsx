@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import type { Role } from '../screens/Onboarding'
 import { accountApi } from '../lib/accountApi'
+import { API_BASE } from '../lib/api'
 import { downloadText } from '../lib/csv'
 import { researcherApi } from '../lib/researcher'
 import { updateSettings, useSettings } from '../lib/settings'
@@ -49,6 +50,13 @@ const MAX_AVATAR_BYTES = 2 * 1024 * 1024
  * somewhere else. */
 function isOwnAvatarUrl(url: string): boolean {
   return url.startsWith('/api/user/avatar/')
+}
+
+/** The stored value is the gateway's bare `/api/user/avatar/me?v=…` path; it is prefixed
+ * with API_BASE only here, at render, the way figureImageUrl does, so it still reaches the
+ * gateway when the frontend is served from another origin (VITE_GATEWAY_URL). */
+function avatarPhotoUrl(stored: string): string | undefined {
+  return stored && isOwnAvatarUrl(stored) ? `${API_BASE}${stored}` : undefined
 }
 
 export function AccountSection() {
@@ -131,7 +139,7 @@ export function AccountSection() {
       >
         <Avatar
           initials={initials(settings.displayName)}
-          photoUrl={settings.avatarUrl && isOwnAvatarUrl(settings.avatarUrl) ? settings.avatarUrl : undefined}
+          photoUrl={avatarPhotoUrl(settings.avatarUrl)}
           size={48}
         />
         <input
