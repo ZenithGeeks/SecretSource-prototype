@@ -10,7 +10,7 @@ import { useState } from 'react'
 
 import { Card } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally, QueueEntry } from '../../../lib/researcher'
-import { useSettings } from '../../../lib/settings'
+import { greeting, useSettings } from '../../../lib/settings'
 import { useResearcherActions, useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
@@ -78,7 +78,7 @@ export function Home({
     <>
       <header className="flex flex-col gap-1">
         <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          Good morning, {displayName}
+          {greeting(displayName)}
         </h1>
         <p className="text-sm text-ink-muted">{home.alert}</p>
       </header>

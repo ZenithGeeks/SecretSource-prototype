@@ -40,8 +40,10 @@ function ProfileMenu({ onOpenSettings, active }: { onOpenSettings?: () => void; 
   // settings display name is the fallback, since its default is shared across accounts. Same
   // for the email — the session address, not the settings one, is who is actually signed in.
   const metaName = session?.user?.user_metadata?.full_name as string | undefined
-  const name = metaName?.trim() || displayName
   const email = session?.user?.email ?? 'Signed in locally'
+  // The display name can be cleared in Settings; fall back to the address rather than show
+  // an empty chip with blank initials.
+  const name = metaName?.trim() || displayName.trim() || (session?.user?.email ?? 'Your account')
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 

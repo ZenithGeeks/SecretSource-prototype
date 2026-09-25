@@ -2,12 +2,16 @@
  * role's tabs from the Roles group, and keyboard travel along the settings tab list. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { SettingsModal } from '../src/components/SettingsModal'
-import { resetSettings } from '../src/lib/settings'
+
+// Signed-out, no Supabase: request() then sends without a token instead of throwing
+// SignedOut, whatever a local .env says (the same env dependency as SCRUM-245).
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+import { getSettings, greeting, resetSettings } from '../src/lib/settings'
 import { resetTeacherPreferences } from '../src/lib/teacherPreferences'
 import { resetTeacherStore } from '../src/lib/teacherStore'
 
@@ -33,6 +37,14 @@ beforeEach(() => {
   resetTeacherPreferences()
   resetTeacherStore()
 })
+afterEach(() => vi.unstubAllGlobals())
+
+/** The PATCH /user/preferences bodies sent so far (the GET on open is skipped). */
+function patchBodies(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown>[] {
+  return fetchMock.mock.calls
+    .filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')
+    .map(([, init]) => JSON.parse((init as RequestInit).body as string).patch)
+}
 
 describe('role preview never writes another role’s settings', () => {
   test('Class and marking is read-only while an Author previews Teacher', async () => {
@@ -151,5 +163,44 @@ describe('row accessible names', () => {
     const input = screen.getByRole('textbox', { name: 'Send reports as' })
     expect(input).toHaveValue('Wittawat S.')
     expect(input).toBeEnabled()
+  })
+})
+
+describe('display name', () => {
+  test('Account has a Display name row that saves through the shared PATCH', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderModal('researcher')
+
+    const input = screen.getByRole('textbox', { name: 'Display name' })
+    expect(input).toHaveValue('Wittawat')
+
+    fireEvent.change(input, { target: { value: 'Ada Lovelace' } })
+    expect(getSettings().displayName).toBe('Ada Lovelace') // optimistic
+    expect(screen.getByText('AL')).toBeInTheDocument() // avatar initials follow
+    await waitFor(() => expect(patchBodies(fetchMock)).toContainEqual({ displayName: 'Ada Lovelace' }))
+  })
+
+  test('an empty or whitespace-only name never blanks the badge, and is stored trimmed', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })))
+    renderModal('researcher')
+    const input = screen.getByRole('textbox', { name: 'Display name' })
+
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(screen.getByText('?')).toBeInTheDocument() // initials fallback, not an empty badge
+    fireEvent.blur(input)
+    expect(getSettings().displayName).toBe('')
+    expect(input).toHaveValue('')
+
+    fireEvent.change(input, { target: { value: '  Ada  ' } })
+    fireEvent.blur(input)
+    expect(getSettings().displayName).toBe('Ada')
+  })
+
+  test('the greeting drops the name when it is blank', () => {
+    expect(greeting('Ada Lovelace')).toBe('Good morning, Ada Lovelace')
+    expect(greeting('  Ada ')).toBe('Good morning, Ada')
+    expect(greeting('')).toBe('Good morning')
+    expect(greeting('   ')).toBe('Good morning')
   })
 })

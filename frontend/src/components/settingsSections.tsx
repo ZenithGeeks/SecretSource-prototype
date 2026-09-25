@@ -61,6 +61,7 @@ function avatarPhotoUrl(stored: string): string | undefined {
 
 export function AccountSection() {
   const settings = useSettings()
+  const set = useSetSetting()
   const { session } = useAuth()
   const email = session?.user?.email ?? settings.email
   const fileRef = useRef<HTMLInputElement>(null)
@@ -169,6 +170,19 @@ export function AccountSection() {
         >
           Remove
         </button>
+      </Row>
+      <Row label="Display name" hint="Used in greetings and on shared reports.">
+        <input
+          value={settings.displayName}
+          onChange={(e) => set('displayName', e.target.value)}
+          // Stored as typed while editing (a trailing space may be mid-name), tidied on blur.
+          // Readers cope with '' (initials show "?", the greeting drops the name).
+          onBlur={(e) => {
+            const trimmed = e.target.value.trim()
+            if (trimmed !== e.target.value) set('displayName', trimmed)
+          }}
+          className="h-9 w-[180px] rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent"
+        />
       </Row>
       <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">
         <span className="text-sm text-ink-muted">{email}</span>
