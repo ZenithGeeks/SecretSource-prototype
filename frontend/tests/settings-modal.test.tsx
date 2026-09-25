@@ -143,3 +143,13 @@ describe('settings tab list keyboard travel', () => {
     expect(account).toHaveAttribute('aria-selected', 'true')
   })
 })
+
+describe('row accessible names', () => {
+  test('a bare input as a Row’s only child is labelled by the row, like Toggle and Select', () => {
+    renderModal('teacher')
+    fireEvent.click(screen.getByRole('tab', { name: 'Class and marking' }))
+    const input = screen.getByRole('textbox', { name: 'Send reports as' })
+    expect(input).toHaveValue('Wittawat S.')
+    expect(input).toBeEnabled()
+  })
+})
