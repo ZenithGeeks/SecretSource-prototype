@@ -73,6 +73,9 @@ class FakeRepository:
     def save_feedback(self, feedback):
         self.feedback = feedback
 
+    def save_submission(self, submission):
+        self.submission = submission
+
     def get_connection_status(self, owner):
         return None
 
@@ -124,16 +127,16 @@ def teacher_client(monkeypatch):
 def test_teacher_reads_are_owner_scoped_and_map_assignment_and_essay_contract(teacher_client):
     client, _, _ = teacher_client
 
-    workspace = client.get("/api/teacher/classes/course-1/workspace")
+    workspace = client.get("/teacher/classes/course-1/workspace")
     assert workspace.status_code == 200
     assert workspace.json()["course"]["name"] == "Research Methods"
     assert workspace.json()["assignments"][0]["id"] == "work-1"
 
-    detail = client.get("/api/teacher/classes/course-1/assignments/work-1")
+    detail = client.get("/teacher/classes/course-1/assignments/work-1")
     assert detail.status_code == 200
     assert detail.json()["submissions"][0]["studentId"] == "student-1"
 
-    essay = client.get("/api/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check")
+    essay = client.get("/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check")
     assert essay.status_code == 200
     assert essay.json()["reviews"][0]["standing"] == "supports"
     assert essay.json()["reviews"][0]["sourceLocation"] == "p.2"
@@ -141,36 +144,38 @@ def test_teacher_reads_are_owner_scoped_and_map_assignment_and_essay_contract(te
 
 def test_teacher_review_feedback_and_grade_return_mutations_are_scoped(teacher_client):
     client, repository, google = teacher_client
-    review_id = "claim-0:10.1/example"
+    review_id = "claim-0:10.1/example:0"
 
     reviewed = client.patch(
-        f"/api/teacher/classes/course-1/assignments/work-1/essay-check/reviews/{quote(review_id, safe='')}",
+        f"/teacher/classes/course-1/assignments/work-1/essay-check/reviews/{quote(review_id, safe='')}",
         json={"studentId": "student-1", "outcome": "supports", "note": "Checked."},
     )
     assert reviewed.status_code == 200
     assert repository.reviews[0].review_id == review_id
 
     saved = client.put(
-        "/api/teacher/classes/course-1/assignments/work-1/essay-check/feedback",
+        "/teacher/classes/course-1/assignments/work-1/essay-check/feedback",
         json={"studentId": "student-1", "body": "Good work.", "citationIds": [review_id]},
     )
     assert saved.status_code == 200
     assert saved.json()["feedback"]["citationIds"] == [review_id]
 
     sent = client.post(
-        "/api/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
+        "/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
         json={"studentId": "student-1", "body": "Good work.", "citationIds": [review_id]},
     )
     assert sent.status_code == 200
     assert sent.json()["status"] == "sent"
 
     graded = client.post(
-        "/api/teacher/classes/course-1/assignments/work-1/students/student-1/grade-and-return",
+        "/teacher/classes/course-1/assignments/work-1/students/student-1/grade-and-return",
         json={"grade": 9},
     )
     assert graded.status_code == 200
     assert google.patched == [("course-1", "work-1", "submission-1", 9.0)]
     assert google.returned == [("course-1", "work-1", "submission-1")]
+    assert repository.submission.assigned_grade == 9
+    assert repository.submission.state == "RETURNED"
 
 
 def test_update_review_resolves_the_submission_once(teacher_client):
@@ -210,6 +215,26 @@ def test_analyze_submission_runs_on_the_event_loop():
     assert iscoroutinefunction(analyze_submission)
 
 
+def test_essay_review_citation_ids_are_unique_even_when_citations_have_no_identifiers():
+    from app.teacher.analysis import TeacherEssayAnalysisService
+
+    _, _, submission = _fixtures()
+    repository = FakeRepository()
+    repository.submission = submission
+    service = TeacherEssayAnalysisService(
+        client=FakeGoogle(),
+        repository=repository,
+        analysis_lookup=lambda _analysis_id: {
+            "status": "done",
+            "claims": [{"claim": "A claim", "citations": [{}, {}]}],
+        },
+    )
+
+    essay = service.essay_check("teacher-a", "course-1", "work-1", "submission-1")
+
+    assert [review["id"] for review in essay["reviews"]] == ["claim-0::0", "claim-0::1"]
+
+
 def test_grade_and_return_reports_partial_failure_after_grade_patch(teacher_client):
     client, _, _ = teacher_client
     from app import main
@@ -218,7 +243,7 @@ def test_grade_and_return_reports_partial_failure_after_grade_patch(teacher_clie
     failing = FakeGoogle(fail_return=True)
     main.app.dependency_overrides[teacher_router_module.get_google_client] = lambda: failing
     response = client.post(
-        "/api/teacher/classes/course-1/assignments/work-1/students/student-1/grade-and-return",
+        "/teacher/classes/course-1/assignments/work-1/students/student-1/grade-and-return",
         json={"grade": 8},
     )
     assert response.status_code == 502

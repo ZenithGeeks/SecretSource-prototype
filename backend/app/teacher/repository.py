@@ -249,10 +249,18 @@ class TeacherGoogleRepository:
         return reviews[0] if reviews else None
 
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
-        self._upsert("teacher_professor_reviews", review.to_row(), "owner,submission_id,review_id")
+        self._upsert(
+            "teacher_professor_reviews",
+            review.to_row(),
+            "owner,course_id,coursework_id,submission_id,review_id",
+        )
 
     def save_feedback(self, feedback: TeacherFeedback) -> None:
-        self._upsert("teacher_feedback", feedback.to_row(), "owner,submission_id")
+        self._upsert(
+            "teacher_feedback",
+            feedback.to_row(),
+            "owner,course_id,coursework_id,submission_id",
+        )
 
     def get_feedback(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str

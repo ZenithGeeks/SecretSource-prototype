@@ -126,9 +126,15 @@ Set up Google Cloud before enabling the flag:
 
    Keep the result in `TEACHER_GOOGLE_ENCRYPTION_KEY`; changing it makes existing encrypted
    refresh tokens unreadable.
-6. Apply `supabase/migrations/20260917120000_teacher_classroom.sql` with the Supabase CLI or
-   SQL editor. The tables have RLS enabled and no browser policies; only the service role is
-   intended to access them.
+6. Apply these migrations in timestamp order with the Supabase CLI or SQL editor:
+
+   - `supabase/migrations/20260917120000_teacher_classroom.sql`
+   - `supabase/migrations/20260917160000_teacher_professor_review_ids.sql`
+   - `supabase/migrations/20260921120000_teacher_feedback_citation_ids.sql`
+   - `supabase/migrations/20260925120000_teacher_review_composite_ids.sql`
+
+   The tables have RLS enabled and no browser policies; only the service role is intended
+   to access them.
 
 The frontend remains on its local mock adapter unless `VITE_TEACHER_BACKEND=remote` is set at
 frontend build time. `VITE_TEACHER_BACKEND=mock` is the safe default. Never expose the Google

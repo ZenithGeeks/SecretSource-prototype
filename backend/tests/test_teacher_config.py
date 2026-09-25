@@ -1,6 +1,7 @@
 """Configuration contracts for the optional Teacher Google Classroom integration."""
 
 import importlib
+from pathlib import Path
 
 import pytest
 from app import config
@@ -18,6 +19,12 @@ GOOGLE_ENV = (
     "TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS",
     "TEACHER_GOOGLE_SUCCESS_REDIRECT",
 )
+
+
+def test_cloud_env_keeps_optional_google_classroom_disabled_by_default():
+    cloud_env = Path(__file__).parents[2] / ".env.cloud"
+
+    assert "TEACHER_GOOGLE_ENABLED=false" in cloud_env.read_text(encoding="utf-8")
 
 
 def _clear_google_env(monkeypatch):

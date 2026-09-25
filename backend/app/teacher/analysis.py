@@ -14,12 +14,12 @@ from app.teacher.models import TeacherFeedback, TeacherProfessorReview
 def _citation_key(citation: dict[str, Any]) -> str:
     return str(
         citation.get("doi") or citation.get("arxiv") or citation.get("title")
-        or citation.get("url") or citation.get("ref") or "unknown"
+        or citation.get("url") or citation.get("ref") or ""
     )
 
 
-def _citation_id(claim_index: int, citation: dict[str, Any]) -> str:
-    return f"claim-{claim_index}:{_citation_key(citation)}"
+def _citation_id(claim_index: int, citation: dict[str, Any], citation_index: int) -> str:
+    return f"claim-{claim_index}:{_citation_key(citation)}:{citation_index}"
 
 
 def _citation_url(citation: dict[str, Any]) -> str:
@@ -215,9 +215,9 @@ class TeacherEssayAnalysisService:
         for claim_index, claim in enumerate(snapshot.get("claims") or []):
             verdicts = {str(item.get("cited")): item for item in claim.get("verdicts") or []}
             unchecked = {str(item.get("source")): item for item in claim.get("unchecked") or []}
-            for citation in claim.get("citations") or []:
+            for citation_index, citation in enumerate(claim.get("citations") or []):
                 key = _citation_key(citation)
-                citation_id = _citation_id(claim_index, citation)
+                citation_id = _citation_id(claim_index, citation, citation_index)
                 verdict = verdicts.get(key, {})
                 standing = str(verdict.get("verdict") or ("unchecked" if key in unchecked else "insufficient"))
                 if standing not in {"supports", "refutes", "insufficient", "unchecked"}:

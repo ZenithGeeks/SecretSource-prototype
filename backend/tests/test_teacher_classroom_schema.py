@@ -5,6 +5,7 @@ from pathlib import Path
 
 MIGRATION = Path(__file__).parents[2] / "supabase" / "migrations" / "20260917120000_teacher_classroom.sql"
 FEEDBACK_CITATIONS_MIGRATION = Path(__file__).parents[2] / "supabase" / "migrations" / "20260921120000_teacher_feedback_citation_ids.sql"
+COMPOSITE_REVIEWS_MIGRATION = Path(__file__).parents[2] / "supabase" / "migrations" / "20260925120000_teacher_review_composite_ids.sql"
 TABLES = (
     "teacher_google_connections",
     "teacher_google_oauth_states",
@@ -56,3 +57,17 @@ def test_teacher_feedback_persists_selected_citation_ids():
     sql = FEEDBACK_CITATIONS_MIGRATION.read_text(encoding="utf-8")
 
     assert _has(sql, r"alter\s+table\s+public\.teacher_feedback.*?add\s+column.*?citation_ids\s+text\[\]")
+
+
+def test_reviews_and_feedback_are_unique_within_their_coursework():
+    assert COMPOSITE_REVIEWS_MIGRATION.exists(), f"missing migration: {COMPOSITE_REVIEWS_MIGRATION}"
+    sql = COMPOSITE_REVIEWS_MIGRATION.read_text(encoding="utf-8")
+
+    assert _has(
+        sql,
+        r"create\s+unique\s+index\s+if\s+not\s+exists\s+teacher_professor_reviews_owner_coursework_review_idx\s+on\s+public\.teacher_professor_reviews\s*\(\s*owner\s*,\s*course_id\s*,\s*coursework_id\s*,\s*submission_id\s*,\s*review_id\s*\)",
+    )
+    assert _has(
+        sql,
+        r"create\s+unique\s+index\s+if\s+not\s+exists\s+teacher_feedback_owner_coursework_submission_idx\s+on\s+public\.teacher_feedback\s*\(\s*owner\s*,\s*course_id\s*,\s*coursework_id\s*,\s*submission_id\s*\)",
+    )

@@ -29,7 +29,9 @@ class FakeRepository:
         self.connections: dict[str, object] = {}
 
     def save_oauth_state(self, state):
-        self.states[state.state_hash] = SavedState(**state.to_row())
+        row = state.to_row()
+        row["expires_at"] = datetime.fromisoformat(row["expires_at"])
+        self.states[state.state_hash] = SavedState(**row)
 
     def consume_oauth_state(self, state_hash, now):
         state = self.states.get(state_hash)
@@ -208,8 +210,9 @@ def test_callback_without_refresh_token_keeps_the_existing_encrypted_token():
     assert repository.connections["teacher-42"].refresh_token_ciphertext == existing_ciphertext
 
 
-def test_callback_without_refresh_token_rejects_a_different_google_subject_without_overwriting():
-    """Break caught: a token-less callback attaches another Google account to this owner."""
+@pytest.mark.parametrize("refresh_token", [None, "fresh-refresh-token"])
+def test_callback_rejects_a_different_google_subject_without_overwriting(refresh_token):
+    """Break caught: reconnecting another account mixes its data with existing imports."""
     from app.teacher.models import GoogleTokenResponse, TeacherGoogleConnection
 
     now = datetime(2026, 9, 17, 4, 0, tzinfo=UTC)
@@ -228,7 +231,7 @@ def test_callback_without_refresh_token_rejects_a_different_google_subject_witho
         repository,
         FakeGoogleTransport(
             GoogleTokenResponse(
-                refresh_token=None,
+                refresh_token=refresh_token,
                 subject="different-subject",
                 email="different@example.test",
                 scopes=("openid", "scope.classroom"),
@@ -240,7 +243,7 @@ def test_callback_without_refresh_token_rejects_a_different_google_subject_witho
     )
     authorization = service.start_authorization("teacher-42")
 
-    with pytest.raises(ValueError, match="reconnect"):
+    with pytest.raises(ValueError, match="disconnect"):
         service.complete_callback(state=authorization.state, code="another-code")
 
     assert repository.connections["teacher-42"] == existing

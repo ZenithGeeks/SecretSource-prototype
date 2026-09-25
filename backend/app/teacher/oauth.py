@@ -170,13 +170,13 @@ class TeacherGoogleOAuthService:
             redirect_uri=saved_state.redirect_uri,
         )
         existing = self._repository.get_connection(saved_state.owner)
+        if existing is not None and existing.google_subject != token.subject:
+            raise ValueError(
+                "Google account changed during reauthorization; disconnect before connecting another account"
+            )
         if token.refresh_token:
             ciphertext = self._cipher.encrypt(token.refresh_token)
         elif existing is not None:
-            if existing.google_subject != token.subject:
-                raise ValueError(
-                    "Google account changed during reauthorization; reconnect with the original account"
-                )
             ciphertext = existing.refresh_token_ciphertext
         else:
             raise ValueError("Google did not return a refresh token for this new connection")

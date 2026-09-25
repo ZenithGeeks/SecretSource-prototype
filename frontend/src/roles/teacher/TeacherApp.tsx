@@ -54,6 +54,7 @@ function Placeholder({ title }: { title: string }) {
 export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const queryClient = useQueryClient()
   const [route, setRoute] = useState<TeacherRoute>(() => parseTeacherRoute(window.location.search))
+  const [connectionError, setConnectionError] = useState('')
   const importClass = useImportTeacherClass()
 
   useEffect(() => {
@@ -73,10 +74,15 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     importClass.mutate(courseId, { onSuccess: () => navigate({ screen: 'class-overview', courseId }) })
   }
   const connectGoogle = async () => {
-    if (!teacherRemoteEnabled) return navigate({ screen: 'add-class-course' })
-    const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
-    const { authorizationUrl } = await teacherApi.startGoogleConnection(data.session?.user.email)
-    window.location.assign(authorizationUrl)
+    setConnectionError('')
+    try {
+      if (!teacherRemoteEnabled) return navigate({ screen: 'add-class-course' })
+      const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
+      const { authorizationUrl } = await teacherApi.startGoogleConnection(data.session?.user.email)
+      window.location.assign(authorizationUrl)
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : 'Google connection could not start. Try again.')
+    }
   }
 
   return (
@@ -95,7 +101,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       ) : route.screen === 'classes' ? (
         <Classes onOpenClass={(courseId) => navigate({ screen: 'class-overview', courseId })} onAddClass={() => navigate({ screen: 'add-class-connect' })} />
       ) : route.screen === 'add-class-connect' ? (
-        <AddClass step="connect" onBack={() => navigate({ screen: 'classes' })} onContinue={() => void connectGoogle()} onSelectCourse={() => undefined} onImport={handleImport} />
+        <AddClass step="connect" error={connectionError} onBack={() => navigate({ screen: 'classes' })} onContinue={() => void connectGoogle()} onSelectCourse={() => undefined} onImport={handleImport} />
       ) : route.screen === 'add-class-course' ? (
         <AddClass step="course" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-connect' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
       ) : route.screen === 'add-class-review' ? (

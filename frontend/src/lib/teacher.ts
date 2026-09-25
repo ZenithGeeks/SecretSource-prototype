@@ -189,6 +189,13 @@ export type EssayCheck = {
   reviews: EssayReview[]
   feedback: FeedbackDraft
   navigation: { previous?: StudentNavigation; next?: StudentNavigation }
+  analysis?: { id: string | null; status: string; error?: string | null }
+}
+
+export type AnalyzeTeacherSubmissionRequest = {
+  courseId: string
+  assignmentId: string
+  studentId: string
 }
 
 export type UpdateProfessorReviewRequest = {
@@ -302,8 +309,8 @@ export const teacherClassImportKey = (courseId: string) => ['teacher', 'class-im
 export const teacherWorkspaceKey = (courseId: string) => ['teacher', 'workspace', courseId] as const
 export const teacherAssignmentKey = (courseId: string, assignmentId: string) =>
   ['teacher', 'assignment', courseId, assignmentId] as const
-export const teacherEssayCheckKey = (assignmentId: string, studentId: string) =>
-  ['teacher', 'essay-check', assignmentId, studentId] as const
+export const teacherEssayCheckKey = (courseId: string, assignmentId: string, studentId: string) =>
+  ['teacher', 'essay-check', courseId, assignmentId, studentId] as const
 export const teacherReadingQuestionsKey = (paperId?: string) =>
   ['teacher', 'reading-questions', paperId] as const
 
@@ -324,6 +331,9 @@ const mockTeacherApi = {
   getWorkspace: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
   getAssignmentDetail: async (courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> =>
     store.getAssignmentDetail(courseId, assignmentId),
+  analyzeSubmission: async (_input: AnalyzeTeacherSubmissionRequest) => {
+    throw new Error('Essay analysis requires a connected Google Classroom account.')
+  },
   getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
   saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
@@ -375,6 +385,11 @@ export const createRemoteTeacherApi = () => ({
     courseId
       ? request<EssayCheck>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/essay-check`)
       : Promise.resolve(null),
+  analyzeSubmission: (input: AnalyzeTeacherSubmissionRequest) =>
+    request<{ id: string; status: string; submission_id: string }>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/students/${encodeURIComponent(input.studentId)}/analyze`,
+      { method: 'POST' },
+    ),
   updateProfessorReview: (input: UpdateProfessorReviewRequest) => {
     if (!input.courseId) throw new Error('courseId is required for a remote professor review')
     const assignmentId = normalizedAssignmentId(input)
@@ -404,7 +419,7 @@ export const createRemoteTeacherApi = () => ({
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: input.body, citationIds: input.citationIds }),
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
       },
     )
   },

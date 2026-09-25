@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -703,4 +704,11 @@ def grade_and_return(
         client.return_submission(course_id, assignment_id, submission.submission_id)
     except Exception as error:
         raise HTTPException(status_code=502, detail={"message": "grade saved but return failed", "partial": True}) from error
+    try:
+        repository.save_submission(replace(submission, assigned_grade=request.grade, state="RETURNED"))
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "grade returned but local submission update failed", "partial": True},
+        ) from error
     return {"submissionId": submission.submission_id, "studentId": student_id, "grade": request.grade, "status": "returned"}

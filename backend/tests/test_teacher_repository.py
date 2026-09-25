@@ -312,7 +312,28 @@ def test_professor_review_upsert_uses_the_review_id_schema_conflict_target():
     )
 
     assert client.upsert_conflicts == [
-        ("teacher_professor_reviews", "owner,submission_id,review_id")
+        (
+            "teacher_professor_reviews",
+            "owner,course_id,coursework_id,submission_id,review_id",
+        )
+    ]
+
+
+def test_feedback_upsert_uses_coursework_scoped_submission_identity():
+    from app.teacher.models import TeacherFeedback
+    from app.teacher.repository import TeacherGoogleRepository
+
+    repository = TeacherGoogleRepository(FakeSupabase())
+
+    repository.save_feedback(
+        TeacherFeedback(
+            "teacher-a", "course-1", "work-1", "submission-1", "student-1",
+            "Good work.", "draft", None,
+        )
+    )
+
+    assert repository._client.upsert_conflicts == [
+        ("teacher_feedback", "owner,course_id,coursework_id,submission_id")
     ]
 
 
