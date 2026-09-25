@@ -190,3 +190,38 @@ def test_an_avatar_with_an_unknown_size_is_read_no_further_than_the_cap(client, 
     assert ok.status_code == 200
     assert reads == [main.MAX_AVATAR_BYTES + 1]
     assert client.get("/user/avatar/me", headers=ADA).content == b"small"
+
+
+# --- avatar upload: one file per user, even for two uploads at once ---
+
+
+def test_concurrent_uploads_leave_exactly_one_avatar_file(client, monkeypatch):
+    """Two uploads for the same user in flight together (double-click, two tabs) with
+    different extensions must not both pass the glob and leave two files. The unlink step is
+    slowed so the two requests interleave if nothing serialises them."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from pathlib import Path
+
+    client.post("/user/avatar", headers=ADA, files={"file": ("a.png", b"one", "image/png")})
+
+    real_unlink = Path.unlink
+
+    def slow_unlink(self, missing_ok=False):
+        time.sleep(0.2)
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", slow_unlink)
+
+    def upload(name, body, kind):
+        return client.post("/user/avatar", headers=ADA, files={"file": (name, body, kind)})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(upload, "b.jpg", b"two", "image/jpeg")
+        second = pool.submit(upload, "c.webp", b"three", "image/webp")
+        assert first.result().status_code == 200
+        assert second.result().status_code == 200
+
+    files = sorted(p.name for p in main.AVATARS_DIR.glob("user-ada.*"))
+    assert len(files) == 1, files
+    assert client.get("/user/avatar/me", headers=ADA).content in (b"two", b"three")

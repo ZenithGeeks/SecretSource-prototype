@@ -619,6 +619,30 @@ def _avatar_path(user: str | None) -> Path | None:
     return next(iter(AVATARS_DIR.glob(f"{user or 'anon'}.*")), None)
 
 
+# One avatar file per user is kept by glob-unlink-write, a read-modify-write like
+# _merge_preferences: two uploads for the same user at once (double-click, two tabs) could
+# both pass the glob and leave two files with different extensions, and _avatar_path would
+# then serve whichever the filesystem lists first. The file work runs on a worker thread
+# (disk I/O off the loop) under this lock. Lock order, should anything ever need both:
+# _avatar_lock first, then _preferences_lock — never _avatar_lock while holding
+# _preferences_lock. Today nothing holds both: the avatarUrl preference is a separate PATCH.
+_avatar_lock = threading.Lock()
+
+
+def _replace_avatar(key: str, ext: str, content: bytes) -> None:
+    with _avatar_lock:
+        AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+        for old in AVATARS_DIR.glob(f"{key}.*"):
+            old.unlink(missing_ok=True)
+        (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+
+
+def _remove_avatar(key: str) -> None:
+    with _avatar_lock:
+        for old in AVATARS_DIR.glob(f"{key}.*"):
+            old.unlink(missing_ok=True)
+
+
 @app.post("/user/avatar")
 async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Depends(current_user)):
     ext = AVATAR_TYPES.get(file.content_type or "")
@@ -632,11 +656,7 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
     content = await file.read(MAX_AVATAR_BYTES + 1)
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(413, "avatar must be under 2MB")
-    key = user or "anon"
-    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
-    for old in AVATARS_DIR.glob(f"{key}.*"):
-        old.unlink(missing_ok=True)
-    (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+    await asyncio.to_thread(_replace_avatar, user or "anon", ext, content)
     # Cache-bust: the frontend keeps this url in its settings blob indefinitely, so a
     # same-name re-upload needs a new url or the browser (and its own blob-url cache) would
     # keep showing the old image.
@@ -645,9 +665,7 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
 
 @app.delete("/user/avatar")
 async def remove_avatar(user: str | None = Depends(current_user)):
-    key = user or "anon"
-    for old in AVATARS_DIR.glob(f"{key}.*"):
-        old.unlink(missing_ok=True)
+    await asyncio.to_thread(_remove_avatar, user or "anon")
     return {"deleted": True}
 
 
