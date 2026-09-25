@@ -87,3 +87,59 @@ describe('role preview never writes another role’s settings', () => {
     expect(screen.getByRole('combobox', { name: 'Group papers by' })).toBeEnabled()
   })
 })
+
+describe('settings tab list keyboard travel', () => {
+  function settingsTabs() {
+    return Array.from(screen.getByRole('tablist', { name: 'Settings sections' }).querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+  }
+
+  test('is a roving tabindex: only the selected tab is in the Tab order', () => {
+    renderModal('writer')
+    const tabs = settingsTabs()
+    expect(tabs.filter((t) => t.tabIndex === 0).map((t) => t.textContent)).toEqual(['Account'])
+    expect(tabs.filter((t) => t.tabIndex === -1)).toHaveLength(tabs.length - 1)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Checking' }))
+    expect(settingsTabs().filter((t) => t.tabIndex === 0).map((t) => t.textContent)).toEqual(['Checking'])
+  })
+
+  test('arrow keys move selection and DOM focus together, wrapping at both ends', () => {
+    renderModal('writer')
+    const account = screen.getByRole('tab', { name: 'Account' })
+    account.focus()
+
+    fireEvent.keyDown(account, { key: 'ArrowDown' })
+    const roleTab = screen.getByRole('tab', { name: 'Role and home' })
+    expect(roleTab).toHaveAttribute('aria-selected', 'true')
+    expect(document.activeElement).toBe(roleTab)
+    expect(account).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.keyDown(roleTab, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(account)
+    expect(account).toHaveAttribute('aria-selected', 'true')
+
+    // Up from the first wraps to the last; Down from the last wraps to the first.
+    const last = settingsTabs().at(-1)!
+    fireEvent.keyDown(account, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(last)
+    expect(last).toHaveAttribute('aria-selected', 'true')
+    fireEvent.keyDown(last, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(account)
+  })
+
+  test('Home and End jump to the first and last tab', () => {
+    renderModal('teacher')
+    const account = screen.getByRole('tab', { name: 'Account' })
+    account.focus()
+
+    fireEvent.keyDown(account, { key: 'End' })
+    const classMarking = screen.getByRole('tab', { name: 'Class and marking' })
+    expect(document.activeElement).toBe(classMarking)
+    expect(classMarking).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: 'Class and marking' })).toBeInTheDocument()
+
+    fireEvent.keyDown(classMarking, { key: 'Home' })
+    expect(document.activeElement).toBe(account)
+    expect(account).toHaveAttribute('aria-selected', 'true')
+  })
+})

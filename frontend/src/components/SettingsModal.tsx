@@ -24,14 +24,17 @@ function NavButton({
   icon: Icon,
   active,
   onClick,
+  buttonRef,
 }: {
   label: string
   icon: Icon
   active: boolean
   onClick: () => void
+  buttonRef?: (node: HTMLButtonElement | null) => void
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       role="tab"
       aria-selected={active}
@@ -64,6 +67,9 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState('account')
   const [search, setSearch] = useState('')
   const dialogRef = useRef<HTMLDivElement>(null)
+  // One ref per settings tab button, so arrow keys can move DOM focus along with the
+  // selection (roving tabindex: only the active tab is in the Tab order).
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const [wasOpen, setWasOpen] = useState(open)
 
   usePreferencesSync(open)
@@ -127,10 +133,17 @@ export function SettingsModal({
   const activeVisible = active && visibleTabs.some((t) => t.id === active.id)
 
   const onTabKeyDown = (e: React.KeyboardEvent, list: string[], index: number) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    let next: number
+    if (e.key === 'ArrowDown') next = (index + 1) % list.length
+    else if (e.key === 'ArrowUp') next = (index - 1 + list.length) % list.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = list.length - 1
+    else return
     e.preventDefault()
-    const next = e.key === 'ArrowDown' ? (index + 1) % list.length : (index - 1 + list.length) % list.length
     setActiveTab(list[next])
+    // Selection and focus must travel together: otherwise Enter/Tab still act on the button
+    // that was focused before, not the one that now looks selected.
+    tabRefs.current.get(list[next])?.focus()
   }
 
   if (!open) return null
@@ -165,6 +178,10 @@ export function SettingsModal({
                       icon={tab.icon}
                       active={tab.id === active?.id}
                       onClick={() => setActiveTab(tab.id)}
+                      buttonRef={(node) => {
+                        if (node) tabRefs.current.set(tab.id, node)
+                        else tabRefs.current.delete(tab.id)
+                      }}
                     />
                   </div>
                 ))}
