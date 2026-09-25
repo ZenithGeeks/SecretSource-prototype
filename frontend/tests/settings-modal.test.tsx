@@ -286,3 +286,22 @@ describe('avatar upload and remove roll back like every other row', () => {
     expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
   })
 })
+
+describe('search and the Roles group', () => {
+  test('picking a role clears the search, so its tab set is not hidden behind a stale query', () => {
+    renderModal('writer')
+    const search = screen.getByRole('textbox', { name: 'Search settings' })
+
+    fireEvent.change(search, { target: { value: 'Teach' } })
+    // Only the Teacher role matches; the Settings list and the panel are gone.
+    expect(screen.queryByRole('tablist', { name: 'Settings sections' })).not.toBeInTheDocument()
+    expect(screen.getByText('No settings match "Teach".')).toBeInTheDocument()
+
+    previewRole('Teacher')
+    expect(search).toHaveValue('')
+    expect(screen.getByRole('tab', { name: 'Class and marking' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: 'Account' })).toBeInTheDocument()
+    expect(screen.queryByText(/No settings match/)).not.toBeInTheDocument()
+  })
+})

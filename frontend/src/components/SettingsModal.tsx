@@ -132,6 +132,15 @@ export function SettingsModal({
   // unreachable) content too, not silently leave stale settings on screen.
   const activeVisible = active && visibleTabs.some((t) => t.id === active.id)
 
+  // Previewing a role re-anchors to its Account tab and drops the search: the query was
+  // typed against the old role's labels (or matched only the role itself), so keeping it
+  // would leave the new tab set filtered down to "No settings match".
+  const previewRole = (role: Role) => {
+    setViewingRole(role)
+    setActiveTab('account')
+    setSearch('')
+  }
+
   const onTabKeyDown = (e: React.KeyboardEvent, list: string[], index: number) => {
     let next: number
     if (e.key === 'ArrowDown') next = (index + 1) % list.length
@@ -198,10 +207,7 @@ export function SettingsModal({
                     label={role.label}
                     icon={role.icon}
                     active={role.id === viewingRole}
-                    onClick={() => {
-                      setViewingRole(role.id)
-                      setActiveTab('account')
-                    }}
+                    onClick={() => previewRole(role.id)}
                   />
                 ))}
               </div>
