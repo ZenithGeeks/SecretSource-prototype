@@ -7,6 +7,7 @@
  */
 
 import { store } from './teacherStore'
+import { request } from './api'
 
 export type TeacherStanding = 'supports' | 'refutes' | 'insufficient' | 'unchecked'
 
@@ -188,9 +189,17 @@ export type EssayCheck = {
   reviews: EssayReview[]
   feedback: FeedbackDraft
   navigation: { previous?: StudentNavigation; next?: StudentNavigation }
+  analysis?: { id: string | null; status: string; error?: string | null }
+}
+
+export type AnalyzeTeacherSubmissionRequest = {
+  courseId: string
+  assignmentId: string
+  studentId: string
 }
 
 export type UpdateProfessorReviewRequest = {
+  courseId?: string
   assignmentId?: string
   /** Legacy URL/query name; converted inside the adapter only. */
   courseWorkId?: string
@@ -201,6 +210,7 @@ export type UpdateProfessorReviewRequest = {
 }
 
 export type SendFeedbackRequest = {
+  courseId?: string
   assignmentId?: string
   courseWorkId?: string
   studentId: string
@@ -299,8 +309,8 @@ export const teacherClassImportKey = (courseId: string) => ['teacher', 'class-im
 export const teacherWorkspaceKey = (courseId: string) => ['teacher', 'workspace', courseId] as const
 export const teacherAssignmentKey = (courseId: string, assignmentId: string) =>
   ['teacher', 'assignment', courseId, assignmentId] as const
-export const teacherEssayCheckKey = (assignmentId: string, studentId: string) =>
-  ['teacher', 'essay-check', assignmentId, studentId] as const
+export const teacherEssayCheckKey = (courseId: string, assignmentId: string, studentId: string) =>
+  ['teacher', 'essay-check', courseId, assignmentId, studentId] as const
 export const teacherReadingQuestionsKey = (paperId?: string) =>
   ['teacher', 'reading-questions', paperId] as const
 
@@ -311,7 +321,7 @@ function normalizedAssignmentId(input: { assignmentId?: string; courseWorkId?: s
   return input.assignmentId ?? input.courseWorkId ?? ''
 }
 
-export const teacherApi = {
+const mockTeacherApi = {
   getHome: async (): Promise<TeacherHome> => store.getHome(),
   getClasses: async (): Promise<TeacherClass[]> => store.getClasses(),
   getImportableClasses: async (): Promise<TeacherClass[]> => store.getImportableClasses(),
@@ -321,7 +331,10 @@ export const teacherApi = {
   getWorkspace: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
   getAssignmentDetail: async (courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> =>
     store.getAssignmentDetail(courseId, assignmentId),
-  getEssayCheck: async (assignmentId: string, studentId: string): Promise<EssayCheck | null> =>
+  analyzeSubmission: async (_input: AnalyzeTeacherSubmissionRequest) => {
+    throw new Error('Essay analysis requires a connected Google Classroom account.')
+  },
+  getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
   saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
     store.saveFeedback(input.assignmentId, input.studentId, {
@@ -351,4 +364,69 @@ export const teacherApi = {
   ): Promise<TeacherCourseWork> => store.setCourseWorkAnalysisSelected(courseWorkId, selected),
   queueSelectedCourseWork: async (courseId: string): Promise<QueueCourseWorkResult> =>
     store.queueSelectedCourseWork(courseId),
+  getGoogleConnection: async (): Promise<{ connected: boolean; email: string | null }> => ({ connected: false, email: null }),
+  startGoogleConnection: async (): Promise<{ authorizationUrl: string }> => {
+    throw new Error('Google Classroom is unavailable in mock mode.')
+  },
 }
+
+export const teacherRemoteEnabled = import.meta.env.VITE_TEACHER_BACKEND === 'remote'
+
+export const createRemoteTeacherApi = () => ({
+  ...mockTeacherApi,
+  getClasses: () => request<TeacherClass[]>('/teacher/classes'),
+  getImportableClasses: () => request<TeacherClass[]>('/teacher/classes/importable'),
+  getClassImportPreview: (courseId: string) => request<TeacherClassImportPreview>(`/teacher/classes/importable/${encodeURIComponent(courseId)}/preview`),
+  importClass: async (courseId: string) => (await request<{ course: TeacherClass }>(`/teacher/classes/${encodeURIComponent(courseId)}/import`, { method: 'POST' })).course,
+  getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),
+  getAssignmentDetail: (courseId: string, assignmentId: string) =>
+    request<TeacherAssignmentDetail>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}`),
+  getEssayCheck: (assignmentId: string, studentId: string, courseId?: string) =>
+    courseId
+      ? request<EssayCheck>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/essay-check`)
+      : Promise.resolve(null),
+  analyzeSubmission: (input: AnalyzeTeacherSubmissionRequest) =>
+    request<{ id: string; status: string; submission_id: string }>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/students/${encodeURIComponent(input.studentId)}/analyze`,
+      { method: 'POST' },
+    ),
+  updateProfessorReview: (input: UpdateProfessorReviewRequest) => {
+    if (!input.courseId) throw new Error('courseId is required for a remote professor review')
+    const assignmentId = normalizedAssignmentId(input)
+    return request<EssayCheck>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(assignmentId)}/essay-check/reviews/${encodeURIComponent(input.reviewId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: input.studentId, outcome: input.outcome, note: input.note }),
+      },
+    )
+  },
+  saveFeedback: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+    request<EssayCheck>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/essay-check/feedback`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+      },
+    ),
+  sendFeedback: (input: SendFeedbackRequest) => {
+    if (!input.courseId) throw new Error('courseId is required for remote feedback')
+    const assignmentId = normalizedAssignmentId(input)
+    return request<FeedbackDelivery>(
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(input.studentId)}/essay-check/feedback/send`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+      },
+    )
+  },
+  getGoogleConnection: () => request<{ connected: boolean; email: string | null }>('/teacher/google/status'),
+  startGoogleConnection: (email?: string, switchAccount = false) => request<{ authorizationUrl: string }>(`/teacher/google/connect?${new URLSearchParams({ ...(email ? { loginHint: email } : {}), ...(switchAccount ? { switch: 'true' } : {}) })}`),
+})
+
+const remoteTeacherApi = createRemoteTeacherApi()
+
+export const teacherApi = teacherRemoteEnabled ? remoteTeacherApi : mockTeacherApi

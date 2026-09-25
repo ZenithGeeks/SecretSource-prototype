@@ -14,6 +14,7 @@ import {
   teacherReadingQuestionsKey,
   teacherWorkspaceKey,
   type EssayCheck,
+  type AnalyzeTeacherSubmissionRequest,
   type TeacherAssignmentDetail,
   type TeacherCourseWork,
   type TeacherReadingQuestionsPage,
@@ -68,32 +69,45 @@ export function useTeacherAssignmentDetail(courseId: string, assignmentId: strin
   })
 }
 
-export function useTeacherEssayCheck(assignmentId: string, studentId: string) {
+export function useTeacherEssayCheck(courseId: string, assignmentId: string, studentId: string) {
   return useQuery<EssayCheck | null>({
-    queryKey: teacherEssayCheckKey(assignmentId, studentId),
-    queryFn: () => teacherApi.getEssayCheck(assignmentId, studentId),
-    enabled: Boolean(assignmentId && studentId),
+    queryKey: teacherEssayCheckKey(courseId, assignmentId, studentId),
+    queryFn: () => teacherApi.getEssayCheck(assignmentId, studentId, courseId),
+    enabled: Boolean(courseId && assignmentId && studentId),
+    refetchInterval: (query) => query.state.data?.analysis?.status === 'running' ? 2000 : false,
   })
 }
 
-function updateEssayCache(queryClient: ReturnType<typeof useQueryClient>, essay: EssayCheck) {
-  queryClient.setQueryData(teacherEssayCheckKey(essay.assignment.assignmentId, essay.student.id), essay)
+function updateEssayCache(queryClient: ReturnType<typeof useQueryClient>, essay: EssayCheck, courseId: string) {
+  queryClient.setQueryData(teacherEssayCheckKey(courseId, essay.assignment.assignmentId, essay.student.id), essay)
 }
 
 export function useUpdateProfessorReview() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: UpdateProfessorReviewRequest) => teacherApi.updateProfessorReview(input),
-    onSuccess: (essay) => updateEssayCache(queryClient, essay),
+    onSuccess: (essay, input) => updateEssayCache(queryClient, essay, input.courseId ?? essay.assignment.courseId),
+  })
+}
+
+export function useAnalyzeTeacherSubmission() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: AnalyzeTeacherSubmissionRequest) => teacherApi.analyzeSubmission(input),
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: teacherEssayCheckKey(input.courseId, input.assignmentId, input.studentId),
+      })
+    },
   })
 }
 
 export function useSaveTeacherFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
       teacherApi.saveFeedback(input),
-    onSuccess: (essay) => updateEssayCache(queryClient, essay),
+    onSuccess: (essay, input) => updateEssayCache(queryClient, essay, input.courseId),
   })
 }
 

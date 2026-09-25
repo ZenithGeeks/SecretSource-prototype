@@ -5,6 +5,7 @@ import { Button, Card, Empty } from '../../../components/ui'
 import { feedbackPreview, toggleFeedbackReview } from '../../../lib/teacherSelectors'
 import type { EssayReview, ProfessorReviewOutcome, TeacherStanding } from '../../../lib/teacher'
 import {
+  useAnalyzeTeacherSubmission,
   useSaveTeacherFeedback,
   useSendTeacherFeedback,
   useTeacherEssayCheck,
@@ -20,7 +21,8 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
   onNavigate: (studentId: string) => void
   onBack: () => void
 }) {
-  const essay = useTeacherEssayCheck(assignmentId, studentId)
+  const essay = useTeacherEssayCheck(courseId, assignmentId, studentId)
+  const analyze = useAnalyzeTeacherSubmission()
   const updateReview = useUpdateProfessorReview()
   const saveFeedback = useSaveTeacherFeedback()
   const sendFeedback = useSendTeacherFeedback()
@@ -46,7 +48,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
   const preview = feedbackPreview(body, pages)
 
   const handleReviewChange = (review: EssayReview, outcome: ProfessorReviewOutcome) => {
-    updateReview.mutate({ assignmentId, studentId, reviewId: review.id, outcome, note: review.professorReview.note })
+    updateReview.mutate({ courseId, assignmentId, studentId, reviewId: review.id, outcome, note: review.professorReview.note })
   }
 
   const copy = async (text: string, message: string) => {
@@ -61,8 +63,8 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
   }
 
   const send = async () => {
-    await saveFeedback.mutateAsync({ assignmentId, studentId, body, citationIds })
-    await sendFeedback.mutateAsync({ assignmentId, studentId, body, citationIds })
+    await saveFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds })
+    await sendFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds })
   }
 
   return (
@@ -73,7 +75,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onNavigate, onBa
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-surface p-4 text-sm"><FileText className="size-4 text-accent" /><span className="font-medium">{data.student.fileName}</span><span className="text-ink-muted">·</span><span className="text-ink-muted">{data.citationSummary.total} citations</span><span className="ml-auto flex flex-wrap gap-2"><StatusPill label={`${data.citationSummary.contradicted} contradicted`} tone="danger" /><StatusPill label={`${data.citationSummary.silent} silent`} tone="warning" /><StatusPill label={`${data.citationSummary.backed} backed`} tone="success" /></span></div>
 
       {notice && <div role="status" className="rounded-lg bg-supports-soft px-4 py-3 text-sm text-supports">{notice}</div>}
-      <section className="space-y-4" aria-labelledby="citation-review-heading"><div><h2 id="citation-review-heading" className="font-serif text-2xl font-semibold">Citation review</h2><p className="mt-1 text-sm text-ink-muted">Check each claim against the source, then add only the citations you want to mention in feedback.</p></div>{data.reviews.map((review, index) => <CitationCard key={review.id} review={review} index={index} included={citationIds.includes(review.id)} updating={updateReview.isPending} onToggle={() => changeDraft({ citationIds: toggleFeedbackReview(citationIds, review.id) })} onReviewChange={(outcome) => handleReviewChange(review, outcome)} onShowPaper={() => showPaper(review)} />)}</section>
+      <section className="space-y-4" aria-labelledby="citation-review-heading"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="citation-review-heading" className="font-serif text-2xl font-semibold">Citation review</h2><p className="mt-1 text-sm text-ink-muted">Check each claim against the source, then add only the citations you want to mention in feedback.</p></div>{data.analysis && data.analysis.status !== 'done' && data.analysis.status !== 'running' && <Button type="button" onClick={() => analyze.mutate({ courseId, assignmentId, studentId })} disabled={analyze.isPending}>{analyze.isPending ? 'Starting check...' : 'Check essay'}</Button>}</div>{data.analysis?.status === 'running' && <p role="status" className="text-sm text-ink-muted">Essay analysis is running. This page will update when it finishes.</p>}{analyze.isError && <p role="alert" className="text-sm text-insufficient">{analyze.error instanceof Error ? analyze.error.message : 'Essay analysis could not start.'}</p>}{data.analysis?.error && <p role="alert" className="text-sm text-insufficient">{data.analysis.error}</p>}{data.reviews.map((review, index) => <CitationCard key={review.id} review={review} index={index} included={citationIds.includes(review.id)} updating={updateReview.isPending} onToggle={() => changeDraft({ citationIds: toggleFeedbackReview(citationIds, review.id) })} onReviewChange={(outcome) => handleReviewChange(review, outcome)} onShowPaper={() => showPaper(review)} />)}</section>
 
       <Card className="border-accent bg-accent-soft/25"><div className="flex flex-col gap-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-accent">Feedback</p><h2 className="mt-1 font-serif text-2xl font-semibold">Write to {data.student.name}</h2></div><MessageSquarePlus className="size-5 text-accent" /></div><textarea value={body} onChange={(event) => changeDraft({ body: event.target.value })} rows={7} aria-label="Feedback to student" className="w-full resize-y rounded-xl border border-border-subtle bg-surface px-4 py-3 text-sm leading-6 placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent" placeholder="Write feedback for the student..." /><p className="text-xs leading-5 text-ink-muted">{preview}</p><div className="flex flex-col gap-3 border-t border-accent/20 pt-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-ink-muted">{citationIds.length} citation{citationIds.length === 1 ? '' : 's'} included</span><div className="flex flex-wrap gap-2"><Button type="button" variant="ghost" onClick={() => void copy(body, 'Feedback copied locally.')}><Copy className="size-4" />Copy</Button><Button type="button" onClick={() => setFeedbackOpen(true)} disabled={!body.trim() || saveFeedback.isPending}><Send className="size-4" />Send to student</Button></div></div></div></Card>
 

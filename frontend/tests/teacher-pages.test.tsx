@@ -86,6 +86,21 @@ describe('Teacher home and class pages', () => {
     expect(onContinue).toHaveBeenCalledOnce()
   })
 
+  test('Add class displays a Google connection error', () => {
+    renderWithQuery(
+      <AddClass
+        step="connect"
+        error="Google is unavailable."
+        onBack={vi.fn()}
+        onContinue={vi.fn()}
+        onSelectCourse={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Google is unavailable.')
+  })
+
   test('Add class selects an importable course and confirms its local import', async () => {
     const onSelectCourse = vi.fn()
     renderWithQuery(

@@ -11,6 +11,7 @@ export type AddClassStep = 'connect' | 'course' | 'review'
 export function AddClass({
   step,
   selectedCourseId,
+  error,
   onBack,
   onContinue,
   onSelectCourse,
@@ -18,6 +19,7 @@ export function AddClass({
 }: {
   step: AddClassStep
   selectedCourseId?: string
+  error?: string
   onBack: () => void
   onContinue: () => void
   onSelectCourse: (courseId: string) => void
@@ -29,7 +31,7 @@ export function AddClass({
       <Breadcrumbs items={[{ label: 'Classes', onClick: onBack }, { label: 'Add class' }]} />
       <StepProgress steps={steps} active={step === 'connect' ? 0 : step === 'course' ? 1 : 2} />
       {step === 'connect' ? (
-        <ConnectStep onContinue={onContinue} />
+        <ConnectStep error={error} onContinue={onContinue} />
       ) : step === 'course' ? (
         <CourseStep selectedCourseId={selectedCourseId} onBack={onBack} onContinue={onContinue} onSelectCourse={onSelectCourse} />
       ) : (
@@ -39,7 +41,7 @@ export function AddClass({
   )
 }
 
-function ConnectStep({ onContinue }: { onContinue: () => void }) {
+function ConnectStep({ error, onContinue }: { error?: string; onContinue: () => void }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-7">
       <PageHeading
@@ -58,7 +60,10 @@ function ConnectStep({ onContinue }: { onContinue: () => void }) {
         </div>
       </Card>
       <div className="flex justify-end">
-        <Button type="button" onClick={onContinue}>Continue with Google</Button>
+        <div className="space-y-2 text-right">
+          {error && <p role="alert" className="text-sm text-insufficient">{error}</p>}
+          <Button type="button" onClick={onContinue}>Continue with Google</Button>
+        </div>
       </div>
     </div>
   )

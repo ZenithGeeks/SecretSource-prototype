@@ -6,9 +6,55 @@
 import os
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    value = value.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean, got {value!r}")
+
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from error
+    if parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {parsed}")
+    return parsed
+
+
+def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number, got {value!r}") from error
+    if parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {parsed}")
+    return parsed
+
+
+def _env_scopes(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return tuple(scope for scope in value.replace(",", " ").split() if scope)
 
 # `or` instead of a default argument, on purpose. .env.example ships these empty.
 # An empty string must mean "not set", not "connect to nothing".
@@ -42,6 +88,8 @@ ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
+# Optional, teacher-page-only Google Classroom connection. These credentials are never sent to
+# the browser; the public callback goes through the web server's existing /api proxy.
 # Source lookups. Without S2_API_KEY, Semantic Scholar rate-limits most calls.
 # UNPAYWALL_EMAIL lets Unpaywall answer instead. It is a contact address, not a key.
 S2_API_KEY = os.getenv("S2_API_KEY", "")
@@ -63,3 +111,60 @@ PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECK
 # check is judged on the text alone, and a later run of the paper gets the figures. On the same
 # 15 checks, 0 took 85 s instead of 264 s, and one verdict out of 15 came out wrong (#163).
 FIGURE_WAIT = float(os.getenv("FIGURE_WAIT")) if os.getenv("FIGURE_WAIT") else None
+
+# Teacher Google Classroom is deliberately opt-in. Local mock development and tests keep
+# working without any Google credentials. When enabled, fail at startup with the names of
+# the missing settings rather than failing later during the OAuth redirect.
+_DEFAULT_TEACHER_GOOGLE_SCOPES = (
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/classroom.courses.readonly",
+    "https://www.googleapis.com/auth/classroom.rosters.readonly",
+    "https://www.googleapis.com/auth/classroom.coursework.students",
+    "https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly",
+    "https://www.googleapis.com/auth/classroom.announcements.readonly",
+    "https://www.googleapis.com/auth/classroom.topics.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
+)
+
+TEACHER_GOOGLE_ENABLED = _env_flag("TEACHER_GOOGLE_ENABLED")
+TEACHER_GOOGLE_CLIENT_ID = os.getenv("TEACHER_GOOGLE_CLIENT_ID", "").strip()
+TEACHER_GOOGLE_CLIENT_SECRET = os.getenv("TEACHER_GOOGLE_CLIENT_SECRET", "").strip()
+TEACHER_GOOGLE_REDIRECT_URI = os.getenv("TEACHER_GOOGLE_REDIRECT_URI", "").strip()
+TEACHER_GOOGLE_ENCRYPTION_KEY = os.getenv("TEACHER_GOOGLE_ENCRYPTION_KEY", "").strip()
+TEACHER_GOOGLE_SUCCESS_REDIRECT = os.getenv("TEACHER_GOOGLE_SUCCESS_REDIRECT", "").strip() or "/"
+TEACHER_GOOGLE_SCOPES = _env_scopes("TEACHER_GOOGLE_SCOPES", _DEFAULT_TEACHER_GOOGLE_SCOPES)
+TEACHER_GOOGLE_STATE_TTL_SECONDS = _env_int("TEACHER_GOOGLE_STATE_TTL_SECONDS", 600, minimum=1)
+TEACHER_GOOGLE_RETRY_ATTEMPTS = _env_int("TEACHER_GOOGLE_RETRY_ATTEMPTS", 3, minimum=1)
+TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS = _env_float(
+    "TEACHER_GOOGLE_RETRY_BACKOFF_SECONDS", 0.5, minimum=0.0
+)
+
+
+def validate_teacher_google_settings() -> None:
+    """Raise a clear error when the opt-in Classroom integration is incomplete."""
+
+    if not TEACHER_GOOGLE_ENABLED:
+        return
+
+    required = {
+        "TEACHER_GOOGLE_CLIENT_ID": TEACHER_GOOGLE_CLIENT_ID,
+        "TEACHER_GOOGLE_CLIENT_SECRET": TEACHER_GOOGLE_CLIENT_SECRET,
+        "TEACHER_GOOGLE_REDIRECT_URI": TEACHER_GOOGLE_REDIRECT_URI,
+        "TEACHER_GOOGLE_ENCRYPTION_KEY": TEACHER_GOOGLE_ENCRYPTION_KEY,
+        "SUPABASE_URL": SUPABASE_URL,
+        "SUPABASE_SERVICE_ROLE_KEY": SUPABASE_SERVICE_ROLE_KEY,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if not TEACHER_GOOGLE_SCOPES:
+        missing.append("TEACHER_GOOGLE_SCOPES")
+    if missing:
+        names = ", ".join(missing)
+        raise ValueError(f"TEACHER_GOOGLE_ENABLED is true but required settings are missing: {names}")
+    try:
+        Fernet(TEACHER_GOOGLE_ENCRYPTION_KEY.encode())
+    except (TypeError, ValueError) as error:
+        raise ValueError("TEACHER_GOOGLE_ENCRYPTION_KEY must be a valid Fernet key") from error
+
+
+validate_teacher_google_settings()
