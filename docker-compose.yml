@@ -173,6 +173,8 @@ services:
       - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
     depends_on:
       - grobid # vllm / colbert are only dependencies under --profile gpu; .env decides
+    cap_add:
+      - SYS_PTRACE # lets py-spy attach to pid 1 for live profiling (backend/README.md#profiling)
     restart: unless-stopped
 
   # TLS in front of the gateway, for a frontend hosted on a different origin (e.g. Vercel) that
