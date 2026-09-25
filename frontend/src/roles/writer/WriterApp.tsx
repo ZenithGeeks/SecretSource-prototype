@@ -87,7 +87,7 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       nav={NAV}
       active={NAV_FOR[screen]}
       onNavigate={(key) => navigate(screenForNav(key))}
-      role="Writer"
+      role="Author"
       roleIcon={Pen}
       onChangeRole={onChangeRole}
       onOpenSettings={() => setSettingsOpen(true)}
