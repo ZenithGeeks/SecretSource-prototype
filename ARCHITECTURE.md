@@ -154,6 +154,25 @@ fields. You read them like normal Python values, for example `prediction.verdict
 - Both use the same LLM. `backend/app/llm.py` creates `adk_model()` for ADK and `dspy_lm()`
   for DSPy, both pointed at `VLLM_URL`.
 
+**The math ColBERT and ColPali share**
+
+Both are late-interaction retrievers: they keep a vector per token (ColBERT) or per image
+patch (ColPali) instead of compressing a passage into one vector, and score a candidate with
+MaxSim. Given a query's token embeddings q_1...q_n and a candidate's token embeddings
+d_1...d_m:
+
+```
+Score(Q, D) = sum_i max_j (q_i . d_j)
+```
+
+For every query token, take its highest dot-product similarity to any single token in the
+candidate, then sum those maxima across the query. A query token needs only one matching
+token anywhere in the candidate to score well, so a number in row eight of a table scores
+the same as if it were the passage's opening sentence — this is what a single-vector
+embedding cannot do, since it has already averaged that row away before search ever runs.
+Qdrant's multivector search executes this scoring natively; neither service re-ranks
+candidates in application code.
+
 **Our four DSPy programs**
 
 | Signature | File | Gets | Returns | Used by |
@@ -354,6 +373,19 @@ flowchart TD
 | ReAct | The search is the same for every claim, so code runs it, and the judge is one model call. |
 | Human in the loop | A run does not stop. Each verdict shows its quote, passages, and reasoning, so the reader decides after. |
 
+## Teacher: Google Classroom
+
+`backend/app/teacher/` connects a teacher's Google Classroom courses to the same
+claim-verification pipeline everything else uses. It follows none of the agent patterns
+above, deliberately: OAuth, roster import, and syncing a class's assignments and
+submissions are plain CRUD against Google's API and the store, with nothing for a model to
+decide. The one place it touches the pipeline is `analysis.py`, an adapter that turns a
+Classroom submission into the same claim/citation shapes `verify.py` already produces, so
+grading an essay reuses the existing analysis code rather than a second implementation of
+it. `oauth.py` holds the token exchange and refresh; `google_client.py` wraps the Classroom
+and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (see
+[backend/README.md#teacher](backend/README.md#teacher)).
+
 ## Services
 
 | Service | What it does | Where it runs |
@@ -449,3 +481,4 @@ adds an analysis to it.
 | the graph in `adk web` | `backend/app/workflow.py` |
 | the chat agents and their routing | `backend/app/agents/team.py` |
 | the researcher Home, Library, Field consensus or Graph | `backend/app/researcher.py`, `frontend/src/roles/researcher` |
+| the teacher Classroom OAuth, roster sync, or essay-check review | `backend/app/teacher/`, `frontend/src/roles/teacher` |
