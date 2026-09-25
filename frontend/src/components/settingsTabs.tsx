@@ -29,6 +29,9 @@ export const ROLE_NAV: { id: Role; label: string; icon: Icon }[] = [
 
 export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRole: () => void): SettingsTabDef[] {
   const current = ROLE_NAV.find((r) => r.id === currentRole) ?? ROLE_NAV[0]
+  // Previewing another role's tabs must never write that role's settings as the signed-in
+  // user: every section whose controls save for real gets this and disables itself.
+  const isPreview = viewingRole !== currentRole
 
   const tabs: SettingsTabDef[] = [
     { id: 'account', label: 'Account', icon: UserRound, content: <AccountSection /> },
@@ -45,15 +48,25 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
       id: 'data',
       label: 'Your data',
       icon: Download,
-      content: <YourDataSection role={viewingRole} isPreview={viewingRole !== currentRole} />,
+      content: <YourDataSection role={viewingRole} isPreview={isPreview} />,
     },
   ]
 
   if (viewingRole === 'researcher') {
-    tabs.push({ id: 'field-map', label: 'Field map', icon: Waypoints, content: <FieldMapSection /> })
+    tabs.push({
+      id: 'field-map',
+      label: 'Field map',
+      icon: Waypoints,
+      content: <FieldMapSection isPreview={isPreview} />,
+    })
   }
   if (viewingRole === 'teacher') {
-    tabs.push({ id: 'class-marking', label: 'Class and marking', icon: Users2, content: <ClassMarkingSection /> })
+    tabs.push({
+      id: 'class-marking',
+      label: 'Class and marking',
+      icon: Users2,
+      content: <ClassMarkingSection isPreview={isPreview} />,
+    })
   }
 
   return tabs

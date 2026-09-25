@@ -490,58 +490,75 @@ export function YourDataSection({ role, isPreview }: { role: Role; isPreview: bo
   return <TeacherYourData isPreview={isPreview} />
 }
 
-export function FieldMapSection() {
+/** `isPreview`: the modal is showing this role's tabs to someone signed in as another role
+ * (Roles group in the aside). The controls still show the stored values but cannot save. */
+export function FieldMapSection({ isPreview }: { isPreview: boolean }) {
   const s = useSettings()
   const set = useSetSetting()
   return (
     <Section title="Field map">
+      {isPreview && <Notice text="You are previewing Researcher settings. Switch to Researcher to change them." />}
       <Row
         label="Group papers by"
         hint="Meaning puts papers that make the same claim together. Citations group by who cites whom."
       >
-        <Select value={s.groupBy} options={['Meaning', 'Citations']} onChange={(v) => set('groupBy', v)} />
+        <Select
+          value={s.groupBy}
+          options={['Meaning', 'Citations']}
+          onChange={(v) => set('groupBy', v)}
+          disabled={isPreview}
+        />
       </Row>
       <Row label="Smallest group to draw" hint="Anything smaller stays folded until you open the cluster.">
         <Select
           value={s.smallestGroup}
           options={['2 papers', '3 papers', '4 papers', '5 papers']}
           onChange={(v) => set('smallestGroup', v)}
+          disabled={isPreview}
         />
       </Row>
       <Row
         label="Mark disagreements on the map"
         hint="Draws a marked edge wherever two papers answer the same claim differently."
       >
-        <Toggle on={s.markDisagreements} onChange={(v) => set('markDisagreements', v)} />
+        <Toggle on={s.markDisagreements} onChange={(v) => set('markDisagreements', v)} disabled={isPreview} />
       </Row>
     </Section>
   )
 }
 
-export function ClassMarkingSection() {
+/** Same `isPreview` contract as FieldMapSection. */
+export function ClassMarkingSection({ isPreview }: { isPreview: boolean }) {
   const teacher = useTeacherPreferences()
   const classes = useTeacherClasses()
   const set = useSetTeacherPreference()
   return (
     <Section title="Class and marking">
+      {isPreview && <Notice text="You are previewing Teacher settings. Switch to Teacher to change them." />}
       <Row label="Default class" hint="The class used when exporting results.">
         <Select
           value={teacher.defaultClassId}
           options={(classes.data ?? []).map((c) => ({ value: c.id, label: `${c.name} · ${c.section}` }))}
           onChange={(v) => set('defaultClassId', v)}
+          disabled={isPreview}
         />
       </Row>
       <Row label="Hide student names" hint="Use initials in review lists.">
-        <Toggle on={teacher.hideStudentNames} onChange={(v) => set('hideStudentNames', v)} />
+        <Toggle on={teacher.hideStudentNames} onChange={(v) => set('hideStudentNames', v)} disabled={isPreview} />
       </Row>
       <Row label="Show student report" hint="Allow a report preview to be prepared.">
-        <Toggle on={teacher.studentReportVisibility} onChange={(v) => set('studentReportVisibility', v)} />
+        <Toggle
+          on={teacher.studentReportVisibility}
+          onChange={(v) => set('studentReportVisibility', v)}
+          disabled={isPreview}
+        />
       </Row>
       <Row label="Send reports as" hint="Displayed sender name.">
         <input
           value={teacher.sendReportsAs}
           onChange={(e) => set('sendReportsAs', e.target.value)}
-          className="h-9 w-[180px] rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent"
+          disabled={isPreview}
+          className="h-9 w-[180px] rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50"
         />
       </Row>
     </Section>
