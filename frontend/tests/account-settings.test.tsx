@@ -2,7 +2,7 @@
  * hydrating the local stores from the server's preferences blob on open. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
@@ -59,4 +59,42 @@ test('usePreferencesSync hydrates the local settings store from the server once 
   rerender({ open: true })
   await waitFor(() => expect(getSettings().theme).toBe('Dark'))
   expect(getSettings().notifyDone).toBe(true)
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+
+  // Closing and reopening fetches again, so another device's change still wins on open.
+  rerender({ open: false })
+  rerender({ open: true })
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+})
+
+test('a PATCH response never overwrites a newer local value (fast typing, a double toggle)', async () => {
+  // GET answers at once; each PATCH is held until the test releases it, in order.
+  const release: ((response: Response) => void)[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return new Promise<Response>((resolve) => release.push(resolve))
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+  )
+  const { result } = renderHook(() => ({ sync: usePreferencesSync(true), set: useSetSetting() }), { wrapper })
+  await waitFor(() => expect(result.current.sync.data).toEqual({}))
+
+  result.current.set('displayName', 'A')
+  result.current.set('displayName', 'AB')
+  expect(getSettings().displayName).toBe('AB')
+  await waitFor(() => expect(release).toHaveLength(2))
+
+  // The first PATCH answers with the blob as of that write — older than what is typed now.
+  await act(async () => {
+    release[0](new Response(JSON.stringify({ displayName: 'A' }), { status: 200 }))
+    await new Promise((r) => setTimeout(r, 20))
+  })
+  expect(getSettings().displayName).toBe('AB') // not reverted to 'A'
+
+  await act(async () => {
+    release[1](new Response(JSON.stringify({ displayName: 'AB' }), { status: 200 }))
+    await new Promise((r) => setTimeout(r, 20))
+  })
+  expect(getSettings().displayName).toBe('AB')
 })
