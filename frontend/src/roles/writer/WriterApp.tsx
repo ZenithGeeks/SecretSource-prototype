@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
+import { settingsRequested } from '../../lib/settingsDeepLink'
 import { CitationReplaced } from './screens/CitationReplaced'
 import { DraftCheck } from './screens/DraftCheck'
 import { FindASource } from './screens/FindASource'
@@ -71,7 +72,8 @@ function Placeholder({ title }: { title: string }) {
 export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [screen, setScreen] = useState<WriterScreen>(initialScreen)
   const [replacedCitation, setReplacedCitation] = useState<string | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
+  const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
 
   useEffect(() => syncScreenParam(screen), [screen])
 
