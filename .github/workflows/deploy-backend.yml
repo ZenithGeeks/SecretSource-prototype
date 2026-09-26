@@ -3,14 +3,19 @@
 # because ss-core's address (10.35.109.71) is KMUTT-internal only — GitHub-hosted runners
 # cannot reach it, so the job has to run on the box itself rather than SSH into it.
 #
-# Secrets stay off GitHub entirely: .env lives only on ss-core (~/app/.env) and is copied into
-# the checkout before `docker compose` reads it, the same file used for the manual deploys this
-# replaces.
+# Secrets stay off GitHub entirely: .env and the Google service-account key live only on
+# ss-core (~/app/.env, ~/app/backend/secrets/service-auth.json) and are copied into the
+# checkout before `docker compose` reads them, the same files used for the manual deploys this
+# replaces. Both copies matter: actions/checkout's git clean wipes backend/secrets/ (gitignored)
+# on every run, so skipping the second copy silently breaks colbert/colpali's google-id-token
+# auth on the very next deploy, even though .env itself is fine (#252).
 #
 # Setup (one-time, on ss-core itself — see the runner registration steps in the PR/issue that
 # introduced this file):
 #   1. Install a GitHub Actions self-hosted runner for this repo, labeled "ss-core".
 #   2. Confirm ~/app/.env exists with the gateway's real config (S2_API_KEY, SUPABASE_*, etc).
+#   3. Confirm ~/app/backend/secrets/service-auth.json exists (the shared Google service-account
+#      key described in deploy/team-cloud-services-setup.md).
 name: deploy-backend
 
 on:
@@ -25,7 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Load persistent secrets
-        run: cp ~/app/.env .env
+        run: |
+          cp ~/app/.env .env
+          mkdir -p backend/secrets
+          cp ~/app/backend/secrets/service-auth.json backend/secrets/service-auth.json
       - name: Build and restart gateway + web
         # --no-deps: grobid runs on a separate VM (ss-grobid) here, not as a local container.
         run: docker compose up -d --build --no-deps gateway web
