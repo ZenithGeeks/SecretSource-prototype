@@ -17,8 +17,9 @@
 # BLOCKED/ERROR state). What actually cost 6 hours three separate times (#203, #212, a retried
 # #157) was `vercel deploy` hitting a still-blocked commit and hanging on an interactive
 # confirmation instead of failing, silently eating the job until GitHub's 6-hour ceiling
-# cancelled it. `--yes`/`--non-interactive` on build and deploy stop the prompt; `timeout-minutes: 5`
-# on the deploy step is the backstop in case some other prompt shows up later.
+# cancelled it. `--yes`/`--non-interactive` on build and deploy stop the prompt; `timeout-minutes: 2`
+# on the deploy step is the backstop in case some other prompt shows up later — every real deploy
+# so far has finished in about a minute, so 2 leaves headroom without eating much on a repeat.
 #
 # Required repository secrets:
 #   VERCEL_TOKEN       from vercel.com/account/settings/tokens, scoped to this project
@@ -34,6 +35,12 @@ on:
     branches: [main]
     paths: ["frontend/**"]
   workflow_dispatch:
+
+# Only the latest push to main needs to actually deploy; a superseded run's minutes are wasted
+# the moment a newer commit lands, so cancel it instead of letting it run to completion or timeout.
+concurrency:
+  group: deploy-frontend-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   vercel:
@@ -63,5 +70,5 @@ jobs:
       - name: Build (Vercel-driven, uses pulled env vars)
         run: npx vercel build --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy prebuilt output
-        timeout-minutes: 5
+        timeout-minutes: 2
         run: npx vercel deploy --prebuilt --prod --yes --non-interactive --token=${{ secrets.VERCEL_TOKEN }}
