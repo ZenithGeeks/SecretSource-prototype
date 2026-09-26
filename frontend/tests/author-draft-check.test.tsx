@@ -1,73 +1,75 @@
+/**
+ * Author Home — Check a draft — against the fake gateway (tests/fakeAuthorGateway.ts): the
+ * counts and warnings come from the seeded thesis chapter, and every action ends in the
+ * request the real gateway would get. What the screen changed is still there after it
+ * unmounts and mounts again, as after a page refresh.
+ */
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { setMockLatency } from '../src/lib/author'
-import { authorStore } from '../src/lib/authorStore'
 import { DraftCheck } from '../src/roles/author/screens/DraftCheck'
+import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
+import { THESIS_FILES } from './fixtures/thesis'
+
+vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
+
+let gateway: FakeGateway
+let queryClient: QueryClient
 
 function renderWithQuery(ui: ReactNode) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
   return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
-function renderDraftCheck(draftId = 'd1') {
+function renderDraftCheck(draftId: string | null = 'd1') {
   const onSelectDraft = vi.fn()
   const onOpenEditor = vi.fn()
   const onOpenHistory = vi.fn()
-  renderWithQuery(
-    <DraftCheck draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={onOpenEditor} onOpenHistory={onOpenHistory} />,
+  const onFindSource = vi.fn()
+  const view = renderWithQuery(
+    <DraftCheck draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={onOpenEditor} onOpenHistory={onOpenHistory} onFindSource={onFindSource} />,
   )
-  return { onSelectDraft, onOpenEditor, onOpenHistory }
+  return { ...view, onSelectDraft, onOpenEditor, onOpenHistory, onFindSource }
 }
 
 beforeEach(() => {
-  setMockLatency(0)
-  authorStore.reset()
-  window.history.replaceState(null, '', '/')
+  gateway = installFakeGateway({ files: THESIS_FILES })
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
 })
 
-describe('Author Draft check', () => {
-  test('shows the header counts, the derived warnings and the three open issues', async () => {
+afterEach(() => vi.unstubAllGlobals())
+
+describe('Author Check a draft', () => {
+  test('shows the header counts, the parse warnings and the open issues from the gateway', async () => {
     renderDraftCheck()
     expect(await screen.findByRole('heading', { name: 'Check a draft' })).toBeInTheDocument()
-    expect(screen.getByText(/12 citations found · 3 need work/)).toBeInTheDocument()
+    expect(await screen.findByText(/6 citations found · 3 need work/)).toBeInTheDocument()
 
-    expect(await screen.findByText('4 warnings')).toBeInTheDocument()
-    expect(screen.getByText('\\cite{liu2023} in intro.tex L18')).toBeInTheDocument()
+    expect(await screen.findByText('5 warnings')).toBeInTheDocument()
+    expect(screen.getByText('\\cite{liu2023} in related-work.tex L37')).toBeInTheDocument()
+    expect(screen.getByText('santhanam2022 defined twice')).toBeInTheDocument()
 
-    const rows = within(screen.getByRole('list', { name: 'Citations' })).getAllByRole('button')
+    const rows = within(await screen.findByRole('list', { name: 'Citations' })).getAllByRole('button')
     expect(rows).toHaveLength(3)
     expect(rows[0]).toHaveTextContent('source contradicts')
-    expect(rows[0]).toHaveTextContent('\\cite{khattab2020} · 0.88 confidence')
-    expect(screen.getByText('9 supported')).toBeInTheDocument()
+    expect(rows[0]).toHaveTextContent('\\cite{khattab2020} · khattab2020.pdf p.7')
+    expect(screen.getByText('2 supported')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /1 of 3 issues/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })).toBeInTheDocument()
+    expect(screen.getByText('“we leave compression of the embeddings to future work”')).toBeInTheDocument()
+    expect(gateway.calls).toContain('GET /author/drafts/d1')
   })
 
-  test('"Replace with …" rewrites the source, resolves the issue and moves the pager on', async () => {
-    renderDraftCheck()
-    fireEvent.click(await screen.findByRole('button', { name: /Replace with Santhanam 2022/ }))
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Citation replaced with Santhanam 2022')
-    await waitFor(() => expect(screen.getByText(/2 need work/)).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /1 of 2 issues/ })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Evidence · Thakur et al., 2021' })).toBeInTheDocument()
-
-    const related = authorStore.draft('d1')!.files.find((f) => f.name === 'related-work.tex')!
-    expect(related.content.split('\n')[9]).toContain('\\cite{santhanam2022}')
-  })
-
-  test('the pager cycles through open issues and "All" lists every citation', async () => {
+  test('the pager cycles through open issues; "All" and "Low confidence" filter the rows', async () => {
     renderDraftCheck()
     fireEvent.click(await screen.findByRole('button', { name: /1 of 3 issues/ }))
     expect(screen.getByRole('button', { name: /2 of 3 issues/ })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Evidence · Thakur et al., 2021' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'All' }))
-    expect(within(screen.getByRole('list', { name: 'Citations' })).getAllByRole('button')).toHaveLength(13)
+    expect(within(screen.getByRole('list', { name: 'Citations' })).getAllByRole('button')).toHaveLength(8)
 
     fireEvent.click(screen.getByRole('button', { name: 'Low confidence' }))
     const low = within(screen.getByRole('list', { name: 'Citations' })).getAllByRole('button')
@@ -75,14 +77,48 @@ describe('Author Draft check', () => {
     expect(low[0]).toHaveTextContent('thakur2021')
   })
 
-  test('"Override · add note" keeps the citation with a note and advances', async () => {
-    renderDraftCheck()
+  test('"Override · add note" records the resolution on the gateway and survives a remount', async () => {
+    const first = renderDraftCheck()
     fireEvent.click(await screen.findByRole('button', { name: /Override · add note/ }))
     fireEvent.change(screen.getByLabelText('Why you are keeping this citation'), { target: { value: 'Table 3 says so' } })
     fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
 
     await waitFor(() => expect(screen.getByText(/2 need work/)).toBeInTheDocument())
-    expect(authorStore.citations('d1').find((c) => c.id === 'c10')?.resolution?.note).toBe('Table 3 says so')
+    expect(gateway.calls.some((c) => /^PATCH \/author\/checks\/check\d+\/citations\//.test(c))).toBe(true)
+    const check = [...gateway.checks.values()].find((c) => c.draftId === 'd1')!
+    expect(check.citations.find((c) => c.resolution)?.resolution).toMatchObject({ kind: 'overridden', note: 'Table 3 says so' })
+
+    // A fresh mount (a refresh) reads the same state back from the gateway.
+    first.unmount()
+    queryClient.clear()
+    renderDraftCheck()
+    expect(await screen.findByText(/2 need work/)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /1 of 2 issues/ })).toBeInTheDocument()
+  })
+
+  test('"Find a replacement" opens Find a source for the selected citation', async () => {
+    const { onFindSource } = renderDraftCheck()
+    fireEvent.click(await screen.findByRole('button', { name: /Find a replacement/ }))
+    expect(onFindSource).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: 'd1', checkId: expect.stringMatching(/^check/), claim: expect.stringContaining('token-level vectors') }),
+    )
+  })
+
+  test('Find sources searches the selected issue and "Insert \\cite" rewrites the draft and the .bib', async () => {
+    renderDraftCheck()
+    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+    expect(await screen.findByDisplayValue(/token-level vectors/)).toBeInTheDocument()
+    const inserts = await screen.findAllByRole('button', { name: 'Insert \\cite' })
+    fireEvent.click(inserts[0])
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Citation replaced with Santhanam 2022')
+    await waitFor(() => expect(screen.getByText(/2 need work/)).toBeInTheDocument())
+    const draft = gateway.drafts.get('d1')!
+    const related = draft.files.find((f) => f.name === 'related-work.tex')!
+    expect(related.content).toMatch(/score them with MaxSim~\\cite\{santhanam2022b\}/)
+    expect(draft.files.find((f) => f.name === 'main.bib')!.content).toContain('@inproceedings{santhanam2022b,')
+    expect(gateway.calls).toContain('PUT /author/drafts/d1/files/related-work.tex')
+    expect(gateway.calls).toContain('PUT /author/drafts/d1/files/main.bib')
   })
 
   test('warnings and "Fix in editor" open the editor at the file and line', async () => {
@@ -91,28 +127,45 @@ describe('Author Draft check', () => {
     expect(onOpenEditor).toHaveBeenCalledWith({ draftId: 'd1', file: 'main.bib', line: expect.any(Number) })
 
     fireEvent.click(screen.getByRole('button', { name: 'Fix in editor' }))
-    expect(onOpenEditor).toHaveBeenLastCalledWith({ draftId: 'd1', file: 'intro.tex', line: 18 })
+    expect(onOpenEditor).toHaveBeenLastCalledWith({ draftId: 'd1', file: 'related-work.tex', line: 37 })
   })
 
-  test('Find sources lists the suggested fix first and inserting it replaces the selected issue', async () => {
-    renderDraftCheck()
-    expect(await screen.findByText(/Suggested fix for issue 1 · similarity 0.91/)).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Insert \\cite' })[0])
-    await waitFor(() => expect(screen.getByText(/2 need work/)).toBeInTheDocument())
-  })
-
-  test('Your drafts switches drafts and starts a new one in the editor', async () => {
+  test('Your drafts switches drafts and "+ New draft" creates one on the gateway', async () => {
     const { onSelectDraft, onOpenEditor } = renderDraftCheck()
     fireEvent.click(await screen.findByRole('button', { name: /Seminar paper \(CPE\)/ }))
     expect(onSelectDraft).toHaveBeenCalledWith('d2')
     expect(screen.getByText('all supported')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '+ New draft' }))
-    expect(onOpenEditor).toHaveBeenCalledWith({ draftId: expect.stringMatching(/^draft-/), file: 'main.tex', line: 1 })
+    await waitFor(() => expect(onOpenEditor).toHaveBeenCalledWith({ draftId: expect.stringMatching(/^draft/), file: 'main.tex', line: 1 }))
+    expect(gateway.calls).toContain('POST /author/drafts')
   })
 
-  test('a draft that does not exist shows the empty state, not a crash', async () => {
+  test('Re-check starts a run on the gateway and the new verdicts land', async () => {
+    renderDraftCheck()
+    await screen.findByText(/3 need work/)
+    gateway.verdictFor = () => ({ verdict: 'supports', passage: 'all good', page: 1 })
+    fireEvent.click(screen.getByRole('button', { name: 'Re-check' }))
+    await waitFor(() => expect(screen.getByText(/0 need work/)).toBeInTheDocument())
+    expect(gateway.calls).toContain('POST /author/drafts/d1/check')
+  })
+
+  test('with no drafts the screen offers the quick actions and an empty state', async () => {
+    gateway = installFakeGateway({})
+    renderDraftCheck(null)
+    expect(await screen.findByText('No drafts yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Upload \.tex or \.zip/ })).toBeInTheDocument()
+  })
+
+  test('a draft that does not exist shows an honest message, not a crash', async () => {
     renderDraftCheck('gone')
-    expect(await screen.findByText('This draft no longer exists')).toBeInTheDocument()
+    expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument()
+  })
+
+  test('a gateway that does not answer shows the error and a retry', async () => {
+    gateway.fetch.mockRejectedValue(new Error('the gateway is down'))
+    renderDraftCheck()
+    expect(await screen.findByText(/Could not load your drafts: the gateway is down/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 })

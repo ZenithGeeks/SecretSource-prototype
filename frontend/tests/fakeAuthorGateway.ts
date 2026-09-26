@@ -1,0 +1,516 @@
+/**
+ * An in-memory stand-in for the gateway's /author routes (backend/app/author/router.py),
+ * installed as `fetch` for the Author screen tests. It keeps drafts, checks, projects and
+ * sources between requests — a screen that unmounts and mounts again sees what it saved, the
+ * way a page refresh does against the real gateway — and answers the same shapes the router
+ * documents. Verdicts come from `verdictFor`, the test's stand-in for the pipeline.
+ */
+
+import { vi } from 'vitest'
+
+import { parseBib } from '../src/lib/bibtex'
+import { findCites, parseProject } from '../src/lib/latexProject'
+import { summarize } from '../src/lib/verdict'
+import type { CheckRun, Citation, Draft, ProjectFile, SavedSource, SearchResult, Verdict } from '../src/types/draftCheck'
+
+type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks'>
+type StoredProject = { id: string; name: string; bib: { name: string; content: string } | null; pdfs: Record<string, string>; created: string; updated: string }
+type StoredCheck = Omit<CheckRun, 'summary' | 'sinceLastCheck' | 'previousVersion' | 'previousId'> & { citations: Citation[] }
+
+export type VerdictRule = (key: string, claim: string) => { verdict: Verdict; passage?: string; page?: number; explanation?: string; message?: string; reason?: string }
+
+export type FakeGateway = {
+  drafts: Map<string, StoredDraft>
+  projects: Map<string, StoredProject>
+  checks: Map<string, StoredCheck>
+  sources: Map<string, SavedSource>
+  searchResults: SearchResult[]
+  verdictFor: VerdictRule
+  /** Every request seen, for assertions: "PUT /author/drafts/d1/files/related-work.tex". */
+  calls: string[]
+  fetch: ReturnType<typeof vi.fn>
+}
+
+let seq = 0
+const id = (prefix: string) => `${prefix}${++seq}`
+const now = () => new Date().toISOString()
+
+function kindOf(name: string): 'tex' | 'bib' {
+  return name.toLowerCase().endsWith('.bib') ? 'bib' : 'tex'
+}
+
+/** The default pipeline: contradicted for khattab2020, silent for thakur2021, unreadable for
+ * nguyen2016, everything else supported. Missing keys never reach it. */
+export const DEFAULT_VERDICTS: VerdictRule = (key) => {
+  if (key === 'khattab2020') return { verdict: 'refutes', passage: 'we leave compression of the embeddings to future work', page: 7, explanation: 'The 2020 paper defers compression.' }
+  if (key === 'thakur2021') return { verdict: 'insufficient', passage: '', explanation: 'BEIR does not compare against single-vector retrievers.' }
+  if (key === 'nguyen2016') return { verdict: 'unavailable', reason: 'no-open-access', message: 'no free copy published' }
+  return { verdict: 'supports', passage: `the paper says so about ${key}`, page: 4, explanation: 'It matches.' }
+}
+
+export const SEARCH_RESULTS: SearchResult[] = [
+  {
+    id: 'p1', key: 'santhanam2022b', title: 'ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction', authors: 'Santhanam et al.',
+    authorsList: ['Keshav Santhanam', 'Omar Khattab'], year: 2022, venue: 'NAACL', doi: '10.18653/v1/2022.naacl-main.272', arxiv: '2112.01488',
+    url: 'https://arxiv.org/pdf/2112.01488', identifier: '10.18653/v1/2022.naacl-main.272', openAccess: true, citedBy: 320, similarity: 0.91, similarityBasis: 'abstract',
+    inLibrary: false, bibtex: '@inproceedings{santhanam2022b,\n  title = {ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction},\n  author = {Keshav Santhanam and Omar Khattab},\n  year = {2022},\n  booktitle = {NAACL},\n  doi = {10.18653/v1/2022.naacl-main.272},\n}',
+  },
+  {
+    id: 'p2', key: 'santhanam2022plaid', title: 'PLAID: An Efficient Engine for Late Interaction Retrieval', authors: 'Santhanam et al.', authorsList: ['Keshav Santhanam'],
+    year: 2022, venue: 'CIKM', doi: '10.1145/3511808.3557325', arxiv: '2205.09707', url: 'https://arxiv.org/pdf/2205.09707', identifier: '10.1145/3511808.3557325',
+    openAccess: true, citedBy: 120, similarity: 0.84, similarityBasis: 'abstract', inLibrary: false,
+    bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID: An Efficient Engine for Late Interaction Retrieval},\n  author = {Keshav Santhanam},\n  year = {2022},\n  booktitle = {CIKM},\n  doi = {10.1145/3511808.3557325},\n}',
+  },
+  {
+    id: 'bib:proj1:khattab2020', key: 'khattab2020', title: 'ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT',
+    authors: 'Khattab & Zaharia', authorsList: ['Omar Khattab', 'Matei Zaharia'], year: 2020, venue: 'SIGIR', doi: '10.1145/3397271.3401075', arxiv: '', url: '',
+    identifier: '10.1145/3397271.3401075', openAccess: true, citedBy: 900, similarity: 0.62, similarityBasis: 'title', inLibrary: true, cited: true, projectId: 'proj1', bibName: 'main.bib',
+    bibtex: '@inproceedings{khattab2020,\n  title = {ColBERT},\n}',
+  },
+]
+
+export const VERIFY_RESULTS: Record<string, { verdict: Verdict; passage: string; page: number; explanation: string }> = {
+  '10.18653/v1/2022.naacl-main.272': { verdict: 'supports', passage: 'residual compression reduces the space footprint of ColBERT by 6–10× with no loss in quality', page: 4, explanation: 'It states the reduction.' },
+  '10.1145/3511808.3557325': { verdict: 'supports', passage: 'building on ColBERTv2 compressed representations (6–10× smaller)', page: 2, explanation: 'It repeats the figure.' },
+  '10.1145/3397271.3401075': { verdict: 'refutes', passage: 'the index occupies 154 GiB; we leave compression of the embeddings to future work', page: 7, explanation: 'The 2020 paper defers compression.' },
+}
+
+const SENTENCE_END = /[.!?]["”’)}]?(?=\s|$)/
+
+/** A sentence around a \cite, and its plain words — the same idea as the gateway's parser. */
+function sentenceAt(content: string, line: number): { sentence: string; claim: string; section: string } {
+  const lines = content.split('\n')
+  let start = line - 1
+  while (start > 0 && lines[start - 1].trim() !== '' && !SENTENCE_END.test(lines[start - 1].trim()) && !lines[start - 1].trim().startsWith('\\')) start -= 1
+  let end = line - 1
+  while (end < lines.length - 1 && !SENTENCE_END.test(lines[end]) && lines[end + 1].trim() !== '') end += 1
+  const sentence = lines.slice(start, end + 1).join(' ').replace(/\s+/g, ' ').trim()
+  const claim = sentence
+    .replace(/\\(?:cite|citep|citet)\*?(?:\[[^\]]*\])*\{[^}]*\}/g, '')
+    .replace(/\$([^$]*)\$/g, '$1')
+    .replace(/\\times/g, '×')
+    .replace(/~/g, ' ')
+    .replace(/--/g, '–')
+    .replace(/\\[A-Za-z]+/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+([.,])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+  let section = ''
+  for (let i = 0; i < line; i += 1) {
+    const m = lines[i].match(/\\(?:section|subsection)\*?\{([^}]*)\}/)
+    if (m) section = m[1]
+  }
+  return { sentence, claim, section }
+}
+
+export function installFakeGateway(options: { files?: { name: string; content: string }[]; verdictFor?: VerdictRule; project?: boolean; prechecked?: boolean } = {}): FakeGateway {
+  seq = 0
+  const gateway: FakeGateway = {
+    drafts: new Map(),
+    projects: new Map(),
+    checks: new Map(),
+    sources: new Map(),
+    searchResults: SEARCH_RESULTS.map((r) => ({ ...r })),
+    verdictFor: options.verdictFor ?? DEFAULT_VERDICTS,
+    calls: [],
+    fetch: vi.fn(),
+  }
+
+  const t = now()
+  if (options.project !== false) {
+    gateway.projects.set('proj1', { id: 'proj1', name: 'Related work — thesis ch.2', bib: null, pdfs: {}, created: t, updated: t })
+  }
+  if (options.files) {
+    gateway.drafts.set('d1', {
+      id: 'd1', projectId: options.project !== false ? 'proj1' : null, title: 'Related work — thesis ch.2', version: 3,
+      files: options.files.map((f) => ({ name: f.name, kind: kindOf(f.name), content: f.content })), pdfs: {}, created: t, updated: t, savedAt: t,
+    })
+    gateway.drafts.set('d2', {
+      id: 'd2', projectId: options.project !== false ? 'proj1' : null, title: 'Seminar paper (CPE)', version: 5,
+      files: [{ name: 'seminar.tex', kind: 'tex', content: '\\section{Seminar}\nDPR works~\\cite{karpukhin2020}.\n' }, { name: 'refs.bib', kind: 'bib', content: '@misc{karpukhin2020, title={DPR}, year={2020}, doi={10.1/dpr}}' }],
+      pdfs: {}, created: t, updated: t, savedAt: t,
+    })
+    if (options.prechecked !== false) {
+      runCheck(gateway, 'd1')
+      runCheck(gateway, 'd2')
+    }
+  }
+
+  gateway.fetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => handle(gateway, input, init))
+  vi.stubGlobal('fetch', gateway.fetch)
+  return gateway
+}
+
+function filesOf(gateway: FakeGateway, draft: StoredDraft): ProjectFile[] {
+  const files = [...draft.files]
+  const project = draft.projectId ? gateway.projects.get(draft.projectId) : undefined
+  if (project?.bib && !files.some((f) => f.name === project.bib!.name)) files.push({ ...project.bib, kind: 'bib', shared: true })
+  return files
+}
+
+function checksOf(gateway: FakeGateway, draftId: string): StoredCheck[] {
+  return [...gateway.checks.values()].filter((c) => c.draftId === draftId).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+}
+
+function delta(current: Citation[], previous: Citation[] | undefined) {
+  if (!previous) return null
+  const needs = (c: Citation) => c.verdict === 'refutes' || c.verdict === 'insufficient'
+  const key = (c: Citation, i: number) => `${c.key}#${i}`
+  const before = new Map(previous.map((c, i) => [key(c, i), c]))
+  const nowMap = new Map(current.map((c, i) => [key(c, i), c]))
+  const fixed = [...before].filter(([k, c]) => needs(c) && !(nowMap.get(k) && needs(nowMap.get(k)!))).length
+  const fresh = [...nowMap].filter(([k, c]) => needs(c) && !(before.get(k) && needs(before.get(k)!))).length
+  return { addedCitations: current.length - previous.length, fixedIssues: fixed, newIssues: fresh }
+}
+
+function checkView(gateway: FakeGateway, check: StoredCheck, full: boolean): CheckRun {
+  const done = checksOf(gateway, check.draftId).filter((c) => c.status === 'done' && c.startedAt < check.startedAt)
+  const previous = done[done.length - 1]
+  const view: CheckRun = {
+    ...check,
+    summary: summarize(check.citations),
+    sinceLastCheck: delta(check.citations, previous?.citations),
+    previousVersion: previous?.version ?? null,
+    previousId: previous?.id ?? null,
+  }
+  if (!full) delete (view as { citations?: Citation[] }).citations
+  return view
+}
+
+function draftView(gateway: FakeGateway, draft: StoredDraft): Draft {
+  const runs = checksOf(gateway, draft.id)
+  const done = runs.filter((r) => r.status === 'done')
+  const latest = done[done.length - 1]
+  const previous = done[done.length - 2]
+  return {
+    ...draft,
+    files: filesOf(gateway, draft),
+    status: summarize(latest?.citations ?? []),
+    lastCheckedAt: latest?.finishedAt ?? null,
+    lastCheckId: latest?.id ?? null,
+    runningCheckId: runs.find((r) => r.status === 'running')?.id ?? null,
+    sinceLastCheck: latest ? delta(latest.citations, previous?.citations) : null,
+    checks: done.length,
+  }
+}
+
+/** The stand-in for the pipeline: every \cite judged by `verdictFor`, finished at once. */
+export function runCheck(gateway: FakeGateway, draftId: string): StoredCheck {
+  const draft = gateway.drafts.get(draftId)!
+  const files = filesOf(gateway, draft)
+  const known = new Set(files.filter((f) => f.kind === 'bib').flatMap((f) => parseBib(f.content).map((e) => e.key)))
+  const entries = new Map(files.filter((f) => f.kind === 'bib').flatMap((f) => parseBib(f.content).map((e) => [e.key, e] as const)))
+  const previous = checksOf(gateway, draftId).filter((c) => c.status === 'done').pop()
+  const checkId = id('check')
+  const citations: Citation[] = files
+    .filter((f) => f.kind === 'tex')
+    .flatMap((f) =>
+      findCites(f).map((c, i) => {
+        const { sentence, claim, section } = sentenceAt(f.content, c.line)
+        const base: Citation = { id: `${checkId}-${f.name}-${i}`, key: c.key, file: f.name, line: c.line, column: c.column, section, sentence, claim, verdict: 'unchecked' }
+        const carried = previous?.citations.find((p) => p.key === c.key && p.claim === claim && p.resolution?.kind === 'overridden')
+        if (carried) base.resolution = carried.resolution
+        if (!known.has(c.key)) return { ...base, reason: 'missing-key', message: `${c.key} is not in the bibliography` }
+        const entry = entries.get(c.key)!
+        const ref = { key: c.key, title: (entry.fields.title ?? '').replace(/[{}]/g, ''), authors: shortAuthors(entry.fields.author ?? ''), year: Number(entry.fields.year) || null, venue: entry.fields.booktitle ?? entry.fields.journal ?? '', doi: entry.fields.doi ?? '', url: entry.fields.url ?? '' }
+        const result = gateway.verdictFor(c.key, claim)
+        if (result.verdict === 'unavailable') return { ...base, sourceRef: ref, verdict: 'unavailable', reason: result.reason ?? 'failed', message: result.message ?? 'checking it failed' }
+        return { ...base, sourceRef: ref, verdict: result.verdict, explanation: result.explanation, evidence: { passage: result.passage ?? '', pdf: `${c.key}.pdf`, page: result.page ?? null } }
+      }),
+    )
+  const started = new Date(Date.now() + seq).toISOString()
+  const check: StoredCheck = { id: checkId, draftId, version: draft.version, status: 'done', startedAt: started, finishedAt: started, stages: [{ stage: 'planned', checks: citations.length }, { stage: 'done' }], citations }
+  gateway.checks.set(checkId, check)
+  return check
+}
+
+function shortAuthors(author: string): string {
+  const names = author.split(/\s+and\s+/i).map((n) => n.trim()).filter(Boolean).map((n) => (n.includes(',') ? n.split(',')[0] : n.split(/\s+/).pop() ?? n).trim())
+  if (names.length === 0) return ''
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return `${names[0]} & ${names[1]}`
+  return `${names[0]} et al.`
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+function fail(status: number, detail: string): Response {
+  return json({ detail }, status)
+}
+
+async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost')
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const path = url.pathname.replace(/^\/api/, '')
+  gateway.calls.push(`${method} ${path}${url.search}`)
+  const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null
+  const form = init?.body instanceof FormData ? init.body : null
+  const parts = path.split('/').filter(Boolean)
+
+  if (path === '/analyses') return json([])
+  if (parts[0] === 'papers') return json({ page: null, boxes: [] })
+  if (parts[0] !== 'author') return fail(404, `no route ${path}`)
+
+  // drafts
+  if (parts[1] === 'drafts') {
+    if (parts.length === 2 && method === 'GET') return json([...gateway.drafts.values()].map((d) => draftView(gateway, d)).sort((a, b) => b.updated.localeCompare(a.updated)))
+    if (parts.length === 2 && method === 'POST') {
+      const files = ((body?.files as { name: string; content: string }[] | undefined) ?? []).map((f) => ({ ...f, kind: kindOf(f.name) }))
+      const draft: StoredDraft = { id: id('draft'), projectId: (body?.projectId as string | null) ?? null, title: String(body?.title ?? 'Untitled draft'), version: 1, files: files.length ? files : [{ name: 'main.tex', kind: 'tex', content: '' }], pdfs: {}, created: now(), updated: now(), savedAt: now() }
+      gateway.drafts.set(draft.id, draft)
+      return json(draftView(gateway, draft))
+    }
+    if (parts[2] === 'upload' && method === 'POST') {
+      const file = form?.get('file') as File
+      const text = await file.text()
+      const draft: StoredDraft = { id: id('draft'), projectId: null, title: file.name.replace(/\.(tex|zip|bib)$/i, ''), version: 1, files: [{ name: file.name, kind: kindOf(file.name), content: text }], pdfs: {}, created: now(), updated: now(), savedAt: now() }
+      gateway.drafts.set(draft.id, draft)
+      return json(draftView(gateway, draft))
+    }
+    const draft = gateway.drafts.get(parts[2])
+    if (!draft) return fail(404, 'no such draft')
+    if (parts.length === 3 && method === 'GET') return json(draftView(gateway, draft))
+    if (parts.length === 3 && method === 'PATCH') {
+      if (body?.title) draft.title = String(body.title)
+      if ('projectId' in (body ?? {})) draft.projectId = (body?.projectId as string) || null
+      draft.updated = now()
+      return json(draftView(gateway, draft))
+    }
+    if (parts.length === 3 && method === 'DELETE') {
+      gateway.drafts.delete(draft.id)
+      return json({ deleted: draft.id })
+    }
+    if (parts[3] === 'files') {
+      const name = decodeURIComponent(parts.slice(4).join('/'))
+      if (method === 'PUT') {
+        const existing = draft.files.find((f) => f.name === name)
+        if (existing) existing.content = String(body?.content ?? '')
+        else draft.files.push({ name, kind: kindOf(name), content: String(body?.content ?? '') })
+        draft.updated = now()
+        return json(draftView(gateway, draft))
+      }
+      if (method === 'DELETE') {
+        draft.files = draft.files.filter((f) => f.name !== name)
+        return json(draftView(gateway, draft))
+      }
+    }
+    if (parts[3] === 'save') {
+      draft.version += 1
+      draft.savedAt = now()
+      draft.updated = now()
+      return json(draftView(gateway, draft))
+    }
+    if (parts[3] === 'parse') return json(parseProject(filesOf(gateway, draft)))
+    if (parts[3] === 'check' && method === 'POST') {
+      if (checksOf(gateway, draft.id).some((c) => c.status === 'running')) return fail(409, 'a check is already running')
+      return json({ id: runCheck(gateway, draft.id).id })
+    }
+    if (parts[3] === 'checks') return json(checksOf(gateway, draft.id).map((c) => checkView(gateway, c, false)).reverse())
+    if (parts[3] === 'citations' && parts[5] === 'pdf') {
+      const file = form?.get('file') as File
+      draft.pdfs[decodeURIComponent(parts[4])] = `${file.name.replace(/\.pdf$/, '')}-abc123.pdf`
+      return json({ key: parts[4], pdf: draft.pdfs[decodeURIComponent(parts[4])] })
+    }
+    if (parts[3] === 'report') {
+      if (!checksOf(gateway, draft.id).some((c) => c.status === 'done')) return fail(409, 'check the draft first, then export its report')
+      return new Response(new Blob(['%PDF-1.4 fake'], { type: 'application/pdf' }), { status: 200, headers: { 'Content-Type': 'application/pdf' } })
+    }
+  }
+
+  // checks
+  if (parts[1] === 'checks') {
+    const check = gateway.checks.get(parts[2])
+    if (!check) return fail(404, 'no such check')
+    if (parts.length === 3 && method === 'GET') return json(checkView(gateway, check, true))
+    if (parts.length === 3 && method === 'DELETE') {
+      gateway.checks.delete(check.id)
+      return json({ deleted: check.id })
+    }
+    if (parts[3] === 'compare') {
+      const view = checkView(gateway, check, true)
+      if (!view.previousId) return fail(404, 'nothing earlier to compare with')
+      const previous = gateway.checks.get(view.previousId)!
+      const rows = check.citations.map((c, i) => {
+        const before = previous.citations[i]
+        const needs = (v: Verdict | null | undefined) => v === 'refutes' || v === 'insufficient'
+        const change = !before ? 'added' : before.verdict === c.verdict ? 'same' : needs(before.verdict) && !needs(c.verdict) ? 'fixed' : needs(c.verdict) && !needs(before.verdict) ? 'new' : 'changed'
+        return { key: c.key, claim: c.claim, file: c.file, line: c.line, before: before?.verdict ?? null, after: c.verdict, change }
+      })
+      return json({ current: { id: check.id, version: check.version }, previous: { id: previous.id, version: previous.version }, rows })
+    }
+    if (parts[3] === 'citations' && method === 'PATCH') {
+      const citation = check.citations.find((c) => c.id === parts[4])
+      if (!citation) return fail(404, 'no such citation')
+      if (body && 'resolution' in body) {
+        if (body.resolution) citation.resolution = { ...(body.resolution as Citation['resolution']), at: now() } as Citation['resolution']
+        else delete citation.resolution
+      }
+      if (body?.key) citation.key = String(body.key)
+      if (body?.sourceRef) citation.sourceRef = body.sourceRef as Citation['sourceRef']
+      if (body?.verdict) {
+        citation.verdict = body.verdict as Verdict
+        delete citation.reason
+        delete citation.message
+      }
+      if (body?.evidence) citation.evidence = body.evidence as Citation['evidence']
+      if (body?.explanation) citation.explanation = String(body.explanation)
+      return json(checkView(gateway, check, true))
+    }
+  }
+
+  // projects and the library
+  if (parts[1] === 'projects') {
+    const cards = () =>
+      [...gateway.projects.values()].map((p) => {
+        const drafts = [...gateway.drafts.values()].filter((d) => d.projectId === p.id)
+        const entries = p.bib ? parseBib(p.bib.content) : []
+        const tally = { supports: 0, refutes: 0, insufficient: 0, unavailable: 0, unchecked: 0 }
+        let needWork = 0
+        let checkedAt: string | null = null
+        for (const d of drafts) {
+          const v = draftView(gateway, d)
+          for (const k of Object.keys(tally) as Verdict[]) tally[k] += v.status.counts[k]
+          needWork += v.status.open
+          if (v.lastCheckedAt && (!checkedAt || v.lastCheckedAt > checkedAt)) checkedAt = v.lastCheckedAt
+        }
+        return { id: p.id, name: p.name, bibName: p.bib?.name ?? null, entries: entries.length, cited: 0, needWork, tally, drafts: drafts.length, checkedAt, pdfs: p.pdfs, created: p.created, updated: p.updated }
+      })
+    if (parts.length === 2 && method === 'GET') return json(cards())
+    if (parts.length === 2 && method === 'POST') {
+      const project: StoredProject = { id: id('proj'), name: String(body?.name ?? 'Untitled project'), bib: { name: String(body?.bibName ?? 'main.bib'), content: String(body?.bib ?? '') }, pdfs: {}, created: now(), updated: now() }
+      gateway.projects.set(project.id, project)
+      return json(cards().find((c) => c.id === project.id))
+    }
+    if (parts[2] === 'import' && method === 'POST') {
+      const file = form?.get('file') as File
+      const project: StoredProject = { id: id('proj'), name: file.name.replace(/\.(bib|zip)$/i, ''), bib: { name: file.name, content: await file.text() }, pdfs: {}, created: now(), updated: now() }
+      gateway.projects.set(project.id, project)
+      return json(cards().find((c) => c.id === project.id))
+    }
+    const project = gateway.projects.get(parts[2])
+    if (!project) return fail(404, 'no such project')
+    if (parts.length === 3 && method === 'GET') {
+      const drafts = [...gateway.drafts.values()].filter((d) => d.projectId === project.id)
+      const history: Record<string, CheckRun[]> = {}
+      for (const d of drafts) history[d.id] = checksOf(gateway, d.id).map((c) => checkView(gateway, c, false)).reverse()
+      return json({ ...cards().find((c) => c.id === project.id), bib: project.bib, draftList: drafts.map((d) => draftView(gateway, d)), history })
+    }
+    if (parts.length === 3 && method === 'PATCH') {
+      if (body?.name) project.name = String(body.name)
+      if (typeof body?.bib === 'string') project.bib = { name: String(body.bibName ?? project.bib?.name ?? 'main.bib'), content: body.bib }
+      project.updated = now()
+      return json(cards().find((c) => c.id === project.id))
+    }
+    if (parts.length === 3 && method === 'DELETE') {
+      gateway.projects.delete(project.id)
+      return json({ deleted: project.id })
+    }
+    if (parts[3] === 'bib' && method === 'DELETE') {
+      const entries = project.bib ? parseBib(project.bib.content) : []
+      const key = decodeURIComponent(parts[4])
+      if (!entries.some((e) => e.key === key)) return fail(404, `${key} is not in the bib`)
+      const kept = entries.filter((e) => e.key !== key)
+      project.bib = { name: project.bib!.name, content: kept.map((e) => `@${e.type}{${e.key},\n${Object.entries(e.fields).map(([k, v]) => `  ${k} = {${v}},`).join('\n')}\n}`).join('\n\n') }
+      return json({ removed: key, entries: kept.length })
+    }
+    if (parts[3] === 'bib' && parts[5] === 'pdf') {
+      const file = form?.get('file') as File
+      project.pdfs[decodeURIComponent(parts[4])] = `${file.name}`
+      return json({ key: parts[4], pdf: file.name })
+    }
+  }
+
+  if (parts[1] === 'library') {
+    const projects = (await (await handle(gateway, '/api/author/projects')).json()) as { id: string }[]
+    const drafts = [...gateway.drafts.values()]
+    const attention: unknown[] = []
+    for (const d of drafts) {
+      const v = draftView(gateway, d)
+      const latest = v.lastCheckId ? gateway.checks.get(v.lastCheckId) : undefined
+      const seen = new Set<string>()
+      for (const c of latest?.citations ?? []) {
+        if (seen.has(c.key)) continue
+        if (c.verdict === 'refutes' && !c.resolution) attention.push({ kind: 'replace', key: c.key, title: `${c.sourceRef?.authors} (${c.sourceRef?.year}) · ${c.sourceRef?.title.split(':')[0]}`, detail: `\\cite{${c.key}} contradicts a claim in ${d.title}`, draftId: d.id, checkId: latest!.id, citationId: c.id, projectId: d.projectId })
+        if (c.verdict === 'unavailable') attention.push({ kind: 'upload-pdf', key: c.key, title: `${c.key} · no DOI or PDF`, detail: 'Cannot be checked until a source is attached', draftId: d.id, projectId: d.projectId })
+        if (c.verdict === 'refutes' || c.verdict === 'unavailable') seen.add(c.key)
+      }
+    }
+    for (const p of gateway.projects.values()) {
+      for (const e of p.bib ? parseBib(p.bib.content) : []) {
+        const cited = drafts.some((d) => d.projectId === p.id && filesOf(gateway, d).some((f) => f.kind === 'tex' && f.content.includes(`{${e.key}}`)))
+        if (!cited) attention.push({ kind: 'remove', key: e.key, title: `${e.key} · in ${p.bib!.name}`, detail: 'Never cited in any draft', projectId: p.id })
+      }
+    }
+    const unsorted = [...gateway.sources.values()].filter((s) => !s.projectId)
+    const saved = [...gateway.sources.values()].reverse().map((s) => {
+      const project = s.projectId ? gateway.projects.get(s.projectId) : undefined
+      const keys = project?.bib ? new Set(parseBib(project.bib.content).map((e) => e.key)) : new Set<string>()
+      return { ...s, inBib: keys.has(s.key), bibName: project?.bib?.name ?? null }
+    })
+    return json({ projects, unsorted: { sources: unsorted.length, pdfs: unsorted.filter((s) => s.pdf).length, drafts: drafts.filter((d) => !d.projectId).length }, attention, saved })
+  }
+
+  // saved sources
+  if (parts[1] === 'sources') {
+    const view = (s: SavedSource): SavedSource => {
+      const project = s.projectId ? gateway.projects.get(s.projectId) : undefined
+      const keys = project?.bib ? new Set(parseBib(project.bib.content).map((e) => e.key)) : new Set<string>()
+      return { ...s, inBib: keys.has(s.key), bibName: project?.bib?.name ?? null }
+    }
+    if (parts.length === 2 && method === 'GET') {
+      const project = url.searchParams.get('project')
+      return json([...gateway.sources.values()].filter((s) => project === null || (s.projectId ?? '') === project).map(view).reverse())
+    }
+    if (parts.length === 2 && method === 'POST') {
+      const source = { id: id('src'), inBib: false, bibName: null, savedAt: now(), key: 'source', bibtex: '', ...(body as Partial<SavedSource>) } as SavedSource
+      const first = (source.authorsList ?? [])[0] ?? 'source'
+      const surname = first.split(' ').pop() ?? first
+      source.key = (body?.key as string) || `${surname.toLowerCase()}${source.year ?? ''}`
+      source.bibtex = (body?.bibtex as string) || `@inproceedings{${source.key},\n  title = {${source.title}},\n}`
+      gateway.sources.set(source.id, source)
+      return json(view(source))
+    }
+    const source = gateway.sources.get(parts[2])
+    if (!source) return fail(404, 'no such source')
+    if (parts.length === 3 && method === 'DELETE') {
+      gateway.sources.delete(source.id)
+      return json({ deleted: source.id })
+    }
+    if (parts[3] === 'add-to-bib') {
+      const project = gateway.projects.get(String(body?.projectId ?? source.projectId))
+      if (!project) return fail(404, 'no such project')
+      const bib = project.bib ?? { name: 'main.bib', content: '' }
+      if (parseBib(bib.content).some((e) => e.key === source.key)) return fail(409, `${source.key} is already in ${bib.name}`)
+      project.bib = { name: bib.name, content: `${bib.content.trimEnd()}\n\n${source.bibtex}\n` }
+      source.projectId = project.id
+      return json(view(source))
+    }
+    if (parts[3] === 'pdf') {
+      const file = form?.get('file') as File | undefined
+      if (!file) return fail(400, 'no file')
+      source.pdf = file.name
+      return json(view(source))
+    }
+  }
+
+  // find a source
+  if (parts[1] === 'search' && parts.length === 2) {
+    const q = url.searchParams.get('q') ?? ''
+    if (!q.trim()) return json({ results: [], libraryCount: 0 })
+    return json({ results: gateway.searchResults, libraryCount: 7 })
+  }
+  if (parts[1] === 'search' && parts[2] === 'verify') {
+    const identifier = String(body?.identifier ?? '')
+    if (!String(body?.claim ?? '').trim() || !identifier) return fail(400, 'a claim and a source identifier are needed')
+    const found = VERIFY_RESULTS[identifier]
+    if (!found) return json({ verdict: 'unavailable', reason: 'no-open-access', message: 'no free copy published', cached: false })
+    return json({ verdict: found.verdict, explanation: found.explanation, evidence: { passage: found.passage, pdf: `${identifier.replace(/[^a-z0-9]+/gi, '-')}.pdf`, page: found.page }, quote: found.passage, reasoning: found.explanation, cached: false })
+  }
+
+  if (parts[1] === 'export') return json({ exportedAt: now(), projects: [...gateway.projects.values()], drafts: [...gateway.drafts.values()], sources: [...gateway.sources.values()], checks: [...gateway.checks.values()] })
+
+  return fail(404, `no route ${method} ${path}`)
+}

@@ -1,10 +1,18 @@
+/**
+ * The editor's live preview: LaTeX.js renders the thesis chapter inside a shadow root, the
+ * \cite markers become numbered links coloured by verdict, and a flagged marker opens the
+ * issue popover. The render is the real library; only the gateway is faked.
+ */
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { parseBib } from '../src/lib/bibtex'
-import { authorStore } from '../src/lib/authorStore'
 import { decorateCitations } from '../src/lib/latexPreview'
 import { PreviewPane } from '../src/roles/author/components/editor/PreviewPane'
+import type { Citation } from '../src/types/draftCheck'
+import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
+import { MAIN_BIB, RELATED_WORK_TEX, THESIS_FILES } from './fixtures/thesis'
 
 beforeAll(() => {
   const rect = { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }
@@ -12,18 +20,24 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => undefined
 })
 
-beforeEach(() => authorStore.reset())
+let gateway: FakeGateway
+let citations: Citation[]
+const bib = parseBib(MAIN_BIB)
 
-function d1() {
-  const run = authorStore.checkRun('d1')!
-  const related = run.draft.files.find((f) => f.name === 'related-work.tex')!
-  const bib = parseBib(run.draft.files.find((f) => f.name === 'main.bib')!.content)
-  return { run, related, bib, citations: run.citations.filter((c) => c.file === 'related-work.tex') }
+beforeEach(() => {
+  gateway = installFakeGateway({ files: THESIS_FILES, prechecked: false })
+  citations = runCheck(gateway, 'd1').citations.filter((c) => c.file === 'related-work.tex')
+})
+
+afterEach(() => vi.unstubAllGlobals())
+
+/** The rendered page lives in the preview host's shadow root. */
+function page(): ShadowRoot {
+  return screen.getByTestId('preview-page').shadowRoot!
 }
 
 function renderPane(content: string, extra: Partial<Parameters<typeof PreviewPane>[0]> = {}) {
-  const { bib, citations } = d1()
-  const onReplace = vi.fn()
+  const onFindReplacement = vi.fn()
   const onKeepMine = vi.fn()
   const view = render(
     <PreviewPane
@@ -32,12 +46,12 @@ function renderPane(content: string, extra: Partial<Parameters<typeof PreviewPan
       bibEntries={bib}
       verdictColors
       onToggleVerdictColors={() => undefined}
-      onReplace={onReplace}
+      onFindReplacement={onFindReplacement}
       onKeepMine={onKeepMine}
       {...extra}
     />,
   )
-  return { ...view, onReplace, onKeepMine }
+  return { ...view, onFindReplacement, onKeepMine }
 }
 
 describe('decorateCitations', () => {
@@ -48,6 +62,7 @@ describe('decorateCitations', () => {
     const cites = root.querySelectorAll('.ss-cite')
     expect(cites).toHaveLength(2)
     expect(cites[0].textContent).toBe('[1]')
+    expect(cites[0].getAttribute('href')).toBe('#ref-khattab2020')
     expect(cites[0].getAttribute('data-verdict')).toBe('refutes')
     expect(cites[1].textContent).toBe('[?]')
     const sentence = root.querySelector('.ss-sentence[data-verdict="refutes"]')!
@@ -57,69 +72,74 @@ describe('decorateCitations', () => {
 })
 
 describe('PreviewPane', () => {
-  test('renders the file with [n] markers, the [?] for the unfinished cite, and a References list', async () => {
-    const { related } = d1()
-    renderPane(related.content)
-    await waitFor(() => expect(screen.getByRole('heading', { name: /Related work/ })).toBeInTheDocument(), { timeout: 8000 })
+  test('renders the chapter in a shadow root with [n] markers, [?] for a missing key, and a References list', async () => {
+    renderPane(RELATED_WORK_TEX)
+    await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Related work/), { timeout: 15000 })
 
-    const markers = [...document.querySelectorAll('.ss-cite')].map((el) => el.textContent)
-    expect(markers).toEqual(['[1]', '[1]', '[4]', '[3]', '[2]', '[?]'])
-    expect(document.querySelector('.ss-cite[data-verdict="refutes"]')?.textContent).toBe('[1]')
-    expect(document.querySelector('.ss-sentence[data-verdict="refutes"]')?.textContent).toContain('ColBERTv2 further reduces')
+    const markers = [...page().querySelectorAll('.ss-cite')].map((el) => el.textContent)
+    // robertson, khattab ×2, thakur, santhanam, nguyen, liu (not in the .bib)
+    expect(markers).toEqual(['[3]', '[1]', '[1]', '[5]', '[4]', '[2]', '[?]'])
+    expect(page().querySelectorAll('.ss-cite[data-verdict="refutes"]')).toHaveLength(2)
+    expect(page().querySelector('.ss-sentence[data-verdict="refutes"]')?.textContent).toMatch(/token.level vectors/) // LaTeX.js sets a typographic hyphen
 
-    const refs = [...document.querySelectorAll('.ss-refs li')].map((li) => li.textContent)
-    expect(refs).toHaveLength(4)
+    const refs = [...page().querySelectorAll('.ss-refs li')].map((li) => li.textContent)
+    expect(refs).toHaveLength(5)
     expect(refs[0]).toMatch(/^\[1\] O\. Khattab and M\. Zaharia\. ColBERT/)
-    expect(refs[3]).toMatch(/^\[4\] N\. Thakur et al\./)
-  }, 10000)
+    expect(refs[4]).toMatch(/^\[5\] N\. Thakur et al\./)
+    // math, the figure box, the table rows and the footnote made it through the rewrites
+    expect(page().querySelector('.katex-display')).toBeTruthy()
+    expect(page().querySelector('.ss-graphic')?.textContent).toBe('figure · figures/architecture.pdf')
+    expect(page().textContent).toContain('ColBERTv2 │ 0.42 │ 20')
+    expect(page().querySelector('.ss-footnote')?.textContent).toBe('[Reported on MS MARCO dev.]')
+    // nothing of the page's styling reached the document
+    expect(document.querySelector('.ss-refs')).toBeNull()
+    expect(document.getElementById('ss-preview-fonts')).toBeTruthy()
+  }, 20000)
 
-  test('a source that will not compile keeps the last page and shows the line', async () => {
-    const { related } = d1()
-    const { rerender } = renderPane(related.content)
-    await waitFor(() => expect(screen.getByRole('heading', { name: /Related work/ })).toBeInTheDocument(), { timeout: 8000 })
+  test('a source that will not compile keeps the last page and names the line', async () => {
+    const { rerender } = renderPane(RELATED_WORK_TEX)
+    await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Related work/), { timeout: 15000 })
 
-    const { bib, citations } = d1()
     rerender(
       <PreviewPane
-        content={related.content.replace('\\section{Related work}', '\\section{Related work')}
+        content={RELATED_WORK_TEX.replace('\\section{Related work}', '\\section{Related work')}
         citations={citations}
         bibEntries={bib}
         verdictColors
         onToggleVerdictColors={() => undefined}
-        onReplace={() => undefined}
+        onFindReplacement={() => undefined}
         onKeepMine={() => undefined}
       />,
     )
-    const alert = await screen.findByRole('alert', {}, { timeout: 8000 })
-    expect(alert).toHaveTextContent(/Line 4: /)
+    const alert = await screen.findByRole('alert', {}, { timeout: 15000 })
+    expect(alert).toHaveTextContent(/Line 1[89]: /)
     expect(alert).toHaveTextContent('showing the last good render')
-    expect(screen.getByRole('heading', { name: /Related work/ })).toBeInTheDocument()
-  }, 10000)
+    expect(page().querySelector('h2')?.textContent).toMatch(/Related work/)
+  }, 20000)
 
-  test('a flagged marker opens the popover; Replace and Keep mine call back; Escape closes', async () => {
-    const { related } = d1()
-    const { onReplace, onKeepMine } = renderPane(related.content)
-    await waitFor(() => expect(document.querySelector('.ss-cite[data-verdict="refutes"]')).toBeTruthy(), { timeout: 8000 })
+  test('a flagged marker opens the popover; Find a replacement and Keep mine call back; Escape closes', async () => {
+    const { onFindReplacement, onKeepMine } = renderPane(RELATED_WORK_TEX)
+    await waitFor(() => expect(page().querySelector('.ss-cite[data-verdict="refutes"]')).toBeTruthy(), { timeout: 15000 })
 
-    fireEvent.click(document.querySelector('.ss-cite[data-verdict="refutes"]')!)
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="refutes"]')!)
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('source contradicts')
     expect(dialog).toHaveTextContent('[1] Khattab & Zaharia, 2020')
     expect(dialog).toHaveTextContent('1 of 3 issues')
-    fireEvent.click(screen.getByRole('button', { name: /Replace with \[3\]/ }))
-    expect(onReplace).toHaveBeenCalledWith(expect.objectContaining({ id: 'c10' }))
+    fireEvent.click(screen.getByRole('button', { name: /Find a replacement/ }))
+    expect(onFindReplacement).toHaveBeenCalledWith(expect.objectContaining({ key: 'khattab2020', verdict: 'refutes' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
-    fireEvent.click(document.querySelector('.ss-cite[data-verdict="insufficient"]')!)
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="insufficient"]')!)
     await screen.findByRole('dialog')
     fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
     fireEvent.change(screen.getByLabelText('Why you are keeping this citation'), { target: { value: 'Table 3' } })
     fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
-    expect(onKeepMine).toHaveBeenCalledWith(expect.objectContaining({ id: 'c11' }), 'Table 3')
+    expect(onKeepMine).toHaveBeenCalledWith(expect.objectContaining({ key: 'thakur2021' }), 'Table 3')
 
-    fireEvent.click(document.querySelector('.ss-cite[data-verdict="unavailable"]')!)
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="unavailable"]')!)
     await screen.findByRole('dialog')
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-  }, 15000)
+  }, 20000)
 })

@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { parseBib } from '../src/lib/bibtex.ts'
-import { formatAuthors, formatReference, prepareSource, referenceNumbers } from '../src/lib/latexPreview.ts'
-import { MOCK_DRAFTS } from '../src/mocks/author.ts'
+import { expandNewcommands, formatAuthors, formatReference, prepareSource, referenceNumbers, REWRITES } from '../src/lib/latexPreview.ts'
+import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
 
 test('prepareSource turns \\cite into markers, [?] for an unfinished one, and drops what LaTeX.js cannot take', () => {
   const src = String.raw`\documentclass{article}
 \usepackage{hyperref}
+\usepackage{tikz}
 \begin{document}
 Text~\cite{a}. More~\citep[p.~4]{b, c}.
 Typing~\cite{san
@@ -19,26 +20,56 @@ Typing~\cite{san
   assert.ok(out.includes('Text~⟦c:a⟧.'))
   assert.ok(out.includes('More~⟦c:b⟧⟦c:c⟧.'))
   assert.ok(out.includes('Typing~⟦c:?⟧'))
-  assert.ok(!out.includes('\\usepackage'))
+  assert.ok(out.includes('\\usepackage{hyperref}'), 'a built-in package stays')
+  assert.ok(!out.includes('tikz'), 'a package LaTeX.js cannot load is dropped')
   assert.ok(!out.includes('\\input'))
   assert.ok(!out.includes('\\bibliography'))
   assert.ok(out.includes('\\documentclass{article}'))
   assert.ok(out.includes('\\end{document}'))
 })
 
-test('referenceNumbers numbers the cited keys by first author, duplicates collapsed', () => {
-  const bib = MOCK_DRAFTS[0].files.find((f) => f.name === 'main.bib')!
-  const entries = parseBib(bib.content)
-  const all = referenceNumbers(entries)
-  assert.equal(all.size, 17)
-  assert.equal(all.get('devlin2019'), 1)
+test('prepareSource rewrites the thesis chapter the way REWRITES documents', () => {
+  const out = prepareSource(RELATED_WORK_TEX)
+  assert.ok(out.includes('\\[\n  S(q, d) = \\sum_{i \\in q} \\max_{j \\in d} E_{q_i} \\cdot E_{d_j}\n\\]') || /\\\[\s*S\(q, d\)[\s\S]*?\\\]/.test(out), 'equation → \\[ \\]')
+  assert.ok(!/\\label\{eq:maxsim\}/.test(out), 'the label inside math is removed')
+  assert.ok(/\\\[\\begin\{aligned\}[\s\S]*a &= b \+ c[\s\S]*\\end\{aligned\}\\\]/.test(out), 'align → aligned inside display math')
+  assert.ok(!out.includes('\\begin{figure}') && out.includes('\\begin{center}'), 'figure → center')
+  assert.ok(out.includes('\\ssgraphic{figures/architecture.pdf}'), 'includegraphics → the custom box')
+  assert.ok(!out.includes('\\begin{tabular}'))
+  assert.ok(out.includes('\\texttt{ColBERT │ 0.40 │ 154}'), 'tabular rows → text rows')
+  assert.ok(!out.includes('\\toprule'))
+  assert.ok(out.includes('ColBERT{} keeps one vector') || out.includes('ColBERT keeps one vector'), '\\colbert expanded')
+  assert.ok(out.includes('(e.g.\\ 768 dimensions)'), '\\eg{...} expanded with its argument')
+  assert.ok(!out.includes('\\newcommand'))
+  assert.ok(!out.includes('\\usepackage{booktabs}'))
+  assert.ok(!out.includes('\\usepackage{amsmath}'), 'amsmath is not loadable either; KaTeX handles the math')
+  assert.ok(out.includes('\\usepackage{hyperref}'))
+  assert.ok(REWRITES.some((r) => r.construct.startsWith('equation')))
+})
 
-  const cited = referenceNumbers(entries, new Set(['khattab2020', 'thakur2021', 'santhanam2022', 'nguyen2016', 'liu2023']))
+test('expandNewcommands handles no-argument and positional bodies and leaves the rest alone', () => {
+  const src = String.raw`\newcommand{\vc}{vector}
+\newcommand{\pair}[2]{(#1, #2)}
+\renewcommand{\emph}[1]{\textit{#1}}
+A \vc{} and \pair{a}{b} and \emph{x} and \unknown{y}.`
+  const out = expandNewcommands(src)
+  assert.equal(out.trim(), String.raw`A vector{} and (a, b) and \textit{x} and \unknown{y}.`)
+})
+
+test('referenceNumbers numbers the cited keys by first author, duplicates collapsed', () => {
+  const entries = parseBib(MAIN_BIB)
+  assert.equal(entries.length, 7)
+  const all = referenceNumbers(entries)
+  assert.equal(all.size, 6)
+  assert.equal(all.get('karpukhin2020'), 1)
+
+  const cited = referenceNumbers(entries, new Set(['khattab2020', 'thakur2021', 'santhanam2022', 'nguyen2016', 'liu2023', 'robertson2009']))
   assert.deepEqual([...cited.entries()], [
     ['khattab2020', 1],
     ['nguyen2016', 2],
-    ['santhanam2022', 3],
-    ['thakur2021', 4],
+    ['robertson2009', 3],
+    ['santhanam2022', 4],
+    ['thakur2021', 5],
   ])
 })
 

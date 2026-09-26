@@ -2,28 +2,52 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { strFromU8, unzipSync } from 'fflate'
 
-import { authorStore } from '../src/lib/authorStore.ts'
 import { annotationFor, buildAnnotatedTex, buildProjectZip, buildUpdatedBib, mergeEntries, slug } from '../src/lib/authorExport.ts'
 import { parseBib } from '../src/lib/bibtex.ts'
-import { MOCK_SEARCH_RESULTS } from '../src/mocks/author.ts'
+import type { Citation, Draft } from '../src/types/draftCheck.ts'
+import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
+
+const draft: Draft = {
+  id: 'd1',
+  projectId: null,
+  title: 'Related work — thesis ch.2',
+  version: 3,
+  files: [
+    { name: 'related-work.tex', kind: 'tex', content: RELATED_WORK_TEX },
+    { name: 'main.bib', kind: 'bib', content: MAIN_BIB },
+  ],
+  pdfs: {},
+  status: { checked: 0, counts: { supports: 0, refutes: 0, insufficient: 0, unavailable: 0, unchecked: 0 }, open: 0 },
+  lastCheckedAt: null,
+  lastCheckId: null,
+  runningCheckId: null,
+  sinceLastCheck: null,
+  checks: 0,
+  created: '',
+  updated: '',
+  savedAt: '',
+}
+
+const contradicted: Citation = {
+  id: 'c1',
+  key: 'khattab2020',
+  file: 'related-work.tex',
+  line: 24,
+  column: 30,
+  sentence: 'ColBERTv2 further reduces index size by $6$--$10\\times$ while matching retrieval quality~\\cite{khattab2020}.',
+  claim: 'ColBERTv2 further reduces index size by 6–10× while matching retrieval quality.',
+  verdict: 'refutes',
+  evidence: { passage: 'we leave compression to future work', pdf: 'colbert.pdf', page: 7 },
+  explanation: 'The 2020 paper defers compression.',
+}
 
 test('buildUpdatedBib merges the duplicate key and carries a DOI from either copy', () => {
-  authorStore.reset()
-  const draft = authorStore.draft('d1')!
   const text = buildUpdatedBib(draft, new Date('2026-09-25T00:00:00Z'))
   const entries = parseBib(text)
-  assert.equal(entries.length, 17)
+  assert.equal(entries.length, 6)
   assert.equal(entries.filter((e) => e.key === 'santhanam2022').length, 1)
   assert.equal(entries.find((e) => e.key === 'santhanam2022')?.fields.doi, '10.18653/v1/2022.naacl-main.272')
   assert.match(text, /^% Related work — thesis ch\.2 — bibliography updated by SecretSource on 2026-09-25/)
-})
-
-test('buildUpdatedBib includes an entry added by "Replace with …"', () => {
-  authorStore.reset()
-  const plaid = MOCK_SEARCH_RESULTS.find((r) => r.key === 'santhanam2022plaid')!
-  authorStore.replaceCitation('c11', plaid)
-  const entries = parseBib(buildUpdatedBib(authorStore.draft('d1')!))
-  assert.ok(entries.some((e) => e.key === 'santhanam2022plaid'))
 })
 
 test('mergeEntries keeps the first definition and fills gaps from later ones', () => {
@@ -36,42 +60,41 @@ test('mergeEntries keeps the first definition and fills gaps from later ones', (
 })
 
 test('buildAnnotatedTex writes a comment above each open issue and a summary on top', () => {
-  authorStore.reset()
-  const run = authorStore.checkRun('d1')!
-  const file = run.draft.files.find((f) => f.name === 'related-work.tex')!
-  const out = buildAnnotatedTex(file, run.citations)
+  const silent: Citation = { ...contradicted, id: 'c2', key: 'thakur2021', line: 26, verdict: 'insufficient', evidence: undefined, explanation: 'BEIR is silent on it.' }
+  const resolved: Citation = { ...contradicted, id: 'c3', line: 22, resolution: { kind: 'overridden', note: 'fine', at: '' } }
+  const out = buildAnnotatedTex(draft.files[0], [contradicted, silent, resolved])
   const lines = out.split('\n')
-  assert.equal(lines.length, file.content.split('\n').length + 4)
-  assert.equal(lines[0], '% SecretSource: 3 open issues in 5 \\cite of this file')
-  // Original line 10 is now line 11, with its comment on line 10 (three lines inserted above it: summary + comment).
-  assert.match(lines[10], /^% SecretSource: Source contradicts \(0\.88 confidence\) — \\cite\{khattab2020\}: The 6–10× reduction/)
-  assert.match(lines[11], /matching retrieval quality~\\cite\{khattab2020\}\./)
-  assert.match(lines[13], /^% SecretSource: Source is silent \(0\.61 confidence\) — \\cite\{thakur2021\}/)
-  assert.match(lines[19], /^% SecretSource: Not checked — \\cite\{nguyen2016\}: No open-access PDF/)
-  assert.ok(!out.includes('SecretSource: Source backs it'), 'supported citations get no comment')
+  assert.equal(lines[0], '% SecretSource: 2 open issues in 7 \\cite of this file')
+  // the comment sits right above the flagged line (one line down, after the summary)
+  assert.equal(lines[24], '% SecretSource: Source contradicts (colbert.pdf p.7) — \\cite{khattab2020}: The 2020 paper defers compression.')
+  assert.ok(lines[25].includes('\\cite{khattab2020}'))
+  assert.equal(lines[27], '% SecretSource: Source is silent — \\cite{thakur2021}: BEIR is silent on it.')
+  assert.equal(out.split('\n').filter((l) => l.startsWith('% SecretSource')).length, 3)
 })
 
 test('buildAnnotatedTex leaves a file with no open issues untouched', () => {
-  authorStore.reset()
-  const run = authorStore.checkRun('d1')!
-  const file = run.draft.files.find((f) => f.name === 'main.tex')!
-  assert.equal(buildAnnotatedTex(file, run.citations), file.content)
+  assert.equal(buildAnnotatedTex(draft.files[0], []), draft.files[0].content)
 })
 
-test('annotationFor leaves the confidence out when the check had none', () => {
-  authorStore.reset()
-  const c13 = authorStore.citations('d1').find((c) => c.id === 'c13')!
-  assert.equal(annotationFor(c13).startsWith('% SecretSource: Not checked — \\cite{nguyen2016}: '), true)
+test('annotationFor explains an unavailable source and a missing key', () => {
+  assert.equal(
+    annotationFor({ ...contradicted, verdict: 'unavailable', evidence: undefined, explanation: undefined, message: 'no free copy published' }),
+    '% SecretSource: Not checked — \\cite{khattab2020}: The source could not be read: no free copy published.',
+  )
+  assert.equal(
+    annotationFor({ ...contradicted, verdict: 'unchecked', evidence: undefined, explanation: undefined, reason: 'missing-key' }),
+    '% SecretSource: Not checked — \\cite{khattab2020}: No entry in the bibliography.',
+  )
 })
 
-test('buildProjectZip holds every project file with its current text', async () => {
-  authorStore.reset()
-  const draft = authorStore.draft('d1')!
-  const blob = buildProjectZip(draft)
-  assert.equal(blob.type, 'application/zip')
-  const files = unzipSync(new Uint8Array(await blob.arrayBuffer()))
-  assert.deepEqual(Object.keys(files).sort(), ['intro.tex', 'main.bib', 'main.tex', 'related-work.tex'])
-  assert.equal(strFromU8(files['related-work.tex']), draft.files.find((f) => f.name === 'related-work.tex')!.content)
+test('buildProjectZip holds every project file with its current text', () => {
+  const zip = buildProjectZip(draft)
+  assert.equal(zip.type, 'application/zip')
+  return zip.arrayBuffer().then((buffer) => {
+    const files = unzipSync(new Uint8Array(buffer))
+    assert.deepEqual(Object.keys(files).sort(), ['main.bib', 'related-work.tex'])
+    assert.equal(strFromU8(files['related-work.tex']), RELATED_WORK_TEX)
+  })
 })
 
 test('slug makes a safe file name', () => {

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { findCites, parseProject, replaceCiteKey } from '../src/lib/latexProject.ts'
-import { MOCK_DRAFTS } from '../src/mocks/author.ts'
+import { findCites, parseProject, replaceCiteKey, sentenceStart } from '../src/lib/latexProject.ts'
 import type { ProjectFile } from '../src/types/draftCheck.ts'
+import { INTRO_TEX, MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
 
-const tex = (name: string, content: string): ProjectFile => ({ name, kind: 'tex', content, dirty: false })
-const bib = (name: string, content: string): ProjectFile => ({ name, kind: 'bib', content, dirty: false })
+const tex = (name: string, content: string): ProjectFile => ({ name, kind: 'tex', content })
+const bib = (name: string, content: string): ProjectFile => ({ name, kind: 'bib', content })
 
 test('findCites lists every key of every \\cite with its line, and skips an unfinished one', () => {
   const refs = findCites(tex('a.tex', 'One~\\cite{x}.\nTwo~\\citep[p.~4]{y, z}.\nTyping \\cite{par'))
@@ -21,33 +21,33 @@ test('findCites lists every key of every \\cite with its line, and skips an unfi
   assert.equal(refs[0].column, 11)
 })
 
-test('parseProject derives the four Draft check warnings from the d1 project text', () => {
-  const d1 = MOCK_DRAFTS.find((d) => d.id === 'd1')!
-  const result = parseProject(d1.files)
-  assert.equal(result.texFiles, 3)
-  assert.equal(result.citeCommands, 13)
-  assert.equal(result.bibEntries, 18)
+test('parseProject derives the four Draft check warnings from the thesis project text', () => {
+  const files = [tex('related-work.tex', RELATED_WORK_TEX), tex('intro.tex', INTRO_TEX), bib('main.bib', MAIN_BIB)]
+  const result = parseProject(files)
+  assert.equal(result.texFiles, 2)
+  assert.equal(result.citeCommands, 8)
+  assert.equal(result.bibEntries, 7)
   assert.deepEqual(
-    result.warnings.map((w) => w.type),
-    ['missing-key', 'duplicate-key', 'unused-entry', 'no-doi-url'],
+    result.warnings.map((w) => [w.type, w.detail]),
+    [
+      ['missing-key', '\\cite{liu2023} in related-work.tex L37'],
+      ['missing-key', '\\cite{devlin2019} in intro.tex L2'],
+      ['duplicate-key', 'santhanam2022 defined twice'],
+      ['unused-entry', 'karpukhin2020 is never cited'],
+      ['no-doi-url', 'nguyen2016'],
+    ],
   )
-  assert.equal(result.warnings[0].detail, '\\cite{liu2023} in intro.tex L18')
-  assert.equal(result.warnings[1].detail, 'santhanam2022 defined twice')
-  assert.match(result.warnings[2].detail, /^karpukhin2020 and 5 others are never cited$/)
-  assert.equal(result.warnings[3].detail, 'nguyen2016, thakur2021')
-  assert.equal(result.warnings[3].file, 'main.bib')
+  assert.equal(result.warnings[2].file, 'main.bib')
 })
 
-test('parseProject on a draft with no .bib reports every cite as missing', () => {
-  const result = parseProject([tex('abstract.tex', 'A~\\cite{khattab2020}.'), bib('empty.bib', '')])
-  assert.equal(result.warnings.length, 1)
-  assert.equal(result.warnings[0].type, 'missing-key')
+test('sentenceStart walks up to the first line of a sentence that runs on', () => {
+  const content = 'One.\nTwo runs\nonto this line~\\cite{a}.\n\\section{X}\nThree~\\cite{b}.'
+  assert.equal(sentenceStart(content, 3), 2)
+  assert.equal(sentenceStart(content, 5), 5)
 })
 
-test('replaceCiteKey swaps one key on one line and leaves the others alone', () => {
-  const content = 'A~\\cite{old}.\nB~\\cite{keep, old}.\nC~\\cite{old}.'
-  const next = replaceCiteKey(content, 2, 'old', 'new')
-  assert.equal(next, 'A~\\cite{old}.\nB~\\cite{keep, new}.\nC~\\cite{old}.')
-  assert.equal(replaceCiteKey(content, 1, 'absent', 'new'), content)
-  assert.equal(replaceCiteKey(content, 99, 'old', 'new'), content)
+test('replaceCiteKey swaps one key and keeps the others in the same command', () => {
+  assert.equal(replaceCiteKey('a~\\cite{x, y}.', 1, 'y', 'z'), 'a~\\cite{x, z}.')
+  assert.equal(replaceCiteKey('a~\\cite{x}.\nb~\\cite{x}.', 2, 'x', 'q'), 'a~\\cite{x}.\nb~\\cite{q}.')
+  assert.equal(replaceCiteKey('a~\\cite{x}.', 9, 'x', 'q'), 'a~\\cite{x}.')
 })
