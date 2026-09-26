@@ -4,7 +4,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-
 from app.teacher.analysis import TeacherEssayAnalysisService
 from app.teacher.models import TeacherSubmission
 

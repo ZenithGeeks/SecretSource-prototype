@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from inspect import iscoroutinefunction
 from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from dataclasses import replace
 
 
 def _fixtures():
