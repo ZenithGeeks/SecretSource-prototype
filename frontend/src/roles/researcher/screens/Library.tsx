@@ -272,12 +272,20 @@ function ProjectDetail({
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-2">
                 <span className="truncate text-sm font-medium text-ink">{paper.title}</span>
+                {paper.indexed === 'no' && (
+                  <span
+                    className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
+                    title="This paper was not found in Semantic Scholar, arXiv, or Unpaywall. This is not a Scopus check."
+                  >
+                    not indexed
+                  </span>
+                )}
                 {paper.sourcesNotIndexed > 0 && (
                   <span
                     className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
                     title={`${paper.sourcesNotIndexed} cited ${paper.sourcesNotIndexed === 1 ? 'source is' : 'sources are'} not in a public index`}
                   >
-                    not indexed
+                    sources not indexed
                   </span>
                 )}
               </p>

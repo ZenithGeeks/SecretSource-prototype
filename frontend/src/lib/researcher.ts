@@ -73,6 +73,8 @@ export type LibraryPaper = {
   linked: string[] // other library papers it cites or is cited by
   sourcesIndexed: number // distinct cited works a public index knew (#21)
   sourcesNotIndexed: number // distinct cited works no public index knew
+  indexed: 'yes' | 'no' | '' // whether the paper itself (not what it cites) is known to a public index
+  index: string // the index that answered, e.g. "Semantic Scholar"; '' when not known or not found
 }
 
 export type ResearcherLibrary = {
