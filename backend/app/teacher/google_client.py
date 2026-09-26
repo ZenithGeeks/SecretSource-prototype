@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable, Iterable
+from email.message import EmailMessage
 from time import sleep as default_sleep
 from typing import Any
 
@@ -84,6 +86,7 @@ class GoogleClassroomClient:
         self,
         classroom: Any,
         drive: Any,
+        gmail: Any | None = None,
         *,
         attempts: int = 3,
         backoff_seconds: float = 0.5,
@@ -91,6 +94,7 @@ class GoogleClassroomClient:
     ):
         self.classroom = classroom
         self.drive = drive
+        self.gmail = gmail
         self.attempts = attempts
         self.backoff_seconds = backoff_seconds
         self.sleep = sleep
@@ -123,6 +127,7 @@ class GoogleClassroomClient:
         return cls(
             service_builder("classroom", "v1", credentials=credentials),
             service_builder("drive", "v3", credentials=credentials),
+            service_builder("gmail", "v1", credentials=credentials),
             **kwargs,
         )
 
@@ -144,6 +149,17 @@ class GoogleClassroomClient:
     def get_drive_metadata(self, file_id: str): return self._execute(lambda: self.drive.files().get(fileId=file_id))
     def download_drive_file(self, file_id: str): return self._execute(lambda: self.drive.files().get_media(fileId=file_id))
     def export_google_doc_as_pdf(self, file_id: str): return self._execute(lambda: self.drive.files().export_media(fileId=file_id, mimeType=PDF_MIME_TYPE))
+    def send_feedback_email(self, recipient: str, subject: str, body: str, report_html: str | None = None):
+        if self.gmail is None:
+            raise RuntimeError("Gmail feedback delivery is unavailable")
+        message = EmailMessage()
+        message["To"] = recipient
+        message["Subject"] = subject
+        message.set_content(body)
+        if report_html:
+            message.add_attachment(report_html.encode("utf-8"), maintype="text", subtype="html", filename="essay-feedback.html")
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+        return self._execute(lambda: self.gmail.users().messages().send(userId="me", body={"raw": raw}))
     def patch_assigned_grade(self, course_id: str, coursework_id: str, submission_id: str, grade: float):
         return self._execute(lambda: self.classroom.courses().courseWork().studentSubmissions().patch(courseId=course_id, courseWorkId=coursework_id, id=submission_id, updateMask="assignedGrade", body={"assignedGrade": float(grade)}))
 

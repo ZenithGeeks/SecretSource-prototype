@@ -46,6 +46,7 @@ export type TeacherSubmission = {
   assignmentId: string
   studentId: string
   studentName: string
+  studentEmail?: string
   fileName: string
   state: 'submitted' | 'missing' | 'returned'
   submittedAt?: string
@@ -184,7 +185,7 @@ export type EssayCheck = {
     /** Kept for a short compatibility window with the retired screen. */
     courseWorkId?: string
   }
-  student: { id: string; name: string; fileName: string }
+  student: { id: string; name: string; fileName: string; email?: string | null }
   citationSummary: { total: number; contradicted: number; silent: number; backed: number }
   reviews: EssayReview[]
   feedback: FeedbackDraft
@@ -192,10 +193,23 @@ export type EssayCheck = {
   analysis?: { id: string | null; status: string; error?: string | null }
 }
 
+export type TeacherGoogleConnection = {
+  connected: boolean
+  email: string | null
+  scopes?: string[]
+}
+
 export type AnalyzeTeacherSubmissionRequest = {
   courseId: string
   assignmentId: string
   studentId: string
+}
+
+export type PrepareTeacherEssayChecksRequest = { courseId: string; assignmentIds: string[] }
+export type PrepareTeacherEssayChecksResult = {
+  prepared: { assignmentId: string; submissionId: string; studentId: string; studentName: string; analysisId: string; status: string }[]
+  skipped: { assignmentId: string; submissionId?: string; studentId?: string; studentName?: string; reason: string }[]
+  failed: { assignmentId: string; submissionId?: string; studentId?: string; studentName?: string; reason: string }[]
 }
 
 export type UpdateProfessorReviewRequest = {
@@ -216,6 +230,7 @@ export type SendFeedbackRequest = {
   studentId: string
   body: string
   citationIds: string[]
+  reportHtml?: string
 }
 
 export type FeedbackDelivery = {
@@ -334,6 +349,9 @@ const mockTeacherApi = {
   analyzeSubmission: async (_input: AnalyzeTeacherSubmissionRequest) => {
     throw new Error('Essay analysis requires a connected Google Classroom account.')
   },
+  prepareEssayChecks: async (_input: PrepareTeacherEssayChecksRequest): Promise<PrepareTeacherEssayChecksResult> => {
+    throw new Error('Essay analysis requires a connected Google Classroom account.')
+  },
   getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
   saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
@@ -364,7 +382,7 @@ const mockTeacherApi = {
   ): Promise<TeacherCourseWork> => store.setCourseWorkAnalysisSelected(courseWorkId, selected),
   queueSelectedCourseWork: async (courseId: string): Promise<QueueCourseWorkResult> =>
     store.queueSelectedCourseWork(courseId),
-  getGoogleConnection: async (): Promise<{ connected: boolean; email: string | null }> => ({ connected: false, email: null }),
+  getGoogleConnection: async (): Promise<TeacherGoogleConnection> => ({ connected: false, email: null, scopes: [] }),
   startGoogleConnection: async (): Promise<{ authorizationUrl: string }> => {
     throw new Error('Google Classroom is unavailable in mock mode.')
   },
@@ -390,6 +408,12 @@ export const createRemoteTeacherApi = () => ({
       `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/students/${encodeURIComponent(input.studentId)}/analyze`,
       { method: 'POST' },
     ),
+  prepareEssayChecks: (input: PrepareTeacherEssayChecksRequest) =>
+    request<PrepareTeacherEssayChecksResult>(`/teacher/classes/${encodeURIComponent(input.courseId)}/essay-checks:prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignmentIds: input.assignmentIds }),
+    }),
   updateProfessorReview: (input: UpdateProfessorReviewRequest) => {
     if (!input.courseId) throw new Error('courseId is required for a remote professor review')
     const assignmentId = normalizedAssignmentId(input)
@@ -419,11 +443,11 @@ export const createRemoteTeacherApi = () => ({
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds, reportHtml: input.reportHtml }),
       },
     )
   },
-  getGoogleConnection: () => request<{ connected: boolean; email: string | null }>('/teacher/google/status'),
+  getGoogleConnection: () => request<TeacherGoogleConnection>('/teacher/google/status'),
   startGoogleConnection: (email?: string, switchAccount = false) => request<{ authorizationUrl: string }>(`/teacher/google/connect?${new URLSearchParams({ ...(email ? { loginHint: email } : {}), ...(switchAccount ? { switch: 'true' } : {}) })}`),
 })
 

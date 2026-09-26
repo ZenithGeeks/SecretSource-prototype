@@ -97,6 +97,11 @@ class TeacherGoogleSyncService:
                 )
 
         student_names = {student.get("userId"): _name(student.get("profile")) for student in students}
+        student_emails = {
+            student.get("userId"): (student.get("profile") or {}).get("emailAddress")
+            for student in students
+            if isinstance(student.get("profile"), dict)
+        }
         submission_count = 0
         for item in coursework:
             coursework_id = item.get("id")
@@ -124,6 +129,9 @@ class TeacherGoogleSyncService:
                         sync_error=error,
                         analysis_id=existing.analysis_id if existing is not None else None,
                         raw=submission,
+                        student_email=student_emails.get(student_id) or (existing.student_email if existing is not None else None),
+                        analysis_file_id=existing.analysis_file_id if existing is not None else None,
+                        analysis_file_version=existing.analysis_file_version if existing is not None else None,
                     )
                 )
                 submission_count += 1

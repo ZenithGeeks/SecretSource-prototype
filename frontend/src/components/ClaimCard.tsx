@@ -1,6 +1,7 @@
 /** One claim, answered: whether it held, what the paper said, and what each source replied. */
 
 import { ChevronDown } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 
 import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
@@ -188,6 +189,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
       quote,
       source: found && found.page ? (found as Target['source']) : null,
       page,
+      verdict: verdict.verdict,
     })
   }
 
@@ -244,6 +246,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
                           label: `${hitName(hit)} of ${verdict.source}`,
                           source: null, // the crop itself is rendered by #36; this opens its page
                           page: hit.page,
+                          verdict: verdict.verdict,
                         })
                       }
                     >
@@ -375,6 +378,8 @@ export function ClaimCard({
   figures = [],
   references = {},
   onShow,
+  onSelect,
+  actions,
 }: {
   claim: Claim
   index: number
@@ -387,6 +392,10 @@ export function ClaimCard({
   /** Every reference the paper's markers point to, by id, to print their numbers. */
   references?: Record<string, Citation>
   onShow?: (target: Target) => void
+  /** Opens the submitted-paper location when a teacher selects this claim. */
+  onSelect?: () => void
+  /** Role-specific controls belong in the shared expanded claim, not a parallel card. */
+  actions?: ReactNode
 }) {
   const [open, setOpen] = useState(opensByDefault(standing))
   const loose = unpaired(claim)
@@ -406,7 +415,10 @@ export function ClaimCard({
       {/* The whole header is the control: a claim whose sources backed it stays one line
           until a reader asks for it, so twenty claims fit on a screen (#37). */}
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open)
+          onSelect?.()
+        }}
         aria-expanded={open}
         className="flex w-full items-start gap-3 rounded-xl p-5 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
       >
@@ -525,6 +537,7 @@ export function ClaimCard({
               against.
             </p>
           )}
+          {actions}
         </div>
       )}
     </Card>

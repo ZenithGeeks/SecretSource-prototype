@@ -48,6 +48,8 @@ def _submission_from_row(row: dict[str, Any]) -> TeacherSubmission:
         state=row.get("state"), assigned_grade=float(assigned_grade) if assigned_grade is not None else None,
         attachments=list(row.get("attachments") or []), sync_state=row["sync_state"],
         sync_error=row.get("sync_error"), analysis_id=row.get("analysis_id"), raw=dict(row.get("raw") or {}),
+        student_email=row.get("student_email"), analysis_file_id=row.get("analysis_file_id"),
+        analysis_file_version=row.get("analysis_file_version"),
     )
 
 
@@ -215,17 +217,32 @@ class TeacherGoogleRepository:
         return _submission_from_row(rows[0]) if rows else None
 
     def link_submission_analysis(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str, analysis_id: str
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str, analysis_id: str,
+        *, file_id: str | None = None, file_version: str | None = None,
     ) -> None:
+        changes = {"analysis_id": analysis_id}
+        if file_id is not None:
+            changes["analysis_file_id"] = file_id
+        if file_version is not None:
+            changes["analysis_file_version"] = file_version
         (
             self._client.table("teacher_submissions")
-            .update({"analysis_id": analysis_id})
+            .update(changes)
             .eq("owner", owner)
             .eq("course_id", course_id)
             .eq("coursework_id", coursework_id)
             .eq("submission_id", submission_id)
             .execute()
         )
+
+    def reset_submission_review(
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+    ) -> None:
+        """Remove decisions and drafts tied to an older student PDF version."""
+        self._client.table("teacher_professor_reviews").delete().eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
+        self._client.table("teacher_feedback").update({
+            "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [],
+        }).eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
 
     def get_professor_reviews(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str

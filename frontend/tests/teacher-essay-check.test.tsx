@@ -17,11 +17,14 @@ vi.mock('../src/lib/useTeacher', () => ({
       analysis: { id: null, status: 'missing', error: null },
     },
   }),
+  useTeacherGoogleConnection: () => ({ data: { connected: false, email: null, scopes: [] }, isPending: false, isError: false }),
   useAnalyzeTeacherSubmission: () => ({ mutate: mocks.analyze, isPending: false, isError: false }),
   useUpdateProfessorReview: () => ({ mutate: vi.fn(), isPending: false }),
   useSaveTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSendTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
+vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => <div /> }))
+vi.mock('../src/lib/useAnalysis', () => ({ useAnalysis: () => ({ data: undefined, isPending: false, isError: false }) }))
 
 import { EssayCheck } from '../src/roles/teacher/screens/EssayCheck'
 

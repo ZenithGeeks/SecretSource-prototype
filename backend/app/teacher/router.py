@@ -14,7 +14,7 @@ from app import config
 from app.auth import current_user
 from app.teacher.analysis import TeacherEssayAnalysisService
 from app.teacher.crypto import RefreshTokenCipher
-from app.teacher.google_client import GoogleApiError, GoogleClassroomClient
+from app.teacher.google_client import GoogleApiError, GoogleClassroomClient, select_supported_attachments
 from app.teacher.models import ConnectedTeacher, TeacherCourse, TeacherCoursework, TeacherSubmission
 from app.teacher.oauth import (
     GoogleAuthorizationCodeTransport,
@@ -40,6 +40,13 @@ class FeedbackUpdate(BaseModel):
     student_id: str = Field(alias="studentId")
     body: str = ""
     citation_ids: list[str] = Field(default_factory=list, alias="citationIds")
+    report_html: str | None = Field(default=None, alias="reportHtml", max_length=20_000_000)
+
+    model_config = {"populate_by_name": True}
+
+
+class PrepareEssayChecksRequest(BaseModel):
+    assignment_ids: list[str] = Field(min_length=1, max_length=100, alias="assignmentIds")
 
     model_config = {"populate_by_name": True}
 
@@ -241,6 +248,7 @@ def _submission_view(submission: TeacherSubmission) -> dict[str, Any]:
         "assignmentId": submission.coursework_id,
         "studentId": submission.student_id,
         "studentName": submission.student_name or submission.student_id,
+        "studentEmail": submission.student_email,
         "fileName": attachments[0]["title"] if attachments else "submission.pdf",
         "state": display_state,
         "submittedAt": raw.get("updateTime") or raw.get("creationTime"),
@@ -592,9 +600,57 @@ async def analyze_submission(
         raise
     except ValueError as error:
         detail = str(error)
-        raise HTTPException(status_code=409 if "supported Drive" in detail else 404, detail=detail) from error
+        raise HTTPException(status_code=409 if "supported Drive" in detail or "PDF attachment" in detail else 404, detail=detail) from error
     except Exception as error:
         raise _map_google_error(error) from error
+
+
+@router.post("/classes/{course_id}/essay-checks:prepare")
+async def prepare_essay_checks(
+    course_id: str,
+    request: PrepareEssayChecksRequest,
+    owner: str = Depends(require_teacher_user),
+    service: TeacherEssayAnalysisService = Depends(get_analysis_service),
+    repository: TeacherGoogleRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    """Start one analysis for each unambiguous submitted PDF in selected assignments."""
+    _owned_course(repository, owner, course_id)
+    assignments = {item.coursework_id for item in repository.list_coursework(owner, course_id)}
+    selected = list(dict.fromkeys(request.assignment_ids))
+    unknown = [assignment_id for assignment_id in selected if assignment_id not in assignments]
+    if unknown:
+        raise HTTPException(status_code=404, detail=f"assignment not found: {unknown[0]}")
+
+    prepared: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for assignment_id in selected:
+        submissions = repository.list_submissions(owner, course_id, assignment_id)
+        if not submissions:
+            skipped.append({"assignmentId": assignment_id, "reason": "no submitted student work"})
+            continue
+        for submission in submissions:
+            item = {
+                "assignmentId": assignment_id,
+                "submissionId": submission.submission_id,
+                "studentId": submission.student_id,
+                "studentName": submission.student_name or submission.student_id,
+            }
+            if submission.state not in {"TURNED_IN", "RETURNED"}:
+                skipped.append({**item, "reason": "submission is not turned in"})
+                continue
+            pdfs = [attachment for attachment in select_supported_attachments(submission.attachments) if attachment.get("mimeType") == "application/pdf"]
+            if len(pdfs) != 1:
+                skipped.append({**item, "reason": "submission must contain exactly one PDF attachment"})
+                continue
+            try:
+                result = service.start(owner, course_id, assignment_id, submission.submission_id)
+                prepared.append({**item, "analysisId": result["id"], "status": result["status"]})
+            except ValueError as error:
+                skipped.append({**item, "reason": str(error)})
+            except Exception as error:
+                failed.append({**item, "reason": str(error) or "analysis could not start"})
+    return {"prepared": prepared, "skipped": skipped, "failed": failed}
 
 
 @router.get("/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/essay-check")
@@ -628,6 +684,8 @@ def update_review(
         service.save_review(owner, course_id, assignment_id, submission_id, request.outcome, request.note, review_id=review_id)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except Exception as error:
+        raise _map_google_error(error) from error
     return _essay_or_error(service, owner, course_id, assignment_id, submission_id)
 
 
@@ -658,7 +716,7 @@ def send_feedback(
     student_id: str,
     request: FeedbackUpdate | None = None,
     owner: str = Depends(require_teacher_user),
-    service: TeacherEssayAnalysisService = Depends(get_analysis_read_service),
+    service: TeacherEssayAnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any]:
     submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
     if request is not None:
@@ -671,9 +729,11 @@ def send_feedback(
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
     try:
-        sent = service.send_feedback(owner, course_id, assignment_id, submission_id)
+        sent = service.send_feedback(owner, course_id, assignment_id, submission_id, request.report_html if request else None)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except Exception as error:
+        raise _map_google_error(error) from error
     return {
         "assignmentId": assignment_id,
         "studentId": student_id,

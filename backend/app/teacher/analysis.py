@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.teacher.google_client import select_supported_attachments
+from app.teacher.google_client import PDF_MIME_TYPE, select_supported_attachments
 from app.teacher.models import TeacherFeedback, TeacherProfessorReview
 
 
@@ -75,23 +75,34 @@ class TeacherEssayAnalysisService:
     ) -> dict[str, Any]:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         attachments = select_supported_attachments(submission.attachments)
-        if not attachments:
-            raise ValueError("submission has no supported Drive attachment")
-        attachment = attachments[0]
+        pdfs = [item for item in attachments if item.get("mimeType") == PDF_MIME_TYPE]
+        if len(pdfs) != 1:
+            raise ValueError("submission must contain exactly one PDF attachment")
+        attachment = pdfs[0]
         file_id = attachment.get("id")
         if not file_id:
             raise ValueError("submission has no supported Drive attachment")
-        content = (
-            self.client.download_drive_file(file_id)
-            if attachment["download_strategy"] == "download"
-            else self.client.export_google_doc_as_pdf(file_id)
-        )
+        metadata = self.client.get_drive_metadata(file_id) if hasattr(self.client, "get_drive_metadata") else attachment
+        file_version = str(metadata.get("version") or metadata.get("modifiedTime") or metadata.get("md5Checksum") or "")
+        if (
+            submission.analysis_id
+            and submission.analysis_file_id == file_id
+            and submission.analysis_file_version == file_version
+        ):
+            snapshot = self._analysis(submission.analysis_id)
+            if snapshot.get("status") in {"running", "done"}:
+                return {"id": submission.analysis_id, "status": snapshot["status"], "submission_id": submission_id}
+        content = self.client.download_drive_file(file_id)
         path = self._save(content, _attachment_filename(attachment))
         job = self._launch(path.as_posix(), verify, owner)
         analysis_id = job.get("id")
         if not analysis_id:
             raise ValueError("analysis pipeline did not return an id")
-        self.repository.link_submission_analysis(owner, course_id, coursework_id, submission_id, analysis_id)
+        if submission.analysis_id and hasattr(self.repository, "reset_submission_review"):
+            self.repository.reset_submission_review(owner, course_id, coursework_id, submission_id)
+        self.repository.link_submission_analysis(
+            owner, course_id, coursework_id, submission_id, analysis_id, file_id=file_id, file_version=file_version
+        )
         return {"id": analysis_id, "status": "running", "submission_id": submission_id}
 
     def essay_check(
@@ -119,6 +130,7 @@ class TeacherEssayAnalysisService:
                 "id": submission.student_id,
                 "name": submission.student_name or submission.student_id,
                 "fileName": _attachment_filename(submission.attachments[0]) if submission.attachments else "submission.pdf",
+                "email": submission.student_email,
             },
             "citationSummary": self._summary(reviews),
             "reviews": reviews,
@@ -157,13 +169,27 @@ class TeacherEssayAnalysisService:
         return feedback
 
     def send_feedback(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str, report_html: str | None = None
     ) -> TeacherFeedback:
-        """Mark persisted feedback sent internally; Classroom has no per-student text API."""
+        """Email the saved teacher feedback and its student-ready HTML report through Gmail."""
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         feedback = self.repository.get_feedback(owner, course_id, coursework_id, submission_id)
         if feedback is None:
             raise ValueError("feedback not found")
+        if feedback.status == "sent":
+            return feedback
+        if not feedback.feedback_text.strip():
+            raise ValueError("feedback is empty")
+        if not submission.student_email:
+            raise ValueError("student email is unavailable; refresh Classroom student email access")
+        if self.client is None or not hasattr(self.client, "send_feedback_email"):
+            raise ValueError("Gmail feedback delivery is unavailable; reconnect Google with Gmail sending access")
+        self.client.send_feedback_email(
+            submission.student_email,
+            f"Essay feedback for {coursework_id}",
+            feedback.feedback_text,
+            report_html,
+        )
         sent = TeacherFeedback(
             owner, course_id, coursework_id, submission_id, submission.student_id,
             feedback.feedback_text, "sent", self._now(), feedback.citation_ids,

@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => <div /> }))
+
 import { AddClass } from '../src/roles/teacher/screens/AddClass'
 import { AssignmentDetail } from '../src/roles/teacher/screens/AssignmentDetail'
 import { Classes } from '../src/roles/teacher/screens/Classes'
@@ -19,6 +21,7 @@ import { resetSettings } from '../src/lib/settings'
 import { resetTeacherPreferences } from '../src/lib/teacherPreferences'
 import { resetTeacherStore } from '../src/lib/teacherStore'
 import { MOCK_TEACHER_WORKSPACE } from '../src/mocks/teacher'
+import { teacherApi } from '../src/lib/teacher'
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({
@@ -160,7 +163,11 @@ describe('Teacher home and class pages', () => {
     expect(onRefresh).toHaveBeenCalledOnce()
   })
 
-  test('Classwork queues selected assignments locally and exposes Essay Check', () => {
+  test('Classwork sends selected assignments to the Essay Check batch pipeline', async () => {
+    const prepare = vi.spyOn(teacherApi, 'prepareEssayChecks').mockResolvedValue({
+      prepared: [{ assignmentId: 'assignment-essay', submissionId: 'sub-1', studentId: 'student-anan', studentName: 'Anan P.', analysisId: 'analysis-1', status: 'running' }],
+      skipped: [], failed: [],
+    })
     const onCheckEssays = vi.fn()
     renderWithQuery(
       <Classwork
@@ -172,7 +179,9 @@ describe('Teacher home and class pages', () => {
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Assignment 2: Evidence-based essay' }))
     fireEvent.click(screen.getByRole('button', { name: 'Analyze selected (1)' }))
-    expect(screen.getByText('1 assignment queued locally.')).toBeInTheDocument()
+    await waitFor(() => expect(prepare).toHaveBeenCalledWith({ courseId: MOCK_TEACHER_WORKSPACE.course.id, assignmentIds: ['assignment-essay'] }))
+    expect(await screen.findByText('1 student submission sent to the analysis pipeline.')).toBeInTheDocument()
+    prepare.mockRestore()
 
     fireEvent.click(screen.getByRole('button', { name: 'Check essays' }))
     expect(onCheckEssays).toHaveBeenCalledWith('assignment-essay')
@@ -204,7 +213,7 @@ describe('Teacher home and class pages', () => {
 })
 
 describe('Teacher review and worksheet pages', () => {
-  test('Essay Check toggles citations, saves professor results, and opens feedback confirmation', async () => {
+  test('Essay Check keeps the teacher feedback editor and confirmation in the review flow', async () => {
     renderWithQuery(
       <EssayCheck
         courseId="class-literary-2b"
@@ -215,13 +224,8 @@ describe('Teacher review and worksheet pages', () => {
       />,
     )
 
-    expect(await screen.findByRole('heading', { name: 'Citation review' })).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add to feedback' })[0]!)
-    expect(screen.getByText('4 citations included')).toBeInTheDocument()
-
-    const result = screen.getAllByRole('combobox', { name: 'Professor result' })[0]!
-    fireEvent.change(result, { target: { value: 'contradicts' } })
-    await waitFor(() => expect(result).toHaveValue('contradicts'))
+    expect(await screen.findByRole('heading', { name: 'Anan P.' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Feedback to student' }), { target: { value: 'Please revisit the source evidence.' } })
 
     fireEvent.click(screen.getByRole('button', { name: 'Send to student' }))
     const dialog = await screen.findByRole('dialog')
@@ -238,17 +242,21 @@ describe('Teacher review and worksheet pages', () => {
       <FeedbackDialog
         open
         studentName="Anan P."
+        recipientEmail="anan@example.edu"
+        senderEmail="teacher@example.edu"
+        deliveryReady
+        deliveryIssue=""
         preview="Feedback preview"
         onClose={onClose}
         onSend={onSend}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send email' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Delivery unavailable')
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Send email' })).toBeEnabled()
   })
 
   test('Reading Questions opens the source and edits then removes a local question', async () => {

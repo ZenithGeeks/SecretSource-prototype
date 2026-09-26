@@ -7,6 +7,7 @@ import {
   TEACHER_CLASSES_KEY,
   TEACHER_HOME_KEY,
   teacherApi,
+  teacherRemoteEnabled,
   teacherAssignmentKey,
   teacherClassImportKey,
   teacherCourseWorkKey,
@@ -15,6 +16,7 @@ import {
   teacherWorkspaceKey,
   type EssayCheck,
   type AnalyzeTeacherSubmissionRequest,
+  type PrepareTeacherEssayChecksRequest,
   type TeacherAssignmentDetail,
   type TeacherCourseWork,
   type TeacherReadingQuestionsPage,
@@ -78,6 +80,14 @@ export function useTeacherEssayCheck(courseId: string, assignmentId: string, stu
   })
 }
 
+export function useTeacherGoogleConnection() {
+  return useQuery({
+    queryKey: ['teacher', 'google-connection'],
+    queryFn: teacherApi.getGoogleConnection,
+    enabled: teacherRemoteEnabled,
+  })
+}
+
 function updateEssayCache(queryClient: ReturnType<typeof useQueryClient>, essay: EssayCheck, courseId: string) {
   queryClient.setQueryData(teacherEssayCheckKey(courseId, essay.assignment.assignmentId, essay.student.id), essay)
 }
@@ -99,6 +109,14 @@ export function useAnalyzeTeacherSubmission() {
         queryKey: teacherEssayCheckKey(input.courseId, input.assignmentId, input.studentId),
       })
     },
+  })
+}
+
+export function usePrepareTeacherEssayChecks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: PrepareTeacherEssayChecksRequest) => teacherApi.prepareEssayChecks(input),
+    onSuccess: (_result, input) => queryClient.invalidateQueries({ queryKey: teacherWorkspaceKey(input.courseId) }),
   })
 }
 
