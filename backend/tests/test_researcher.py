@@ -153,7 +153,9 @@ def test_library_rows_count_how_many_cited_sources_are_publicly_indexed():
             {
                 "claim": "B",
                 "citations": [url_only],
-                "verdicts": [{"verdict": "insufficient", "cited": "http://example.com/x", "quote": "", "evidence": []}],
+                "verdicts": [
+                    {"verdict": "insufficient", "cited": "http://example.com/x", "quote": "", "evidence": []}
+                ],
             },
         ],
     }
