@@ -29,7 +29,7 @@ const ROLES: { id: Role; title: string; desc: string; icon: Icon; bullets: strin
   },
   {
     id: 'writer',
-    title: 'Writer',
+    title: 'Author',
     desc: 'Cite with confidence before you submit.',
     icon: Pen,
     bullets: [

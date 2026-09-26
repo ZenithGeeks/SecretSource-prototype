@@ -15,8 +15,8 @@ import { FeedbackDialog } from '../src/roles/teacher/screens/FeedbackDialog'
 import { Home } from '../src/roles/teacher/screens/Home'
 import { People } from '../src/roles/teacher/screens/People'
 import { ReadingQuestions } from '../src/roles/teacher/screens/ReadingQuestions'
-import { Settings } from '../src/roles/teacher/screens/Settings'
 import { TeacherApp } from '../src/roles/teacher/TeacherApp'
+import { SettingsModal } from '../src/components/SettingsModal'
 import { resetSettings } from '../src/lib/settings'
 import { resetTeacherPreferences } from '../src/lib/teacherPreferences'
 import { resetTeacherStore } from '../src/lib/teacherStore'
@@ -285,22 +285,27 @@ describe('Teacher review and worksheet pages', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Edited reading question' })).not.toBeInTheDocument())
   })
 
-  test('Settings updates teacher preferences, exports results, and resets local data after confirmation', async () => {
+  test('Settings modal updates teacher preferences, exports results, and resets local data after confirmation', async () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
-    renderWithQuery(<Settings />)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderWithQuery(<SettingsModal open onClose={vi.fn()} currentRole="teacher" onSwitchRole={vi.fn()} />)
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-    const hideNames = screen.getByRole('checkbox', { name: 'Hide student names' })
-    expect(hideNames).not.toBeChecked()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Class and marking' }))
+    const hideNames = screen.getByRole('switch', { name: 'Hide student names' })
+    expect(hideNames).toHaveAttribute('aria-checked', 'false')
     fireEvent.click(hideNames)
-    await waitFor(() => expect(hideNames).toBeChecked())
+    await waitFor(() => expect(hideNames).toHaveAttribute('aria-checked', 'true'))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Export class results' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Class results exported locally.')
+    fireEvent.click(screen.getByRole('tab', { name: 'Your data' }))
+    const exportButton = await screen.findByRole('button', { name: 'Export' })
+    await waitFor(() => {
+      fireEvent.click(exportButton)
+      expect(screen.getByRole('status')).toHaveTextContent('Class results exported locally.')
+    })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete local data' }))
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset local data' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Local uploaded essay data was reset.')
   })
 })

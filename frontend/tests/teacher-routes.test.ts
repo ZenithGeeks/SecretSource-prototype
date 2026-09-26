@@ -58,8 +58,9 @@ test('legacy coursework identifiers are translated by the route parser', () => {
 })
 
 test('teacher navigation includes the updated Figma destinations', () => {
-  assert.deepEqual(TEACHER_NAV_KEYS, ['home', 'classes', 'library', 'graph', 'settings'])
+  // Settings moved off the nav and into the shared Settings modal (Figma 22), opened from the
+  // profile menu like every other role — teacher no longer has its own nav entry for it.
+  assert.deepEqual(TEACHER_NAV_KEYS, ['home', 'classes', 'library', 'graph'])
   assert.equal(teacherNavForScreen('essay-check'), 'classes')
   assert.equal(teacherNavForScreen('reading-questions'), 'library')
-  assert.equal(teacherNavForScreen('settings'), 'settings')
 })

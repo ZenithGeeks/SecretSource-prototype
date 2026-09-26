@@ -11,6 +11,12 @@ DELETE /analyses/{id}
 GET  /papers/{name}             -> the PDF itself
 GET  /papers/{name}/pages/{n}.png?dpi=110   -> that page rendered
 GET  /papers/{name}/find?q=...&page=N       -> where that text sits, as boxes
+GET  /user/preferences                      -> the signed-in user's stored settings patch
+PATCH /user/preferences  {"patch": {...}}   -> merges and returns the settings patch
+DELETE /user/data        -> deletes every analysis (and researcher project) the user owns
+POST /user/avatar        multipart image -> {"url"}
+DELETE /user/avatar
+GET  /user/avatar/me     -> the avatar image
 POST /verify            {"claim", "source"} -> one verdict, outside any analysis
 GET  /health
 
@@ -25,11 +31,13 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
@@ -40,6 +48,7 @@ from pydantic import BaseModel
 from app import dependencies, researcher, store
 from app.auth import current_user
 from app.config import (
+    AVATARS_DIR,
     PAPERS_DIR,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
@@ -61,6 +70,9 @@ from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
+AVATAR_UPLOAD = File(...)
+MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2MB — a square 128px+ photo, not a print-res upload
+AVATAR_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 PAGE_CACHE = Path(os.getenv("PAGE_CACHE", "/tmp/pages"))
 DEFAULT_DPI, MAX_DPI = 110, 300
 # Crops are saved as figure-1.png, figure-2.png ... by pipeline/figures.py.
@@ -346,15 +358,19 @@ async def get_analysis(analysis_id: str, user: str | None = Depends(current_user
     return _owned(analysis_id, user)
 
 
-@app.delete("/analyses/{analysis_id}")
-async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    _owned(analysis_id, user)
+async def _delete_one(analysis_id: str) -> None:
     # Out of memory first, so no new save starts. A save already running would store the row
     # again after the delete, so wait for it.
     analyses.pop(analysis_id, None)
     streams.pop(analysis_id, None)
     await _saved(analysis_id)
     await asyncio.to_thread(store.delete, analysis_id)
+
+
+@app.delete("/analyses/{analysis_id}")
+async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
+    _owned(analysis_id, user)
+    await _delete_one(analysis_id)
     return {"deleted": analysis_id}
 
 
@@ -550,13 +566,101 @@ async def knowledge_graph(user: str | None = Depends(current_user)):
     return researcher.graph(visible_to(user))
 
 
+# --- account settings, shared by every role (Settings modal) ---
+
+
+class PreferencesPatch(BaseModel):
+    patch: dict[str, Any]
+
+
+# patch_preferences is a read-modify-write of the whole blob. Two PATCHes for different keys
+# in flight at once (two settings changed within one round trip) could both read the same
+# `current`, and the later save would silently drop the earlier key. Serialising the
+# load→merge→save keeps both. It runs on a worker thread (the store calls block), so this is
+# a threading.Lock, held only for that section. This assumes a single gateway process
+# (uvicorn.run(app) below); a multi-instance deploy would need the merge in SQL instead
+# (SQLite json_patch, a Supabase RPC doing `data || excluded.data`).
+_preferences_lock = threading.Lock()
+
+
+def _merge_preferences(user: str | None, patch: dict[str, Any]) -> dict[str, Any]:
+    with _preferences_lock:
+        current = store.load_preferences(user) or {}
+        merged = {**current, **patch}
+        store.save_preferences(user, merged)
+    return merged
+
+
+@app.get("/user/preferences")
+async def get_preferences(user: str | None = Depends(current_user)):
+    """The signed-in user's stored settings patch — checking/notification/appearance
+    prefs and the role-specific extras. `{}` until the first PATCH. The frontend layers
+    this over its own defaults, same as it did over localStorage before this endpoint."""
+    return await asyncio.to_thread(store.load_preferences, user) or {}
+
+
+@app.patch("/user/preferences")
+async def patch_preferences(request: PreferencesPatch, user: str | None = Depends(current_user)):
+    return await asyncio.to_thread(_merge_preferences, user, request.patch)
+
+
+@app.delete("/user/data")
+async def delete_all_data(user: str | None = Depends(current_user)):
+    """Every analysis (and researcher project) this user owns — Settings → Your data →
+    Delete all. The confirm dialog is the UI's job; this call is unconditional."""
+    ids = [analysis["id"] for analysis in visible_to(user)]
+    for analysis_id in ids:
+        await _delete_one(analysis_id)
+    await asyncio.to_thread(store.delete_projects, user)
+    return {"deleted": len(ids)}
+
+
+def _avatar_path(user: str | None) -> Path | None:
+    return next(iter(AVATARS_DIR.glob(f"{user or 'anon'}.*")), None)
+
+
+@app.post("/user/avatar")
+async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Depends(current_user)):
+    ext = AVATAR_TYPES.get(file.content_type or "")
+    if not ext:
+        raise HTTPException(400, "avatar must be a PNG, JPEG or WebP image")
+    content = await file.read()
+    if len(content) > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "avatar must be under 2MB")
+    key = user or "anon"
+    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+    for old in AVATARS_DIR.glob(f"{key}.*"):
+        old.unlink(missing_ok=True)
+    (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+    # Cache-bust: the frontend keeps this url in its settings blob indefinitely, so a
+    # same-name re-upload needs a new url or the browser (and its own blob-url cache) would
+    # keep showing the old image.
+    return {"url": f"/api/user/avatar/me?v={int(time.time())}"}
+
+
+@app.delete("/user/avatar")
+async def remove_avatar(user: str | None = Depends(current_user)):
+    key = user or "anon"
+    for old in AVATARS_DIR.glob(f"{key}.*"):
+        old.unlink(missing_ok=True)
+    return {"deleted": True}
+
+
+@app.get("/user/avatar/me")
+async def get_avatar(user: str | None = Depends(current_user)):
+    path = _avatar_path(user)
+    if path is None:
+        raise HTTPException(404, "no avatar")
+    return FileResponse(path)
+
+
 class VerifyRequest(BaseModel):
     claim: str
     source: str
 
 
 @app.post("/verify")
-async def verify(request: VerifyRequest):
+async def verify(request: VerifyRequest, user: str | None = Depends(current_user)):
     """Check one claim against one source, without running a whole analysis."""
     return await asyncio.to_thread(verify_claim, request.claim, request.source)
 

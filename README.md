@@ -61,15 +61,15 @@ The quote highlighted in the cited PDF:
 
 Choosing a role:
 
-![Onboarding: pick researcher, writer or teacher](docs/images/onboarding.jpg)
+![Onboarding: pick researcher, author or teacher](docs/images/onboarding.jpg)
 
 Researcher home:
 
 ![Researcher home with quick actions, conflicts and reading queue](docs/images/researcher-home.jpg)
 
-Writer draft check (sample data):
+Author draft check (sample data):
 
-![Writer draft check with marked citations and a suggested fix](docs/images/writer-draft-check.jpg)
+![Author draft check with marked citations and a suggested fix](docs/images/writer-draft-check.jpg)
 </details>
 
 ## Quick start
