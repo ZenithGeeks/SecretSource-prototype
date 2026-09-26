@@ -1,24 +1,23 @@
 /**
  * Author LaTeX editor (Figma 565:3957): a full-bleed screen with its own top bar, the file
- * tabs + CodeMirror + status bar on the left and the preview on the right. Reads the same
- * author store as Draft check, so the verdict marks in the gutter are the citations Draft
- * check lists, and an edit here moves those citations' lines there.
+ * tabs + CodeMirror + status bar on the left and the live preview on the right. Reads the
+ * same draft and check the Check a draft screen does, so the verdict marks in the gutter are
+ * the citations it lists, and an edit here moves those citations' lines there.
  *
- * Typing is committed to the store after a short pause (not per keystroke), which is also
- * when the parse warnings and citation lines catch up. Ctrl/Cmd+S saves (clears the dirty
- * dots, bumps the version).
+ * Typing is written to the gateway after a short pause (not per keystroke). Ctrl/Cmd+S saves
+ * (writes what is pending, then bumps the version). Re-check writes first, then starts the
+ * run, and the preview's markers recolour as the results stream in.
  */
 
 import { Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button, Card } from '../../../components/ui'
-import { ReportUnavailable } from '../../../lib/author'
+import { errorMessage } from '../../../lib/author'
 import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
 import { downloadBlob, downloadText } from '../../../lib/csv'
-import { bibEntries, findCites, sentenceStart } from '../../../lib/latexProject'
-import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorParse, useExportReport, useRecheck } from '../../../lib/useAuthor'
-import { authorStore } from '../../../lib/authorStore'
+import { bibEntries, findCites, parseProject, sentenceStart } from '../../../lib/latexProject'
+import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue, summarize } from '../../../lib/verdict'
 import type { Citation, ProjectFile } from '../../../types/draftCheck'
 import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark } from '../components/editor/CodeEditor'
@@ -30,28 +29,32 @@ import { SplitPane } from '../components/editor/SplitPane'
 import { StatusBar } from '../components/editor/StatusBar'
 import { Toast } from '../components/Toast'
 import type { EditorTarget } from '../editorTarget'
-import { replacementLabel } from '../labels'
+import type { ReplacementRequest } from './DraftCheck'
 
-const COMMIT_DELAY_MS = 300
+const COMMIT_DELAY_MS = 600
 
 export function Editor({
   target,
   onFileChange,
   onNavigate,
   onSearch,
+  onFindReplacement,
 }: {
   target: EditorTarget
   /** The open file changed (for the URL). */
   onFileChange: (file: string) => void
-  onNavigate: (tab: EditorTab | 'draft-check') => void
+  onNavigate: (tab: EditorTab | 'home') => void
   /** The "search '…'" completion: open Find a source with this query. */
   onSearch: (query: string) => void
+  /** The popover's "Find a replacement". */
+  onFindReplacement: (request: ReplacementRequest) => void
 }) {
   const { draftId } = target
   const draft = useAuthorDraft(draftId)
-  const check = useAuthorCheck(draftId)
-  const parse = useAuthorParse(draftId)
-  const recheck = useRecheck()
+  const check = useAuthorCheck(draft.data?.lastCheckId ?? null)
+  const running = useAuthorCheck(draft.data?.runningCheckId ?? null)
+  const saved = useSavedSources(draft.data?.projectId ?? undefined)
+  const start = useStartCheck()
   const exportReport = useExportReport()
   const actions = useAuthorActions()
 
@@ -59,14 +62,15 @@ export function Editor({
   const [activeName, setActiveName] = useState<string | null>(target.file ?? null)
   const active = files.find((f) => f.name === activeName) ?? files.find((f) => f.kind === 'tex') ?? files[0]
 
-  // Local text per file, committed to the store after a pause. `committed` remembers what
-  // we last sent, so a store change we did not make (a replacement) can be told apart from
-  // our own text coming back through the query.
+  // Local text per file, written to the gateway after a pause. `committed` remembers what we
+  // last sent, so a change we did not make (a replacement) can be told apart from our own
+  // text coming back through the query.
   const [texts, setTexts] = useState<Record<string, string>>({})
+  const [dirty, setDirty] = useState<Set<string>>(new Set())
   const committed = useRef<Record<string, string>>({})
   const timers = useRef<Record<string, number>>({})
-  // True while an edit is waiting to be committed, so the breadcrumb can say "unsaved" at once.
   const [pending, setPending] = useState(false)
+  const [writeError, setWriteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!draft.data) return
@@ -83,45 +87,59 @@ export function Editor({
   }, [draft.data])
 
   const commit = useCallback(
-    (name: string, content: string) => {
+    async (name: string, content: string) => {
       window.clearTimeout(timers.current[name])
       delete timers.current[name]
+      if (committed.current[name] === content) return
       committed.current[name] = content
-      actions.updateFile(draftId, name, content)
-      setPending(false)
+      try {
+        await actions.putFile(draftId, name, content, true)
+        setWriteError(null)
+      } catch (error) {
+        setWriteError(`Could not save ${name}: ${errorMessage(error)}`)
+        delete committed.current[name]
+      } finally {
+        setPending(Object.keys(timers.current).length > 0)
+      }
     },
     [actions, draftId],
   )
 
   const onChange = (name: string, content: string) => {
     setTexts((prev) => ({ ...prev, [name]: content }))
+    setDirty((prev) => new Set(prev).add(name))
     setPending(true)
     window.clearTimeout(timers.current[name])
-    timers.current[name] = window.setTimeout(() => commit(name, content), COMMIT_DELAY_MS)
+    timers.current[name] = window.setTimeout(() => void commit(name, content), COMMIT_DELAY_MS)
   }
 
-  const flush = useCallback(() => {
-    for (const name of Object.keys(timers.current)) {
-      if (timers.current[name]) {
-        window.clearTimeout(timers.current[name])
-        delete timers.current[name]
-        const content = texts[name]
-        if (content !== undefined && committed.current[name] !== content) commit(name, content)
-      }
-    }
+  /** Writes every pending edit now. */
+  const flush = useCallback(async () => {
+    const names = Object.keys(timers.current)
+    await Promise.all(names.map((name) => (texts[name] === undefined ? Promise.resolve() : commit(name, texts[name]))))
   }, [texts, commit])
 
   useEffect(() => () => Object.values(timers.current).forEach((t) => window.clearTimeout(t)), [])
 
-  const save = () => {
-    flush()
-    actions.saveDraft(draftId)
+  const save = async () => {
+    await flush()
+    try {
+      await actions.saveDraft(draftId)
+      setDirty(new Set())
+      setToast(`Saved as v${(draft.data?.version ?? 0) + 1}`)
+    } catch (error) {
+      setToast(`Could not save: ${errorMessage(error)}`)
+    }
+  }
+
+  const recheck = async () => {
+    await flush()
+    start.mutate(draftId, { onError: (error) => setToast(`Could not start the check: ${errorMessage(error)}`) })
   }
 
   const [cursor, setCursor] = useState<CursorPosition>({ line: target.line ?? 1, column: 1 })
   const [jump, setJump] = useState(target.line ? { line: target.line, nonce: 1 } : undefined)
   // A new target from outside (another "Fix in editor") opens its file and moves the cursor.
-  // Derived during render, the way React suggests for state that follows a prop.
   const [seenTarget, setSeenTarget] = useState(target)
   if (seenTarget.file !== target.file || seenTarget.line !== target.line || seenTarget.draftId !== target.draftId) {
     setSeenTarget(target)
@@ -138,26 +156,23 @@ export function Editor({
   const [toast, setToast] = useState<string | null>(null)
   const closeToast = useCallback(() => setToast(null), [])
 
-  // The popover's actions: the same store calls Draft check makes, so both screens agree.
-  const replaceFromPopover = (citation: Citation) => {
-    if (!citation.suggestedReplacement) return
-    actions.replaceCitation(citation.id, citation.suggestedReplacement)
-    setToast(`Citation replaced with ${replacementLabel(citation.suggestedReplacement)}`)
-  }
-  const keepMine = (citation: Citation, note: string) => {
-    actions.overrideCitation(citation.id, note)
-    setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+  const checkId = check.data?.id
+  const keepMine = async (citation: Citation, note: string) => {
+    if (!checkId) return
+    try {
+      await actions.overrideCitation(draftId, checkId, citation, note)
+      setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+    } catch (error) {
+      setToast(`Could not save the note: ${errorMessage(error)}`)
+    }
   }
 
   // The Export menu. Text exports use what is on screen right now (pending edits included);
-  // the PDF report goes through the service, which has no endpoint yet.
+  // the PDF report comes from the gateway, from the latest check.
   const [exporting, setExporting] = useState<ExportKind | null>(null)
   const exportAs = async (kind: ExportKind): Promise<boolean | void> => {
     if (!draft.data || !active) return
-    const current: typeof draft.data = {
-      ...draft.data,
-      files: draft.data.files.map((f) => ({ ...f, content: texts[f.name] ?? f.content })),
-    }
+    const current = { ...draft.data, files: draft.data.files.map((f) => ({ ...f, content: texts[f.name] ?? f.content })) }
     const name = slug(current.title)
     switch (kind) {
       case 'bib':
@@ -166,7 +181,7 @@ export function Editor({
         return
       case 'tex': {
         const file = current.files.find((f) => f.name === active.name)!
-        downloadText(file.name, buildAnnotatedTex(file, check.data?.citations ?? []), 'application/x-tex')
+        downloadText(file.name.split('/').pop()!, buildAnnotatedTex(file, check.data?.citations ?? []), 'application/x-tex')
         setToast(`Downloaded ${file.name} with SecretSource comments`)
         return
       }
@@ -177,11 +192,13 @@ export function Editor({
       case 'report':
         setExporting('report')
         try {
+          await flush()
           const pdf = await exportReport.mutateAsync(draftId)
           downloadBlob(`${name}-report.pdf`, pdf)
           setToast('Downloaded the verification report')
         } catch (error) {
-          setToast(error instanceof ReportUnavailable ? error.message : `Could not build the report: ${(error as Error).message}`)
+          setToast(`Could not build the report: ${errorMessage(error)}`)
+          return false
         } finally {
           setExporting(null)
         }
@@ -189,10 +206,7 @@ export function Editor({
   }
 
   const text = active ? (texts[active.name] ?? active.content) : ''
-  const fileCitations = useMemo(
-    () => (check.data?.citations ?? []).filter((c) => c.file === active?.name),
-    [check.data, active?.name],
-  )
+  const fileCitations = useMemo(() => (check.data?.citations ?? []).filter((c) => c.file === active?.name), [check.data, active?.name])
   const marks: LineMark[] = useMemo(
     () =>
       fileCitations.map((c) => ({
@@ -205,17 +219,19 @@ export function Editor({
   )
   const counts = useMemo(() => summarize(fileCitations).counts, [fileCitations])
   const citeCount = useMemo(() => (active ? findCites({ name: active.name, content: text }).length : 0), [active, text])
-  const warningCount = (parse.data?.warnings ?? []).filter((w) => w.file === active?.name).length
+  // Warnings come from the project text as typed, so they follow the keystrokes.
+  const liveFiles = useMemo(() => files.map((f) => ({ ...f, content: texts[f.name] ?? f.content })), [files, texts])
+  const warningCount = useMemo(() => parseProject(liveFiles).warnings.filter((w) => w.file === active?.name).length, [liveFiles, active?.name])
 
-  const entries = useMemo(() => bibEntries(files), [files])
+  const entries = useMemo(() => bibEntries(liveFiles), [liveFiles])
   const completions: CiteCompletionSource = useMemo(() => {
     const seen = new Set<string>()
     const bibKeys = entries
       .filter((e) => (seen.has(e.key) ? false : (seen.add(e.key), true)))
       .map((e) => ({ key: e.key, detail: `${e.file} · ${(e.fields.title ?? '').split(':')[0].slice(0, 28)}` }))
-    const suggested = draft.data ? authorStore.suggestedKeys(draftId).map((r) => ({ key: r.key, detail: 'suggested · not in .bib' })) : []
+    const suggested = (saved.data ?? []).filter((s) => !seen.has(s.key)).map((s) => ({ key: s.key, detail: 'saved · not in .bib' }))
     return { bibKeys, suggested, onSearch }
-  }, [entries, draft.data, draftId, onSearch])
+  }, [entries, saved.data, onSearch])
 
   if (draft.isPending) {
     return (
@@ -229,19 +245,20 @@ export function Editor({
   }
 
   if (draft.isError || !draft.data || !active) {
+    const gone = draft.isError && errorMessage(draft.error).includes('no such draft')
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas p-6">
         <Card className="flex flex-col items-start gap-3">
-          <p className="text-refutes">
-            {draft.isError ? `Could not open this draft: ${(draft.error as Error).message}` : 'This draft no longer exists.'}
+          <p className={gone ? 'text-ink' : 'text-refutes'}>
+            {gone ? 'This draft no longer exists.' : draft.isError ? `Could not open this draft: ${errorMessage(draft.error)}` : 'This draft has no files.'}
           </p>
           <div className="flex gap-2">
-            {draft.isError && (
-              <Button variant="ghost" onClick={() => draft.refetch()}>
+            {draft.isError && !gone && (
+              <Button variant="ghost" onClick={() => void draft.refetch()}>
                 Try again
               </Button>
             )}
-            <Button variant="ghost" onClick={() => onNavigate('draft-check')}>
+            <Button variant="ghost" onClick={() => onNavigate('home')}>
               Back to Check a draft
             </Button>
           </div>
@@ -250,26 +267,25 @@ export function Editor({
     )
   }
 
-  const saved = !pending && !files.some((f) => f.dirty)
+  const isChecking = Boolean(draft.data.runningCheckId) || start.isPending
+  const savedState = !pending && dirty.size === 0
+  const filesWithDirty = files.map((f) => ({ ...f, dirty: dirty.has(f.name) }))
 
   return (
     <div className="flex h-screen flex-col bg-canvas">
       <EditorTopBar
         title={draft.data.title}
         version={draft.data.version}
-        saved={saved}
-        onBack={() => onNavigate('draft-check')}
+        saved={savedState}
+        onBack={() => onNavigate('home')}
         onNavigate={(tab) => onNavigate(tab)}
-        onRecheck={() => {
-          flush()
-          recheck.mutate(draftId)
-        }}
-        rechecking={recheck.isPending}
+        onRecheck={() => void recheck()}
+        rechecking={isChecking}
         exportSlot={<ExportMenu openIssues={draft.data.status.open} busy={exporting} onExport={exportAs} />}
       />
-      {recheck.isError && (
+      {(start.isError || writeError || running.data?.status === 'error') && (
         <p role="alert" className="border-b border-refutes bg-refutes-soft px-4 py-1.5 text-xs text-refutes">
-          Re-check failed: {(recheck.error as Error).message}
+          {writeError ?? (start.isError ? `Re-check failed: ${errorMessage(start.error)}` : `The check failed: ${running.data?.message}`)}
         </p>
       )}
       <SplitPane
@@ -277,10 +293,17 @@ export function Editor({
         rightLabel="Preview"
         left={
           <div className="flex min-h-0 flex-1 flex-col bg-surface">
-            <FileTabs files={files} active={active.name} onSelect={selectFile} onAdd={(name) => {
-              actions.addFile(draftId, name)
-              selectFile(name)
-            }} />
+            <FileTabs
+              files={filesWithDirty}
+              active={active.name}
+              onSelect={selectFile}
+              onAdd={(name) => {
+                void actions
+                  .putFile(draftId, name, '')
+                  .then(() => selectFile(name))
+                  .catch((error) => setToast(`Could not add ${name}: ${errorMessage(error)}`))
+              }}
+            />
             <CodeEditor
               key={`${draftId}:${active.name}`}
               ariaLabel={`${active.name} source`}
@@ -289,7 +312,7 @@ export function Editor({
               completions={completions}
               onChange={(content) => onChange(active.name, content)}
               onCursor={setCursor}
-              onSave={save}
+              onSave={() => void save()}
               jumpTo={jump}
             />
             <StatusBar counts={counts} cursor={cursor} citeCount={citeCount} warningCount={warningCount} />
@@ -302,8 +325,8 @@ export function Editor({
             bibEntries={entries}
             verdictColors={verdictColors}
             onToggleVerdictColors={() => setVerdictColors((v) => !v)}
-            onReplace={replaceFromPopover}
-            onKeepMine={keepMine}
+            onFindReplacement={(citation) => checkId && onFindReplacement({ draftId, checkId, citationId: citation.id, claim: citation.claim })}
+            onKeepMine={(citation, note) => void keepMine(citation, note)}
           />
         }
       />

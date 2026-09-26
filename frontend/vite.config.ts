@@ -10,6 +10,13 @@ export default defineConfig({
   // a second frontend/.env that drifts out of sync with it — Vite otherwise only looks in its
   // own project root, so VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY silently had two homes.
   envDir: fileURLToPath(new URL('..', import.meta.url)),
+  resolve: {
+    alias: {
+      // latex.js lists only its JS in `exports`, so its stylesheet (and the KaTeX fonts it
+      // references, which Vite then bundles) is reached through the package directory.
+      'latex.js/dist': fileURLToPath(new URL('./node_modules/latex.js/dist', import.meta.url)),
+    },
+  },
   server: {
     proxy: {
       '/api': {

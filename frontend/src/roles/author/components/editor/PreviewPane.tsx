@@ -3,14 +3,14 @@
  * page. Compiles the open file a moment after typing stops; when the source will not
  * compile, the last good page stays and a one-line error says where. The `[n]` markers are
  * coloured by verdict when the toggle is on, and a flagged one opens the issue popover.
+ *
+ * The page lives in a shadow root, so LaTeX.js's and KaTeX's stylesheets (and the page's own
+ * paper look) never leak into the app and the app's Tailwind never reaches the page. Fonts
+ * are the exception: an @font-face inside a shadow root does not register, so those rules
+ * are lifted into the document once, and KaTeX's woff2 files ship with the bundle.
  */
 
-// latex.js does not list its stylesheets in its package exports, so KaTeX's layout sheet
-// (needed for math to line up) is reached by path. The Computer Modern sheet is left out on
-// purpose: it would pull 8 MB of fonts into the bundle.
-import '../../../../../node_modules/latex.js/dist/css/katex.css'
-import './preview.css'
-
+import katexCss from 'latex.js/dist/css/katex.css?inline'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -18,11 +18,35 @@ import { cn } from '../../../../lib/utils'
 import { appendReferences, decorateCitations, prepareSource, referenceNumbers, renderLatex, type RenderFailure } from '../../../../lib/latexPreview'
 import type { BibEntry } from '../../../../lib/bibtex'
 import { findCites } from '../../../../lib/latexProject'
+import { useDebounced } from '../../../../lib/useDebounced'
 import { isOpenIssue } from '../../../../lib/verdict'
 import type { Citation } from '../../../../types/draftCheck'
 import { IssuePopover, type PopoverAnchor } from './IssuePopover'
+import previewCss from './preview.css?inline'
 
 const RENDER_DELAY_MS = 300
+const FONT_STYLE_ID = 'ss-preview-fonts'
+
+/** The @font-face rules of a stylesheet, and the sheet without them. */
+function splitFontFaces(css: string): { fonts: string; rest: string } {
+  const fonts: string[] = []
+  const rest = css.replace(/@font-face\s*\{[^}]*\}/g, (rule) => {
+    fonts.push(rule)
+    return ''
+  })
+  return { fonts: fonts.join('\n'), rest }
+}
+
+/** Puts KaTeX's fonts on the document once; every preview shares them. */
+function ensureFonts(fonts: string) {
+  if (document.getElementById(FONT_STYLE_ID)) return
+  const style = document.createElement('style')
+  style.id = FONT_STYLE_ID
+  style.textContent = fonts
+  document.head.appendChild(style)
+}
+
+const KATEX = splitFontFaces(katexCss)
 
 type RenderState = {
   root: HTMLElement | null
@@ -31,22 +55,13 @@ type RenderState = {
   source: string | null
 }
 
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const id = window.setTimeout(() => setDebounced(value), ms)
-    return () => window.clearTimeout(id)
-  }, [value, ms])
-  return debounced
-}
-
 export function PreviewPane({
   content,
   citations,
   bibEntries,
   verdictColors,
   onToggleVerdictColors,
-  onReplace,
+  onFindReplacement,
   onKeepMine,
 }: {
   content: string
@@ -55,13 +70,14 @@ export function PreviewPane({
   bibEntries: BibEntry[]
   verdictColors: boolean
   onToggleVerdictColors: () => void
-  onReplace: (citation: Citation) => void
+  onFindReplacement: (citation: Citation) => void
   onKeepMine: (citation: Citation, note: string) => void
 }) {
   const debounced = useDebounced(content, RENDER_DELAY_MS)
   const [state, setState] = useState<RenderState>({ root: null, error: null, source: null })
   const rendering = state.source !== debounced
-  const page = useRef<HTMLDivElement>(null)
+  const host = useRef<HTMLDivElement>(null)
+  const page = useRef<HTMLElement | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState<{ id: string; anchor: PopoverAnchor; trigger: HTMLElement | null; containerWidth: number } | null>(null)
 
@@ -83,35 +99,10 @@ export function PreviewPane({
   )
   const issues = useMemo(() => citations.filter(isOpenIssue), [citations])
 
-  // Put the page in the DOM with the markers decorated. A fresh clone each time, so the
-  // decoration can be redone when the citations change without recompiling.
-  useEffect(() => {
-    const host = page.current
-    if (!host || !state.root) return
-    const clone = state.root.cloneNode(true) as HTMLElement
-    const seen = new Map<string, Citation[]>()
-    for (const c of citations) seen.set(c.key, [...(seen.get(c.key) ?? []), c])
-    const cited = new Set<string>()
-    decorateCitations(clone, (key, occurrence) => {
-      cited.add(key)
-      const citation = seen.get(key)?.[occurrence]
-      return { id: citation?.id, verdict: citation?.verdict, n: numbers.get(key) ?? null }
-    })
-    appendReferences(clone, bibEntries, numbers, cited)
-    host.replaceChildren(clone)
-  }, [state.root, citations, bibEntries, numbers])
-
-  const close = useCallback(() => {
-    setOpen((o) => {
-      o?.trigger?.focus()
-      return null
-    })
-  }, [])
-
   const openFor = useCallback((id: string, trigger: HTMLElement | null) => {
     const box = scroller.current
     if (!box) return
-    const target = trigger ?? box.querySelector<HTMLElement>(`.ss-cite[data-id="${id}"]`)
+    const target = trigger ?? page.current?.querySelector<HTMLElement>(`.ss-cite[data-id="${id}"]`) ?? null
     if (!target) return
     const r = target.getBoundingClientRect()
     const b = box.getBoundingClientRect()
@@ -124,29 +115,87 @@ export function PreviewPane({
     })
   }, [])
 
-  // Clicks and Enter/Space on a flagged marker open its popover (event delegation: the
-  // markers are created outside React).
-  const onPageClick = (event: React.MouseEvent) => {
-    const marker = (event.target as HTMLElement).closest<HTMLElement>('.ss-cite[data-id]')
-    if (marker?.dataset.id) openFor(marker.dataset.id, marker)
-  }
-  const onPageKey = (event: React.KeyboardEvent) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    const marker = (event.target as HTMLElement).closest<HTMLElement>('.ss-cite[data-id]')
-    if (!marker?.dataset.id) return
-    event.preventDefault()
-    openFor(marker.dataset.id, marker)
-  }
+  // The shadow root: the stylesheets and the page element, made once per mount. Clicks and
+  // Enter/Space on a flagged marker open its popover (the markers are created outside React,
+  // inside the shadow tree, so the listeners live there too).
+  useEffect(() => {
+    const element = host.current
+    if (!element) return
+    ensureFonts(KATEX.fonts)
+    const shadow = element.shadowRoot ?? element.attachShadow({ mode: 'open' })
+    shadow.replaceChildren()
+    const katex = document.createElement('style')
+    katex.textContent = KATEX.rest
+    const look = document.createElement('style')
+    look.textContent = previewCss
+    const body = document.createElement('article')
+    body.className = 'ss-preview'
+    body.setAttribute('aria-live', 'polite')
+    shadow.append(katex, look, body)
+    page.current = body
+    const onClick = (event: Event) => {
+      const marker = (event.target as HTMLElement).closest?.('.ss-cite[data-id]') as HTMLElement | null
+      if (marker?.dataset.id) {
+        event.preventDefault()
+        openFor(marker.dataset.id, marker)
+      }
+    }
+    const onKey = (event: Event) => {
+      const key = (event as KeyboardEvent).key
+      if (key !== 'Enter' && key !== ' ') return
+      const marker = (event.target as HTMLElement).closest?.('.ss-cite[data-id]') as HTMLElement | null
+      if (!marker?.dataset.id) return
+      event.preventDefault()
+      openFor(marker.dataset.id, marker)
+    }
+    body.addEventListener('click', onClick)
+    body.addEventListener('keydown', onKey)
+    return () => {
+      body.removeEventListener('click', onClick)
+      body.removeEventListener('keydown', onKey)
+    }
+  }, [openFor])
+
+  // Put the page in the shadow tree with the markers decorated. A fresh clone each time, so
+  // the decoration can be redone when the citations change without recompiling.
+  useEffect(() => {
+    const body = page.current
+    if (!body || !state.root) return
+    const clone = state.root.cloneNode(true) as HTMLElement
+    const seen = new Map<string, Citation[]>()
+    for (const c of citations) seen.set(c.key, [...(seen.get(c.key) ?? []), c])
+    const cited = new Set<string>()
+    decorateCitations(clone, (key, occurrence) => {
+      cited.add(key)
+      const citation = seen.get(key)?.[occurrence]
+      return { id: citation?.id, verdict: citation?.verdict, n: numbers.get(key) ?? null }
+    })
+    appendReferences(clone, bibEntries, numbers, cited)
+    body.replaceChildren(clone)
+    body.classList.toggle('ss-verdicts', verdictColors)
+    body.setAttribute('aria-busy', String(rendering))
+  }, [state.root, citations, bibEntries, numbers, verdictColors, rendering])
+
+  useEffect(() => {
+    page.current?.classList.toggle('ss-verdicts', verdictColors)
+  }, [verdictColors])
+
+  const close = useCallback(() => {
+    setOpen((o) => {
+      o?.trigger?.focus()
+      return null
+    })
+  }, [])
 
   const current = open ? citations.find((c) => c.id === open.id) : undefined
   const currentIndex = current ? issues.findIndex((c) => c.id === current.id) : -1
 
   // Highlight the open issue's sentence.
   useEffect(() => {
-    const host = page.current
-    if (!host) return
-    host.querySelectorAll('.ss-active').forEach((el) => el.classList.remove('ss-active'))
-    if (open) host.querySelector(`.ss-sentence[data-id="${open.id}"]`)?.classList.add('ss-active')
+    const body = page.current
+    if (!body) return
+    body.querySelectorAll('.ss-active').forEach((el) => el.classList.remove('ss-active'))
+    if (open) body.querySelector(`.ss-sentence[data-id="${open.id}"]`)?.classList.add('ss-active')
   }, [open, state.root, citations])
 
   const next = () => {
@@ -176,16 +225,11 @@ export function PreviewPane({
         </p>
       )}
       <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto p-4 sm:p-8">
-        {!state.root && !state.error && (
-          <p className="text-center text-xs text-ink-muted">Rendering…</p>
-        )}
+        {!state.root && !state.error && <p className="text-center text-xs text-ink-muted">Rendering…</p>}
         <div
-          ref={page}
-          onClick={onPageClick}
-          onKeyDown={onPageKey}
-          className={cn('ss-preview mx-auto min-h-[24rem] max-w-[560px] rounded-sm bg-surface px-10 py-12 shadow-md sm:px-14', verdictColors && 'ss-verdicts')}
-          aria-live="polite"
-          aria-busy={rendering}
+          ref={host}
+          data-testid="preview-page"
+          className={cn('mx-auto min-h-[24rem] max-w-[560px] rounded-sm bg-surface px-10 py-12 shadow-md sm:px-14', !state.root && 'hidden')}
         />
         {open && current && (
           <IssuePopover
@@ -195,8 +239,8 @@ export function PreviewPane({
             anchor={open.anchor}
             containerWidth={open.containerWidth}
             numberOf={(key) => numbers.get(key) ?? null}
-            onReplace={() => {
-              onReplace(current)
+            onFindReplacement={() => {
+              onFindReplacement(current)
               close()
             }}
             onKeepMine={(note) => {

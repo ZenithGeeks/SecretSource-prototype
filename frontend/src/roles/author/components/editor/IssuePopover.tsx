@@ -1,14 +1,14 @@
 /**
  * The popover that opens on a flagged [n] in the preview (Figma 565:3957): the verdict
- * badge, the source, why, the passage, "Replace with [n]" and "Keep mine", and the pager.
+ * badge, the source, why, the passage, "Find a replacement" and "Keep mine", and the pager.
  * "Keep mine" is Draft check's "Override · add note" — it opens the same note field and
- * ends in the same store action.
+ * ends in the same gateway call.
  *
  * A non-modal dialog positioned inside the preview's scroll box: Escape or a click outside
  * closes it and focus goes back to the marker that opened it.
  */
 
-import { ChevronRight, Sparkles } from 'lucide-react'
+import { ChevronRight, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../../components/ui'
@@ -27,7 +27,7 @@ export function IssuePopover({
   anchor,
   containerWidth,
   numberOf,
-  onReplace,
+  onFindReplacement,
   onKeepMine,
   onNext,
   onClose,
@@ -40,7 +40,7 @@ export function IssuePopover({
   containerWidth: number
   /** The reference number a key has in the preview, or null when it is not in the .bib yet. */
   numberOf: (key: string) => number | null
-  onReplace: () => void
+  onFindReplacement: () => void
   onKeepMine: (note: string) => void
   onNext: () => void
   onClose: () => void
@@ -69,8 +69,6 @@ export function IssuePopover({
     }
   }, [onClose])
 
-  const replacement = citation.suggestedReplacement
-  const replacementNumber = replacement ? numberOf(replacement.key) : null
   const left = Math.max(8, Math.min(anchor.left, containerWidth - WIDTH - 8))
   const pager = total === 0 ? 'no open issues' : index >= 0 ? `${index + 1} of ${total} issue${total === 1 ? '' : 's'}` : `${total} open issue${total === 1 ? '' : 's'}`
 
@@ -89,11 +87,12 @@ export function IssuePopover({
         </span>
       </div>
       {citation.explanation && <p className="text-xs text-ink">{citation.explanation}</p>}
-      {citation.evidence && (
+      {citation.evidence?.passage && (
         <blockquote className="font-serif text-xs italic text-ink">
-          “{citation.evidence.passage}” — p.{citation.evidence.page}
+          “{citation.evidence.passage}”{citation.evidence.page ? ` — p.${citation.evidence.page}` : ''}
         </blockquote>
       )}
+      {citation.verdict === 'unavailable' && citation.message && <p className="text-xs text-ink-muted">{citation.message}</p>}
       {citation.resolution ? (
         <p className="text-xs text-ink-muted">
           {citation.resolution.kind === 'replaced' ? `Replaced with \\cite{${citation.key}}.` : 'Kept as written.'}
@@ -128,12 +127,10 @@ export function IssuePopover({
         </form>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          {replacement && (
-            <Button onClick={onReplace} className="px-3 py-1.5 text-[13px]">
-              <Sparkles className="size-4" aria-hidden="true" />
-              Replace with [{replacementNumber ?? 'new'}]
-            </Button>
-          )}
+          <Button onClick={onFindReplacement} className="px-3 py-1.5 text-[13px]">
+            <Search className="size-4" aria-hidden="true" />
+            Find a replacement
+          </Button>
           <Button variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setNoteOpen(true)}>
             Keep mine
           </Button>

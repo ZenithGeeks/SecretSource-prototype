@@ -1,7 +1,8 @@
-/* The rendered page inside the Author editor's preview. LaTeX.js emits plain classes
-   (.body, .title, .list, .small, .bf …); these give them a paper look with the palette tokens
-   instead of the library's own stylesheet, which would pull in 8 MB of Computer Modern fonts.
-   KaTeX's layout stylesheet is imported separately by the pane. */
+/* The rendered page inside the Author editor's preview, inside its shadow root. LaTeX.js
+   emits plain classes (.body, .title, .list, .small, .bf …); these give them a paper look
+   with the palette tokens (custom properties cross the shadow boundary) instead of the
+   library's own stylesheet, which would pull in 8 MB of Computer Modern fonts. KaTeX's layout
+   stylesheet sits beside this one in the same shadow root; its fonts are on the document. */
 
 .ss-preview {
   font-family: 'Libertinus Serif', 'Linux Libertine', Georgia, 'Times New Roman', serif;
@@ -155,4 +156,36 @@
   display: inline-block;
   min-width: 2em;
   text-indent: 0;
+}
+
+.ss-preview .ss-footnote {
+  font-size: 0.8em;
+  color: var(--color-ink-muted);
+}
+
+.ss-preview .ss-caption {
+  margin: 0.4em 0 0.8em;
+  font-size: 0.92em;
+  font-style: italic;
+  text-align: center;
+}
+
+.ss-preview .ss-graphic {
+  margin: 0.6em auto;
+  padding: 1.4em 1em;
+  max-width: 80%;
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  text-align: center;
+  color: var(--color-ink-muted);
+}
+
+.ss-preview .list.flushleft .tt {
+  white-space: pre;
+}
+
+.ss-preview a {
+  color: var(--color-accent);
 }
