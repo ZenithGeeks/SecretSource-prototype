@@ -302,6 +302,7 @@ def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict |
             if other["id"] != paper["id"] and cited[paper["id"]] & cited[other["id"]]
         ]
         index_states = _cited_work_index_states(paper).values()
+        indexed, index_name = _index_of_paper(paper)
         rows.append(
             {
                 "id": paper["id"],
@@ -314,6 +315,8 @@ def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict |
                 "linked": linked[:3],
                 "sourcesIndexed": sum(1 for state in index_states if state == "yes"),
                 "sourcesNotIndexed": sum(1 for state in index_states if state == "no"),
+                "indexed": indexed,
+                "index": index_name,
             }
         )
     claim_count = sum(row["claims"] for row in rows)
@@ -426,6 +429,17 @@ def _index_of_unchecked(entry: dict) -> tuple[str, str]:
     return ("no", "") if reason in NOT_FOUND else ("", "")
 
 
+def _index_of_paper(paper: dict) -> tuple[str, str]:
+    """Whether the analysed paper itself (not what it cites) is known to a public index.
+    Checked in the background after the analysis finishes (main.py's _index_self), so a
+    paper without that field yet has not been checked, not confirmed absent."""
+    indexed_in = paper.get("indexed_in")
+    if indexed_in is None:
+        return "", ""
+    index = indexed_in.get("index", "")
+    return ("yes", INDEX_NAMES[index]) if index in INDEX_NAMES else ("no", "")
+
+
 def _mark_index(node: dict, found: tuple[str, str]) -> None:
     """Keep the strongest answer for a work cited several times: found beats not found, and
     either beats not known. One citation with a garbled title must not hide a clean one."""
@@ -459,6 +473,7 @@ def graph(analyses: list[dict]) -> dict:
             "indexed": "",
             "index": "",
         }
+        _mark_index(nodes[node], _index_of_paper(paper))
         for key in analysis_keys(paper):
             key_to_node[key] = node
 

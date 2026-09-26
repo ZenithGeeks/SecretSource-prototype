@@ -314,6 +314,21 @@ def lookup_key(citation: dict) -> str:
     return citation.get("doi") or citation.get("arxiv") or citation.get("title") or citation.get("url") or ""
 
 
+def index_paper(title: str, doi: str = "") -> dict:
+    """Best-effort: whether the paper itself (not what it cites) is known to a public index,
+    using the same resolvers and cache as a citation lookup. Always returns a dict and never
+    raises — a paper the resolvers cannot place (a preprint that never sold, a first upload)
+    is common and must not fail or slow down the analysis that calls this."""
+    identifier = doi or title
+    if not identifier:
+        return {"index": "", "ids": {}}
+    try:
+        _resolve(identifier)
+    except Exception:
+        return {"index": "", "ids": {}}
+    return known_index(identifier)
+
+
 def known_index(identifier: str) -> dict:
     """Where the resolution found this work, read back from the cache. Costs no request.
     The caller has resolved the work to a PDF first. An empty index means the work was
