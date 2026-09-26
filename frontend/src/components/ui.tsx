@@ -1,5 +1,7 @@
 /** The handful of primitives the app reuses. Styling lives here so screens stay about content. */
 
+import { motion } from 'framer-motion'
+import { Loader2 } from 'lucide-react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 
 import { useSettings } from '../lib/settings'
@@ -120,5 +122,39 @@ export function Empty({ title, hint }: { title: string; hint: string }) {
       <p className="font-medium">{title}</p>
       <p className="mt-1 text-sm text-ink-muted">{hint}</p>
     </div>
+  )
+}
+
+/** A query's pending state, in place of returning null while it fetches — a blank screen reads
+ * as "broken", not "loading" (#271). Fades in on mount so a fast load doesn't flash. */
+export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
+      className="flex min-h-[40vh] items-center justify-center gap-2 text-sm text-ink-muted"
+    >
+      <Loader2 className="size-4 animate-spin" />
+      {label}
+    </motion.div>
+  )
+}
+
+/** Wraps a screen's loaded content so it fades and settles in, instead of popping in the
+ * instant its query resolves (the same moment LoadingScreen above disappears). A screen whose
+ * top-level sections used to be direct children of AppShell's `gap-5` flex column needs that
+ * same class passed in here, or replacing the fragment with this one div drops the gap between
+ * them. */
+export function FadeIn({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className={className}
+    >
+      {children}
+    </motion.div>
   )
 }

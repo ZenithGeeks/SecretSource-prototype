@@ -21,6 +21,7 @@ import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitF
 import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
+import { Empty, LoadingScreen } from '../../../components/ui'
 import { reasonText } from '../../../lib/api'
 import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
@@ -518,7 +519,7 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
 }
 
 function GraphCanvas() {
-  const graph = useKnowledgeGraph().data
+  const { data: graph, isError } = useKnowledgeGraph()
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
@@ -676,12 +677,8 @@ function GraphCanvas() {
     if (cy && graph) cy.style(stylesheet(pal, graph.clusters, view))
   }, [pal, view, graph])
 
-  if (!graph)
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center text-sm text-ink-muted">
-        Loading the graph…
-      </div>
-    )
+  if (isError) return <Empty title="The graph could not load" hint="Refresh the page to try again." />
+  if (!graph) return <LoadingScreen label="Loading the graph…" />
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =

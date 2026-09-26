@@ -8,7 +8,7 @@
 import { ChevronRight, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Empty, Input } from '../../../components/ui'
+import { Button, Empty, FadeIn, Input, LoadingScreen } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
@@ -182,7 +182,7 @@ function ProjectDetail({
   const [picking, setPicking] = useState(false)
   const { data: library, isError } = useResearcherLibrary(projectId)
   if (isError) return <Empty title="This project could not load" hint="Refresh the page to try again." />
-  if (!library) return null
+  if (!library) return <LoadingScreen label="Loading this project…" />
   const hasClusters = library.papers.some((p) => p.cluster)
 
   const clusterNames = [...new Set(library.papers.map((p) => p.cluster))]
@@ -199,7 +199,7 @@ function ProjectDetail({
     )
 
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
         <span className="font-medium text-accent hover:underline">← Projects</span>
         <span className="text-ink-muted">· {projectName}</span>
@@ -311,7 +311,7 @@ function ProjectDetail({
           </p>
         )}
       </div>
-    </>
+    </FadeIn>
   )
 }
 
@@ -394,7 +394,7 @@ export function Library({
   const { data: projects, isError } = useProjects()
   const { createProject } = useResearcherActions()
   if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
-  if (!projects) return null
+  if (!projects) return <LoadingScreen label="Loading your projects…" />
 
   if (openId) {
     const project = projects.find((p) => p.id === openId)
@@ -410,7 +410,7 @@ export function Library({
     )
   }
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} />
       {showNew && (
         <NewProjectDialog
@@ -421,6 +421,6 @@ export function Library({
           }}
         />
       )}
-    </>
+    </FadeIn>
   )
 }
