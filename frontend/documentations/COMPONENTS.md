@@ -42,7 +42,7 @@ src/
 │  └─ auth/Auth.tsx       sign in / sign up / forgot / reset / check-email (Supabase Auth)
 ├─ roles/                 one folder per role — no cross-role imports
 │  ├─ researcher/         ResearcherApp + screens/ (Home, Library, FieldConsensus, Graph, History, Settings)
-│  ├─ writer/             WriterApp + screens/ (Home, DraftCheck, FindASource, CitationReplaced)
+│  ├─ author/             AuthorApp + screens/ (DraftCheck, Editor, FindASource) + components/
 │  └─ teacher/            TeacherApp + screens/ (Home, Classes, AddClass, ClassWorkspace,
 │                          Classwork, People, AssignmentDetail, EssayCheck, ReadingQuestions,
 │                          Settings) + role-local components

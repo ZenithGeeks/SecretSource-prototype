@@ -1,8 +1,8 @@
 /**
- * Author role router (the folder still says "writer" until the rename PR): which screen is
- * showing, rendered inside the shared AppShell with the Author nav. `?screen=` deep-links a
- * screen, `?draft=` the draft Check a draft / the editor work on, and `?file=` / `?line=`
- * where the editor puts the cursor — mirroring ResearcherApp's param scheme.
+ * Author role router: which screen is showing, rendered inside the shared AppShell with
+ * the Author nav. `?screen=` deep-links a screen, `?draft=` the draft Check a draft / the
+ * editor work on, and `?file=` / `?line=` where the editor puts the cursor — mirroring
+ * ResearcherApp's param scheme.
  */
 
 import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Pen, Waypoints } from 'lucide-react'
@@ -12,15 +12,15 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
-import type { EditorTarget } from '../author/editorTarget'
-import { DraftCheck } from '../author/screens/DraftCheck'
-import { Editor } from '../author/screens/Editor'
+import type { EditorTarget } from './editorTarget'
+import { DraftCheck } from './screens/DraftCheck'
+import { Editor } from './screens/Editor'
 import { FindASource } from './screens/FindASource'
 import { Home } from './screens/Home'
 
 type NavKey = 'home' | 'library' | 'graph' | 'history'
 // Settings is a modal, opened from the profile menu — not a screen of its own (Figma 22).
-export type WriterScreen = 'home' | 'draft-check' | 'editor' | 'find-source' | 'graph' | 'history'
+export type AuthorScreen = 'home' | 'draft-check' | 'editor' | 'find-source' | 'graph' | 'history'
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
@@ -32,7 +32,7 @@ const NAV: NavEntry<NavKey>[] = [
 // Draft check and the editor are reached from Home's "Check a draft" action and count as
 // the Home section in the nav. Library's one screen is Find a source, so its nav key routes
 // straight there.
-const NAV_FOR: Record<WriterScreen, NavKey | null> = {
+const NAV_FOR: Record<AuthorScreen, NavKey | null> = {
   home: 'home',
   'draft-check': 'home',
   editor: 'home',
@@ -44,16 +44,16 @@ const NAV_FOR: Record<WriterScreen, NavKey | null> = {
 /** The draft Check a draft opens when the URL names none. */
 const DEFAULT_DRAFT_ID = 'd1'
 
-function screenForNav(key: NavKey): WriterScreen {
+function screenForNav(key: NavKey): AuthorScreen {
   return key === 'library' ? 'find-source' : key
 }
 
 function readParams() {
   const params = new URLSearchParams(window.location.search)
-  const s = params.get('screen') as WriterScreen | null
+  const s = params.get('screen') as AuthorScreen | null
   const line = Number(params.get('line'))
   return {
-    screen: s && s in NAV_FOR ? s : ('home' as WriterScreen),
+    screen: s && s in NAV_FOR ? s : ('home' as AuthorScreen),
     draftId: params.get('draft') ?? DEFAULT_DRAFT_ID,
     target: {
       draftId: params.get('draft') ?? DEFAULT_DRAFT_ID,
@@ -65,7 +65,7 @@ function readParams() {
 
 /** Keeps `?screen=`, `?draft=`, `?file=`, `?line=` in sync with what's showing, so a refresh
  * reopens the same place. Reads the URL fresh each time so Root's own `?role=` is untouched. */
-function syncParams(screen: WriterScreen, draftId: string, target: EditorTarget | null) {
+function syncParams(screen: AuthorScreen, draftId: string, target: EditorTarget | null) {
   const params = new URLSearchParams(window.location.search)
   params.set('screen', screen)
   params.set('draft', draftId)
@@ -86,9 +86,9 @@ function Placeholder({ title }: { title: string }) {
   )
 }
 
-export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
+export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [initial] = useState(readParams)
-  const [screen, setScreen] = useState<WriterScreen>(initial.screen)
+  const [screen, setScreen] = useState<AuthorScreen>(initial.screen)
   const [draftId, setDraftId] = useState(initial.draftId)
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(
     initial.screen === 'editor' ? initial.target : null,
@@ -98,7 +98,7 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
 
   useEffect(() => syncParams(screen, draftId, editorTarget), [screen, draftId, editorTarget])
 
-  const navigate = (next: WriterScreen) => setScreen(next)
+  const navigate = (next: AuthorScreen) => setScreen(next)
 
   const openEditor = (target: EditorTarget) => {
     setDraftId(target.draftId)

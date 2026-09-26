@@ -8,7 +8,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import { ResearcherApp } from '../src/roles/researcher/ResearcherApp'
 import { TeacherApp } from '../src/roles/teacher/TeacherApp'
-import { WriterApp } from '../src/roles/writer/WriterApp'
+import { AuthorApp } from '../src/roles/author/AuthorApp'
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 // ResearcherApp reaches PageViewer, and react-pdf's pdf.js needs canvas globals jsdom lacks.
@@ -20,7 +20,7 @@ afterEach(() => {
 })
 
 const APPS: [string, ComponentType<{ onChangeRole?: () => void }>][] = [
-  ['writer', WriterApp],
+  ['writer', AuthorApp],
   ['researcher', ResearcherApp],
   ['teacher', TeacherApp],
 ]
