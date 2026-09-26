@@ -60,7 +60,7 @@ describe('role preview never writes another role’s settings', () => {
     expect(screen.getByRole('combobox', { name: 'Default class' })).toBeDisabled()
     expect(screen.getByRole('switch', { name: 'Hide student names' })).toBeDisabled()
     expect(screen.getByRole('switch', { name: 'Show student report' })).toBeDisabled()
-    expect(screen.getByDisplayValue('Wittawat S.')).toBeDisabled() // "Send reports as" input
+    expect(screen.getByDisplayValue('Alex S.')).toBeDisabled() // "Send reports as" input
 
     // Clicking a disabled switch changes nothing.
     const hideNames = screen.getByRole('switch', { name: 'Hide student names' })
@@ -97,7 +97,7 @@ describe('role preview never writes another role’s settings', () => {
     // Going back to your own role from a preview re-enables everything.
     previewRole('Teacher')
     fireEvent.click(screen.getByRole('tab', { name: 'Class and marking' }))
-    expect(screen.getByDisplayValue('Wittawat S.')).toBeDisabled() // "Send reports as" input
+    expect(screen.getByDisplayValue('Alex S.')).toBeDisabled() // "Send reports as" input
     previewRole('Researcher')
     fireEvent.click(screen.getByRole('tab', { name: 'Field map' }))
     expect(screen.getByRole('combobox', { name: 'Group papers by' })).toBeEnabled()

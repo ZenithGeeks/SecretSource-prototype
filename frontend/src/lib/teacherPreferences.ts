@@ -22,7 +22,7 @@ export const TEACHER_PREFERENCES_DEFAULTS: TeacherPreferences = {
   defaultClassId: 'class-literary-2b',
   hideStudentNames: false,
   studentReportVisibility: true,
-  sendReportsAs: 'Wittawat S.',
+  sendReportsAs: 'Alex S.',
 }
 
 const listeners = new Set<() => void>()

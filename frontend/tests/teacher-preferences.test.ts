@@ -11,7 +11,7 @@ test('teacher preferences merge updates without dropping defaults', () => {
   resetTeacherPreferences()
   updateTeacherPreferences({ hideStudentNames: true })
   assert.equal(getTeacherPreferences().hideStudentNames, true)
-  assert.equal(getTeacherPreferences().sendReportsAs, 'Wittawat S.')
+  assert.equal(getTeacherPreferences().sendReportsAs, 'Alex S.')
 })
 
 test('teacher preferences reset to local defaults', () => {

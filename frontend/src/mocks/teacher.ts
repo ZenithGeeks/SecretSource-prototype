@@ -41,7 +41,7 @@ export const MOCK_TEACHER_CLASSES: TeacherClass[] = [
     section: '2B',
     subject: 'English · Undergraduate',
     status: 'active',
-    teacherName: 'Wittawat S.',
+    teacherName: 'Alex S.',
     studentCount: 25,
     assignmentCount: 4,
     topicCount: 3,
@@ -55,7 +55,7 @@ export const MOCK_TEACHER_CLASSES: TeacherClass[] = [
     section: '1A',
     subject: 'English · Undergraduate',
     status: 'active',
-    teacherName: 'Wittawat S.',
+    teacherName: 'Alex S.',
     studentCount: 22,
     assignmentCount: 3,
     topicCount: 2,
@@ -73,7 +73,7 @@ export const MOCK_TEACHER_IMPORT_COURSES: TeacherClass[] = [
     section: '3A',
     subject: 'Computer Engineering',
     status: 'active',
-    teacherName: 'Wittawat S.',
+    teacherName: 'Alex S.',
     studentCount: 31,
     assignmentCount: 5,
     topicCount: 4,
@@ -247,7 +247,7 @@ const essaySubmissions: TeacherSubmission[] = [
 ]
 
 const roster: TeacherRosterMember[] = [
-  { id: 'teacher-wittawat', name: 'Wittawat S.', initials: 'WS', role: 'Teacher', isCourseOwner: true },
+  { id: 'teacher-alex', name: 'Alex S.', initials: 'AS', role: 'Teacher', isCourseOwner: true },
   { id: 'student-anan', name: 'Anan P.', initials: 'AP', role: 'Student', isCourseOwner: false },
   { id: 'student-bee', name: 'Bee S.', initials: 'BS', role: 'Student', isCourseOwner: false },
   { id: 'student-chai', name: 'Chai W.', initials: 'CW', role: 'Student', isCourseOwner: false },
@@ -256,7 +256,7 @@ const roster: TeacherRosterMember[] = [
 ]
 
 const modernRoster: TeacherRosterMember[] = [
-  { id: 'teacher-wittawat', name: 'Wittawat S.', initials: 'WS', role: 'Teacher', isCourseOwner: true },
+  { id: 'teacher-alex', name: 'Alex S.', initials: 'AS', role: 'Teacher', isCourseOwner: true },
   { id: 'student-min', name: 'Min J.', initials: 'MJ', role: 'Student', isCourseOwner: false },
   { id: 'student-nok', name: 'Nok T.', initials: 'NT', role: 'Student', isCourseOwner: false },
   { id: 'student-pat', name: 'Pat C.', initials: 'PC', role: 'Student', isCourseOwner: false },
@@ -275,13 +275,13 @@ const workspaceFor = (course: TeacherClass, people: TeacherRosterMember[], assig
     course.id === 'class-literary-2b'
       ? {
           title: 'Welcome to the new reading unit',
-          postedBy: 'Wittawat S.',
+          postedBy: 'Alex S.',
           postedAt: 'Sep 14, 2026',
           body: 'Please bring one passage from this week\'s paper to our next discussion.',
         }
       : {
           title: 'Workshop groups are ready',
-          postedBy: 'Wittawat S.',
+          postedBy: 'Alex S.',
           postedAt: 'Sep 12, 2026',
           body: 'Check your group before beginning the revision workshop.',
         },
@@ -456,7 +456,7 @@ export const MOCK_ESSAY_CHECKS: Record<string, EssayCheck> = {
 }
 
 export const MOCK_TEACHER_HOME: TeacherHome = {
-  user: 'Vitawat',
+  user: 'Alex',
   course: 'CPE 401',
   courseId: 'class-literary-2b',
   checkedEssays: 18,
