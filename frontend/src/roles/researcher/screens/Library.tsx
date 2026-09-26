@@ -270,7 +270,17 @@ function ProjectDetail({
             className="flex w-full items-center gap-4 border-t border-border-subtle px-4 py-3 text-left first:border-t-0 hover:bg-accent-soft md:px-5 md:py-2.5 md:first:border-t"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-ink">{paper.title}</p>
+              <p className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-ink">{paper.title}</span>
+                {paper.sourcesNotIndexed > 0 && (
+                  <span
+                    className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
+                    title={`${paper.sourcesNotIndexed} cited ${paper.sourcesNotIndexed === 1 ? 'source is' : 'sources are'} not in a public index`}
+                  >
+                    not indexed
+                  </span>
+                )}
+              </p>
               <p className="text-xs text-ink-muted">{paper.cite}</p>
               {/* On a phone the number columns do not fit, so they read as one line here. */}
               <p className="mt-1 text-xs text-ink-muted md:hidden">
