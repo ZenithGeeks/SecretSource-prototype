@@ -61,15 +61,15 @@ The quote highlighted in the cited PDF:
 
 Choosing a role:
 
-![Onboarding: pick researcher, writer or teacher](docs/images/onboarding.jpg)
+![Onboarding: pick researcher, author or teacher](docs/images/onboarding.jpg)
 
 Researcher home:
 
 ![Researcher home with quick actions, conflicts and reading queue](docs/images/researcher-home.jpg)
 
-Writer draft check (sample data):
+Author draft check (sample data):
 
-![Writer draft check with marked citations and a suggested fix](docs/images/writer-draft-check.jpg)
+![Author draft check with marked citations and a suggested fix](docs/images/writer-draft-check.jpg)
 </details>
 
 ## Quick start
@@ -176,6 +176,10 @@ instead of `:` on Windows).
 - After `git pull`, rebuild: `docker compose up -d --build`
 - After you edit `.env`, run `docker compose up -d`. Containers read `.env` only when they start
 - Logs: `docker compose logs -f gateway`
+- A slow or stuck request: `docker exec <gateway-container> py-spy dump --pid 1` (see
+  [Profiling](backend/README.md#profiling))
+- Container CPU/memory dashboards, off by default: `docker compose --profile monitoring up -d`
+  (see [Monitoring](backend/README.md#monitoring))
 
 In the web app, paste an arXiv ID, a DOI or a URL, or upload a PDF. You can watch each step
 while it runs. Past analyses are in History.
@@ -248,6 +252,7 @@ backend/            gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/main.py         HTTP gateway the frontend talks to
   app/pipeline/       claims, sources, verify, figures, rag
   app/workflow.py     the pipeline as an ADK Workflow graph
+  app/teacher/        Google Classroom: OAuth, roster sync, essay-check review
   a2a_server.py       the agent tree over A2A (docker compose --profile a2a)
   cli.py              agent REPL
 frontend/           React + Vite UI, served by nginx which proxies /api to the gateway
@@ -280,8 +285,13 @@ docker compose --profile a2a up -d a2a           # the agent tree over A2A at ht
 <details>
 <summary>Running pieces on the host</summary>
 
-You can run each part without Docker. It uses the settings in `.env`. Use `localhost`, not
-container names:
+You can run each part without Docker. The gateway, agent REPL, and retrieval service read the
+settings in the repo-root `.env`. Use `localhost`, not container names.
+
+The frontend dev server is the exception: Vite only reads `.env` files inside `frontend/`, never
+the repo root. For sign-in to work under `npm run dev`, copy `frontend/.env.example` to
+`frontend/.env` and fill in `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (same values as the
+root `.env`) — otherwise the app runs open, with no login screen and no Sign out.
 
 ```sh
 # gateway (from backend/)

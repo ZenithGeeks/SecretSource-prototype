@@ -7,12 +7,15 @@
 
 import { useSyncExternalStore } from 'react'
 
+import { pickMatching } from './utils'
+
 export type ThemeChoice = 'Match system' | 'Light' | 'Dark'
 
 export type Settings = {
   displayName: string
   email: string
-  paperVersion: string
+  avatarUrl: string // gateway path (e.g. "/api/user/avatar/me?v=…"); '' means no uploaded photo
+  citationStyle: string
   strictness: string
   checkOnAdd: boolean
   flagQuotes: boolean
@@ -21,16 +24,18 @@ export type Settings = {
   markDisagreements: boolean
   weeklyDigest: boolean
   digestDay: string
-  notifyConflict: boolean
   notifyDone: boolean
   theme: ThemeChoice
   colorBadges: boolean
 }
 
-const DEFAULTS: Settings = {
+/** Exported so the Settings modal's server sync (lib/useAccountSettings.ts) can tell which
+ * keys of a fetched preferences blob belong in this store, without importing its shape twice. */
+export const SETTINGS_DEFAULTS: Settings = {
   displayName: 'Alex',
   email: 'alex@kmutt.ac.th',
-  paperVersion: 'Newest',
+  avatarUrl: '',
+  citationStyle: 'APA 7th',
   strictness: 'Balanced',
   checkOnAdd: true,
   flagQuotes: true,
@@ -39,7 +44,6 @@ const DEFAULTS: Settings = {
   markDisagreements: true,
   weeklyDigest: true,
   digestDay: 'Monday',
-  notifyConflict: true,
   notifyDone: false,
   theme: 'Match system',
   colorBadges: true,
@@ -51,9 +55,10 @@ const listeners = new Set<() => void>()
 function load(): Settings {
   try {
     const raw = localStorage.getItem(KEY)
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) } : { ...DEFAULTS }
+    if (!raw) return { ...SETTINGS_DEFAULTS }
+    return { ...SETTINGS_DEFAULTS, ...pickMatching(SETTINGS_DEFAULTS, JSON.parse(raw)) }
   } catch {
-    return { ...DEFAULTS }
+    return { ...SETTINGS_DEFAULTS }
   }
 }
 
@@ -77,7 +82,7 @@ export function updateSettings(patch: Partial<Settings>): void {
 /** Wipe the stored settings back to defaults — call on sign-out so the next user on this
  * browser doesn't inherit the previous user's name, email, or preferences. */
 export function resetSettings(): void {
-  settings = { ...DEFAULTS }
+  settings = { ...SETTINGS_DEFAULTS }
   try {
     localStorage.removeItem(KEY)
   } catch {
