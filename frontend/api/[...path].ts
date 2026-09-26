@@ -28,6 +28,11 @@
 
 export const config = { runtime: 'edge' }
 
+// Edge Runtime provides process.env (not the rest of Node's process), but Vercel's own build
+// step type-checks this file without reading tsconfig.api.json's "node" types — this local
+// declaration satisfies it without depending on that resolution working.
+declare const process: { env: Record<string, string | undefined> }
+
 const GATEWAY_URL = process.env.GATEWAY_URL
 const SA_EMAIL = process.env.GCP_SA_EMAIL
 const SA_PRIVATE_KEY_RAW = process.env.GCP_SA_PRIVATE_KEY
