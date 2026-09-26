@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { Card } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally, QueueEntry } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
+import { useAuth } from '../../../lib/useAuth'
 import { useResearcherActions, useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
@@ -61,9 +62,15 @@ export function Home({
 }) {
   const home = useResearcherHome().data
   const { displayName } = useSettings()
+  const { session } = useAuth()
   const { analyseQueued } = useResearcherActions()
   const [starting, setStarting] = useState<string | null>(null)
   if (!home) return null
+
+  // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
+  // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
+  const metaName = session?.user?.user_metadata?.full_name as string | undefined
+  const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
 
   const analyse = async (entry: QueueEntry) => {
     setStarting(entry.identifier)
@@ -78,7 +85,7 @@ export function Home({
     <>
       <header className="flex flex-col gap-1">
         <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          {greeting(displayName)}
+          {greeting(firstName)}
         </h1>
         <p className="text-sm text-ink-muted">{home.alert}</p>
       </header>
