@@ -245,8 +245,15 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
 // applied in the elements) and cola runs a finite, non-random simulation, so every reload lays
 // the graph out identically (SCRUM-182's "reload gives the same layout"). Nodes stay draggable
 // once it settles; the initial fit runs on the layout's `layoutstop`, not a timer.
+//
+// animate:true runs the simulation on animation frames instead of one blocking synchronous pass,
+// so a large library no longer freezes the page while the graph lays out (nodes paint at their
+// seeded positions immediately, then ease into place). maxSimulationTime caps the work so even a
+// big graph settles and fits within a couple of seconds. Determinism comes from randomize:false
+// plus the seeded start, not from the animation, so reloads still match.
 const LAYOUT = {
-  name: 'cola', animate: false, infinite: false, fit: false, randomize: false,
+  name: 'cola', animate: true, infinite: false, fit: false, randomize: false,
+  maxSimulationTime: 2000, convergenceThreshold: 0.01,
   nodeDimensionsIncludeLabels: true, edgeLength: 170, nodeSpacing: 14, handleDisconnected: true,
 } as const
 
@@ -255,6 +262,36 @@ function seedPosition(i: number, n: number): { x: number; y: number } {
   const radius = Math.max(340, 16 * n)
   const angle = (2 * Math.PI * i) / Math.max(1, n)
   return { x: Math.round(radius * Math.cos(angle)), y: Math.round(radius * Math.sin(angle)) }
+}
+
+// Replaying saved positions with `preset` is instant, so a revisit skips the physics — the slow
+// part on a big library. The cola run only happens on a cache miss (a new or changed graph).
+const PRESET = { name: 'preset', fit: false } as const
+
+// Settled node positions, cached per graph so reopening the tab is instant and lays out the same
+// way every time. Keyed by view + a hash of the node ids, so a changed library recomputes. Stored
+// in localStorage across sessions; any storage failure just falls back to recomputing.
+const POS_CACHE_KEY = 'ss-graph-positions-v1'
+type PosMap = Record<string, { x: number; y: number }>
+function hashIds(ids: string[]): string {
+  let h = 5381
+  for (const s of ids) for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+function readPosCache(key: string): PosMap | null {
+  try {
+    return (JSON.parse(localStorage.getItem(POS_CACHE_KEY) || '{}')[key] as PosMap) ?? null
+  } catch {
+    return null
+  }
+}
+function writePosCache(key: string, positions: PosMap): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(POS_CACHE_KEY) || '{}')
+    localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ ...all, [key]: positions }))
+  } catch {
+    /* storage full or blocked — recompute next time */
+  }
 }
 
 /** Fit the whole graph, but never so far out that it reads tiny: below 0.9 the labels blur, so
@@ -534,6 +571,17 @@ export function Graph() {
 
   const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
 
+  // The node ids shown in the current view, and a cache key from them. Cached positions (if any)
+  // let the layout replay instantly instead of re-running cola.
+  const shownNodeIds = useMemo(() => {
+    if (!graph) return [] as string[]
+    return view === 'claims'
+      ? graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id)).map((n) => n.id)
+      : graph.nodes.filter((n) => n.kind === 'paper').map((n) => n.id)
+  }, [graph, view, paperIds])
+  const cacheKey = useMemo(() => `${view}:${hashIds(shownNodeIds)}`, [view, shownNodeIds])
+  const cachedPositions = useMemo(() => readPosCache(cacheKey), [cacheKey])
+
   const elements = useMemo(() => {
     if (!graph) return []
     if (view === 'claims') {
@@ -550,7 +598,7 @@ export function Graph() {
             n.kind === 'paper'
               ? { ...n, short: paperShort(n), weight: deg[n.id] ?? 1 }
               : { ...n, standing: claimStanding(claimEdges[n.id] ?? []) },
-          position: seedPosition(i, shown.length),
+          position: cachedPositions?.[n.id] ?? seedPosition(i, shown.length),
         })),
         ...graph.edges.map((e) => ({ data: e })),
       ]
@@ -567,13 +615,13 @@ export function Graph() {
     return [
       ...papers.map((n, i) => ({
         data: { ...n, weight: deg[n.id] ?? 1, short: paperShort(n) },
-        position: seedPosition(i, papers.length),
+        position: cachedPositions?.[n.id] ?? seedPosition(i, papers.length),
       })),
       ...edges.map((e) => ({
         data: { id: e.id, source: e.a, target: e.b, kind: 'paper', cites: e.cites ? 1 : 0, similarity: e.similarity },
       })),
     ]
-  }, [graph, view, pFilter, paperIds])
+  }, [graph, view, pFilter, paperIds, cachedPositions])
 
   // Spotlight one node/edge's neighbourhood and fade the rest. A click selection wins; otherwise
   // hovering spotlights (Obsidian-style); otherwise the claims filter dims non-matches.
@@ -619,7 +667,12 @@ export function Graph() {
     if (cy && graph) cy.style(stylesheet(pal, graph.clusters, view))
   }, [pal, view, graph])
 
-  if (!graph) return null
+  if (!graph)
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center text-sm text-ink-muted">
+        Loading the graph…
+      </div>
+    )
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =
@@ -741,7 +794,7 @@ export function Graph() {
             key={view}
             elements={elements}
             stylesheet={stylesheet(pal, graph.clusters, view)}
-            layout={LAYOUT}
+            layout={cachedPositions ? PRESET : LAYOUT}
             style={{ width: '100%', height: '100%' }}
             cy={(cy: cytoscape.Core) => {
               // react-cytoscapejs calls this on every render (componentDidUpdate), not just mount.
@@ -776,7 +829,17 @@ export function Graph() {
               // Fit once the layout has actually settled (cola emits layoutstop), not on a fixed
               // timer that can fire while nodes are still bunched. It re-runs only when the element
               // set changes (e.g. switching Claims/Papers), which re-runs the layout.
-              cy.on('layoutstop', () => fitReadable(cy))
+              cy.on('layoutstop', () => {
+                fitReadable(cy)
+                // Save the settled positions so the next visit replays them instantly with `preset`
+                // instead of re-running cola — and so reloads lay out identically.
+                const pos: PosMap = {}
+                cy.nodes().forEach((node) => {
+                  const p = node.position()
+                  pos[node.id()] = { x: Math.round(p.x), y: Math.round(p.y) }
+                })
+                writePosCache(cacheKey, pos)
+              })
               setReady(true)
             }}
           />
