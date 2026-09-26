@@ -291,6 +291,11 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
     volumes:
       - grafana-data:/var/lib/grafana
+      # Provisioned on start: the Prometheus datasource and the "System evaluation" dashboard,
+      # so a fresh Grafana (or a reset grafana-data volume) does not need the datasource added by
+      # hand — see deploy/monitoring/README.md.
+      - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/files:ro
     depends_on:
       - prometheus
     restart: unless-stopped

@@ -216,17 +216,21 @@ to the `gateway` service); without it py-spy fails with a permission error, not 
 
 ## Monitoring
 
-Container-level CPU and memory metrics, off by default so a small box like a shared VM
-doesn't run three extra containers it never asked for:
+`GET /metrics` on the gateway itself, always on: analysis success rate, queue wait and duration,
+claim verdicts, audit findings, and LLM token usage, in Prometheus format (`app/metrics.py`).
+Container-level CPU/memory (cadvisor) and Grafana are opt-in, off by default so a small box like
+a shared VM doesn't run three extra containers it never asked for:
 
 ```bash
 docker compose --profile monitoring up -d
 ```
 
-Starts cadvisor (`:8085`), Prometheus (`:9090`, scrapes cadvisor every 15s), and Grafana
-(`:3001`). See [deploy/monitoring/README.md](../deploy/monitoring/README.md) for wiring
-Grafana to Prometheus on first run. This exists because ss-core (2GB RAM, 1 vCPU) OOM-crashed
-once with nothing showing memory climbing beforehand.
+Starts cadvisor (`:8085`), Prometheus (`:9090`, scrapes both cadvisor and the gateway's
+`/metrics` every 15s), and Grafana (`:3001`) with the Prometheus datasource and a
+"System evaluation" dashboard already provisioned — nothing to add by hand. See
+[deploy/monitoring/README.md](../deploy/monitoring/README.md) for what the dashboard shows. This
+exists because ss-core (2GB RAM, 1 vCPU) OOM-crashed once with nothing showing memory climbing
+beforehand, and because until now nothing at all said whether analyses were actually succeeding.
 
 ## Tests
 
