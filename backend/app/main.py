@@ -42,7 +42,8 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from app import dependencies, researcher, store
@@ -55,6 +56,16 @@ from app.config import (
     PARALLEL_CHECKS_TOTAL,
     PARALLEL_SOURCES,
     PARALLEL_SOURCES_TOTAL,
+)
+from app.metrics import (
+    ANALYSES_FINISHED,
+    ANALYSES_RUNNING,
+    ANALYSES_STARTED,
+    ANALYSIS_DURATION_SECONDS,
+    ANALYSIS_QUEUE_WAIT_SECONDS,
+    AUDIT_FINDINGS,
+    CLAIM_CHECKS_FAILED,
+    CLAIM_VERDICTS,
 )
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
@@ -194,12 +205,19 @@ async def _publish(analysis_id: str, stage: str, **fields):
 
 async def _run(analysis_id: str, paper: str, verify: bool):
     analysis = analyses[analysis_id]
+    queued_at = time.monotonic()
     await _publish(analysis_id, "queued", message="waiting for a free analysis slot")
     async with all_analyses:
-        await _run_queued(analysis_id, analysis, paper, verify)
+        ANALYSIS_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
+        ANALYSES_RUNNING.inc()
+        try:
+            await _run_queued(analysis_id, analysis, paper, verify)
+        finally:
+            ANALYSES_RUNNING.dec()
 
 
 async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
+    started_at = time.monotonic()
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
         extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
@@ -270,13 +288,16 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                         )
                 fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":
+                    CLAIM_VERDICTS.labels(verdict=verdict["verdict"]).inc()
                     await _publish(
                         analysis_id, "verified", claim=index, source=source, verdict=verdict["verdict"]
                     )
                 else:
+                    reason = unchecked_reason(verdict, citation)
+                    CLAIM_CHECKS_FAILED.labels(reason=reason).inc()
                     await _publish(
                         analysis_id, "failed", claim=index, source=source,
-                        reason=unchecked_reason(verdict, citation), message=verdict.get("message", ""),
+                        reason=reason, message=verdict.get("message", ""),
                     )
 
             await asyncio.gather(*(check(*job) for job in jobs))
@@ -287,6 +308,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         # We check the run itself before anyone reads it.
         # We only report the findings; we do not fix them.
         analysis["audit"] = audit(analysis)
+        AUDIT_FINDINGS.inc(len(analysis["audit"]))
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
@@ -296,6 +318,8 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         analysis["message"] = str(error)
         await _publish(analysis_id, "error", message=str(error))
     finally:
+        ANALYSIS_DURATION_SECONDS.observe(time.monotonic() - started_at)
+        ANALYSES_FINISHED.labels(status=analysis["status"]).inc()
         await streams[analysis_id].put(None)  # closes any open stream
         await _saved(analysis_id)
 
@@ -305,6 +329,7 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
                              "owner": owner, "stages": [], "claims": []}
     streams[analysis_id] = asyncio.Queue()
+    ANALYSES_STARTED.inc()
     asyncio.create_task(_run(analysis_id, paper, verify))
     return {"id": analysis_id}
 
@@ -731,6 +756,16 @@ async def health():
     """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
     check at most 30 s old. `degraded` is true when a required one did not answer."""
     return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus text format: analysis success rate, duration, queueing, verdicts, audit
+    findings, LLM token usage (app/metrics.py). Scraped by the `gateway` job in
+    deploy/monitoring/prometheus.yml, behind the opt-in `monitoring` compose profile. Reads an
+    in-memory registry only, so unlike /health this needs no thread hop.
+    """
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ import pydantic
 from pydantic import Field
 
 from app.config import CLAIM_LIMIT, GROBID_URL
+from app.metrics import record_llm_usage
 from app.pipeline.sources import local_pdf
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
@@ -299,8 +300,10 @@ def _build_claim_extractor():
 
     def run(paper_text: str) -> list[str]:
         # JSONAdapter: without it the model splits the list across lines and only one claim parses
-        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            return extract(paper=paper_text).claims
+        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+            claims = extract(paper=paper_text).claims
+        record_llm_usage("extract", usage)
+        return claims
 
     return run
 
@@ -917,8 +920,10 @@ def _build_cited_claim_extractor():
     extract = dspy.ChainOfThought(ExtractCitedClaims)
 
     def run(paper_text: str) -> list:
-        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            return extract(paper=paper_text).claims
+        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+            claims = extract(paper=paper_text).claims
+        record_llm_usage("extract", usage)
+        return claims
 
     return run
 

@@ -1,0 +1,274 @@
+{
+  "title": "System evaluation",
+  "uid": "system-evaluation",
+  "tags": ["secretsource", "application"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Success rate (15m)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "green", "value": 0.95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(analyses_finished_total{status=\"done\"}[15m])) / sum(increase(analyses_finished_total[15m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Analyses running now",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "analyses_running"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Started (1h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(analyses_started_total[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Errors (1h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(analyses_finished_total{status=\"error\"}[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Analysis throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "started",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(analyses_started_total[5m]))"
+        },
+        {
+          "refId": "B", "legendFormat": "finished: done",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(analyses_finished_total{status=\"done\"}[5m]))"
+        },
+        {
+          "refId": "C", "legendFormat": "finished: error",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(analyses_finished_total{status=\"error\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Queue wait (time waiting for a free PARALLEL_ANALYSES slot)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "p50",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(analysis_queue_wait_seconds_bucket[5m])) by (le))"
+        },
+        {
+          "refId": "B", "legendFormat": "p95",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(analysis_queue_wait_seconds_bucket[5m])) by (le))"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Analysis duration (queued to done/error)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "p50",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(analysis_duration_seconds_bucket[10m])) by (le))"
+        },
+        {
+          "refId": "B", "legendFormat": "p95",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(analysis_duration_seconds_bucket[10m])) by (le))"
+        },
+        {
+          "refId": "C", "legendFormat": "p99",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(analysis_duration_seconds_bucket[10m])) by (le))"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "LLM token usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "{{phase}} / {{kind}}",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(llm_tokens_total[5m])) by (phase, kind)"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "LLM calls",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "{{phase}}",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(llm_calls_total[5m])) by (phase)"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Verdict distribution (1h)",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "{{verdict}}", "instant": true,
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(claim_verdicts_total[1h])) by (verdict)"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Failed checks by reason (1h)",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "{{reason}}", "instant": true,
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(claim_checks_failed_total[1h])) by (reason)"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Audit findings per finished analysis (correctness proxy, 1h)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A", "legendFormat": "findings per finished analysis",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(audit_findings_total[1h])) / sum(increase(analyses_finished_total{status=\"done\"}[1h]))"
+        }
+      ]
+    }
+  ]
+}

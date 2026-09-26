@@ -12,6 +12,7 @@ from pathlib import Path
 
 from app.clients import retrieval
 from app.config import FIGURE_WAIT, PARALLEL_SOURCES
+from app.metrics import record_llm_usage
 
 EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
@@ -164,8 +165,9 @@ def _build_judge():
     judge = dspy.ChainOfThought(JudgeClaim)
 
     def run(claim: str, evidence: list[str]) -> dict:
-        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
             prediction = judge(claim=claim, evidence=evidence)
+        record_llm_usage("judge", usage)
         verdict = prediction.verdict.strip().lower()
         return {
             "verdict": verdict if verdict in LABELS else "insufficient",

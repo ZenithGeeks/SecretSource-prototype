@@ -1,13 +1,19 @@
-# Container resource monitoring
+# Monitoring: containers and the application
 
-cAdvisor + Prometheus + Grafana, for per-container CPU/memory visibility. Added after ss-core
-(2 GB RAM, 1 vCPU) OOM-crashed with no warning — a container ate memory until the kernel started
-killing processes and the box stopped answering SSH and the gateway alike (issue #230). A
-dashboard showing memory climbing toward the container limit would have caught that before it
-took the box down.
+cAdvisor + Prometheus + Grafana. Two layers:
+
+- **Container resources** (cAdvisor) — per-container CPU/memory visibility. Added after ss-core
+  (2 GB RAM, 1 vCPU) OOM-crashed with no warning — a container ate memory until the kernel started
+  killing processes and the box stopped answering SSH and the gateway alike (issue #230).
+- **The application itself** (`GET /metrics` on the gateway, `backend/app/metrics.py`) — analysis
+  success rate, queue wait and duration, claim verdicts, audit findings, and LLM token usage.
+  Neither cAdvisor nor a process being "up" says anything about whether analyses are actually
+  succeeding or how much of the LLM budget they're costing; this is what answers that.
 
 This is behind the `monitoring` profile, so it does not start on every box by default — a small
-box like ss-core shouldn't be running three extra containers unless someone asked for them.
+box like ss-core shouldn't be running three extra containers unless someone asked for them. Run
+it on whichever box runs the `gateway` container (ss-core in production) — Grafana here is for
+evaluating the running system, not something to point at a local dev gateway.
 
 ## Start it
 
@@ -22,21 +28,24 @@ box like ss-core shouldn't be running three extra containers unless someone aske
 (Swap `localhost` for the host's Tailscale IP, or whatever `BIND_ADDRESS` was set to, if the
 stack isn't running on the machine you're browsing from.)
 
-## First-run setup in Grafana
+## Grafana: provisioned automatically
 
-Grafana starts empty and needs to be pointed at Prometheus once:
+Grafana no longer starts empty. On boot it reads `deploy/monitoring/grafana/provisioning/` and:
 
-1. Open Grafana at http://localhost:3001 and log in with the default `admin` / `admin`
-   (it prompts you to set a new password on first login).
-2. Go to Connections -> Data sources -> Add data source -> Prometheus.
-3. Set the URL to `http://prometheus:9090` — Grafana and Prometheus are on the same compose
-   network, so the service name resolves; `localhost` will not work here.
-4. Click Save & test.
+- adds Prometheus (`http://prometheus:9090`) as a datasource, and
+- loads the **"System evaluation"** dashboard from `deploy/monitoring/grafana/dashboards/`.
 
-From there, either:
+Log in at http://localhost:3001 with the default `admin` / `admin` (it prompts for a new password
+on first login) and the dashboard is already there — nothing to add by hand, even after a reset
+`grafana-data` volume.
 
-- build a panel from a cAdvisor metric directly, e.g. `container_memory_usage_bytes`
-  (filter by the `name` label to a specific container), or
-- import a ready-made dashboard instead of building one: Dashboards -> New -> Import, and
-  enter dashboard ID `14282` (a well-known public cAdvisor/Prometheus dashboard) to get
-  per-container CPU and memory panels without building them by hand.
+**System evaluation** panels: success rate (15m), analyses running/started/errored, throughput,
+queue wait (p50/p95 — see `PARALLEL_ANALYSES` in `backend/app/config.py`), analysis duration
+(p50/p95/p99), LLM token usage and call rate by phase (`extract`/`judge`), claim verdict
+distribution, failed-check reasons, and audit findings per finished analysis. All from
+`GET /metrics` on the gateway (`backend/app/metrics.py`), scraped by the `gateway` job in
+`deploy/monitoring/prometheus.yml`.
+
+Container-level panels (cAdvisor) are not part of this dashboard — build one from a metric
+directly, e.g. `container_memory_usage_bytes` (filter by the `name` label), or import a
+ready-made one: Dashboards -> New -> Import, dashboard ID `14282`.
