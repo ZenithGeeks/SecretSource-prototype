@@ -70,6 +70,8 @@ export type LibraryPaper = {
   backed: number | null // null when the paper has not been verified yet
   contradicted: number | null
   linked: string[] // other library papers it cites or is cited by
+  sourcesIndexed: number // distinct cited works a public index knew (#21)
+  sourcesNotIndexed: number // distinct cited works no public index knew
 }
 
 export type ResearcherLibrary = {

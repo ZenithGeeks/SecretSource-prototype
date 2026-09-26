@@ -253,6 +253,25 @@ def projects(stored: list[dict], analyses: list[dict]) -> list[dict]:
     return listed
 
 
+def _cited_work_index_states(paper: dict) -> dict[str, str]:
+    """The strongest known index state ('yes', 'no', or '' for not known) per distinct work
+    one paper cites, from the same verdict/unchecked data graph() reads for its node colouring
+    (#21) — scoped to a single paper instead of the whole library, and without building nodes."""
+    rank = {"": 0, "no": 1, "yes": 2}
+    states: dict[str, str] = {}
+    for claim in paper.get("claims", []):
+        answers = [(verdict, None) for verdict in claim.get("verdicts", [])] + [
+            ({"cited": entry.get("source", ""), "source": entry.get("source", "")}, entry)
+            for entry in claim.get("unchecked", [])
+        ]
+        for verdict, unchecked in answers:
+            key = work_key(_cited_work(claim, verdict))
+            state, _name = _index_of_unchecked(unchecked) if unchecked else _index_of_verdict(verdict)
+            if rank[state] > rank.get(states.get(key, ""), 0):
+                states[key] = state
+    return states
+
+
 def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict | None:
     """One project's papers, or None when the user has no such project."""
     papers = library_papers(analyses)
@@ -278,6 +297,7 @@ def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict |
             for other in chosen
             if other["id"] != paper["id"] and cited[paper["id"]] & cited[other["id"]]
         ]
+        index_states = _cited_work_index_states(paper).values()
         rows.append(
             {
                 "id": paper["id"],
@@ -288,6 +308,8 @@ def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict |
                 "backed": standings["backed"] if checked else None,
                 "contradicted": standings["contradicted"] if checked else None,
                 "linked": linked[:3],
+                "sourcesIndexed": sum(1 for state in index_states if state == "yes"),
+                "sourcesNotIndexed": sum(1 for state in index_states if state == "no"),
             }
         )
     claim_count = sum(row["claims"] for row in rows)

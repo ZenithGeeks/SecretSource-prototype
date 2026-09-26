@@ -129,6 +129,41 @@ def test_papers_in_no_project_are_unsorted_and_a_project_lists_its_own():
     assert researcher.library("missing", stored, ANALYSES) is None
 
 
+def test_library_rows_count_how_many_cited_sources_are_publicly_indexed():
+    url_only = {"title": "", "authors": [], "year": "", "doi": "", "arxiv": "", "url": "http://example.com/x"}
+    paper = {
+        "id": "f1",
+        "paper": "data/papers/f1.pdf",
+        "file": "data/papers/f1.pdf",
+        "status": "done",
+        "claims": [
+            {
+                "claim": "A",
+                "citations": [COLBERT],
+                "verdicts": [
+                    {
+                        "verdict": "supports",
+                        "cited": "2004.12832",
+                        "indexed_in": {"index": "semantic-scholar"},
+                        "quote": "",
+                        "evidence": [],
+                    }
+                ],
+            },
+            {
+                "claim": "B",
+                "citations": [url_only],
+                "verdicts": [
+                    {"verdict": "insufficient", "cited": "http://example.com/x", "quote": "", "evidence": []}
+                ],
+            },
+        ],
+    }
+    row = researcher.library(researcher.UNSORTED, [], [paper])["papers"][0]
+    assert row["sourcesIndexed"] == 1
+    assert row["sourcesNotIndexed"] == 1
+
+
 def test_consensus_reuses_the_verdicts_of_matching_claims():
     answer = researcher.consensus("does residual compression reduce index size", ANALYSES)
     assert answer["refutes"] == 1
