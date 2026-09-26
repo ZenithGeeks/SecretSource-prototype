@@ -298,14 +298,35 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     return {"id": analysis_id}
 
 
+def team_visible(user: str | None) -> list[dict]:
+    """The analyses a signed-in researcher may read, oldest first: every stored analysis, shared
+    across the whole team, once someone is signed in — one teammate's checked paper is everyone's
+    to search, graph, and open. Signed out (no Supabase configured), current_user() only ever
+    returns None, so this still narrows to analyses without an owner."""
+    if user is None:
+        return [analysis for analysis in analyses.values() if analysis.get("owner") is None]
+    return list(analyses.values())
+
+
 def visible_to(user: str | None) -> list[dict]:
-    """The analyses this user may see, oldest first. Signed out, only analyses without an owner."""
+    """The analyses this exact user owns. Kept owner-scoped even in the shared team library, for
+    the one place sharing must stop: deleting a user's own data must never touch a teammate's."""
     return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
 
 
 def _owned(analysis_id: str, user: str | None) -> dict:
-    """The analysis, if this user may see it. Someone else's analysis is a 404, not a 403,
-    so an id does not tell anyone that it exists."""
+    """The analysis, if this signed-in researcher may read it — shared across the team via
+    team_visible(). Missing, or (signed out) owned by someone else, is a 404, not a 403, so an id
+    does not tell anyone that it exists."""
+    analysis = analyses.get(analysis_id)
+    if analysis is None or analysis not in team_visible(user):
+        raise HTTPException(404, "no such analysis")
+    return analysis
+
+
+def _mine(analysis_id: str, user: str | None) -> dict:
+    """The analysis, only if this exact user created it. Used only for deleting one's own
+    analysis, so that action stays owner-scoped even though reading is now shared."""
     analysis = analyses.get(analysis_id)
     if analysis is None or analysis.get("owner") != user:
         raise HTTPException(404, "no such analysis")
@@ -350,7 +371,7 @@ async def upload_analysis(
 async def list_analyses(user: str | None = Depends(current_user)):
     # The list leaves out what only one analysis's own view needs.
     left_out = ("stages", "references", "markers", "outline")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
+    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(team_visible(user))]
 
 
 @app.get("/analyses/{analysis_id}")
@@ -369,7 +390,7 @@ async def _delete_one(analysis_id: str) -> None:
 
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    _owned(analysis_id, user)
+    _mine(analysis_id, user)
     await _delete_one(analysis_id)
     return {"deleted": analysis_id}
 
@@ -400,10 +421,10 @@ async def analysis_events(analysis_id: str, user: str | None = Depends(current_u
 
 
 def papers_of(user: str | None) -> set[str]:
-    """The file names of the papers this user may open: the analysed paper of each of their
-    analyses, and each cited paper a check read for one of them."""
+    """The file names of the papers this user may open: the analysed paper of each analysis they
+    may read (team_visible), and each cited paper a check read for one of them."""
     names = set()
-    for analysis in visible_to(user):
+    for analysis in team_visible(user):
         if analysis.get("file"):
             names.add(Path(analysis["file"]).name)
         for claim in analysis.get("claims", []):
@@ -509,13 +530,13 @@ def _project(project_id: str, stored: list[dict]) -> dict:
 
 @app.get("/researcher/home")
 async def researcher_home(user: str | None = Depends(current_user)):
-    return researcher.home(visible_to(user))
+    return researcher.home(team_visible(user))
 
 
 @app.get("/researcher/projects")
 async def researcher_projects(user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    return researcher.projects(stored, visible_to(user))
+    return researcher.projects(stored, team_visible(user))
 
 
 @app.post("/researcher/projects")
@@ -533,7 +554,7 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
 @app.get("/researcher/projects/{project_id}/library")
 async def project_library(project_id: str, user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    found = researcher.library(project_id, stored, visible_to(user))
+    found = researcher.library(project_id, stored, team_visible(user))
     if found is None:
         raise HTTPException(404, "no such project")
     return found
@@ -543,7 +564,7 @@ async def project_library(project_id: str, user: str | None = Depends(current_us
 async def add_to_project(
     project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
 ):
-    """Put one of the caller's analysed papers in one of their projects."""
+    """Put an analysed paper the caller may read (team_visible) into one of their own projects."""
     _owned(request.analysis_id, user)
     stored = await asyncio.to_thread(store.load_projects, user)
     project = _project(project_id, stored)
@@ -551,19 +572,19 @@ async def add_to_project(
         project["analyses"].append(request.analysis_id)
     project["updated"] = datetime.now(timezone.utc).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    return researcher.projects([project], visible_to(user))[0]
+    return researcher.projects([project], team_visible(user))[0]
 
 
 @app.post("/researcher/consensus")
 async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
-    """What the works cited in the caller's papers say about a question. Reuses the verdicts
-    already found; it makes no LLM calls."""
-    return researcher.consensus(request.question, visible_to(user))
+    """What the works cited across the team's analysed papers say about a question. Reuses the
+    verdicts already found; it makes no LLM calls."""
+    return researcher.consensus(request.question, team_visible(user))
 
 
 @app.get("/researcher/graph")
 async def knowledge_graph(user: str | None = Depends(current_user)):
-    return researcher.graph(visible_to(user))
+    return researcher.graph(team_visible(user))
 
 
 # --- account settings, shared by every role (Settings modal) ---

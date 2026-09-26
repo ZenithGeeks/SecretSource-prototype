@@ -60,8 +60,9 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
           }}
         >
           <Input
-            value={draft || consensus.question}
+            value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            placeholder="e.g. does late interaction generalize out of domain?"
             className="max-w-2xl"
           />
           <Button type="submit" className="shrink-0">

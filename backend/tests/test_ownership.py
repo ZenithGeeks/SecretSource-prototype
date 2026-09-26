@@ -1,5 +1,6 @@
-"""Each signed-in user sees only their own analyses. With login on, a request without a token is
-refused; with login off, every caller shares the analyses that have no owner.
+"""Every signed-in user reads the whole team's analyses (a shared library) — but only its own
+creator may delete an analysis. With login on, a request without a token is refused; with login
+off, every caller shares the analyses that have no owner.
 
 Supabase is not called: the token check is replaced by a table of known tokens. The client is
 used without its context manager, so the app's startup (which loads the store) does not run.
@@ -9,6 +10,7 @@ import logging
 
 import pytest
 from app import auth, main
+from app.pipeline import figures as figures_module
 from fastapi.testclient import TestClient
 
 TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
@@ -33,9 +35,9 @@ def ids(response):
     return sorted(analysis["id"] for analysis in response.json())
 
 
-def test_each_user_lists_only_their_own_analyses(client):
-    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-ada"})) == ["a1"]
-    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-bo"})) == ["b1"]
+def test_every_signed_in_user_reads_the_shared_team_library(client):
+    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-ada"})) == ["a1", "b1", "shared"]
+    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-bo"})) == ["a1", "b1", "shared"]
 
 
 def test_with_login_on_a_request_without_a_token_is_refused(client):
@@ -54,16 +56,16 @@ def test_with_login_off_a_request_without_a_token_sees_the_shared_analyses(clien
     assert ids(client.get("/analyses")) == ["shared"]
 
 
-def test_someone_elses_analysis_is_not_found(client):
+def test_a_teammates_analysis_is_readable_but_not_deletable(client):
     ada = {"Authorization": "Bearer token-ada"}
-    assert client.get("/analyses/b1", headers=ada).status_code == 404
+    assert client.get("/analyses/b1", headers=ada).status_code == 200
     assert client.delete("/analyses/b1", headers=ada).status_code == 404
     assert client.get("/analyses/a1", headers=ada).status_code == 200
 
 
 def test_the_event_stream_takes_the_token_from_the_header(client):
     ada = {"Authorization": "Bearer token-ada"}
-    assert client.get("/analyses/b1/events", headers=ada).status_code == 404
+    assert client.get("/analyses/b1/events", headers=ada).status_code == 200
     assert client.get("/analyses/a1/events", headers=ada).status_code == 200
 
 
@@ -91,10 +93,16 @@ def test_without_supabase_a_token_is_ignored_and_the_space_is_shared(client, mon
     assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-ada"})) == ["shared"]
 
 
-def test_papers_are_served_only_to_the_user_whose_analyses_they_belong_to(client, monkeypatch, tmp_path):
+def test_papers_are_shared_with_the_team_but_never_with_a_signed_out_request(client, monkeypatch, tmp_path):
     for name in ("ada-upload.pdf", "cited-by-ada.pdf", "bo-upload.pdf"):
         (tmp_path / name).write_bytes(b"%PDF-1.4")
+    figures = tmp_path / "figures" / "ada-upload"
+    figures.mkdir(parents=True)
+    (figures / "figure-1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     monkeypatch.setattr(main, "PAPERS_DIR", tmp_path)
+    # figures_dir() reads its own module-level PAPERS_DIR (imported separately from app.config),
+    # so patching main's binding alone leaves it pointed at the real directory.
+    monkeypatch.setattr(figures_module, "PAPERS_DIR", tmp_path)
     main.analyses["a1"].update(
         file="data/papers/ada-upload.pdf",
         claims=[{"claim": "c", "citations": [], "verdicts": [{"source": "cited-by-ada.pdf"}]}],
@@ -104,10 +112,11 @@ def test_papers_are_served_only_to_the_user_whose_analyses_they_belong_to(client
 
     assert client.get("/papers/ada-upload.pdf", headers=ada).status_code == 200
     assert client.get("/papers/cited-by-ada.pdf", headers=ada).status_code == 200
-    assert client.get("/papers/bo-upload.pdf", headers=ada).status_code == 404
-    assert client.get("/papers/ada-upload.pdf", headers=bo).status_code == 404
+    # Shared team library: bo may open ada's paper, and ada may open bo's.
+    assert client.get("/papers/bo-upload.pdf", headers=ada).status_code == 200
+    assert client.get("/papers/ada-upload.pdf", headers=bo).status_code == 200
+    # Signed out (no token) still gets nothing.
     assert client.get("/papers/ada-upload.pdf").status_code == 401
-    # The other routes under a paper take the same check.
-    assert client.get("/papers/ada-upload.pdf/figures/figure-1.png", headers=bo).status_code == 404
-    assert client.get("/papers/ada-upload.pdf/find?q=x", headers=bo).status_code == 404
-    assert client.get("/papers/ada-upload.pdf/pages/1.png", headers=bo).status_code == 404
+    # figures/, find and pages/ all resolve the paper through the same _paper() check first
+    # (see app/main.py) — figures needs no real PDF content, so it is the one exercised here.
+    assert client.get("/papers/ada-upload.pdf/figures/figure-1.png", headers=bo).status_code == 200
