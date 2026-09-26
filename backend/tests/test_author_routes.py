@@ -507,7 +507,12 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
         }
 
     monkeypatch.setattr(sources, "_semantic_scholar", fake_s2)
-    client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB})
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
+    client.post(
+        "/author/drafts",
+        headers=ADA,
+        json={"title": "ch2", "projectId": project["id"], "files": [{"name": "ch2.tex", "content": TEX}]},
+    )
     found = client.get("/author/search", headers=ADA, params={"q": "index size compression"}).json()
     assert found["libraryCount"] == 3
     by_id = {r["id"]: r for r in found["results"]}
@@ -519,6 +524,7 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
     library_rows = [r for r in found["results"] if r["inLibrary"]]
     assert [r["key"] for r in library_rows] == ["khattab2020"] and library_rows[0]["citedBy"] == 100
     assert library_rows[0]["projectId"] and library_rows[0]["bibName"] == "main.bib"
+    assert library_rows[0]["cited"] is True  # ch2.tex cites khattab2020
     assert "p2" not in by_id
     assert client.get("/author/search", headers=ADA, params={"q": ""}).json() == {
         "results": [],

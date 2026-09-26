@@ -20,7 +20,7 @@ NEEDS_WORK = ("refutes", "insufficient")
 
 CITE = re.compile(r"\\(?:cite|citep|citet|parencite|textcite|autocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)\}")
 SECTION = re.compile(r"\\(?:chapter|section|subsection|subsubsection)\*?\{([^}]*)\}")
-SENTENCE_END = re.compile(r"[.!?][\"'”’)]?(?=\s|$)")
+SENTENCE_END = re.compile(r"[.!?][\"'”’)}]?(?=\s|$)")
 
 
 def now_iso() -> str:

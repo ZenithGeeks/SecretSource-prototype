@@ -1083,7 +1083,18 @@ def _title_key(title: str) -> str:
     return logic._WORD.sub("", (title or "").lower())
 
 
-def _library_row(query: str, project: dict, entry: dict, ref: dict) -> dict:
+def _cited_keys(projects: list[dict], drafts: list[dict]) -> dict[str, set[str]]:
+    """Per project, the bib keys its drafts cite — the "Cited by my drafts" chip."""
+    by_id = {p["id"]: p for p in projects}
+    cited: dict[str, set[str]] = {p["id"]: set() for p in projects}
+    for draft in drafts:
+        project = by_id.get(draft.get("projectId") or "")
+        if project:
+            cited[project["id"]].update(c["key"] for c in logic.find_cites(_draft_files(draft, project)))
+    return cited
+
+
+def _library_row(query: str, project: dict, entry: dict, ref: dict, cited: set[str] | None = None) -> dict:
     bib = project.get("bib") or {}
     identifier = logic.lookup_identifier(entry, project.get("pdfs"))
     return {
@@ -1107,13 +1118,16 @@ def _library_row(query: str, project: dict, entry: dict, ref: dict) -> dict:
         "similarity": logic.similarity(query, f"{ref['title']} {ref['authors']}"),
         "similarityBasis": "title",
         "inLibrary": True,
+        "cited": entry["key"] in (cited or set()),
         "projectId": project["id"],
         "bibName": bib.get("name"),
         "bibtex": logic.serialize_bib(entry),
     }
 
 
-def _library_results(query: str, projects: list[dict], sources: list[dict]) -> list[dict]:
+def _library_results(
+    query: str, projects: list[dict], sources: list[dict], cited: dict[str, set[str]]
+) -> list[dict]:
     """What the user already has that matches the query's words: project bib entries and
     saved sources."""
     results = []
@@ -1121,7 +1135,7 @@ def _library_results(query: str, projects: list[dict], sources: list[dict]) -> l
         bib = project.get("bib") or {}
         for entry in logic.parse_bib(bib.get("content", "")):
             ref = logic.source_ref(entry, project.get("pdfs"))
-            row = _library_row(query, project, entry, ref)
+            row = _library_row(query, project, entry, ref, cited.get(project["id"]))
             if row["similarity"] > 0:
                 results.append(row)
     for source in sources:
@@ -1150,10 +1164,13 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
         return {"results": [], "libraryCount": 0}
     from app.pipeline.sources import LookupUnavailable, _semantic_scholar
 
-    projects, sources = await asyncio.gather(
-        asyncio.to_thread(_rows, PROJECTS, user), asyncio.to_thread(_rows, SOURCES, user)
+    projects, sources, drafts = await asyncio.gather(
+        asyncio.to_thread(_rows, PROJECTS, user),
+        asyncio.to_thread(_rows, SOURCES, user),
+        asyncio.to_thread(_rows, DRAFTS, user),
     )
-    library = _library_results(query, projects, sources)
+    cited = _cited_keys(projects, drafts)
+    library = _library_results(query, projects, sources, cited)
     try:
         found = await asyncio.to_thread(
             _semantic_scholar,
@@ -1185,7 +1202,9 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
             row_id = f"bib:{match['project']['id']}:{match['entry']['key']}"
             row = by_place.get(row_id)
             if row is None:
-                row = _library_row(query, match["project"], match["entry"], match["ref"])
+                row = _library_row(
+                    query, match["project"], match["entry"], match["ref"], cited.get(match["project"]["id"])
+                )
                 row["similarity"] = result["similarity"]
                 row["similarityBasis"] = result["similarityBasis"]
                 by_place[row_id] = row
