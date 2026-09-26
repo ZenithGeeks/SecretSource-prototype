@@ -70,7 +70,7 @@ from app.metrics import (
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
-from app.pipeline.sources import lookup_key
+from app.pipeline.sources import index_paper, lookup_key
 from app.pipeline.verify import (
     check_prepared,
     fold_check,
@@ -203,6 +203,29 @@ async def _publish(analysis_id: str, stage: str, **fields):
     await streams[analysis_id].put(event)
 
 
+_background: set[asyncio.Task] = set()
+
+
+def _detach(coro) -> None:
+    """Run a coroutine without waiting for it, keeping a reference so asyncio does not
+    garbage-collect it mid-flight."""
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def _index_self(analysis_id: str, title: str) -> None:
+    """Best-effort, detached from the run: whether the paper itself (not what it cites) is
+    known to a public index, checked the same way a citation is. A slow or refused lookup
+    must never delay or fail the analysis, so this runs after the analysis is done and just
+    leaves the badge unknown if it fails."""
+    analysis = analyses.get(analysis_id)
+    if analysis is None or not title:
+        return
+    analysis["indexed_in"] = await asyncio.to_thread(index_paper, title)
+    _save_soon(analysis_id)
+
+
 async def _run(analysis_id: str, paper: str, verify: bool):
     analysis = analyses[analysis_id]
     queued_at = time.monotonic()
@@ -313,6 +336,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
 
         analysis["status"] = "done"
         await _publish(analysis_id, "done")
+        _detach(_index_self(analysis_id, analysis["title"]))
     except Exception as error:
         analysis["status"] = "error"
         analysis["message"] = str(error)
