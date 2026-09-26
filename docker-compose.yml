@@ -136,6 +136,7 @@ services:
       COLBERT_URL: ${COLBERT_URL:-http://colbert:8893}
       COLPALI_URL: ${COLPALI_URL:-http://colpali:8894} # optional; visual hints are skipped when it is not running
       GROBID_URL: ${GROBID_URL:-http://grobid:8070}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0} # the analysis queue and cross-process SSE (app/queue.py)
       SERVICE_AUTH: ${SERVICE_AUTH:-none} # google-id-token for the shared Cloud Run services
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-} # e.g. secrets/service-auth.json
       PAPERS_DIR: data/papers
@@ -173,8 +174,36 @@ services:
       - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
     depends_on:
       - grobid # vllm / colbert are only dependencies under --profile gpu; .env decides
+      - redis
     cap_add:
       - SYS_PTRACE # lets py-spy attach to pid 1 for live profiling (backend/README.md#profiling)
+    restart: unless-stopped
+
+  # Backs the analysis queue (app/queue.py) and cross-process SSE delivery (app/main.py's
+  # Redis Pub/Sub subscriber). A named volume so the queue itself survives a restart, not
+  # just the app data. No published port: only gateway/worker reach it, by service name.
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  # Runs analyses pulled off the queue (app/queue.py). Horizontally scalable — the
+  # replacement for the old PARALLEL_ANALYSES semaphore:
+  #   docker compose up -d --scale worker=3
+  worker:
+    build: ./backend
+    command: python worker.py
+    environment: *gateway-env
+    volumes:
+      - ${PAPERS_HOST_DIR:-./data/papers}:/app/data/papers
+      - ./backend/secrets:/app/secrets:ro
+      - analyses:/app/data/db
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      - redis
+      - grobid
     restart: unless-stopped
 
   # TLS in front of the gateway, for a frontend hosted on a different origin (e.g. Vercel) that
@@ -313,3 +342,4 @@ volumes:
   qdrant-storage:
   hf-cache:
   grafana-data:
+  redis-data:
