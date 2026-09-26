@@ -3,12 +3,14 @@
 # because ss-core's address (10.35.109.71) is KMUTT-internal only — GitHub-hosted runners
 # cannot reach it, so the job has to run on the box itself rather than SSH into it.
 #
-# Secrets stay off GitHub entirely: .env and the Google service-account key live only on
-# ss-core (~/app/.env, ~/app/backend/secrets/service-auth.json) and are copied into the
-# checkout before `docker compose` reads them, the same files used for the manual deploys this
-# replaces. Both copies matter: actions/checkout's git clean wipes backend/secrets/ (gitignored)
-# on every run, so skipping the second copy silently breaks colbert/colpali's google-id-token
-# auth on the very next deploy, even though .env itself is fine (#252).
+# Secrets stay off GitHub entirely: .env, the Google service-account key, and the gateway's
+# TLS cert live only on ss-core (~/app/.env, ~/app/backend/secrets/service-auth.json,
+# ~/app/deploy/tls-proxy/certs/) and are copied into the checkout before `docker compose`
+# reads them, the same files used for the manual deploys this replaces. All three copies
+# matter: actions/checkout's git clean wipes any gitignored path on every run, so skipping one
+# silently breaks whatever depends on it on the very next deploy even though the others are
+# fine — that already happened once for backend/secrets/ (#252), and separately for
+# deploy/tls-proxy/certs/, which had no restore step at all until this comment was added.
 #
 # Setup (one-time, on ss-core itself — see the runner registration steps in the PR/issue that
 # introduced this file):
@@ -16,6 +18,8 @@
 #   2. Confirm ~/app/.env exists with the gateway's real config (S2_API_KEY, SUPABASE_*, etc).
 #   3. Confirm ~/app/backend/secrets/service-auth.json exists (the shared Google service-account
 #      key described in deploy/team-cloud-services-setup.md).
+#   4. Confirm ~/app/deploy/tls-proxy/certs/fullchain.pem and privkey.pem exist (self-signed is
+#      fine — deploy/team-cloud-services-setup.md documents clicking through the browser warning).
 name: deploy-backend
 
 on:
@@ -34,6 +38,9 @@ jobs:
           cp ~/app/.env .env
           mkdir -p backend/secrets
           cp ~/app/backend/secrets/service-auth.json backend/secrets/service-auth.json
+          mkdir -p deploy/tls-proxy/certs
+          cp ~/app/deploy/tls-proxy/certs/fullchain.pem deploy/tls-proxy/certs/fullchain.pem
+          cp ~/app/deploy/tls-proxy/certs/privkey.pem deploy/tls-proxy/certs/privkey.pem
       - name: Build and restart gateway + web
         # --no-deps: grobid runs on a separate VM (ss-grobid) here, not as a local container.
         run: docker compose up -d --build --no-deps gateway web
