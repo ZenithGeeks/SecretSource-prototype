@@ -1,6 +1,5 @@
-from starlette.requests import Request
-
 from app.auth import _token
+from starlette.requests import Request
 
 
 def _request(headers: dict[str, str]) -> Request:
