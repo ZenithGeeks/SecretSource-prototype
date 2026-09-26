@@ -36,8 +36,10 @@ def ids(response):
 
 
 def test_every_signed_in_user_reads_the_shared_team_library(client):
-    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-ada"})) == ["a1", "b1", "shared"]
-    assert ids(client.get("/analyses", headers={"Authorization": "Bearer token-bo"})) == ["a1", "b1", "shared"]
+    ada = {"Authorization": "Bearer token-ada"}
+    bo = {"Authorization": "Bearer token-bo"}
+    assert ids(client.get("/analyses", headers=ada)) == ["a1", "b1", "shared"]
+    assert ids(client.get("/analyses", headers=bo)) == ["a1", "b1", "shared"]
 
 
 def test_with_login_on_a_request_without_a_token_is_refused(client):
