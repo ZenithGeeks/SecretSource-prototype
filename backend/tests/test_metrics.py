@@ -33,7 +33,8 @@ def stub_pipeline(monkeypatch):
     monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(main, "prepare_source", lambda s: {"status": "ok", "path": s})
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
-    monkeypatch.setattr(main, "audit", lambda analysis: [{"kind": "claim-limit"}, {"kind": "ungrounded-quote"}])
+    findings = [{"kind": "claim-limit"}, {"kind": "ungrounded-quote"}]
+    monkeypatch.setattr(main, "audit", lambda analysis: findings)
     main.analyses.clear()
     yield
     main.analyses.clear()
