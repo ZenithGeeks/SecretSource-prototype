@@ -18,6 +18,7 @@ POST /user/avatar        multipart image -> {"url"}
 DELETE /user/avatar
 GET  /user/avatar/me     -> the avatar image
 POST /verify            {"claim", "source"} -> one verdict, outside any analysis
+/author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 POST /checks            {"claim", "source"} -> {"id"}, same async shape as /analyses
 GET  /checks/{id}               -> one check with its verdict, once done
 GET  /checks/{id}/events        -> SSE: resolving, then done/error (no stage in between)
@@ -52,6 +53,9 @@ from pydantic import BaseModel
 
 from app import dependencies, researcher, store
 from app.auth import current_user
+from app.author.router import author_pdfs
+from app.author.router import router as author_router
+from app.author.verify import verify_cached
 from app.config import (
     AVATARS_DIR,
     PAPERS_DIR,
@@ -151,6 +155,7 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 app.include_router(teacher_router)
+app.include_router(author_router)
 
 
 class AnalysisRequest(BaseModel):
@@ -365,7 +370,7 @@ async def _run_check(check_id: str, claim: str, source: str):
     check = analyses[check_id]
     try:
         await _publish(check_id, "resolving", message=f"resolving {source}")
-        result = await asyncio.to_thread(verify_claim, claim, source)
+        result = await asyncio.to_thread(verify_cached, claim, source, verify_claim)
         if result["status"] == "ok":
             check["verdict"] = result["verdict"]
             check["quote"] = result["quote"]
@@ -553,6 +558,7 @@ def papers_of(user: str | None) -> set[str]:
             names.add(Path(analysis["file"]).name)
         for claim in analysis.get("claims", []):
             names.update(Path(v["source"]).name for v in claim.get("verdicts", []) if v.get("source"))
+    names.update(author_pdfs(user))
     return names
 
 
@@ -752,8 +758,9 @@ async def patch_preferences(request: PreferencesPatch, user: str | None = Depend
 
 @app.delete("/user/data")
 async def delete_all_data(user: str | None = Depends(current_user)):
-    """Every analysis (and researcher project) this user owns — Settings → Your data →
-    Delete all. The confirm dialog is the UI's job; this call is unconditional.
+    """Every analysis (and researcher project, and the Author role's projects, drafts and
+    saved sources) this user owns — Settings → Your data → Delete all. The confirm dialog is
+    the UI's job; this call is unconditional.
 
     An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
     indexing `analyses`/`streams`, so popping them here would make its next `_publish`
@@ -763,6 +770,7 @@ async def delete_all_data(user: str | None = Depends(current_user)):
     for analysis_id in ids:
         await _delete_one(analysis_id)
     await asyncio.to_thread(store.delete_projects, user)
+    await asyncio.to_thread(store.delete_author_rows, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 

@@ -15,9 +15,12 @@ TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+    # login on, storage (and the verification cache) in a temp SQLite file, not Supabase
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
     monkeypatch.setattr(auth, "_user_id_for", TOKENS.get)
     monkeypatch.setattr(main.store, "delete", lambda item_id: True)
     monkeypatch.setattr(main.dependencies, "report", lambda: {"degraded": False, "dependencies": []})
@@ -91,8 +94,12 @@ def test_an_old_analysis_with_no_kind_field_still_lists(client):
 
 
 @pytest.fixture
-def running_check(monkeypatch):
+def running_check(monkeypatch, tmp_path):
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    # every case verifies the same claim and source; the cache must not carry one case's
+    # verdict into the next
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
     main.analyses.clear()
     main.streams.clear()
 
