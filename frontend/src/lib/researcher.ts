@@ -21,7 +21,8 @@ export type Conflict = {
 export type QueueEntry = {
   paper: string
   note: string // why it is suggested, in a reader's words
-  identifier: string // DOI, arXiv ID or title, to analyse it
+  identifier: string // DOI, arXiv ID or title
+  analysis: string // the analysis that cites it, to open on click
 }
 
 export type LibrarySummary = {
