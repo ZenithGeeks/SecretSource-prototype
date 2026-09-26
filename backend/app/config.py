@@ -79,6 +79,7 @@ if SERVICE_AUTH not in ("none", "google-id-token"):
     raise ValueError(f"SERVICE_AUTH must be 'none' or 'google-id-token', got {SERVICE_AUTH!r}")
 
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
+AVATARS_DIR = Path(os.getenv("AVATARS_DIR", "data/avatars"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 
 # Persistence backend. With both set, the gateway stores analyses and source

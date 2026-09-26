@@ -14,6 +14,10 @@ export function useDrafts() {
   return useQuery({ queryKey: ['writer', 'drafts'], queryFn: writerApi.getDrafts })
 }
 
+export function useClaims() {
+  return useQuery({ queryKey: ['writer', 'claims'], queryFn: writerApi.getClaims })
+}
+
 export function useDraft(draftId: string) {
   return useQuery({ queryKey: ['writer', 'draft', draftId], queryFn: () => writerApi.getDraft(draftId) })
 }

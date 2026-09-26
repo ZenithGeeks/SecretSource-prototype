@@ -10,14 +10,15 @@ import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { SettingsModal } from '../../components/SettingsModal'
 import { CitationReplaced } from './screens/CitationReplaced'
 import { DraftCheck } from './screens/DraftCheck'
 import { FindASource } from './screens/FindASource'
 import { Home } from './screens/Home'
 
 type NavKey = 'home' | 'library' | 'graph' | 'history'
-// Settings is screen-only — opened from the profile menu, not the nav (as in Figma).
-export type WriterScreen = 'home' | 'draft-check' | 'citation-replaced' | 'find-source' | 'graph' | 'history' | 'settings'
+// Settings is a modal, opened from the profile menu — not a screen of its own (Figma 22).
+export type WriterScreen = 'home' | 'draft-check' | 'citation-replaced' | 'find-source' | 'graph' | 'history'
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
@@ -28,8 +29,7 @@ const NAV: NavEntry<NavKey>[] = [
 
 // Draft check and Citation replaced are reached from Home's "Check a draft" action and
 // count as the Home section in the nav, same as the old router's isActive did. Library's
-// one screen is Find a source, so its nav key routes straight there. Settings lights nothing
-// (the profile button carries its own active state).
+// one screen is Find a source, so its nav key routes straight there.
 const NAV_FOR: Record<WriterScreen, NavKey | null> = {
   home: 'home',
   'draft-check': 'home',
@@ -37,7 +37,6 @@ const NAV_FOR: Record<WriterScreen, NavKey | null> = {
   'find-source': 'library',
   graph: 'graph',
   history: 'history',
-  settings: null,
 }
 
 function screenForNav(key: NavKey): WriterScreen {
@@ -72,6 +71,7 @@ function Placeholder({ title }: { title: string }) {
 export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [screen, setScreen] = useState<WriterScreen>(initialScreen)
   const [replacedCitation, setReplacedCitation] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => syncScreenParam(screen), [screen])
 
@@ -87,11 +87,11 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       nav={NAV}
       active={NAV_FOR[screen]}
       onNavigate={(key) => navigate(screenForNav(key))}
-      role="Writer"
+      role="Author"
       roleIcon={Pen}
       onChangeRole={onChangeRole}
-      onOpenSettings={() => navigate('settings')}
-      settingsActive={screen === 'settings'}
+      onOpenSettings={() => setSettingsOpen(true)}
+      settingsActive={settingsOpen}
     >
       {screen === 'home' && (
         <Home onOpenDraftCheck={() => navigate('draft-check')} onOpenFindSource={() => navigate('find-source')} />
@@ -103,7 +103,12 @@ export function WriterApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'find-source' && <FindASource onCiteBestMatch={replaceCitation} />}
       {screen === 'graph' && <Placeholder title="Graph" />}
       {screen === 'history' && <Placeholder title="History" />}
-      {screen === 'settings' && <Placeholder title="Settings" />}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        currentRole="writer"
+        onSwitchRole={onChangeRole ?? (() => {})}
+      />
     </AppShell>
   )
 }
