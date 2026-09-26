@@ -572,6 +572,14 @@ function GraphCanvas() {
 
   const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
 
+  // The backend builds paper nodes oldest-first, so the last "Analysed" one is the most
+  // recently uploaded paper — where the view opens centred, so a fresh upload is what greets
+  // the reader instead of wherever the whole-graph fit happened to land.
+  const latestPaperId = useMemo(
+    () => graph?.nodes.filter((n) => n.kind === 'paper' && n.cluster === 'Analysed').at(-1)?.id ?? null,
+    [graph],
+  )
+
   // The node ids shown in the current view, and a cache key from them. Cached positions (if any)
   // let the layout replay instantly instead of re-running cola.
   const shownNodeIds = useMemo(() => {
@@ -827,11 +835,19 @@ function GraphCanvas() {
               })
               cy.on('drag', 'node', () => setTip(null))
               cy.on('pan zoom', () => setTip(null))
+              // Pan (zoom stays whatever fitReadable set) so the latest upload is what's centred
+              // on open, not wherever the whole-graph bounding box happened to land it.
+              const focusLatest = () => {
+                if (!latestPaperId) return
+                const node = cy.$id(latestPaperId)
+                if (node.nonempty()) cy.center(node)
+              }
               // Fit once the layout has actually settled (cola emits layoutstop), not on a fixed
               // timer that can fire while nodes are still bunched. It re-runs only when the element
               // set changes (e.g. switching Claims/Papers), which re-runs the layout.
               cy.on('layoutstop', () => {
                 fitReadable(cy)
+                focusLatest()
                 // Save the settled positions so the next visit replays them instantly with `preset`
                 // instead of re-running cola — and so reloads lay out identically.
                 const pos: PosMap = {}
@@ -841,6 +857,20 @@ function GraphCanvas() {
                 })
                 writePosCache(cacheKey, pos)
               })
+              // react-cytoscapejs runs `preset` synchronously inside componentDidMount, before
+              // this `cy` prop is ever called — so on a cached revisit, layoutstop above already
+              // fired and is gone; the listener never sees it. Positions are final either way for
+              // `preset` (no simulation to wait for), so just fit/centre directly here instead.
+              // The double rAF waits for the canvas div's first real layout pass — at this exact
+              // point it can still be a zero-size placeholder, which would fit to the wrong box.
+              if (cachedPositions) {
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => {
+                    fitReadable(cy)
+                    focusLatest()
+                  }),
+                )
+              }
               setReady(true)
             }}
           />

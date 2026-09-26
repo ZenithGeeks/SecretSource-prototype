@@ -9,7 +9,7 @@ These are plain functions over lists of analyses, so they can be tested without 
 
 import hashlib
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
 from app.pipeline.claims import _tokens
 
@@ -164,6 +164,8 @@ def home(analyses: list[dict]) -> dict:
     cited_by: dict[str, set[str]] = {}
     claims_citing: Counter = Counter()
     works: dict[str, dict] = {}
+    # The oldest paper (papers is oldest-first) that cites this work, to open on click.
+    first_citer: dict[str, str] = {}
     for paper in papers:
         for claim in paper.get("claims", []):
             for citation in claim.get("citations", []):
@@ -173,6 +175,7 @@ def home(analyses: list[dict]) -> dict:
                 works.setdefault(key, citation)
                 cited_by.setdefault(key, set()).add(paper["id"])
                 claims_citing[key] += 1
+                first_citer.setdefault(key, paper["id"])
     ranked = sorted(works, key=lambda key: (len(cited_by[key]), claims_citing[key]), reverse=True)
     queue = []
     for key in ranked:
@@ -191,6 +194,7 @@ def home(analyses: list[dict]) -> dict:
                 )
                 + ", not in your library",
                 "identifier": citation.get("doi") or citation.get("arxiv") or citation.get("title", ""),
+                "analysis": first_citer[key],
             }
         )
         if len(queue) == HOME_QUEUE:
@@ -558,9 +562,17 @@ def graph(analyses: list[dict]) -> dict:
                         }
                     )
 
+    # How many claims each paper asserts, counted once instead of rescanning all of `edges`
+    # for every (a, b) link below — that rescan was O(links * edges), the graph endpoint's
+    # biggest cost on a library with a lot of claims.
+    asserts_by_paper: Counter = Counter()
+    for edge in edges:
+        if edge["relation"] == "asserts":
+            asserts_by_paper[edge["source"]] += 1
+
     paper_edges = []
     for (a, b), link in links.items():
-        total = max(1, sum(1 for edge in edges if edge["source"] == a and edge["relation"] == "asserts"))
+        total = max(1, asserts_by_paper[a])
         paper_edges.append(
             {
                 "id": f"{a}->{b}",
@@ -574,24 +586,39 @@ def graph(analyses: list[dict]) -> dict:
                 "passages": link["passages"],
             }
         )
-    analysed_nodes = sorted(cites)
-    for i, a in enumerate(analysed_nodes):
-        for b in analysed_nodes[i + 1 :]:
-            shared = cites[a] & cites[b]
-            if shared:
-                paper_edges.append(
-                    {
-                        "id": f"{a}<->{b}",
-                        "a": a,
-                        "b": b,
-                        "similarity": round(len(shared) / len(cites[a] | cites[b]), 2),
-                        "sharedPassages": 0,
-                        "citations": len(shared),
-                        "cites": False,
-                        "contradicted": 0,
-                        "passages": [],
-                    }
-                )
+
+    # Which analysed papers cite the same work, without comparing every pair of papers
+    # directly (that was O(papers^2), the other big cost on a library with a lot of papers).
+    # Grouping by work first instead: a work shared by only a few papers costs little, and most
+    # works are only cited by a handful of the library's papers even when the library is large.
+    papers_by_work: dict[str, list[str]] = defaultdict(list)
+    for paper_node, works in cites.items():
+        for work_node in works:
+            papers_by_work[work_node].append(paper_node)
+
+    shared_by_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for work_node, citers in papers_by_work.items():
+        if len(citers) < 2:
+            continue
+        citers = sorted(citers)
+        for i, a in enumerate(citers):
+            for b in citers[i + 1 :]:
+                shared_by_pair[(a, b)].add(work_node)
+
+    for (a, b), shared in shared_by_pair.items():
+        paper_edges.append(
+            {
+                "id": f"{a}<->{b}",
+                "a": a,
+                "b": b,
+                "similarity": round(len(shared) / len(cites[a] | cites[b]), 2),
+                "sharedPassages": 0,
+                "citations": len(shared),
+                "cites": False,
+                "contradicted": 0,
+                "passages": [],
+            }
+        )
 
     return {
         "stats": [
