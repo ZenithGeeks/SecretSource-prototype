@@ -10,6 +10,7 @@ Re-adding a paper replaces every point it already had. The collection name holds
 vector width. A checkpoint with a different width needs a fresh collection.
 """
 
+import hashlib
 import os
 import sys
 import uuid
@@ -74,9 +75,26 @@ class Store:
             ),
         )
 
-    def _upsert(self, rows: list[dict], vectors: list) -> int:
+    def _source_filter(self, name: str) -> models.Filter:
+        return models.Filter(must=[models.FieldCondition(key="source", match=models.MatchValue(value=name))])
+
+    def _current_hash(self, name: str) -> str | None:
+        """The content hash already stored for this source, or None if it has no points yet.
+        A single point is enough to answer: every point for one source shares the same hash."""
+        hits, _ = self.client.scroll(
+            COLLECTION, scroll_filter=self._source_filter(name), limit=1, with_payload=["content_hash"]
+        )
+        return hits[0].payload.get("content_hash") if hits else None
+
+    def _count_source(self, name: str) -> int:
+        return self.client.count(COLLECTION, count_filter=self._source_filter(name)).count
+
+    def _upsert(self, rows: list[dict], vectors: list, content_hash: str) -> int:
         points = [
-            models.PointStruct(id=uuid.uuid4().hex, vector={VECTOR_NAME: vector.tolist()}, payload=row)
+            models.PointStruct(
+                id=uuid.uuid4().hex, vector={VECTOR_NAME: vector.tolist()},
+                payload={**row, "content_hash": content_hash},
+            )
             for row, vector in zip(rows, vectors, strict=True)
         ]
         # In batches. One big request for a whole paper timed out before, even with a
@@ -86,8 +104,17 @@ class Store:
         return len(points)
 
     def add_pdf(self, pdf_path: str | Path) -> int:
-        """Whole rendered pages. This is the fallback for a paper with no croppable figures."""
+        """Whole rendered pages. This is the fallback for a paper with no croppable figures.
+
+        Skips rendering and encoding (the expensive parts) when Qdrant already has this exact
+        file under this source name — see add_pdf in services/colbert/store.py for why this
+        checks Qdrant itself rather than trusting the caller not to ask twice.
+        """
         path = Path(pdf_path)
+        content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if self._current_hash(path.name) == content_hash:
+            return self._count_source(path.name)
+
         images = pdf_pages(path)
         vectors = self.encoder.pages(images)
         self._delete_source(path.name)
@@ -96,10 +123,24 @@ class Store:
              "label": f"Page {number}", "caption": "", "image": ""}
             for number in range(1, len(vectors) + 1)
         ]
-        return self._upsert(rows, vectors)
+        return self._upsert(rows, vectors, content_hash)
 
     def add_figures(self, source: str, title: str, figures: list[dict]) -> int:
-        """One point per cropped figure, matched by the name the paper gives it."""
+        """One point per cropped figure, matched by the name the paper gives it.
+
+        Hashes each figure's own image bytes plus its page/label/caption, in order, so a changed
+        crop or caption is a genuinely different hash — not just whether the same file names were
+        passed. Skips re-encoding when Qdrant already has this exact set for this source.
+        """
+        hasher = hashlib.sha256()
+        for figure in figures:
+            hasher.update(Path(figure["image"]).read_bytes())
+            meta = (figure.get("page", 0), figure.get("label", ""), figure.get("caption", ""))
+            hasher.update(("\x00" + "\x01".join(str(part) for part in meta) + "\x00").encode())
+        content_hash = hasher.hexdigest()
+        if self._current_hash(source) == content_hash:
+            return self._count_source(source)
+
         from PIL import Image
 
         images = [Image.open(figure["image"]).convert("RGB") for figure in figures]
@@ -111,7 +152,7 @@ class Store:
              "caption": figure.get("caption", ""), "image": figure["image"]}
             for figure in figures
         ]
-        return self._upsert(rows, vectors)
+        return self._upsert(rows, vectors, content_hash)
 
     def search(self, query: str, k: int = 5) -> list[dict]:
         """Top-k figures or pages by MaxSim."""

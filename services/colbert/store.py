@@ -7,6 +7,7 @@ keeps the page and character span, so a hit can be pointed at in the original. R
 a PDF with the same file name replaces its old passages.
 """
 
+import hashlib
 import os
 import sys
 import uuid
@@ -88,9 +89,34 @@ class Store:
             ),
         )
 
+    def _source_filter(self, name: str) -> models.Filter:
+        return models.Filter(must=[models.FieldCondition(key="source", match=models.MatchValue(value=name))])
+
+    def _current_hash(self, name: str) -> str | None:
+        """The content hash already stored for this source, or None if it has no points yet.
+        A single point is enough to answer: every point for one source shares the same hash."""
+        hits, _ = self.client.scroll(
+            COLLECTION, scroll_filter=self._source_filter(name), limit=1, with_payload=["content_hash"]
+        )
+        return hits[0].payload.get("content_hash") if hits else None
+
+    def _count_source(self, name: str) -> int:
+        return self.client.count(COLLECTION, count_filter=self._source_filter(name)).count
+
     def add_pdf(self, path: str | Path) -> int:
-        """Index one PDF. Returns the number of passages added."""
+        """Index one PDF. Returns the number of passages added.
+
+        Skips the encode-and-upsert (the expensive part) when Qdrant already has this exact
+        content under this source name — a restart, or a second gateway process, re-asking to
+        index a paper it (or another process) already put here. The gateway's own dedup
+        (app/pipeline/verify.py's `_indexed` set) only holds for one process's lifetime; this
+        check is against Qdrant itself, so it holds regardless of which process asks.
+        """
         path = Path(path)
+        content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if self._current_hash(path.name) == content_hash:
+            return self._count_source(path.name)
+
         passages = pdf_passages(path)
         vectors = self.encoder.docs([passage["text"] for passage in passages])
         self._delete_source(path.name)  # replace if already indexed
@@ -98,7 +124,7 @@ class Store:
             models.PointStruct(
                 id=uuid.uuid4().hex,
                 vector={VECTOR_NAME: vector.tolist()},
-                payload={**passage, "title": path.stem, "source": path.name},
+                payload={**passage, "title": path.stem, "source": path.name, "content_hash": content_hash},
             )
             for passage, vector in zip(passages, vectors, strict=True)
             if len(vector)  # skip passages with no tokens left
