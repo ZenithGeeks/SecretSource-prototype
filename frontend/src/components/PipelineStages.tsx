@@ -7,6 +7,7 @@ import type { Stage } from '../lib/api'
 import { reasonText } from '../lib/api'
 
 const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
+  queued: (stage) => stage.message ?? 'Waiting for a free analysis slot',
   extracting: (stage) => stage.message ?? 'Reading the paper',
   extracted: (stage) =>
     `Found ${stage.claims} claims` +
