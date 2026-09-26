@@ -24,6 +24,7 @@ import CytoscapeComponent from 'react-cytoscapejs'
 import { reasonText } from '../../../lib/api'
 import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
+import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
@@ -516,7 +517,7 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
   )
 }
 
-export function Graph() {
+function GraphCanvas() {
   const graph = useKnowledgeGraph().data
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
@@ -863,5 +864,40 @@ export function Graph() {
         {view === 'papers' && selectedEdge && <PapersDetail graph={graph} edge={selectedEdge} />}
       </div>
     </>
+  )
+}
+
+/** The Graph tab. It hosts two views behind one toggle: the knowledge graph (GraphCanvas,
+ * unchanged) and Field Consensus, which asks one claim across the whole library. Field consensus
+ * used to be its own screen — it now lives here, so the graph and the cross-paper question share
+ * one place. `initialTab` lets the router open straight to Consensus from an older link. */
+export function Graph({
+  onOpenAnalysis,
+  initialTab = 'graph',
+}: {
+  onOpenAnalysis: (id: string) => void
+  initialTab?: 'graph' | 'consensus'
+}) {
+  const [tab, setTab] = useState<'graph' | 'consensus'>(initialTab)
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="flex items-center gap-1 self-start rounded-xl border border-border-subtle bg-surface p-1">
+        {(['graph', 'consensus'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            aria-pressed={tab === t}
+            className={cn(
+              'rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
+              tab === t ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:text-ink',
+            )}
+          >
+            {t === 'graph' ? 'Graph' : 'Field Consensus'}
+          </button>
+        ))}
+      </div>
+      {tab === 'graph' ? <GraphCanvas /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
+    </div>
   )
 }
