@@ -6,6 +6,7 @@ analysis with the result as JSON. The gateway reads and writes whole analyses, n
 parts of them. So switching backends changes the storage calls here and nothing above.
 """
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -53,6 +54,13 @@ CREATE TABLE IF NOT EXISTS sources (
 )
 """
 
+CACHE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS cache (
+    key  TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+)
+"""
+
 PROJECTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
     id    TEXT PRIMARY KEY,
@@ -91,6 +99,7 @@ def _connect() -> sqlite3.Connection:
         _db.row_factory = sqlite3.Row
         _db.execute(SCHEMA)
         _db.execute(SOURCES_SCHEMA)
+        _db.execute(CACHE_SCHEMA)
         _db.execute(PROJECTS_SCHEMA)
         _db.execute(PREFERENCES_SCHEMA)
         _db_path = path
@@ -162,6 +171,37 @@ def recall_source(key: str) -> dict | None:
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def cache_key(*parts: str) -> str:
+    """One deterministic key from several strings (a namespace, the model id, the input), so a
+    changed model or GROBID endpoint never reads another combination's cached answer."""
+    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()
+
+
+def remember_cache(key: str, data: dict) -> None:
+    """A GROBID parse or an LLM call's result, so the identical input never repeats the call.
+    Same key/data-blob shape as `sources`, in its own table since these come from a different
+    part of the pipeline (app/pipeline/claims.py, app/pipeline/verify.py) and never mix."""
+    if _use_supabase():
+        _supabase().table("cache").upsert({"key": key, "data": data}).execute()
+        return
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO cache (key, data) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET data = excluded.data",
+            (key, json.dumps(data)),
+        )
+        database.commit()
+
+
+def recall_cache(key: str) -> dict | None:
+    if _use_supabase():
+        rows = _supabase().table("cache").select("data").eq("key", key).limit(1).execute().data
+        return rows[0]["data"] if rows else None
+    with _sqlite() as database:
+        row = database.execute("SELECT data FROM cache WHERE key = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
 
 
