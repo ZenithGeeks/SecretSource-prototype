@@ -24,9 +24,9 @@ export const accountApi = {
 
   removeAvatar: () => request<{ deleted: true }>('/user/avatar', { method: 'DELETE' }),
 
-  /** Deletes every analysis (and researcher project) the signed-in user owns. Analyses still
-   * running are left to finish and counted in `skipped`. Writer and teacher data has no
-   * backend store yet (writerStore / teacher mocks are local-only), so their own "Delete all"
-   * clears that local store instead of calling this. */
+  /** Deletes every analysis, researcher project, and Author draft, project and saved source
+   * the signed-in user owns. Analyses (and draft checks) still running are left to finish and
+   * counted in `skipped`. Teacher data has no backend store yet (its mocks are local-only), so
+   * its own "Delete all" clears that local store instead of calling this. */
   deleteAllData: () => request<{ deleted: number; skipped: number }>('/user/data', { method: 'DELETE' }),
 }

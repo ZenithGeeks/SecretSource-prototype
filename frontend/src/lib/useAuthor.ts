@@ -1,110 +1,406 @@
 /**
- * Query hooks for the Author screens, mirroring useWriter/useResearcher. Screens read data
- * only through these; every write goes through useAuthorActions, which mutates the store and
- * invalidates the ['author', …] queries so Draft check and the editor both re-render.
+ * Query hooks for the Author screens, mirroring useResearcher/useAnalysis. Screens read
+ * data only through these; every write goes through useAuthorActions, which calls the
+ * gateway and invalidates the ['author', …] queries so Check a draft, the editor and the
+ * Library all re-render from the same answer.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
-import { authorApi } from './author'
-import { authorStore } from './authorStore'
-import type { SearchResult } from '../types/draftCheck'
+import { followEvents } from './api'
+import { authorApi, type CitationPatch, type NewSource } from './author'
+import { parseBib } from './bibtex'
+import { replaceCiteKey } from './latexProject'
+import type { CheckRun, CheckStage, Citation, Draft, SearchResult, Verification } from '../types/draftCheck'
 
 export const AUTHOR_KEYS = {
   all: ['author'] as const,
   drafts: ['author', 'drafts'] as const,
   draft: (id: string) => ['author', 'draft', id] as const,
-  check: (id: string) => ['author', 'check', id] as const,
   parse: (id: string) => ['author', 'parse', id] as const,
+  checks: (draftId: string) => ['author', 'checks', draftId] as const,
+  check: (id: string) => ['author', 'check', id] as const,
+  compare: (id: string) => ['author', 'compare', id] as const,
+  library: ['author', 'library'] as const,
+  projects: ['author', 'projects'] as const,
+  project: (id: string) => ['author', 'project', id] as const,
+  sources: (projectId?: string) => ['author', 'sources', projectId ?? ''] as const,
   search: (query: string) => ['author', 'search', query] as const,
+  verify: (claim: string, identifier: string) => ['author', 'verify', claim, identifier] as const,
 }
 
 export function useAuthorDrafts() {
-  return useQuery({ queryKey: AUTHOR_KEYS.drafts, queryFn: authorApi.getDrafts })
+  return useQuery({ queryKey: AUTHOR_KEYS.drafts, queryFn: authorApi.listDrafts })
 }
 
-export function useAuthorDraft(draftId: string) {
-  return useQuery({ queryKey: AUTHOR_KEYS.draft(draftId), queryFn: () => authorApi.getDraft(draftId) })
-}
-
-export function useAuthorCheck(draftId: string) {
-  return useQuery({ queryKey: AUTHOR_KEYS.check(draftId), queryFn: () => authorApi.getCheck(draftId) })
-}
-
-export function useAuthorParse(draftId: string) {
-  return useQuery({ queryKey: AUTHOR_KEYS.parse(draftId), queryFn: () => authorApi.parseDraft(draftId) })
-}
-
-/** An empty query lists the suggested fixes for the draft's open issues (Figma shows results
- * before anything is typed), so the card is never blank. */
-export function useAuthorSearch(query: string) {
-  const trimmed = query.trim()
-  return useQuery({ queryKey: AUTHOR_KEYS.search(trimmed), queryFn: () => authorApi.search(trimmed) })
-}
-
-/** "Re-check" — the one action with real latency, so it is a mutation with isPending. */
-export function useRecheck() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: authorApi.recheck,
-    onSuccess: () => qc.invalidateQueries({ queryKey: AUTHOR_KEYS.all }),
+export function useAuthorDraft(draftId: string | null) {
+  return useQuery({
+    queryKey: AUTHOR_KEYS.draft(draftId ?? ''),
+    queryFn: () => authorApi.getDraft(draftId!),
+    enabled: Boolean(draftId),
   })
 }
 
-/** The verification report PDF; rejects with ReportUnavailable until the gateway has it. */
-export function useExportReport() {
-  return useMutation({ mutationFn: authorApi.exportReport })
+export function useAuthorParse(draftId: string | null) {
+  return useQuery({
+    queryKey: AUTHOR_KEYS.parse(draftId ?? ''),
+    queryFn: () => authorApi.parseDraft(draftId!),
+    enabled: Boolean(draftId),
+  })
 }
 
-/** Session-local writes. Each mutates the store, then invalidates what it changed. */
+export function useDraftChecks(draftId: string | null) {
+  return useQuery({
+    queryKey: AUTHOR_KEYS.checks(draftId ?? ''),
+    queryFn: () => authorApi.listChecks(draftId!),
+    enabled: Boolean(draftId),
+  })
+}
+
+/** One check, kept current: fetched, then followed over SSE while it runs. On its last
+ * stage everything that shows its outcome (the draft, the history, the Library) refetches. */
+export function useAuthorCheck(checkId: string | null) {
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: AUTHOR_KEYS.check(checkId ?? ''),
+    queryFn: ({ signal }) => authorApi.getCheck(checkId!, signal),
+    enabled: Boolean(checkId),
+  })
+  const running = query.data?.status === 'running'
+  const draftId = query.data?.draftId
+
+  useEffect(() => {
+    if (!checkId || !running) return
+    // The stream replays every stage recorded so far on every connection; skip that many
+    // so nothing is appended twice, resyncing on each (re)open (same as useAnalysis).
+    let replayed = 0
+    const resync = () => {
+      replayed = queryClient.getQueryData<CheckRun>(AUTHOR_KEYS.check(checkId))?.stages.length ?? 0
+    }
+    resync()
+    let closed = false
+    const close = followEvents<CheckStage>(
+      `/author/checks/${encodeURIComponent(checkId)}/events`,
+      (stage) => {
+        if (replayed > 0) {
+          replayed -= 1
+        } else {
+          queryClient.setQueryData<CheckRun>(AUTHOR_KEYS.check(checkId), (current) =>
+            current ? { ...current, stages: [...current.stages, stage] } : current,
+          )
+        }
+        if (stage.stage === 'done' || stage.stage === 'error') {
+          void queryClient.invalidateQueries({ queryKey: AUTHOR_KEYS.check(checkId) })
+          if (draftId) {
+            void queryClient.invalidateQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
+            void queryClient.invalidateQueries({ queryKey: AUTHOR_KEYS.checks(draftId) })
+          }
+          void queryClient.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+          void queryClient.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
+          void queryClient.invalidateQueries({ queryKey: AUTHOR_KEYS.projects })
+          if (!closed) {
+            closed = true
+            close()
+          }
+        }
+      },
+      resync,
+    )
+    return close
+  }, [checkId, running, draftId, queryClient])
+
+  return query
+}
+
+export function useCompare(checkId: string | null) {
+  return useQuery({
+    queryKey: AUTHOR_KEYS.compare(checkId ?? ''),
+    queryFn: () => authorApi.compareCheck(checkId!),
+    enabled: Boolean(checkId),
+  })
+}
+
+export function useLibrary() {
+  return useQuery({ queryKey: AUTHOR_KEYS.library, queryFn: authorApi.getLibrary })
+}
+
+export function useAuthorProjects() {
+  return useQuery({ queryKey: AUTHOR_KEYS.projects, queryFn: authorApi.listProjects })
+}
+
+export function useAuthorProject(projectId: string | null) {
+  return useQuery({
+    queryKey: AUTHOR_KEYS.project(projectId ?? ''),
+    queryFn: () => authorApi.getProject(projectId!),
+    enabled: Boolean(projectId),
+  })
+}
+
+export function useSavedSources(projectId?: string) {
+  return useQuery({ queryKey: AUTHOR_KEYS.sources(projectId), queryFn: () => authorApi.listSources(projectId) })
+}
+
+/** Search results for a query; nothing is fetched for an empty one. A search is a public-index
+ * call, so an answer is kept for a while rather than refetched on every focus. */
+export function useAuthorSearch(query: string) {
+  const trimmed = query.trim()
+  return useQuery({
+    queryKey: AUTHOR_KEYS.search(trimmed),
+    queryFn: () => authorApi.search(trimmed),
+    enabled: trimmed.length > 0,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+}
+
+// At most two verifications in flight from this browser at once: each is a retrieval plus a
+// model call on the gateway, and the top results of a search all ask for one at the same
+// time. The rest wait here; the gateway caches each (claim, source) pair, so a repeat is free.
+const VERIFY_CONCURRENCY = 2
+let inFlight = 0
+const waiting: (() => void)[] = []
+
+async function verifyLimited(claim: string, identifier: string): Promise<Verification> {
+  if (inFlight >= VERIFY_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve))
+  inFlight += 1
+  try {
+    return await authorApi.verify(claim, identifier)
+  } finally {
+    inFlight -= 1
+    waiting.shift()?.()
+  }
+}
+
+/** Does this source actually say it? Runs when `enabled` (the top results automatically, the
+ * rest when the user asks), and never twice for the same claim and source. */
+export function useVerification(claim: string, identifier: string, enabled: boolean) {
+  return useQuery({
+    queryKey: AUTHOR_KEYS.verify(claim.trim(), identifier),
+    queryFn: () => verifyLimited(claim.trim(), identifier),
+    enabled: enabled && claim.trim().length > 0 && identifier.length > 0,
+    staleTime: Infinity,
+    retry: false,
+  })
+}
+
+/** "Re-check": starts a run and hands back its id; the caller follows it with useAuthorCheck. */
+export function useStartCheck() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: authorApi.startCheck,
+    onSuccess: (_result, draftId) => {
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.checks(draftId) })
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+    },
+  })
+}
+
+/** The verification report PDF; rejects with the gateway's reason before any check ran. */
+export function useExportReport() {
+  return useMutation({ mutationFn: authorApi.report })
+}
+
+/** The bib keys a draft can cite: its own .bib files plus the project's shared one. */
+export function bibKeysOf(draft: Draft): Set<string> {
+  return new Set(draft.files.filter((f) => f.kind === 'bib').flatMap((f) => parseBib(f.content).map((e) => e.key)))
+}
+
+/** Every write. Each calls the gateway, then invalidates what it changed. */
 export function useAuthorActions() {
   const qc = useQueryClient()
   const touched = (draftId: string) => {
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
-    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.check(draftId) })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.checks(draftId) })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.projects })
   }
+  const libraryChanged = () => {
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.projects })
+    void qc.invalidateQueries({ queryKey: ['author', 'project'] })
+    void qc.invalidateQueries({ queryKey: ['author', 'sources'] })
+    void qc.invalidateQueries({ queryKey: ['author', 'search'] })
+  }
+
+  /** Appends a BibTeX entry to the bibliography the draft cites from: its own .bib when it
+   * has one, else the project's shared .bib, else a new main.bib in the draft. */
+  const addBibEntry = async (draft: Draft, bibtex: string): Promise<void> => {
+    const own = draft.files.find((f) => f.kind === 'bib' && !f.shared)
+    const shared = draft.files.find((f) => f.kind === 'bib' && f.shared)
+    const append = (content: string) => `${content.trimEnd()}\n\n${bibtex}\n`.replace(/^\n+/, '')
+    if (own) {
+      await authorApi.putFile(draft.id, own.name, append(own.content))
+    } else if (shared && draft.projectId) {
+      await authorApi.updateProject(draft.projectId, { bib: append(shared.content), bibName: shared.name })
+    } else {
+      await authorApi.putFile(draft.id, 'main.bib', append(''))
+    }
+  }
+
   return {
-    createDraft: (title?: string): string => {
-      const draft = authorStore.createDraft(title)
+    createDraft: async (body: Parameters<typeof authorApi.createDraft>[0] = {}): Promise<Draft> => {
+      const draft = await authorApi.createDraft(body)
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
-      return draft.id
+      libraryChanged()
+      return draft
     },
-    updateFile: (draftId: string, name: string, content: string): void => {
-      authorStore.updateFile(draftId, name, content)
+    uploadDraft: async (file: File, projectId?: string | null): Promise<Draft> => {
+      const draft = await authorApi.uploadDraft(file, projectId)
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+      libraryChanged()
+      return draft
+    },
+    updateDraft: async (draftId: string, body: { title?: string; projectId?: string | null }): Promise<Draft> => {
+      const draft = await authorApi.updateDraft(draftId, body)
       touched(draftId)
+      return draft
     },
-    addFile: (draftId: string, name: string): void => {
-      authorStore.addFile(draftId, name)
+    deleteDraft: async (draftId: string): Promise<void> => {
+      await authorApi.deleteDraft(draftId)
+      void qc.removeQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+      libraryChanged()
+    },
+    /** Writes one file; `quiet` skips the refetch storm while the editor is typing (the
+     * editor keeps its own copy and re-syncs on save). */
+    putFile: async (draftId: string, name: string, content: string, quiet = false): Promise<Draft> => {
+      const draft = await authorApi.putFile(draftId, name, content)
+      if (quiet) {
+        qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) =>
+          current ? { ...current, files: draft.files, updated: draft.updated } : current,
+        )
+        void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
+      } else {
+        touched(draftId)
+      }
+      return draft
+    },
+    deleteFile: async (draftId: string, name: string): Promise<Draft> => {
+      const draft = await authorApi.deleteFile(draftId, name)
       touched(draftId)
+      return draft
     },
-    saveDraft: (draftId: string): void => {
-      authorStore.saveDraft(draftId)
+    saveDraft: async (draftId: string): Promise<Draft> => {
+      const draft = await authorApi.saveDraft(draftId)
       touched(draftId)
+      return draft
     },
-    /** Returns the next open issue's id, so the caller can move the pager along. */
-    replaceCitation: (citationId: string, replacement: SearchResult): string | undefined => {
-      const citation = authorStore.replaceCitation(citationId, replacement)
-      touched(citation.draftId)
-      return authorStore.nextOpenIssue(citation.draftId, citationId)?.id
+    attachPdf: async (draftId: string, key: string, file: File): Promise<{ key: string; pdf: string }> => {
+      const result = await authorApi.attachPdf(draftId, key, file)
+      touched(draftId)
+      return result
     },
-    overrideCitation: (citationId: string, note: string): string | undefined => {
-      const citation = authorStore.overrideCitation(citationId, note)
-      touched(citation.draftId)
-      return authorStore.nextOpenIssue(citation.draftId, citationId)?.id
+
+    /** "Replace with …" / "Insert \cite" / "Cite this": rewrites the \cite in the source,
+     * adds the entry to the bibliography when it is new, and records the resolution on the
+     * check with the verdict the replacement was verified with (unchecked until a re-check
+     * when it was not). Returns the updated check. */
+    replaceCitation: async (
+      draft: Draft,
+      checkId: string,
+      citation: Citation,
+      result: Pick<SearchResult, 'key' | 'title' | 'authors' | 'year' | 'venue' | 'doi' | 'url' | 'bibtex'>,
+      verification?: Verification | null,
+    ): Promise<CheckRun> => {
+      const file = draft.files.find((f) => f.name === citation.file)
+      if (file) {
+        const next = replaceCiteKey(file.content, citation.line, citation.key, result.key)
+        if (next !== file.content) await authorApi.putFile(draft.id, file.name, next)
+      }
+      if (!bibKeysOf(draft).has(result.key)) await addBibEntry(draft, result.bibtex)
+      const patch: CitationPatch = {
+        resolution: { kind: 'replaced', previousKey: citation.key },
+        key: result.key,
+        sourceRef: {
+          key: result.key,
+          title: result.title,
+          authors: result.authors,
+          year: result.year,
+          venue: result.venue,
+          doi: result.doi,
+          url: result.url,
+          pdf: verification?.evidence?.pdf,
+        },
+        verdict: verification?.verdict ?? 'unchecked',
+      }
+      if (verification?.evidence) patch.evidence = verification.evidence
+      if (verification?.explanation) patch.explanation = verification.explanation
+      const check = await authorApi.patchCitation(checkId, citation.id, patch)
+      qc.setQueryData(AUTHOR_KEYS.check(checkId), check)
+      touched(draft.id)
+      return check
     },
-    reopenCitation: (citationId: string): void => {
-      const citation = authorStore.reopenCitation(citationId)
-      touched(citation.draftId)
+    overrideCitation: async (draftId: string, checkId: string, citation: Citation, note: string): Promise<CheckRun> => {
+      const check = await authorApi.patchCitation(checkId, citation.id, { resolution: { kind: 'overridden', note: note.trim() } })
+      qc.setQueryData(AUTHOR_KEYS.check(checkId), check)
+      touched(draftId)
+      return check
     },
-    attachSourcePdf: (citationId: string, fileName: string): void => {
-      const citation = authorStore.attachSourcePdf(citationId, fileName)
-      touched(citation.draftId)
+    reopenCitation: async (draftId: string, checkId: string, citation: Citation): Promise<CheckRun> => {
+      const check = await authorApi.patchCitation(checkId, citation.id, { resolution: null })
+      qc.setQueryData(AUTHOR_KEYS.check(checkId), check)
+      touched(draftId)
+      return check
     },
-    deleteAll: (): void => {
-      authorStore.deleteAll()
-      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.all })
+
+    createProject: async (body: { name: string; bib?: string; bibName?: string }) => {
+      const project = await authorApi.createProject(body)
+      libraryChanged()
+      return project
+    },
+    importProject: async (file: File) => {
+      const project = await authorApi.importProject(file)
+      libraryChanged()
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+      return project
+    },
+    updateProject: async (projectId: string, body: { name?: string; bib?: string; bibName?: string }) => {
+      const project = await authorApi.updateProject(projectId, body)
+      libraryChanged()
+      void qc.invalidateQueries({ queryKey: ['author', 'draft'] })
+      return project
+    },
+    deleteProject: async (projectId: string) => {
+      await authorApi.deleteProject(projectId)
+      libraryChanged()
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
+    },
+    removeBibEntry: async (projectId: string, key: string) => {
+      const result = await authorApi.removeBibEntry(projectId, key)
+      libraryChanged()
+      void qc.invalidateQueries({ queryKey: ['author', 'draft'] })
+      void qc.invalidateQueries({ queryKey: ['author', 'parse'] })
+      return result
+    },
+    attachProjectPdf: async (projectId: string, key: string, file: File) => {
+      const result = await authorApi.attachProjectPdf(projectId, key, file)
+      libraryChanged()
+      return result
+    },
+
+    saveSource: async (body: NewSource) => {
+      const source = await authorApi.saveSource(body)
+      libraryChanged()
+      return source
+    },
+    deleteSource: async (sourceId: string) => {
+      await authorApi.deleteSource(sourceId)
+      libraryChanged()
+    },
+    addSourceToBib: async (sourceId: string, projectId: string) => {
+      const source = await authorApi.addSourceToBib(sourceId, projectId)
+      libraryChanged()
+      void qc.invalidateQueries({ queryKey: ['author', 'draft'] })
+      return source
+    },
+    attachSourcePdf: async (sourceId: string, file: File) => {
+      const source = await authorApi.attachSourcePdf(sourceId, file)
+      libraryChanged()
+      return source
     },
   }
 }

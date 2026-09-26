@@ -53,6 +53,8 @@ export const VERDICTS: Record<Verdict, VerdictMeta> = {
     soft: 'bg-refutes-soft text-refutes',
     needsWork: true,
   },
+  // Not an open issue: nothing was judged, so there is nothing to replace or override. The
+  // Library's "Needs attention" lists it instead, with "Upload PDF" (same rule as the gateway).
   unavailable: {
     badge: 'Not checked',
     legend: 'unavailable',
@@ -60,7 +62,7 @@ export const VERDICTS: Record<Verdict, VerdictMeta> = {
     text: 'text-ink-muted',
     fill: 'bg-ink-muted',
     soft: 'bg-canvas text-ink-muted',
-    needsWork: true,
+    needsWork: false,
   },
   unchecked: {
     badge: 'Not checked',
@@ -85,6 +87,13 @@ export function emptyCounts(): Record<Verdict, number> {
 /** A citation the author still has to deal with: needs work and not yet replaced/overridden. */
 export function isOpenIssue(citation: Pick<Citation, 'verdict' | 'resolution'>): boolean {
   return VERDICTS[citation.verdict].needsWork && !citation.resolution
+}
+
+/** A verdict the check is not sure of: the source was silent on the sentence, or the judge
+ * answered without a passage to point at. */
+export function isLowConfidence(c: Pick<Citation, 'verdict' | 'evidence'>): boolean {
+  if (c.verdict === 'insufficient') return true
+  return (c.verdict === 'supports' || c.verdict === 'refutes') && !c.evidence?.passage
 }
 
 /** Counts every verdict once, plus how many were checked at all and how many are open. */

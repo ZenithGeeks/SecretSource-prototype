@@ -1,89 +1,143 @@
 /**
- * Service layer for the Author screens: the calls that will become gateway requests
- * (parse, check, search, export). Each resolves through src/lib/authorStore.ts after a
- * realistic delay, so the screens' loading, empty and error states are exercised now and
- * swapping a body for a request() later touches nothing else. Mutations that are local by
- * nature (typing in a file, picking a replacement) stay synchronous in useAuthorActions.
- *
- * Latency: `setMockLatency(0)` in tests. Failure: open the app with `?mock-fail=check`
- * (or parse, search, drafts, report) to see that call's error state.
+ * Typed client for the Author screens: every call goes to the gateway's /author routes
+ * (backend/app/author/router.py), through the same `request` helper as the rest of the app,
+ * so the signed-in user's token travels with it and a 401 signs out.
  */
 
-import { authorStore, type CheckRun } from './authorStore'
-import type { Draft, ParseResult, SearchResult } from '../types/draftCheck'
+import { request, requestBlob } from './api'
+import type {
+  CheckRun,
+  Comparison,
+  Draft,
+  LibraryView,
+  ParseResult,
+  Project,
+  ProjectDetail,
+  Resolution,
+  SavedSource,
+  SearchResult,
+  SourceRef,
+  Verdict,
+  Verification,
+} from '../types/draftCheck'
 
-export type { CheckRun } from './authorStore'
+const json = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
 
-type Operation = 'drafts' | 'parse' | 'check' | 'search' | 'report'
-
-const LATENCY_MS: Record<Operation, number> = {
-  drafts: 250,
-  parse: 400,
-  check: 1200,
-  search: 800,
-  report: 1500,
+const upload = (file: File): RequestInit => {
+  const form = new FormData()
+  form.append('file', file)
+  return { method: 'POST', body: form }
 }
 
-let latencyScale = 1
+const enc = encodeURIComponent
 
-/** Scales every mock delay; 0 makes calls resolve on the next tick. */
-export function setMockLatency(scale: number): void {
-  latencyScale = scale
+/** What PATCH /author/checks/{id}/citations/{cid} takes: the author's decision about an issue. */
+export type CitationPatch = {
+  resolution?: Omit<Resolution, 'at'> | null
+  key?: string
+  sourceRef?: SourceRef
+  verdict?: Verdict
+  evidence?: { passage: string; pdf: string; page: number | null }
+  explanation?: string
 }
 
-function failing(op: Operation): boolean {
-  if (typeof window === 'undefined') return false
-  const wanted = new URLSearchParams(window.location.search).get('mock-fail')
-  return wanted !== null && wanted.split(',').includes(op)
-}
-
-async function simulate<T>(op: Operation, read: () => T): Promise<T> {
-  await new Promise((resolve) => setTimeout(resolve, LATENCY_MS[op] * latencyScale))
-  if (failing(op)) throw new Error(`The ${op} service did not answer. Try again in a moment.`)
-  // A snapshot, not the store's live objects: the gateway will hand back fresh JSON too, and
-  // TanStack Query can only notice a change when the new data differs from what it cached.
-  return structuredClone(read())
-}
-
-export class ReportUnavailable extends Error {
-  constructor() {
-    super('The verification report (PDF) is not available yet — the gateway has no report endpoint.')
-  }
+export type NewSource = Pick<
+  SearchResult,
+  'title' | 'authorsList' | 'year' | 'venue' | 'doi' | 'arxiv' | 'url' | 'identifier' | 'openAccess' | 'citedBy'
+> & {
+  key?: string
+  authors?: string
+  bibtex?: string
+  projectId?: string | null
+  claim?: string | null
+  verdict?: Verdict | null
+  evidence?: Verification['evidence'] | null
 }
 
 export const authorApi = {
-  // TODO gateway: GET /author/drafts
-  getDrafts: (): Promise<Draft[]> => simulate('drafts', () => authorStore.drafts()),
+  // drafts
+  listDrafts: () => request<Draft[]>('/author/drafts'),
+  getDraft: (id: string) => request<Draft>(`/author/drafts/${enc(id)}`),
+  createDraft: (body: { title?: string; projectId?: string | null; files?: { name: string; content: string }[] }) =>
+    request<Draft>('/author/drafts', json('POST', body)),
+  uploadDraft: (file: File, projectId?: string | null) =>
+    request<Draft>(`/author/drafts/upload${projectId ? `?projectId=${enc(projectId)}` : ''}`, upload(file)),
+  updateDraft: (id: string, body: { title?: string; projectId?: string | null }) =>
+    request<Draft>(`/author/drafts/${enc(id)}`, json('PATCH', body)),
+  deleteDraft: (id: string) => request<{ deleted: string }>(`/author/drafts/${enc(id)}`, { method: 'DELETE' }),
+  putFile: (id: string, name: string, content: string) =>
+    request<Draft>(`/author/drafts/${enc(id)}/files/${name.split('/').map(enc).join('/')}`, json('PUT', { content })),
+  deleteFile: (id: string, name: string) =>
+    request<Draft>(`/author/drafts/${enc(id)}/files/${name.split('/').map(enc).join('/')}`, { method: 'DELETE' }),
+  saveDraft: (id: string) => request<Draft>(`/author/drafts/${enc(id)}/save`, { method: 'POST' }),
+  parseDraft: (id: string) => request<ParseResult>(`/author/drafts/${enc(id)}/parse`),
+  attachPdf: (draftId: string, key: string, file: File) =>
+    request<{ key: string; pdf: string }>(`/author/drafts/${enc(draftId)}/citations/${enc(key)}/pdf`, upload(file)),
 
-  // TODO gateway: GET /author/drafts/{id}
-  // Resolves null, not undefined, for a draft that does not exist: TanStack Query treats an
-  // undefined result as an error, and "gone" is an empty state, not a failure.
-  getDraft: (draftId: string): Promise<Draft | null> => simulate('drafts', () => authorStore.draft(draftId) ?? null),
+  // checks
+  startCheck: (draftId: string) => request<{ id: string }>(`/author/drafts/${enc(draftId)}/check`, { method: 'POST' }),
+  listChecks: (draftId: string) => request<CheckRun[]>(`/author/drafts/${enc(draftId)}/checks`),
+  getCheck: (id: string, signal?: AbortSignal) => request<CheckRun>(`/author/checks/${enc(id)}`, { signal }),
+  compareCheck: (id: string) => request<Comparison>(`/author/checks/${enc(id)}/compare`),
+  patchCitation: (checkId: string, citationId: string, patch: CitationPatch) =>
+    request<CheckRun>(`/author/checks/${enc(checkId)}/citations/${enc(citationId)}`, json('PATCH', patch)),
 
-  // TODO gateway: POST /author/drafts/{id}/parse
-  parseDraft: (draftId: string): Promise<ParseResult> => simulate('parse', () => authorStore.parse(draftId)),
+  /** The verification report as a PDF. Rejects (a 409) before the draft was ever checked. */
+  report: (draftId: string) => requestBlob(`/author/drafts/${enc(draftId)}/report`, { method: 'POST' }),
 
-  // TODO gateway: GET /author/drafts/{id}/check
-  getCheck: (draftId: string): Promise<CheckRun | null> => simulate('check', () => authorStore.checkRun(draftId) ?? null),
+  // projects and the library
+  getLibrary: () => request<LibraryView>('/author/library'),
+  listProjects: () => request<Project[]>('/author/projects'),
+  getProject: (id: string) => request<ProjectDetail>(`/author/projects/${enc(id)}`),
+  createProject: (body: { name: string; bib?: string; bibName?: string }) =>
+    request<Project>('/author/projects', json('POST', body)),
+  importProject: (file: File) => request<Project>('/author/projects/import', upload(file)),
+  updateProject: (id: string, body: { name?: string; bib?: string; bibName?: string }) =>
+    request<Project>(`/author/projects/${enc(id)}`, json('PATCH', body)),
+  deleteProject: (id: string) => request<{ deleted: string }>(`/author/projects/${enc(id)}`, { method: 'DELETE' }),
+  removeBibEntry: (projectId: string, key: string) =>
+    request<{ removed: string; entries: number }>(`/author/projects/${enc(projectId)}/bib/${enc(key)}`, { method: 'DELETE' }),
+  attachProjectPdf: (projectId: string, key: string, file: File) =>
+    request<{ key: string; pdf: string }>(`/author/projects/${enc(projectId)}/bib/${enc(key)}/pdf`, upload(file)),
 
-  // TODO gateway: POST /author/drafts/{id}/check — async with progress events (see #204)
-  recheck: (draftId: string): Promise<CheckRun> => simulate('check', () => authorStore.recheck(draftId)),
+  // saved sources
+  listSources: (projectId?: string) =>
+    request<SavedSource[]>(`/author/sources${projectId ? `?project=${enc(projectId)}` : ''}`),
+  saveSource: (body: NewSource) => request<SavedSource>('/author/sources', json('POST', body)),
+  deleteSource: (id: string) => request<{ deleted: string }>(`/author/sources/${enc(id)}`, { method: 'DELETE' }),
+  addSourceToBib: (id: string, projectId: string) =>
+    request<SavedSource>(`/author/sources/${enc(id)}/add-to-bib`, json('POST', { projectId })),
+  attachSourcePdf: (id: string, file: File) => request<SavedSource>(`/author/sources/${enc(id)}/pdf`, upload(file)),
 
-  // TODO gateway: GET /author/search?q=…  (Semantic Scholar · Crossref · arXiv)
-  search: (query: string): Promise<SearchResult[]> => simulate('search', () => authorStore.search(query)),
+  // find a source
+  search: (q: string, limit = 8) =>
+    request<{ results: SearchResult[]; libraryCount: number }>(`/author/search?q=${enc(q)}&limit=${limit}`),
+  verify: (claim: string, identifier: string) =>
+    request<Verification>('/author/search/verify', json('POST', { claim, identifier })),
 
-  /** The verification report PDF. There is no endpoint yet, so this always rejects with
-   * ReportUnavailable after the usual delay; the Export menu shows that as its error state. */
-  // TODO gateway: POST /author/drafts/{id}/report → application/pdf
-  exportReport: (draftId: string): Promise<Blob> =>
-    simulate('report', () => {
-      void draftId
-      throw new ReportUnavailable()
-    }),
+  // your data
+  exportData: () => request<Record<string, unknown>>('/author/export'),
+}
+
+/** The gateway's own words out of a failed request ("409: {"detail":"..."}" → the detail). */
+export function errorMessage(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error)
+  const body = text.replace(/^\d{3}: /, '')
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown }
+    if (typeof parsed.detail === 'string') return parsed.detail
+  } catch {
+    // not JSON
+  }
+  return body
 }
 
 /** "checked 2 min ago" · "checked yesterday" · "not checked yet". */
-export function checkedLabel(iso: string | null, now = Date.now()): string {
+export function checkedLabel(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return 'not checked yet'
   const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60_000))
   if (minutes < 1) return 'checked just now'
@@ -93,4 +147,10 @@ export function checkedLabel(iso: string | null, now = Date.now()): string {
   const days = Math.round(hours / 24)
   if (days === 1) return 'checked yesterday'
   return `checked ${days} days ago`
+}
+
+/** "Checked 2 min ago" for a card footer, "Not checked yet" when never. */
+export function checkedSentence(iso: string | null | undefined): string {
+  const label = checkedLabel(iso)
+  return label.charAt(0).toUpperCase() + label.slice(1)
 }

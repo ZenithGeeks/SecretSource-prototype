@@ -42,9 +42,13 @@ export function annotationFor(citation: Citation): string {
   const verdict = VERDICTS[citation.verdict].badge
   const detail =
     citation.explanation ??
-    (citation.verdict === 'unavailable' ? 'The source PDF could not be read.' : 'Not checked yet.')
-  const confidence = citation.confidence !== undefined ? ` (${citation.confidence.toFixed(2)} confidence)` : ''
-  return `% SecretSource: ${verdict}${confidence} — \\cite{${citation.key}}: ${detail.replace(/\s+/g, ' ')}`
+    (citation.verdict === 'unavailable'
+      ? `The source could not be read: ${citation.message ?? 'no PDF'}.`
+      : citation.reason === 'missing-key'
+        ? 'No entry in the bibliography.'
+        : 'Not checked yet.')
+  const where = citation.evidence?.page ? ` (${citation.evidence.pdf} p.${citation.evidence.page})` : ''
+  return `% SecretSource: ${verdict}${where} — \\cite{${citation.key}}: ${detail.replace(/\s+/g, ' ')}`
 }
 
 /** `file` with a `% SecretSource:` line above every line that holds an open issue. Lines

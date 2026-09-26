@@ -1,7 +1,9 @@
 /**
- * The data model shared by every Author screen: Draft check (Figma 558:3647), the LaTeX
- * editor (565:3957) and its Export menu (565:4207). Defined once here so the screens, the
- * store and the mocks agree on shapes and, through the store, on counts.
+ * The data model shared by every Author screen: Check a draft (Figma 558:3647), the LaTeX
+ * editor (565:3957) and its Export menu (565:4207), the Library (597:3631), a project's
+ * detail (597:4404) and Find a source (597:3930). These are the shapes the gateway's
+ * /author routes answer with (backend/app/author/router.py), defined once here so the
+ * service, the hooks and the screens agree.
  *
  * `Verdict` is the ONE verdict union for the Author role. Its labels, badge kind and colour
  * classes live in src/lib/verdict.ts — screens never map a verdict to a word or a colour
@@ -17,24 +19,26 @@
  */
 export type Verdict = 'supports' | 'refutes' | 'insufficient' | 'unavailable' | 'unchecked'
 
-/** One file of a draft's LaTeX project. `dirty` = edited since the last save. */
+/** One file of a draft's LaTeX project. `shared` marks the project's .bib, which every draft
+ * of the project reads; `dirty` is the editor's own flag for unsaved typing. */
 export type ProjectFile = {
-  name: string // "related-work.tex", "main.bib"
+  name: string // "related-work.tex", "main.bib", "chapters/intro.tex"
   kind: 'tex' | 'bib'
   content: string
-  dirty: boolean
+  shared?: boolean
+  dirty?: boolean
 }
 
-/** The work a \cite key resolves to, as far as the bibliography (and Crossref) know it. */
+/** The work a \cite key resolves to, as far as the bibliography knows it. */
 export type SourceRef = {
   key: string // the bib key
   title: string
   authors: string // "Khattab & Zaharia"
-  year: number
+  year: number | null
   venue?: string
   doi?: string
   url?: string
-  /** The PDF the check read, if one was found or uploaded: "colbert.pdf". */
+  /** The PDF the check read, if one was found or uploaded: "colbert-1a2b3c.pdf". */
   pdf?: string
 }
 
@@ -42,7 +46,7 @@ export type SourceRef = {
 export type Evidence = {
   passage: string
   pdf: string
-  page: number
+  page: number | null
 }
 
 /** What the author did about an issue. A resolved issue stays in the list but is not open. */
@@ -57,21 +61,20 @@ export type Resolution = {
 /** One \cite in one sentence, and the check's verdict on it. */
 export type Citation = {
   id: string
-  draftId: string
   key: string // the \cite key as written
   file: string // ProjectFile.name
   line: number // 1-based line holding the \cite
+  column: number
   section?: string // "Related work", for the "By section" filter
   sentence: string // the raw LaTeX sentence, as shown in "Your sentence"
-  claim: string // the sentence in plain words, as shown in the issue row
+  claim: string // the sentence in plain words, what the pipeline judged
   verdict: Verdict
-  confidence?: number // 0..1; absent when unavailable or unchecked
   sourceRef?: SourceRef
   evidence?: Evidence
   explanation?: string // the "Why:" line
-  /** "Bib metadata matches Crossref — title, authors, year, DOI", or what did not match. */
-  metadataMatch?: { ok: boolean; text: string }
-  suggestedReplacement?: SearchResult
+  /** Why the source could not be read (unavailable) or the key could not resolve (unchecked). */
+  reason?: string
+  message?: string
   resolution?: Resolution
 }
 
@@ -102,7 +105,6 @@ export type DraftStatus = {
 
 /** What changed between the last two checks, for the "Since v2" box. */
 export type CheckDelta = {
-  previousVersion: number
   addedCitations: number
   fixedIssues: number
   newIssues: number
@@ -110,28 +112,175 @@ export type CheckDelta = {
 
 export type Draft = {
   id: string
+  projectId: string | null
   title: string
   version: number
-  lastCheckedAt: string | null // ISO; null = not checked yet
-  status: DraftStatus
   files: ProjectFile[]
-  sinceLastCheck?: CheckDelta
+  /** Uploaded source PDFs by bib key. */
+  pdfs: Record<string, string>
+  status: DraftStatus
+  lastCheckedAt: string | null // ISO; null = not checked yet
+  lastCheckId: string | null
+  runningCheckId: string | null
+  sinceLastCheck: CheckDelta | null
+  checks: number
+  created: string
+  updated: string
+  savedAt: string
 }
 
-/** A paper found by "Find sources" (Semantic Scholar · Crossref · arXiv). */
+/** A stage of a running check, streamed over SSE like an analysis's stages. */
+export type CheckStage = {
+  stage: 'planned' | 'checking' | 'checked' | 'done' | 'error'
+  at?: number
+  checks?: number
+  sources?: number
+  claim?: number
+  key?: string
+  source?: string // what the citation is being checked against
+  verdict?: Verdict
+  reason?: string
+  message?: string
+}
+
+/** One run of "Re-check" on a draft: its citations and how it compares with the run before. */
+export type CheckRun = {
+  id: string
+  draftId: string
+  version: number
+  status: 'running' | 'done' | 'error'
+  message?: string
+  startedAt: string
+  finishedAt: string | null
+  summary: DraftStatus
+  sinceLastCheck: CheckDelta | null
+  previousVersion: number | null
+  previousId: string | null
+  stages: CheckStage[]
+  citations?: Citation[]
+}
+
+/** One row of "Compare vN with vN-1". */
+export type CompareRow = {
+  key: string
+  claim: string
+  file: string
+  line: number
+  before: Verdict | null
+  after: Verdict | null
+  change: 'added' | 'removed' | 'fixed' | 'new' | 'changed' | 'same'
+}
+
+export type Comparison = {
+  current: { id: string; version: number }
+  previous: { id: string; version: number }
+  rows: CompareRow[]
+}
+
+/** A paper found by Find a source (Semantic Scholar, merged with the user's own library). */
 export type SearchResult = {
   id: string
   key: string // the bib key it would get
   title: string
   authors: string // "Santhanam et al."
-  venue: string // "NAACL"
-  year: number
-  citedBy: number
+  authorsList: string[]
+  year: number | null
+  venue: string
+  doi: string
+  arxiv: string
+  url: string
+  /** What the gateway verifies the claim against: a DOI, arXiv id, URL or title. */
+  identifier: string
   openAccess: boolean
-  similarity: number // 0..1
-  bibtex: string // the entry to add when it is cited
-  /** The passage that matched, when the search had one — shown as the suggested fix. */
+  citedBy: number | null
+  /** 0..1 word overlap of the query with the title and abstract — a ranking, not a verdict. */
+  similarity: number
+  similarityBasis: 'abstract' | 'title'
+  inLibrary: boolean
+  /** One of the user's drafts already cites this entry. */
+  cited?: boolean
+  projectId?: string
+  bibName?: string | null
+  bibtex: string
+  saved?: boolean
+}
+
+/** What POST /author/search/verify says about one result and one claim. */
+export type Verification = {
+  verdict: Verdict
+  explanation?: string
   evidence?: Evidence
-  /** Set when this result is the suggested fix for a specific issue. */
-  suggestedForCitationId?: string
+  quote?: string
+  reasoning?: string
+  reason?: string
+  message?: string
+  cached: boolean
+}
+
+/** A source saved from Find a source, into a project or into Unsorted sources. */
+export type SavedSource = {
+  id: string
+  projectId: string | null
+  key: string
+  title: string
+  authors: string
+  authorsList: string[]
+  year: number | null
+  venue: string
+  doi: string
+  arxiv: string
+  url: string
+  identifier: string
+  openAccess: boolean
+  citedBy: number | null
+  bibtex: string
+  claim?: string | null
+  verdict?: Verdict | null
+  evidence?: Evidence | null
+  pdf?: string
+  inBib: boolean
+  bibName: string | null
+  savedAt: string
+}
+
+/** A project card on the Library (597:3631): a .bib plus the drafts written against it. */
+export type Project = {
+  id: string
+  name: string
+  bibName: string | null
+  entries: number
+  cited: number
+  needWork: number
+  tally: Record<Verdict, number>
+  drafts: number
+  checkedAt: string | null
+  pdfs: Record<string, string>
+  created: string
+  updated: string
+}
+
+/** The project detail (597:4404): the card plus its .bib, drafts and their check histories. */
+export type ProjectDetail = Project & {
+  bib: { name: string; content: string } | null
+  draftList: Draft[]
+  history: Record<string, CheckRun[]>
+}
+
+/** A "Needs attention" row on the Library. */
+export type AttentionRow = {
+  kind: 'replace' | 'upload-pdf' | 'remove'
+  key: string
+  title: string
+  detail: string
+  draftId?: string
+  projectId?: string | null
+  checkId?: string
+  citationId?: string
+}
+
+export type LibraryView = {
+  projects: Project[]
+  unsorted: { sources: number; pdfs: number; drafts: number }
+  attention: AttentionRow[]
+  saved: SavedSource[]
 }
