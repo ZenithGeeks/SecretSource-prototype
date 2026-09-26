@@ -132,6 +132,10 @@ describe('Author Library', () => {
     expect(screen.getByText('No unsorted sources')).toBeInTheDocument()
     expect(screen.queryByText(/SPLADE v2/)).not.toBeInTheDocument()
     expect(gateway.calls).toContain('GET /author/sources?project=')
+    // "View check history" on Check a draft lands here for a draft in no project: its history shows.
+    const unfiled = [...gateway.drafts.values()].find((d) => !d.projectId)!
+    expect(screen.getByRole('heading', { name: `Check history · ${unfiled.title}` })).toBeInTheDocument()
+    expect(gateway.calls).toContain(`GET /author/drafts/${unfiled.id}/checks`)
   })
 
   test('a gateway error shows the message and a retry', async () => {

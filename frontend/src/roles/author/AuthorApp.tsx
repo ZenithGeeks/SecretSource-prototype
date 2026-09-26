@@ -190,6 +190,7 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'library' && (
         <Library
           projectId={projectId}
+          draftId={draftId}
           onOpenProject={setProjectId}
           onOpenEditor={(id, file, line) => openEditor({ draftId: id, file, line })}
           onFindSource={findSource}

@@ -10,7 +10,7 @@ import { useCallback, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { checkedLabel, errorMessage } from '../../../lib/author'
-import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useSavedSources } from '../../../lib/useAuthor'
+import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
 import { statusLabel, VERDICTS } from '../../../lib/verdict'
 import type { CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
@@ -162,11 +162,14 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
 
 export function ProjectDetail({
   projectId,
+  initialDraft = null,
   onBack,
   onOpenEditor,
   onOpenDraft,
 }: {
   projectId: string
+  /** The draft to open the check history on; the first one otherwise. */
+  initialDraft?: string | null
   onBack: () => void
   onOpenEditor: (draftId: string, file?: string, line?: number) => void
   onOpenDraft: (draftId: string) => void
@@ -177,9 +180,13 @@ export function ProjectDetail({
   const drafts = useAuthorDrafts()
   const sources = useSavedSources(unsorted ? '' : undefined)
   const actions = useAuthorActions()
-  const [selectedDraft, setSelectedDraft] = useState<string | null>(null)
+  const [selectedDraft, setSelectedDraft] = useState<string | null>(initialDraft)
   const [toast, setToast] = useState<string | null>(null)
   const closeToast = useCallback(() => setToast(null), [])
+  // Unsorted drafts belong to no project, so their check history comes from the draft itself.
+  const unfiled = unsorted ? (drafts.data ?? []).filter((d) => !d.projectId) : []
+  const unfiledCurrent = unfiled.find((d) => d.id === selectedDraft) ?? unfiled[0]
+  const unfiledChecks = useDraftChecks(unfiledCurrent?.id ?? null)
 
   const back = (
     <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
@@ -198,7 +205,6 @@ export function ProjectDetail({
 
   if (unsorted) {
     if (drafts.isPending || sources.isPending) return <LoadingScreen label="Loading unsorted sources…" />
-    const unfiled = (drafts.data ?? []).filter((d) => !d.projectId)
     return (
       <FadeIn className="flex flex-col gap-5">
         {back}
@@ -212,10 +218,17 @@ export function ProjectDetail({
             New draft
           </Button>
         </header>
-        <div className="grid items-start gap-4 lg:grid-cols-2">
-          <DraftList drafts={unfiled} selected={selectedDraft} onSelect={setSelectedDraft} onOpenDraft={onOpenDraft} title="Drafts in no project" />
-          <UnsortedSources sources={sources.data ?? []} onToast={setToast} />
+        <div className="grid items-start gap-4 lg:grid-cols-[2fr_3fr]">
+          <DraftList drafts={unfiled} selected={unfiledCurrent?.id ?? null} onSelect={setSelectedDraft} onOpenDraft={onOpenDraft} title="Drafts in no project" />
+          {unfiledCurrent ? (
+            <CheckHistory draft={unfiledCurrent} runs={unfiledChecks.data ?? []} onOpenEditor={() => onOpenEditor(unfiledCurrent.id)} />
+          ) : (
+            <Card>
+              <Empty title="No drafts outside a project" hint="Every draft is in a project. Upload a .tex on Check a draft to start one here." />
+            </Card>
+          )}
         </div>
+        <UnsortedSources sources={sources.data ?? []} onToast={setToast} />
         <Toast message={toast} onClose={closeToast} />
       </FadeIn>
     )

@@ -53,6 +53,7 @@ const ATTENTION_ACTION = { replace: 'Replace', 'upload-pdf': 'Upload PDF', remov
 
 export function Library({
   projectId,
+  draftId,
   onOpenProject,
   onOpenEditor,
   onFindSource,
@@ -60,6 +61,8 @@ export function Library({
 }: {
   /** `?project=`: a project's detail, "unsorted", or none for the landing. */
   projectId: string | null
+  /** `?draft=`: the draft whose check history the detail opens on ("View check history"). */
+  draftId?: string | null
   onOpenProject: (id: string | null) => void
   onOpenEditor: (draftId: string, file?: string, line?: number) => void
   onFindSource: (request?: ReplacementRequest) => void
@@ -78,6 +81,7 @@ export function Library({
     return (
       <ProjectDetail
         projectId={projectId}
+        initialDraft={draftId ?? null}
         onBack={() => onOpenProject(null)}
         onOpenEditor={onOpenEditor}
         onOpenDraft={onOpenDraft}
