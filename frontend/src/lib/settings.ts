@@ -28,8 +28,8 @@ export type Settings = {
 }
 
 const DEFAULTS: Settings = {
-  displayName: 'Wittawat',
-  email: 'wittawat@kmutt.ac.th',
+  displayName: 'Alex',
+  email: 'alex@kmutt.ac.th',
   paperVersion: 'Newest',
   strictness: 'Balanced',
   checkOnAdd: true,

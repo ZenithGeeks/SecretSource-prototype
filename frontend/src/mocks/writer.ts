@@ -83,7 +83,7 @@ export const MOCK_PAPERS: Paper[] = [
 ]
 
 export const MOCK_HOME: WriterHome = {
-  user: 'Wittawat',
+  user: 'Alex',
   alert: '2 claims in your draft still point at sources that do not say that.',
   draftFileName: 'draft-v3.docx',
   draftLastCheckedLabel: 'checked 2h ago',

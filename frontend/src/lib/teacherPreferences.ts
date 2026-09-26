@@ -24,7 +24,7 @@ const DEFAULTS: TeacherPreferences = {
   defaultClassId: 'class-literary-2b',
   hideStudentNames: false,
   studentReportVisibility: true,
-  sendReportsAs: 'Wittawat S.',
+  sendReportsAs: 'Alex S.',
   weeklyDigest: true,
   digestDay: 'Monday',
   batchFinishedNotification: true,
