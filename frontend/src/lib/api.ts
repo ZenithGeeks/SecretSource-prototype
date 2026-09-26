@@ -55,6 +55,7 @@ export type Claim = {
 
 export type Stage = {
   stage:
+    | 'queued'
     | 'extracting'
     | 'extracted'
     | 'planned'

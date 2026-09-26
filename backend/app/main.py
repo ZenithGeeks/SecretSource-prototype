@@ -50,6 +50,7 @@ from app.auth import current_user
 from app.config import (
     AVATARS_DIR,
     PAPERS_DIR,
+    PARALLEL_ANALYSES,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
     PARALLEL_SOURCES,
@@ -87,6 +88,10 @@ streams: dict[str, asyncio.Queue] = {}
 # services and the LLM (#170). _run takes its own limit first, then one of these.
 all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
 all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
+# Extraction (GROBID + EXTRACT_WORKERS LLM calls) has no limit of its own, unlike the two above,
+# so a burst of starts used to send all of it at once. A run waits here before extraction, then
+# an accepted run is unaffected by later starts still waiting.
+all_analyses = asyncio.Semaphore(PARALLEL_ANALYSES)
 
 
 def restore():
@@ -189,6 +194,12 @@ async def _publish(analysis_id: str, stage: str, **fields):
 
 async def _run(analysis_id: str, paper: str, verify: bool):
     analysis = analyses[analysis_id]
+    await _publish(analysis_id, "queued", message="waiting for a free analysis slot")
+    async with all_analyses:
+        await _run_queued(analysis_id, analysis, paper, verify)
+
+
+async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
         extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
