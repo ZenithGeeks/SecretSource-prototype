@@ -234,7 +234,7 @@ function ProjectDetail({
           className="max-w-xl"
         />
         <div className="flex flex-wrap gap-2">
-          {['All', ...library.clusters, 'Unverified'].map((option) => (
+          {library.clusters.map((option) => (
             <button
               key={option}
               type="button"
