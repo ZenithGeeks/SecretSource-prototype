@@ -7,7 +7,7 @@
 import { Bookmark, Copy, Download, Search, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Empty, Input, VerdictBadge } from '../../../components/ui'
+import { Button, Empty, FadeIn, Input, LoadingScreen, VerdictBadge } from '../../../components/ui'
 import { csvText, downloadText } from '../../../lib/csv'
 import type { FieldConsensus as ConsensusData } from '../../../lib/researcher'
 import { useFieldConsensus } from '../../../lib/useResearcher'
@@ -139,7 +139,7 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
   const [question, setQuestion] = useState('')
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
-  const { data: consensus, isError } = useFieldConsensus(question)
+  const { data: consensus, isError, isPending } = useFieldConsensus(question)
 
   return (
     <>
@@ -167,16 +167,19 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
         </form>
       </header>
 
+      {isPending && <LoadingScreen label="Checking your library…" />}
       {isError && <Empty title="That question could not be checked" hint="Refresh the page and try again." />}
       {consensus && (
-        <ConsensusResults
-          consensus={consensus}
-          saved={saved}
-          setSaved={setSaved}
-          copied={copied}
-          setCopied={setCopied}
-          onOpenAnalysis={onOpenAnalysis}
-        />
+        <FadeIn className="flex flex-col gap-4">
+          <ConsensusResults
+            consensus={consensus}
+            saved={saved}
+            setSaved={setSaved}
+            copied={copied}
+            setCopied={setCopied}
+            onOpenAnalysis={onOpenAnalysis}
+          />
+        </FadeIn>
       )}
     </>
   )

@@ -7,7 +7,7 @@
 import { FileSearch, FileText, Library, Search, Waypoints } from 'lucide-react'
 import type { ComponentType } from 'react'
 
-import { Card, Empty } from '../../../components/ui'
+import { Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
 import { useAuth } from '../../../lib/useAuth'
@@ -63,7 +63,7 @@ export function Home({
   const { displayName } = useSettings()
   const { session } = useAuth()
   if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
-  if (!home) return null
+  if (!home) return <LoadingScreen label="Loading your library…" />
 
   // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
   // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
@@ -71,7 +71,7 @@ export function Home({
   const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
 
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
         <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
           {greeting(firstName)}
@@ -177,6 +177,6 @@ export function Home({
         </div>
         <TallyBar tally={home.library.tally} />
       </button>
-    </>
+    </FadeIn>
   )
 }
