@@ -243,24 +243,26 @@ describe('avatar image', () => {
   })
 })
 
-describe('avatar upload and remove roll back like every other row', () => {
+describe('avatar upload and remove when the preferences PATCH fails', () => {
   const stored = '/api/user/avatar/me?v=1'
 
-  /** A gateway where the file calls succeed, the preferences PATCH fails, and the avatar
-   * file itself is not there to fetch. */
-  function gateway() {
+  /** A gateway where the file calls succeed and the preferences PATCH fails. `onDisk` is
+   * whether the avatar file is there to fetch afterwards: it is after an upload (the upload
+   * replaced it) and not after a remove. */
+  function gateway(onDisk: boolean) {
     return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (url.endsWith('/api/user/preferences') && method === 'GET') return Promise.resolve(new Response('{}', { status: 200 }))
       if (url.endsWith('/api/user/preferences') && method === 'PATCH') return Promise.resolve(new Response('down', { status: 500 }))
       if (url.endsWith('/api/user/avatar') && method === 'POST') return Promise.resolve(new Response(JSON.stringify({ url: stored }), { status: 200 }))
       if (url.endsWith('/api/user/avatar') && method === 'DELETE') return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }))
+      if (onDisk) return Promise.resolve(new Response(new Blob(['png']), { status: 200 }))
       return Promise.resolve(new Response('no avatar', { status: 404 }))
     })
   }
 
-  test('a failed PATCH after a successful upload restores the previous avatarUrl and shows initials', async () => {
-    vi.stubGlobal('fetch', gateway())
+  test('a failed PATCH after a successful upload keeps the new avatarUrl, since the file on disk is already the new photo', async () => {
+    vi.stubGlobal('fetch', gateway(true))
     const { container } = renderModal('researcher')
     expect(getSettings().avatarUrl).toBe('')
 
@@ -268,16 +270,36 @@ describe('avatar upload and remove roll back like every other row', () => {
     const picker = container.querySelector('input[type="file"]') as HTMLInputElement
     fireEvent.change(picker, { target: { files: [file] } })
 
+    // The backend keeps one avatar file per user and the upload replaced it, so rolling the
+    // url back to '' would show initials over a photo that exists. The store follows the disk.
+    expect(await screen.findByRole('status')).toHaveTextContent('could not be saved to your account')
+    expect(getSettings().avatarUrl).toBe(stored)
+    expect(await screen.findByRole('img', { name: 'Profile photo' })).toBeInTheDocument()
+    expect(screen.queryByText('W')).not.toBeInTheDocument()
+  })
+
+  test('a failed upload leaves the avatarUrl alone', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/avatar') && init?.method === 'POST') return Promise.resolve(new Response('down', { status: 500 }))
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+    const { container } = renderModal('researcher')
+
+    const file = new File(['png'], 'me.png', { type: 'image/png' })
+    const picker = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(picker, { target: { files: [file] } })
+
     expect(await screen.findByRole('status')).toHaveTextContent('could not be uploaded')
-    expect(getSettings().avatarUrl).toBe('') // rolled back, not left pointing at the new file
-    expect(screen.getByText('W')).toBeInTheDocument() // initials fallback
-    expect(screen.queryByRole('img', { name: 'Profile photo' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
+    expect(getSettings().avatarUrl).toBe('')
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/user/preferences'), expect.objectContaining({ method: 'PATCH' }))
   })
 
   test('a failed PATCH after a successful remove restores the previous avatarUrl and shows initials', async () => {
     updateSettings({ avatarUrl: stored })
-    vi.stubGlobal('fetch', gateway())
+    vi.stubGlobal('fetch', gateway(false))
     renderModal('researcher')
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))

@@ -7,7 +7,8 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { getSettings, resetSettings } from '../src/lib/settings'
-import { usePreferencesSync, useSetSetting } from '../src/lib/useAccountSettings'
+import { getTeacherPreferences, resetTeacherPreferences } from '../src/lib/teacherPreferences'
+import { usePreferencesSync, useSetSetting, useSetTeacherPreference } from '../src/lib/useAccountSettings'
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -16,8 +17,31 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }
 
-beforeEach(() => resetSettings())
+beforeEach(() => {
+  resetSettings()
+  resetTeacherPreferences()
+})
 afterEach(() => vi.unstubAllGlobals())
+
+/** GET answers at once with `{}`; each PATCH is held until the test releases it, in order. */
+function holdPatches(): ((response: Response) => void)[] {
+  const release: ((response: Response) => void)[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return new Promise<Response>((resolve) => release.push(resolve))
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+  )
+  return release
+}
+
+async function answer(release: (response: Response) => void, response: Response) {
+  await act(async () => {
+    release(response)
+    await new Promise((r) => setTimeout(r, 20))
+  })
+}
 
 test('useSetSetting updates optimistically and keeps the value when the PATCH succeeds', async () => {
   vi.stubGlobal(
@@ -68,15 +92,7 @@ test('usePreferencesSync hydrates the local settings store from the server once 
 })
 
 test('a PATCH response never overwrites a newer local value (fast typing, a double toggle)', async () => {
-  // GET answers at once; each PATCH is held until the test releases it, in order.
-  const release: ((response: Response) => void)[] = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.method === 'PATCH') return new Promise<Response>((resolve) => release.push(resolve))
-      return Promise.resolve(new Response('{}', { status: 200 }))
-    }),
-  )
+  const release = holdPatches()
   const { result } = renderHook(() => ({ sync: usePreferencesSync(true), set: useSetSetting() }), { wrapper })
   await waitFor(() => expect(result.current.sync.data).toEqual({}))
 
@@ -86,15 +102,60 @@ test('a PATCH response never overwrites a newer local value (fast typing, a doub
   await waitFor(() => expect(release).toHaveLength(2))
 
   // The first PATCH answers with the blob as of that write — older than what is typed now.
-  await act(async () => {
-    release[0](new Response(JSON.stringify({ displayName: 'A' }), { status: 200 }))
-    await new Promise((r) => setTimeout(r, 20))
-  })
+  await answer(release[0], new Response(JSON.stringify({ displayName: 'A' }), { status: 200 }))
   expect(getSettings().displayName).toBe('AB') // not reverted to 'A'
 
-  await act(async () => {
-    release[1](new Response(JSON.stringify({ displayName: 'AB' }), { status: 200 }))
-    await new Promise((r) => setTimeout(r, 20))
-  })
+  await answer(release[1], new Response(JSON.stringify({ displayName: 'AB' }), { status: 200 }))
   expect(getSettings().displayName).toBe('AB')
+})
+
+test('an older PATCH failing after a newer one succeeded does not roll the key back', async () => {
+  const release = holdPatches()
+  const { result } = renderHook(() => useSetSetting(), { wrapper })
+
+  result.current('displayName', 'A')
+  result.current('displayName', 'AB')
+  await waitFor(() => expect(release).toHaveLength(2))
+
+  await answer(release[1], new Response(JSON.stringify({ displayName: 'AB' }), { status: 200 }))
+  expect(getSettings().displayName).toBe('AB')
+
+  // The stale failure's rollback target is '' (the value before 'A'), which would overwrite
+  // the newer, already-saved 'AB'.
+  await answer(release[0], new Response('server error', { status: 500 }))
+  expect(getSettings().displayName).toBe('AB')
+})
+
+test('a stale failure is skipped by write order, not by value, so re-typing the same text is safe', async () => {
+  const release = holdPatches()
+  const { result } = renderHook(() => useSetSetting(), { wrapper })
+
+  result.current('displayName', 'ab')
+  result.current('displayName', 'a')
+  result.current('displayName', 'ab') // the current value equals the first write's again
+  await waitFor(() => expect(release).toHaveLength(3))
+
+  await answer(release[0], new Response('server error', { status: 500 }))
+  expect(getSettings().displayName).toBe('ab') // a value check would have reverted to ''
+
+  await answer(release[1], new Response('server error', { status: 500 }))
+  expect(getSettings().displayName).toBe('ab')
+
+  // Only the latest write's failure rolls back, and it rolls back to its own previous value.
+  await answer(release[2], new Response('server error', { status: 500 }))
+  expect(getSettings().displayName).toBe('a')
+})
+
+test('useSetTeacherPreference applies the same write-order guard', async () => {
+  const release = holdPatches()
+  const { result } = renderHook(() => useSetTeacherPreference(), { wrapper })
+  const initial = getTeacherPreferences().hideStudentNames
+
+  result.current('hideStudentNames', !initial)
+  result.current('hideStudentNames', initial)
+  await waitFor(() => expect(release).toHaveLength(2))
+
+  await answer(release[1], new Response('{}', { status: 200 }))
+  await answer(release[0], new Response('server error', { status: 500 }))
+  expect(getTeacherPreferences().hideStudentNames).toBe(initial) // not flipped by the stale failure
 })

@@ -80,18 +80,26 @@ export function AccountSection() {
       return
     }
     setBusy(true)
-    // Optimistic local write, rolled back if the PATCH fails, the same contract as
-    // useSetSetting — otherwise the store would show the new photo while the server blob
-    // still had the old one, until the next open quietly reverted it.
-    const previous = getSettings().avatarUrl
+    // Optimistic local write plus PATCH, the same contract as useSetSetting — otherwise the
+    // store would show the new photo while the server blob still had the old one, until the
+    // next open quietly reverted it. Unlike useSetSetting there is no rollback once the upload
+    // has gone through: the backend keeps one avatar file per user and the upload has already
+    // replaced it (_replace_avatar), so the previous url would now serve this new photo, or
+    // show initials over a photo that exists. The store follows the disk; the notice says the
+    // account record is behind.
+    let uploaded = false
     try {
       const { url } = await accountApi.uploadAvatar(file)
+      uploaded = true
       updateSettings({ avatarUrl: url })
       await accountApi.patchPreferences({ avatarUrl: url })
       setNotice('')
     } catch {
-      updateSettings({ avatarUrl: previous })
-      setNotice('The avatar could not be uploaded. Try again.')
+      setNotice(
+        uploaded
+          ? 'The photo was uploaded, but it could not be saved to your account. Try again.'
+          : 'The avatar could not be uploaded. Try again.',
+      )
     } finally {
       setBusy(false)
     }

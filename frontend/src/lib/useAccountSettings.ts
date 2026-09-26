@@ -58,16 +58,37 @@ export function usePatchPreference() {
   })
 }
 
+/** One write sequence per store key, shared by every hook instance. A failed PATCH rolls its
+ * key back only while its own write is still the latest for that key: a text row PATCHes on
+ * every keystroke, so an earlier request can fail after a later one has already succeeded,
+ * and reverting then would overwrite the newer, saved value with the older one. The check is
+ * on sequence, not value, so re-typing the same text ("ab" → "a" → "ab") does not let a stale
+ * failure through. Module-level so two instances of the same hook never race each other. */
+const writeSequence = new Map<string, number>()
+
+function beginWrite(store: string, key: string): { isLatest: () => boolean } {
+  const sequenceKey = `${store}.${key}`
+  const id = (writeSequence.get(sequenceKey) ?? 0) + 1
+  writeSequence.set(sequenceKey, id)
+  return { isLatest: () => writeSequence.get(sequenceKey) === id }
+}
+
 /** A `set(key, value)` for the shared Settings store (lib/settings.ts) that updates
- * optimistically and PATCHes the server, rolling the local value back on a failed request. */
+ * optimistically and PATCHes the server, rolling the local value back on a failed request
+ * unless a newer `set` for the same key has happened since. */
 export function useSetSetting() {
   const patch = usePatchPreference()
   return <K extends keyof Settings>(key: K, value: Settings[K]) => {
     const previous = getSettings()[key]
+    const write = beginWrite('settings', key)
     updateSettings({ [key]: value } as Partial<Settings>)
     patch.mutate(
       { [key]: value },
-      { onError: () => updateSettings({ [key]: previous } as Partial<Settings>) },
+      {
+        onError: () => {
+          if (write.isLatest()) updateSettings({ [key]: previous } as Partial<Settings>)
+        },
+      },
     )
   }
 }
@@ -77,10 +98,15 @@ export function useSetTeacherPreference() {
   const patch = usePatchPreference()
   return <K extends keyof TeacherPreferences>(key: K, value: TeacherPreferences[K]) => {
     const previous = getTeacherPreferences()[key]
+    const write = beginWrite('teacher', key)
     updateTeacherPreferences({ [key]: value } as Partial<TeacherPreferences>)
     patch.mutate(
       { [key]: value },
-      { onError: () => updateTeacherPreferences({ [key]: previous } as Partial<TeacherPreferences>) },
+      {
+        onError: () => {
+          if (write.isLatest()) updateTeacherPreferences({ [key]: previous } as Partial<TeacherPreferences>)
+        },
+      },
     )
   }
 }
