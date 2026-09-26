@@ -94,7 +94,8 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Teacher"
       roleIcon={GraduationCap}
       onChangeRole={onChangeRole}
-      showProfileMenu={false}
+      onOpenSettings={() => navigate({ screen: 'settings' })}
+      settingsActive={route.screen === 'settings'}
       sidebar={route.screen === 'essay-check' ? (
         <EssayCheckRoster
           courseId={route.courseId ?? ''}

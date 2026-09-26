@@ -306,6 +306,20 @@ describe('Teacher review and worksheet pages', () => {
 })
 
 describe('Teacher application routing', () => {
+  test('keeps the Essay Check roster and opens Settings from the profile menu', async () => {
+    window.history.replaceState(null, '', '/?role=teacher&screen=essay-check&courseId=class-literary-2b&assignmentId=assignment-essay&studentId=student-anan')
+    renderWithQuery(<TeacherApp />)
+
+    expect(await screen.findByRole('navigation', { name: 'Assignment students' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Anan P\./ })).toHaveAttribute('aria-current', 'page')
+
+    fireEvent.click(screen.getByRole('button', { name: /Wittawat/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }))
+
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('settings')
+  })
+
   test('TeacherApp renders a deep-linked page and navigates through the shell', async () => {
     window.history.replaceState(null, '', '/?role=teacher&screen=classes')
     renderWithQuery(<TeacherApp />)
