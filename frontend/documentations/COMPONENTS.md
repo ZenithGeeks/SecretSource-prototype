@@ -42,7 +42,7 @@ src/
 │  └─ auth/Auth.tsx       sign in / sign up / forgot / reset / check-email (Supabase Auth)
 ├─ roles/                 one folder per role — no cross-role imports
 │  ├─ researcher/         ResearcherApp + screens/ (Home, Library, FieldConsensus, Graph, History, Settings)
-│  ├─ author/             AuthorApp + screens/ (DraftCheck, Editor, FindASource) + components/
+│  ├─ author/             AuthorApp + screens/ (DraftCheck = Home, Editor, Library, ProjectDetail, FindASource) + components/
 │  └─ teacher/            TeacherApp + screens/ (Home, Classes, AddClass, ClassWorkspace,
 │                          Classwork, People, AssignmentDetail, EssayCheck, ReadingQuestions,
 │                          Settings) + role-local components
@@ -50,13 +50,12 @@ src/
 │  ├─ api.ts              gateway client for the analysis app
 │  ├─ supabase.ts         Supabase browser client (auth)      · useAuth.ts   live session
 │  ├─ settings.ts         account settings store (localStorage) + useSettings + applyTheme
-│  ├─ researcher.ts / writer.ts / teacher.ts   per-role typed clients (researcher.ts calls the gateway; writer.ts / teacher.ts read mocks)
+│  ├─ researcher.ts / author.ts / teacher.ts   per-role typed clients (researcher.ts and author.ts call the gateway; teacher.ts reads mocks)
 │  ├─ useResearcher.ts / useWriter.ts / useTeacher.ts   per-role query hooks
-│  │                       (+ useResearcherActions / writer actions; teacher reads and mutations)
-│  ├─ writerStore.ts   in-session mutable store (writer only)
+│  │                       (+ useResearcherActions / useAuthorActions; teacher reads and mutations)
 │  ├─ teacherStore.ts / teacherPreferences.ts  local teacher data and settings stores
 │  └─ claims.ts · useAnalysis.ts · utils.ts (cn)
-└─ mocks/<role>.ts        per-role mock payloads (until gateway endpoints exist)
+└─ mocks/teacher.ts       the teacher's mock payloads (until its gateway endpoints exist)
 
 supabase/  (repo root, NOT under frontend/) — DB migrations + README. Server-only:
            the gateway connects with SUPABASE_SERVICE_ROLE_KEY from backend/.env; that
@@ -293,24 +292,44 @@ is on.
 Writer still uses a store and mocks. Teacher uses the typed `teacherApi` adapter and clone-safe
 `teacherStore` for every page read and local mutation.
 
-### Author data layer (Draft check + LaTeX editor)
+### Author data layer
 
-The Author screens (Figma 08 / 08c) share one chain, separate from the writer files until
-the writer → author rename lands:
+Every Author screen (Figma 08 Home = Check a draft, 08c editor, 08d Library, 08d-1 project
+detail, 08e Find a source) reads the gateway's `/author` routes (`backend/app/author/router.py`)
+through one chain — there is no mock and no in-session store:
 
 ```
-types/draftCheck.ts   Draft, ProjectFile, Citation, ParseWarning, SearchResult, Verdict
-lib/verdict.ts        the ONE Verdict → badge text / legend text / colour classes map
-lib/bibtex.ts         .bib reader + writer      lib/latexProject.ts  \cite scan, warnings, key swap
-mocks/author.ts       every demo item once (drafts, files, citations, search results)
-lib/authorStore.ts    in-session store; replaceCitation rewrites the .tex and merges the .bib
-lib/author.ts         service layer with mock latency (`?mock-fail=check` etc. for errors)
-lib/useAuthor.ts      query hooks + useAuthorActions
+types/draftCheck.ts   Draft, ProjectFile, Citation, CheckRun, ParseWarning, SearchResult, Project, LibraryView, Verdict
+lib/verdict.ts        the ONE Verdict → badge text / legend text / colour classes map, isOpenIssue, summarize
+lib/bibtex.ts         .bib reader + writer      lib/latexProject.ts  \cite scan, warnings, key swap (client-side mirror of the gateway's parse)
+lib/author.ts         authorApi: typed request() calls, one per route
+lib/useAuthor.ts      query hooks (a running check is followed over SSE like an analysis) + useAuthorActions
+lib/latexPreview.ts   the LaTeX.js pipeline for the editor's preview (see below)
 ```
 
-Parse warnings are derived from the project text, not listed in the mock, so an edit in the
-editor changes them the same way a real parse would. Use `VERDICTS[verdict]` for any word or
-colour tied to a verdict — never a local map.
+`useAuthorActions.replaceCitation` is the one composite write: it rewrites the `\cite` in the
+file, appends the BibTeX entry to whichever .bib the draft cites from, and records the
+resolution on the check — the same call from Check a draft's "Insert \cite", the editor's
+popover and Find a source's "Cite this". Use `VERDICTS[verdict]` for any word or colour tied
+to a verdict — never a local map. `unavailable` is not an open issue (the gateway counts the
+same way); the Library's "Needs attention" lists it with "Upload PDF".
+
+History for the Author is the Researcher's History: `components/HistoryWorkspace.tsx`
+(`useHistoryWorkspace`) holds the form, results, page viewer and sidebar list both apps render.
+
+### LaTeX.js preview
+
+`lib/latexPreview.ts` renders one file with `latex.js` (loaded on first use, in its own chunk).
+LaTeX.js 0.12 knows no `\cite`, `\footnote`, `\url`, `\eqref`, `\newcommand`, and none of
+figure / table / tabular / equation / align / verbatim, so `prepareSource` rewrites those (the
+`REWRITES` table in the module says what becomes what) and `SECRETSOURCE_MACROS` adds the
+commands as LaTeX.js custom macros — assigned on the prototype, because LaTeX.js copies the
+*enumerable* members of the macro object and ignores ES class methods. Anything still unknown
+throws with a line number, which the pane shows over the last good render; the editor never
+crashes on it. `PreviewPane` puts the page in a shadow root with KaTeX's layout sheet and
+`preview.css` inside it and KaTeX's `@font-face` rules on the document (a font-face inside a
+shadow root does not register); the woff2 files ship with the bundle through the
+`latex.js/dist` alias in `vite.config.ts` / `vitest.config.ts`.
 
 ### Mutations
 
@@ -397,7 +416,7 @@ local mutations are documented above. Keep role-specific data behind its typed c
 2. `src/roles/<role>/<Role>App.tsx` — copy `ResearcherApp.tsx`, swap the `NAV` array,
    `role="…"`, `roleIcon={…}`.
 3. `src/lib/<role>.ts` + `src/lib/use<Role>.ts` — the typed client and query hooks. A role
-   without gateway endpoints yet can start from `src/mocks/<role>.ts` like writer. Add a
+   without gateway endpoints yet can start from `src/mocks/<role>.ts` like teacher. Add a
    `use<Role>Actions()` hook if the role has create/add interactions.
 4. Wire it into the two shared routing files:
    - `src/screens/Onboarding.tsx` — add the role to the `Role` union and the `ROLES` array.
@@ -405,7 +424,7 @@ local mutations are documented above. Keep role-specific data behind its typed c
      the render case `<YourRoleApp onChangeRole=… />`.
 5. Preview: `npm run dev` → `http://localhost:5173/?role=<role>`.
 
-The **writer** and **teacher** roles are complete working examples to copy from. Reuse
+The **author** and **teacher** roles are complete working examples to copy from. Reuse
 `AppShell`, `Brand`, `ui.tsx`, tokens, lucide. Don't add a second sidebar, button, or CSS system.
 
 ## Figma → code index
