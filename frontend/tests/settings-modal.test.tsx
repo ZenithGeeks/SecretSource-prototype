@@ -165,7 +165,7 @@ describe('row accessible names', () => {
     renderModal('teacher')
     fireEvent.click(screen.getByRole('tab', { name: 'Class and marking' }))
     const input = screen.getByRole('textbox', { name: 'Send reports as' })
-    expect(input).toHaveValue('Wittawat S.')
+    expect(input).toHaveValue('Alex S.')
     expect(input).toBeEnabled()
   })
 })
@@ -177,7 +177,7 @@ describe('display name', () => {
     renderModal('researcher')
 
     const input = screen.getByRole('textbox', { name: 'Display name' })
-    expect(input).toHaveValue('Wittawat')
+    expect(input).toHaveValue('Alex')
 
     fireEvent.change(input, { target: { value: 'Ada Lovelace' } })
     expect(getSettings().displayName).toBe('Ada Lovelace') // optimistic
@@ -275,7 +275,7 @@ describe('avatar upload and remove when the preferences PATCH fails', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('could not be saved to your account')
     expect(getSettings().avatarUrl).toBe(stored)
     expect(await screen.findByRole('img', { name: 'Profile photo' })).toBeInTheDocument()
-    expect(screen.queryByText('W')).not.toBeInTheDocument()
+    expect(screen.queryByText('A')).not.toBeInTheDocument()
   })
 
   test('a failed upload leaves the avatarUrl alone', async () => {
@@ -306,7 +306,7 @@ describe('avatar upload and remove when the preferences PATCH fails', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('could not be removed')
     expect(getSettings().avatarUrl).toBe(stored) // rolled back to what the server blob still has
-    expect(await screen.findByText('W')).toBeInTheDocument() // the file is gone, so initials
+    expect(await screen.findByText('A')).toBeInTheDocument() // the file is gone, so initials
     expect(screen.queryByRole('img', { name: 'Profile photo' })).not.toBeInTheDocument()
     expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
   })
