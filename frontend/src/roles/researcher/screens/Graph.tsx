@@ -403,9 +403,24 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
   const claim = graph.nodes.find((n) => n.id === claimId)
   const edges = graph.edges.filter((e) => e.target === claimId)
   const paper = (id: string) => graph.nodes.find((n) => n.id === id)
+  const [copied, setCopied] = useState(false)
   if (!claim || claim.kind !== 'claim') return null
   const contradicts = edges.some((e) => e.relation === 'contradicts')
   const singleOrigin = edges.filter((e) => e.relation === 'asserts').length <= 1
+
+  const copyParagraph = async () => {
+    const p = (id: string) => paper(id)
+    const lines = edges
+      .filter((e) => e.relation !== 'asserts' && e.quote)
+      .map((e) => {
+        const node = p(e.source)
+        const label = node?.kind === 'paper' ? node.label : e.source
+        return `${label} — ${RELATION_LABEL[e.relation]}: "${e.quote}"`
+      })
+    await navigator.clipboard.writeText([claim.label, ...lines].join('\n\n'))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   return (
     <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
@@ -452,7 +467,9 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
       <div className="mt-4 flex flex-col gap-1.5 text-sm">
         <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><FileText className="size-4" /> Show the deciding page</button>
         <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><Bookmark className="size-4" /> Add these {edges.length} to reading queue</button>
-        <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><Copy className="size-4" /> Copy as related-work paragraph</button>
+        <button type="button" onClick={copyParagraph} className="flex items-center gap-2 text-ink hover:text-accent">
+          <Copy className="size-4" /> {copied ? 'Copied ✓' : 'Copy as related-work paragraph'}
+        </button>
       </div>
     </aside>
   )
