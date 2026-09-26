@@ -541,13 +541,13 @@ def _project(project_id: str, stored: list[dict]) -> dict:
 
 @app.get("/researcher/home")
 async def researcher_home(user: str | None = Depends(current_user)):
-    return researcher.home(team_visible(user))
+    return await asyncio.to_thread(researcher.home, team_visible(user))
 
 
 @app.get("/researcher/projects")
 async def researcher_projects(user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    return researcher.projects(stored, team_visible(user))
+    return await asyncio.to_thread(researcher.projects, stored, team_visible(user))
 
 
 @app.post("/researcher/projects")
@@ -565,7 +565,7 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
 @app.get("/researcher/projects/{project_id}/library")
 async def project_library(project_id: str, user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    found = researcher.library(project_id, stored, team_visible(user))
+    found = await asyncio.to_thread(researcher.library, project_id, stored, team_visible(user))
     if found is None:
         raise HTTPException(404, "no such project")
     return found
@@ -583,19 +583,20 @@ async def add_to_project(
         project["analyses"].append(request.analysis_id)
     project["updated"] = datetime.now(timezone.utc).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    return researcher.projects([project], team_visible(user))[0]
+    projected = await asyncio.to_thread(researcher.projects, [project], team_visible(user))
+    return projected[0]
 
 
 @app.post("/researcher/consensus")
 async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
     """What the works cited across the team's analysed papers say about a question. Reuses the
     verdicts already found; it makes no LLM calls."""
-    return researcher.consensus(request.question, team_visible(user))
+    return await asyncio.to_thread(researcher.consensus, request.question, team_visible(user))
 
 
 @app.get("/researcher/graph")
 async def knowledge_graph(user: str | None = Depends(current_user)):
-    return researcher.graph(team_visible(user))
+    return await asyncio.to_thread(researcher.graph, team_visible(user))
 
 
 # --- account settings, shared by every role (Settings modal) ---
