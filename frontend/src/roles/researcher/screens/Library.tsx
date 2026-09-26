@@ -234,17 +234,17 @@ function ProjectDetail({
           className="max-w-xl"
         />
         <div className="flex flex-wrap gap-2">
-          {library.clusters.map((cluster) => (
+          {['All', ...library.clusters, 'Unverified'].map((option) => (
             <button
-              key={cluster}
+              key={option}
               type="button"
-              onClick={() => setFilter(cluster)}
+              onClick={() => setFilter(option)}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-xs font-medium text-ink',
-                filter === cluster ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
+                filter === option ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
               )}
             >
-              {cluster}
+              {option}
             </button>
           ))}
         </div>
