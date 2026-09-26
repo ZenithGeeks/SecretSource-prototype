@@ -7,18 +7,30 @@
 import { Bookmark, Copy, Download, Search, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Input, VerdictBadge } from '../../../components/ui'
+import { Button, Empty, Input, VerdictBadge } from '../../../components/ui'
 import { csvText, downloadText } from '../../../lib/csv'
+import type { FieldConsensus as ConsensusData } from '../../../lib/researcher'
 import { useFieldConsensus } from '../../../lib/useResearcher'
 
-export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
-  const [draft, setDraft] = useState('')
-  const [question, setQuestion] = useState('')
-  const [saved, setSaved] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const consensus = useFieldConsensus(question).data
-  if (!consensus) return null
-
+/** The stats, note, verdict table and export actions — everything that needs a loaded answer.
+ * Split out so the question form above it can stay on screen while a new question is loading:
+ * the query's `data` goes back to undefined on every question change, and returning null for
+ * the whole screen in that case used to wipe the form along with the results (#226). */
+function ConsensusResults({
+  consensus,
+  saved,
+  setSaved,
+  copied,
+  setCopied,
+  onOpenAnalysis,
+}: {
+  consensus: ConsensusData
+  saved: boolean
+  setSaved: (saved: boolean) => void
+  copied: boolean
+  setCopied: (copied: boolean) => void
+  onOpenAnalysis: (id: string) => void
+}) {
   const copyParagraph = async () => {
     const text =
       consensus.note +
@@ -48,30 +60,6 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
 
   return (
     <>
-      <header className="flex flex-col gap-2">
-        <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          What does the field say about…
-        </h1>
-        <form
-          className="flex flex-col gap-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setQuestion(draft)
-          }}
-        >
-          <Input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="e.g. does late interaction generalize out of domain?"
-            className="max-w-2xl"
-          />
-          <Button type="submit" className="shrink-0">
-            <Search className="size-4" />
-            Ask library
-          </Button>
-        </form>
-      </header>
-
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
         {stats.map((s) => (
@@ -142,6 +130,54 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
           CSV
         </Button>
       </div>
+    </>
+  )
+}
+
+export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
+  const [draft, setDraft] = useState('')
+  const [question, setQuestion] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const { data: consensus, isError } = useFieldConsensus(question)
+
+  return (
+    <>
+      <header className="flex flex-col gap-2">
+        <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
+          What does the field say about…
+        </h1>
+        <form
+          className="flex flex-col gap-3 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setQuestion(draft)
+          }}
+        >
+          <Input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="e.g. does late interaction generalize out of domain?"
+            className="max-w-2xl"
+          />
+          <Button type="submit" className="shrink-0">
+            <Search className="size-4" />
+            Ask library
+          </Button>
+        </form>
+      </header>
+
+      {isError && <Empty title="That question could not be checked" hint="Refresh the page and try again." />}
+      {consensus && (
+        <ConsensusResults
+          consensus={consensus}
+          saved={saved}
+          setSaved={setSaved}
+          copied={copied}
+          setCopied={setCopied}
+          onOpenAnalysis={onOpenAnalysis}
+        />
+      )}
     </>
   )
 }
