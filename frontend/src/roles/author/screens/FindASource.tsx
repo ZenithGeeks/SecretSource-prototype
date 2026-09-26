@@ -144,12 +144,15 @@ function ResultCard({
 
 export function FindASource({
   initialQuery,
+  draftId,
   replacement,
   onQueryChange,
   onReplaced,
   onTargetChange,
 }: {
   initialQuery: string
+  /** The draft the screen was opened from (?draft=): "Add to library" saves into its project. */
+  draftId?: string | null
   /** The citation "Cite this" should replace, from Check a draft's "Find a replacement". */
   replacement?: ReplacementRequest
   /** The submitted query, for the URL. */
@@ -171,7 +174,7 @@ export function FindASource({
   const projects = useAuthorProjects()
   const actions = useAuthorActions()
   const check = useAuthorCheck(replacement?.checkId ?? null)
-  const draft = useAuthorDraft(replacement?.draftId ?? null)
+  const draft = useAuthorDraft(replacement?.draftId ?? draftId ?? null)
   const citation: Citation | undefined = check.data?.citations?.find((c) => c.id === replacement?.citationId)
   const claim = replacement?.claim ?? submitted
 
@@ -205,9 +208,12 @@ export function FindASource({
 
   const save = async (result: SearchResult, verification: Verification | undefined) => {
     try {
-      const projectId = draft.data?.projectId ?? (projects.data?.length === 1 ? projects.data[0].id : null)
+      // Opened for a draft: the source follows that draft's project (Unsorted when it has none).
+      // Opened on its own with one project in the library: that project; otherwise Unsorted.
+      const projectId = draft.data ? draft.data.projectId : projects.data?.length === 1 ? projects.data[0].id : null
+      const project = projects.data?.find((p) => p.id === projectId)
       await actions.saveSource({ ...result, projectId, claim, verdict: verification?.verdict ?? null, evidence: verification?.evidence ?? null })
-      setToast(`Saved ${replacementLabel(result)} to ${projectId ? 'the project' : 'Unsorted sources'}`)
+      setToast(`Saved ${replacementLabel(result)} to ${project ? project.name : 'Unsorted sources'}`)
     } catch (error) {
       setToast(`Could not save: ${errorMessage(error)}`)
     }

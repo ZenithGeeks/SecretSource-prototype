@@ -200,6 +200,7 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
         <FindASource
           key={replacement ? `${replacement.checkId}:${replacement.citationId}` : 'free'}
           initialQuery={query}
+          draftId={draftId}
           replacement={replacement ?? undefined}
           onQueryChange={setQuery}
           onReplaced={(id) => {

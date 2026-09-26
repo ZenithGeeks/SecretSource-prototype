@@ -137,7 +137,9 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
                   {source.authors}
                   {source.year ? ` (${source.year})` : ''} · {source.title}
                 </p>
-                <p className="truncate text-xs text-ink-muted">{source.pdf ? `PDF attached · ${source.pdf}` : 'not linked to a .bib key yet'}</p>
+                <p className="truncate text-xs text-ink-muted">
+                  {[source.pdf ? `PDF attached · ${source.pdf}` : null, source.inBib ? 'in the project .bib' : 'not in a .bib yet'].filter(Boolean).join(' · ')}
+                </p>
               </div>
               <TextLink onClick={() => void copyText(source.bibtex).then((ok) => onToast(copiedMessage(ok, `BibTeX for ${source.key}`)))}>
                 Copy BibTeX

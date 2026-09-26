@@ -100,6 +100,16 @@ describe('Find a source', () => {
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Add to library' })).toHaveLength(1))
   })
 
+  test('opened from a draft in no project, "Add to library" saves to Unsorted sources', async () => {
+    gateway.drafts.get('d1')!.projectId = null
+    renderScreen({ draftId: 'd1' })
+    await screen.findByText(/PLAID/)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add to library' })[0])
+    await waitFor(() => expect(gateway.calls).toContain('POST /author/sources'))
+    expect([...gateway.sources.values()][0].projectId).toBeNull()
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Saved .* to Unsorted sources/))
+  })
+
   test('an index outage is shown with a retry', async () => {
     gateway.fetch.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : (input as Request).url

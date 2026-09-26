@@ -105,8 +105,9 @@ export const authorApi = {
     request<{ key: string; pdf: string }>(`/author/projects/${enc(projectId)}/bib/${enc(key)}/pdf`, upload(file)),
 
   // saved sources
+  /** All saved sources, or one project's; '' is the unsorted ones (saved to no project). */
   listSources: (projectId?: string) =>
-    request<SavedSource[]>(`/author/sources${projectId ? `?project=${enc(projectId)}` : ''}`),
+    request<SavedSource[]>(`/author/sources${projectId === undefined ? '' : `?project=${enc(projectId)}`}`),
   saveSource: (body: NewSource) => request<SavedSource>('/author/sources', json('POST', body)),
   deleteSource: (id: string) => request<{ deleted: string }>(`/author/sources/${enc(id)}`, { method: 'DELETE' }),
   addSourceToBib: (id: string, projectId: string) =>

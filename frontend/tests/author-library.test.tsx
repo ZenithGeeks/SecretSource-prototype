@@ -124,11 +124,14 @@ describe('Author Library', () => {
     fireEvent.click(screen.getByRole('button', { name: '← Library' }))
   })
 
-  test('"unsorted" shows the drafts in no project and an empty sources list', async () => {
+  test('"unsorted" shows the drafts in no project and only the sources saved to no project', async () => {
+    gateway.sources.set('in-project', { id: 'in-project', projectId: 'proj1', key: 'formal2021', title: 'SPLADE v2', authors: 'Formal et al.', authorsList: ['Thibault Formal'], year: 2021, venue: '', doi: '', arxiv: '', url: '', identifier: 'arxiv:2109.10086', openAccess: true, citedBy: 1, bibtex: '', inBib: false, bibName: null, savedAt: '2026-09-27T00:00:00Z' })
     renderLibrary('unsorted')
     expect(await screen.findByRole('heading', { level: 1, name: 'Unsorted sources' })).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'Drafts in no project' })).getAllByRole('button')).toHaveLength(1)
     expect(screen.getByText('No unsorted sources')).toBeInTheDocument()
+    expect(screen.queryByText(/SPLADE v2/)).not.toBeInTheDocument()
+    expect(gateway.calls).toContain('GET /author/sources?project=')
   })
 
   test('a gateway error shows the message and a retry', async () => {
