@@ -440,8 +440,9 @@ def test_the_library_lists_attention_rows_and_saved_sources(client, monkeypatch)
     assert [p["id"] for p in library["projects"]] == [project["id"]]
     kinds = {(row["kind"], row["key"]) for row in library["attention"]}
     assert ("replace", "khattab2020") in kinds
-    assert ("upload-pdf", "nguyen2016") in kinds
+    assert ("upload-pdf", "nguyen2016") in kinds  # unavailable after the check
     assert ("remove", "unused2019") in kinds
+    assert len([r for r in library["attention"] if r["key"] == "nguyen2016"]) == 1
     assert library["unsorted"] == {"sources": 1, "pdfs": 0, "drafts": 0}
     assert [s["id"] for s in library["saved"]] == [saved["id"]]
     assert client.get("/author/library", headers=BO).json()["saved"] == []
@@ -478,7 +479,7 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
     from app.pipeline import sources
 
     def fake_s2(path, params):
-        assert path == "/search" and params["query"] == "index size compression"
+        assert path == "/search" and params["query"] == "index size compression"  # 3 content words pass as-is
         return {
             "data": [
                 {
@@ -518,7 +519,7 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
     by_id = {r["id"]: r for r in found["results"]}
     assert by_id["p1"]["key"] == "santhanam2022" and by_id["p1"]["identifier"] == "10.1/cv2"
     assert by_id["p1"]["openAccess"] is True and by_id["p1"]["inLibrary"] is False
-    assert by_id["p1"]["similarity"] >= by_id["p2"]["similarity"] if "p2" in by_id else True
+    assert [r["inLibrary"] for r in found["results"]] == [True, False], "own entries first, then the index"
     assert "@inproceedings{santhanam2022" in by_id["p1"]["bibtex"]
     # the ColBERT paper is already in the project's .bib, so it shows once, as the library entry
     library_rows = [r for r in found["results"] if r["inLibrary"]]

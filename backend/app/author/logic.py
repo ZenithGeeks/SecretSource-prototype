@@ -538,6 +538,18 @@ def similarity(query: str, text: str) -> float:
     return round(len(q & t) / len(q), 2)
 
 
+def search_terms(query: str, limit: int = 12) -> str:
+    """The words worth sending a public index: a whole sentence ("ColBERTv2 further reduces
+    index size by 6–10× while matching retrieval quality.") gets keyword-matched on its
+    filler, so the stop words and one-letter tokens go and the first `limit` content words
+    stay, in order. A short query (a title, a DOI) passes through untouched."""
+    words = [w.rstrip(".,;:") for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9./:-]*", query)]
+    words = [w for w in words if w.lower() not in _STOP and len(w) > 1]
+    if len(words) <= 3:
+        return query.strip()
+    return " ".join(words[:limit])
+
+
 def bib_key_for(authors: list[str], year: str | int | None, taken: set[str] | None = None) -> str:
     """ "santhanam2022", made unique against `taken` with a letter suffix."""
     surname = ""

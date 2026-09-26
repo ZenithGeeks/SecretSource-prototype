@@ -171,6 +171,14 @@ def test_summary_delta_and_compare():
     assert changes[("c", None, "insufficient")] == "added"
 
 
+def test_search_terms_keeps_the_content_words_of_a_sentence():
+    assert logic.search_terms(
+        "ColBERTv2 further reduces index size by 6–10× while matching retrieval quality."
+    ) == ("ColBERTv2 further reduces index size 10 while matching retrieval quality")
+    assert logic.search_terms("10.1145/3397271.3401075") == "10.1145/3397271.3401075"
+    assert logic.search_terms("ColBERT") == "ColBERT"
+
+
 def test_search_helpers_make_unique_escaped_bibtex():
     assert (
         logic.bib_key_for(["Keshav Santhanam", "Omar Khattab"], 2022, {"santhanam2022"}) == "santhanam2022b"

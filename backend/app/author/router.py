@@ -846,8 +846,9 @@ async def upload_project_pdf(
 
 
 def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str, list[dict]]) -> list[dict]:
-    """What the Library's "Needs attention" lists: contradicted citations (Replace), cited
-    entries no check can read (Upload PDF), and entries no draft cites (Remove)."""
+    """What the Library's "Needs attention" lists: contradicted citations (Replace), sources
+    no check could read — a paywalled work, or an entry with nothing to look it up by
+    (Upload PDF) — and entries no draft cites (Remove)."""
     rows: list[dict] = []
     by_project = {p["id"]: p for p in projects}
     cited_by_project: dict[str, set[str]] = {p["id"]: set() for p in projects}
@@ -861,9 +862,11 @@ def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str
         pdfs = _pdfs_for(draft, project)
         seen: set[str] = set()
         for c in (latest or {}).get("citations", []):
-            if c.get("verdict") == "refutes" and logic.is_open_issue(c) and c["key"] not in seen:
+            if c["key"] in seen or pdfs.get(c["key"]):
+                continue
+            ref = c.get("sourceRef") or {}
+            if c.get("verdict") == "refutes" and logic.is_open_issue(c):
                 seen.add(c["key"])
-                ref = c.get("sourceRef") or {}
                 rows.append(
                     {
                         "kind": "replace",
@@ -879,7 +882,22 @@ def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str
                         "projectId": draft.get("projectId"),
                     }
                 )
-        entries = {e["key"]: e for e in logic.bib_entries(files)}
+            elif c.get("verdict") == "unavailable":
+                seen.add(c["key"])
+                rows.append(
+                    {
+                        "kind": "upload-pdf",
+                        "key": c["key"],
+                        "title": f"{c['key']} · {c.get('message') or 'no PDF could be read'}",
+                        "detail": "Cannot be checked until a source is attached",
+                        "draftId": draft["id"],
+                        "projectId": draft.get("projectId"),
+                    }
+                )
+        # Not checked yet: an entry with nothing to look it up by will fail the same way.
+        entries: dict[str, dict] = {}
+        for entry in logic.bib_entries(files):
+            entries.setdefault(entry["key"], entry)  # the first definition is the one the check uses
         for key in dict.fromkeys(c["key"] for c in cites):
             entry = entries.get(key)
             if entry and logic.lacks_locator(entry) and not pdfs.get(key) and key not in seen:
@@ -1119,21 +1137,44 @@ def _library_row(query: str, project: dict, entry: dict, ref: dict, cited: set[s
         "similarityBasis": "title",
         "inLibrary": True,
         "cited": entry["key"] in (cited or set()),
-        "projectId": project["id"],
+        "projectId": project["id"] if not project["id"].startswith("draft:") else None,
+        "draftId": project["id"][6:] if project["id"].startswith("draft:") else None,
         "bibName": bib.get("name"),
         "bibtex": logic.serialize_bib(entry),
     }
 
 
+def _bib_holders(projects: list[dict], drafts: list[dict]) -> list[dict]:
+    """Everything with a .bib of its own: the projects, and the drafts that carry one
+    instead of citing from a project's. A draft holder looks like a project to _library_row
+    (an id, a `bib`, its `pdfs`)."""
+    holders = list(projects)
+    for draft in drafts:
+        for f in draft.get("files", []):
+            if f.get("kind") == "bib":
+                holders.append(
+                    {
+                        "id": f"draft:{draft['id']}",
+                        "bib": {"name": f["name"], "content": f.get("content", "")},
+                        "pdfs": draft.get("pdfs", {}),
+                    }
+                )
+    return holders
+
+
 def _library_results(
-    query: str, projects: list[dict], sources: list[dict], cited: dict[str, set[str]]
+    query: str, holders: list[dict], sources: list[dict], cited: dict[str, set[str]]
 ) -> list[dict]:
-    """What the user already has that matches the query's words: project bib entries and
-    saved sources."""
+    """What the user already has that matches the query's words: the .bib entries of the
+    projects and of drafts with their own .bib, and saved sources."""
     results = []
-    for project in projects:
+    for project in holders:
         bib = project.get("bib") or {}
+        seen_keys: set[str] = set()
         for entry in logic.parse_bib(bib.get("content", "")):
+            if entry["key"] in seen_keys:
+                continue  # a key defined twice is one work; the first definition is the check's
+            seen_keys.add(entry["key"])
             ref = logic.source_ref(entry, project.get("pdfs"))
             row = _library_row(query, project, entry, ref, cited.get(project["id"]))
             if row["similarity"] > 0:
@@ -1156,9 +1197,10 @@ def _library_results(
 
 @router.get("/search")
 async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends(current_user)):
-    """Find a source: Semantic Scholar plus what the user's own library already holds,
-    ranked by word overlap until a result is verified against the claim (which reads the
-    paper). A public-index outage is a 503, not an empty list."""
+    """Find a source: what the user's own library already holds (first), then Semantic
+    Scholar's answers in its order; every row carries the query's word overlap, and the real
+    match comes from verifying a result against the claim. A public-index outage is a 503,
+    not an empty list."""
     query = q.strip()
     if not query:
         return {"results": [], "libraryCount": 0}
@@ -1170,12 +1212,16 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
         asyncio.to_thread(_rows, DRAFTS, user),
     )
     cited = _cited_keys(projects, drafts)
-    library = _library_results(query, projects, sources, cited)
+    for draft in drafts:  # a draft's own .bib: cited keys count for its holder too
+        if any(f.get("kind") == "bib" for f in draft.get("files", [])):
+            cited[f"draft:{draft['id']}"] = {c["key"] for c in logic.find_cites(draft.get("files", []))}
+    holders = _bib_holders(projects, drafts)
+    library = _library_results(query, holders, sources, cited)
     try:
         found = await asyncio.to_thread(
             _semantic_scholar,
             "/search",
-            {"query": query, "limit": max(1, min(limit, 20)), "fields": SEARCH_FIELDS},
+            {"query": logic.search_terms(query), "limit": max(1, min(limit, 20)), "fields": SEARCH_FIELDS},
         )
     except LookupUnavailable as error:
         raise HTTPException(503, str(error)) from error
@@ -1184,7 +1230,7 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
     # A public-index hit that is already in one of the user's .bib files shows once, as the
     # library entry: its own key, flagged in-library, with the index's citation count added.
     in_bib: dict[str, dict] = {}
-    for project in projects:
+    for project in holders:
         bib = project.get("bib") or {}
         for entry in logic.parse_bib(bib.get("content", "")):
             ref = logic.source_ref(entry, project.get("pdfs"))
@@ -1213,10 +1259,13 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
             row["identifier"] = row.get("identifier") or result["identifier"]
             continue
         results.append(result)
-    results.sort(key=lambda r: (-r["similarity"], r.get("year") or 0))
-    library_count = sum(
-        len(logic.parse_bib((p.get("bib") or {}).get("content", ""))) for p in projects
-    ) + len(sources)
+    # The user's own matching entries first, by how many of the query's words they share;
+    # then the index's answers in the order it ranked them. Word overlap is shown on every row
+    # but does not reorder the index: its ranking reads the abstract, overlap only counts words.
+    results.sort(key=lambda r: (0, -r["similarity"]) if r["inLibrary"] else (1, 0))
+    library_count = sum(len(logic.parse_bib((p.get("bib") or {}).get("content", ""))) for p in holders) + len(
+        sources
+    )
     return {"results": results, "libraryCount": library_count}
 
 
