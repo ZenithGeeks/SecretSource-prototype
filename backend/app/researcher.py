@@ -25,11 +25,18 @@ HOME_QUEUE = 5
 
 def library_papers(analyses: list[dict]) -> list[dict]:
     """The finished analyses, one per paper. A paper analysed twice counts once: the newest
-    run wins. `analyses` is oldest first, as the gateway keeps them."""
+    run wins. `analyses` is oldest first, as the gateway keeps them.
+
+    A single-claim check (POST /verify) is not stored against a paper: it has neither `file`
+    nor `paper`, so it is not part of the library and is skipped here rather than crashing
+    every researcher route with a KeyError (#256)."""
     newest: dict[str, dict] = {}
     for analysis in analyses:
-        if analysis.get("status") == "done":
-            newest[analysis.get("file") or analysis["paper"]] = analysis
+        if analysis.get("status") != "done":
+            continue
+        key = analysis.get("file") or analysis.get("paper")
+        if key:
+            newest[key] = analysis
     return list(newest.values())
 
 

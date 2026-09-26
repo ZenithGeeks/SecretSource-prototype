@@ -8,7 +8,7 @@ import { FileSearch, FileText, Library, Plus, Search, Waypoints } from 'lucide-r
 import type { ComponentType } from 'react'
 import { useState } from 'react'
 
-import { Card } from '../../../components/ui'
+import { Card, Empty } from '../../../components/ui'
 import type { ClaimStanding, ClaimTally, QueueEntry } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
 import { useAuth } from '../../../lib/useAuth'
@@ -60,11 +60,12 @@ export function Home({
   onOpen: (screen: ResearcherScreen) => void
   onOpenAnalysis: (id: string) => void
 }) {
-  const home = useResearcherHome().data
+  const { data: home, isError } = useResearcherHome()
   const { displayName } = useSettings()
   const { session } = useAuth()
   const { analyseQueued } = useResearcherActions()
   const [starting, setStarting] = useState<string | null>(null)
+  if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
   if (!home) return null
 
   // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,

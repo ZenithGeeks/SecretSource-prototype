@@ -8,7 +8,7 @@
 import { ChevronRight, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Input } from '../../../components/ui'
+import { Button, Empty, Input } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
@@ -180,7 +180,8 @@ function ProjectDetail({
   const [filter, setFilter] = useState('All')
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [picking, setPicking] = useState(false)
-  const library = useResearcherLibrary(projectId).data
+  const { data: library, isError } = useResearcherLibrary(projectId)
+  if (isError) return <Empty title="This project could not load" hint="Refresh the page to try again." />
   if (!library) return null
   const hasClusters = library.papers.some((p) => p.cluster)
 
@@ -380,8 +381,9 @@ export function Library({
   const [showNew, setShowNew] = useState(
     () => new URLSearchParams(window.location.search).get('new') === '1',
   )
-  const projects = useProjects().data
+  const { data: projects, isError } = useProjects()
   const { createProject } = useResearcherActions()
+  if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
   if (!projects) return null
 
   if (openId) {
