@@ -14,7 +14,7 @@ import { accountApi } from '../lib/accountApi'
 import { API_BASE } from '../lib/api'
 import { downloadText } from '../lib/csv'
 import { researcherApi } from '../lib/researcher'
-import { updateSettings, useSettings } from '../lib/settings'
+import { getSettings, updateSettings, useSettings } from '../lib/settings'
 import type { ThemeChoice } from '../lib/settings'
 import { authEnabled, supabase } from '../lib/supabase'
 import { useTeacherPreferences } from '../lib/teacherPreferences'
@@ -61,6 +61,7 @@ function avatarPhotoUrl(stored: string): string | undefined {
 
 export function AccountSection() {
   const settings = useSettings()
+  const set = useSetSetting()
   const { session } = useAuth()
   const email = session?.user?.email ?? settings.email
   const fileRef = useRef<HTMLInputElement>(null)
@@ -79,13 +80,26 @@ export function AccountSection() {
       return
     }
     setBusy(true)
+    // Optimistic local write plus PATCH, the same contract as useSetSetting — otherwise the
+    // store would show the new photo while the server blob still had the old one, until the
+    // next open quietly reverted it. Unlike useSetSetting there is no rollback once the upload
+    // has gone through: the backend keeps one avatar file per user and the upload has already
+    // replaced it (_replace_avatar), so the previous url would now serve this new photo, or
+    // show initials over a photo that exists. The store follows the disk; the notice says the
+    // account record is behind.
+    let uploaded = false
     try {
       const { url } = await accountApi.uploadAvatar(file)
+      uploaded = true
       updateSettings({ avatarUrl: url })
       await accountApi.patchPreferences({ avatarUrl: url })
       setNotice('')
     } catch {
-      setNotice('The avatar could not be uploaded. Try again.')
+      setNotice(
+        uploaded
+          ? 'The photo was uploaded, but it could not be saved to your account. Try again.'
+          : 'The avatar could not be uploaded. Try again.',
+      )
     } finally {
       setBusy(false)
     }
@@ -93,11 +107,14 @@ export function AccountSection() {
 
   const removeAvatar = async () => {
     setBusy(true)
+    const previous = getSettings().avatarUrl
     try {
       await accountApi.removeAvatar()
       updateSettings({ avatarUrl: '' })
       await accountApi.patchPreferences({ avatarUrl: '' })
     } catch {
+      // The file may already be gone; the url then fails to load and Avatar shows initials.
+      updateSettings({ avatarUrl: previous })
       setNotice('The avatar could not be removed. Try again.')
     } finally {
       setBusy(false)
@@ -169,6 +186,19 @@ export function AccountSection() {
         >
           Remove
         </button>
+      </Row>
+      <Row label="Display name" hint="Used in greetings and on shared reports.">
+        <input
+          value={settings.displayName}
+          onChange={(e) => set('displayName', e.target.value)}
+          // Stored as typed while editing (a trailing space may be mid-name), tidied on blur.
+          // Readers cope with '' (initials show "?", the greeting drops the name).
+          onBlur={(e) => {
+            const trimmed = e.target.value.trim()
+            if (trimmed !== e.target.value) set('displayName', trimmed)
+          }}
+          className="h-9 w-[180px] rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent"
+        />
       </Row>
       <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">
         <span className="text-sm text-ink-muted">{email}</span>
@@ -304,6 +334,10 @@ export function AppearanceSection() {
   )
 }
 
+function papers(n: number): string {
+  return `${n} ${n === 1 ? 'paper' : 'papers'}`
+}
+
 function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
@@ -333,10 +367,14 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
     if (!window.confirm('Delete all uploaded papers? This removes the files and every check made on them. This cannot be undone.')) return
     setBusy(true)
     try {
-      await accountApi.deleteAllData()
+      const { deleted, skipped } = await accountApi.deleteAllData()
       await queryClient.invalidateQueries({ queryKey: ['researcher'] })
       await queryClient.invalidateQueries({ queryKey: ['analyses'] })
-      setNotice('Every uploaded paper was deleted.')
+      setNotice(
+        skipped > 0
+          ? `${papers(deleted)} deleted. ${papers(skipped)} still being checked ${skipped === 1 ? 'was' : 'were'} kept; delete again once ${skipped === 1 ? 'it finishes' : 'they finish'}.`
+          : 'Every uploaded paper was deleted.',
+      )
     } catch {
       setNotice('Delete failed — the papers are still there. Try again.')
     } finally {

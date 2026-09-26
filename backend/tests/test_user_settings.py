@@ -65,7 +65,7 @@ def test_delete_all_data_removes_only_the_callers_analyses(client):
         }
 
     response = client.delete("/user/data", headers=ADA)
-    assert response.json() == {"deleted": 2}
+    assert response.json() == {"deleted": 2, "skipped": 0}
     assert sorted(main.analyses) == ["b1"]
 
 
@@ -138,3 +138,121 @@ def test_concurrent_patches_to_different_keys_both_survive(client, monkeypatch):
         "theme": "Dark",
         "weeklyDigest": False,
     }
+
+
+# --- avatar upload: the size cap is enforced before the body is buffered ---
+
+
+def test_an_oversized_avatar_with_a_known_size_is_refused_before_it_is_read(client, monkeypatch):
+    from starlette.datastructures import UploadFile
+
+    reads = []
+    real_read = UploadFile.read
+
+    async def counting_read(self, size=-1):
+        reads.append(size)
+        return await real_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", counting_read)
+    huge = client.post(
+        "/user/avatar", headers=ADA,
+        files={"file": ("me.png", b"0" * (main.MAX_AVATAR_BYTES + 1), "image/png")},
+    )
+    assert huge.status_code == 413
+    assert reads == []  # rejected on file.size alone
+
+
+def test_an_avatar_with_an_unknown_size_is_read_no_further_than_the_cap(client, monkeypatch):
+    """Without a size (chunked upload) the body is read up to one byte past the cap, never
+    whole: an oversized one is refused and a normal one is stored."""
+    from starlette.datastructures import UploadFile
+
+    no_size = property(lambda self: None, lambda self, value: None)
+    monkeypatch.setattr(UploadFile, "size", no_size, raising=False)
+    reads = []
+    real_read = UploadFile.read
+
+    async def counting_read(self, size=-1):
+        reads.append(size)
+        return await real_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", counting_read)
+
+    huge = client.post(
+        "/user/avatar", headers=ADA,
+        files={"file": ("me.png", b"0" * (main.MAX_AVATAR_BYTES + 1), "image/png")},
+    )
+    assert huge.status_code == 413
+    assert reads == [main.MAX_AVATAR_BYTES + 1]
+
+    reads.clear()
+    ok = client.post("/user/avatar", headers=ADA, files={"file": ("me.png", b"small", "image/png")})
+    assert ok.status_code == 200
+    assert reads == [main.MAX_AVATAR_BYTES + 1]
+    assert client.get("/user/avatar/me", headers=ADA).content == b"small"
+
+
+# --- avatar upload: one file per user, even for two uploads at once ---
+
+
+def test_concurrent_uploads_leave_exactly_one_avatar_file(client, monkeypatch):
+    """Two uploads for the same user in flight together (double-click, two tabs) with
+    different extensions must not both pass the glob and leave two files. The unlink step is
+    slowed so the two requests interleave if nothing serialises them."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from pathlib import Path
+
+    client.post("/user/avatar", headers=ADA, files={"file": ("a.png", b"one", "image/png")})
+
+    real_unlink = Path.unlink
+
+    def slow_unlink(self, missing_ok=False):
+        time.sleep(0.2)
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", slow_unlink)
+
+    def upload(name, body, kind):
+        return client.post("/user/avatar", headers=ADA, files={"file": (name, body, kind)})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(upload, "b.jpg", b"two", "image/jpeg")
+        second = pool.submit(upload, "c.webp", b"three", "image/webp")
+        assert first.result().status_code == 200
+        assert second.result().status_code == 200
+
+    files = sorted(p.name for p in main.AVATARS_DIR.glob("user-ada.*"))
+    assert len(files) == 1, files
+    assert client.get("/user/avatar/me", headers=ADA).content in (b"two", b"three")
+
+
+# --- delete all: a running analysis is left to finish ---
+
+
+def test_delete_all_data_skips_a_running_analysis_and_its_run_can_still_publish(client, monkeypatch):
+    """Popping a running analysis out from under its `_run` task makes the next `_publish`
+    raise KeyError inside the task, after the caller already got a 200. Running ones are
+    skipped and reported instead."""
+    import asyncio
+
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    for analysis_id, status in (("done1", "done"), ("run1", "running")):
+        main.analyses[analysis_id] = {
+            "id": analysis_id, "paper": "x.pdf", "status": status,
+            "owner": "user-ada", "stages": [], "claims": [],
+        }
+    main.streams["run1"] = asyncio.Queue()
+
+    response = client.delete("/user/data", headers=ADA)
+    assert response.json() == {"deleted": 1, "skipped": 1}
+    assert sorted(main.analyses) == ["run1"]
+
+    async def publish_then_close():
+        await main._publish("run1", "verifying", claim=0)
+        await main.streams["run1"].put(None)
+        await main._saved("run1")
+
+    asyncio.run(publish_then_close())  # no KeyError: the run's dicts are still there
+    assert main.analyses["run1"]["stages"][0]["stage"] == "verifying"
+    main.streams.clear()

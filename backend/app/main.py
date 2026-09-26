@@ -607,16 +607,45 @@ async def patch_preferences(request: PreferencesPatch, user: str | None = Depend
 @app.delete("/user/data")
 async def delete_all_data(user: str | None = Depends(current_user)):
     """Every analysis (and researcher project) this user owns — Settings → Your data →
-    Delete all. The confirm dialog is the UI's job; this call is unconditional."""
-    ids = [analysis["id"] for analysis in visible_to(user)]
+    Delete all. The confirm dialog is the UI's job; this call is unconditional.
+
+    An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
+    indexing `analyses`/`streams`, so popping them here would make its next `_publish`
+    raise inside the task after this call already answered 200."""
+    mine = visible_to(user)
+    ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
     await asyncio.to_thread(store.delete_projects, user)
-    return {"deleted": len(ids)}
+    return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 
 def _avatar_path(user: str | None) -> Path | None:
     return next(iter(AVATARS_DIR.glob(f"{user or 'anon'}.*")), None)
+
+
+# One avatar file per user is kept by glob-unlink-write, a read-modify-write like
+# _merge_preferences: two uploads for the same user at once (double-click, two tabs) could
+# both pass the glob and leave two files with different extensions, and _avatar_path would
+# then serve whichever the filesystem lists first. The file work runs on a worker thread
+# (disk I/O off the loop) under this lock. Lock order, should anything ever need both:
+# _avatar_lock first, then _preferences_lock — never _avatar_lock while holding
+# _preferences_lock. Today nothing holds both: the avatarUrl preference is a separate PATCH.
+_avatar_lock = threading.Lock()
+
+
+def _replace_avatar(key: str, ext: str, content: bytes) -> None:
+    with _avatar_lock:
+        AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+        for old in AVATARS_DIR.glob(f"{key}.*"):
+            old.unlink(missing_ok=True)
+        (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+
+
+def _remove_avatar(key: str) -> None:
+    with _avatar_lock:
+        for old in AVATARS_DIR.glob(f"{key}.*"):
+            old.unlink(missing_ok=True)
 
 
 @app.post("/user/avatar")
@@ -624,14 +653,15 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
     ext = AVATAR_TYPES.get(file.content_type or "")
     if not ext:
         raise HTTPException(400, "avatar must be a PNG, JPEG or WebP image")
-    content = await file.read()
+    # The cap is checked before anything is buffered: on the declared size when the client
+    # sent one, and otherwise by reading at most one byte past the cap, so an oversized body
+    # is never read whole.
+    if file.size is not None and file.size > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "avatar must be under 2MB")
+    content = await file.read(MAX_AVATAR_BYTES + 1)
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(413, "avatar must be under 2MB")
-    key = user or "anon"
-    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
-    for old in AVATARS_DIR.glob(f"{key}.*"):
-        old.unlink(missing_ok=True)
-    (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+    await asyncio.to_thread(_replace_avatar, user or "anon", ext, content)
     # Cache-bust: the frontend keeps this url in its settings blob indefinitely, so a
     # same-name re-upload needs a new url or the browser (and its own blob-url cache) would
     # keep showing the old image.
@@ -640,9 +670,7 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
 
 @app.delete("/user/avatar")
 async def remove_avatar(user: str | None = Depends(current_user)):
-    key = user or "anon"
-    for old in AVATARS_DIR.glob(f"{key}.*"):
-        old.unlink(missing_ok=True)
+    await asyncio.to_thread(_remove_avatar, user or "anon")
     return {"deleted": True}
 
 

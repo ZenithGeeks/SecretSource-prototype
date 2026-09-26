@@ -101,6 +101,13 @@ export function applyTheme(theme: ThemeChoice = settings.theme): void {
   else delete root.dataset.theme
 }
 
+/** "Good morning, Ada" — or just "Good morning" when the display name is blank, since the
+ * Settings modal lets it be cleared. */
+export function greeting(displayName: string): string {
+  const name = displayName.trim()
+  return name ? `Good morning, ${name}` : 'Good morning'
+}
+
 export function useSettings(): Settings {
   return useSyncExternalStore(
     (cb) => {
