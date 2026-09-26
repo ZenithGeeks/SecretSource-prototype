@@ -7,6 +7,7 @@
  */
 
 import { Loader2, RefreshCw } from 'lucide-react'
+import { useEffect } from 'react'
 
 import { useVerification } from '../../../lib/useAuthor'
 import { errorMessage } from '../../../lib/author'
@@ -27,8 +28,12 @@ export function VerifiedBadge({
 }) {
   const verification = useVerification(claim, identifier, auto)
   const data = verification.data
+  // The parent learns the verdict after the commit, not during this render (React forbids
+  // setting a parent's state while a child renders).
+  useEffect(() => {
+    if (data) onVerified?.(data)
+  }, [data, onVerified])
   if (data) {
-    onVerified?.(data)
     if (data.verdict === 'unavailable') {
       return (
         <span className="flex items-center gap-1.5 text-xs text-ink-muted" title={data.message}>

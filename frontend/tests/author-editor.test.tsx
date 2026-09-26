@@ -8,6 +8,9 @@ import { SplitPane } from '../src/roles/author/components/editor/SplitPane'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
+// Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+
 // CodeMirror measures text with Range geometry that jsdom does not implement.
 beforeAll(() => {
   const rect = { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }

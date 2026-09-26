@@ -13,6 +13,9 @@ import { Library } from '../src/roles/author/screens/Library'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
 
+// Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+
 let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {

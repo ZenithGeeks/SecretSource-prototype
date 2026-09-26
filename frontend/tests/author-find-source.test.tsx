@@ -13,6 +13,8 @@ import { FindASource } from '../src/roles/author/screens/FindASource'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
+// Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
 
