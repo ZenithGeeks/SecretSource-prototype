@@ -17,7 +17,7 @@
 
 import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
-import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
 import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
@@ -466,8 +466,18 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
         </div>
       )}
       <div className="mt-4 flex flex-col gap-1.5 text-sm">
-        <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><FileText className="size-4" /> Show the deciding page</button>
-        <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><Bookmark className="size-4" /> Add these {edges.length} to reading queue</button>
+        <button
+          type="button"
+          onClick={() => {
+            const deciding = edges.find((e) => e.relation !== 'asserts') ?? edges[0]
+            if (!deciding) return
+            const id = deciding.source.replace(/^a:/, '')
+            window.open(`${window.location.pathname}?screen=history&analysis=${id}`, '_blank')
+          }}
+          className="flex items-center gap-2 text-ink hover:text-accent"
+        >
+          <FileText className="size-4" /> Show the deciding page
+        </button>
         <button type="button" onClick={copyParagraph} className="flex items-center gap-2 text-ink hover:text-accent">
           <Copy className="size-4" /> {copied ? 'Copied ✓' : 'Copy as related-work paragraph'}
         </button>
@@ -528,7 +538,16 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
       ) : (
         <p className="mt-2 text-[13px] text-ink-muted">No shared passages indexed for this pair yet.</p>
       )}
-      <button type="button" className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-accent">
+      <button
+        type="button"
+        onClick={() => {
+          const idA = edge.a.replace(/^a:/, '')
+          const idB = edge.b.replace(/^a:/, '')
+          window.open(`${window.location.pathname}?screen=history&analysis=${idA}`, '_blank')
+          window.open(`${window.location.pathname}?screen=history&analysis=${idB}`, '_blank')
+        }}
+        className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-accent"
+      >
         <ExternalLink className="size-4" /> Open both side by side
       </button>
     </aside>
