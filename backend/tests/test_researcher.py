@@ -75,6 +75,9 @@ UNCHECKED = {
 RUNNING = {"id": "c1", "paper": "x.pdf", "status": "running", "claims": []}
 ANALYSES = [CHECKED, UNCHECKED, RUNNING]
 
+# A single-claim check (POST /verify) is never stored against a paper: no `file`, no `paper`.
+CHECK_ONLY = {"id": "e1", "status": "done", "claims": [{"claim": "PLAID is fast.", "citations": []}]}
+
 
 def test_home_counts_claims_and_lists_the_contradicted_one():
     home = researcher.home(ANALYSES)
@@ -87,6 +90,12 @@ def test_home_counts_claims_and_lists_the_contradicted_one():
     assert home["conflicts"][0]["against"] == ["ColBERT"]
     assert home["conflicts"][0]["analysis"] == "a1"
     assert home["alert"].startswith("1 claim in your papers")
+
+
+def test_a_finished_check_with_no_paper_is_skipped_instead_of_crashing_the_library():
+    home = researcher.home(ANALYSES + [CHECK_ONLY])
+    assert home["library"]["papers"] == 2  # e1 does not count as a library paper
+    assert researcher.library_papers(ANALYSES + [CHECK_ONLY]) == researcher.library_papers(ANALYSES)
 
 
 def test_the_reading_queue_suggests_works_cited_more_than_once_that_are_not_analysed():
