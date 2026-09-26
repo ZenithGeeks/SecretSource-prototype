@@ -1,64 +1,84 @@
-/** "Find sources": search Semantic Scholar · Crossref · arXiv (mocked) for a claim. A result
- * can be inserted for the selected issue, its BibTeX copied, or saved for later. */
+/**
+ * "Find sources" on Check a draft: a search over Semantic Scholar and the user's own library
+ * for a claim. The box starts on the selected issue's sentence (the parent keys the card by
+ * the issue), so the suggested fixes show before anything is typed; the top results are
+ * verified against that sentence on their own, the rest on request. A result can replace
+ * the selected issue's citation ("Insert \cite"), have its BibTeX copied, or be saved to
+ * the library.
+ */
 
-import { Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Bookmark, BookmarkCheck, Loader2 } from 'lucide-react'
+import { useState } from 'react'
 
 import { Card, Empty, Input } from '../../../components/ui'
-import { useAuthorSearch } from '../../../lib/useAuthor'
-import type { Citation, SearchResult } from '../../../types/draftCheck'
+import { errorMessage } from '../../../lib/author'
+import { useAuthorSearch, useSavedSources } from '../../../lib/useAuthor'
+import { useDebounced } from '../../../lib/useDebounced'
+import type { Citation, SavedSource, SearchResult, Verification } from '../../../types/draftCheck'
 import { citedBy, FIND_SOURCES_INPUT_ID } from '../labels'
+import { AUTO_VERIFY, copiedMessage, copyText, savedMatch } from '../searchHelpers'
 import { CardHead } from './CardHead'
+import { VerifiedBadge } from './VerifiedBadge'
 
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const id = window.setTimeout(() => setDebounced(value), ms)
-    return () => window.clearTimeout(id)
-  }, [value, ms])
-  return debounced
-}
-
-function ResultRow({
+export function ResultRow({
   result,
-  suggestedFor,
-  onInsert,
-  onCopyBibtex,
+  claim,
+  auto,
   saved,
-  onToggleSaved,
+  onInsert,
+  onCopied,
+  onSave,
+  insertLabel = 'Insert \\cite',
 }: {
   result: SearchResult
-  /** 1-based index of the open issue this result fixes, if any. */
-  suggestedFor: number | undefined
-  onInsert: () => void
-  onCopyBibtex: () => void
-  saved: boolean
-  onToggleSaved: () => void
+  claim: string
+  auto: boolean
+  saved: SavedSource | undefined
+  onInsert: (result: SearchResult, verification: Verification | undefined) => void
+  onCopied: (message: string) => void
+  onSave: (result: SearchResult, verification: Verification | undefined) => void
+  insertLabel?: string
 }) {
+  const [verification, setVerification] = useState<Verification>()
   const meta = [
     result.authors,
-    `${result.venue} ${result.year}`,
-    `cited ${citedBy(result.citedBy)}`,
+    [result.venue, result.year].filter(Boolean).join(' '),
+    result.citedBy !== null ? `cited ${citedBy(result.citedBy)}` : null,
     result.openAccess ? 'open access' : null,
-    suggestedFor === undefined ? `similarity ${result.similarity.toFixed(2)}` : null,
+    result.inLibrary ? `in ${result.bibName ?? 'library'}` : null,
+    `similarity ${result.similarity.toFixed(2)}`,
   ].filter(Boolean)
   return (
     <li className="flex flex-col gap-[3px] border-b border-border-subtle py-2">
-      {suggestedFor !== undefined && (
-        <p className="text-[11px] font-medium text-accent">
-          Suggested fix for issue {suggestedFor} · similarity {result.similarity.toFixed(2)}
-        </p>
-      )}
-      <p className="text-[13px] font-medium text-ink">{result.title}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {claim && <VerifiedBadge claim={claim} identifier={result.identifier} auto={auto} onVerified={setVerification} />}
+        <p className="text-[13px] font-medium text-ink">{result.title}</p>
+      </div>
       <p className="text-xs text-ink-muted">{meta.join(' · ')}</p>
-      <div className="flex flex-wrap gap-3.5 text-xs">
-        <button type="button" onClick={onInsert} className="rounded text-accent hover:underline">
-          Insert \cite
+      {verification?.evidence?.passage && (
+        <blockquote className="font-serif text-xs italic text-ink">
+          “{verification.evidence.passage}”{verification.evidence.page ? ` — p.${verification.evidence.page}` : ''}
+        </blockquote>
+      )}
+      <div className="flex flex-wrap items-center gap-3.5 text-xs">
+        <button type="button" onClick={() => onInsert(result, verification)} className="rounded text-accent hover:underline">
+          {insertLabel}
         </button>
-        <button type="button" onClick={onCopyBibtex} className="rounded text-accent hover:underline">
+        <button
+          type="button"
+          onClick={() => void copyText(result.bibtex).then((ok) => onCopied(copiedMessage(ok, `BibTeX for ${result.key}`)))}
+          className="rounded text-accent hover:underline"
+        >
           Copy BibTeX
         </button>
-        <button type="button" onClick={onToggleSaved} aria-pressed={saved} className="rounded text-ink-muted hover:underline">
+        <button
+          type="button"
+          onClick={() => !saved && onSave(result, verification)}
+          aria-pressed={Boolean(saved)}
+          disabled={Boolean(saved)}
+          className="flex items-center gap-1 rounded text-ink-muted hover:underline disabled:cursor-default disabled:no-underline"
+        >
+          {saved ? <BookmarkCheck className="size-3.5" aria-hidden="true" /> : <Bookmark className="size-3.5" aria-hidden="true" />}
           {saved ? 'Saved' : 'Save to list'}
         </button>
       </div>
@@ -67,37 +87,31 @@ function ResultRow({
 }
 
 export function FindSourcesCard({
-  issues,
   selectedIssue,
   onInsert,
+  onSave,
   onCopied,
 }: {
-  issues: Citation[]
   selectedIssue: Citation | undefined
   /** Replace the selected issue's citation with this result. */
-  onInsert: (issue: Citation, result: SearchResult) => void
-  onCopied: (what: string) => void
+  onInsert: (issue: Citation, result: SearchResult, verification: Verification | undefined) => void
+  onSave: (result: SearchResult, verification: Verification | undefined, claim: string) => void
+  onCopied: (message: string) => void
 }) {
-  const [query, setQuery] = useState('')
-  const search = useAuthorSearch(useDebounced(query, 300))
-  const [saved, setSaved] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState(selectedIssue?.claim ?? '')
+  const debounced = useDebounced(query, 400)
+  const search = useAuthorSearch(debounced)
+  const saved = useSavedSources()
+  const claim = selectedIssue?.claim ?? debounced
 
-  const copy = async (text: string, what: string) => {
-    await navigator.clipboard.writeText(text)
-    onCopied(what)
+  const insert = (result: SearchResult, verification: Verification | undefined) => {
+    if (selectedIssue) onInsert(selectedIssue, result, verification)
+    else void copyText(`\\cite{${result.key}}`).then((ok) => onCopied(copiedMessage(ok, `\\cite{${result.key}}`)))
   }
-
-  const toggleSaved = (id: string) =>
-    setSaved((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
 
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="find-sources-title">
-      <CardHead id="find-sources-title" title="Find sources" aside={<span className="text-ink-muted">Semantic Scholar · Crossref · arXiv</span>} />
+      <CardHead id="find-sources-title" title="Find sources" aside={<span className="text-ink-muted">Semantic Scholar · your library</span>} />
       <Input
         id={FIND_SOURCES_INPUT_ID}
         type="search"
@@ -106,40 +120,36 @@ export function FindSourcesCard({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      {search.isPending ? (
+      {debounced.trim() === '' ? (
+        <Empty title="Search for a source" hint="Pick an issue above, or type a claim, a title or a DOI." />
+      ) : search.isPending ? (
         <p className="flex items-center gap-2 py-2 text-xs text-ink-muted">
           <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
           Searching…
         </p>
       ) : search.isError ? (
         <p className="text-sm text-refutes">
-          Could not search: {(search.error as Error).message}{' '}
-          <button type="button" onClick={() => search.refetch()} className="text-accent hover:underline">
+          Could not search: {errorMessage(search.error)}{' '}
+          <button type="button" onClick={() => void search.refetch()} className="text-accent hover:underline">
             Try again
           </button>
         </p>
-      ) : search.data.length === 0 ? (
+      ) : search.data.results.length === 0 ? (
         <Empty title="No sources found" hint="Try a different phrasing, a title, or a DOI." />
       ) : (
         <ul>
-          {search.data.map((result) => {
-            const issueIndex = issues.findIndex((c) => c.id === result.suggestedForCitationId)
-            return (
-              <ResultRow
-                key={result.id}
-                result={result}
-                suggestedFor={issueIndex >= 0 ? issueIndex + 1 : undefined}
-                onInsert={() => {
-                  const target = issueIndex >= 0 ? issues[issueIndex] : selectedIssue
-                  if (target) onInsert(target, result)
-                  else void copy(`\\cite{${result.key}}`, `\\cite{${result.key}}`)
-                }}
-                onCopyBibtex={() => void copy(result.bibtex, `BibTeX for ${result.key}`)}
-                saved={saved.has(result.id)}
-                onToggleSaved={() => toggleSaved(result.id)}
-              />
-            )
-          })}
+          {search.data.results.map((result, index) => (
+            <ResultRow
+              key={result.id}
+              result={result}
+              claim={claim}
+              auto={index < AUTO_VERIFY}
+              saved={savedMatch(result, saved.data)}
+              onInsert={insert}
+              onCopied={onCopied}
+              onSave={(r, verification) => onSave(r, verification, claim)}
+            />
+          ))}
         </ul>
       )}
     </Card>

@@ -1,6 +1,6 @@
 /** "Your drafts": every draft with its version, last check and standing; the current one is
  * marked. "+ New draft" opens an empty draft in the editor; the "Since v2" box sums up what
- * changed for the current draft. */
+ * changed for the current draft and links to its check history in the Library. */
 
 import { FileText } from 'lucide-react'
 
@@ -27,7 +27,7 @@ export function YourDraftsCard({
   currentId: string
   onSelect: (id: string) => void
   onNew: () => void
-  onHistory: () => void
+  onHistory: (draft: Draft) => void
 }) {
   const current = drafts.find((d) => d.id === currentId)
   const delta = current?.sinceLastCheck
@@ -54,7 +54,7 @@ export function YourDraftsCard({
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-[13px] font-medium text-ink">{draft.title}</span>
                   <span className="text-xs text-ink-muted">
-                    v{draft.version} · {checkedLabel(draft.lastCheckedAt)}
+                    v{draft.version} · {draft.runningCheckId ? 'checking…' : checkedLabel(draft.lastCheckedAt)}
                   </span>
                 </span>
                 <span className={cn('shrink-0 whitespace-nowrap text-xs', tone(draft))}>{statusLabel(draft.status)}</span>
@@ -63,15 +63,21 @@ export function YourDraftsCard({
           ))}
         </ul>
       )}
-      {delta && (
+      {current && (delta || current.checks > 0) && (
         <div className="flex flex-col gap-1 rounded-lg bg-canvas px-3 py-2.5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Since v{delta.previousVersion}</p>
-          <p className="text-xs text-ink">
-            {delta.addedCitations >= 0 ? '+' : ''}
-            {delta.addedCitations} citation{Math.abs(delta.addedCitations) === 1 ? '' : 's'} · {delta.fixedIssues} issue
-            {delta.fixedIssues === 1 ? '' : 's'} fixed · {delta.newIssues} new issue{delta.newIssues === 1 ? '' : 's'}
-          </p>
-          <TextLink onClick={onHistory} className="self-start">
+          {delta ? (
+            <>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Since the previous check</p>
+              <p className="text-xs text-ink">
+                {delta.addedCitations >= 0 ? '+' : ''}
+                {delta.addedCitations} citation{Math.abs(delta.addedCitations) === 1 ? '' : 's'} · {delta.fixedIssues} issue
+                {delta.fixedIssues === 1 ? '' : 's'} fixed · {delta.newIssues} new issue{delta.newIssues === 1 ? '' : 's'}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-ink-muted">Checked once so far.</p>
+          )}
+          <TextLink onClick={() => onHistory(current)} className="self-start">
             View check history
           </TextLink>
         </div>

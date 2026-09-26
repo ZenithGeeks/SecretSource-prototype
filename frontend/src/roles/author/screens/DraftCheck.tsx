@@ -1,18 +1,24 @@
 /**
- * Author "Check a draft" (Figma 558:3647). Every card reads the one author store through
- * the useAuthor hooks, so a fix here is what the editor shows next, and the other way round.
- * The screen owns which citation is selected and the toast; the cards own their own filters.
+ * Author Home: "Check a draft" (Figma 558:3647). Every card reads the gateway through the
+ * useAuthor hooks, so a fix here is what the editor shows next, and the other way round.
+ * The screen owns which draft and which citation are selected, the toast, and the page
+ * viewer that "show in the paper" opens beside the cards.
  *
- * `draftId` comes from the URL (?draft=); the parent keys this component by it so selection
- * resets when the draft changes.
+ * `draftId` comes from the URL (?draft=); with none, the most recently changed draft is
+ * picked. The parent keys this component by it so selection resets when the draft changes.
  */
 
 import { Loader2, Search } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-import { Button, Card, Empty } from '../../../components/ui'
-import { useAuthorActions, useAuthorCheck, useAuthorDrafts, useAuthorParse, useRecheck } from '../../../lib/useAuthor'
-import type { Citation, SearchResult } from '../../../types/draftCheck'
+import type { Target } from '../../../components/PageViewer'
+import { PageViewer } from '../../../components/PageViewer'
+import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { errorMessage } from '../../../lib/author'
+import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorDrafts, useAuthorParse, useStartCheck } from '../../../lib/useAuthor'
+import { isOpenIssue } from '../../../lib/verdict'
+import type { Citation, Draft, SearchResult, Verification } from '../../../types/draftCheck'
+import { CheckProgress } from '../components/CheckProgress'
 import { CitationCheckCard } from '../components/CitationCheckCard'
 import { EvidencePanel } from '../components/EvidencePanel'
 import { FindSourcesCard } from '../components/FindSourcesCard'
@@ -21,43 +27,206 @@ import { QuickActions } from '../components/QuickActions'
 import { Toast } from '../components/Toast'
 import { YourDraftsCard } from '../components/YourDraftsCard'
 import type { EditorTarget } from '../editorTarget'
-import { FIND_SOURCES_INPUT_ID, replacementLabel } from '../labels'
+import { replacementLabel } from '../labels'
+
+/** Where "Find a replacement" sends the author: Find a source, with the sentence and the
+ * citation it should replace. */
+export type ReplacementRequest = { draftId: string; checkId: string; citationId: string; claim: string }
 
 export function DraftCheck({
   draftId,
   onSelectDraft,
   onOpenEditor,
   onOpenHistory,
+  onFindSource,
+  onTargetChange,
 }: {
-  draftId: string
+  draftId: string | null
   onSelectDraft: (id: string) => void
   onOpenEditor: (target: EditorTarget) => void
-  onOpenHistory: () => void
+  /** "View check history": the draft's project in the Library. */
+  onOpenHistory: (draft: Draft) => void
+  onFindSource: (request?: ReplacementRequest) => void
+  /** The page viewer opened or closed, so the shell can make room for it. */
+  onTargetChange?: (open: boolean) => void
 }) {
-  const check = useAuthorCheck(draftId)
-  const parse = useAuthorParse(draftId)
   const drafts = useAuthorDrafts()
-  const recheck = useRecheck()
   const actions = useAuthorActions()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const closeToast = useCallback(() => setToast(null), [])
 
-  const run = check.data
-  const issues = run?.issues ?? []
-  // The selected row, else the first open issue — what the Evidence panel shows.
-  const selected: Citation | undefined = run?.citations.find((c) => c.id === selectedId) ?? issues[0]
+  // No draft in the URL: open the most recently changed one.
+  useEffect(() => {
+    if (!draftId && drafts.data?.[0]) onSelectDraft(drafts.data[0].id)
+  }, [draftId, drafts.data, onSelectDraft])
 
-  const replace = (citation: Citation, replacement: SearchResult) => {
-    const next = actions.replaceCitation(citation.id, replacement)
-    setSelectedId(next ?? null)
-    setToast(`Citation replaced with ${replacementLabel(replacement)}`)
+  const newDraft = async (title?: string, files?: { name: string; content: string }[]) => {
+    try {
+      const draft = await actions.createDraft({ title, files })
+      onSelectDraft(draft.id)
+      return draft
+    } catch (error) {
+      setToast(`Could not create the draft: ${errorMessage(error)}`)
+      return null
+    }
   }
 
-  const override = (citation: Citation, note: string) => {
-    const next = actions.overrideCitation(citation.id, note)
-    setSelectedId(next ?? null)
-    setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+  const upload = async (file: File) => {
+    try {
+      const draft = await actions.uploadDraft(file)
+      onSelectDraft(draft.id)
+      setToast(`${file.name} uploaded${file.name.toLowerCase().endsWith('.zip') ? ' — its .tex and .bib files are in the draft' : ''}. Re-check when you are ready.`)
+    } catch (error) {
+      setToast(`Could not upload ${file.name}: ${errorMessage(error)}`)
+    }
+  }
+
+  const quickActions = (draft: Draft | null) => (
+    <QuickActions
+      onUpload={(file) => void upload(file)}
+      onWrite={() => void newDraft('Untitled draft').then((d) => d && onOpenEditor({ draftId: d.id, file: 'main.tex', line: 1 }))}
+      onAddBibliography={async (file) => {
+        const name = file.name.endsWith('.bib') ? file.name : `${file.name.replace(/\.[^.]+$/, '')}.bib`
+        const text = await file.text()
+        try {
+          if (draft) {
+            await actions.putFile(draft.id, name, text)
+            setToast(`${name} added to ${draft.title}`)
+          } else {
+            const created = await newDraft(name.replace(/\.bib$/, ''), [{ name: 'main.tex', content: '' }, { name, content: text }])
+            if (created) setToast(`${name} added to a new draft`)
+          }
+        } catch (error) {
+          setToast(`Could not add ${name}: ${errorMessage(error)}`)
+        }
+      }}
+      onFindSource={() => onFindSource()}
+    />
+  )
+
+  if (drafts.isPending) return <LoadingScreen label="Loading your drafts…" />
+  if (drafts.isError) {
+    return (
+      <Card className="flex flex-col items-start gap-3 border-refutes text-refutes">
+        <p>Could not load your drafts: {errorMessage(drafts.error)}</p>
+        <Button variant="ghost" onClick={() => void drafts.refetch()}>
+          Try again
+        </Button>
+      </Card>
+    )
+  }
+
+  if (drafts.data.length === 0 || !draftId) {
+    return (
+      <FadeIn className="flex flex-col gap-5">
+        <header className="flex flex-col gap-1">
+          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Check a draft</h1>
+          <p className="text-sm text-ink-muted">Upload a .tex file or write one, and every \cite gets checked against its source.</p>
+        </header>
+        {quickActions(null)}
+        <Empty title="No drafts yet" hint="Upload a .tex or .zip, write a draft, or add a bibliography to begin." />
+        <Toast message={toast} onClose={closeToast} />
+      </FadeIn>
+    )
+  }
+
+  return (
+    <DraftCheckBody
+      key={draftId}
+      draftId={draftId}
+      drafts={drafts.data}
+      toast={toast}
+      setToast={setToast}
+      closeToast={closeToast}
+      quickActions={quickActions}
+      onSelectDraft={onSelectDraft}
+      onOpenEditor={onOpenEditor}
+      onOpenHistory={onOpenHistory}
+      onFindSource={onFindSource}
+      onTargetChange={onTargetChange}
+      onNewDraft={() => void newDraft('Untitled draft').then((d) => d && onOpenEditor({ draftId: d.id, file: 'main.tex', line: 1 }))}
+    />
+  )
+}
+
+function DraftCheckBody({
+  draftId,
+  drafts,
+  toast,
+  setToast,
+  closeToast,
+  quickActions,
+  onSelectDraft,
+  onOpenEditor,
+  onOpenHistory,
+  onFindSource,
+  onTargetChange,
+  onNewDraft,
+}: {
+  draftId: string
+  drafts: Draft[]
+  toast: string | null
+  setToast: (message: string | null) => void
+  closeToast: () => void
+  quickActions: (draft: Draft | null) => React.ReactNode
+  onSelectDraft: (id: string) => void
+  onOpenEditor: (target: EditorTarget) => void
+  onOpenHistory: (draft: Draft) => void
+  onFindSource: (request?: ReplacementRequest) => void
+  onTargetChange?: (open: boolean) => void
+  onNewDraft: () => void
+}) {
+  const draft = useAuthorDraft(draftId)
+  const parse = useAuthorParse(draftId)
+  const latest = useAuthorCheck(draft.data?.lastCheckId ?? null)
+  const running = useAuthorCheck(draft.data?.runningCheckId ?? null)
+  const start = useStartCheck()
+  const actions = useAuthorActions()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [target, setTarget] = useState<Target | null>(null)
+
+  const showTarget = (next: Target | null) => {
+    setTarget(next)
+    onTargetChange?.(next !== null)
+  }
+  useEffect(() => () => onTargetChange?.(false), [onTargetChange])
+
+  const citations = latest.data?.citations ?? []
+  const issues = citations.filter(isOpenIssue)
+  // The selected row, else the first open issue — what the Evidence panel shows.
+  const selected: Citation | undefined = citations.find((c) => c.id === selectedId) ?? issues[0]
+  const checkId = latest.data?.id
+  const isChecking = Boolean(draft.data?.runningCheckId) || start.isPending
+
+  const recheck = () => {
+    if (!draft.data || isChecking) return
+    start.mutate(draft.data.id, {
+      onError: (error) => setToast(`Could not start the check: ${errorMessage(error)}`),
+    })
+  }
+
+  const replace = async (citation: Citation, result: SearchResult, verification: Verification | undefined) => {
+    if (!draft.data || !checkId) return
+    try {
+      const check = await actions.replaceCitation(draft.data, checkId, citation, result, verification)
+      const next = (check.citations ?? []).filter(isOpenIssue)
+      setSelectedId(next[0]?.id ?? null)
+      setToast(`Citation replaced with ${replacementLabel(result)}`)
+    } catch (error) {
+      setToast(`Could not replace the citation: ${errorMessage(error)}`)
+    }
+  }
+
+  const override = async (citation: Citation, note: string) => {
+    if (!draft.data || !checkId) return
+    try {
+      const check = await actions.overrideCitation(draft.data.id, checkId, citation, note)
+      const next = (check.citations ?? []).filter(isOpenIssue)
+      setSelectedId(next[0]?.id ?? null)
+      setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+    } catch (error) {
+      setToast(`Could not save the note: ${errorMessage(error)}`)
+    }
   }
 
   const nextIssue = () => {
@@ -66,125 +235,112 @@ export function DraftCheck({
     setSelectedId(issues[(index + 1) % issues.length].id)
   }
 
-  const newDraft = (title?: string) => {
-    const id = actions.createDraft(title)
-    onSelectDraft(id)
-    return id
-  }
-
-  if (check.isPending) {
+  if (draft.isPending) return <LoadingScreen label="Opening your draft…" />
+  if (draft.isError) {
+    const gone = errorMessage(draft.error).includes('no such draft')
     return (
-      <p className="flex items-center gap-2 text-sm text-ink-muted">
-        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-        Checking your draft…
-      </p>
-    )
-  }
-
-  if (check.isError) {
-    return (
-      <Card className="flex flex-col items-start gap-3 border-refutes text-refutes">
-        <p>Could not check this draft: {(check.error as Error).message}</p>
-        <Button variant="ghost" onClick={() => check.refetch()}>
-          Try again
-        </Button>
+      <Card className="flex flex-col items-start gap-3">
+        <p className={gone ? 'text-ink' : 'text-refutes'}>
+          {gone ? 'This draft no longer exists.' : `Could not open this draft: ${errorMessage(draft.error)}`}
+        </p>
+        <div className="flex gap-2">
+          {!gone && (
+            <Button variant="ghost" onClick={() => void draft.refetch()}>
+              Try again
+            </Button>
+          )}
+          {drafts[0] && drafts[0].id !== draftId && (
+            <Button variant="ghost" onClick={() => onSelectDraft(drafts[0].id)}>
+              Open {drafts[0].title}
+            </Button>
+          )}
+        </div>
       </Card>
     )
   }
 
-  if (!run) {
-    return (
-      <Empty title="This draft no longer exists" hint="Pick another one from Your drafts, or upload a new file." />
-    )
-  }
-
-  const { draft } = run
-  const files = draft.files.map((f) => f.name).join(' · ')
+  const current = draft.data
+  const files = current.files.map((f) => f.name).join(' · ')
 
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Check a draft</h1>
           <p className="text-sm text-ink-muted">
-            {files || 'no files yet'} · {draft.status.checked} citation{draft.status.checked === 1 ? '' : 's'} found ·{' '}
-            {draft.status.open} need{draft.status.open === 1 ? 's' : ''} work
+            {files || 'no files yet'} · {current.status.checked} citation{current.status.checked === 1 ? '' : 's'} found ·{' '}
+            {current.status.open} need{current.status.open === 1 ? 's' : ''} work
           </p>
         </div>
-        <Button onClick={() => recheck.mutate(draft.id)} disabled={recheck.isPending} aria-busy={recheck.isPending}>
-          {recheck.isPending ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <Search className="size-4" aria-hidden="true" />
-          )}
-          {recheck.isPending ? 'Checking…' : 'Re-check'}
+        <Button onClick={recheck} disabled={isChecking} aria-busy={isChecking}>
+          {isChecking ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Search className="size-4" aria-hidden="true" />}
+          {isChecking ? 'Checking…' : current.checks ? 'Re-check' : 'Check'}
         </Button>
       </header>
-      {recheck.isError && (
+
+      {quickActions(current)}
+
+      {running.data?.status === 'running' && <CheckProgress check={running.data} />}
+      {running.data?.status === 'error' && (
         <p role="alert" className="text-sm text-refutes">
-          Re-check failed: {(recheck.error as Error).message}
+          The check failed: {running.data.message}
+        </p>
+      )}
+      {latest.isError && (
+        <p role="alert" className="text-sm text-refutes">
+          Could not load the last check: {errorMessage(latest.error)}
         </p>
       )}
 
-      <QuickActions
-        onUpload={(file, text) => {
-          const id = newDraft(file.name.replace(/\.(tex|zip)$/i, ''))
-          if (file.name.toLowerCase().endsWith('.zip')) {
-            setToast(`${file.name} added as a draft. Reading the files inside a .zip arrives with the export work.`)
-          } else {
-            actions.updateFile(id, 'main.tex', text)
-            setToast(`${file.name} uploaded. Re-check when you are ready.`)
-          }
-        }}
-        onPaste={() => onOpenEditor({ draftId: newDraft('Pasted draft'), file: 'main.tex', line: 1 })}
-        onAddBibliography={(file, text) => {
-          const name = file.name.endsWith('.bib') ? file.name : `${file.name}.bib`
-          if (!draft.files.some((f) => f.name === name)) actions.addFile(draft.id, name)
-          actions.updateFile(draft.id, name, text)
-          setToast(`${name} added to ${draft.title}`)
-        }}
-        onFindSource={() => {
-          const input = document.getElementById(FIND_SOURCES_INPUT_ID)
-          input?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          input?.focus({ preventScroll: true })
-        }}
-      />
-
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <ParsedDraftCard draftId={draft.id} parse={parse.data} error={parse.error} onOpenEditor={onOpenEditor} />
-        <CitationCheckCard draft={draft} citations={run.citations} selectedId={selected?.id} onSelect={setSelectedId} />
+        <ParsedDraftCard draftId={current.id} parse={parse.data} error={parse.error} onOpenEditor={onOpenEditor} />
+        <CitationCheckCard draft={current} citations={citations} selectedId={selected?.id} onSelect={setSelectedId} checking={isChecking} />
       </div>
 
-      <EvidencePanel
-        citation={selected}
-        issues={issues}
-        onNext={nextIssue}
-        onReplace={replace}
-        onOverride={override}
-        onReopen={(c) => actions.reopenCitation(c.id)}
-        onAttachPdf={(c, file) => {
-          actions.attachSourcePdf(c.id, file.name)
-          setToast(`${file.name} attached to \\cite{${c.key}}. Re-check to read it.`)
-        }}
-      />
+      <div className={target ? 'grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : undefined}>
+        <div className="flex flex-col gap-4">
+          <EvidencePanel
+            citation={selected}
+            issues={issues}
+            onNext={nextIssue}
+            onFindReplacement={(c) => checkId && onFindSource({ draftId: current.id, checkId, citationId: c.id, claim: c.claim })}
+            onOverride={(c, note) => void override(c, note)}
+            onReopen={(c) => {
+              if (checkId) void actions.reopenCitation(current.id, checkId, c).catch((error) => setToast(`Could not reopen: ${errorMessage(error)}`))
+            }}
+            onAttachPdf={(c, file) =>
+              void actions
+                .attachPdf(current.id, c.key, file)
+                .then(() => setToast(`${file.name} attached to \\cite{${c.key}}. Re-check to read it.`))
+                .catch((error) => setToast(`Could not upload ${file.name}: ${errorMessage(error)}`))
+            }
+            onShow={showTarget}
+          />
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        <FindSourcesCard
-          issues={issues}
-          selectedIssue={selected && issues.some((c) => c.id === selected.id) ? selected : undefined}
-          onInsert={replace}
-          onCopied={(what) => setToast(`Copied ${what}`)}
-        />
-        <YourDraftsCard
-          drafts={drafts.data ?? [draft]}
-          currentId={draft.id}
-          onSelect={onSelectDraft}
-          onNew={() => onOpenEditor({ draftId: newDraft(), file: 'main.tex', line: 1 })}
-          onHistory={onOpenHistory}
-        />
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <FindSourcesCard
+              key={selected?.id ?? 'none'}
+              selectedIssue={selected && issues.some((c) => c.id === selected.id) ? selected : undefined}
+              onInsert={(issue, result, verification) => void replace(issue, result, verification)}
+              onSave={(result, verification, claim) =>
+                void actions
+                  .saveSource({ ...result, projectId: current.projectId, claim, verdict: verification?.verdict ?? null, evidence: verification?.evidence ?? null })
+                  .then(() => setToast(`Saved ${result.key} to ${current.projectId ? 'the project' : 'Unsorted sources'}`))
+                  .catch((error) => setToast(`Could not save: ${errorMessage(error)}`))
+              }
+              onCopied={setToast}
+            />
+            <YourDraftsCard drafts={drafts} currentId={current.id} onSelect={onSelectDraft} onNew={onNewDraft} onHistory={onOpenHistory} />
+          </div>
+        </div>
+        {target && (
+          <div className="xl:sticky xl:top-6 xl:z-20 xl:self-start">
+            <PageViewer key={target.paper} target={target} onClose={() => showTarget(null)} />
+          </div>
+        )}
       </div>
 
       <Toast message={toast} onClose={closeToast} />
-    </>
+    </FadeIn>
   )
 }

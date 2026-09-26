@@ -1,26 +1,14 @@
 /** The four ways a draft gets in (Figma "quick actions — draft input"). Upload and Add
- * bibliography open a file picker; Paste LaTeX opens a fresh draft in the editor; Find a
- * source moves focus to the search box further down. */
+ * bibliography open a file picker; Write a draft opens a fresh draft in the editor; Find a
+ * source opens the search screen. */
 
 import { FileText, FileUp, Library, Search } from 'lucide-react'
-import type { ComponentType, ReactNode } from 'react'
+import type { ComponentType } from 'react'
 import { useRef } from 'react'
 
 type Icon = ComponentType<{ className?: string }>
 
-function ActionCard({
-  icon: Icon,
-  title,
-  hint,
-  onClick,
-  children,
-}: {
-  icon: Icon
-  title: string
-  hint: string
-  onClick: () => void
-  children?: ReactNode
-}) {
+function ActionCard({ icon: Icon, title, hint, onClick }: { icon: Icon; title: string; hint: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -30,20 +18,21 @@ function ActionCard({
       <Icon className="size-4 text-accent" aria-hidden="true" />
       <span className="text-sm font-medium text-ink">{title}</span>
       <span className="text-xs text-ink-muted">{hint}</span>
-      {children}
     </button>
   )
 }
 
-/** A hidden file input the card's click opens. Reads the file as text and hands it up. */
+/** A hidden file input the card's click opens. */
 function FilePicker({
   accept,
   inputRef,
   onFile,
+  label,
 }: {
   accept: string
   inputRef: React.RefObject<HTMLInputElement | null>
-  onFile: (file: File, text: string) => void
+  onFile: (file: File) => void
+  label: string
 }) {
   return (
     <input
@@ -52,13 +41,11 @@ function FilePicker({
       accept={accept}
       className="sr-only"
       tabIndex={-1}
-      aria-hidden="true"
-      onChange={async (event) => {
+      aria-label={label}
+      onChange={(event) => {
         const file = event.target.files?.[0]
         event.target.value = ''
-        if (!file) return
-        const text = file.name.endsWith('.zip') ? '' : await file.text()
-        onFile(file, text)
+        if (file) onFile(file)
       }}
     />
   )
@@ -66,13 +53,13 @@ function FilePicker({
 
 export function QuickActions({
   onUpload,
-  onPaste,
+  onWrite,
   onAddBibliography,
   onFindSource,
 }: {
-  onUpload: (file: File, text: string) => void
-  onPaste: () => void
-  onAddBibliography: (file: File, text: string) => void
+  onUpload: (file: File) => void
+  onWrite: () => void
+  onAddBibliography: (file: File) => void
   onFindSource: () => void
 }) {
   const texInput = useRef<HTMLInputElement>(null)
@@ -86,15 +73,15 @@ export function QuickActions({
         hint="One file or a whole Overleaf project with \input and figures"
         onClick={() => texInput.current?.click()}
       />
-      <FilePicker accept=".tex,.zip" inputRef={texInput} onFile={onUpload} />
-      <ActionCard icon={FileText} title="Paste LaTeX" hint="Drop source straight into the editor" onClick={onPaste} />
+      <FilePicker accept=".tex,.zip,.bib" inputRef={texInput} onFile={onUpload} label="Upload a .tex or .zip file" />
+      <ActionCard icon={FileText} title="Write a draft" hint="Write or paste LaTeX in the editor and check it as you go" onClick={onWrite} />
       <ActionCard
         icon={Library}
         title="Add bibliography"
         hint=".bib, BibLaTeX, or a \bibitem list, auto-linked to \cite keys"
         onClick={() => bibInput.current?.click()}
       />
-      <FilePicker accept=".bib,.bbl,.txt" inputRef={bibInput} onFile={onAddBibliography} />
+      <FilePicker accept=".bib,.bbl,.txt" inputRef={bibInput} onFile={onAddBibliography} label="Upload a .bib file" />
       <ActionCard icon={Search} title="Find a source" hint="Search papers for any claim in your draft" onClick={onFindSource} />
     </div>
   )

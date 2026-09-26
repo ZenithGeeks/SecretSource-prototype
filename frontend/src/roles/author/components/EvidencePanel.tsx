@@ -1,17 +1,21 @@
 /**
  * "Evidence — issue N of M": the selected citation's sentence beside the passage the verdict
- * rests on, why, whether the bib metadata checked out, and the three ways to act on it.
- * "Override · add note" and the editor's "Keep mine" are the same action, so the note form
- * lives here and the editor reuses this component's pieces later.
+ * rests on, why, and the three ways to act on it: find a replacement, upload the source PDF,
+ * or keep the citation with a note. "Override · add note" and the editor's "Keep mine" are
+ * the same action, so the note form lives here and the popover reuses the wording.
+ *
+ * "show in the paper" opens the source PDF at the passage in the shared PageViewer, the way
+ * a researcher's claim card does: the gateway locates the text, the viewer highlights it.
  */
 
-import { AlertCircle, CheckCircle2, ChevronRight, PencilLine, RotateCcw, Sparkles, Upload } from 'lucide-react'
+import { ChevronRight, PencilLine, RotateCcw, Search, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 
+import type { Target } from '../../../components/PageViewer'
 import { Button, Card, Empty } from '../../../components/ui'
-import { cn } from '../../../lib/utils'
-import type { Citation, SearchResult } from '../../../types/draftCheck'
-import { replacementLabel, sourceLabel } from '../labels'
+import { api } from '../../../lib/api'
+import type { Citation } from '../../../types/draftCheck'
+import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
 import { CitationBadge } from './Verdicts'
 
@@ -19,22 +23,27 @@ export function EvidencePanel({
   citation,
   issues,
   onNext,
-  onReplace,
+  onFindReplacement,
   onOverride,
   onReopen,
   onAttachPdf,
+  onShow,
 }: {
   citation: Citation | undefined
   /** The open issues, for the "N of M" pager. */
   issues: Citation[]
   onNext: () => void
-  onReplace: (citation: Citation, replacement: SearchResult) => void
+  /** Open Find a source for this sentence, so "Cite this" replaces the citation. */
+  onFindReplacement: (citation: Citation) => void
   onOverride: (citation: Citation, note: string) => void
   onReopen: (citation: Citation) => void
   onAttachPdf: (citation: Citation, file: File) => void
+  /** Open the source PDF at the passage. */
+  onShow?: (target: Target) => void
 }) {
   const [noteOpen, setNoteOpen] = useState(false)
   const [note, setNote] = useState('')
+  const [locating, setLocating] = useState(false)
   const pdfInput = useRef<HTMLInputElement>(null)
 
   const index = citation ? issues.findIndex((c) => c.id === citation.id) : -1
@@ -50,6 +59,25 @@ export function EvidencePanel({
     onOverride(citation, note)
     setNote('')
     setNoteOpen(false)
+  }
+
+  /** Look the passage up in the source PDF, then show it — located or not. */
+  const showInPaper = async () => {
+    if (!citation?.evidence || !onShow) return
+    const { pdf, passage, page } = citation.evidence
+    setLocating(true)
+    try {
+      const found = await api.findInPaper(pdf, passage, page ?? undefined).catch(() => null)
+      onShow({
+        paper: pdf,
+        label: `Deciding passage in ${pdf}`,
+        quote: passage,
+        source: found && found.page ? (found as Target['source']) : null,
+        page: page ?? undefined,
+      })
+    } finally {
+      setLocating(false)
+    }
   }
 
   return (
@@ -83,29 +111,32 @@ export function EvidencePanel({
               <p className="font-mono text-xs leading-relaxed text-ink">{citation.sentence}</p>
             </div>
             <div className="flex flex-col gap-1.5 rounded-lg bg-canvas p-3">
-              {citation.evidence ? (
+              {citation.evidence?.passage ? (
                 <>
                   <p className="text-[11px] font-medium text-ink-muted">
-                    <span className="uppercase tracking-wide">Source passage</span> · {citation.evidence.pdf} p.
-                    {citation.evidence.page}
+                    <span className="uppercase tracking-wide">Source passage</span> · {citation.evidence.pdf}
+                    {citation.evidence.page ? ` p.${citation.evidence.page}` : ''}
                   </p>
                   <blockquote className="font-serif text-[13px] italic leading-relaxed text-ink">
                     “{citation.evidence.passage}”
                   </blockquote>
-                  <TextLink
-                    className="self-start"
-                    title="Opening the source PDF arrives with the gateway"
-                    aria-disabled
-                    onClick={() => undefined}
-                  >
-                    show in the paper
-                  </TextLink>
+                  {onShow && (
+                    <TextLink className="self-start" onClick={() => void showInPaper()} aria-disabled={locating}>
+                      {locating ? 'locating…' : 'show in the paper'}
+                    </TextLink>
+                  )}
                 </>
               ) : (
                 <>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
                   <p className="text-[13px] text-ink-muted">
-                    {citation.verdict === 'unavailable' ? 'The source PDF could not be read.' : 'Not checked yet.'}
+                    {citation.verdict === 'unavailable'
+                      ? `The source could not be read: ${citation.message || 'no PDF'}.`
+                      : citation.verdict === 'unchecked'
+                        ? citation.reason === 'missing-key'
+                          ? `\\cite{${citation.key}} has no entry in the bibliography.`
+                          : 'Not checked yet.'
+                        : 'The check answered without quoting a passage.'}
                   </p>
                 </>
               )}
@@ -115,17 +146,6 @@ export function EvidencePanel({
           {citation.explanation && (
             <p className="text-[13px] text-ink-muted">
               <span className="font-medium text-ink">Why:</span> {citation.explanation}
-            </p>
-          )}
-
-          {citation.metadataMatch && (
-            <p className={cn('flex items-center gap-2 text-xs', citation.metadataMatch.ok ? 'text-supports' : 'text-insufficient')}>
-              {citation.metadataMatch.ok ? (
-                <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
-              ) : (
-                <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
-              )}
-              {citation.metadataMatch.text}
             </p>
           )}
 
@@ -175,12 +195,10 @@ export function EvidencePanel({
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              {citation.suggestedReplacement && (
-                <Button onClick={() => onReplace(citation, citation.suggestedReplacement!)}>
-                  <Sparkles className="size-4" aria-hidden="true" />
-                  Replace with {replacementLabel(citation.suggestedReplacement)}
-                </Button>
-              )}
+              <Button onClick={() => onFindReplacement(citation)}>
+                <Search className="size-4" aria-hidden="true" />
+                Find a replacement
+              </Button>
               <Button variant="ghost" onClick={() => pdfInput.current?.click()}>
                 <Upload className="size-4" aria-hidden="true" />
                 Upload source PDF
