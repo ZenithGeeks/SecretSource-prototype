@@ -2,12 +2,17 @@
  * role's tabs from the Roles group, and keyboard travel along the settings tab list. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { Avatar } from '../src/components/settings'
 import { SettingsModal } from '../src/components/SettingsModal'
-import { resetSettings } from '../src/lib/settings'
+
+// Signed-out, no Supabase: request() then sends without a token instead of throwing
+// SignedOut, whatever a local .env says (the same env dependency as SCRUM-245).
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+import { getSettings, greeting, resetSettings, updateSettings } from '../src/lib/settings'
 import { resetTeacherPreferences } from '../src/lib/teacherPreferences'
 import { resetTeacherStore } from '../src/lib/teacherStore'
 
@@ -22,10 +27,13 @@ function renderModal(currentRole: 'writer' | 'researcher' | 'teacher') {
   return renderWithQuery(<SettingsModal open onClose={vi.fn()} currentRole={currentRole} onSwitchRole={vi.fn()} />)
 }
 
-/** The Roles group in the aside: plain buttons (role="tab" but outside the Settings tablist),
- * found by their label. */
+/** The Roles group in the aside: its own tablist, separate from the Settings one. */
+function roleTabs() {
+  return within(screen.getByRole('tablist', { name: 'Roles' }))
+}
+
 function previewRole(label: 'Author' | 'Researcher' | 'Teacher') {
-  fireEvent.click(screen.getByRole('tab', { name: label }))
+  fireEvent.click(roleTabs().getByRole('tab', { name: label }))
 }
 
 beforeEach(() => {
@@ -33,6 +41,14 @@ beforeEach(() => {
   resetTeacherPreferences()
   resetTeacherStore()
 })
+afterEach(() => vi.unstubAllGlobals())
+
+/** The PATCH /user/preferences bodies sent so far (the GET on open is skipped). */
+function patchBodies(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown>[] {
+  return fetchMock.mock.calls
+    .filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH')
+    .map(([, init]) => JSON.parse((init as RequestInit).body as string).patch)
+}
 
 describe('role preview never writes another role’s settings', () => {
   test('Class and marking is read-only while an Author previews Teacher', async () => {
@@ -141,5 +157,252 @@ describe('settings tab list keyboard travel', () => {
     fireEvent.keyDown(classMarking, { key: 'Home' })
     expect(document.activeElement).toBe(account)
     expect(account).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+describe('row accessible names', () => {
+  test('a bare input as a Row’s only child is labelled by the row, like Toggle and Select', () => {
+    renderModal('teacher')
+    fireEvent.click(screen.getByRole('tab', { name: 'Class and marking' }))
+    const input = screen.getByRole('textbox', { name: 'Send reports as' })
+    expect(input).toHaveValue('Wittawat S.')
+    expect(input).toBeEnabled()
+  })
+})
+
+describe('display name', () => {
+  test('Account has a Display name row that saves through the shared PATCH', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderModal('researcher')
+
+    const input = screen.getByRole('textbox', { name: 'Display name' })
+    expect(input).toHaveValue('Wittawat')
+
+    fireEvent.change(input, { target: { value: 'Ada Lovelace' } })
+    expect(getSettings().displayName).toBe('Ada Lovelace') // optimistic
+    expect(screen.getByText('AL')).toBeInTheDocument() // avatar initials follow
+    await waitFor(() => expect(patchBodies(fetchMock)).toContainEqual({ displayName: 'Ada Lovelace' }))
+  })
+
+  test('an empty or whitespace-only name never blanks the badge, and is stored trimmed', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })))
+    renderModal('researcher')
+    const input = screen.getByRole('textbox', { name: 'Display name' })
+
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(screen.getByText('?')).toBeInTheDocument() // initials fallback, not an empty badge
+    fireEvent.blur(input)
+    expect(getSettings().displayName).toBe('')
+    expect(input).toHaveValue('')
+
+    fireEvent.change(input, { target: { value: '  Ada  ' } })
+    fireEvent.blur(input)
+    expect(getSettings().displayName).toBe('Ada')
+  })
+
+  test('the greeting drops the name when it is blank', () => {
+    expect(greeting('Ada Lovelace')).toBe('Good morning, Ada Lovelace')
+    expect(greeting('  Ada ')).toBe('Good morning, Ada')
+    expect(greeting('')).toBe('Good morning')
+    expect(greeting('   ')).toBe('Good morning')
+  })
+})
+
+describe('avatar image', () => {
+  const photo = '/api/user/avatar/me?v=1'
+
+  test('falls back to the initials badge when the photo fails to load, not the alt text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('gone', { status: 404 })))
+    render(<Avatar initials="AL" photoUrl={photo} />)
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByText('AL')).toBeInTheDocument())
+    expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  test('shows the photo once fetched, and revokes the blob URL on change and unmount', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => Promise.resolve(new Response(new Blob(['png']), { status: 200 }))),
+    )
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+
+    const { rerender, unmount } = render(<Avatar initials="AL" photoUrl={photo} />)
+    const img = await screen.findByRole('img', { name: 'Profile photo' })
+    expect(img).toHaveAttribute('src', 'blob:vitest')
+
+    rerender(<Avatar initials="AL" photoUrl="/api/user/avatar/me?v=2" />)
+    expect(revoke).toHaveBeenCalledWith('blob:vitest') // the old copy goes when the url changes
+    await screen.findByRole('img', { name: 'Profile photo' })
+
+    revoke.mockClear()
+    unmount()
+    expect(revoke).toHaveBeenCalledWith('blob:vitest') // and on unmount
+  })
+})
+
+describe('avatar upload and remove when the preferences PATCH fails', () => {
+  const stored = '/api/user/avatar/me?v=1'
+
+  /** A gateway where the file calls succeed and the preferences PATCH fails. `onDisk` is
+   * whether the avatar file is there to fetch afterwards: it is after an upload (the upload
+   * replaced it) and not after a remove. */
+  function gateway(onDisk: boolean) {
+    return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/user/preferences') && method === 'GET') return Promise.resolve(new Response('{}', { status: 200 }))
+      if (url.endsWith('/api/user/preferences') && method === 'PATCH') return Promise.resolve(new Response('down', { status: 500 }))
+      if (url.endsWith('/api/user/avatar') && method === 'POST') return Promise.resolve(new Response(JSON.stringify({ url: stored }), { status: 200 }))
+      if (url.endsWith('/api/user/avatar') && method === 'DELETE') return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }))
+      if (onDisk) return Promise.resolve(new Response(new Blob(['png']), { status: 200 }))
+      return Promise.resolve(new Response('no avatar', { status: 404 }))
+    })
+  }
+
+  test('a failed PATCH after a successful upload keeps the new avatarUrl, since the file on disk is already the new photo', async () => {
+    vi.stubGlobal('fetch', gateway(true))
+    const { container } = renderModal('researcher')
+    expect(getSettings().avatarUrl).toBe('')
+
+    const file = new File(['png'], 'me.png', { type: 'image/png' })
+    const picker = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(picker, { target: { files: [file] } })
+
+    // The backend keeps one avatar file per user and the upload replaced it, so rolling the
+    // url back to '' would show initials over a photo that exists. The store follows the disk.
+    expect(await screen.findByRole('status')).toHaveTextContent('could not be saved to your account')
+    expect(getSettings().avatarUrl).toBe(stored)
+    expect(await screen.findByRole('img', { name: 'Profile photo' })).toBeInTheDocument()
+    expect(screen.queryByText('W')).not.toBeInTheDocument()
+  })
+
+  test('a failed upload leaves the avatarUrl alone', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/avatar') && init?.method === 'POST') return Promise.resolve(new Response('down', { status: 500 }))
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+    const { container } = renderModal('researcher')
+
+    const file = new File(['png'], 'me.png', { type: 'image/png' })
+    const picker = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(picker, { target: { files: [file] } })
+
+    expect(await screen.findByRole('status')).toHaveTextContent('could not be uploaded')
+    expect(getSettings().avatarUrl).toBe('')
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/api/user/preferences'), expect.objectContaining({ method: 'PATCH' }))
+  })
+
+  test('a failed PATCH after a successful remove restores the previous avatarUrl and shows initials', async () => {
+    updateSettings({ avatarUrl: stored })
+    vi.stubGlobal('fetch', gateway(false))
+    renderModal('researcher')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('could not be removed')
+    expect(getSettings().avatarUrl).toBe(stored) // rolled back to what the server blob still has
+    expect(await screen.findByText('W')).toBeInTheDocument() // the file is gone, so initials
+    expect(screen.queryByRole('img', { name: 'Profile photo' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Profile photo')).not.toBeInTheDocument()
+  })
+})
+
+describe('search and the Roles group', () => {
+  test('picking a role clears the search, so its tab set is not hidden behind a stale query', () => {
+    renderModal('writer')
+    const search = screen.getByRole('textbox', { name: 'Search settings' })
+
+    fireEvent.change(search, { target: { value: 'Teach' } })
+    // Only the Teacher role matches; the Settings list and the panel are gone.
+    expect(screen.queryByRole('tablist', { name: 'Settings sections' })).not.toBeInTheDocument()
+    expect(screen.getByText('No settings match "Teach".')).toBeInTheDocument()
+
+    previewRole('Teacher')
+    expect(search).toHaveValue('')
+    expect(screen.getByRole('tab', { name: 'Class and marking' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: 'Account' })).toBeInTheDocument()
+    expect(screen.queryByText(/No settings match/)).not.toBeInTheDocument()
+  })
+})
+
+describe('roles group keyboard travel', () => {
+  function roleButtons() {
+    return Array.from(screen.getByRole('tablist', { name: 'Roles' }).querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+  }
+
+  test('is a roving tabindex: only the previewed role is in the Tab order', () => {
+    renderModal('researcher')
+    expect(roleButtons().filter((t) => t.tabIndex === 0).map((t) => t.textContent)).toEqual(['Researcher'])
+    previewRole('Teacher')
+    expect(roleButtons().filter((t) => t.tabIndex === 0).map((t) => t.textContent)).toEqual(['Teacher'])
+  })
+
+  test('arrow keys move the preview and DOM focus together, wrapping at both ends', () => {
+    renderModal('writer')
+    const author = roleTabs().getByRole('tab', { name: 'Author' })
+    author.focus()
+
+    fireEvent.keyDown(author, { key: 'ArrowDown' })
+    const researcher = roleTabs().getByRole('tab', { name: 'Researcher' })
+    expect(document.activeElement).toBe(researcher)
+    expect(researcher).toHaveAttribute('aria-selected', 'true')
+    expect(author).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Field map' })).toBeInTheDocument() // the tab set swapped
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(researcher, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(author)
+    expect(author).toHaveAttribute('aria-selected', 'true')
+
+    const teacher = roleTabs().getByRole('tab', { name: 'Teacher' })
+    fireEvent.keyDown(author, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(teacher)
+    expect(screen.getByRole('tab', { name: 'Class and marking' })).toBeInTheDocument()
+    fireEvent.keyDown(teacher, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(author)
+  })
+
+  test('Home and End jump to the first and last role, and the Settings list is untouched', () => {
+    renderModal('researcher')
+    const researcher = roleTabs().getByRole('tab', { name: 'Researcher' })
+    researcher.focus()
+
+    fireEvent.keyDown(researcher, { key: 'End' })
+    const teacher = roleTabs().getByRole('tab', { name: 'Teacher' })
+    expect(document.activeElement).toBe(teacher)
+    expect(teacher).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(teacher, { key: 'Home' })
+    expect(document.activeElement).toBe(roleTabs().getByRole('tab', { name: 'Author' }))
+    // Settings tabs keep their own selection: still Account.
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+describe('researcher Delete all', () => {
+  test('reports papers still being checked that the gateway kept', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/user/data') && init?.method === 'DELETE') {
+          return Promise.resolve(new Response(JSON.stringify({ deleted: 2, skipped: 1 }), { status: 200 }))
+        }
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+    renderModal('researcher')
+    fireEvent.click(screen.getByRole('tab', { name: 'Your data' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '2 papers deleted. 1 paper still being checked was kept; delete again once it finishes.',
+    )
   })
 })

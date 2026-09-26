@@ -17,6 +17,7 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { HistoryList } from '../../components/HistoryList'
 import { SettingsModal } from '../../components/SettingsModal'
+import { settingsRequested } from '../../lib/settingsDeepLink'
 import { AnalysisContents } from '../../components/TableOfContents'
 import type { ContentsRow } from '../../lib/outline'
 import { useAnalyses } from '../../lib/useAnalysis'
@@ -79,7 +80,8 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [section, setSection] = useState<string | null>(null) // claims narrowed to one section
   const [current, setCurrent] = useState<string | null>(null) // section open in the page viewer
   const [jump, setJump] = useState<SectionJump | null>(null) // section page to open
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
+  const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   const analyses = useAnalyses()
 
   useEffect(() => syncScreenParams(screen, selected), [screen, selected])
