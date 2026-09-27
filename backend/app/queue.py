@@ -13,7 +13,7 @@ import time
 
 import redis
 import redis.asyncio
-from rq import Queue, SimpleWorker
+from rq import Queue, SimpleWorker, Worker
 from rq.job import Callback, Job, JobStatus
 from rq.serializers import JSONSerializer
 
@@ -137,6 +137,38 @@ def enqueue_analysis(analysis_id: str, paper: str, verify: bool, owner: str | No
         run_analysis_job, analysis_id, paper, verify, owner, stages,
         job_id=analysis_id, job_timeout=JOB_TIMEOUT, on_failure=Callback(_on_analysis_job_failure),
     )
+
+
+def _short_timeout_client() -> redis.Redis:
+    # Unlike redis_connection(), a read timeout is fine (even wanted) here: /health must not
+    # hang if Redis is up but not answering.
+    return redis.Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+
+
+def ping() -> tuple[bool, str]:
+    """Whether Redis answers a PING right now, for /health."""
+    try:
+        _short_timeout_client().ping()
+        return True, "PONG"
+    except Exception as error:
+        return False, f"{type(error).__name__}: {str(error)[:200]}"
+
+
+def worker_status() -> tuple[bool, str]:
+    """(at least one worker is listening on the analyses queue, "N worker(s), M waiting"),
+    for /health. Redis unreachable counts as no worker, not an exception."""
+    ok, detail = ping()
+    if not ok:
+        return False, f"redis unreachable: {detail}"
+    try:
+        connection = _short_timeout_client()
+        queue = Queue(QUEUE_NAME, connection=connection, serializer=JSONSerializer)
+        count = len(Worker.all(connection=connection, queue=queue))
+        waiting = queue.count
+        plural = "" if count == 1 else "s"
+        return count > 0, f"{count} worker{plural}, {waiting} waiting"
+    except Exception as error:
+        return False, f"{type(error).__name__}: {str(error)[:200]}"
 
 
 def job_is_alive(analysis_id: str) -> bool | None:

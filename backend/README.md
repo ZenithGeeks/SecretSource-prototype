@@ -801,10 +801,16 @@ check at most 30 s old:
     {"name": "grobid", "url": "http://grobid:8070", "auth": "none", "required": true, "ok": true, "detail": "HTTP 200"},
     {"name": "colbert", "url": "http://colbert:8893", "auth": "none", "required": true, "ok": false, "detail": "ConnectionError: ..."},
     {"name": "colpali", "url": "http://colpali:8894", "auth": "none", "required": false, "ok": true, "detail": "HTTP 200"},
-    {"name": "supabase", "url": "", "auth": "none", "required": false, "ok": null, "detail": "not set: analyses are stored in SQLite at ..."}
+    {"name": "supabase", "url": "", "auth": "none", "required": false, "ok": null, "detail": "not set: analyses are stored in SQLite at ..."},
+    {"name": "redis", "url": "redis://redis:6379/0", "auth": "url password", "required": true, "ok": true, "detail": "PONG"},
+    {"name": "worker", "url": "redis://redis:6379/0", "auth": "url password", "required": true, "ok": true, "detail": "1 worker, 0 waiting"}
   ]
 }
 ```
+
+`redis` pings Redis directly; `worker` counts RQ workers registered on the `analyses` queue and jobs
+waiting on it, so a down Redis or a dead worker shows here instead of only surfacing as a stuck or
+failed analysis.
 
 | Field | Meaning |
 | --- | --- |
