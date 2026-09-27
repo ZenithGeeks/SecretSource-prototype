@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+from email import message_from_bytes
+
 import pytest
 
 
@@ -75,6 +78,21 @@ class Drive:
 
     def files(self):
         return self._root
+
+
+class Gmail:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def users(self):
+        return self
+
+    def messages(self):
+        return self
+
+    def send(self, **kwargs):
+        self.calls.append(("gmail", "send", kwargs))
+        return Request({"id": "gmail-message-1"})
 
 
 def test_client_traverses_every_classroom_collection_page():
@@ -173,6 +191,22 @@ def test_drive_and_submission_mutations_use_google_resources():
     assert ("submissions", "return", {"courseId": "c1", "courseWorkId": "cw1", "id": "sub1"}) in calls
 
 
+def test_gmail_feedback_sends_the_teacher_text_with_the_student_ready_report_attached():
+    from app.teacher.google_client import GoogleClassroomClient
+
+    calls = []
+    client = GoogleClassroomClient(Classroom({}, calls), Drive({"drive": []}, calls), Gmail(calls))
+
+    result = client.send_feedback_email("student@example.edu", "Essay feedback", "Please revise.", "<h1>Report</h1>")
+
+    assert result == {"id": "gmail-message-1"}
+    raw = calls[0][2]["body"]["raw"]
+    message = message_from_bytes(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    assert message["To"] == "student@example.edu"
+    assert message["Subject"] == "Essay feedback"
+    assert any(part.get_filename() == "essay-feedback.html" and b"<h1>Report</h1>" in part.get_payload(decode=True) for part in message.walk())
+
+
 def test_supported_attachments_prefer_pdf_then_google_docs_deterministically():
     """Break caught: an unsupported or lower-priority attachment is selected for analysis."""
     from app.teacher.google_client import select_supported_attachments
@@ -230,7 +264,7 @@ def test_refresh_token_constructor_uses_an_injected_google_service_builder():
 
     def build_service(api, version, **kwargs):
         builder_calls.append((api, version, kwargs))
-        return classroom if api == "classroom" else drive
+        return {"classroom": classroom, "drive": drive, "gmail": Gmail(builder_calls)}[api]
 
     client = GoogleClassroomClient.from_refresh_token(
         "refresh-token",
@@ -241,4 +275,4 @@ def test_refresh_token_constructor_uses_an_injected_google_service_builder():
     )
 
     assert client.list_courses() == []
-    assert [(api, version) for api, version, _ in builder_calls] == [("classroom", "v1"), ("drive", "v3")]
+    assert [(api, version) for api, version, _ in builder_calls] == [("classroom", "v1"), ("drive", "v3"), ("gmail", "v1")]

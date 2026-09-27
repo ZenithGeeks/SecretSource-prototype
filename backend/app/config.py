@@ -71,6 +71,10 @@ COLPALI_URL = os.getenv("COLPALI_URL") or "http://localhost:8894"  # optional. S
 
 GROBID_URL = os.getenv("GROBID_URL") or "http://localhost:8070"
 
+# The analysis queue's backing store (app/queue.py) and how the gateway hears back from a
+# worker running a job in a separate process (main.py's Redis Pub/Sub subscriber).
+REDIS_URL = os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+
 # How calls to the services above prove who they are.
 # `google-id-token` adds a Google identity token to every *.run.app URL.
 # `none` sends nothing, which compose needs.
@@ -98,14 +102,6 @@ UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "")
 
 CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 keeps all
 
-# How many analyses run at once, gateway-wide. Unlike PARALLEL_SOURCES/PARALLEL_CHECKS below,
-# nothing bounded extraction until now: every run's own GROBID call (no concurrency limit of its
-# own) and its EXTRACT_WORKERS=3 LLM calls (pipeline/claims.py) started immediately on `POST
-# /analyses`, so a burst of starts could send 3x-as-many-analyses concurrent LLM calls at a single
-# vLLM instance sized for --max-num-seqs 8. A run waits here before extraction starts; once past
-# it, it still shares PARALLEL_*_TOTAL with every other running analysis as before.
-PARALLEL_ANALYSES = int(os.getenv("PARALLEL_ANALYSES", "2"))
-
 # How many cited papers are downloaded and indexed at the same time. Indexing uses the
 # GPU services, so keep it small.
 PARALLEL_SOURCES = int(os.getenv("PARALLEL_SOURCES", "3"))
@@ -115,6 +111,9 @@ PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 # keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.
 PARALLEL_SOURCES_TOTAL = int(os.getenv("PARALLEL_SOURCES_TOTAL") or PARALLEL_SOURCES)
 PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECKS)
+# How many Docling PDF conversions run at once in this process. Each one holds about 2 GB of
+# layout and table models while it runs, which killed Cloud Run gateway instances at 4Gi and 8Gi.
+DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
 # How long a cited paper's checks wait for its figures to be indexed. Empty: until they are, so
 # every verdict can use the figure captions. A number of seconds is a fast mode: after that the
 # check is judged on the text alone, and a later run of the paper gets the figures. On the same
@@ -129,11 +128,13 @@ _DEFAULT_TEACHER_GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/classroom.courses.readonly",
     "https://www.googleapis.com/auth/classroom.rosters.readonly",
+    "https://www.googleapis.com/auth/classroom.profile.emails",
     "https://www.googleapis.com/auth/classroom.coursework.students",
     "https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly",
     "https://www.googleapis.com/auth/classroom.announcements.readonly",
     "https://www.googleapis.com/auth/classroom.topics.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
 )
 
 TEACHER_GOOGLE_ENABLED = _env_flag("TEACHER_GOOGLE_ENABLED")

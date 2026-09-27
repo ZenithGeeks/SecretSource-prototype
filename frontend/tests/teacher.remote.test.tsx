@@ -24,7 +24,7 @@ describe('remote Teacher API', () => {
     })
     await api.sendFeedback({
       courseId: 'course-1', assignmentId: 'work-1', studentId: 'student-1',
-      body: 'Good work.', citationIds: ['citation-1'],
+      body: 'Good work.', citationIds: ['citation-1'], reportHtml: '<h1>Feedback</h1>',
     })
     await api.analyzeSubmission({ courseId: 'course-1', assignmentId: 'work-1', studentId: 'student-1' })
 
@@ -41,7 +41,7 @@ describe('remote Teacher API', () => {
     )
     expect(request).toHaveBeenNthCalledWith(
       4, '/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: 'student-1', body: 'Good work.', citationIds: ['citation-1'] }) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: 'student-1', body: 'Good work.', citationIds: ['citation-1'], reportHtml: '<h1>Feedback</h1>' }) },
     )
     expect(request).toHaveBeenNthCalledWith(
       5, '/teacher/classes/course-1/assignments/work-1/students/student-1/analyze', { method: 'POST' },
@@ -52,5 +52,18 @@ describe('remote Teacher API', () => {
     expect(teacherEssayCheckKey('course-1', 'work-1', 'student-1')).not.toEqual(
       teacherEssayCheckKey('course-2', 'work-1', 'student-1'),
     )
+  })
+
+  it('prepares the selected classwork through the batch Essay Check pipeline route', async () => {
+    const api = createRemoteTeacherApi()
+    request.mockResolvedValue({ prepared: [], skipped: [], failed: [] })
+
+    await api.prepareEssayChecks({ courseId: 'course-1', assignmentIds: ['work-1', 'work-2'] })
+
+    expect(request).toHaveBeenCalledWith('/teacher/classes/course-1/essay-checks:prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignmentIds: ['work-1', 'work-2'] }),
+    })
   })
 })

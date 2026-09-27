@@ -59,10 +59,13 @@ def _normalised_claim(claim: str) -> str:
 
 
 def _pdf_to_text(pdf_path: str) -> str:
-    from app.pipeline.figures import docling_converter, needs_ocr
+    from app.pipeline.figures import convert, docling_converter, needs_ocr
 
-    converter = docling_converter(needs_ocr(pdf_path), pictures=False)
-    return converter.convert(pdf_path).document.export_to_markdown()
+    # pictures=True: the same converter paper_media uses, so only one Docling model set per OCR
+    # setting stays loaded instead of two. export_to_markdown's own image_mode defaults to a
+    # placeholder regardless of whether picture crops were rendered, so the text is unchanged.
+    converter = docling_converter(needs_ocr(pdf_path), pictures=True)
+    return convert(converter, pdf_path).document.export_to_markdown()
 
 
 # --- where a sentence sits on a page -------------------------------------------------

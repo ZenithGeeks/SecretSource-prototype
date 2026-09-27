@@ -28,6 +28,7 @@ export function ResultsSummary({
   onFilter,
   paper,
   onOpenPaper,
+  teacherMode = false,
 }: {
   claims: Claim[]
   standings: Standings
@@ -37,11 +38,13 @@ export function ResultsSummary({
   paper?: string
   /** Opens the paper in the page viewer beside the claims; without it the button links to the file. */
   onOpenPaper?: () => void
+  /** Student-facing feedback has a dedicated export; do not offer researcher paper exports. */
+  teacherMode?: boolean
 }) {
   const [copied, setCopied] = useState(false)
   // Only fetched when there is no page viewer to open it in; the link needs the user's token.
   const pdf = useAuthorizedUrl(
-    paper && !onOpenPaper ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined,
+    paper && !onOpenPaper && !teacherMode ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined,
   )
 
   async function copyMarkdown() {
@@ -64,13 +67,13 @@ export function ResultsSummary({
         </div>
 
         <div className="flex items-center gap-2">
-          {paper && onOpenPaper && (
+          {!teacherMode && paper && onOpenPaper && (
             <Button variant="ghost" onClick={onOpenPaper} title="Read the paper here, page by page">
               <FileText className="size-4" />
               The PDF
             </Button>
           )}
-          {pdf.url && (
+          {!teacherMode && pdf.url && (
             <a
               href={pdf.url}
               target="_blank"
@@ -81,18 +84,20 @@ export function ResultsSummary({
               The PDF
             </a>
           )}
-          <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">
-            <Copy className="size-4" />
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
-            title="Download the claims, their verdicts and their pages as CSV"
-          >
-            <Download className="size-4" />
-            CSV
-          </Button>
+          {!teacherMode && <>
+            <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">
+              <Copy className="size-4" />
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
+              title="Download the claims, their verdicts and their pages as CSV"
+            >
+              <Download className="size-4" />
+              CSV
+            </Button>
+          </>}
         </div>
       </div>
 

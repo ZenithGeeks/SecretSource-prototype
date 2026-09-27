@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from inspect import iscoroutinefunction
 from urllib.parse import quote
 
@@ -22,6 +23,7 @@ def _fixtures():
         "teacher-a", "course-1", "work-1", "submission-1", "student-1", "Grace", "TURNED_IN", None,
         [{"id": "file-1", "name": "Essay.pdf", "mimeType": "application/pdf", "webViewLink": "https://drive.test/file-1"}],
         "synced", None, "analysis-1", {"updateTime": "2026-09-17T01:00:00Z"},
+        student_email="grace@example.edu",
     )
     return course, assignment, submission
 
@@ -76,6 +78,12 @@ class FakeRepository:
     def save_submission(self, submission):
         self.submission = submission
 
+    def link_submission_analysis(self, owner, course_id, coursework_id, submission_id, analysis_id, **version):
+        self.submission = replace(self.submission, analysis_id=analysis_id, **{
+            "analysis_file_id": version.get("file_id"),
+            "analysis_file_version": version.get("file_version"),
+        })
+
     def get_connection_status(self, owner):
         return None
 
@@ -89,6 +97,19 @@ class FakeGoogle:
         self.patched = []
         self.returned = []
         self.fail_return = fail_return
+        self.sent_emails = []
+        self.downloads = []
+
+    def get_drive_metadata(self, file_id):
+        return {"id": file_id, "version": "1"}
+
+    def download_drive_file(self, file_id):
+        self.downloads.append(file_id)
+        return b"pdf bytes"
+
+    def send_feedback_email(self, recipient, subject, body, report_html=None):
+        self.sent_emails.append((recipient, subject, body, report_html))
+        return {"id": "message-1"}
 
     def patch_assigned_grade(self, course_id, coursework_id, submission_id, grade):
         self.patched.append((course_id, coursework_id, submission_id, grade))
@@ -111,13 +132,18 @@ def teacher_client(monkeypatch):
         "citations": [{"doi": "10.1/example", "title": "Example", "url": "https://doi.org/10.1/example"}],
         "verdicts": [{"cited": "10.1/example", "verdict": "supports", "quote": "It works.", "evidence": [{"page": 2}] }],
     }]}}
-    analysis_service = analysis.TeacherEssayAnalysisService(
-        client=FakeGoogle(), repository=repository, analysis_lookup=analyses.get,
-    )
     google = FakeGoogle()
+    analysis_starts = []
+    repository.analysis_starts = analysis_starts
+    analysis_service = analysis.TeacherEssayAnalysisService(
+        client=google, repository=repository, analysis_lookup=analyses.get,
+        save_upload=lambda _content, filename: __import__("pathlib").Path(filename),
+        start=lambda _path, _verify, _owner: analysis_starts.append("start") or {"id": f"prepared-{len(analysis_starts)}"},
+    )
     main.app.dependency_overrides[teacher_router_module.require_teacher_user] = lambda: "teacher-a"
     main.app.dependency_overrides[teacher_router_module.get_repository] = lambda: repository
     main.app.dependency_overrides[teacher_router_module.get_analysis_read_service] = lambda: analysis_service
+    main.app.dependency_overrides[teacher_router_module.get_analysis_service] = lambda: analysis_service
     main.app.dependency_overrides[teacher_router_module.get_google_client] = lambda: google
     client = TestClient(main.app)
     yield client, repository, google
@@ -162,10 +188,11 @@ def test_teacher_review_feedback_and_grade_return_mutations_are_scoped(teacher_c
 
     sent = client.post(
         "/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
-        json={"studentId": "student-1", "body": "Good work.", "citationIds": [review_id]},
+        json={"studentId": "student-1", "body": "Good work.", "citationIds": [review_id], "reportHtml": "<h1>Feedback</h1>"},
     )
-    assert sent.status_code == 200
+    assert sent.status_code == 200, sent.text
     assert sent.json()["status"] == "sent"
+    assert google.sent_emails == [("grace@example.edu", "Essay feedback for work-1", "Good work.", "<h1>Feedback</h1>")]
 
     graded = client.post(
         "/teacher/classes/course-1/assignments/work-1/students/student-1/grade-and-return",
@@ -213,6 +240,58 @@ def test_analyze_submission_runs_on_the_event_loop():
     from app.teacher.router import analyze_submission
 
     assert iscoroutinefunction(analyze_submission)
+
+
+def test_prepare_selected_classwork_starts_analysis_for_each_single_pdf_submission(teacher_client):
+    client, repository, google = teacher_client
+
+    response = client.post(
+        "/teacher/classes/course-1/essay-checks:prepare",
+        json={"assignmentIds": ["work-1", "work-1"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "prepared": [{"assignmentId": "work-1", "submissionId": "submission-1", "studentId": "student-1", "studentName": "Grace", "analysisId": "prepared-1", "status": "running"}],
+        "skipped": [],
+        "failed": [],
+    }
+    assert repository.analysis_starts == ["start"]
+    assert google.downloads == ["file-1"]
+    assert repository.submission.analysis_id == "prepared-1"
+
+
+def test_prepare_selected_classwork_skips_ambiguous_pdf_submissions(teacher_client):
+    client, repository, google = teacher_client
+    repository.submission = replace(repository.submission, attachments=[
+        {"id": "draft-a", "name": "draft-a.pdf", "mimeType": "application/pdf"},
+        {"id": "draft-b", "name": "draft-b.pdf", "mimeType": "application/pdf"},
+    ])
+
+    response = client.post("/teacher/classes/course-1/essay-checks:prepare", json={"assignmentIds": ["work-1"]})
+
+    assert response.status_code == 200
+    assert response.json()["prepared"] == []
+    assert response.json()["skipped"] == [{
+        "assignmentId": "work-1", "submissionId": "submission-1", "studentId": "student-1",
+        "studentName": "Grace", "reason": "submission must contain exactly one PDF attachment",
+    }]
+    assert repository.analysis_starts == []
+    assert google.downloads == []
+
+
+def test_feedback_is_not_marked_sent_without_student_email(teacher_client):
+    client, repository, _ = teacher_client
+    repository.submission = replace(repository.submission, student_email=None)
+
+    response = client.post(
+        "/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
+        json={"studentId": "student-1", "body": "Please revise.", "citationIds": []},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "student email is unavailable; refresh Classroom student email access"
+    assert repository.feedback.status == "draft"
 
 
 def test_essay_review_citation_ids_are_unique_even_when_citations_have_no_identifiers():

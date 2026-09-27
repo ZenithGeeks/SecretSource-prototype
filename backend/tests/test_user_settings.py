@@ -231,9 +231,8 @@ def test_concurrent_uploads_leave_exactly_one_avatar_file(client, monkeypatch):
 
 
 def test_delete_all_data_skips_a_running_analysis_and_its_run_can_still_publish(client, monkeypatch):
-    """Popping a running analysis out from under its `_run` task makes the next `_publish`
-    raise KeyError inside the task, after the caller already got a 200. Running ones are
-    skipped and reported instead."""
+    """A running analysis's worker keeps saving it, so deleting it would not stick. Running ones
+    are skipped and reported instead, and the run can still publish."""
     import asyncio
 
     monkeypatch.setattr(main.store, "save", lambda analysis: None)

@@ -1,0 +1,289 @@
+{
+  "title": "Analyses",
+  "uid": "analyses",
+  "tags": ["secretsource", "analyses"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Analyses per day by outcome",
+      "type": "timeseries",
+      "description": "done / error-interrupted (message = \"interrupted by a restart\") / error-other / running, by day the analysis started.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "select $__timeGroup(started, '1d') as time,\n  case\n    when data->>'status' = 'done' then 'done'\n    when data->>'status' = 'running' then 'running'\n    when data->>'status' = 'error' and coalesce(data->>'message','') = 'interrupted by a restart' then 'error-interrupted'\n    when data->>'status' = 'error' then 'error-other'\n    else 'other'\n  end as outcome,\n  count(*) as count\nfrom public.analyses\nwhere $__timeFilter(started)\ngroup by 1, 2\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Success rate (done ÷ finished)",
+      "type": "stat",
+      "description": "Finished = status done or error, over the selected time range.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 9 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "green", "value": 0.95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "table",
+          "rawSql": "select\n  case when count(*) filter (where data->>'status' in ('done','error')) = 0 then null\n  else count(*) filter (where data->>'status' = 'done')::float8 / count(*) filter (where data->>'status' in ('done','error'))\n  end as success_rate\nfrom public.analyses\nwhere $__timeFilter(started)",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Success rate over time",
+      "type": "timeseries",
+      "gridPos": { "h": 5, "w": 18, "x": 6, "y": 9 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "select $__timeGroup(started, '1d') as time,\n  case when count(*) filter (where data->>'status' in ('done','error')) = 0 then null\n  else count(*) filter (where data->>'status' = 'done')::float8 / count(*) filter (where data->>'status' in ('done','error'))\n  end as success_rate\nfrom public.analyses\nwhere $__timeFilter(started)\ngroup by 1\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Top error messages",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "table",
+          "rawSql": "select coalesce(data->>'message', '(no message)') as message,\n  count(*) as count,\n  max(started) as last_seen\nfrom public.analyses\nwhere data->>'status' = 'error' and $__timeFilter(started)\ngroup by 1\norder by count desc\nlimit 20",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Failed sources by reason",
+      "type": "table",
+      "description": "Buckets the message of each \"failed\" stage: no open-access PDF, not found, timeout, other.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "table",
+          "rawSql": "select\n  case\n    when message ilike '%no open-access pdf%' then 'no open-access PDF'\n    when message ilike '%no paper found%' then 'not found'\n    when message ilike '%timed out%' or message ilike '%timeout%' then 'timeout'\n    else 'other'\n  end as reason,\n  count(*) as count\nfrom (\n  select elem->>'message' as message\n  from public.analyses a, lateral jsonb_array_elements(coalesce(a.data->'stages', '[]'::jsonb)) elem\n  where elem->>'stage' = 'failed' and $__timeFilter(a.started)\n) f\ngroup by 1\norder by count desc",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Duration of finished runs (minutes)",
+      "type": "timeseries",
+      "description": "p50/p95 per day, first stage \"at\" to last stage \"at\", for runs that ended done or error. Rows with no \"at\" timestamps are excluded.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 22 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "m" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "with s as (\n  select id, started, data,\n    (select min((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as first_at,\n    (select max((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as last_at\n  from public.analyses\n  where data->>'status' in ('done', 'error') and $__timeFilter(started)\n)\nselect $__timeGroup(started, '1d') as time,\n  percentile_cont(0.5) within group (order by (last_at - first_at) / 60.0) as \"p50\",\n  percentile_cont(0.95) within group (order by (last_at - first_at) / 60.0) as \"p95\"\nfrom s\nwhere first_at is not null and last_at is not null and last_at > first_at\ngroup by 1\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Time split per run (approximate, minutes)",
+      "type": "timeseries",
+      "description": "Approximation: reading = first stage → \"planned\"; source prep + judging = \"planned\" → last \"verified\"; finishing = last \"verified\" → \"done\". Averaged per day. Relies on stage \"at\" timestamps, which some older runs lack for some stages — those runs are simply skipped for the split(s) they are missing.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 31 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "m", "custom": { "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "with s as (\n  select id, started, data,\n    (select min((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as first_at,\n    (select (elem->>'at')::double precision from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem->>'stage' = 'planned' and elem ? 'at' limit 1) as planned_at,\n    (select max((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem->>'stage' = 'verified' and elem ? 'at') as last_verified_at,\n    (select (elem->>'at')::double precision from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem->>'stage' = 'done' and elem ? 'at' limit 1) as done_at\n  from public.analyses\n  where $__timeFilter(started)\n)\nselect $__timeGroup(started, '1d') as time,\n  avg(greatest(planned_at - first_at, 0)) / 60.0 as \"reading (approx.)\",\n  avg(greatest(last_verified_at - planned_at, 0)) / 60.0 as \"source prep + judging (approx.)\",\n  avg(greatest(done_at - last_verified_at, 0)) / 60.0 as \"finishing (approx.)\"\nfrom s\nwhere first_at is not null and planned_at is not null\ngroup by 1\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Verdict mix per day",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 40 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "select $__timeGroup(a.started, '1d') as time,\n  coalesce(v->>'verdict', 'none') as verdict,\n  count(*) as count\nfrom public.analyses a,\n  lateral jsonb_array_elements(coalesce(a.data->'claims', '[]'::jsonb)) c,\n  lateral jsonb_array_elements(coalesce(c->'verdicts', '[]'::jsonb)) v\nwhere $__timeFilter(a.started)\ngroup by 1, 2\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Checks per analysis (avg)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 49 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 1 }, "overrides": [] },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "table",
+          "rawSql": "with counts as (\n  select a.id,\n    count(v) as n_checks\n  from public.analyses a\n  left join lateral jsonb_array_elements(coalesce(a.data->'claims', '[]'::jsonb)) c on true\n  left join lateral jsonb_array_elements(coalesce(c->'verdicts', '[]'::jsonb)) v on true\n  where $__timeFilter(a.started)\n  group by a.id\n)\nselect avg(n_checks) as avg_checks_per_analysis from counts",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Share of checks with no verdict",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 49 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "table",
+          "rawSql": "with counts as (\n  select a.id,\n    count(v) as n_checks,\n    count(*) filter (where v is not null and v->>'verdict' is null) as n_no_verdict\n  from public.analyses a\n  left join lateral jsonb_array_elements(coalesce(a.data->'claims', '[]'::jsonb)) c on true\n  left join lateral jsonb_array_elements(coalesce(c->'verdicts', '[]'::jsonb)) v on true\n  where $__timeFilter(a.started)\n  group by a.id\n)\nselect case when sum(n_checks) = 0 then null else sum(n_no_verdict)::float8 / sum(n_checks) end as share_no_verdict from counts",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Uploads vs identifiers per day",
+      "type": "timeseries",
+      "description": "upload = analyses.data.paper starts with \"data/papers/\"; identifier = arXiv id, DOI, or URL.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "select $__timeGroup(started, '1d') as time,\n  case when data->>'paper' like 'data/papers/%' then 'upload' else 'identifier' end as kind,\n  count(*) as count\nfrom public.analyses\nwhere $__timeFilter(started)\ngroup by 1, 2\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Active users per day",
+      "type": "timeseries",
+      "description": "Distinct owners with an analysis started that day. Counts only — never shows an owner id.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 57 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "time_series",
+          "rawSql": "select $__timeGroup(started, '1d') as time,\n  count(distinct data->>'owner') as active_users\nfrom public.analyses\nwhere $__timeFilter(started) and data->>'owner' is not null\ngroup by 1\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Running now",
+      "type": "table",
+      "description": "id, minutes since start, last stage. No titles or owners.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 57 },
+      "datasource": { "type": "postgres", "uid": "analyses-db" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "minutes_since_start" },
+            "properties": [{ "id": "unit", "value": "m" }, { "id": "decimals", "value": 1 }]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "analyses-db" },
+          "format": "table",
+          "rawSql": "select id,\n  extract(epoch from (now() - started)) / 60.0 as minutes_since_start,\n  data->'stages'->-1->>'stage' as last_stage\nfrom public.analyses\nwhere data->>'status' = 'running'\norder by started asc",
+          "rawQuery": true
+        }
+      ]
+    }
+  ]
+}

@@ -6,6 +6,12 @@ URL is ignored: access logs record URLs, so anyone who can read the logs could r
 We ask Supabase who the token belongs to and keep the answer for a few minutes, so a page that
 makes ten requests does not make ten lookups.
 
+On Cloud Run, the Vercel proxy (frontend/api/[...path].ts) spends the gateway's own
+Authorization header on the Google identity token Cloud Run's IAM requires, and relays the
+user's Supabase token as X-User-Authorization instead. That header wins when present; a
+direct caller with no such proxy in front (local dev, docker compose, ss-core) still works
+with a plain Authorization header, since there is no Google token there to make room for.
+
 Without Supabase configured, login is off: every caller is nobody, the owner is None, and the
 gateway works as one shared space, as it did before login existed. With Supabase configured, a
 request with no token is a 401, like a token Supabase rejects. Treating it as nobody would show
@@ -32,7 +38,7 @@ def _supabase_configured() -> bool:
 
 
 def _token(request: Request) -> str:
-    header = request.headers.get("authorization", "")
+    header = request.headers.get("x-user-authorization") or request.headers.get("authorization", "")
     return header[7:].strip() if header.lower().startswith("bearer ") else ""
 
 

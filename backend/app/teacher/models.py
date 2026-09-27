@@ -151,6 +151,9 @@ class TeacherSubmission:
     sync_error: str | None
     analysis_id: str | None
     raw: dict[str, Any]
+    student_email: str | None = None
+    analysis_file_id: str | None = None
+    analysis_file_version: str | None = None
 
     def to_row(self) -> dict[str, Any]:
         return self.__dict__.copy()

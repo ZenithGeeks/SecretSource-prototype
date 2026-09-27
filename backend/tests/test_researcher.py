@@ -164,6 +164,34 @@ def test_library_rows_count_how_many_cited_sources_are_publicly_indexed():
     assert row["sourcesNotIndexed"] == 1
 
 
+def test_library_and_graph_mark_whether_the_analysed_paper_itself_is_indexed():
+    checked_and_found = {
+        "id": "f2", "paper": "data/papers/f2.pdf", "file": "data/papers/f2.pdf",
+        "status": "done", "title": "Found Paper", "claims": [],
+        "indexed_in": {"index": "arxiv", "ids": {}},
+    }
+    checked_and_not_found = {
+        "id": "f3", "paper": "data/papers/f3.pdf", "file": "data/papers/f3.pdf",
+        "status": "done", "title": "Missing Paper", "claims": [],
+        "indexed_in": {"index": "", "ids": {}},
+    }
+    not_yet_checked = {
+        "id": "f4", "paper": "data/papers/f4.pdf", "file": "data/papers/f4.pdf",
+        "status": "done", "title": "Unchecked Paper", "claims": [],
+    }
+    analyses = [checked_and_found, checked_and_not_found, not_yet_checked]
+
+    rows = {row["id"]: row for row in researcher.library(researcher.UNSORTED, [], analyses)["papers"]}
+    assert rows["f2"]["indexed"] == "yes" and rows["f2"]["index"] == "arXiv"
+    assert rows["f3"]["indexed"] == "no" and rows["f3"]["index"] == ""
+    assert rows["f4"]["indexed"] == "" and rows["f4"]["index"] == ""
+
+    nodes = {n["label"]: n for n in researcher.graph(analyses)["nodes"] if n["kind"] == "paper"}
+    assert nodes["Found Paper"]["indexed"] == "yes"
+    assert nodes["Missing Paper"]["indexed"] == "no"
+    assert nodes["Unchecked Paper"]["indexed"] == ""
+
+
 def test_consensus_reuses_the_verdicts_of_matching_claims():
     answer = researcher.consensus("does residual compression reduce index size", ANALYSES)
     assert answer["refutes"] == 1

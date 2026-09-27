@@ -23,7 +23,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-import { API_BASE, type Citation, type CitationMarker, type Source } from '../lib/api'
+import { API_BASE, type Citation, type CitationMarker, type Source, type Verdict } from '../lib/api'
 import { citationLink, reference } from '../lib/citations'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
@@ -36,6 +36,7 @@ export type Target = {
   label: string // what the reader clicked, shown above the page
   quote?: string // the text being pointed at, if there is one to show
   source: Source | null // null when it could not be located: the page shows unmarked
+  verdict?: Verdict['verdict'] // colors a located passage by the result it represents
   page?: number // fall back to this when there is no source to take a page from
   error?: string // a lookup failure that should remain distinct from an unlocated passage
   section?: string // the analysed paper's section this points into, for the table of contents
@@ -59,10 +60,19 @@ function boxStyle(box: Box, width: number, height: number) {
   }
 }
 
-function Highlight({ box, source }: { box: Box; source: Source }) {
+const VERDICT_HIGHLIGHT = {
+  supports: 'bg-supports/20 ring-supports/70',
+  refutes: 'bg-refutes/20 ring-refutes/70',
+  insufficient: 'bg-insufficient/20 ring-insufficient/70',
+} as const
+
+function Highlight({ box, source, verdict }: { box: Box; source: Source; verdict?: Verdict['verdict'] }) {
   return (
     <div
-      className="pointer-events-none absolute z-10 rounded-xs bg-accent/20 ring-2 ring-accent/70"
+      className={cn(
+        'pointer-events-none absolute z-10 rounded-xs ring-2',
+        verdict ? VERDICT_HIGHLIGHT[verdict] : 'bg-accent/20 ring-accent/70',
+      )}
       style={boxStyle(box, source.page_width, source.page_height)}
     />
   )
@@ -373,7 +383,7 @@ export function PageViewer({
                       )}
                       {number === highlightPage &&
                         target.source?.boxes.map((box, i) => (
-                          <Highlight key={i} box={box} source={target.source as Source} />
+                          <Highlight key={i} box={box} source={target.source as Source} verdict={target.verdict} />
                         ))}
                       {pageMarkers.map((marker, i) => (
                         <button
