@@ -1,0 +1,28 @@
+# The "Analyses" dashboard's data source: Supabase Postgres, read through the grafana_ro role
+# created by supabase/migrations/20260928090000_grafana_readonly.sql (SELECT on public.analyses
+# and public.sources only, RLS-scoped, no login by default until someone sets a password by
+# hand). Values are filled from the environment at container start — see
+# https://grafana.com/docs/grafana/latest/administration/provisioning/#using-environment-variables
+# ("$VAR" / "${VAR}" interpolation; provisioning does not need the GF_ prefix env vars use).
+#
+# GRAFANA_DB_USER carries the whole username, including the Supabase project ref
+# (grafana_ro.<project-ref> on the session pooler), so the ref is never hardcoded here.
+apiVersion: 1
+
+datasources:
+  - name: Analyses (Postgres)
+    uid: analyses-db
+    type: postgres
+    access: proxy
+    url: ${GRAFANA_DB_HOST}
+    user: ${GRAFANA_DB_USER}
+    editable: false
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}
+    jsonData:
+      database: postgres
+      sslmode: require
+      maxOpenConns: 2
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1500
