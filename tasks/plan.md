@@ -35,11 +35,11 @@ Replace `asyncio.create_task(_run(...))` (in-process, one gateway, no restart su
 
 ### Phase 3: Worker execution path (not yet wired into `_start`)
 
-- [ ] Task 4: `run_analysis_job()` + `worker.py` entrypoint
+- [x] Task 4: `run_analysis_job()` + `worker.py` entrypoint
 
 ### Checkpoint: Worker path proven in isolation
-- [ ] `run_analysis_job` tested directly (no real Redis/RQ needed) — correct final analysis state, correct sequence of "published" snapshots against a fake Redis client
-- [ ] Live app still uses `asyncio.create_task` — nothing user-facing has changed yet
+- [x] `run_analysis_job` tested directly (no real Redis/RQ needed) — correct final analysis state, correct sequence of "published" snapshots against a fake Redis client
+- [x] Live app still uses `asyncio.create_task` — nothing user-facing has changed yet
 
 ### Phase 4: Cutover
 

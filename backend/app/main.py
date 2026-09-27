@@ -426,10 +426,16 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         await _saved(analysis_id)
 
 
+def _new_analysis(analysis_id: str, paper: str, owner: str | None) -> dict:
+    """The skeleton dict an analysis starts as, shared by the gateway's in-process `_start`
+    and the worker's job (app/queue.py), so the two can never drift apart."""
+    return {"id": analysis_id, "paper": paper, "status": "running",
+            "owner": owner, "stages": [], "claims": []}
+
+
 def _start(paper: str, verify: bool, owner: str | None) -> dict:
     analysis_id = uuid.uuid4().hex[:12]
-    analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
-                             "owner": owner, "stages": [], "claims": []}
+    analyses[analysis_id] = _new_analysis(analysis_id, paper, owner)
     streams[analysis_id] = asyncio.Queue()
     ANALYSES_STARTED.inc()
     asyncio.create_task(_run(analysis_id, paper, verify))

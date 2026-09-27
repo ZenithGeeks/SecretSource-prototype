@@ -88,14 +88,14 @@ docker run --rm -v "$(pwd -W):/repo" -w /repo secretsource-prototype-gateway sh 
 **Description:** In `backend/app/queue.py`, add `run_analysis_job(analysis_id, paper, verify, owner)` — a plain sync function (RQ jobs are sync) that constructs the analysis dict skeleton (same shape `_start()` builds today) and runs the existing async pipeline (`_run_queued` from `main.py`, unchanged) via `asyncio.run(...)`. Set a generous `job_timeout` when enqueuing (later, in Task 5) — analyses can run several minutes; RQ's 180s default is too short. Not yet wired into `_start()` — reachable only by calling it directly (tests) or via a manually-enqueued job.
 
 **Acceptance criteria:**
-- [ ] `run_analysis_job` builds the same skeleton dict `_start()` currently builds
-- [ ] Runs `_run_queued` to completion via `asyncio.run`
-- [ ] Final analysis state (status, claims, figures, audit) matches what today's in-process path produces for the same stubbed pipeline
-- [ ] `backend/worker.py` correctly picks up and runs a job when a real RQ worker is pointed at it (checked via Task 4's live verification, not just the unit test)
+- [x] `run_analysis_job` builds the same skeleton dict `_start()` currently builds
+- [x] Runs `_run_queued` to completion via `asyncio.run`
+- [x] Final analysis state (status, claims, figures, audit) matches what today's in-process path produces for the same stubbed pipeline
+- [x] `backend/worker.py` correctly picks up and runs a job when a real RQ worker is pointed at it (checked via Task 4's live verification, not just the unit test)
 
 **Verification:**
-- [ ] New test: call `run_analysis_job` directly with the pipeline functions stubbed (same pattern as `test_shared_limits.py`), assert the final dict and the sequence of fake-Redis-client publishes are correct
-- [ ] Full backend suite passes
+- [x] New test: call `run_analysis_job` directly with the pipeline functions stubbed (same pattern as `test_shared_limits.py`), assert the final dict and the sequence of fake-Redis-client publishes are correct
+- [x] Full backend suite passes
 
 **Dependencies:** Task 1 (queue.py/worker.py skeleton), Task 2 (the `_publish` behavior `_run_queued` relies on)
 
