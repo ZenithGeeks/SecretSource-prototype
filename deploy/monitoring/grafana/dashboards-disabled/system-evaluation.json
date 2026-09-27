@@ -61,7 +61,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "analyses_running"
+          "expr": "sum(analyses_running)"
         }
       ]
     },

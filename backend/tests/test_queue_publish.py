@@ -1,13 +1,17 @@
 """_publish() forwards the full analysis snapshot to Redis on every stage, additively
 alongside its existing streams[]/store.save() behavior (see tasks/plan.md, Task 2). A single
 claim/citation keeps stage ordering deterministic, since nothing here runs concurrently.
+
+Driven through queue.run_analysis_job() (the worker's entry point, sync) rather than _start(),
+since analyses no longer run in-process off POST /analyses.
 """
 
-import asyncio
+import copy
 import json
 
 import pytest
 from app import main
+from app.queue import run_analysis_job
 
 
 class FakeRedis:
@@ -20,12 +24,21 @@ class FakeRedis:
 
 @pytest.fixture
 def stubbed_pipeline(monkeypatch):
+    saves: list[dict] = []
+
     def extract(paper):
         claims = [{"claim": "c0", "citations": [{"key": "s0"}]}]
-        return {"status": "ok", "file": f"{paper}.pdf", "claims": claims}
+        return {"status": "ok", "file": f"{paper}.pdf", "title": "T", "claims": claims}
 
-    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    def save(analysis):
+        saves.append(copy.deepcopy(analysis))
+
+    monkeypatch.setattr(main.store, "save", save)
     monkeypatch.setattr(main, "extract_claims_with_citations", extract)
+    # A non-empty title makes _index_self actually await asyncio.to_thread(index_paper, ...)
+    # instead of returning synchronously -- returning synchronously races run_analysis_job's
+    # _background drain loop under pytest's capture and can hang it (unrelated to this change).
+    monkeypatch.setattr(main, "index_paper", lambda title: f"indexed:{title}")
     monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
     monkeypatch.setattr(
@@ -35,39 +48,35 @@ def stubbed_pipeline(monkeypatch):
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "audit", lambda analysis: [])
     main.analyses.clear()
-    yield
+    main.streams.clear()
+    yield saves
     main.analyses.clear()
-
-
-def _run_to_completion(paper: str) -> str:
-    async def scenario():
-        analysis_id = main._start(paper, True, None)["id"]
-        async def wait():
-            while main.analyses[analysis_id]["status"] == "running":
-                await asyncio.sleep(0.01)
-        await asyncio.wait_for(wait(), timeout=10)
-        return analysis_id
-
-    return asyncio.run(scenario())
+    main.streams.clear()
 
 
 def test_publish_sends_the_full_snapshot_to_redis_per_stage(stubbed_pipeline, monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(main, "redis_connection", lambda: fake)
+    saves = stubbed_pipeline
 
-    analysis_id = _run_to_completion("paper.pdf")
+    run_analysis_job("job-pub-1", "paper.pdf", True, None)
 
-    stages = main.analyses[analysis_id]["stages"]
+    # The last save is from the detached _index_self task, which run_analysis_job drains
+    # before returning (see queue.py) but which never publishes to Redis on its own -- so
+    # the last published snapshot corresponds to the save just before it, not the final one.
+    stages = saves[-1]["stages"]
     assert len(fake.published) == len(stages) > 0
 
     for index, (channel, message) in enumerate(fake.published):
-        assert channel == f"analysis:{analysis_id}"
+        assert channel == "analysis:job-pub-1"
         snapshot = json.loads(message)
-        assert snapshot["id"] == analysis_id
+        assert snapshot["id"] == "job-pub-1"
         # The snapshot published with stage N already carries stages[0..N], not fewer or more.
         assert snapshot["stages"] == stages[: index + 1]
 
-    assert json.loads(fake.published[-1][1]) == main.analyses[analysis_id]
+    assert "indexed_in" not in json.loads(fake.published[-1][1])
+    assert saves[-1]["indexed_in"] == "indexed:T"
+    assert json.loads(fake.published[-1][1])["stages"] == saves[-1]["stages"]
 
 
 def test_publish_survives_redis_being_down(stubbed_pipeline, monkeypatch):
@@ -77,24 +86,26 @@ def test_publish_survives_redis_being_down(stubbed_pipeline, monkeypatch):
             raise ConnectionError("redis is down")
 
     monkeypatch.setattr(main, "redis_connection", lambda: DownRedis())
+    saves = stubbed_pipeline
 
-    analysis_id = _run_to_completion("paper.pdf")
+    result = run_analysis_job("job-pub-2", "paper.pdf", True, None)
 
-    analysis = main.analyses[analysis_id]
-    assert analysis["status"] == "done"
-    assert [stage["stage"] for stage in analysis["stages"]][:2] == ["queued", "extracting"]
+    assert result["status"] == "done"
+    analysis = saves[-1]
+    assert [stage["stage"] for stage in analysis["stages"]][:1] == ["extracting"]
     assert analysis["stages"][-1]["stage"] == "done"
 
 
 def test_existing_stream_and_stage_behavior_is_unchanged(stubbed_pipeline, monkeypatch):
     """Redis is additive: an analysis with no reachable Redis-like object at all would still
-    fail if _publish's existing behavior regressed, since streams[]/analyses[] are read here
+    fail if _publish's existing behavior regressed, since the saved analysis is read here
     exactly like every other test in this suite does, unaffected by the new call."""
     monkeypatch.setattr(main, "redis_connection", lambda: FakeRedis())
+    saves = stubbed_pipeline
 
-    analysis_id = _run_to_completion("paper.pdf")
+    result = run_analysis_job("job-pub-3", "paper.pdf", True, None)
 
-    analysis = main.analyses[analysis_id]
-    assert analysis["status"] == "done"
-    assert [stage["stage"] for stage in analysis["stages"]][:2] == ["queued", "extracting"]
+    assert result["status"] == "done"
+    analysis = saves[-1]
+    assert [stage["stage"] for stage in analysis["stages"]][:1] == ["extracting"]
     assert analysis["stages"][-1]["stage"] == "done"

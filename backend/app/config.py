@@ -102,14 +102,6 @@ UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "")
 
 CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 keeps all
 
-# How many analyses run at once, gateway-wide. Unlike PARALLEL_SOURCES/PARALLEL_CHECKS below,
-# nothing bounded extraction until now: every run's own GROBID call (no concurrency limit of its
-# own) and its EXTRACT_WORKERS=3 LLM calls (pipeline/claims.py) started immediately on `POST
-# /analyses`, so a burst of starts could send 3x-as-many-analyses concurrent LLM calls at a single
-# vLLM instance sized for --max-num-seqs 8. A run waits here before extraction starts; once past
-# it, it still shares PARALLEL_*_TOTAL with every other running analysis as before.
-PARALLEL_ANALYSES = int(os.getenv("PARALLEL_ANALYSES", "2"))
-
 # How many cited papers are downloaded and indexed at the same time. Indexing uses the
 # GPU services, so keep it small.
 PARALLEL_SOURCES = int(os.getenv("PARALLEL_SOURCES", "3"))

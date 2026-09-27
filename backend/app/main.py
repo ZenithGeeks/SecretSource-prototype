@@ -51,7 +51,6 @@ from app.auth import current_user
 from app.config import (
     AVATARS_DIR,
     PAPERS_DIR,
-    PARALLEL_ANALYSES,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
     PARALLEL_SOURCES,
@@ -59,10 +58,8 @@ from app.config import (
 )
 from app.metrics import (
     ANALYSES_FINISHED,
-    ANALYSES_RUNNING,
     ANALYSES_STARTED,
     ANALYSIS_DURATION_SECONDS,
-    ANALYSIS_QUEUE_WAIT_SECONDS,
     AUDIT_FINDINGS,
     CLAIM_CHECKS_FAILED,
     CLAIM_VERDICTS,
@@ -78,7 +75,7 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
-from app.queue import pubsub_client, redis_connection
+from app.queue import cancel_if_queued, enqueue_analysis, job_is_alive, pubsub_client, redis_connection
 from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
@@ -98,27 +95,38 @@ streams: dict[str, asyncio.Queue] = {}
 _deleted: set[str] = set()
 
 # Shared by every run, so N analyses at once are not N times the load on the retrieval
-# services and the LLM (#170). _run takes its own limit first, then one of these.
+# services and the LLM (#170). _run_queued takes its own limit first, then one of these.
 all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
 all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
-# Extraction (GROBID + EXTRACT_WORKERS LLM calls) has no limit of its own, unlike the two above,
-# so a burst of starts used to send all of it at once. A run waits here before extraction, then
-# an accepted run is unaffected by later starts still waiting.
-all_analyses = asyncio.Semaphore(PARALLEL_ANALYSES)
 
 
 def restore():
-    """Load stored analyses on startup. Ones still marked running were interrupted."""
+    """Load stored analyses on startup. A "running" row may belong to a job an RQ worker is
+    still executing (or was, before this gateway process last exited); only mark it interrupted
+    when the job itself is confirmed gone, and otherwise let the snapshot subscriber catch it up."""
     analyses.clear()
     analyses.update(store.load_all())
     for analysis in analyses.values():
-        if analysis["status"] == "running":
+        if analysis["status"] != "running":
+            continue
+        alive = job_is_alive(analysis["id"])
+        if alive is False:
             analysis.update(status="error", message="interrupted by a restart")
             # Add a final stage. A client that reconnects then sees the run is over.
             analysis["stages"].append(
                 {"stage": "error", "message": "interrupted by a restart"}
             )
             store.save(analysis)
+        else:
+            if alive is None:
+                logger.warning(
+                    "could not reach Redis to check job %s on restart; leaving it running",
+                    analysis["id"],
+                )
+            # SSE replay invariant: a stream must hold every stage already recorded.
+            queue = streams.setdefault(analysis["id"], asyncio.Queue())
+            for stage in analysis["stages"]:
+                queue.put_nowait(stage)
 
 
 def _apply_snapshot(snapshot: dict) -> None:
@@ -304,19 +312,6 @@ async def _index_self(analysis_id: str, title: str) -> None:
     _save_soon(analysis_id)
 
 
-async def _run(analysis_id: str, paper: str, verify: bool):
-    analysis = analyses[analysis_id]
-    queued_at = time.monotonic()
-    await _publish(analysis_id, "queued", message="waiting for a free analysis slot")
-    async with all_analyses:
-        ANALYSIS_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
-        ANALYSES_RUNNING.inc()
-        try:
-            await _run_queued(analysis_id, analysis, paper, verify)
-        finally:
-            ANALYSES_RUNNING.dec()
-
-
 async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
     started_at = time.monotonic()
     try:
@@ -434,11 +429,26 @@ def _new_analysis(analysis_id: str, paper: str, owner: str | None) -> dict:
 
 
 def _start(paper: str, verify: bool, owner: str | None) -> dict:
+    """Records a "queued" stage locally (so the caller sees it immediately) and hands the run to
+    an RQ worker."""
     analysis_id = uuid.uuid4().hex[:12]
-    analyses[analysis_id] = _new_analysis(analysis_id, paper, owner)
+    analysis = _new_analysis(analysis_id, paper, owner)
+    queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
+    analysis["stages"].append(queued)
+    analyses[analysis_id] = analysis
     streams[analysis_id] = asyncio.Queue()
+    streams[analysis_id].put_nowait(queued)
+    try:
+        enqueue_analysis(analysis_id, paper, verify, owner, [queued])
+    except Exception:
+        analyses.pop(analysis_id, None)
+        streams.pop(analysis_id, None)
+        logger.warning("enqueuing analysis %s failed", analysis_id)
+        raise HTTPException(503, "the analysis queue is unavailable, try again shortly") from None
     ANALYSES_STARTED.inc()
-    asyncio.create_task(_run(analysis_id, paper, verify))
+    # Stored now so a gateway restart before a worker picks the job up still finds it (else it
+    # 404s, and the web app's event stream stops retrying). The worker's saves supersede this.
+    _save_soon(analysis_id)
     return {"id": analysis_id}
 
 
@@ -526,7 +536,11 @@ async def _delete_one(analysis_id: str) -> None:
 
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    _mine(analysis_id, user)
+    analysis = _mine(analysis_id, user)
+    if analysis["status"] == "running":
+        # A started job keeps saving to the store, so a deleted row would come back on restart.
+        if not await asyncio.to_thread(cancel_if_queued, analysis_id):
+            raise HTTPException(409, "this analysis is still running; delete it once it finishes")
     await _delete_one(analysis_id)
     return {"deleted": analysis_id}
 

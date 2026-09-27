@@ -10,3 +10,11 @@ scrape_configs:
   - job_name: gateway
     static_configs:
       - targets: ["gateway:8080"]
+  # The pipeline's metrics are counted in the RQ worker processes, not the gateway
+  # (backend/worker.py serves them on WORKER_METRICS_PORT, default 9101). DNS
+  # discovery finds every replica after docker compose up --scale worker=N.
+  - job_name: worker
+    dns_sd_configs:
+      - names: ["worker"]
+        type: A
+        port: 9101

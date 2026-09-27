@@ -7,24 +7,35 @@ asyncio one. `run_analysis_job` is the thing a worker actually runs.
 """
 
 import asyncio
+import json
+import logging
+import time
 
 import redis
 import redis.asyncio
 from rq import Queue
+from rq.job import Callback, Job, JobStatus
 
 from app.config import REDIS_URL
+from app.metrics import ANALYSES_RUNNING, ANALYSIS_QUEUE_WAIT_SECONDS
 
 QUEUE_NAME = "analyses"
 JOB_TIMEOUT = 60 * 30  # RQ's own default (180s) suits quick jobs; an analysis can run minutes.
 
+logger = logging.getLogger(__name__)
+
 _connection: redis.Redis | None = None
 _queue: Queue | None = None
+
+_ALIVE_STATUSES = {JobStatus.QUEUED, JobStatus.STARTED, JobStatus.DEFERRED, JobStatus.SCHEDULED}
 
 
 def redis_connection() -> redis.Redis:
     global _connection
     if _connection is None:
-        _connection = redis.Redis.from_url(REDIS_URL)
+        # Connect timeout only: POST /analyses enqueues on the event loop, so an unreachable
+        # Redis must fail fast. No read timeout: the worker's dequeue is a long blocking read.
+        _connection = redis.Redis.from_url(REDIS_URL, socket_connect_timeout=5)
     return _connection
 
 
@@ -41,7 +52,9 @@ def pubsub_client() -> redis.asyncio.Redis:
     return redis.asyncio.Redis.from_url(REDIS_URL)
 
 
-def run_analysis_job(analysis_id: str, paper: str, verify: bool, owner: str | None) -> dict:
+def run_analysis_job(
+    analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict] | None = None
+) -> dict:
     """What a worker process actually runs for one analysis (RQ jobs are sync, so this
     wraps the async pipeline in its own event loop via asyncio.run)."""
     # Imported here, not at module level: main imports app.queue, so a top-level
@@ -56,15 +69,29 @@ def run_analysis_job(analysis_id: str, paper: str, verify: bool, owner: str | No
             main.all_checks = asyncio.Semaphore(main.PARALLEL_CHECKS_TOTAL)
 
             analysis = main._new_analysis(analysis_id, paper, owner)
+            analysis["stages"] = list(stages or [])
             main.analyses[analysis_id] = analysis
             main.streams[analysis_id] = asyncio.Queue()
 
-            # Not _run: RQ already did the queueing its semaphore approximated.
-            await main._run_queued(analysis_id, analysis, paper, verify)
+            # The gateway stamped stages[0]["at"] in its own process, so this is wall-clock,
+            # not a monotonic delta across processes.
+            if stages and "at" in stages[0]:
+                ANALYSIS_QUEUE_WAIT_SECONDS.observe(max(0.0, time.time() - stages[0]["at"]))
+
+            ANALYSES_RUNNING.inc()
+            try:
+                # Not _run: RQ already did the queueing its semaphore approximated.
+                await main._run_queued(analysis_id, analysis, paper, verify)
+            finally:
+                ANALYSES_RUNNING.dec()
 
             # asyncio.run cancels pending tasks on exit, which would drop the detached _index_self.
-            while main._background:
-                await asyncio.gather(*list(main._background), return_exceptions=True)
+            # Only await tasks that are both still pending and on this loop: a task that is
+            # already done but hasn't been discarded yet (its done-callback hasn't run), or
+            # that belongs to some other loop entirely, would otherwise make this spin forever.
+            loop = asyncio.get_running_loop()
+            while pending := [t for t in main._background if not t.done() and t.get_loop() is loop]:
+                await asyncio.gather(*pending, return_exceptions=True)
             await main._saved(analysis_id)
 
             # Small on purpose: RQ stores this in Redis, and the full analysis can be large.
@@ -77,8 +104,61 @@ def run_analysis_job(analysis_id: str, paper: str, verify: bool, owner: str | No
     return asyncio.run(run())
 
 
-def enqueue_analysis(analysis_id: str, paper: str, verify: bool, owner: str | None):
+def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:
+    """Runs in the worker when a job raises something run_analysis_job's own except never sees
+    (a timeout, a crash in the job wrapper), so an analysis never gets stuck at "running"."""
+    from app import main, store
+
+    analysis_id = job.args[0]
+    stored = store.load_all().get(analysis_id)
+    if stored is not None:
+        analysis = stored
+    else:
+        paper, owner = job.args[1], job.args[3]
+        analysis = main._new_analysis(analysis_id, paper, owner)
+        analysis["stages"] = list(job.args[4] if len(job.args) > 4 else job.kwargs.get("stages") or [])
+
+    if analysis["status"] == "running":
+        _, exc_value, _ = exc_info
+        message = str(exc_value) if exc_value else "the worker stopped before this analysis finished"
+        analysis["status"] = "error"
+        analysis["message"] = message
+        analysis["stages"].append({"stage": "error", "message": message, "at": round(time.time(), 1)})
+        store.save(analysis)
+        try:
+            redis_connection().publish(f"analysis:{analysis_id}", json.dumps(analysis, default=str))
+        except Exception as error:
+            logger.warning("publishing failed-job snapshot for %s failed: %s", analysis_id, error)
+
+
+def enqueue_analysis(analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict]):
     return analysis_queue().enqueue(
-        run_analysis_job, analysis_id, paper, verify, owner,
-        job_id=analysis_id, job_timeout=JOB_TIMEOUT,
+        run_analysis_job, analysis_id, paper, verify, owner, stages,
+        job_id=analysis_id, job_timeout=JOB_TIMEOUT, on_failure=Callback(_on_analysis_job_failure),
     )
+
+
+def job_is_alive(analysis_id: str) -> bool | None:
+    """True if the RQ job still exists and has not reached a final state, False if it is
+    missing or finished/failed/stopped/canceled, None if Redis could not be reached (a short
+    timeout so a restart never hangs on this)."""
+    try:
+        connection = redis.Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+        job = Job.fetch(analysis_id, connection=connection)
+        return job.get_status(refresh=True) in _ALIVE_STATUSES
+    except redis.exceptions.RedisError:
+        return None
+    except Exception:
+        return False
+
+
+def cancel_if_queued(analysis_id: str) -> bool:
+    """True only if the job was still queued (never started) and is now cancelled."""
+    try:
+        job = Job.fetch(analysis_id, connection=redis_connection())
+    except Exception:
+        return False
+    if job.get_status(refresh=True) != JobStatus.QUEUED:
+        return False
+    job.cancel()
+    return True

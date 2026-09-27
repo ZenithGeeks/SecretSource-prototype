@@ -77,3 +77,40 @@ def test_run_analysis_job_via_rq_simple_worker(stubbed_pipeline):
         assert last["status"] == "done"
     finally:
         queue.delete(delete_jobs=True)
+
+
+def test_a_job_that_escapes_run_analysis_job_is_saved_as_error_by_the_failure_callback(
+    stubbed_pipeline, monkeypatch
+):
+    """run_analysis_job's own except turns a pipeline exception into status "error" already
+    (see test_run_analysis_job.py); this covers what escapes that -- here, _run_queued itself
+    raising, which propagates out of run_analysis_job and is caught by RQ's on_failure callback."""
+    from app.queue import _on_analysis_job_failure
+    from rq.job import Callback
+
+    saves = stubbed_pipeline
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("pipeline wrapper crashed")
+
+    monkeypatch.setattr(main, "_run_queued", broken)
+
+    queue_name = f"test-analyses-{uuid.uuid4().hex}"
+    queue = rq.Queue(queue_name, connection=redis_connection())
+    try:
+        queue.enqueue(
+            run_analysis_job, "job-rq-fail", "paper.pdf", True, "owner-1", [],
+            job_id="job-rq-fail", job_timeout=JOB_TIMEOUT,
+            on_failure=Callback(_on_analysis_job_failure),
+        )
+        rq.SimpleWorker([queue], connection=redis_connection()).work(burst=True)
+
+        job = rq.job.Job.fetch("job-rq-fail", connection=redis_connection())
+        assert job.get_status() == "failed"
+
+        last = saves[-1]
+        assert last["id"] == "job-rq-fail"
+        assert last["status"] == "error"
+        assert last["stages"][-1]["stage"] == "error"
+    finally:
+        queue.delete(delete_jobs=True)

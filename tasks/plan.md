@@ -43,12 +43,12 @@ Replace `asyncio.create_task(_run(...))` (in-process, one gateway, no restart su
 
 ### Phase 4: Cutover
 
-- [ ] Task 5: `_start()` enqueues via RQ; remove `_run`'s wrapper, `all_analyses`, `PARALLEL_ANALYSES`, and the now-dead direct `streams[id].put()` line in `_publish`
+- [x] Task 5: `_start()` enqueues via RQ; remove `_run`'s wrapper, `all_analyses`, `PARALLEL_ANALYSES`, and the now-dead direct `streams[id].put()` line in `_publish`
 
 ### Checkpoint: Cutover verified
-- [ ] Full backend suite passes
-- [ ] `docker compose up -d --build` (or equivalent) with `redis`+`worker` running: start a real analysis, confirm `GET /analyses/{id}/events` still streams progress end-to-end and `GET /analyses/{id}` returns the full payload
-- [ ] Highest-risk task in this plan despite its small file count — it's the actual behavior flip. Do not skip the live check here even though earlier tasks were test-only.
+- [x] Full backend suite passes
+- [x] `docker compose up -d --build` (or equivalent) with `redis`+`worker` running: start a real analysis, confirm `GET /analyses/{id}/events` still streams progress end-to-end and `GET /analyses/{id}` returns the full payload
+- [x] Highest-risk task in this plan despite its small file count — it's the actual behavior flip. Do not skip the live check here even though earlier tasks were test-only.
 
 ### Phase 5: Docs
 

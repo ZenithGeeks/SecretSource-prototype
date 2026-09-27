@@ -7,6 +7,7 @@ the job), waits for _index_self's detached work, and cleans up analyses[]/stream
 import asyncio
 import copy
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from app import main
@@ -136,3 +137,29 @@ def test_run_analysis_job_waits_for_detached_indexing(stubbed_pipeline):
 
     last = saves[-1]
     assert last["indexed_in"] == "indexed:A Paper"
+
+
+def test_a_stale_done_task_in_the_background_set_does_not_block_the_drain(stubbed_pipeline):
+    """A task can sit in main._background already finished but not yet discarded (its
+    done-callback runs via call_soon, not synchronously) -- or, as reproduced here, never
+    discarded at all because it was never registered through _detach(). The drain loop
+    (queue.py) must only wait on tasks that are still pending, or a leftover finished task
+    like this spins it forever. Run in a thread with a timeout so a regression here fails
+    this test instead of hanging the whole suite."""
+
+    async def already_done():
+        return None
+
+    stale_loop = asyncio.new_event_loop()
+    stale_task = stale_loop.create_task(already_done())
+    stale_loop.run_until_complete(stale_task)
+    stale_loop.close()
+    main._background.add(stale_task)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(run_analysis_job, "job-stale-bg", "paper.pdf", True, None)
+            result = future.result(timeout=15)
+    finally:
+        main._background.discard(stale_task)
+
+    assert result == {"id": "job-stale-bg", "status": "done"}

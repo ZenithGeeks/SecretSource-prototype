@@ -113,17 +113,18 @@ docker run --rm -v "$(pwd -W):/repo" -w /repo secretsource-prototype-gateway sh 
 **Description:** The actual behavior flip. In `backend/app/main.py`: `_start()` calls `queue.enqueue(run_analysis_job, analysis_id, paper, verify, owner, job_timeout=...)` instead of `asyncio.create_task(_run(...))`. Remove `_run`'s outer wrapper (the `PARALLEL_ANALYSES`-waiting layer added in PR #270), `all_analyses`, and `PARALLEL_ANALYSES` itself from `backend/app/config.py`. Remove the now-dead direct `streams[analysis_id].put(event)` line from `_publish()` — `_publish` now only ever runs in the worker process, where the gateway's `streams` dict doesn't exist/matter.
 
 **Acceptance criteria:**
-- [ ] `_start()` enqueues instead of spawning an `asyncio.Task`
-- [ ] `_run`/`all_analyses`/`PARALLEL_ANALYSES` removed (not just unused — actually deleted)
-- [ ] `_publish()` no longer references the gateway's `streams` dict at all
-- [ ] `GET /analyses/{id}/events` still streams correctly end-to-end (via the Task 2/3 path, now the *only* path)
-- [ ] `restore()` stops marking `running` analyses as "interrupted by a restart" on gateway startup: a worker may still be running them, and the Task 3 subscriber catches them up
-- [ ] Deleting a running analysis also cancels its RQ job (the subscriber's `_deleted` set only stops a deleted analysis from reappearing; it does not stop the work)
+- [x] `_start()` enqueues instead of spawning an `asyncio.Task`
+- [x] `_run`/`all_analyses`/`PARALLEL_ANALYSES` removed (not just unused — actually deleted)
+- [x] ~~`_publish()` no longer references the gateway's `streams` dict at all~~ Kept on purpose: in the worker, `streams[id]` is the job's own queue and is popped when the job ends, so removing it only adds churn in `_run_queued`
+- [x] `GET /analyses/{id}/events` still streams correctly end-to-end (via the Task 2/3 path, now the *only* path)
+- [x] `restore()` stops marking `running` analyses as "interrupted by a restart" on gateway startup: a worker may still be running them, and the Task 3 subscriber catches them up
+- [x] Deleting a queued analysis cancels its RQ job; deleting a started one returns 409, because a started job keeps saving and the row would come back after the next restart
+- [x] `_start` also stores the queued analysis, so a gateway restart before a worker starts the job still finds it (found in the live check: it returned 404 and the web app's event stream stopped retrying)
 
 **Verification:**
-- [ ] Full backend suite passes (expect to update/remove any test that directly asserted on the old `_run`/`all_analyses` semaphore behavior, e.g. parts of `test_shared_limits.py`)
-- [ ] **Live check, not just unit tests**: `docker compose up -d --build` with `redis`+`worker` running, start a real analysis through the actual app, confirm `GET /analyses/{id}/events` streams progress and `GET /analyses/{id}` returns the full payload once done
-- [ ] `ruff check backend services` clean
+- [x] Full backend suite passes (on a freshly built image, `test_service_auth.py::test_mcp_client_signs_every_request` also fails on main: mcp 2.2 moved to httpx2, a separate follow-up)
+- [x] **Live check, not just unit tests**: `docker compose up -d --build` with `redis`+`worker` running, start a real analysis through the actual app, confirm `GET /analyses/{id}/events` streams progress and `GET /analyses/{id}` returns the full payload once done
+- [x] `ruff check backend services` clean
 
 **Dependencies:** Tasks 2, 3, 4 all proven first
 
