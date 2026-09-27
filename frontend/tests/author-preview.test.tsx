@@ -96,6 +96,14 @@ describe('PreviewPane', () => {
     expect(document.getElementById('ss-preview-fonts')).toBeTruthy()
   }, 20000)
 
+  test('the editor preview renders a sample document with a heading and an inline equation, no errors', async () => {
+    renderPane('\\section{Introduction}\nEnergy is $E = mc^2$ in every frame.\n', { citations: [], bibEntries: [] })
+    await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Introduction/), { timeout: 15000 })
+    expect(page().querySelector('.katex')).toBeTruthy()
+    expect(page().textContent).toContain('in every frame.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  }, 20000)
+
   test('a source that will not compile keeps the last page and names the line', async () => {
     const { rerender } = renderPane(RELATED_WORK_TEX)
     await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Related work/), { timeout: 15000 })

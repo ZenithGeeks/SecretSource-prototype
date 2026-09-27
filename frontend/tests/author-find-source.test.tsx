@@ -50,6 +50,22 @@ describe('Find a source', () => {
     expect(gateway.calls.filter((c) => c === 'POST /author/search/verify')).toHaveLength(3)
   })
 
+  test('typing a query and submitting the form searches the gateway for it and lists the results', async () => {
+    const { onQueryChange } = renderScreen({ initialQuery: '' })
+    expect(gateway.calls.filter((c) => c.startsWith('GET /author/search'))).toHaveLength(0) // nothing to search yet
+
+    const box = screen.getByRole('textbox', { name: 'Search for a source' })
+    fireEvent.change(box, { target: { value: 'late interaction retrieval' } })
+    fireEvent.submit(box.closest('form')!)
+
+    expect(await screen.findByText(/ColBERTv2: Effective and Efficient Retrieval/)).toBeInTheDocument()
+    expect(screen.getByText(/PLAID: An Efficient Engine/)).toBeInTheDocument()
+    expect(onQueryChange).toHaveBeenCalledWith('late interaction retrieval')
+    const searches = gateway.calls.filter((c) => c.startsWith('GET /author/search?'))
+    expect(searches).toHaveLength(1)
+    expect(decodeURIComponent(searches[0])).toContain('q=late interaction retrieval')
+  })
+
   test('the scope chips filter the one cached answer', async () => {
     renderScreen()
     await screen.findByText(/PLAID/)

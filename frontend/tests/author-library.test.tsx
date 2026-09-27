@@ -5,7 +5,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -94,6 +94,20 @@ describe('Author Library', () => {
     fireEvent.change(input, { target: { files: [new File(['@misc{a, title={A}}'], 'refs.bib', { type: 'text/plain' })] } })
     await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(expect.stringMatching(/^proj/)))
     expect(gateway.calls).toContain('POST /author/projects/import')
+  })
+
+  test('clicking a project card asks to open it, and the project id then shows the detail view', async () => {
+    const { onOpenProject } = renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: /Related work — thesis ch\.2/ }))
+    expect(onOpenProject).toHaveBeenCalledWith('proj1')
+
+    // What AuthorApp does with that id: the same Library, now on the project's detail.
+    cleanup()
+    renderLibrary('proj1')
+    expect(await screen.findByRole('heading', { name: 'Related work — thesis ch.2' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Drafts in this project' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Check history · Related work/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '← Library' })).toBeInTheDocument()
   })
 
   test('the project detail lists its drafts and the check history with a compare', async () => {

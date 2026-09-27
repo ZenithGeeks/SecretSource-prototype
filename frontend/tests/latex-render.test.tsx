@@ -45,6 +45,16 @@ describe('LaTeX.js on a thesis chapter', () => {
     expect(text).not.toContain('\\bibliography')
   }, 20000)
 
+  test('a small document — a section heading and an inline equation — renders through LaTeX.js without throwing', async () => {
+    const { root } = await renderLatex(prepareSource('\\section{Introduction}\nEnergy is $E = mc^2$ in every frame.\n'))
+    expect(root.querySelector('h2')?.textContent?.replace(/\s+/g, ' ')).toBe('1 Introduction')
+    const math = root.querySelector('.katex') // LaTeX.js typesets math with its bundled KaTeX
+    expect(math).toBeTruthy()
+    expect(math?.querySelector('annotation')?.textContent).toBe('E = mc^2')
+    expect(root.textContent?.replace(/\s+/g, ' ')).toContain('Energy is')
+    expect(root.textContent).toContain('in every frame.')
+  })
+
   test('a package and an environment LaTeX.js cannot take give a readable error with the line', async () => {
     const error = await failure(UNSUPPORTED_TEX)
     expect(error.message).toBe('The tikzpicture environment is not supported by the preview (LaTeX.js). It still compiles with LaTeX.')
