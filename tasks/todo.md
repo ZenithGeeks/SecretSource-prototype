@@ -41,12 +41,13 @@ docker run --rm -v "$(pwd -W):/repo" -w /repo secretsource-prototype-gateway sh 
 **Description:** In `backend/app/main.py`, `_publish()` keeps its existing behavior (append to `analysis["stages"]`, `_save_soon`, push to the local `streams[analysis_id]` queue) and *additionally* publishes the full current `analysis` dict as JSON to a Redis Pub/Sub channel `f"analysis:{analysis_id}"`. Purely additive — nothing currently reading `streams` changes.
 
 **Acceptance criteria:**
-- [ ] `_publish()` calls `redis_client().publish(f"analysis:{analysis_id}", json.dumps(analysis, default=str))` after its existing work
-- [ ] Existing SSE/`_start`/`_run_queued` behavior is completely unchanged (no test should need to change)
+- [x] `_publish()` calls `redis_client().publish(f"analysis:{analysis_id}", json.dumps(analysis, default=str))` after its existing work
+- [x] Existing SSE/`_start`/`_run_queued` behavior is completely unchanged (no test should need to change)
+- [x] Publish is best-effort: a Redis failure is logged, never raised (a raise from `_run`'s first publish left the analysis stuck at `running` and hung the test suite)
 
 **Verification:**
-- [ ] Full backend suite passes, including existing `test_shared_limits.py` and `test_metrics.py`
-- [ ] New test: monkeypatch the Redis client, run an analysis through `_start`/`_run_queued` (same stub-the-pipeline pattern as `test_shared_limits.py`), assert the fake client received one `publish` call per stage with the correct channel and a JSON body matching the analysis dict at that point
+- [x] Full backend suite passes, including existing `test_shared_limits.py` and `test_metrics.py`
+- [x] New test: monkeypatch the Redis client, run an analysis through `_start`/`_run_queued` (same stub-the-pipeline pattern as `test_shared_limits.py`), assert the fake client received one `publish` call per stage with the correct channel and a JSON body matching the analysis dict at that point
 
 **Dependencies:** Task 1 (needs `queue.py`'s Redis connection helper)
 

@@ -78,6 +78,7 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
+from app.queue import redis_connection
 from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
@@ -196,11 +197,26 @@ async def _saved(analysis_id: str) -> None:
 
 async def _publish(analysis_id: str, stage: str, **fields):
     """Record a stage on the analysis and send it to the open event stream. `at` is the Unix
-    time, so the web app can show how long a run has taken."""
+    time, so the web app can show how long a run has taken.
+
+    Also publishes the whole current analysis (not just this event) to Redis, so a gateway
+    process running in a separate process from whatever runs the pipeline can pick it up
+    (its own subscriber turns this into the same streams[]/analyses[] updates below). A sync
+    publish call would block the loop while other claims' checks are running concurrently
+    (asyncio.gather in _run_queued), so it runs in a thread, same reasoning as _save_soon.
+
+    Best-effort: with Redis down, a raise here would kill the run with its status left at
+    "running" forever, since _run's first publish sits outside _run_queued's try.
+    """
     event = {"stage": stage, **fields, "at": round(time.time(), 1)}
     analyses[analysis_id]["stages"].append(event)
     _save_soon(analysis_id)
     await streams[analysis_id].put(event)
+    snapshot = json.dumps(analyses[analysis_id], default=str)
+    try:
+        await asyncio.to_thread(redis_connection().publish, f"analysis:{analysis_id}", snapshot)
+    except Exception as error:
+        logger.warning("publishing analysis %s to Redis failed: %s", analysis_id, error)
 
 
 _background: set[asyncio.Task] = set()

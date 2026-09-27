@@ -26,7 +26,7 @@ Replace `asyncio.create_task(_run(...))` (in-process, one gateway, no restart su
 
 ### Phase 2: Build the new path alongside the old one
 
-- [ ] Task 2: `_publish()` also publishes the full snapshot to Redis (additive)
+- [x] Task 2: `_publish()` also publishes the full snapshot to Redis (additive)
 - [ ] Task 3: Gateway-side subscriber task (diff-based, idempotent)
 
 ### Checkpoint: New path proven, old path still live
