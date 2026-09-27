@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
 from app.teacher.analysis import TeacherEssayAnalysisService
@@ -27,6 +26,7 @@ class Repository:
 class Drive:
     def __init__(self, version="3"):
         self.downloads = []
+        self.exports = []
         self.version = version
 
     def get_drive_metadata(self, file_id):
@@ -37,7 +37,8 @@ class Drive:
         return b"pdf bytes"
 
     def export_google_doc_as_pdf(self, file_id):
-        raise AssertionError(f"Google Doc {file_id} must not be selected as the student PDF")
+        self.exports.append(file_id)
+        return b"exported pdf bytes"
 
 
 def make_submission(attachments, analysis_id=None, analysis_file_id=None, analysis_file_version=None):
@@ -51,14 +52,13 @@ def make_submission(attachments, analysis_id=None, analysis_file_id=None, analys
 def service_for(submission, start_calls, drive=None):
     repository = Repository(submission)
     drive = drive or Drive()
-    with TemporaryDirectory() as folder:
-        service = TeacherEssayAnalysisService(
-            client=drive,
-            repository=repository,
-            save_upload=lambda _content, name: Path(folder) / name,
-            start=lambda _path, _verify, _owner: start_calls.append("started") or {"id": f"analysis-{len(start_calls)}"},
-        )
-        return service, repository, drive, folder
+    service = TeacherEssayAnalysisService(
+        client=drive,
+        repository=repository,
+        save_upload=lambda _content, name: Path(name),
+        start=lambda _path, _verify, _owner: start_calls.append("started") or {"id": f"analysis-{len(start_calls)}"},
+    )
+    return service, repository, drive
 
 
 def test_submission_with_multiple_pdf_attachments_is_rejected_instead_of_analyzing_the_first():
@@ -67,7 +67,7 @@ def test_submission_with_multiple_pdf_attachments_is_rejected_instead_of_analyzi
         {"id": "essay-a", "name": "draft-a.pdf", "mimeType": "application/pdf"},
         {"id": "essay-b", "name": "draft-b.pdf", "mimeType": "application/pdf"},
     ])
-    service, _, drive, _ = service_for(submission, calls)
+    service, _, drive = service_for(submission, calls)
 
     with pytest.raises(ValueError, match="exactly one PDF"):
         service.start("teacher-1", "course-1", "work-1", "submission-1")
@@ -82,7 +82,7 @@ def test_student_pdf_is_selected_over_non_pdf_attachment():
         {"id": "slides", "name": "slides.pptx", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
         {"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"},
     ])
-    service, repository, drive, _ = service_for(submission, calls)
+    service, repository, drive = service_for(submission, calls)
 
     result = service.start("teacher-1", "course-1", "work-1", "submission-1")
 
@@ -92,13 +92,29 @@ def test_student_pdf_is_selected_over_non_pdf_attachment():
     assert repository.links[0][1] == {"file_id": "essay", "file_version": "3"}
 
 
+def test_student_google_doc_is_exported_to_pdf_before_analysis():
+    calls = []
+    submission = make_submission([
+        {"id": "essay-doc", "name": "essay draft", "mimeType": "application/vnd.google-apps.document"},
+    ])
+    service, repository, drive = service_for(submission, calls)
+
+    result = service.start("teacher-1", "course-1", "work-1", "submission-1")
+
+    assert result["id"] == "analysis-1"
+    assert drive.downloads == []
+    assert drive.exports == ["essay-doc"]
+    assert calls == ["started"]
+    assert repository.links[0][1] == {"file_id": "essay-doc", "file_version": "3"}
+
+
 def test_same_pdf_version_reuses_its_existing_pipeline_analysis():
     calls = []
     submission = make_submission(
         [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
         analysis_id="analysis-existing", analysis_file_id="essay", analysis_file_version="3",
     )
-    service, repository, drive, _ = service_for(submission, calls)
+    service, repository, drive = service_for(submission, calls)
     service._analysis_lookup = lambda _analysis_id: {"status": "done"}
 
     result = service.start("teacher-1", "course-1", "work-1", "submission-1")
@@ -115,7 +131,7 @@ def test_changed_pdf_version_starts_a_new_pipeline_analysis():
         [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
         analysis_id="analysis-existing", analysis_file_id="essay", analysis_file_version="2",
     )
-    service, repository, drive, _ = service_for(submission, calls, drive=Drive(version="3"))
+    service, repository, drive = service_for(submission, calls, drive=Drive(version="3"))
 
     result = service.start("teacher-1", "course-1", "work-1", "submission-1")
 
@@ -132,7 +148,7 @@ def test_failed_analysis_for_the_same_pdf_can_be_retried():
         [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
         analysis_id="analysis-failed", analysis_file_id="essay", analysis_file_version="3",
     )
-    service, _, drive, _ = service_for(submission, calls)
+    service, _, drive = service_for(submission, calls)
     service._analysis_lookup = lambda _analysis_id: {"status": "error"}
 
     result = service.start("teacher-1", "course-1", "work-1", "submission-1")

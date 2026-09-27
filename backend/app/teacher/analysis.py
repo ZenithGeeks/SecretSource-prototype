@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.teacher.google_client import PDF_MIME_TYPE, select_supported_attachments
+from app.teacher.google_client import GOOGLE_DOCUMENT_MIME_TYPE, select_supported_attachments
 from app.teacher.models import TeacherFeedback, TeacherProfessorReview
 
 
@@ -75,10 +75,9 @@ class TeacherEssayAnalysisService:
     ) -> dict[str, Any]:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         attachments = select_supported_attachments(submission.attachments)
-        pdfs = [item for item in attachments if item.get("mimeType") == PDF_MIME_TYPE]
-        if len(pdfs) != 1:
-            raise ValueError("submission must contain exactly one PDF attachment")
-        attachment = pdfs[0]
+        if len(attachments) != 1:
+            raise ValueError("submission must contain exactly one PDF or Google Doc attachment")
+        attachment = attachments[0]
         file_id = attachment.get("id")
         if not file_id:
             raise ValueError("submission has no supported Drive attachment")
@@ -92,7 +91,11 @@ class TeacherEssayAnalysisService:
             snapshot = self._analysis(submission.analysis_id)
             if snapshot.get("status") in {"running", "done"}:
                 return {"id": submission.analysis_id, "status": snapshot["status"], "submission_id": submission_id}
-        content = self.client.download_drive_file(file_id)
+        content = (
+            self.client.export_google_doc_as_pdf(file_id)
+            if attachment.get("mimeType") == GOOGLE_DOCUMENT_MIME_TYPE
+            else self.client.download_drive_file(file_id)
+        )
         path = self._save(content, _attachment_filename(attachment))
         job = self._launch(path.as_posix(), verify, owner)
         analysis_id = job.get("id")
