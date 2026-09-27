@@ -1,4 +1,4 @@
-import { AlertCircle, Bell, BookOpen, ChevronRight, FileText, GraduationCap, Link2, Users } from 'lucide-react'
+import { AlertCircle, FileText } from 'lucide-react'
 
 import { Button, Card, Empty } from '../../../components/ui'
 import { useTeacherWorkspace } from '../../../lib/useTeacher'
@@ -6,16 +6,11 @@ import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import type { TeacherWorkspace } from '../../../lib/teacher'
 import { workspaceStats, type WorkspaceTab } from '../../../lib/teacherSelectors'
 import { ClassWorkspaceHeader } from '../components/ClassWorkspaceHeader'
-import { InitialAvatar, LoadingState, MetricCard, StatusPill } from '../components/TeacherUi'
+import { InitialAvatar, LoadingState } from '../components/TeacherUi'
 import { Classwork } from './Classwork'
 import { People } from './People'
 
-export function ClassWorkspace({
-  courseId,
-  tab,
-  onNavigate,
-  onRefresh,
-}: {
+export function ClassWorkspace({ courseId, tab, onNavigate, onRefresh }: {
   courseId: string
   tab: WorkspaceTab
   onNavigate: (route: TeacherRoute) => void
@@ -23,143 +18,90 @@ export function ClassWorkspace({
 }) {
   const workspace = useTeacherWorkspace(courseId)
   if (workspace.isPending) return <LoadingState label="Loading class workspace..." />
-  if (workspace.isError || !workspace.data) {
-    return (
-      <Empty
-        title="Class workspace unavailable"
-        hint="This class is not available in the local teacher session."
-      />
-    )
-  }
+  if (workspace.isError || !workspace.data) return <Empty title="Class workspace unavailable" hint="This class is not available in the local teacher session." />
 
   const data = workspace.data
-  const setTab = (next: WorkspaceTab) => onNavigate({
-    screen: next === 'overview' ? 'class-overview' : next,
-    courseId,
-  })
+  const setTab = (next: WorkspaceTab) => onNavigate({ screen: next === 'overview' ? 'class-overview' : next, courseId })
 
   return (
-    <div className="space-y-7">
-      <ClassWorkspaceHeader
-        workspace={data}
-        activeTab={tab}
-        onTabChange={setTab}
-        onRefresh={onRefresh}
-        refreshing={workspace.isFetching}
-      />
+    <div className="space-y-3">
+      <ClassWorkspaceHeader workspace={data} activeTab={tab} onTabChange={setTab} onNavigate={onNavigate} onRefresh={onRefresh} refreshing={workspace.isFetching} />
       {tab === 'overview' ? (
         <OverviewTab
           workspace={data}
           onOpenAssignment={(assignmentId) => onNavigate({ screen: 'assignment-detail', courseId, assignmentId })}
+          onCheckEssays={(assignmentId, studentId) => onNavigate({ screen: 'essay-check', courseId, assignmentId, studentId })}
           onOpenClasswork={() => setTab('classwork')}
+          onOpenPeople={() => setTab('people')}
         />
       ) : tab === 'classwork' ? (
         <Classwork
           workspace={data}
           onOpenAssignment={(assignmentId) => onNavigate({ screen: 'assignment-detail', courseId, assignmentId })}
-          onCheckEssays={(assignmentId) => onNavigate({ screen: 'assignment-detail', courseId, assignmentId })}
         />
-      ) : (
-        <People workspace={data} />
-      )}
+      ) : <People workspace={data} />}
     </div>
   )
 }
 
-function OverviewTab({ workspace, onOpenAssignment, onOpenClasswork }: {
+function OverviewTab({ workspace, onOpenAssignment, onCheckEssays, onOpenClasswork, onOpenPeople }: {
   workspace: TeacherWorkspace
   onOpenAssignment: (assignmentId: string) => void
+  onCheckEssays: (assignmentId: string, studentId: string) => void
   onOpenClasswork: () => void
+  onOpenPeople: () => void
 }) {
   const stats = workspaceStats(workspace)
-  const students = workspace.people.filter((person) => person.role === 'Student').slice(0, 4)
+  const people = workspace.people.slice(0, 5)
+  const firstAssignment = workspace.assignments[0]
+  const firstSubmission = firstAssignment
+    ? workspace.submissions.find((submission) => submission.assignmentId === firstAssignment.id && submission.state !== 'missing' && submission.attachments.length > 0)
+    : undefined
 
   return (
-    <div className="space-y-6">
-      <section>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="font-serif text-2xl font-semibold">Course overview</h2>
-          <StatusPill label="Synced today" tone="success" />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <MetricCard label="Classwork" value={stats.classworkCount} detail="active assignments" />
-          <MetricCard label="Submissions" value={stats.submissions} detail={`of ${workspace.course.studentCount * stats.classworkCount} expected`} tone="accent" />
-          <MetricCard label="Returned" value={stats.returned} detail="submissions with feedback" tone="success" />
-        </div>
-      </section>
-
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="font-serif text-xl font-semibold">Recent classwork</h2>
-              <p className="mt-1 text-sm text-ink-muted">The latest work from your class.</p>
-            </div>
-            <Button type="button" variant="ghost" onClick={onOpenClasswork}>View all <ChevronRight className="size-4" /></Button>
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_368px]">
+      <div className="space-y-3">
+        <Card className="space-y-4 p-4">
+          <div><h2 className="text-[14px] font-semibold">Course overview</h2><p className="mt-2 text-[11px] leading-[16px] text-ink-muted">{workspace.description}</p></div>
+          <div className="grid grid-cols-2 gap-y-3 text-[11px] text-ink-muted sm:grid-cols-4">
+            <span>{workspace.course.studentCount} students</span><span>{stats.classworkCount} assignments</span><span>{workspace.topics.length} topics</span><span>{workspace.course.announcementCount} announcements</span>
           </div>
-          <div className="mt-5 divide-y divide-border-subtle">
-            {workspace.assignments.slice(0, 3).map((assignment) => (
-              <button key={assignment.id} type="button" onClick={() => onOpenAssignment(assignment.id)} className="flex w-full items-center justify-between gap-4 py-4 text-left first:pt-0 last:pb-0 hover:text-accent">
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-ink">{assignment.title}</span>
-                  <span className="mt-1 block text-xs text-ink-muted">Due {assignment.dueAt} · {assignment.submittedCount} submitted</span>
-                </span>
-                <span className="flex shrink-0 items-center gap-2">
-                  {assignment.pendingReviewCount > 0 && <StatusPill label={`${assignment.pendingReviewCount} to check`} tone="warning" />}
-                  <ChevronRight className="size-4 text-ink-muted" />
-                </span>
-              </button>
-            ))}
-          </div>
+          <p className="border-t border-border-subtle pt-2 text-[10px] text-ink-muted">Teacher {workspace.course.teacherName} · Section {workspace.course.section} · Updated just now</p>
         </Card>
 
-        <Card>
-          <div className="flex items-start gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent"><Bell className="size-5" /></span>
-            <div>
-              <h2 className="font-serif text-xl font-semibold">Announcement</h2>
-              {workspace.latestAnnouncement ? (
-                <>
-                  <p className="mt-3 text-sm font-medium">{workspace.latestAnnouncement.title}</p>
-                  <p className="mt-1 text-xs text-ink-muted">{workspace.latestAnnouncement.postedBy} · {workspace.latestAnnouncement.postedAt}</p>
-                  <p className="mt-3 text-sm leading-6 text-ink-muted">{workspace.latestAnnouncement.body}</p>
-                </>
-              ) : <p className="mt-3 text-sm text-ink-muted">No announcements yet.</p>}
-            </div>
-          </div>
+        <Card className="min-h-[192px] space-y-3 p-4">
+          <div className="flex items-center justify-between"><h2 className="text-[14px] font-semibold">Classwork</h2><button type="button" onClick={onOpenClasswork} className="text-[10px] font-medium text-accent hover:underline">View all <span aria-hidden="true">→</span></button></div>
+          {firstAssignment ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-canvas p-3">
+            <button type="button" onClick={() => onOpenAssignment(firstAssignment.id)} className="min-w-0 flex-1 text-left hover:text-accent"><span className="block truncate text-[12px] font-semibold">{firstAssignment.title}</span><span className="mt-1 block text-[10px] text-ink-muted">Due {firstAssignment.dueAt} · {firstAssignment.submittedCount} of {firstAssignment.enrolledCount} submitted</span></button>
+            <span className="shrink-0 text-right text-[10px] text-supports">{firstAssignment.returnedCount} returned<br /><span className="text-insufficient">{firstAssignment.pendingReviewCount} to review</span></span>
+            <Button type="button" className="shrink-0" disabled={!firstSubmission} onClick={() => firstSubmission && onCheckEssays(firstAssignment.id, firstSubmission.studentId)}>Check essays</Button>
+          </div> : <p className="text-[11px] text-ink-muted">No classwork yet.</p>}
+          <p className="text-[10px] text-ink-muted">Submission and grade status is read from Classroom.</p>
+        </Card>
+
+        <Card className="min-h-[132px] space-y-2 p-4">
+          <h2 className="text-[14px] font-semibold">Latest announcement</h2>
+          {workspace.latestAnnouncement ? <><p className="text-[12px] font-medium">{workspace.latestAnnouncement.title}</p><p className="text-[10px] text-ink-muted">Posted by {workspace.latestAnnouncement.postedBy} · {workspace.latestAnnouncement.postedAt}</p><p className="text-[11px] leading-4 text-ink-muted">{workspace.latestAnnouncement.body}</p></> : <p className="text-[11px] text-ink-muted">No announcements yet.</p>}
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <Card>
-          <div className="flex items-center justify-between gap-3"><h2 className="font-serif text-xl font-semibold">People</h2><Users className="size-5 text-accent" /></div>
-          <div className="mt-4 space-y-3">
-            {students.map((person) => <div key={person.id} className="flex items-center gap-2.5"><InitialAvatar initials={person.initials} className="size-8" /><span className="text-sm">{person.name}</span></div>)}
-          </div>
-          <p className="mt-4 border-t border-border-subtle pt-3 text-xs text-ink-muted">{workspace.course.studentCount} students in this class</p>
+      <div className="space-y-3">
+        <Card className="space-y-2 p-3">
+          <div className="flex items-center justify-between"><h2 className="text-[13px] font-semibold">People</h2><span className="text-[9px] text-ink-muted">{workspace.course.studentCount} students</span></div>
+          <div className="flex items-center gap-1.5">{people.map((person) => <InitialAvatar key={person.id} initials={person.initials} className="size-6 text-[8px]" />)}<span className="flex size-6 items-center justify-center rounded-full bg-accent-soft text-[10px] text-accent">+</span></div>
+          <p className="text-[9px] text-ink-muted">{workspace.course.teacherName} · Teacher</p>
+          <button type="button" onClick={onOpenPeople} className="text-[10px] text-accent hover:underline">Full roster in People <span aria-hidden="true">→</span></button>
         </Card>
 
-        <Card>
-          <div className="flex items-center justify-between gap-3"><h2 className="font-serif text-xl font-semibold">Materials</h2><FileText className="size-5 text-accent" /></div>
-          <div className="mt-4 space-y-3">
-            {workspace.materials.map((material) => <div key={material.id} className="flex items-center gap-2.5 text-sm"><span className="flex size-7 items-center justify-center rounded-md bg-canvas text-accent">{material.kind === 'link' ? <Link2 className="size-3.5" /> : <FileText className="size-3.5" />}</span><span className="min-w-0 flex-1 truncate">{material.title}</span>{!material.accessible && <AlertCircle className="size-4 shrink-0 text-insufficient" />}</div>)}
-          </div>
-          <p className="mt-4 text-xs text-ink-muted">{workspace.course.linkedFileCount} linked files from Classroom</p>
+        <Card className="space-y-2 p-3">
+          <div className="flex items-center justify-between"><h2 className="text-[13px] font-semibold">Materials</h2><span className="text-[9px] text-ink-muted">{workspace.course.linkedFileCount} linked</span></div>
+          <div className="space-y-1.5">{workspace.materials.slice(0, 3).map((material) => <div key={material.id} className="flex items-center gap-2 text-[10px]"><FileText className="size-3 shrink-0 text-ink-muted" /><span className="truncate">{material.title}</span>{!material.accessible && <AlertCircle className="size-3 shrink-0 text-insufficient" />}</div>)}</div>
+          <p className="text-[9px] leading-3 text-ink-muted">Materials tab shows Drive availability.</p>
         </Card>
 
-        <Card>
-          <div className="flex items-center justify-between gap-3"><h2 className="font-serif text-xl font-semibold">Topics</h2><BookOpen className="size-5 text-accent" /></div>
-          <div className="mt-4 space-y-3">
-            {workspace.topics.map((topic) => <div key={topic.id} className="flex items-center justify-between gap-3 text-sm"><span>{topic.name}</span><span className="text-xs text-ink-muted">{topic.assignmentCount} items</span></div>)}
-          </div>
-          <p className="mt-4 text-xs text-ink-muted">Organized from your local class view</p>
-        </Card>
+        <Card className="space-y-2 p-3"><h2 className="text-[13px] font-semibold">Topics</h2>{workspace.topics.slice(0, 3).map((topic) => <p key={topic.id} className="text-[10px] text-ink-muted">{topic.name} · {topic.assignmentCount} classwork items</p>)}</Card>
+        <Card className="space-y-2 p-3"><h2 className="text-[13px] font-semibold">Grades &amp; submissions</h2><p className="text-[10px]">{stats.returned} returned · {stats.submissions - stats.returned} pending</p><p className="text-[9px] text-ink-muted">Read only · from Classroom</p></Card>
       </div>
-
-      <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-lg bg-accent-soft text-accent"><GraduationCap className="size-5" /></span><div><h2 className="font-serif text-xl font-semibold">Grades & submissions</h2><p className="mt-1 text-sm text-ink-muted">Open Classwork and grades to review the submission queue.</p></div></div>
-        <Button type="button" variant="ghost" onClick={onOpenClasswork}>Open classwork <ChevronRight className="size-4" /></Button>
-      </Card>
     </div>
   )
 }

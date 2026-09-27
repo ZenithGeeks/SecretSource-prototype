@@ -40,6 +40,7 @@ class FeedbackUpdate(BaseModel):
     student_id: str = Field(alias="studentId")
     body: str = ""
     citation_ids: list[str] = Field(default_factory=list, alias="citationIds")
+    sharing_options: dict[str, dict[str, bool]] = Field(default_factory=dict, alias="sharingOptions")
     report_html: str | None = Field(default=None, alias="reportHtml", max_length=20_000_000)
 
     model_config = {"populate_by_name": True}
@@ -586,6 +587,7 @@ async def analyze_submission(
     assignment_id: str,
     student_id: str,
     verify: bool = Query(True),
+    force: bool = Query(False),
     owner: str = Depends(require_teacher_user),
     service: TeacherEssayAnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any]:
@@ -595,7 +597,7 @@ async def analyze_submission(
         # the student id. This accepts the common one-submission-per-student shape and gives
         # the route a stable lookup without exposing another public identifier.
         submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
-        return service.start(owner, course_id, assignment_id, submission_id, verify=verify)
+        return service.start(owner, course_id, assignment_id, submission_id, verify=verify, force=force)
     except HTTPException:
         raise
     except ValueError as error:
@@ -702,8 +704,10 @@ def save_feedback(
     allowed = {review["id"] for review in essay.get("reviews", [])}
     if not set(request.citation_ids).issubset(allowed):
         raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
+    if not set(request.sharing_options).issubset(allowed):
+        raise HTTPException(status_code=422, detail="feedback sharing settings contain an unknown citation")
     try:
-        service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids)
+        service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return _essay_or_error(service, owner, course_id, assignment_id, submission_id)
@@ -724,8 +728,10 @@ def send_feedback(
         allowed = {review["id"] for review in essay.get("reviews", [])}
         if not set(request.citation_ids).issubset(allowed):
             raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
+        if not set(request.sharing_options).issubset(allowed):
+            raise HTTPException(status_code=422, detail="feedback sharing settings contain an unknown citation")
         try:
-            service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids)
+            service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
     try:

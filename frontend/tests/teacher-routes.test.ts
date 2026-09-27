@@ -47,7 +47,7 @@ test('serializing Home removes detail context but keeps the teacher role', () =>
     ),
     '?role=teacher&screen=home',
   )
-  assert.deepEqual(teacherRouteForNav('library'), { screen: 'reading-questions' })
+  assert.deepEqual(teacherRouteForNav('classes'), { screen: 'classes' })
 })
 
 test('legacy coursework identifiers are translated by the route parser', () => {
@@ -57,10 +57,9 @@ test('legacy coursework identifiers are translated by the route parser', () => {
   assert.equal(route.assignmentId, 'coursework-assignment-2')
 })
 
-test('teacher navigation includes the updated Figma destinations', () => {
-  // Settings moved off the nav and into the shared Settings modal (Figma 22), opened from the
-  // profile menu like every other role — teacher no longer has its own nav entry for it.
-  assert.deepEqual(TEACHER_NAV_KEYS, ['home', 'classes', 'library', 'graph'])
+test('teacher navigation matches the Figma destinations without Library or Graph', () => {
+  assert.deepEqual(TEACHER_NAV_KEYS, ['home', 'classes', 'settings'])
   assert.equal(teacherNavForScreen('essay-check'), 'classes')
-  assert.equal(teacherNavForScreen('reading-questions'), 'library')
+  assert.equal(teacherNavForScreen('reading-questions'), null)
+  assert.deepEqual(parseTeacherRoute('?role=teacher&screen=graph'), { screen: 'home' })
 })

@@ -235,6 +235,22 @@ def test_google_disconnect_removes_the_connection_without_deleting_imported_data
     assert repository.deleted is False
 
 
+def test_recheck_route_forces_a_new_analysis_for_the_same_file(teacher_client):
+    client, repository, google = teacher_client
+    repository.submission = replace(repository.submission, analysis_file_id="file-1", analysis_file_version="1")
+    path = "/teacher/classes/course-1/assignments/work-1/students/student-1/analyze"
+    cached = client.post(path)
+    assert cached.status_code == 200
+    assert cached.json()["id"] == "analysis-1"
+    assert repository.analysis_starts == []
+
+    response = client.post(path + "?force=true")
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == "prepared-1"
+    assert repository.analysis_starts == ["start"]
+    assert google.downloads == ["file-1"]
+
+
 def test_analyze_submission_runs_on_the_event_loop():
     """Break caught: the analysis route runs in FastAPI's worker thread without an event loop."""
     from app.teacher.router import analyze_submission

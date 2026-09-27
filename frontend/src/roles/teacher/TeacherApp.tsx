@@ -1,7 +1,7 @@
 /** Teacher role route owner. Every destination is URL-backed so refresh keeps the current page. */
 
 import { useQueryClient } from '@tanstack/react-query'
-import { BookOpen, GraduationCap, Home as HomeIcon, Waypoints } from 'lucide-react'
+import { GraduationCap, Home as HomeIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -35,22 +35,7 @@ export type { TeacherRoute, TeacherScreen }
 const TEACHER_NAV: NavEntry<TeacherNavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'classes', label: 'Classes', icon: GraduationCap },
-  { key: 'library', label: 'Library', icon: BookOpen },
-  { key: 'graph', label: 'Graph', icon: Waypoints },
 ]
-
-function placeholderTitle(screen: TeacherScreen): string {
-  return screen === 'graph' ? 'Graph' : 'Teacher page'
-}
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="flex min-h-64 flex-col items-center justify-center gap-2 text-center">
-      <p className="font-serif text-2xl font-semibold text-ink">{title}</p>
-      <p className="text-sm text-ink-muted">This teacher destination is outside the updated frontend scope.</p>
-    </div>
-  )
-}
 
 export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const queryClient = useQueryClient()
@@ -65,8 +50,27 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     window.history.replaceState(null, '', `${window.location.pathname}${nextSearch}`)
   }, [route])
 
-  const navigate = (next: TeacherRoute) => setRoute(next)
-  const navigateNav = (key: TeacherNavKey) => navigate(teacherRouteForNav(key))
+  useEffect(() => {
+    const onPopState = () => {
+      setRoute(parseTeacherRoute(window.location.search))
+      setSettingsOpen(settingsRequested(window.location.search))
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const navigate = (next: TeacherRoute) => {
+    const nextSearch = serializeTeacherRoute(next, window.location.search)
+    window.history.pushState(null, '', `${window.location.pathname}${nextSearch}`)
+    setRoute(next)
+  }
+  const navigateNav = (key: TeacherNavKey) => {
+    if (key === 'settings') {
+      setSettingsOpen(true)
+      return
+    }
+    navigate(teacherRouteForNav(key))
+  }
   const workspaceTab = route.screen === 'classwork' ? 'classwork' : route.screen === 'people' ? 'people' : 'overview'
 
   const refreshWorkspace = () => {
@@ -89,9 +93,10 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   }
 
   return (
+    <div className="teacher-app">
     <AppShell
       nav={TEACHER_NAV}
-      active={teacherNavForScreen(route.screen)}
+      active={settingsOpen ? 'settings' : teacherNavForScreen(route.screen)}
       onNavigate={navigateNav}
       role="Teacher"
       roleIcon={GraduationCap}
@@ -111,24 +116,22 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {route.screen === 'home' ? (
         <Home onOpen={navigate} />
       ) : route.screen === 'classes' ? (
-        <Classes onOpenClass={(courseId) => navigate({ screen: 'class-overview', courseId })} onAddClass={() => navigate({ screen: 'add-class-connect' })} />
+        <Classes onOpenClass={(courseId) => navigate({ screen: 'class-overview', courseId })} onOpenHome={() => navigate({ screen: 'home' })} onAddClass={() => navigate({ screen: 'add-class-connect' })} onConnectGoogle={connectGoogle} connectionError={connectionError} />
       ) : route.screen === 'add-class-connect' ? (
-        <AddClass step="connect" error={connectionError} onBack={() => navigate({ screen: 'classes' })} onContinue={() => void connectGoogle()} onSelectCourse={() => undefined} onImport={handleImport} />
+        <AddClass step="connect" error={connectionError} onBack={() => navigate({ screen: 'classes' })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => void connectGoogle()} onSelectCourse={() => undefined} onImport={handleImport} />
       ) : route.screen === 'add-class-course' ? (
-        <AddClass step="course" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-connect' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
+        <AddClass step="course" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-connect' })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
       ) : route.screen === 'add-class-review' ? (
-        <AddClass step="review" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-course', courseId: route.courseId })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
+        <AddClass step="review" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-course', courseId: route.courseId })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
       ) : route.screen === 'class-overview' || route.screen === 'classwork' || route.screen === 'people' ? (
         <ClassWorkspace courseId={route.courseId ?? ''} tab={workspaceTab} onNavigate={navigate} onRefresh={refreshWorkspace} />
       ) : route.screen === 'assignment-detail' ? (
-        <AssignmentDetail courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} onOpenEssay={(studentId) => navigate({ screen: 'essay-check', courseId: route.courseId, assignmentId: route.assignmentId, studentId })} />
+        <AssignmentDetail courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} onOpenEssay={(studentId) => navigate({ screen: 'essay-check', courseId: route.courseId, assignmentId: route.assignmentId, studentId })} onNavigate={navigate} onRefresh={refreshWorkspace} />
       ) : route.screen === 'essay-check' ? (
-        <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onNavigate={(studentId) => navigate({ ...route, studentId })} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} />
+        <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} onNavigate={navigate} />
       ) : route.screen === 'reading-questions' ? (
-        <ReadingQuestions paperId={route.paperId} />
-      ) : (
-        <Placeholder title={placeholderTitle(route.screen)} />
-      )}
+        <ReadingQuestions paperId={route.paperId} onNavigate={navigate} />
+      ) : null}
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -136,5 +139,6 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         onSwitchRole={onChangeRole ?? (() => {})}
       />
     </AppShell>
+    </div>
   )
 }

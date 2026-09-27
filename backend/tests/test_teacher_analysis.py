@@ -125,6 +125,39 @@ def test_same_pdf_version_reuses_its_existing_pipeline_analysis():
     assert repository.links == []
 
 
+def test_force_rechecks_an_unchanged_completed_submission():
+    calls = []
+    submission = make_submission(
+        [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
+        analysis_id="analysis-existing", analysis_file_id="essay", analysis_file_version="3",
+    )
+    service, repository, drive = service_for(submission, calls)
+    service._analysis_lookup = lambda _id: {"status": "done"}
+
+    result = service.start("teacher-1", "course-1", "work-1", "submission-1", force=True)
+
+    assert result["id"] == "analysis-1"
+    assert calls == ["started"]
+    assert drive.downloads == ["essay"]
+    assert repository.resets == [("teacher-1", "course-1", "work-1", "submission-1")]
+
+
+def test_force_does_not_duplicate_a_running_analysis_even_if_file_changed():
+    calls = []
+    submission = make_submission(
+        [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
+        analysis_id="analysis-existing", analysis_file_id="essay", analysis_file_version="2",
+    )
+    service, repository, drive = service_for(submission, calls)
+    service._analysis_lookup = lambda _id: {"status": "running"}
+
+    result = service.start("teacher-1", "course-1", "work-1", "submission-1", force=True)
+
+    assert result["id"] == "analysis-existing"
+    assert result["status"] == "running"
+    assert calls == drive.downloads == repository.resets == []
+
+
 def test_changed_pdf_version_starts_a_new_pipeline_analysis():
     calls = []
     submission = make_submission(

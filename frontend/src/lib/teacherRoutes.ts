@@ -12,9 +12,9 @@ export type TeacherScreen =
   | 'assignment-detail'
   | 'essay-check'
   | 'reading-questions'
-  | 'graph'
 
-export type TeacherNavKey = 'home' | 'classes' | 'library' | 'graph'
+export type TeacherNavKey = 'home' | 'classes' | 'settings'
+export type TeacherRouteNavKey = Exclude<TeacherNavKey, 'settings'>
 
 export type TeacherRoute = {
   screen: TeacherScreen
@@ -24,7 +24,7 @@ export type TeacherRoute = {
   paperId?: string
 }
 
-export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'library', 'graph']
+export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'settings']
 
 const SCREENS: readonly TeacherScreen[] = [
   'home',
@@ -38,7 +38,6 @@ const SCREENS: readonly TeacherScreen[] = [
   'assignment-detail',
   'essay-check',
   'reading-questions',
-  'graph',
 ]
 
 function isTeacherScreen(value: string | null): value is TeacherScreen {
@@ -183,11 +182,10 @@ export function serializeTeacherRoute(route: TeacherRoute, search?: string): str
   return query ? `?${query}` : ''
 }
 
-export function teacherRouteForNav(key: TeacherNavKey): TeacherRoute {
+export function teacherRouteForNav(key: TeacherRouteNavKey): TeacherRoute {
   switch (key) {
-    case 'library':
-      return { screen: 'reading-questions' }
-    default:
+    case 'home':
+    case 'classes':
       return { screen: key }
   }
 }
@@ -199,9 +197,7 @@ export function teacherNavForScreen(screen: TeacherScreen): TeacherNavKey | null
     case 'classes':
       return 'classes'
     case 'reading-questions':
-      return 'library'
-    case 'graph':
-      return 'graph'
+      return null
     default:
       return screen === 'add-class-connect' || screen === 'add-class-course' || screen === 'add-class-review'
         ? 'classes'

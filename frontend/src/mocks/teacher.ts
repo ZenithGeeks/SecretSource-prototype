@@ -442,6 +442,7 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
     preview: '"Two of your citations attribute results to papers that do not contain them." - 7 lines, cites p.7, p.6, p.9',
     citedPages: ['p.7', 'p.6', 'p.9'],
     citationIds: ['review-colbert', 'review-dpr', 'review-beir'],
+    sharingOptions: {},
   },
   navigation: { next: { id: 'student-bee', name: 'Bee S.' } },
 }

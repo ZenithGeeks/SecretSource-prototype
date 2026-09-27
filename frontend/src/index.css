@@ -1,5 +1,21 @@
 @import 'tailwindcss';
 
+/* Figma's Teacher screens use Geist for interface copy and Fraunces for display headings.
+   Keep these overrides role-scoped so the other role frontends retain their own typography. */
+.teacher-app {
+  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+.teacher-app .font-sans {
+  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+.teacher-app .font-serif {
+  font-family: 'Fraunces', Georgia, serif;
+  font-optical-sizing: auto;
+  font-variation-settings: 'SOFT' 0, 'WONK' 1;
+}
+
 /* One palette. @theme defines the light values; the dark ones override the same custom
    properties, which is what the generated utilities read. (@theme itself only works at the
    top level — nesting it in a media query silently produces nothing.) */

@@ -1,48 +1,40 @@
-import { Copy, Download, Send } from 'lucide-react'
+import { Copy, Download, Send, Sheet } from 'lucide-react'
 
 import { Button } from '../../../components/ui'
-import { toCsv } from '../../../lib/claims'
-import { downloadText } from '../../../lib/csv'
-import type { Claim } from '../../../lib/api'
 
 export function EssayCheckActions({
-  claims,
   onCopy,
   onDownloadReport,
+  onDownloadCsv = () => {},
   onSend,
   reportDisabled,
   reportBusy = false,
   sendDisabled,
   sending = false,
-  csvDisabled = false,
+  compact = false,
 }: {
-  claims: Claim[]
   onCopy: () => void
   onDownloadReport: () => void
+  onDownloadCsv?: () => void
   onSend: () => void
   reportDisabled: boolean
   reportBusy?: boolean
   sendDisabled: boolean
   sending?: boolean
-  csvDisabled?: boolean
+  compact?: boolean
 }) {
+  const actionClass = compact ? 'px-3 py-2 text-xs' : undefined
   return (
     <div className="flex flex-wrap gap-2">
-      <Button type="button" variant="ghost" onClick={onCopy}><Copy className="size-4" />Copy</Button>
-      <Button type="button" variant="ghost" onClick={onDownloadReport} disabled={reportDisabled || reportBusy}>
+      <Button className={actionClass} type="button" variant="ghost" onClick={onCopy}><Copy className="size-4" />Copy Markdown</Button>
+      <Button className={actionClass} type="button" variant="ghost" onClick={onDownloadReport} disabled={reportDisabled || reportBusy}>
         <Download className="size-4" />{reportBusy ? 'Preparing PDF…' : 'Download feedback report'}
       </Button>
-      <Button type="button" onClick={onSend} disabled={sendDisabled || sending}>
-        <Send className="size-4" />{sending ? 'Sending…' : 'Send to student'}
+      <Button className={actionClass} type="button" variant="ghost" onClick={onDownloadCsv}>
+        <Sheet className="size-4" />Download CSV
       </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        disabled={csvDisabled}
-        onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
-        title="Download the claims, their verdicts and their pages as CSV"
-      >
-        <Download className="size-4" />CSV
+      <Button className={actionClass} type="button" onClick={onSend} disabled={sendDisabled || sending}>
+        <Send className="size-4" />{sending ? 'Sending…' : 'Send to student'}
       </Button>
     </div>
   )

@@ -68,6 +68,7 @@ def _feedback_from_row(row: dict[str, Any]) -> TeacherFeedback:
         submission_id=row["submission_id"], student_id=row["student_id"],
         feedback_text=row["feedback_text"], status=row["status"], sent_at=_datetime_or_none(row.get("sent_at")),
         citation_ids=tuple(row.get("citation_ids") or ()),
+        sharing_options=dict(row.get("sharing_options") or {}),
     )
 
 
@@ -241,7 +242,7 @@ class TeacherGoogleRepository:
         """Remove decisions and drafts tied to an older student PDF version."""
         self._client.table("teacher_professor_reviews").delete().eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
         self._client.table("teacher_feedback").update({
-            "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [],
+            "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [], "sharing_options": {},
         }).eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
 
     def get_professor_reviews(

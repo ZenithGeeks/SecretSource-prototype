@@ -8,7 +8,7 @@ import { FeedbackDialog } from '../src/roles/teacher/screens/FeedbackDialog'
 const counts = { refutes: 0, insufficient: 0, supports: 0, unchecked: 0, uncited: 0 }
 
 describe('Essay Check action placement', () => {
-  it('does not show analysis export actions in the teacher summary header', () => {
+  it('shows the PDF, Copy All, and CSV actions in the teacher summary header', () => {
     render(
       <ResultsSummary
         claims={[]}
@@ -16,23 +16,23 @@ describe('Essay Check action placement', () => {
         counts={counts}
         filter={null}
         onFilter={() => undefined}
+        paper="essay.pdf"
+        onOpenPaper={() => undefined}
         teacherMode
       />,
     )
 
-    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'CSV' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
   })
 
-  it('keeps CSV and the feedback PDF export together in the bottom action row', () => {
+  it('keeps feedback copy, report export, and send actions together in the bottom row', () => {
     const onCopy = vi.fn()
     const onDownloadReport = vi.fn()
     const onSend = vi.fn()
-    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     render(
       <EssayCheckActions
-        claims={[]}
         onCopy={onCopy}
         onDownloadReport={onDownloadReport}
         onSend={onSend}
@@ -41,14 +41,10 @@ describe('Essay Check action placement', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'CSV' }))
-    expect(URL.createObjectURL).toHaveBeenCalled()
-    expect(anchorClick).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: 'Download feedback report' }))
     expect(onDownloadReport).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send to student' })).toBeInTheDocument()
-    anchorClick.mockRestore()
   })
 })
 

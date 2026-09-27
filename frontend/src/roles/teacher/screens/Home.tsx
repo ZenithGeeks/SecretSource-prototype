@@ -1,66 +1,116 @@
-import { ArrowUpRight, BookOpen, ChevronRight, FileCheck2, FileText, LibraryBig, Sparkles } from 'lucide-react'
+import { ArrowUpRight, ChevronRight, FileCheck2, FileText, GraduationCap, Sparkles } from 'lucide-react'
 
 import { Button, Card, Empty } from '../../../components/ui'
 import { homeRouteForAction } from '../../../lib/teacherSelectors'
 import type { TeacherHomeSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
-import { useTeacherHome } from '../../../lib/useTeacher'
-import { InitialAvatar, LoadingState, PageHeading, StatusPill } from '../components/TeacherUi'
+import { useTeacherGoogleConnection, useTeacherHome } from '../../../lib/useTeacher'
+import { InitialAvatar, LoadingState, StatusPill } from '../components/TeacherUi'
 
 export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
   const home = useTeacherHome()
+  const connection = useTeacherGoogleConnection()
   if (home.isPending) return <LoadingState label="Loading your teaching overview..." />
   if (home.isError || !home.data) return <Empty title="Your overview could not load" hint="Refresh the page to reload the local teacher data." />
 
   const data = home.data
   return (
-    <div className="space-y-8">
-      <PageHeading
-        eyebrow="Teacher home"
-        title={`Good morning, ${data.user}`}
-        description={`${data.course} · ${data.checkedEssays} of ${data.totalEssays} essays checked · ${data.citationsNeedingAttention} cite sources that do not say that.`}
-      />
+    <div className="space-y-[22px]">
+      <header className="space-y-1">
+        <h1 className="font-serif text-[20px] font-semibold leading-6 text-ink">Good morning, {data.user}</h1>
+        <p className="text-[12px] leading-[18px] text-ink-muted">{data.course} | {data.checkedEssays} of {data.totalEssays} essays checked | {data.citationsNeedingAttention} cite sources that do not say that.</p>
+      </header>
 
-      <section className="grid gap-4 md:grid-cols-3" aria-label="Quick actions">
-        <QuickAction icon={FileCheck2} title="Check student essays" detail="Review citations and prepare feedback." onClick={() => onOpen(homeRouteForAction('check-essays', data))} />
-        <QuickAction icon={Sparkles} title="Make reading questions" detail="Turn a paper into a class worksheet." onClick={() => onOpen(homeRouteForAction('reading-questions', data))} />
-        <QuickAction icon={LibraryBig} title="Class library" detail="See the sources your classes are using." />
+      <section className="grid gap-3 md:grid-cols-3" aria-label="Quick actions">
+        <QuickAction icon={FileCheck2} title="Check student essays" detail="Upload a batch, get a verdict per citation" onClick={() => onOpen(homeRouteForAction('check-essays', data))} />
+        <QuickAction icon={Sparkles} title="Make reading questions" detail="From any paper in the class library" onClick={() => onOpen(homeRouteForAction('reading-questions', data))} />
+        <QuickAction icon={GraduationCap} title="Class library" detail="Papers you assigned, and what students open" />
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card className="p-0">
-          <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5 sm:p-6"><div><h2 className="font-serif text-2xl font-semibold">Essays to review</h2><p className="mt-1 text-sm text-ink-muted">{data.assignment} · a local review queue</p></div><StatusPill label={`${data.citationsNeedingAttention} need attention`} tone="warning" /></div>
+      {connection.data && !connection.data.connected && (
+        <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <GraduationCap className="mt-0.5 size-5 shrink-0 text-accent" />
+            <div>
+              <h2 className="text-[14px] font-semibold">Connect Google Classroom</h2>
+              <p className="mt-1 text-[12px] leading-[18px] text-ink-muted">Connect your account to bring your Classroom courses into SecretSource.</p>
+            </div>
+          </div>
+          <Button type="button" onClick={() => onOpen({ screen: 'classes' })}>Connect Google Classroom</Button>
+        </Card>
+      )}
+
+      <div className="grid items-start gap-4 xl:grid-cols-2">
+        <Card className="overflow-hidden p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
+            <h2 className="text-[14px] font-semibold">Essays to review</h2>
+            <span className="text-[11px] text-accent">{data.course} | {data.assignment}</span>
+          </div>
           <div className="divide-y divide-border-subtle">
-            {data.submissions.length === 0 ? <div className="p-6"><Empty title="Nothing to review" hint="Submitted essays will appear here." /></div> : data.submissions.map((submission) => <ReviewRow key={submission.id} submission={submission} onOpen={() => onOpen(submission.state === 'submitted' ? { screen: 'essay-check', courseId: submissionCourse(submission, data), assignmentId: data.assignmentId, studentId: submission.studentId } : { screen: 'assignment-detail', courseId: submissionCourse(submission, data), assignmentId: data.assignmentId })} />)}
+            {data.submissions.length === 0
+              ? <div className="p-5"><Empty title="Nothing to review" hint="Submitted essays will appear here." /></div>
+              : data.submissions.map((submission) => (
+                <ReviewRow
+                  key={submission.id}
+                  submission={submission}
+                  onOpen={() => onOpen(submission.state === 'submitted'
+                    ? { screen: 'essay-check', courseId: data.courseId, assignmentId: data.assignmentId, studentId: submission.studentId }
+                    : { screen: 'assignment-detail', courseId: data.courseId, assignmentId: data.assignmentId })}
+                />
+              ))}
           </div>
-          <div className="border-t border-border-subtle p-5 sm:p-6"><Button type="button" variant="ghost" onClick={() => onOpen({ screen: 'assignment-detail', courseId: data.courseId, assignmentId: data.assignmentId })}>Open assignment <ChevronRight className="size-4" /></Button></div>
         </Card>
 
-        <Card>
-          <div className="flex items-start justify-between gap-3"><div><h2 className="font-serif text-2xl font-semibold">Class library</h2><p className="mt-1 text-sm text-ink-muted">{data.library.visibility}</p></div><BookOpen className="size-5 text-accent" /></div>
-          <p className="mt-5 text-3xl font-semibold text-ink">{data.library.paperCount}<span className="ml-2 text-sm font-normal text-ink-muted">papers available</span></p>
-          <div className="mt-5 space-y-3">
-            {data.library.papers.map((paper) => <div key={paper.id} className="flex w-full items-center gap-3 rounded-lg p-2"><span className="flex size-8 items-center justify-center rounded-md bg-canvas text-accent"><FileText className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{paper.title}</span><span className="mt-0.5 block text-xs text-ink-muted">{paper.citation} · {paper.note}</span></span></div>)}
-          </div>
-          <p className="mt-4 text-xs leading-5 text-ink-muted">The library card is informational in this frontend; no separate class-note page is created.</p>
-        </Card>
+        <div className="space-y-4">
+          <Card className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-[14px] font-semibold">Class library</h2>
+              <span className="text-[11px] text-accent">{data.library.paperCount} papers | {data.library.visibility}</span>
+            </div>
+            <div className="mt-2 divide-y divide-border-subtle">
+              {data.library.papers.map((paper) => (
+                <div key={paper.id} className="flex items-center gap-2.5 py-2 first:pt-0 last:pb-0">
+                  <FileText className="size-4 shrink-0 text-ink-muted" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12px] font-medium">{paper.title}</span>
+                    <span className="block text-[11px] text-ink-muted">{paper.citation} | {paper.note}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+          {data.mostMisusedSource && (
+            <Card className="space-y-2 p-4">
+              <h2 className="text-[14px] font-semibold">Most misused source this week</h2>
+              <p className="text-[12px] leading-[18px] text-ink-muted">{data.mostMisusedSource.detail}</p>
+              <span className="inline-flex items-center gap-2 text-[12px] text-ink-muted"><ArrowUpRight className="size-3.5" />Turn into a class note</span>
+            </Card>
+          )}
+        </div>
       </div>
-
-      {data.mostMisusedSource && <Card className="border-insufficient bg-insufficient-soft/35"><div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-insufficient">Most misused source</p><h2 className="mt-2 font-serif text-2xl font-semibold">{data.mostMisusedSource.title}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{data.mostMisusedSource.detail}</p></div><span className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-accent">Turn into a class note <ArrowUpRight className="size-4" /></span></div></Card>}
     </div>
   )
 }
 
 function QuickAction({ icon: Icon, title, detail, onClick }: { icon: typeof FileCheck2; title: string; detail: string; onClick?: () => void }) {
-  const content = <><span className="flex size-10 items-center justify-center rounded-lg bg-accent-soft text-accent"><Icon className="size-5" /></span><span className="mt-5 block font-serif text-xl font-semibold">{title}</span><span className="mt-1 block text-sm leading-6 text-ink-muted">{detail}</span><span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-accent">{onClick ? <>Open <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" /></> : 'Shared reference'}</span></>
-  return onClick ? <button type="button" onClick={onClick} className="group rounded-xl border border-border-subtle bg-surface p-5 text-left transition-shadow hover:border-accent hover:shadow-md">{content}</button> : <div className="rounded-xl border border-border-subtle bg-surface p-5">{content}</div>
+  const content = <><Icon className="size-4 text-accent" /><span className="mt-2 block text-[14px] font-medium text-ink">{title}</span><span className="mt-2 block text-[12px] leading-[18px] text-ink-muted">{detail}</span></>
+  return onClick
+    ? <button type="button" onClick={onClick} className="min-h-[107px] rounded-[12px] border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent">{content}</button>
+    : <div className="min-h-[107px] rounded-[12px] border border-border-subtle bg-surface p-4">{content}</div>
 }
 
 function ReviewRow({ submission, onOpen }: { submission: TeacherHomeSubmission; onOpen: () => void }) {
   const tone = submission.standing === 'supports' ? 'success' : submission.standing === 'refutes' ? 'danger' : submission.standing === 'insufficient' ? 'warning' : 'neutral'
-  return <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 p-5 text-left hover:bg-canvas sm:p-6"><InitialAvatar initials={submission.initial} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{submission.studentName}</span><span className="mt-1 block truncate text-xs text-ink-muted">{submission.fileName} · {submission.summary}</span></span><span className="hidden sm:block"><StatusPill label={submission.standing === 'refutes' ? 'Needs review' : submission.standing === 'supports' ? 'Backed' : submission.standing === 'insufficient' ? 'Silent' : 'Not checked'} tone={tone} /></span><ChevronRight className="size-4 shrink-0 text-ink-muted" /></button>
-}
-
-function submissionCourse(_submission: TeacherHomeSubmission, home: { courseId: string }): string {
-  return home.courseId
+  const label = submission.standing === 'refutes' ? 'Source contradicts' : submission.standing === 'supports' ? 'Source backs it' : submission.standing === 'insufficient' ? 'Source is silent' : 'Not checked'
+  return (
+    <button type="button" onClick={onOpen} className="flex min-h-[56px] w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-canvas">
+      <InitialAvatar initials={submission.initial} className="size-7 text-[10px]" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12px] font-medium">{submission.studentName}</span>
+        <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{submission.summary}</span>
+      </span>
+      <span className="hidden sm:block"><StatusPill label={label} tone={tone} /></span>
+      <ChevronRight className="size-3.5 shrink-0 text-ink-muted" />
+    </button>
+  )
 }

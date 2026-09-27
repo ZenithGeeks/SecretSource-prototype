@@ -43,15 +43,15 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
         <span key={`${item.label}-${index}`} className="flex min-w-0 items-center gap-1.5">
           {index > 0 && <ChevronRight className="size-3 shrink-0 text-border-subtle" />}
           {item.onClick ? (
-            <button type="button" onClick={item.onClick} className="truncate hover:text-accent hover:underline">
+            <button type="button" onClick={item.onClick} className="cursor-pointer truncate rounded-sm hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
               {item.label}
             </button>
           ) : item.href ? (
-            <a href={item.href} className="truncate hover:text-accent hover:underline">
+            <a href={item.href} className="cursor-pointer truncate rounded-sm hover:text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
               {item.label}
             </a>
           ) : (
-            <span className={cn('truncate', index === items.length - 1 && 'font-medium text-ink')}>{item.label}</span>
+            <span aria-current={index === items.length - 1 ? 'page' : undefined} className={cn('truncate', index === items.length - 1 && 'font-medium text-ink')}>{item.label}</span>
           )}
         </span>
       ))}
@@ -91,13 +91,13 @@ export function StepProgress({ steps, active }: { steps: string[]; active: numbe
 
 const WORKSPACE_TABS: { key: WorkspaceTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  { key: 'classwork', label: 'Classwork and grades' },
+  { key: 'classwork', label: 'Classwork' },
   { key: 'people', label: 'People' },
 ]
 
 export function WorkspaceTabs({ active, onChange }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {
   return (
-    <div role="tablist" aria-label="Class workspace" className="flex gap-5 overflow-x-auto border-b border-border-subtle">
+    <div role="tablist" aria-label="Class workspace" className="flex min-h-[44px] gap-1.5 overflow-x-auto border-b border-border-subtle py-[5px]">
       {WORKSPACE_TABS.map((tab) => (
         <button
           key={tab.key}
@@ -106,9 +106,8 @@ export function WorkspaceTabs({ active, onChange }: { active: WorkspaceTab; onCh
           aria-selected={active === tab.key}
           onClick={() => onChange(tab.key)}
           className={cn(
-            'relative whitespace-nowrap pb-3 text-sm font-medium transition-colors',
-            active === tab.key ? 'text-accent' : 'text-ink-muted hover:text-ink',
-            active === tab.key && 'after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-accent',
+            'whitespace-nowrap rounded-lg px-3 py-2 text-[11px] font-medium transition-colors',
+            active === tab.key ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
           )}
         >
           {tab.label}

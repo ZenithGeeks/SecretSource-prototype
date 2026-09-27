@@ -7,7 +7,6 @@ import {
   TEACHER_CLASSES_KEY,
   TEACHER_HOME_KEY,
   teacherApi,
-  teacherRemoteEnabled,
   teacherAssignmentKey,
   teacherClassImportKey,
   teacherCourseWorkKey,
@@ -28,8 +27,8 @@ export function useTeacherHome() {
   return useQuery({ queryKey: TEACHER_HOME_KEY, queryFn: teacherApi.getHome })
 }
 
-export function useTeacherClasses() {
-  return useQuery({ queryKey: TEACHER_CLASSES_KEY, queryFn: teacherApi.getClasses })
+export function useTeacherClasses(enabled = true) {
+  return useQuery({ queryKey: TEACHER_CLASSES_KEY, queryFn: teacherApi.getClasses, enabled })
 }
 
 export function useTeacherImportableClasses() {
@@ -83,8 +82,8 @@ export function useTeacherEssayCheck(courseId: string, assignmentId: string, stu
 export function useTeacherGoogleConnection() {
   return useQuery({
     queryKey: ['teacher', 'google-connection'],
-    queryFn: teacherApi.getGoogleConnection,
-    enabled: teacherRemoteEnabled,
+    queryFn: ({ signal }) => teacherApi.getGoogleConnection(AbortSignal.any([signal, AbortSignal.timeout(10_000)])),
+    retry: false,
   })
 }
 
@@ -105,7 +104,7 @@ export function useAnalyzeTeacherSubmission() {
   return useMutation({
     mutationFn: (input: AnalyzeTeacherSubmissionRequest) => teacherApi.analyzeSubmission(input),
     onSuccess: (_result, input) => {
-      void queryClient.invalidateQueries({
+      return queryClient.invalidateQueries({
         queryKey: teacherEssayCheckKey(input.courseId, input.assignmentId, input.studentId),
       })
     },
@@ -123,7 +122,7 @@ export function usePrepareTeacherEssayChecks() {
 export function useSaveTeacherFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: import('./teacherFeedbackExport').FeedbackSharingByCitation }) =>
       teacherApi.saveFeedback(input),
     onSuccess: (essay, input) => updateEssayCache(queryClient, essay, input.courseId),
   })

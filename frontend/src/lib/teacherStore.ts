@@ -151,7 +151,7 @@ export const teacherStore = {
   async saveFeedback(
     assignmentId: string,
     studentId: string,
-    input: { body: string; citationIds: string[] },
+    input: { body: string; citationIds: string[]; sharingOptions?: EssayCheck['feedback']['sharingOptions'] },
   ): Promise<EssayCheck> {
     const essay = db.essayChecks[essayKey(assignmentId, studentId)]
     if (!essay) throw new Error('That essay could not be found.')
@@ -163,6 +163,7 @@ export const teacherStore = {
       ...essay.feedback,
       body: input.body,
       citationIds: [...new Set(input.citationIds)],
+      sharingOptions: input.sharingOptions ?? {},
       citedPages,
       preview: feedbackPreview(input.body, citedPages),
     }
@@ -178,6 +179,7 @@ export const teacherStore = {
     await this.saveFeedback(input.assignmentId, input.studentId, {
       body: input.body,
       citationIds: input.citationIds,
+      sharingOptions: input.sharingOptions ?? {},
     })
     return {
       assignmentId: resolveAssignmentId(input.assignmentId),

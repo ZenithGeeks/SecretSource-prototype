@@ -8,6 +8,7 @@
 
 import { store } from './teacherStore'
 import { request } from './api'
+import type { FeedbackSharingByCitation } from './teacherFeedbackExport'
 
 export type TeacherStanding = 'supports' | 'refutes' | 'insufficient' | 'unchecked'
 
@@ -172,6 +173,7 @@ export type FeedbackDraft = {
   preview: string
   citedPages: string[]
   citationIds: string[]
+  sharingOptions?: FeedbackSharingByCitation
 }
 
 export type StudentNavigation = { id: string; name: string }
@@ -203,6 +205,7 @@ export type AnalyzeTeacherSubmissionRequest = {
   courseId: string
   assignmentId: string
   studentId: string
+  force?: boolean
 }
 
 export type PrepareTeacherEssayChecksRequest = { courseId: string; assignmentIds: string[] }
@@ -230,6 +233,7 @@ export type SendFeedbackRequest = {
   studentId: string
   body: string
   citationIds: string[]
+  sharingOptions?: FeedbackSharingByCitation
   reportHtml?: string
 }
 
@@ -354,10 +358,11 @@ const mockTeacherApi = {
   },
   getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
-  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[] }): Promise<EssayCheck> =>
+  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: FeedbackSharingByCitation }): Promise<EssayCheck> =>
     store.saveFeedback(input.assignmentId, input.studentId, {
       body: input.body,
       citationIds: input.citationIds,
+      sharingOptions: input.sharingOptions,
     }),
   updateProfessorReview: async (input: UpdateProfessorReviewRequest): Promise<EssayCheck> =>
     store.updateProfessorReview({ ...input, assignmentId: normalizedAssignmentId(input) }),
@@ -382,7 +387,7 @@ const mockTeacherApi = {
   ): Promise<TeacherCourseWork> => store.setCourseWorkAnalysisSelected(courseWorkId, selected),
   queueSelectedCourseWork: async (courseId: string): Promise<QueueCourseWorkResult> =>
     store.queueSelectedCourseWork(courseId),
-  getGoogleConnection: async (): Promise<TeacherGoogleConnection> => ({ connected: false, email: null, scopes: [] }),
+  getGoogleConnection: async (_signal?: AbortSignal): Promise<TeacherGoogleConnection> => ({ connected: false, email: null, scopes: [] }),
   startGoogleConnection: async (): Promise<{ authorizationUrl: string }> => {
     throw new Error('Google Classroom is unavailable in mock mode.')
   },
@@ -405,7 +410,7 @@ export const createRemoteTeacherApi = () => ({
       : Promise.resolve(null),
   analyzeSubmission: (input: AnalyzeTeacherSubmissionRequest) =>
     request<{ id: string; status: string; submission_id: string }>(
-      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/students/${encodeURIComponent(input.studentId)}/analyze`,
+      `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/students/${encodeURIComponent(input.studentId)}/analyze${input.force ? '?force=true' : ''}`,
       { method: 'POST' },
     ),
   prepareEssayChecks: (input: PrepareTeacherEssayChecksRequest) =>
@@ -426,13 +431,13 @@ export const createRemoteTeacherApi = () => ({
       },
     )
   },
-  saveFeedback: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+  saveFeedback: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: FeedbackSharingByCitation }) =>
     request<EssayCheck>(
       `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/essay-check/feedback`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds }),
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds, sharingOptions: input.sharingOptions }),
       },
     ),
   sendFeedback: (input: SendFeedbackRequest) => {
@@ -443,11 +448,11 @@ export const createRemoteTeacherApi = () => ({
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds, reportHtml: input.reportHtml }),
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds, sharingOptions: input.sharingOptions, reportHtml: input.reportHtml }),
       },
     )
   },
-  getGoogleConnection: () => request<TeacherGoogleConnection>('/teacher/google/status'),
+  getGoogleConnection: (signal?: AbortSignal) => request<TeacherGoogleConnection>('/teacher/google/status', { signal }),
   startGoogleConnection: (email?: string, switchAccount = false) => request<{ authorizationUrl: string }>(`/teacher/google/connect?${new URLSearchParams({ ...(email ? { loginHint: email } : {}), ...(switchAccount ? { switch: 'true' } : {}) })}`),
 })
 
