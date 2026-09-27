@@ -8,9 +8,11 @@
  */
 
 import { Loader2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { paperName } from '../lib/api'
+import type { Analysis } from '../lib/api'
 import { countsOf, ranked } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { sectionName, sectionOfPage } from '../lib/outline'
@@ -33,6 +35,9 @@ export function AnalysisView({
   onClearSection,
   jump = null,
   onCurrentSection,
+  presentation = 'researcher',
+  openPaperOnLoad = false,
+  renderClaimActions,
 }: {
   id: string | null
   /** Fires when the page viewer opens or closes, so the screen can make room for it. */
@@ -44,9 +49,17 @@ export function AnalysisView({
   jump?: SectionJump | null
   /** Which section of the analysed paper the page viewer now shows, for the table of contents. */
   onCurrentSection?: (section: string | null) => void
+  /** Teacher uses the same pipeline/results, with the submitted PDF on the left. */
+  presentation?: 'researcher' | 'teacher'
+  /** Automatically show the submitted PDF when a student analysis becomes available. */
+  openPaperOnLoad?: boolean
+  /** Add teacher-only review controls inside the shared expanded claim card. */
+  renderClaimActions?: (claim: NonNullable<Analysis['claims']>[number], index: number) => ReactNode
 }) {
   const [opened, setOpened] = useState<{ target: Target | null; at: number }>({ target: null, at: 0 })
   const [filter, setFilter] = useState<Standing | null>(null)
+  const [paperDismissedFor, setPaperDismissedFor] = useState<string | null>(null)
+  const paperNotifiedFor = useRef<string | null>(null)
   const analysis = useAnalysis(id)
   const running = analysis.data?.status === 'running'
   const file = analysis.data?.file ? paperName(analysis.data.file) : undefined
@@ -60,18 +73,29 @@ export function AnalysisView({
     (entry) => !section || entry.claim.section === section,
   )
 
-  const target: Target | null =
-    jump && file && jump.at > opened.at
-      ? { paper: file, label: `Section ${jump.n} · ${jump.title}`, source: null, page: jump.page, section: jump.n }
-      : opened.target
+  const sectionTarget = jump && file && jump.at > opened.at
+    ? { paper: file, label: `Section ${jump.n} · ${jump.title}`, source: null, page: jump.page, section: jump.n }
+    : null
+  const autoPaperTarget = id && file && openPaperOnLoad && paperDismissedFor !== id
+    ? { paper: file, label: 'The paper', source: null, page: 1 }
+    : null
+  const target: Target | null = sectionTarget ?? opened.target ?? autoPaperTarget
 
   const setTarget = (next: Target | null) => {
     setOpened({ target: next, at: Date.now() })
+    if (!next && id) setPaperDismissedFor(id)
     onTargetChange?.(next !== null)
     const inPaper = next !== null && next.paper === file
     const page = next?.source?.page ?? next?.page
     onCurrentSection?.(inPaper ? (next.section ?? (page ? sectionOfPage(outline, page) : null)) : null)
   }
+
+  useEffect(() => {
+    if (!id || !file || !openPaperOnLoad || paperDismissedFor === id || paperNotifiedFor.current === id) return
+    paperNotifiedFor.current = id
+    onTargetChange?.(true)
+    onCurrentSection?.(null)
+  }, [id, file, openPaperOnLoad, paperDismissedFor, onTargetChange, onCurrentSection])
 
   if (!id) {
     return (
@@ -112,8 +136,24 @@ export function AnalysisView({
       {/* Wide screens put the page beside the claims and give it the larger part: a PDF page
           below about 600px wide stops being readable. The viewer can also fill the window. */}
       <div
-        className={target ? 'grid gap-4 xl:grid-cols-[minmax(22rem,2fr)_minmax(32rem,3fr)]' : undefined}
+        className={target
+          ? presentation === 'teacher'
+            ? 'grid gap-4 xl:grid-cols-[minmax(28rem,3fr)_minmax(24rem,2fr)]'
+            : 'grid gap-4 xl:grid-cols-[minmax(22rem,2fr)_minmax(32rem,3fr)]'
+          : undefined}
       >
+        {presentation === 'teacher' && target && (
+          <div className="xl:sticky xl:top-6 xl:z-20 xl:self-start">
+            <PageViewer
+              key={target.paper}
+              target={target}
+              onClose={() => setTarget(null)}
+              markers={target.paper === file ? analysis.data.markers : undefined}
+              references={analysis.data.references}
+            />
+          </div>
+        )}
+
         <section className="space-y-3">
           {standings.length > 0 && (
             <ResultsSummary
@@ -123,6 +163,7 @@ export function AnalysisView({
               filter={filter}
               onFilter={setFilter}
               paper={file}
+              teacherMode={presentation === 'teacher'}
               // The paper itself, from page 1, in the same viewer a claim opens: reading it
               // here keeps the claims in view, where a download or a new tab would not.
               onOpenPaper={file ? () => setTarget({ paper: file, label: 'The paper', source: null, page: 1 }) : undefined}
@@ -157,13 +198,25 @@ export function AnalysisView({
               section={claim.section ? sectionName(outline, claim.section) : undefined}
               figures={analysis.data.figures}
               references={analysis.data.references}
+              actions={renderClaimActions?.(claim, index)}
+              onSelect={presentation === 'teacher' && file && claim.source
+                ? () => setTarget({
+                    paper: file,
+                    label: `Claim ${index + 1} in the submission`,
+                    quote: claim.sentence,
+                    source: claim.source ?? null,
+                    verdict: ['supports', 'refutes', 'insufficient'].includes(standing)
+                      ? standing as 'supports' | 'refutes' | 'insufficient'
+                      : undefined,
+                  })
+                : undefined}
               // A page of the analysed paper carries the claim's section; a cited paper's does not.
               onShow={(next) => setTarget(next.paper === file ? { ...next, section: claim.section } : next)}
             />
           ))}
         </section>
 
-        {target && (
+        {target && presentation !== 'teacher' && (
           // Sticky starts its own stacking context, so the viewer's z-50 only counts inside this
           // box. z-20 lifts the box, full-window viewer included, above the sticky summary card (#160).
           <div className="xl:sticky xl:top-6 xl:z-20 xl:self-start">

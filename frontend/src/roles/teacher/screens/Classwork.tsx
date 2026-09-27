@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button, Card, Empty } from '../../../components/ui'
 import type { TeacherAssignment, TeacherWorkspace } from '../../../lib/teacher'
 import { assignmentCanBeChecked, workspaceStats } from '../../../lib/teacherSelectors'
+import { usePrepareTeacherEssayChecks } from '../../../lib/useTeacher'
 import { StatusPill, MetricCard } from '../components/TeacherUi'
 
 export function Classwork({ workspace, onOpenAssignment, onCheckEssays }: {
@@ -12,19 +13,14 @@ export function Classwork({ workspace, onOpenAssignment, onCheckEssays }: {
   onCheckEssays: (assignmentId: string) => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
-  const [queued, setQueued] = useState<string[]>([])
-  const [skipped, setSkipped] = useState(0)
+  const preparation = usePrepareTeacherEssayChecks()
+  const preparedAssignments = [...new Set(preparation.data?.prepared.map((item) => item.assignmentId) ?? [])]
   const stats = workspaceStats(workspace)
   const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
-  const analyze = () => {
-    const eligible = selected.filter((id) => {
-      const assignment = workspace.assignments.find((item) => item.id === id)
-      return assignment ? assignment.submittedCount > 0 : false
-    })
-    setSkipped(selected.length - eligible.length)
-    setQueued((current) => [...new Set([...current, ...eligible])])
-    setSelected([])
-  }
+  const analyze = () => preparation.mutate(
+    { courseId: workspace.course.id, assignmentIds: selected },
+    { onSuccess: () => setSelected([]) },
+  )
 
   return (
     <div className="space-y-6">
@@ -37,7 +33,7 @@ export function Classwork({ workspace, onOpenAssignment, onCheckEssays }: {
       <section className="space-y-3" aria-labelledby="classwork-list-heading">
         <div className="flex items-center justify-between gap-3"><div><h2 id="classwork-list-heading" className="font-serif text-2xl font-semibold">Classwork and grades</h2><p className="mt-1 text-sm text-ink-muted">Select assignments when you want to prepare them for Essay Check.</p></div><span className="text-xs text-ink-muted">{workspace.assignments.length} items</span></div>
         {workspace.assignments.length === 0 ? <Empty title="No classwork yet" hint="Assignments from the local class view will appear here." /> : workspace.assignments.map((assignment) => (
-          <AssignmentRow key={assignment.id} assignment={assignment} selected={selected.includes(assignment.id)} queued={queued.includes(assignment.id)} onToggle={() => toggle(assignment.id)} onOpen={() => onOpenAssignment(assignment.id)} onCheck={() => onCheckEssays(assignment.id)} />
+          <AssignmentRow key={assignment.id} assignment={assignment} selected={selected.includes(assignment.id)} queued={preparedAssignments.includes(assignment.id)} onToggle={() => toggle(assignment.id)} onOpen={() => onOpenAssignment(assignment.id)} onCheck={() => onCheckEssays(assignment.id)} />
         ))}
       </section>
 
@@ -46,12 +42,16 @@ export function Classwork({ workspace, onOpenAssignment, onCheckEssays }: {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-accent">Add to Essay Check</p>
             <h2 className="mt-1 font-serif text-xl font-semibold">Prepare selected classwork</h2>
-            <p className="mt-1 text-sm leading-6 text-ink-muted">This demo queues eligible local assignments only. It does not submit anything to Classroom.</p>
+            <p className="mt-1 text-sm leading-6 text-ink-muted">Each student's PDF is checked with the same research pipeline. Unsupported or ambiguous submissions are listed as skipped.</p>
           </div>
-          <Button type="button" onClick={analyze} disabled={selected.length === 0}><Play className="size-4" />Analyze selected ({selected.length})</Button>
+          <Button type="button" onClick={analyze} disabled={selected.length === 0 || preparation.isPending}><Play className="size-4" />{preparation.isPending ? 'Preparing...' : `Analyze selected (${selected.length})`}</Button>
         </div>
-        {queued.length > 0 && <p className="mt-4 flex items-center gap-2 border-t border-accent/20 pt-3 text-sm text-supports"><CheckCircle2 className="size-4" />{queued.length} assignment{queued.length === 1 ? '' : 's'} queued locally.</p>}
-        {skipped > 0 && <p className="mt-3 border-t border-insufficient/20 pt-3 text-sm text-insufficient">{skipped} selected assignment{skipped === 1 ? '' : 's'} skipped because it has no submitted attachment.</p>}
+        {preparation.isError && <p role="alert" className="mt-4 border-t border-insufficient/20 pt-3 text-sm text-insufficient">{preparation.error instanceof Error ? preparation.error.message : 'Selected classwork could not be prepared.'}</p>}
+        {preparation.data && <div className="mt-4 space-y-2 border-t border-accent/20 pt-3 text-sm">
+          {preparation.data.prepared.length > 0 && <p className="flex items-center gap-2 text-supports"><CheckCircle2 className="size-4" />{preparation.data.prepared.length} student submission{preparation.data.prepared.length === 1 ? '' : 's'} sent to the analysis pipeline.</p>}
+          {preparation.data.skipped.map((item, index) => <p key={`skip-${item.assignmentId}-${item.submissionId ?? index}`} className="text-insufficient">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
+          {preparation.data.failed.map((item, index) => <p key={`failed-${item.assignmentId}-${item.submissionId ?? index}`} role="alert" className="text-refutes">{item.studentName ? `${item.studentName}: ` : ''}{item.reason} — retry from Essay Check.</p>)}
+        </div>}
       </Card>
     </div>
   )

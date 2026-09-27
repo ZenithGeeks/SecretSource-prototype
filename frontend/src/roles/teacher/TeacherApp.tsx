@@ -22,6 +22,7 @@ import { useImportTeacherClass } from '../../lib/useTeacher'
 import { teacherApi, teacherRemoteEnabled } from '../../lib/teacher'
 import { supabase } from '../../lib/supabase'
 import { AssignmentDetail } from './screens/AssignmentDetail'
+import { EssayCheckRoster } from './components/EssayCheckRoster'
 import { AddClass } from './screens/AddClass'
 import { Classes } from './screens/Classes'
 import { ClassWorkspace } from './screens/ClassWorkspace'
@@ -97,6 +98,14 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsActive={settingsOpen}
+      sidebar={route.screen === 'essay-check' ? (
+        <EssayCheckRoster
+          courseId={route.courseId ?? ''}
+          assignmentId={route.assignmentId ?? ''}
+          selectedStudentId={route.studentId ?? ''}
+          onSelect={(studentId) => navigate({ ...route, studentId })}
+        />
+      ) : undefined}
       wide
     >
       {route.screen === 'home' ? (
