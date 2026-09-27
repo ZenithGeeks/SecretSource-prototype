@@ -11,6 +11,7 @@ import asyncio
 import io
 import json
 import zipfile
+from datetime import datetime, timedelta
 
 import pytest
 from app import auth, main
@@ -221,6 +222,7 @@ def test_a_draft_check_verifies_every_cite_and_persists_per_version(client, monk
     assert [h["id"] for h in history] == [check2, check_id]
     assert history[0]["sinceLastCheck"] == {"addedCitations": 0, "fixedIssues": 0, "newIssues": 0}
     assert history[0]["previousVersion"] == 1 and "citations" not in history[0]
+    assert history[0]["unchanged"] is True and history[1]["unchanged"] is False
 
     # the draft's own view shows the latest check
     view = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
@@ -230,6 +232,61 @@ def test_a_draft_check_verifies_every_cite_and_persists_per_version(client, monk
     assert client.get(f"/author/checks/{check_id}", headers=BO).status_code == 404
     assert client.get(f"/author/checks/{check_id}/events", headers=BO).status_code == 404
     assert client.get(f"/author/checks/{check_id}/events", headers=ADA).status_code == 200
+
+
+def test_a_check_saves_unsaved_edits_first_and_the_version_names_what_was_checked(client, monkeypatch):
+    stub_verify(monkeypatch)
+    draft = make_draft(client)
+    first = run_check(client, draft["id"])
+    assert client.get(f"/author/checks/{first}", headers=ADA).json()["version"] == 1
+
+    # the editor wrote an edit (no Ctrl+S): the check saves it as v2 and checks that
+    assert "MaxSim" in TEX
+    edited = TEX.replace("MaxSim", "MaxSim scoring")
+    client.put(f"/author/drafts/{draft['id']}/files/related-work.tex", headers=ADA, json={"content": edited})
+    assert client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()["version"] == 1
+    second = run_check(client, draft["id"])
+    view = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
+    assert view["version"] == 2 and "savedHash" not in view
+    history = client.get(f"/author/drafts/{draft['id']}/checks", headers=ADA).json()
+    rows = [(h["id"], h["version"], h["unchanged"]) for h in history]
+    assert rows == [(second, 2, False), (first, 1, False)]
+
+    # nothing edited since: no new version, and the run says so
+    third = run_check(client, draft["id"])
+    assert client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()["version"] == 2
+    history = client.get(f"/author/drafts/{draft['id']}/checks", headers=ADA).json()
+    assert history[0]["id"] == third and history[0]["version"] == 2 and history[0]["unchanged"] is True
+    assert history[0]["previousVersion"] == 2
+
+    # a Ctrl+S save still bumps on its own, and the next check does not bump again
+    assert client.post(f"/author/drafts/{draft['id']}/save", headers=ADA).json()["version"] == 3
+    run_check(client, draft["id"])
+    assert client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()["version"] == 3
+
+
+def test_timestamps_are_iso_8601_in_utc_with_the_offset_written(client, monkeypatch):
+    """The browser turns these into "checked 2 min ago": a naive stamp would be read as local
+    time and be hours off, so every one carries its offset."""
+    stub_verify(monkeypatch)
+    draft = make_draft(client)
+    check = client.get(f"/author/checks/{run_check(client, draft['id'])}", headers=ADA).json()
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
+    saved = client.post(f"/author/drafts/{draft['id']}/save", headers=ADA).json()
+    stamps = {
+        "draft.created": draft["created"],
+        "draft.updated": draft["updated"],
+        "draft.savedAt": saved["savedAt"],
+        "draft.lastCheckedAt": saved["lastCheckedAt"],
+        "check.startedAt": check["startedAt"],
+        "check.finishedAt": check["finishedAt"],
+        "project.created": project["created"],
+        "project.updated": project["updated"],
+    }
+    for name, stamp in stamps.items():
+        parsed = datetime.fromisoformat(stamp)
+        assert parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0), (name, stamp)
+        assert stamp.endswith("+00:00"), (name, stamp)
 
 
 def test_a_second_check_while_one_runs_is_refused(client):

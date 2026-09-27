@@ -492,7 +492,7 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 | `DELETE /author/drafts/{id}` | the draft and its finished checks |
 | `PUT /author/drafts/{id}/files/{name}` | body `{"content"}`; a new name adds the file. Does not bump the version |
 | `DELETE /author/drafts/{id}/files/{name}` | keeps at least one file |
-| `POST /author/drafts/{id}/save` | Ctrl/Cmd+S: `version + 1` |
+| `POST /author/drafts/{id}/save` | Ctrl/Cmd+S: `version + 1`. A check on a draft with unsaved edits saves first, the same way, so every check's `version` names the content it checked |
 | `GET /author/drafts/{id}/parse` | `{texFiles, citeCommands, bibEntries, warnings}`; a warning is `{type, detail, file, line}` with `type` one of `missing-key`, `duplicate-key`, `unused-entry`, `no-doi-url` |
 | `POST /author/drafts/{id}/citations/{key}/pdf` | multipart PDF for a bib key no check can read; used instead of a lookup by the next check |
 | `POST /author/drafts/{id}/report` | the verification report of the latest check as `application/pdf`; `409` before any check |
@@ -507,7 +507,7 @@ and the search verification share that cache. `409` while a check of that draft 
 
 | Route | Does |
 | --- | --- |
-| `GET /author/drafts/{id}/checks` | history, newest first: `{id, version, status, startedAt, finishedAt, summary, sinceLastCheck, previousVersion, previousId}` |
+| `GET /author/drafts/{id}/checks` | history, newest first: `{id, version, status, startedAt, finishedAt, summary, sinceLastCheck, previousVersion, previousId, unchanged}`; `unchanged` is a re-check of the same text and bibliography as the check before. Every timestamp is ISO 8601 in UTC with the offset written (`+00:00`) |
 | `GET /author/checks/{id}` | the same plus `citations` and `stages` |
 | `GET /author/checks/{id}/events` | SSE, like `/analyses/{id}/events`: `planned`, `checking`/`checked` per citation, then `done` or `error` |
 | `GET /author/checks/{id}/compare` | against the finished check before it: `{current, previous, rows}`; a row's `change` is `added`, `removed`, `fixed`, `new`, `changed` or `same` |

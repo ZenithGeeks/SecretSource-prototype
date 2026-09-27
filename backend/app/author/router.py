@@ -94,7 +94,7 @@ def _save(table: str, row: dict) -> dict:
 
 
 def _public(row: dict) -> dict:
-    return {k: v for k, v in row.items() if k != "owner"}
+    return {k: v for k, v in row.items() if k not in ("owner", "savedHash")}
 
 
 # --- drafts and their checks ------------------------------------------------------------
@@ -132,6 +132,10 @@ def check_view(run: dict, previous: dict | None = None, full: bool = True) -> di
         "sinceLastCheck": logic.delta(citations, previous.get("citations", []) if previous else None),
         "previousVersion": previous.get("version") if previous else None,
         "previousId": previous.get("id") if previous else None,
+        # the same text and bibliography as the check before (a re-check without edits)
+        "unchanged": bool(
+            previous and run.get("contentHash") and run.get("contentHash") == previous.get("contentHash")
+        ),
         "stages": run.get("stages", []),
     }
     if full:
@@ -209,6 +213,7 @@ def _new_draft(user: str | None, title: str, project_id: str | None, files: list
         "created": now,
         "updated": now,
         "savedAt": now,
+        "savedHash": logic.content_hash(files),
     }
     store.save_author_row(DRAFTS, draft)
     return draft
@@ -350,10 +355,20 @@ async def delete_file(draft_id: str, name: str, user: str | None = Depends(curre
 async def save_draft(draft_id: str, user: str | None = Depends(current_user)):
     """Ctrl/Cmd+S: a new version. The check history shows one row per version checked."""
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    draft["version"] = int(draft.get("version", 1)) + 1
-    draft["savedAt"] = logic.now_iso()
+    _bump_version(draft)
     await asyncio.to_thread(_save, DRAFTS, draft)
     return draft_view(draft, _checks_of(draft_id, user))
+
+
+def _bump_version(draft: dict) -> None:
+    draft["version"] = int(draft.get("version", 1)) + 1
+    draft["savedAt"] = logic.now_iso()
+    draft["savedHash"] = logic.content_hash(draft.get("files", []))
+
+
+def _unsaved(draft: dict) -> bool:
+    """Edits written by the editor since the last version was saved (Ctrl+S or a check)."""
+    return logic.content_hash(draft.get("files", [])) != draft.get("savedHash")
 
 
 @router.get("/drafts/{draft_id}/parse")
@@ -502,6 +517,12 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
     running = next((r for r in _checks_of(draft_id, user) if r.get("status") == "running"), None)
     if running:
         raise HTTPException(409, f"a check is already running: {running['id']}")
+    # A check runs on a saved version: unsaved edits are saved first (as Ctrl+S would), so
+    # the history's "vN" names exactly the content that was checked.
+    if _unsaved(draft):
+        _bump_version(draft)
+        await asyncio.to_thread(_save, DRAFTS, draft)
+    project = await asyncio.to_thread(_project_of, draft, user)
     gateway = _gateway()
     check_id = _new_id()
     gateway.analyses[check_id] = {
@@ -511,6 +532,8 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
         "draftId": draft_id,
         "draftTitle": draft["title"],
         "version": draft.get("version", 1),
+        # the draft's files plus the project's .bib: what "unchanged since the previous check" compares
+        "contentHash": logic.content_hash(_draft_files(draft, project)),
         "status": "running",
         "startedAt": logic.now_iso(),
         "stages": [],

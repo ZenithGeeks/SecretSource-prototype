@@ -11,6 +11,7 @@ means the check ran but the source could not be read; unchecked means it never r
 entry, or no check yet). The same five words are the frontend's `Verdict` union.
 """
 
+import hashlib
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -21,6 +22,19 @@ NEEDS_WORK = ("refutes", "insufficient")
 CITE = re.compile(r"\\(?:cite|citep|citet|parencite|textcite|autocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)\}")
 SECTION = re.compile(r"\\(?:chapter|section|subsection|subsubsection)\*?\{([^}]*)\}")
 SENTENCE_END = re.compile(r"[.!?][\"'”’)}]?(?=\s|$)")
+
+
+def content_hash(files: list[dict]) -> str:
+    """What a draft's text and bibliography add up to, so a check can tell an edited draft
+    from an unchanged one: the same files with the same content hash the same, whatever
+    their order."""
+    digest = hashlib.sha1()
+    for f in sorted(files, key=lambda f: f["name"]):
+        digest.update(f["name"].encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((f.get("content") or "").encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def now_iso() -> str:
