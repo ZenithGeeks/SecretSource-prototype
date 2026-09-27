@@ -6,7 +6,9 @@
  *
  * Typing is written to the gateway after a short pause (not per keystroke). Ctrl/Cmd+S saves
  * (writes what is pending, then bumps the version). Re-check writes first, then starts the
- * run, and the preview's markers recolour as the results stream in.
+ * run; the gateway saves a new version itself when the draft changed since the last one, so
+ * the history's "vN" names the content that was checked. The preview's markers recolour as
+ * the results stream in.
  */
 
 import { Loader2 } from 'lucide-react'

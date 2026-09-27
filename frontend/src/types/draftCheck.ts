@@ -156,6 +156,8 @@ export type CheckRun = {
   sinceLastCheck: CheckDelta | null
   previousVersion: number | null
   previousId: string | null
+  /** The same text and bibliography as the check before: a re-check without edits. */
+  unchanged: boolean
   stages: CheckStage[]
   citations?: Citation[]
 }

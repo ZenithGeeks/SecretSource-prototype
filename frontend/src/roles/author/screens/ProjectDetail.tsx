@@ -13,7 +13,7 @@ import { checkedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
 import { statusLabel, VERDICTS } from '../../../lib/verdict'
-import type { CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
+import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
 import { copiedMessage, copyText } from '../searchHelpers'
 import { Toast } from '../components/Toast'
@@ -71,6 +71,11 @@ function CompareTable({ checkId, onClose }: { checkId: string; onClose: () => vo
   )
 }
 
+/** A re-check of the same text can still differ (a PDF attached, a source now readable). */
+function hasChanges(delta: CheckDelta | null): boolean {
+  return Boolean(delta && (delta.addedCitations !== 0 || delta.fixedIssues !== 0 || delta.newIssues !== 0))
+}
+
 function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: CheckRun[]; onOpenEditor: () => void }) {
   const [comparing, setComparing] = useState<string | null>(null)
   const done = runs.filter((r) => r.status === 'done')
@@ -106,9 +111,11 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
                   </p>
                   {comparing === run.id ? (
                     <CompareTable checkId={run.id} onClose={() => setComparing(null)} />
+                  ) : run.unchanged && !hasChanges(run.sinceLastCheck) ? (
+                    <p className="text-xs text-ink-muted">No changes since the previous check</p>
                   ) : (
                     <TextLink onClick={() => setComparing(run.id)} className="self-start">
-                      Compare v{run.version} with v{run.previousVersion}
+                      {run.unchanged ? 'Compare with the previous check' : `Compare v${run.version} with v${run.previousVersion}`}
                     </TextLink>
                   )}
                 </div>

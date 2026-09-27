@@ -13,9 +13,9 @@ import { findCites, parseProject } from '../src/lib/latexProject'
 import { summarize } from '../src/lib/verdict'
 import type { CheckRun, Citation, Draft, ProjectFile, SavedSource, SearchResult, Verdict } from '../src/types/draftCheck'
 
-type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks'>
+type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks'> & { savedHash?: string }
 type StoredProject = { id: string; name: string; bib: { name: string; content: string } | null; pdfs: Record<string, string>; created: string; updated: string }
-type StoredCheck = Omit<CheckRun, 'summary' | 'sinceLastCheck' | 'previousVersion' | 'previousId'> & { citations: Citation[] }
+type StoredCheck = Omit<CheckRun, 'summary' | 'sinceLastCheck' | 'previousVersion' | 'previousId' | 'unchanged'> & { citations: Citation[]; contentHash: string }
 
 export type VerdictRule = (key: string, claim: string) => { verdict: Verdict; passage?: string; page?: number; explanation?: string; message?: string; reason?: string }
 
@@ -131,6 +131,7 @@ export function installFakeGateway(options: { files?: { name: string; content: s
       files: [{ name: 'seminar.tex', kind: 'tex', content: '\\section{Seminar}\nDPR works~\\cite{karpukhin2020}.\n' }, { name: 'refs.bib', kind: 'bib', content: '@misc{karpukhin2020, title={DPR}, year={2020}, doi={10.1/dpr}}' }],
       pdfs: {}, created: t, updated: t, savedAt: t,
     })
+    for (const draft of gateway.drafts.values()) markSaved(draft)
     if (options.prechecked !== false) {
       runCheck(gateway, 'd1')
       runCheck(gateway, 'd2')
@@ -147,6 +148,19 @@ function filesOf(gateway: FakeGateway, draft: StoredDraft): ProjectFile[] {
   const project = draft.projectId ? gateway.projects.get(draft.projectId) : undefined
   if (project?.bib && !files.some((f) => f.name === project.bib!.name)) files.push({ ...project.bib, kind: 'bib', shared: true })
   return files
+}
+
+/** The gateway's content hash: the same files hash the same, whatever their order. */
+export function contentHash(files: { name: string; content: string }[]): string {
+  const text = [...files].sort((a, b) => a.name.localeCompare(b.name)).map((f) => `${f.name}\0${f.content}\0`).join('')
+  let hash = 5381
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  return (hash >>> 0).toString(16)
+}
+
+/** The draft as last saved (Ctrl+S, or the save a check makes first). */
+export function markSaved(draft: StoredDraft): void {
+  draft.savedHash = contentHash(draft.files)
 }
 
 function checksOf(gateway: FakeGateway, draftId: string): StoredCheck[] {
@@ -173,7 +187,9 @@ function checkView(gateway: FakeGateway, check: StoredCheck, full: boolean): Che
     sinceLastCheck: delta(check.citations, previous?.citations),
     previousVersion: previous?.version ?? null,
     previousId: previous?.id ?? null,
+    unchanged: Boolean(previous && previous.contentHash === check.contentHash),
   }
+  delete (view as { contentHash?: string }).contentHash
   if (!full) delete (view as { citations?: Citation[] }).citations
   return view
 }
@@ -198,6 +214,12 @@ function draftView(gateway: FakeGateway, draft: StoredDraft): Draft {
 /** The stand-in for the pipeline: every \cite judged by `verdictFor`, finished at once. */
 export function runCheck(gateway: FakeGateway, draftId: string): StoredCheck {
   const draft = gateway.drafts.get(draftId)!
+  // unsaved edits are saved first, as the gateway does, so the run's version names what was checked
+  if (draft.savedHash !== contentHash(draft.files)) {
+    draft.version += 1
+    draft.savedAt = now()
+    markSaved(draft)
+  }
   const files = filesOf(gateway, draft)
   const known = new Set(files.filter((f) => f.kind === 'bib').flatMap((f) => parseBib(f.content).map((e) => e.key)))
   const entries = new Map(files.filter((f) => f.kind === 'bib').flatMap((f) => parseBib(f.content).map((e) => [e.key, e] as const)))
@@ -220,7 +242,7 @@ export function runCheck(gateway: FakeGateway, draftId: string): StoredCheck {
       }),
     )
   const started = new Date(Date.now() + seq).toISOString()
-  const check: StoredCheck = { id: checkId, draftId, version: draft.version, status: 'done', startedAt: started, finishedAt: started, stages: [{ stage: 'planned', checks: citations.length }, { stage: 'done' }], citations }
+  const check: StoredCheck = { id: checkId, draftId, version: draft.version, contentHash: contentHash(files), status: 'done', startedAt: started, finishedAt: started, stages: [{ stage: 'planned', checks: citations.length }, { stage: 'done' }], citations }
   gateway.checks.set(checkId, check)
   return check
 }
@@ -260,6 +282,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
     if (parts.length === 2 && method === 'POST') {
       const files = ((body?.files as { name: string; content: string }[] | undefined) ?? []).map((f) => ({ ...f, kind: kindOf(f.name) }))
       const draft: StoredDraft = { id: id('draft'), projectId: (body?.projectId as string | null) ?? null, title: String(body?.title ?? 'Untitled draft'), version: 1, files: files.length ? files : [{ name: 'main.tex', kind: 'tex', content: '' }], pdfs: {}, created: now(), updated: now(), savedAt: now() }
+      markSaved(draft)
       gateway.drafts.set(draft.id, draft)
       return json(draftView(gateway, draft))
     }
@@ -267,6 +290,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       const file = form?.get('file') as File
       const text = await file.text()
       const draft: StoredDraft = { id: id('draft'), projectId: null, title: file.name.replace(/\.(tex|zip|bib)$/i, ''), version: 1, files: [{ name: file.name, kind: kindOf(file.name), content: text }], pdfs: {}, created: now(), updated: now(), savedAt: now() }
+      markSaved(draft)
       gateway.drafts.set(draft.id, draft)
       return json(draftView(gateway, draft))
     }
@@ -301,6 +325,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       draft.version += 1
       draft.savedAt = now()
       draft.updated = now()
+      markSaved(draft)
       return json(draftView(gateway, draft))
     }
     if (parts[3] === 'parse') return json(parseProject(filesOf(gateway, draft)))

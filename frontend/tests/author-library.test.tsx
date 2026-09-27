@@ -10,7 +10,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { Library } from '../src/roles/author/screens/Library'
-import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
+import { installFakeGateway, markSaved, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
@@ -98,7 +98,10 @@ describe('Author Library', () => {
 
   test('the project detail lists its drafts and the check history with a compare', async () => {
     // a second, later check on a newer version, with the contradiction fixed
-    gateway.drafts.get('d1')!.version = 4
+    const d1 = gateway.drafts.get('d1')!
+    d1.files[0].content += '\n% revised after the first check\n'
+    d1.version = 4
+    markSaved(d1)
     gateway.verdictFor = (key) => (key === 'nguyen2016' ? { verdict: 'unavailable', reason: 'no-open-access', message: 'x' } : { verdict: 'supports', passage: 'ok', page: 1 })
     runCheck(gateway, 'd1')
 
@@ -122,6 +125,15 @@ describe('Author Library', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open in editor' }))
     expect(onOpenEditor).toHaveBeenCalledWith('d1')
     fireEvent.click(screen.getByRole('button', { name: '← Library' }))
+  })
+
+  test('a re-check without edits says so instead of offering a compare of the same version', async () => {
+    runCheck(gateway, 'd1') // nothing edited since the seeded check
+    renderLibrary('proj1')
+    await screen.findByRole('heading', { name: /Check history · Related work/ })
+    expect(screen.getByText('No changes since the previous check')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Compare v3 with v3/ })).not.toBeInTheDocument()
+    expect(gateway.drafts.get('d1')!.version).toBe(3)
   })
 
   test('"unsorted" shows the drafts in no project and only the sources saved to no project', async () => {
