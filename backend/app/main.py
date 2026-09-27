@@ -34,7 +34,7 @@ import re
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -78,7 +78,7 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
-from app.queue import redis_connection
+from app.queue import pubsub_client, redis_connection
 from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
@@ -95,6 +95,7 @@ FIGURE_NAME = re.compile(r"figure-\d+")
 
 analyses: dict[str, dict] = {}
 streams: dict[str, asyncio.Queue] = {}
+_deleted: set[str] = set()
 
 # Shared by every run, so N analyses at once are not N times the load on the retrieval
 # services and the LLM (#170). _run takes its own limit first, then one of these.
@@ -120,12 +121,73 @@ def restore():
             store.save(analysis)
 
 
+def _apply_snapshot(snapshot: dict) -> None:
+    """Turn a Redis analysis snapshot into the gateway's in-memory state and live SSE events.
+
+    While runs still execute in-process, _publish appends a stage locally before publishing,
+    so the local stage count is always >= the snapshot's for those runs, making this a no-op
+    for them automatically. Once a stage count truly is newer, this is the only writer that
+    replaces analyses[id], so it never mutates a dict another part of the process still holds.
+    """
+    analysis_id = snapshot["id"]
+    if analysis_id in _deleted:
+        return
+    local = analyses.get(analysis_id)
+    seen = len(local["stages"]) if local else 0
+    new = snapshot["stages"][seen:]
+    if not new:
+        return
+    analyses[analysis_id] = snapshot
+    queue = streams.setdefault(analysis_id, asyncio.Queue())
+    for stage in new:
+        queue.put_nowait(stage)
+    if snapshot["status"] in ("done", "error"):
+        queue.put_nowait(None)
+
+
+_SUBSCRIBE_BACKOFF_START = 1.0
+_SUBSCRIBE_BACKOFF_MAX = 30.0
+
+
+async def _subscribe_forever() -> None:
+    """Background task: apply every analysis snapshot published by a worker process. Retries
+    quietly on any Redis outage so a gateway with no Redis (e.g. under TestClient) still
+    starts and shuts down cleanly."""
+    backoff = _SUBSCRIBE_BACKOFF_START
+    while True:
+        client = None
+        try:
+            client = pubsub_client()
+            pubsub = client.pubsub()
+            await pubsub.psubscribe("analysis:*")
+            backoff = _SUBSCRIBE_BACKOFF_START
+            async for message in pubsub.listen():
+                if message["type"] != "pmessage":
+                    continue
+                try:
+                    _apply_snapshot(json.loads(message["data"]))
+                except Exception:
+                    logger.exception("applying a Redis analysis snapshot failed")
+        except Exception as error:
+            logger.warning("analysis snapshot subscriber lost Redis (%s); retrying", error)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, _SUBSCRIBE_BACKOFF_MAX)
+        finally:
+            if client is not None:
+                with suppress(Exception):
+                    await client.aclose()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     restore()
     # Log where each dependency is and whether it answers, without holding up startup.
     app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))
+    app.state.snapshot_subscriber = asyncio.create_task(_subscribe_forever())
     yield
+    app.state.snapshot_subscriber.cancel()
+    with suppress(asyncio.CancelledError):
+        await app.state.snapshot_subscriber
 
 
 class PathWithoutQuery(logging.Filter):
@@ -446,6 +508,8 @@ async def get_analysis(analysis_id: str, user: str | None = Depends(current_user
 
 
 async def _delete_one(analysis_id: str) -> None:
+    # A worker may still publish a snapshot after this delete; it must not come back.
+    _deleted.add(analysis_id)
     # Out of memory first, so no new save starts. A save already running would store the row
     # again after the delete, so wait for it.
     analyses.pop(analysis_id, None)

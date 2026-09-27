@@ -7,6 +7,7 @@ asyncio one. `run_analysis_job`, the thing a worker actually runs, lands in a la
 """
 
 import redis
+import redis.asyncio
 from rq import Queue
 
 from app.config import REDIS_URL
@@ -30,3 +31,9 @@ def analysis_queue() -> Queue:
     if _queue is None:
         _queue = Queue(QUEUE_NAME, connection=redis_connection())
     return _queue
+
+
+def pubsub_client() -> redis.asyncio.Redis:
+    # Never cached: an async client binds to the event loop it was created on, and tests
+    # (and the subscriber's own reconnect loop) create fresh loops with asyncio.run.
+    return redis.asyncio.Redis.from_url(REDIS_URL)

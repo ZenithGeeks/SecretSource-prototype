@@ -64,14 +64,14 @@ docker run --rm -v "$(pwd -W):/repo" -w /repo secretsource-prototype-gateway sh 
 **Description:** A new background task, started in `lifespan()` alongside the existing `dependency_check` task: subscribes to `analysis:*` on Redis. For each incoming snapshot: update `analyses[analysis_id]` from it (`setdefault` if this gateway has never seen the id — the restart-survivability case), diff `stages` against what's already recorded locally, and push only the genuinely new stage entries onto `streams[analysis_id]` (creating the queue if needed). On a terminal snapshot (`status` is `done`/`error`), also push `None` to close any open SSE connection.
 
 **Acceptance criteria:**
-- [ ] Subscriber task started in `lifespan()`, runs for the gateway's lifetime
-- [ ] Correctly no-ops on a stage it already has locally (idempotent — this is what makes it safe to run alongside Task 2's still-active direct `streams.put()` call)
-- [ ] Correctly initializes `analyses[id]`/`streams[id]` for an id this gateway process has never seen
-- [ ] Pushes `None` on a terminal snapshot
+- [x] Subscriber task started in `lifespan()`, runs for the gateway's lifetime
+- [x] Correctly no-ops on a stage it already has locally (idempotent — this is what makes it safe to run alongside Task 2's still-active direct `streams.put()` call)
+- [x] Correctly initializes `analyses[id]`/`streams[id]` for an id this gateway process has never seen
+- [x] Pushes `None` on a terminal snapshot
 
 **Verification:**
-- [ ] Full backend suite passes
-- [ ] New test: feed the subscriber's message-handling logic a sequence of fake snapshots directly (no real Redis needed — extract the per-message handling into a plain function the test can call), assert `analyses`/`streams` end up correct for: (a) a fresh id, (b) a stage already seen (no duplicate push), (c) a terminal snapshot closing the stream
+- [x] Full backend suite passes
+- [x] New test: feed the subscriber's message-handling logic a sequence of fake snapshots directly (no real Redis needed — extract the per-message handling into a plain function the test can call), assert `analyses`/`streams` end up correct for: (a) a fresh id, (b) a stage already seen (no duplicate push), (c) a terminal snapshot closing the stream
 
 **Dependencies:** Task 2 (needs the snapshot message format)
 
@@ -117,6 +117,8 @@ docker run --rm -v "$(pwd -W):/repo" -w /repo secretsource-prototype-gateway sh 
 - [ ] `_run`/`all_analyses`/`PARALLEL_ANALYSES` removed (not just unused — actually deleted)
 - [ ] `_publish()` no longer references the gateway's `streams` dict at all
 - [ ] `GET /analyses/{id}/events` still streams correctly end-to-end (via the Task 2/3 path, now the *only* path)
+- [ ] `restore()` stops marking `running` analyses as "interrupted by a restart" on gateway startup: a worker may still be running them, and the Task 3 subscriber catches them up
+- [ ] Deleting a running analysis also cancels its RQ job (the subscriber's `_deleted` set only stops a deleted analysis from reappearing; it does not stop the work)
 
 **Verification:**
 - [ ] Full backend suite passes (expect to update/remove any test that directly asserted on the old `_run`/`all_analyses` semaphore behavior, e.g. parts of `test_shared_limits.py`)

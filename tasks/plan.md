@@ -27,11 +27,11 @@ Replace `asyncio.create_task(_run(...))` (in-process, one gateway, no restart su
 ### Phase 2: Build the new path alongside the old one
 
 - [x] Task 2: `_publish()` also publishes the full snapshot to Redis (additive)
-- [ ] Task 3: Gateway-side subscriber task (diff-based, idempotent)
+- [x] Task 3: Gateway-side subscriber task (diff-based, idempotent)
 
 ### Checkpoint: New path proven, old path still live
-- [ ] Full backend suite passes — existing SSE/`_start`/`_run_queued` behavior is untouched
-- [ ] New tests confirm the subscriber correctly updates `analyses`/`streams` from fake snapshots, including an id the gateway has never seen (the restart-survivability case)
+- [x] Full backend suite passes — existing SSE/`_start`/`_run_queued` behavior is untouched
+- [x] New tests confirm the subscriber correctly updates `analyses`/`streams` from fake snapshots, including an id the gateway has never seen (the restart-survivability case)
 
 ### Phase 3: Worker execution path (not yet wired into `_start`)
 
