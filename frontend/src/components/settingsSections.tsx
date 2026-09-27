@@ -367,7 +367,7 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
     if (!window.confirm('Delete all uploaded papers? This removes the files and every check made on them. This cannot be undone.')) return
     setBusy(true)
     try {
-      const { deleted, skipped } = await accountApi.deleteAllData()
+      const { deleted, skipped } = await accountApi.deleteAllData('researcher')
       await queryClient.invalidateQueries({ queryKey: ['researcher'] })
       await queryClient.invalidateQueries({ queryKey: ['analyses'] })
       setNotice(
@@ -438,7 +438,7 @@ function AuthorYourData({ isPreview }: { isPreview: boolean }) {
     if (!window.confirm('Delete all drafts? This removes every draft, project, saved source and check made on them. This cannot be undone.')) return
     setBusy(true)
     try {
-      const { skipped } = await accountApi.deleteAllData()
+      const { skipped } = await accountApi.deleteAllData('author')
       await queryClient.invalidateQueries({ queryKey: ['author'] })
       await queryClient.invalidateQueries({ queryKey: ['analyses'] })
       setNotice(
