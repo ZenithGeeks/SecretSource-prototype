@@ -1,7 +1,7 @@
 /**
- * The Author role's shell: its nav is Home, Library and History — no Find a source, no Graph —
- * and its History screen is the Researcher's History component (through useHistoryWorkspace),
- * not a copy. Against the fake gateway, with login off.
+ * The Author role's shell: its nav is Home, Library, Graph and History — no Find a source —
+ * and its Graph and History screens are the Researcher's components (Graph directly, History
+ * through useHistoryWorkspace), not copies. Against the fake gateway, with login off.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -15,9 +15,19 @@ import { THESIS_FILES } from './fixtures/thesis'
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
-// The Researcher's History screen, stubbed so the test can tell the shared component from a fork.
+// The Researcher's screens, stubbed so the test can tell the shared components from forks.
 vi.mock('../src/roles/researcher/screens/History', () => ({
   History: (props: { selected: string | null }) => <div data-testid="researcher-history">researcher history · selected={String(props.selected)}</div>,
+}))
+vi.mock('../src/roles/researcher/screens/Graph', () => ({
+  Graph: (props: { onOpenAnalysis: (id: string) => void }) => (
+    <div data-testid="researcher-graph">
+      researcher graph
+      <button type="button" onClick={() => props.onOpenAnalysis('a7')}>
+        open paper a7
+      </button>
+    </div>
+  ),
 }))
 
 let gateway: FakeGateway
@@ -55,12 +65,11 @@ afterEach(() => {
 })
 
 describe('AuthorApp', () => {
-  test('the nav is exactly Home, Library, History — no Find a source, no Graph', async () => {
+  test('the nav is exactly Home, Library, Graph, History — no Find a source', async () => {
     renderApp()
     await screen.findAllByRole('navigation')
-    expect(navLabels()).toEqual(['Home', 'Library', 'History'])
+    expect(navLabels()).toEqual(['Home', 'Library', 'Graph', 'History'])
     expect(nav().queryByRole('button', { name: 'Find a source' })).toBeNull()
-    expect(nav().queryByRole('button', { name: 'Graph' })).toBeNull()
     expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
 
@@ -72,9 +81,31 @@ describe('AuthorApp', () => {
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('library')
     expect(await screen.findByRole('button', { name: /Unsorted sources/ })).toBeInTheDocument()
 
+    fireEvent.click(nav().getByRole('button', { name: 'Graph' }))
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('graph')
+    expect(screen.getByTestId('researcher-graph')).toBeInTheDocument()
+
     fireEvent.click(nav().getByRole('button', { name: 'History' }))
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('history')
     expect(screen.getByTestId('researcher-history')).toBeInTheDocument()
+  })
+
+  test('Graph is the Researcher Graph component; a paper picked on it opens on History', async () => {
+    renderApp('?screen=graph')
+    expect(await screen.findByTestId('researcher-graph')).toBeInTheDocument()
+    expect(nav().getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(screen.getByRole('button', { name: 'open paper a7' }))
+    expect(await screen.findByTestId('researcher-history')).toHaveTextContent('selected=a7')
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('history')
+    expect(new URLSearchParams(window.location.search).get('analysis')).toBe('a7')
+  })
+
+  test('a bookmarked ?screen=find-source (the removed tab) lands on Home', async () => {
+    renderApp('?screen=find-source&q=late+interaction')
+    await screen.findAllByRole('navigation')
+    expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('home')
+    expect(new URLSearchParams(window.location.search).get('q')).toBeNull()
   })
 
   test('History renders the Researcher History component, with ?analysis= as the open one', async () => {

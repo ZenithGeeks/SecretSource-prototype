@@ -244,6 +244,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
   const parts = path.split('/').filter(Boolean)
 
   if (path === '/analyses') return json([])
+  if (path === '/researcher/graph') return json({ clusters: [], nodes: [], edges: [], paperEdges: [] })
   if (parts[0] === 'papers') return json({ page: null, boxes: [] })
   if (parts[0] !== 'author') return fail(404, `no route ${path}`)
 

@@ -1,15 +1,17 @@
 /**
  * Author role router: which screen is showing, rendered inside the shared AppShell with the
- * Author nav (Home, Library, History — Figma 558:3647 and on). `?screen=` deep-links
+ * Author nav (Home, Library, Graph, History — Figma 558:3647 and on). `?screen=` deep-links
  * a screen, `?draft=` the draft Check a draft / the editor work on, `?file=` / `?line=` where
  * the editor puts the cursor, `?project=` a project in the Library, and `?analysis=` the
  * analysis open on History — mirroring ResearcherApp's param scheme.
  *
- * Home is Check a draft. History is the Researcher's History (the same components, through
- * useHistoryWorkspace). Settings is a modal from the profile menu, not a screen of its own.
+ * Home is Check a draft. Graph and History are the Researcher's screens (the same Graph
+ * component, and History through useHistoryWorkspace), not copies: the Graph's papers open
+ * on History here as they do there. Settings is a modal from the profile menu, not a screen
+ * of its own.
  */
 
-import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Pen } from 'lucide-react'
+import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Pen, Waypoints } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -17,17 +19,19 @@ import { AppShell } from '../../components/AppShell'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
+import { Graph } from '../researcher/screens/Graph'
 import type { EditorTarget } from './editorTarget'
 import { DraftCheck } from './screens/DraftCheck'
 import { Editor } from './screens/Editor'
 import { Library } from './screens/Library'
 
-type NavKey = 'home' | 'library' | 'history'
+type NavKey = 'home' | 'library' | 'graph' | 'history'
 export type AuthorScreen = NavKey | 'editor'
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'library', label: 'Library', icon: LibraryIcon },
+  { key: 'graph', label: 'Graph', icon: Waypoints },
   { key: 'history', label: 'History', icon: HistoryIcon },
 ]
 
@@ -36,6 +40,7 @@ const NAV_FOR: Record<AuthorScreen, NavKey> = {
   home: 'home',
   editor: 'home',
   library: 'library',
+  graph: 'graph',
   history: 'history',
 }
 
@@ -117,6 +122,12 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
     },
     [navigate],
   )
+  /** A paper picked on the Graph opens on History, as in ResearcherApp. */
+  const openAnalysis = (id: string) => {
+    history.open(id)
+    navigate('history')
+  }
+
   // The editor is full-bleed with its own top bar, so it renders outside the sidebar shell.
   if (screen === 'editor' && draftId) {
     return (
@@ -139,7 +150,9 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsActive={settingsOpen}
-      wide={wide || (screen === 'history' && history.wide)}
+      // The Graph is a whole-screen canvas, so it gets the wide shell (History uses it for the
+      // page viewer).
+      wide={wide || (screen === 'history' && history.wide) || screen === 'graph'}
       sidebar={screen === 'history' ? history.sidebar : undefined}
     >
       {screen === 'home' && (
@@ -162,6 +175,15 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
           onOpenProject={setProjectId}
           onOpenEditor={(id, file, line) => openEditor({ draftId: id, file, line })}
           onOpenDraft={openDraft}
+        />
+      )}
+      {screen === 'graph' && (
+        <Graph
+          onOpenAnalysis={openAnalysis}
+          emptyMessage={{
+            title: 'Nothing to graph yet',
+            hint: 'The graph is built from analysed papers. Analyse one on History and it appears here with the claims it makes and the works it cites.',
+          }}
         />
       )}
       {screen === 'history' && history.main}
