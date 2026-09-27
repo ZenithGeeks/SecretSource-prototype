@@ -676,7 +676,10 @@ def test_delete_all_scoped_to_one_role_keeps_the_other_roles_data(client, monkey
     run_check(client, draft["id"])
     client.post("/author/sources", headers=ADA, json={"title": "S", "authorsList": ["A B"], "year": 2020})
     researcher_project = client.post("/researcher/projects", headers=ADA, json={"name": "Survey"}).json()
-    main.analyses["paper1"] = {"id": "paper1", "paper": "x.pdf", "status": "done", "owner": "user-ada", "stages": [], "claims": []}
+    main.analyses["paper1"] = {
+        "id": "paper1", "paper": "x.pdf", "status": "done", "owner": "user-ada",
+        "stages": [], "claims": [],
+    }
 
     def author_rows():
         return (

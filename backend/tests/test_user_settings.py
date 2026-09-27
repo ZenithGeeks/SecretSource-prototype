@@ -262,13 +262,16 @@ def test_delete_all_data_scope_researcher_leaves_the_authors_draft_checks(client
     and the Author's must not take the papers. No scope still means everything, as before."""
     for analysis_id, kind in (("paper1", "paper"), ("check1", "check"), ("draft1", "draft-check")):
         main.analyses[analysis_id] = {
-            "id": analysis_id, "kind": kind, "status": "done", "owner": "user-ada", "stages": [], "claims": [],
+            "id": analysis_id, "kind": kind, "status": "done", "owner": "user-ada",
+            "stages": [], "claims": [],
         }
 
     assert client.delete("/user/data?scope=researcher", headers=ADA).json() == {"deleted": 2, "skipped": 0}
     assert sorted(main.analyses) == ["draft1"]
 
-    main.analyses["paper2"] = {"id": "paper2", "status": "done", "owner": "user-ada", "stages": [], "claims": []}
+    main.analyses["paper2"] = {
+        "id": "paper2", "status": "done", "owner": "user-ada", "stages": [], "claims": [],
+    }
     assert client.delete("/user/data?scope=author", headers=ADA).json() == {"deleted": 1, "skipped": 0}
     assert sorted(main.analyses) == ["paper2"]
 
