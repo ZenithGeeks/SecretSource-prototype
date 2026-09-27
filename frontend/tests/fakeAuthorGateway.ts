@@ -28,6 +28,11 @@ export type FakeGateway = {
   /** Every request seen, for assertions: "PUT /author/drafts/d1/files/related-work.tex". */
   calls: string[]
   fetch: ReturnType<typeof vi.fn>
+  /** While true, every file write answers 503 — a gateway that is down mid-typing. */
+  failWrites: boolean
+  /** Awaited before a file write is applied, so a test can hold one reply back and let a later
+   * one land first. */
+  beforeWrite?: (name: string, content: string) => Promise<void>
 }
 
 let seq = 0
@@ -86,6 +91,7 @@ export function installFakeGateway(options: { files?: { name: string; content: s
     verdictFor: options.verdictFor ?? DEFAULT_VERDICTS,
     calls: [],
     fetch: vi.fn(),
+    failWrites: false,
   }
 
   const t = now()
@@ -282,9 +288,12 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
     if (parts[3] === 'files') {
       const name = decodeURIComponent(parts.slice(4).join('/'))
       if (method === 'PUT') {
+        const content = String(body?.content ?? '')
+        if (gateway.beforeWrite) await gateway.beforeWrite(name, content)
+        if (gateway.failWrites) return fail(503, 'the gateway is down')
         const existing = draft.files.find((f) => f.name === name)
-        if (existing) existing.content = String(body?.content ?? '')
-        else draft.files.push({ name, kind: kindOf(name), content: String(body?.content ?? '') })
+        if (existing) existing.content = content
+        else draft.files.push({ name, kind: kindOf(name), content })
         draft.updated = now()
         return json(draftView(gateway, draft))
       }

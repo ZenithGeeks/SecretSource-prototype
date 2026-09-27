@@ -1,5 +1,6 @@
+import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -29,9 +30,22 @@ function renderWithQuery(ui: ReactNode) {
 function renderEditor(target = { draftId: 'd1', file: 'related-work.tex', line: 10 }) {
   const onFileChange = vi.fn()
   const onNavigate = vi.fn()
-  renderWithQuery(<Editor target={target} onFileChange={onFileChange} onNavigate={onNavigate} />)
-  return { onFileChange, onNavigate }
+  const view = renderWithQuery(<Editor target={target} onFileChange={onFileChange} onNavigate={onNavigate} />)
+  return { ...view, onFileChange, onNavigate }
 }
+
+/** Types into the open file the way a keystroke does: through CodeMirror, so the editor's own
+ * change handling runs (the debounced write, the dirty state). */
+function type(text: string, at = 0) {
+  const cm = document.querySelector('.cm-editor') as HTMLElement
+  const view = EditorView.findFromDOM(cm)!
+  act(() => view.dispatch({ changes: { from: at, insert: text } }))
+}
+
+const source = () => screen.getByLabelText('related-work.tex source').textContent ?? ''
+const stored = () => gateway.drafts.get('d1')!.files.find((f) => f.name === 'related-work.tex')!.content
+/** The PUTs of the chapter so far. */
+const writes = () => gateway.calls.filter((c) => c === 'PUT /author/drafts/d1/files/related-work.tex').length
 
 beforeEach(() => {
   gateway = installFakeGateway({ files: THESIS_FILES })
@@ -58,7 +72,7 @@ describe('Author LaTeX editor', () => {
     await waitFor(() => expect(document.querySelector('.cm-cite-refutes')?.textContent).toBe('khattab2020'))
 
     expect(screen.getByText('Related work — thesis ch.2')).toBeInTheDocument()
-    expect(screen.getByText('v3 · saved')).toBeInTheDocument()
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved')
   })
 
   test('switching tabs shows that file and reports it; "+ file" adds one on the gateway', async () => {
@@ -92,7 +106,7 @@ describe('Author LaTeX editor', () => {
     const editor = screen.getByLabelText('related-work.tex source')
     fireEvent.keyDown(editor, { key: 's', ctrlKey: true })
     await waitFor(() => expect(gateway.drafts.get('d1')!.version).toBe(4))
-    expect(await screen.findByText('v4 · saved')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v4 · saved'))
   })
 
   test('a change made on the gateway (a replacement elsewhere) shows up in the open file', async () => {
@@ -126,6 +140,117 @@ describe('Author LaTeX editor', () => {
     fireEvent.click(screen.getAllByRole('menuitem')[0])
     await waitFor(() => expect(gateway.calls).toContain('POST /author/drafts/d1/report'))
     expect(await screen.findByRole('status')).toHaveTextContent('Downloaded the verification report')
+  })
+})
+
+describe('Author LaTeX editor — saving', () => {
+  test('typing writes the file after a pause; the status goes saving… then saved and the tab dot comes and goes', async () => {
+    renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const before = writes()
+
+    type('% typed\n')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saving…')
+    expect(within(screen.getByRole('tab', { name: /related-work\.tex/ })).getByLabelText('unsaved changes')).toBeInTheDocument()
+
+    await waitFor(() => expect(writes()).toBe(before + 1), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    expect(stored().startsWith('% typed\n')).toBe(true)
+    expect(gateway.drafts.get('d1')!.version).toBe(3) // typing never makes a version
+    expect(within(screen.getByRole('tab', { name: /related-work\.tex/ })).queryByLabelText('unsaved changes')).toBeNull()
+  })
+
+  test('leaving the editor before the pause still writes what was typed', async () => {
+    const { unmount } = renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    type('% leaving\n')
+    unmount()
+    await waitFor(() => expect(stored().startsWith('% leaving\n')).toBe(true))
+  })
+
+  test('a refused write keeps the text on screen, says not saved, and Retry sends it again; Ctrl+S does not make a version until it lands', async () => {
+    renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const original = stored()
+
+    gateway.failWrites = true
+    type('% offline\n')
+    const alert = await screen.findByRole('alert', {}, { timeout: 3000 })
+    expect(alert).toHaveTextContent('Could not save related-work.tex: the gateway is down')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · not saved')
+    expect(stored()).toBe(original)
+
+    // a refetch of the draft (a check landing, the window focused) does not put the old text back
+    fireEvent.click(screen.getByRole('button', { name: 'Re-check' }))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('not saved'))
+    expect(source()).toContain('% offline')
+    expect(gateway.calls).not.toContain('POST /author/drafts/d1/check')
+
+    // Ctrl+S: no version while the gateway does not hold the text
+    fireEvent.keyDown(screen.getByLabelText('related-work.tex source'), { key: 's', ctrlKey: true })
+    expect(await screen.findByText(/Not saved: the gateway refused the last edit/)).toBeInTheDocument()
+    expect(gateway.calls).not.toContain('POST /author/drafts/d1/save')
+    expect(gateway.drafts.get('d1')!.version).toBe(3)
+
+    gateway.failWrites = false
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(stored().startsWith('% offline\n')).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(source()).toContain('% offline')
+
+    fireEvent.keyDown(screen.getByLabelText('related-work.tex source'), { key: 's', ctrlKey: true })
+    await waitFor(() => expect(gateway.drafts.get('d1')!.version).toBe(4))
+  })
+
+  test('a slow reply to an older write never puts the older text back', async () => {
+    renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+
+    // hold the first write until the second has been applied
+    let releaseFirst: (() => void) | null = null
+    let held = 0
+    gateway.beforeWrite = (_name, content) => {
+      if (content.startsWith('% one') && !content.startsWith('% one\n% two')) {
+        held += 1
+        return new Promise<void>((resolve) => {
+          releaseFirst = resolve
+        })
+      }
+      return Promise.resolve()
+    }
+    type('% one\n')
+    await waitFor(() => expect(held).toBe(1), { timeout: 3000 })
+    type('% two\n', '% one\n'.length)
+    await waitFor(() => expect(stored().startsWith('% one\n% two\n')).toBe(true), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+
+    releaseFirst!()
+    // the first write lands on the gateway last, so the gateway holds the older text now…
+    await waitFor(() => expect(stored().startsWith('% one\n')).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    // …but the editor kept the newer text and shows the older reply as an outstanding difference
+    expect(source()).toContain('% two')
+    expect(source()).toContain('% one')
+  })
+
+  test('switching drafts keeps each draft its own text', async () => {
+    const { rerender } = renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    type('% first draft\n')
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Editor key="d2" target={{ draftId: 'd2' }} onFileChange={() => undefined} onNavigate={() => undefined} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByLabelText('seminar.tex source').textContent).toContain('\\section{Seminar}'))
+    expect(screen.getByLabelText('seminar.tex source').textContent).not.toContain('% first draft')
+    await waitFor(() => expect(stored().startsWith('% first draft\n')).toBe(true))
   })
 })
 

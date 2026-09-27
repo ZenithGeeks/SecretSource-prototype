@@ -1,6 +1,6 @@
 /** The editor's own top bar (the screen is full-bleed, outside the AppShell sidebar): brand,
- * breadcrumb with save state, the Editor / Export / History tabs, Re-check,
- * and the role chip. `exportSlot` is where the Export dropdown mounts in a later PR. */
+ * breadcrumb with the version and save state, the Editor / Export / History tabs, Re-check,
+ * and the role chip. `exportSlot` is where the Export dropdown mounts. */
 
 import { Loader2, Pen, Search } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -11,6 +11,10 @@ import { Button } from '../../../../components/ui'
 import { cn } from '../../../../lib/utils'
 
 export type EditorTab = 'editor' | 'history'
+
+/** Where the draft's text stands against the gateway: every edit written, a write pending or
+ * in flight, or the last write refused. */
+export type SaveStatus = 'saved' | 'saving' | 'error'
 
 function TabButton({ active, onClick, children }: { active?: boolean; onClick: () => void; children: ReactNode }) {
   return (
@@ -31,7 +35,8 @@ function TabButton({ active, onClick, children }: { active?: boolean; onClick: (
 export function EditorTopBar({
   title,
   version,
-  saved,
+  status,
+  onRetry,
   onBack,
   onNavigate,
   onRecheck,
@@ -40,12 +45,14 @@ export function EditorTopBar({
 }: {
   title: string
   version: number
-  saved: boolean
+  status: SaveStatus
+  /** Send the refused edits again. */
+  onRetry: () => void
   onBack: () => void
   onNavigate: (tab: EditorTab) => void
   onRecheck: () => void
   rechecking: boolean
-  exportSlot?: ReactNode
+  exportSlot: ReactNode
 }) {
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border-subtle bg-surface px-4 sm:px-6">
@@ -64,8 +71,23 @@ export function EditorTopBar({
           <span className="truncate font-medium text-ink" aria-current="page">
             {title}
           </span>
-          <span className="whitespace-nowrap text-xs text-ink-muted">
-            v{version} · {saved ? 'saved' : 'unsaved'}
+          <span data-testid="save-state" aria-live="polite" className={cn('flex items-center gap-1 whitespace-nowrap text-xs', status === 'error' ? 'text-refutes' : 'text-ink-muted')}>
+            v{version} ·{' '}
+            {status === 'saving' ? (
+              <>
+                <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                saving…
+              </>
+            ) : status === 'error' ? (
+              <>
+                not saved
+                <button type="button" onClick={onRetry} className="ml-1 rounded font-medium text-accent hover:underline">
+                  Retry
+                </button>
+              </>
+            ) : (
+              'saved'
+            )}
           </span>
         </nav>
       </div>
@@ -73,11 +95,7 @@ export function EditorTopBar({
         <TabButton active onClick={() => onNavigate('editor')}>
           Editor
         </TabButton>
-        {exportSlot ?? (
-          <span className="cursor-default px-1 text-[15px] font-medium text-ink-muted" title="Export arrives in a later PR">
-            Export ▾
-          </span>
-        )}
+        {exportSlot}
         <TabButton onClick={() => onNavigate('history')}>History</TabButton>
       </nav>
       <div className="flex items-center gap-3 py-3">

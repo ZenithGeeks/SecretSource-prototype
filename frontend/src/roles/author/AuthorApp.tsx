@@ -20,6 +20,7 @@ import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { Graph } from '../researcher/screens/Graph'
+import { Toast } from './components/Toast'
 import type { EditorTarget } from './editorTarget'
 import { DraftCheck } from './screens/DraftCheck'
 import { Editor } from './screens/Editor'
@@ -92,6 +93,9 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [wide, setWide] = useState(false) // a page viewer is open beside the cards
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
+  // What outlives a screen: the editor's last write being refused after the author left it.
+  const [notice, setNotice] = useState<string | null>(null)
+  const closeNotice = useCallback(() => setNotice(null), [])
   const history = useHistoryWorkspace()
 
   useEffect(
@@ -131,12 +135,16 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   // The editor is full-bleed with its own top bar, so it renders outside the sidebar shell.
   if (screen === 'editor' && draftId) {
     return (
-      <Editor
-        key={draftId}
-        target={editorTarget ?? { draftId }}
-        onFileChange={(file) => setEditorTarget({ draftId, file })}
-        onNavigate={(next) => navigate(next)}
-      />
+      <>
+        <Editor
+          key={draftId}
+          target={editorTarget ?? { draftId }}
+          onFileChange={(file) => setEditorTarget({ draftId, file })}
+          onNavigate={(next) => navigate(next)}
+          onWriteFailed={setNotice}
+        />
+        <Toast message={notice} onClose={closeNotice} ms={10_000} />
+      </>
     )
   }
 
@@ -187,6 +195,7 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
         />
       )}
       {screen === 'history' && history.main}
+      <Toast message={notice} onClose={closeNotice} ms={10_000} />
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

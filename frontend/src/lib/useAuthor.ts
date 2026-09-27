@@ -203,19 +203,21 @@ export function useAuthorActions() {
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
       libraryChanged()
     },
-    /** Writes one file; `quiet` skips the refetch storm while the editor is typing (the
-     * editor keeps its own copy and re-syncs on save). */
-    putFile: async (draftId: string, name: string, content: string, quiet = false): Promise<Draft> => {
+    /** Writes one file and refetches what shows it. */
+    putFile: async (draftId: string, name: string, content: string): Promise<Draft> => {
       const draft = await authorApi.putFile(draftId, name, content)
-      if (quiet) {
-        qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) =>
-          current ? { ...current, files: draft.files, updated: draft.updated } : current,
-        )
-        void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
-      } else {
-        touched(draftId)
-      }
+      touched(draftId)
       return draft
+    },
+    /** The editor's own write while typing: the file goes to the gateway and the cache is
+     * left alone until the editor accepts the answer with `acceptWrite` — so a reply that
+     * arrives after a newer write can be dropped instead of putting old text back. */
+    writeFile: (draftId: string, name: string, content: string): Promise<Draft> => authorApi.putFile(draftId, name, content),
+    /** Puts a write's answer in the cache without the refetch storm; only the files and
+     * the timestamp move, and the parse (warnings, citation lines) is refetched. */
+    acceptWrite: (draftId: string, draft: Draft): void => {
+      qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) => (current ? { ...current, files: draft.files, updated: draft.updated } : current))
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
     },
     deleteFile: async (draftId: string, name: string): Promise<Draft> => {
       const draft = await authorApi.deleteFile(draftId, name)

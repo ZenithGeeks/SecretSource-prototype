@@ -4,9 +4,10 @@
  * through useHistoryWorkspace), not copies. Against the fake gateway, with login off.
  */
 
+import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
@@ -55,6 +56,14 @@ function navLabels(): string[] {
     .map((button) => button.textContent?.trim() ?? '')
 }
 
+// CodeMirror measures text with Range geometry that jsdom does not implement.
+beforeAll(() => {
+  const rect = { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }
+  Range.prototype.getBoundingClientRect = () => rect as DOMRect
+  Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as DOMRectList
+  Element.prototype.scrollIntoView = () => undefined
+})
+
 beforeEach(() => {
   gateway = installFakeGateway({ files: THESIS_FILES })
 })
@@ -98,6 +107,21 @@ describe('AuthorApp', () => {
     expect(await screen.findByTestId('researcher-history')).toHaveTextContent('selected=a7')
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('history')
     expect(new URLSearchParams(window.location.search).get('analysis')).toBe('a7')
+  })
+
+  test('an edit refused on the way out of the editor is reported on the screen the author lands on', async () => {
+    renderApp('?screen=editor&draft=d1&file=related-work.tex')
+    const source = await screen.findByLabelText('related-work.tex source')
+    await waitFor(() => expect(source.textContent).toContain('\\section{Related work}'))
+
+    gateway.failWrites = true
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!
+    act(() => view.dispatch({ changes: { from: 0, insert: '% leaving\n' } }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check a draft' }))
+
+    expect(await screen.findByRole('heading', { name: 'Check a draft' })).toBeInTheDocument()
+    expect(await screen.findByText('Your last edits to related-work.tex were not saved: the gateway is down')).toBeInTheDocument()
+    expect(gateway.drafts.get('d1')!.files.find((f) => f.name === 'related-work.tex')!.content.startsWith('% leaving')).toBe(false)
   })
 
   test('a bookmarked ?screen=find-source (the removed tab) lands on Home', async () => {
