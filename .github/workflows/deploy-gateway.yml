@@ -74,14 +74,18 @@ jobs:
           S2_API_KEY: ${{ secrets.S2_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
+          # Without a reachable Redis the gateway answers every POST /analyses with 503, so refuse
+          # to deploy rather than ship that. The worker that drains the queue runs on ss-core.
+          if [ -z "$REDIS_URL" ]; then echo "::error::the REDIS_URL secret is not set"; exit 1; fi
           # 8Gi: Docling on an uploaded PDF went over 4Gi and Cloud Run killed the instance.
           # One instance with CPU always on: analyses run inside the gateway process, so a second
           # instance's restore() marked a live run "interrupted", and a throttled CPU stalled it.
           gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
             --port 8080 --memory 8Gi --allow-unauthenticated \
             --max-instances 1 --no-cpu-throttling --cpu 4 \
-            --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY,S2_API_KEY=$S2_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY"
+            --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY,S2_API_KEY=$S2_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL"
 
       - name: Print the gateway URL
         run: gcloud run services describe gateway --region "$REGION" --format 'value(status.url)'
