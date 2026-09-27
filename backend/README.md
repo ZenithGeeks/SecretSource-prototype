@@ -15,6 +15,7 @@ covers how to run the backend, how it is organised, and the HTTP API.
 - [Folder layout](#folder-layout)
 - [Profiling](#profiling)
 - [Monitoring](#monitoring)
+- [Deploy](#deploy)
 - [Tests](#tests)
 - [HTTP API](#http-api)
   - [Analyses](#analyses)
@@ -37,6 +38,15 @@ curl http://localhost:8080/health
 process that actually runs it (see [ARCHITECTURE.md#services](../ARCHITECTURE.md#services)).
 Starting `gateway` alone brings up its dependencies (`redis`, `grobid`) but not `worker`, so
 analyses would queue and never run.
+
+Run more than one worker to run more analyses at once:
+`docker compose up -d --scale worker=3`, or start extra `python worker.py` processes outside
+compose. How many analyses run at once equals how many workers are running.
+
+Production uses Redis Cloud's free plan, which has no TLS. Anyone who can write to that Redis
+could queue a job, so the worker only runs `app.queue.run_analysis_job` (and its own failure
+callback) and refuses anything else, and jobs are stored as JSON, not pickle, for the same
+reason (`AnalysisWorker` in `app/queue.py`).
 
 The gateway needs GROBID, ColBERT and an LLM endpoint. ColPali is optional. Their URLs come
 from `.env` (see the root [README](../README.md)).
@@ -222,20 +232,20 @@ docker exec <gateway-container> py-spy dump --pid 1   # one snapshot of every th
 docker exec <gateway-container> py-spy top --pid 1     # live, updating view of what's using CPU
 ```
 
-`py-spy dump` on a request that's hanging shows the exact call it's blocked on — this is what
-would have caught #224/#228 (`asyncio.to_thread` missing on a synchronous route) directly,
-instead of by reading `main.py` line by line. Needs `SYS_PTRACE` (docker-compose.yml grants it
-to the `gateway` service); without it py-spy fails with a permission error, not a hang.
+`py-spy dump` on a request that's hanging shows the exact call it's blocked on. It would have
+caught #224/#228 (`asyncio.to_thread` missing on a synchronous route) right away, instead of by
+reading `main.py` line by line. It needs `SYS_PTRACE` (docker-compose.yml grants it to the
+`gateway` service); without it py-spy fails with a permission error, not a hang.
 
 ## Monitoring
 
 `GET /metrics` on the gateway itself, always on, counts analyses accepted
-(`analyses_started_total`). The rest of the pipeline's metrics — success rate, queue wait and
-duration, claim verdicts, audit findings, and LLM token usage — are counted where the pipeline
-actually runs now, the RQ worker processes, and served on `WORKER_METRICS_PORT` (default
-`9101`), in Prometheus format (`app/metrics.py`). Container-level CPU/memory (cadvisor) and
-Grafana are opt-in, off by default so a small box like a shared VM doesn't run three extra
-containers it never asked for:
+(`analyses_started_total`). The rest of the pipeline's metrics are counted in the RQ worker
+processes, where the pipeline actually runs now: success rate, queue wait and duration, claim
+verdicts, audit findings, and LLM token usage. They are served in Prometheus format
+(`app/metrics.py`) on `WORKER_METRICS_PORT` (default `9101`). Container-level CPU/memory
+(cadvisor) and Grafana are opt-in, off by default, so a small box like a shared VM doesn't run
+three extra containers it never asked for:
 
 ```bash
 docker compose --profile monitoring up -d
@@ -243,10 +253,22 @@ docker compose --profile monitoring up -d
 
 Starts cadvisor (`:8085`), Prometheus (`:9090`, scrapes cadvisor, the gateway's `/metrics`, and
 every `worker` replica's metrics every 15s), and Grafana (`:3001`) with the Prometheus
-datasource and a "System evaluation" dashboard already provisioned — nothing to add by hand. See
-[deploy/monitoring/README.md](../deploy/monitoring/README.md) for what the dashboard shows. This
-exists because ss-core (2GB RAM, 1 vCPU) OOM-crashed once with nothing showing memory climbing
-beforehand, and because until now nothing at all said whether analyses were actually succeeding.
+datasource and a "System evaluation" dashboard already provisioned. There is nothing to add by
+hand. See [deploy/monitoring/README.md](../deploy/monitoring/README.md) for what the dashboard
+shows. This exists because ss-core, back when it had 2GB RAM and 1 vCPU, once OOM-crashed with nothing showing
+memory climbing beforehand, and because until now nothing said whether analyses were actually
+succeeding.
+
+## Deploy
+
+`.github/workflows/deploy-gateway.yml` builds and deploys only the gateway to Google Cloud Run,
+on every push to `main` that touches `backend/**`. It refuses to deploy when the `REDIS_URL`
+repository secret is empty, because a gateway with no Redis would answer every `POST /analyses`
+with `503`.
+
+The worker that drains the queue is not part of that deploy. It runs on `ss-core`, as the
+compose service `worker` in the compose project `secretsource-worker`, kept up and scaled by
+hand.
 
 ## Tests
 
@@ -263,6 +285,9 @@ On Git Bash for Windows, put `MSYS_NO_PATHCONV=1` before `docker run` and use
 
 `tests/test_sources.py` also runs on the host with `pytest tests/test_sources.py`. Lint with
 `ruff check backend` from the repository root.
+
+`tests/test_run_analysis_job_rq.py` runs a real `AnalysisWorker` against a real Redis. It is
+skipped when no Redis answers at `REDIS_URL`.
 
 ## HTTP API
 
@@ -508,7 +533,7 @@ message when there is one or `Google Classroom request failed` otherwise. Those 
 called out below; every other route reads and writes local storage only, and works the same
 whether or not a Google account is connected.
 
-**Google connection**
+##### Google connection
 
 #### `GET /teacher/google/connect`
 
@@ -558,7 +583,7 @@ Deletes the stored connection. Response: `{"connected": false, "connectionDelete
 delete. `importedDataDeleted` is hardcoded `false`: previously imported courses, coursework,
 and submissions are not deleted by disconnecting.
 
-**Home**
+##### Home
 
 #### `GET /teacher/home`
 
@@ -581,7 +606,7 @@ selector yet).
 No error cases beyond the shared `401`; an unconnected or empty account just returns empty
 fields.
 
-**Classes and rosters**
+##### Classes and rosters
 
 `GET /classes`, `GET .../workspace` and `GET .../assignments/{assignment_id}` read local
 storage only. `GET .../importable`, `GET .../importable/{course_id}/preview`,
@@ -653,7 +678,7 @@ Response: `{"assignment": <same shape as a workspace assignments entry>, "submis
 [<same shape as workspace submissions entries>]}`. Errors: `404` when the course was never
 imported, or the assignment id is not coursework in that course.
 
-**Essay checks and reviews**
+##### Essay checks and reviews
 
 Each route below addresses a submission by `student_id` and returns `404` with
 `submission not found` when that student has no submission for the assignment. Only
@@ -735,7 +760,7 @@ Response: `{"assignmentId": "...", "studentId": "...", "status": "sent", "sentAt
 timestamp>"}`. Errors: `404` when the submission is not found, `404` when there is no saved
 feedback to send (nothing was ever saved with `PUT .../feedback`).
 
-**Grading**
+##### Grading
 
 #### `POST /teacher/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/grade-and-return`
 

@@ -9,20 +9,29 @@ which design pattern each part follows and why, and which file to change for a g
 flowchart LR
     B["Browser"] --> W["web<br/>React UI"]
     W --> G["gateway<br/>FastAPI"]
-    G --> GR["GROBID<br/>reads references"]
-    G --> CB["ColBERT<br/>text search"]
-    G --> CP["ColPali<br/>figure and page search"]
-    G --> L["LLM<br/>OpenAI-compatible"]
+    G --> R[("Redis<br/>job queue")]
+    R --> WK["worker<br/>runs the analysis"]
+    WK --> R
+    WK --> GR["GROBID<br/>reads references"]
+    WK --> CB["ColBERT<br/>text search"]
+    WK --> CP["ColPali<br/>figure and page search"]
+    WK --> L["LLM<br/>OpenAI-compatible"]
     CB --> Q[("Qdrant")]
     CP --> Q
-    G --> S[("SQLite or Supabase")]
+    WK --> S[("SQLite or Supabase")]
 ```
 
 - `web` is the user interface. It sends every `/api` request to the gateway.
-- `gateway` runs the analysis. The code is in `backend/`.
+- `gateway` takes each request and puts an analysis job on `redis`. The code is in `backend/`.
+- `worker` takes jobs off `redis` and runs the analysis. The code is in `backend/worker.py`.
 - ColBERT and ColPali are separate services in `services/`. Both store their indexes in Qdrant.
-- Docling is not a service. It is a library inside the gateway that turns a PDF into text
+- Docling is not a service. It is a library inside the worker that turns a PDF into text
   and cuts out figures.
+
+In production: `web` runs on Vercel. `gateway`, GROBID, ColBERT and ColPali run as separate
+Cloud Run services in the same GCP project. Redis runs on Redis Cloud's free plan. `worker`
+runs on ss-core, a VM outside Cloud Run. It is the process that calls GROBID, ColBERT, ColPali
+and the LLM.
 
 ## Three ways to run the pipeline
 
@@ -45,14 +54,17 @@ http://localhost:8001.
 
 ```mermaid
 flowchart TD
-    A["POST /analyses"] --> B["Read the paper<br/>claims.py"]
+    A["POST /analyses<br/>enqueue on Redis"] --> W["a worker picks up the job"]
+    W --> B["Read the paper<br/>claims.py"]
     B --> C["Make one job per claim and cited paper"]
     C --> D["Prepare each cited paper once<br/>download and index"]
     D --> E["Judge each claim<br/>search and ask the LLM"]
     B --> P["Read the paper's own figures<br/>figures.py"]
     E --> F["Audit the result<br/>audit.py"]
     P --> F
-    F --> G["Done"]
+    F --> H["Publish a snapshot on Redis Pub/Sub<br/>analysis:id"]
+    H --> I["gateway applies the snapshot"]
+    I --> J["SSE to the web app"]
 ```
 
 1. **Start.** `POST /analyses` creates an analysis with a 12-character id, records a
@@ -172,11 +184,10 @@ Score(Q, D) = sum_i max_j (q_i . d_j)
 
 For every query token, take its highest dot-product similarity to any single token in the
 candidate, then sum those maxima across the query. A query token needs only one matching
-token anywhere in the candidate to score well, so a number in row eight of a table scores
-the same as if it were the passage's opening sentence — this is what a single-vector
-embedding cannot do, since it has already averaged that row away before search ever runs.
-Qdrant's multivector search executes this scoring natively; neither service re-ranks
-candidates in application code.
+token anywhere in the candidate to score well. So a number in row eight of a table scores the
+same as if it were the passage's opening sentence. A single-vector embedding cannot do this: it
+has already averaged that row away before search ever runs. Qdrant's multivector search
+executes this scoring natively. Neither service re-ranks candidates in application code.
 
 **Our four DSPy programs**
 
@@ -415,10 +426,15 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
   services and the LLM (see step 5 above).
 
 **Deploying this.** `.github/workflows/deploy-gateway.yml` builds and deploys only the
-`gateway` container to Cloud Run, and it sets no `REDIS_URL`. Nothing deploys a worker yet. A
-real deployment of this code needs a Redis both the gateway and the worker can reach (set as
-`REDIS_URL` on both), and at least one always-running worker process with the same settings as
-the gateway. Without that, `POST /analyses` returns `503` and nothing runs.
+`gateway` container to Cloud Run, on every push to `main` that touches `backend/`. It refuses to
+deploy if the `REDIS_URL` repository secret is empty, because without a reachable Redis every
+`POST /analyses` would return `503`. The `worker` runs separately, as a compose service on
+ss-core, using the same `REDIS_URL` as the gateway.
+
+**Why the queue uses JSON, not pickle.** The Redis Cloud free plan used in production has no
+TLS, so anyone who can write to that Redis could queue a job. `backend/app/queue.py` uses RQ's
+`JSONSerializer` instead of pickle, and the worker class `AnalysisWorker` refuses any job except
+`app.queue.run_analysis_job`, and refuses any callback other than its own failure callback.
 
 **Known limits.**
 
@@ -430,6 +446,26 @@ the gateway. Without that, `POST /analyses` returns `503` and nothing runs.
 - The analysed paper's own `indexed_in` badge (`_index_self`) is saved by the worker after the
   run finishes, but that save is not published to Redis, so a running gateway only shows it
   after a restart or a fresh load from the store.
+
+## Monitoring
+
+`GET /health` returns `ok`, `analyses`, `degraded`, and a `dependencies` list: the LLM, GROBID,
+ColBERT, ColPali (optional), Supabase, and `redis` and `worker`. `redis` and `worker` are
+required, so `degraded` is true when Redis cannot be reached or no worker is listening.
+
+A Google Cloud Monitoring uptime check calls the gateway's `/health` every 5 minutes from 6
+regions, and passes when the body contains `"ok":true`. Two alert policies email the team: one
+fires when the uptime check fails from more than one region for 10 minutes, and one fires when
+the gateway returns more than 5 5xx responses in 5 minutes.
+
+Grafana runs on ss-core, next to the worker, with two dashboards: "System evaluation" (analyses
+running, queue wait, worker and container CPU and memory, from Prometheus) and "Cloud Run
+services" (requests, latency, instance count, CPU and memory for each Cloud Run service). Cloud
+Run is private, so Prometheus cannot scrape it there. Those metrics come from Google Cloud
+Monitoring instead.
+
+See [deploy/monitoring/README.md](deploy/monitoring/README.md) for how to run this stack and
+what each dashboard shows.
 
 ## MCP and A2A
 
@@ -507,7 +543,9 @@ adds an analysis to it.
 | figure extraction | `backend/app/pipeline/figures.py` |
 | search behaviour (chunks, batches, collections) | `services/colbert`, `services/colpali` |
 | which LLM is used, or how it is called | `backend/app/llm.py`, `backend/app/config.py` |
-| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS` in `.env` |
+| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS` in `.env`; analyses at once = worker count (`--scale worker=N`) |
+| how analyses are queued, or the Redis connection | `backend/app/queue.py` |
+| what the worker process does | `backend/worker.py` |
 | the graph in `adk web` | `backend/app/workflow.py` |
 | the chat agents and their routing | `backend/app/agents/team.py` |
 | the researcher Home, Library, Field consensus or Graph | `backend/app/researcher.py`, `frontend/src/roles/researcher` |
