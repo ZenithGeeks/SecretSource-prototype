@@ -151,7 +151,7 @@ export type Analysis = {
 
 /** "colbert_server/papers/x.pdf" -> "x.pdf": the gateway serves papers by file name. */
 export function paperName(file: string) {
-  return file.split(/[\/]/).pop() ?? file
+  return file.split('/').pop() ?? file
 }
 
 /** Where the gateway lives. Empty (the default) means same-origin behind a reverse proxy, as

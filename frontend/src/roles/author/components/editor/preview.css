@@ -182,6 +182,19 @@
   color: var(--color-ink-muted);
 }
 
+.ss-preview .ss-unknown {
+  display: inline-block;
+  padding: 0 0.35em;
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: 3px;
+  background: var(--color-canvas);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.4;
+  color: var(--color-ink-muted);
+  vertical-align: baseline;
+}
+
 .ss-preview .list.flushleft .tt {
   white-space: pre;
 }

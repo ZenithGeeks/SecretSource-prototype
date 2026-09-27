@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { parseBib } from '../src/lib/bibtex.ts'
-import { expandNewcommands, formatAuthors, formatReference, prepareSource, referenceNumbers, REWRITES } from '../src/lib/latexPreview.ts'
-import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
+import { expandNewcommands, formatAuthors, formatReference, preparePreview, prepareSource, referenceNumbers, REWRITES } from '../src/lib/latexPreview.ts'
+import { BUNDLED_PACKAGES_TEX, MAIN_BIB, RELATED_WORK_TEX, UNSUPPORTED_PREAMBLE_TEX } from './fixtures/thesis.ts'
+
+const lines = (text: string) => text.split('\n').length
 
 test('prepareSource turns \\cite into markers, [?] for an unfinished one, and drops what LaTeX.js cannot take', () => {
   const src = String.raw`\documentclass{article}
@@ -45,6 +47,67 @@ test('prepareSource rewrites the thesis chapter the way REWRITES documents', () 
   assert.ok(!out.includes('\\usepackage{amsmath}'), 'amsmath is not loadable either; KaTeX handles the math')
   assert.ok(out.includes('\\usepackage{hyperref}'))
   assert.ok(REWRITES.some((r) => r.construct.startsWith('equation')))
+})
+
+test('preparePreview keeps the line count of every file it rewrites', () => {
+  for (const source of [RELATED_WORK_TEX, UNSUPPORTED_PREAMBLE_TEX, BUNDLED_PACKAGES_TEX, 'no document here\n\\usepackage{tikz}\nfragment', '']) {
+    const { source: out } = preparePreview(source)
+    assert.equal(lines(out), lines(source), `line count changed for: ${source.slice(0, 40)}`)
+  }
+  // multi-line environments fold onto one line and are padded with comment lines
+  const folded = preparePreview('\\begin{align}\na &= b \\\\\nc &= d\n\\end{align}\nafter')
+  assert.equal(lines(folded.source), 5)
+  // the two-line body keeps its own newline; the two lines the \begin/\end took become comments
+  assert.equal(folded.source, '\\[\\begin{aligned}a &= b \\\\\nc &= d\\end{aligned}\\]%\n%\n\nafter')
+  const table = preparePreview('\\begin{tabular}{lr}\na & 1 \\\\\nb & 2 \\\\\n\\end{tabular}\nafter')
+  assert.equal(lines(table.source), 5)
+  assert.ok(table.source.includes('\\texttt{a │ 1}\\\\ \\texttt{b │ 2}'))
+  const multi = preparePreview('\\newcommand{\\long}{one\n  two}\nA \\long{} B')
+  assert.equal(lines(multi.source), 3)
+  assert.ok(multi.source.includes('A one two{} B'))
+})
+
+test('preparePreview keeps only what LaTeX.js accepts before \\begin{document} and names the rest', () => {
+  const { source, ignored } = preparePreview(UNSUPPORTED_PREAMBLE_TEX)
+  const preamble = source.slice(0, source.indexOf('\\begin{document}'))
+  assert.ok(preamble.includes('\\documentclass[11pt]{article}'))
+  assert.ok(preamble.includes('\\title{Two columns}'))
+  assert.ok(preamble.includes('\\usepackage{hyperref}'), 'the built-in package survives out of a mixed \\usepackage')
+  for (const gone of ['geometry', 'booktabs', 'newtheorem', 'DeclareMathOperator', 'hypersetup', 'colorlinks'])
+    assert.ok(!preamble.includes(gone), `${gone} should be dropped`)
+  assert.deepEqual(ignored, ['geometry', 'booktabs', '\\newtheorem', '\\DeclareMathOperator', '\\hypersetup'])
+  assert.ok(preamble.includes('\\usepackage{multicol}'), 'a bundled package loads as written')
+  assert.ok(source.includes('\\begin{multicols}{2}'), 'multicols is left for LaTeX.js, which renders real columns')
+  assert.ok(source.includes('Left column text.'))
+  // the bundled packages and a \setcounter LaTeX.js knows pass untouched
+  const bundled = preparePreview(BUNDLED_PACKAGES_TEX)
+  assert.deepEqual(bundled.ignored, [])
+  for (const line of ['\\usepackage{textgreek}', '\\usepackage{gensymb}', '\\usepackage{multicol}', '\\setcounter{secnumdepth}{2}'])
+    assert.ok(bundled.source.includes(line), `${line} should survive`)
+  // a multi-line \usepackage: the options span lines, the built-in package stays
+  const wrappedSource = '\\documentclass{article}\n\\usepackage[\n  a4paper,\n  margin=2cm\n]{geometry}\n\\usepackage[\n  colorlinks]{hyperref}\n\\begin{document}\nx\n\\end{document}'
+  const wrapped = preparePreview(wrappedSource)
+  assert.equal(lines(wrapped.source), lines(wrappedSource))
+  assert.ok(wrapped.source.includes('\\usepackage{hyperref}'))
+  assert.ok(!wrapped.source.includes('geometry'))
+  assert.deepEqual(wrapped.ignored, ['geometry'])
+  // a chapter that needs nothing dropped reports nothing
+  assert.deepEqual(preparePreview('\\documentclass{article}\n\\usepackage{hyperref}\n\\title{T}\n\\begin{document}\nx\n\\end{document}').ignored, [])
+  // the thesis chapter: booktabs is named; amsmath is dropped without a word, KaTeX covers it
+  assert.deepEqual(preparePreview(RELATED_WORK_TEX).ignored, ['booktabs'])
+})
+
+test('preparePreview blanks comment environments when the comment package is loaded, keeping the lines and naming nothing', () => {
+  const source = '\\documentclass{article}\n\\usepackage{comment}\n\\begin{document}\nshown\n\\begin{comment}\nhidden\n\\end{comment} tail\nafter\n\\end{document}'
+  const { source: out, ignored } = preparePreview(source)
+  assert.equal(lines(out), lines(source))
+  assert.ok(!out.includes('hidden'))
+  assert.ok(!out.includes('comment}'), 'the environment and the package line are gone')
+  assert.ok(out.includes('%\n%\n tail\nafter'), 'the padding keeps the lines and the text after \\end{comment} stays')
+  assert.deepEqual(ignored, [])
+  // without the package the environment is left for LaTeX.js to report as unknown
+  const bare = preparePreview('\\documentclass{article}\n\\begin{document}\n\\begin{comment}\nhidden\n\\end{comment}\n\\end{document}')
+  assert.ok(bare.source.includes('\\begin{comment}'))
 })
 
 test('expandNewcommands handles no-argument and positional bodies and leaves the rest alone', () => {

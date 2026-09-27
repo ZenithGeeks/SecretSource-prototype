@@ -159,6 +159,52 @@ Text before.
 \end{document}
 `
 
+/** A chapter whose preamble mixes what LaTeX.js cannot load (geometry, booktabs,
+ * \newtheorem, a \DeclareMathOperator, a \hypersetup spanning three lines) with packages it
+ * bundles (multicol, hyperref): the allowlist drops the former, the multicols body renders
+ * as real columns. */
+export const UNSUPPORTED_PREAMBLE_TEX = String.raw`\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs,hyperref}
+\usepackage{multicol}
+\newtheorem{theorem}{Theorem}
+\DeclareMathOperator{\argmax}{arg\,max}
+\hypersetup{
+  colorlinks = true,
+  linkcolor = blue,
+}
+\title{Two columns}
+\begin{document}
+\maketitle
+\section{Two columns}
+\begin{multicols}{2}
+Left column text.
+
+Right column text.
+\end{multicols}
+\end{document}
+`
+
+/** A chapter that leans on packages LaTeX.js bundles — textgreek, gensymb, multicol — plus
+ * a \setcounter of a counter it has, so nothing should be dropped or reported. */
+export const BUNDLED_PACKAGES_TEX = String.raw`\documentclass{article}
+\usepackage{textgreek}
+\usepackage{gensymb}
+\usepackage{multicol}
+\setcounter{secnumdepth}{2}
+\title{Greek and degrees}
+\begin{document}
+\maketitle
+\section{Symbols}
+The \textalpha\ particle scatters at 90\degree\ and \textbeta\ decay follows.
+\begin{multicols}{2}
+Left column text.
+
+Right column text.
+\end{multicols}
+\end{document}
+`
+
 /** A chapter with a syntax error on line 4 (an unclosed group). */
 export const BROKEN_TEX = String.raw`\documentclass{article}
 \begin{document}

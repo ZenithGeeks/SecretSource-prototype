@@ -9,6 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 
 import { parseBib } from '../src/lib/bibtex'
 import { decorateCitations } from '../src/lib/latexPreview'
+import { UNSUPPORTED_PREAMBLE_TEX } from './fixtures/thesis'
 import { PreviewPane } from '../src/roles/author/components/editor/PreviewPane'
 import type { Citation } from '../src/types/draftCheck'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
@@ -92,6 +93,31 @@ describe('PreviewPane', () => {
     expect(page().querySelector('.katex')).toBeTruthy()
     expect(page().textContent).toContain('in every frame.')
     expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByTestId('preview-ignored')).toBeNull()
+  }, 20000)
+
+  test('a preamble LaTeX.js cannot take renders anyway with a quiet notice naming what was left out, and multicols keeps its columns', async () => {
+    renderPane(UNSUPPORTED_PREAMBLE_TEX, { citations: [], bibEntries: [] })
+    await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Two columns/), { timeout: 15000 })
+    expect(page().textContent).toContain('Left column text.')
+    expect(page().textContent).toContain('Right column text.')
+    expect(page().querySelector<HTMLElement>('.multicols')?.style.columnCount).toBe('2')
+    expect(screen.queryByRole('alert')).toBeNull()
+    const notice = screen.getByTestId('preview-ignored')
+    expect(notice).toHaveTextContent('Ignored in the preview (LaTeX still compiles them): geometry, booktabs, \\newtheorem, \\DeclareMathOperator, \\hypersetup')
+    expect(notice).not.toHaveTextContent('multicol')
+  }, 20000)
+
+  test('an unknown macro after a rewritten block is a grey box on the page and is listed with its line in the source file, with no alert', async () => {
+    // \badmacro is on line 12 of a file whose 4-line align block was folded into one line
+    const source = ['\\documentclass{article}', '\\begin{document}', '\\begin{align}', 'a &= b \\\\', 'c &= d', '\\end{align}', 'text', 'text', 'text', 'text', 'text', 'see \\badmacro here', '\\end{document}'].join('\n')
+    renderPane(source, { citations: [], bibEntries: [] })
+    await waitFor(() => expect(page().querySelector('.ss-unknown')).toBeTruthy(), { timeout: 15000 })
+    expect(page().querySelector('.ss-unknown')?.textContent).toBe('\\badmacro')
+    expect(page().textContent).toContain('see')
+    expect(page().textContent).toContain('here')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('preview-ignored')).toHaveTextContent('Unknown to the preview, shown as grey boxes: \\badmacro (line 12)')
   }, 20000)
 
   test('a source that will not compile keeps the last page and names the line', async () => {

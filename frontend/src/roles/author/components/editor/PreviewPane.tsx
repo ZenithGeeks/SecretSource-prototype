@@ -1,8 +1,12 @@
 /**
  * The right half of the split: "Live preview · rendered with LaTeX.js" over the rendered
  * page. Compiles the open file a moment after typing stops; when the source will not
- * compile, the last good page stays and a one-line error says where. The `[n]` markers are
- * coloured by verdict when the toggle is on, and a flagged one opens the issue popover.
+ * compile, the last good page stays and a one-line error says where (the line in the
+ * author's file: preparePreview keeps the line count). What the preview had to leave out
+ * (packages and preamble commands LaTeX.js lacks) and what it did not know in the body
+ * (shown as grey placeholders) are named in a quiet notice that never blocks the page. The
+ * `[n]` markers are coloured by verdict when the toggle is on, and a flagged one opens the
+ * issue popover.
  *
  * The page lives in a shadow root, so LaTeX.js's and KaTeX's stylesheets (and the page's own
  * paper look) never leak into the app and the app's Tailwind never reaches the page. Fonts
@@ -11,11 +15,11 @@
  */
 
 import katexCss from 'latex.js/dist/css/katex.css?inline'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, Info, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { cn } from '../../../../lib/utils'
-import { appendReferences, decorateCitations, prepareSource, referenceNumbers, renderLatex, type RenderFailure } from '../../../../lib/latexPreview'
+import { appendReferences, decorateCitations, preparePreview, referenceNumbers, renderLatex, type RenderFailure, type UnknownMacro } from '../../../../lib/latexPreview'
 import type { BibEntry } from '../../../../lib/bibtex'
 import { findCites } from '../../../../lib/latexProject'
 import { useDebounced } from '../../../../lib/useDebounced'
@@ -51,6 +55,8 @@ const KATEX = splitFontFaces(katexCss)
 type RenderState = {
   root: HTMLElement | null
   error: RenderFailure | null
+  /** What the last good render had to stand in for. */
+  unknown: UnknownMacro[]
   /** The source the state above came from; rendering is under way while it lags `debounced`. */
   source: string | null
 }
@@ -72,7 +78,8 @@ export function PreviewPane({
   onKeepMine: (citation: Citation, note: string) => void
 }) {
   const debounced = useDebounced(content, RENDER_DELAY_MS)
-  const [state, setState] = useState<RenderState>({ root: null, error: null, source: null })
+  const prepared = useMemo(() => preparePreview(debounced), [debounced])
+  const [state, setState] = useState<RenderState>({ root: null, error: null, unknown: [], source: null })
   const rendering = state.source !== debounced
   const host = useRef<HTMLDivElement>(null)
   const page = useRef<HTMLElement | null>(null)
@@ -82,13 +89,13 @@ export function PreviewPane({
   // Compile after typing pauses; keep the last good page on failure.
   useEffect(() => {
     let cancelled = false
-    renderLatex(prepareSource(debounced))
-      .then(({ root }) => !cancelled && setState({ root, error: null, source: debounced }))
-      .catch((error: RenderFailure) => !cancelled && setState((s) => ({ root: s.root, error, source: debounced })))
+    renderLatex(prepared.source)
+      .then(({ root, unknown }) => !cancelled && setState({ root, error: null, unknown, source: debounced }))
+      .catch((error: RenderFailure) => !cancelled && setState((s) => ({ ...s, error, source: debounced })))
     return () => {
       cancelled = true
     }
-  }, [debounced])
+  }, [debounced, prepared])
 
   // Numbered like plainnat: only the works this file cites, by first author.
   const numbers = useMemo(
@@ -196,6 +203,16 @@ export function PreviewPane({
     if (open) body.querySelector(`.ss-sentence[data-id="${open.id}"]`)?.classList.add('ss-active')
   }, [open, state.root, citations])
 
+  // One quiet line for everything the page is not showing as written.
+  const notice = [
+    prepared.ignored.length ? `Ignored in the preview (LaTeX still compiles them): ${prepared.ignored.join(', ')}` : '',
+    state.unknown.length
+      ? `Unknown to the preview, shown as grey boxes: ${state.unknown.map((u) => `${u.what} (line${u.lines.length === 1 ? '' : 's'} ${u.lines.join(', ')})`).join(', ')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   const next = () => {
     if (issues.length === 0) return
     const target = issues[(currentIndex + 1) % issues.length]
@@ -219,6 +236,14 @@ export function PreviewPane({
             {state.error.line ? `Line ${state.error.line}: ` : ''}
             {state.error.message}
             {state.root ? ' · showing the last good render' : ''}
+          </span>
+        </p>
+      )}
+      {notice && (
+        <p data-testid="preview-ignored" className="flex items-center gap-2 border-b border-border-subtle bg-canvas px-3.5 py-1 text-[11px] text-ink-muted">
+          <Info className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate" title={notice}>
+            {notice}
           </span>
         </p>
       )}
