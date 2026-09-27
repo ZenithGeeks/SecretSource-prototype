@@ -560,8 +560,10 @@ reason, message}`. Same cache as the draft checks; `400` when either field is bl
 
 #### Your data
 
-`GET /author/export` → `{exportedAt, projects, drafts, sources, checks}`. `DELETE /user/data`
-(Settings → Delete all) removes these along with the caller's analyses.
+`GET /author/export` → `{exportedAt, projects, drafts, sources, checks}`. `DELETE
+/user/data?scope=author` (the Author tab's Settings → Delete all) removes these and the
+caller's draft checks, and nothing of the Researcher's; `scope=researcher` is the reverse,
+and `scope=all` (the default) both.
 
 ### Teacher
 

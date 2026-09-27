@@ -665,3 +665,44 @@ def test_export_and_delete_all_cover_the_author_rows(client, monkeypatch):
     assert client.get("/author/projects", headers=ADA).json() == []
     assert client.get("/author/library", headers=ADA).json()["saved"] == []
     assert len(client.get("/author/drafts", headers=BO).json()) == 1
+
+
+def test_delete_all_scoped_to_one_role_keeps_the_other_roles_data(client, monkeypatch):
+    """PR #291 review: DELETE /user/data used to wipe both roles at once, so a Researcher
+    clearing papers lost their Author drafts too. Each Settings tab now sends its own scope."""
+    stub_verify(monkeypatch)
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
+    draft = make_draft(client, project_id=project["id"])
+    run_check(client, draft["id"])
+    client.post("/author/sources", headers=ADA, json={"title": "S", "authorsList": ["A B"], "year": 2020})
+    researcher_project = client.post("/researcher/projects", headers=ADA, json={"name": "Survey"}).json()
+    main.analyses["paper1"] = {"id": "paper1", "paper": "x.pdf", "status": "done", "owner": "user-ada", "stages": [], "claims": []}
+
+    def author_rows():
+        return (
+            client.get("/author/drafts", headers=ADA).json(),
+            client.get("/author/projects", headers=ADA).json(),
+            client.get("/author/library", headers=ADA).json()["saved"],
+        )
+
+    # The Researcher's Delete all: the paper and the researcher project go, the Author's rows stay.
+    assert client.delete("/user/data?scope=researcher", headers=ADA).json() == {"deleted": 1, "skipped": 0}
+    assert "paper1" not in main.analyses
+    assert client.get("/researcher/projects", headers=ADA).json() == []
+    drafts, projects, saved = author_rows()
+    assert [d["id"] for d in drafts] == [draft["id"]] and [p["id"] for p in projects] == [project["id"]]
+    assert len(saved) == 1
+    assert len(client.get(f"/author/drafts/{draft['id']}/checks", headers=ADA).json()) == 1
+
+    # The Author's Delete all: the draft check and rows go, a Researcher project made since stays.
+    kept = client.post("/researcher/projects", headers=ADA, json={"name": "Kept"}).json()
+    assert client.delete("/user/data?scope=author", headers=ADA).json() == {"deleted": 1, "skipped": 0}
+    assert author_rows() == ([], [], [])
+    assert [p["id"] for p in client.get("/researcher/projects", headers=ADA).json()] == [kept["id"]]
+    assert researcher_project["id"] != kept["id"]
+
+
+def test_delete_all_refuses_an_unknown_scope(client):
+    response = client.delete("/user/data?scope=teacher", headers=ADA)
+    assert response.status_code == 400
+    assert "scope must be one of all, researcher, author" in response.text

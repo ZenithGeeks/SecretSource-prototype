@@ -13,7 +13,7 @@ GET  /papers/{name}/pages/{n}.png?dpi=110   -> that page rendered
 GET  /papers/{name}/find?q=...&page=N       -> where that text sits, as boxes
 GET  /user/preferences                      -> the signed-in user's stored settings patch
 PATCH /user/preferences  {"patch": {...}}   -> merges and returns the settings patch
-DELETE /user/data        -> deletes every analysis (and researcher project) the user owns
+DELETE /user/data?scope=all|researcher|author -> deletes what the user owns in that role (default: both)
 POST /user/avatar        multipart image -> {"url"}
 DELETE /user/avatar
 GET  /user/avatar/me     -> the avatar image
@@ -53,7 +53,7 @@ from pydantic import BaseModel
 
 from app import dependencies, researcher, store
 from app.auth import current_user
-from app.author.router import author_pdfs
+from app.author.router import DRAFT_CHECK, author_pdfs
 from app.author.router import router as author_router
 from app.author.verify import verify_cached
 from app.config import (
@@ -756,21 +756,35 @@ async def patch_preferences(request: PreferencesPatch, user: str | None = Depend
     return await asyncio.to_thread(_merge_preferences, user, request.patch)
 
 
+DELETE_SCOPES = ("all", "researcher", "author")
+
+
 @app.delete("/user/data")
-async def delete_all_data(user: str | None = Depends(current_user)):
-    """Every analysis (and researcher project, and the Author role's projects, drafts and
-    saved sources) this user owns — Settings → Your data → Delete all. The confirm dialog is
-    the UI's job; this call is unconditional.
+async def delete_all_data(scope: str = "all", user: str | None = Depends(current_user)):
+    """Settings → Your data → Delete all. `scope` says whose data: `researcher` is the paper
+    analyses and researcher projects, `author` the draft checks and the Author role's projects,
+    drafts and saved sources, `all` (the default) both. Each role's Settings tab sends its own
+    scope, so a Researcher clearing papers keeps their Author drafts and the other way round
+    (PR #291 review). The confirm dialog is the UI's job; this call is unconditional.
 
     An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
     indexing `analyses`/`streams`, so popping them here would make its next `_publish`
     raise inside the task after this call already answered 200."""
-    mine = visible_to(user)
+    if scope not in DELETE_SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(DELETE_SCOPES)}")
+    researcher = scope in ("all", "researcher")
+    author = scope in ("all", "author")
+    mine = [
+        analysis for analysis in visible_to(user)
+        if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
+    ]
     ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
-    await asyncio.to_thread(store.delete_projects, user)
-    await asyncio.to_thread(store.delete_author_rows, user)
+    if researcher:
+        await asyncio.to_thread(store.delete_projects, user)
+    if author:
+        await asyncio.to_thread(store.delete_author_rows, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 
