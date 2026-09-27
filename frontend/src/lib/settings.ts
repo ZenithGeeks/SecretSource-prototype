@@ -32,8 +32,8 @@ export type Settings = {
 /** Exported so the Settings modal's server sync (lib/useAccountSettings.ts) can tell which
  * keys of a fetched preferences blob belong in this store, without importing its shape twice. */
 export const SETTINGS_DEFAULTS: Settings = {
-  displayName: 'Wittawat',
-  email: 'wittawat@kmutt.ac.th',
+  displayName: 'Alex',
+  email: 'alex@kmutt.ac.th',
   avatarUrl: '',
   citationStyle: 'APA 7th',
   strictness: 'Balanced',
@@ -99,6 +99,13 @@ export function applyTheme(theme: ThemeChoice = settings.theme): void {
   if (theme === 'Light') root.dataset.theme = 'light'
   else if (theme === 'Dark') root.dataset.theme = 'dark'
   else delete root.dataset.theme
+}
+
+/** "Good morning, Ada" — or just "Good morning" when the display name is blank, since the
+ * Settings modal lets it be cleared. */
+export function greeting(displayName: string): string {
+  const name = displayName.trim()
+  return name ? `Good morning, ${name}` : 'Good morning'
 }
 
 export function useSettings(): Settings {

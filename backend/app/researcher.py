@@ -9,7 +9,7 @@ These are plain functions over lists of analyses, so they can be tested without 
 
 import hashlib
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
 from app.pipeline.claims import _tokens
 
@@ -25,11 +25,18 @@ HOME_QUEUE = 5
 
 def library_papers(analyses: list[dict]) -> list[dict]:
     """The finished analyses, one per paper. A paper analysed twice counts once: the newest
-    run wins. `analyses` is oldest first, as the gateway keeps them."""
+    run wins. `analyses` is oldest first, as the gateway keeps them.
+
+    A single-claim check (POST /verify) is not stored against a paper: it has neither `file`
+    nor `paper`, so it is not part of the library and is skipped here rather than crashing
+    every researcher route with a KeyError (#256)."""
     newest: dict[str, dict] = {}
     for analysis in analyses:
-        if analysis.get("status") == "done":
-            newest[analysis.get("file") or analysis["paper"]] = analysis
+        if analysis.get("status") != "done":
+            continue
+        key = analysis.get("file") or analysis.get("paper")
+        if key:
+            newest[key] = analysis
     return list(newest.values())
 
 
@@ -157,6 +164,8 @@ def home(analyses: list[dict]) -> dict:
     cited_by: dict[str, set[str]] = {}
     claims_citing: Counter = Counter()
     works: dict[str, dict] = {}
+    # The oldest paper (papers is oldest-first) that cites this work, to open on click.
+    first_citer: dict[str, str] = {}
     for paper in papers:
         for claim in paper.get("claims", []):
             for citation in claim.get("citations", []):
@@ -166,6 +175,7 @@ def home(analyses: list[dict]) -> dict:
                 works.setdefault(key, citation)
                 cited_by.setdefault(key, set()).add(paper["id"])
                 claims_citing[key] += 1
+                first_citer.setdefault(key, paper["id"])
     ranked = sorted(works, key=lambda key: (len(cited_by[key]), claims_citing[key]), reverse=True)
     queue = []
     for key in ranked:
@@ -184,6 +194,7 @@ def home(analyses: list[dict]) -> dict:
                 )
                 + ", not in your library",
                 "identifier": citation.get("doi") or citation.get("arxiv") or citation.get("title", ""),
+                "analysis": first_citer[key],
             }
         )
         if len(queue) == HOME_QUEUE:
@@ -246,6 +257,25 @@ def projects(stored: list[dict], analyses: list[dict]) -> list[dict]:
     return listed
 
 
+def _cited_work_index_states(paper: dict) -> dict[str, str]:
+    """The strongest known index state ('yes', 'no', or '' for not known) per distinct work
+    one paper cites, from the same verdict/unchecked data graph() reads for its node colouring
+    (#21) — scoped to a single paper instead of the whole library, and without building nodes."""
+    rank = {"": 0, "no": 1, "yes": 2}
+    states: dict[str, str] = {}
+    for claim in paper.get("claims", []):
+        answers = [(verdict, None) for verdict in claim.get("verdicts", [])] + [
+            ({"cited": entry.get("source", ""), "source": entry.get("source", "")}, entry)
+            for entry in claim.get("unchecked", [])
+        ]
+        for verdict, unchecked in answers:
+            key = work_key(_cited_work(claim, verdict))
+            state, _name = _index_of_unchecked(unchecked) if unchecked else _index_of_verdict(verdict)
+            if rank[state] > rank.get(states.get(key, ""), 0):
+                states[key] = state
+    return states
+
+
 def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict | None:
     """One project's papers, or None when the user has no such project."""
     papers = library_papers(analyses)
@@ -271,6 +301,8 @@ def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict |
             for other in chosen
             if other["id"] != paper["id"] and cited[paper["id"]] & cited[other["id"]]
         ]
+        index_states = _cited_work_index_states(paper).values()
+        indexed, index_name = _index_of_paper(paper)
         rows.append(
             {
                 "id": paper["id"],
@@ -281,6 +313,10 @@ def library(project_id: str, stored: list[dict], analyses: list[dict]) -> dict |
                 "backed": standings["backed"] if checked else None,
                 "contradicted": standings["contradicted"] if checked else None,
                 "linked": linked[:3],
+                "sourcesIndexed": sum(1 for state in index_states if state == "yes"),
+                "sourcesNotIndexed": sum(1 for state in index_states if state == "no"),
+                "indexed": indexed,
+                "index": index_name,
             }
         )
     claim_count = sum(row["claims"] for row in rows)
@@ -393,6 +429,17 @@ def _index_of_unchecked(entry: dict) -> tuple[str, str]:
     return ("no", "") if reason in NOT_FOUND else ("", "")
 
 
+def _index_of_paper(paper: dict) -> tuple[str, str]:
+    """Whether the analysed paper itself (not what it cites) is known to a public index.
+    Checked in the background after the analysis finishes (main.py's _index_self), so a
+    paper without that field yet has not been checked, not confirmed absent."""
+    indexed_in = paper.get("indexed_in")
+    if indexed_in is None:
+        return "", ""
+    index = indexed_in.get("index", "")
+    return ("yes", INDEX_NAMES[index]) if index in INDEX_NAMES else ("no", "")
+
+
 def _mark_index(node: dict, found: tuple[str, str]) -> None:
     """Keep the strongest answer for a work cited several times: found beats not found, and
     either beats not known. One citation with a garbled title must not hide a clean one."""
@@ -426,6 +473,7 @@ def graph(analyses: list[dict]) -> dict:
             "indexed": "",
             "index": "",
         }
+        _mark_index(nodes[node], _index_of_paper(paper))
         for key in analysis_keys(paper):
             key_to_node[key] = node
 
@@ -529,9 +577,17 @@ def graph(analyses: list[dict]) -> dict:
                         }
                     )
 
+    # How many claims each paper asserts, counted once instead of rescanning all of `edges`
+    # for every (a, b) link below — that rescan was O(links * edges), the graph endpoint's
+    # biggest cost on a library with a lot of claims.
+    asserts_by_paper: Counter = Counter()
+    for edge in edges:
+        if edge["relation"] == "asserts":
+            asserts_by_paper[edge["source"]] += 1
+
     paper_edges = []
     for (a, b), link in links.items():
-        total = max(1, sum(1 for edge in edges if edge["source"] == a and edge["relation"] == "asserts"))
+        total = max(1, asserts_by_paper[a])
         paper_edges.append(
             {
                 "id": f"{a}->{b}",
@@ -545,24 +601,39 @@ def graph(analyses: list[dict]) -> dict:
                 "passages": link["passages"],
             }
         )
-    analysed_nodes = sorted(cites)
-    for i, a in enumerate(analysed_nodes):
-        for b in analysed_nodes[i + 1 :]:
-            shared = cites[a] & cites[b]
-            if shared:
-                paper_edges.append(
-                    {
-                        "id": f"{a}<->{b}",
-                        "a": a,
-                        "b": b,
-                        "similarity": round(len(shared) / len(cites[a] | cites[b]), 2),
-                        "sharedPassages": 0,
-                        "citations": len(shared),
-                        "cites": False,
-                        "contradicted": 0,
-                        "passages": [],
-                    }
-                )
+
+    # Which analysed papers cite the same work, without comparing every pair of papers
+    # directly (that was O(papers^2), the other big cost on a library with a lot of papers).
+    # Grouping by work first instead: a work shared by only a few papers costs little, and most
+    # works are only cited by a handful of the library's papers even when the library is large.
+    papers_by_work: dict[str, list[str]] = defaultdict(list)
+    for paper_node, works in cites.items():
+        for work_node in works:
+            papers_by_work[work_node].append(paper_node)
+
+    shared_by_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for work_node, citers in papers_by_work.items():
+        if len(citers) < 2:
+            continue
+        citers = sorted(citers)
+        for i, a in enumerate(citers):
+            for b in citers[i + 1 :]:
+                shared_by_pair[(a, b)].add(work_node)
+
+    for (a, b), shared in shared_by_pair.items():
+        paper_edges.append(
+            {
+                "id": f"{a}<->{b}",
+                "a": a,
+                "b": b,
+                "similarity": round(len(shared) / len(cites[a] | cites[b]), 2),
+                "sharedPassages": 0,
+                "citations": len(shared),
+                "cites": False,
+                "contradicted": 0,
+                "passages": [],
+            }
+        )
 
     return {
         "stats": [

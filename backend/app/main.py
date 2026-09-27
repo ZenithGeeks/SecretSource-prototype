@@ -42,7 +42,8 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from app import dependencies, researcher, store
@@ -50,15 +51,26 @@ from app.auth import current_user
 from app.config import (
     AVATARS_DIR,
     PAPERS_DIR,
+    PARALLEL_ANALYSES,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
     PARALLEL_SOURCES,
     PARALLEL_SOURCES_TOTAL,
 )
+from app.metrics import (
+    ANALYSES_FINISHED,
+    ANALYSES_RUNNING,
+    ANALYSES_STARTED,
+    ANALYSIS_DURATION_SECONDS,
+    ANALYSIS_QUEUE_WAIT_SECONDS,
+    AUDIT_FINDINGS,
+    CLAIM_CHECKS_FAILED,
+    CLAIM_VERDICTS,
+)
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
-from app.pipeline.sources import lookup_key
+from app.pipeline.sources import index_paper, lookup_key
 from app.pipeline.verify import (
     check_prepared,
     fold_check,
@@ -87,6 +99,10 @@ streams: dict[str, asyncio.Queue] = {}
 # services and the LLM (#170). _run takes its own limit first, then one of these.
 all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
 all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
+# Extraction (GROBID + EXTRACT_WORKERS LLM calls) has no limit of its own, unlike the two above,
+# so a burst of starts used to send all of it at once. A run waits here before extraction, then
+# an accepted run is unaffected by later starts still waiting.
+all_analyses = asyncio.Semaphore(PARALLEL_ANALYSES)
 
 
 def restore():
@@ -187,8 +203,44 @@ async def _publish(analysis_id: str, stage: str, **fields):
     await streams[analysis_id].put(event)
 
 
+_background: set[asyncio.Task] = set()
+
+
+def _detach(coro) -> None:
+    """Run a coroutine without waiting for it, keeping a reference so asyncio does not
+    garbage-collect it mid-flight."""
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def _index_self(analysis_id: str, title: str) -> None:
+    """Best-effort, detached from the run: whether the paper itself (not what it cites) is
+    known to a public index, checked the same way a citation is. A slow or refused lookup
+    must never delay or fail the analysis, so this runs after the analysis is done and just
+    leaves the badge unknown if it fails."""
+    analysis = analyses.get(analysis_id)
+    if analysis is None or not title:
+        return
+    analysis["indexed_in"] = await asyncio.to_thread(index_paper, title)
+    _save_soon(analysis_id)
+
+
 async def _run(analysis_id: str, paper: str, verify: bool):
     analysis = analyses[analysis_id]
+    queued_at = time.monotonic()
+    await _publish(analysis_id, "queued", message="waiting for a free analysis slot")
+    async with all_analyses:
+        ANALYSIS_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
+        ANALYSES_RUNNING.inc()
+        try:
+            await _run_queued(analysis_id, analysis, paper, verify)
+        finally:
+            ANALYSES_RUNNING.dec()
+
+
+async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
+    started_at = time.monotonic()
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
         extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
@@ -259,13 +311,16 @@ async def _run(analysis_id: str, paper: str, verify: bool):
                         )
                 fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":
+                    CLAIM_VERDICTS.labels(verdict=verdict["verdict"]).inc()
                     await _publish(
                         analysis_id, "verified", claim=index, source=source, verdict=verdict["verdict"]
                     )
                 else:
+                    reason = unchecked_reason(verdict, citation)
+                    CLAIM_CHECKS_FAILED.labels(reason=reason).inc()
                     await _publish(
                         analysis_id, "failed", claim=index, source=source,
-                        reason=unchecked_reason(verdict, citation), message=verdict.get("message", ""),
+                        reason=reason, message=verdict.get("message", ""),
                     )
 
             await asyncio.gather(*(check(*job) for job in jobs))
@@ -276,15 +331,19 @@ async def _run(analysis_id: str, paper: str, verify: bool):
         # We check the run itself before anyone reads it.
         # We only report the findings; we do not fix them.
         analysis["audit"] = audit(analysis)
+        AUDIT_FINDINGS.inc(len(analysis["audit"]))
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
         await _publish(analysis_id, "done")
+        _detach(_index_self(analysis_id, analysis["title"]))
     except Exception as error:
         analysis["status"] = "error"
         analysis["message"] = str(error)
         await _publish(analysis_id, "error", message=str(error))
     finally:
+        ANALYSIS_DURATION_SECONDS.observe(time.monotonic() - started_at)
+        ANALYSES_FINISHED.labels(status=analysis["status"]).inc()
         await streams[analysis_id].put(None)  # closes any open stream
         await _saved(analysis_id)
 
@@ -294,18 +353,40 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
                              "owner": owner, "stages": [], "claims": []}
     streams[analysis_id] = asyncio.Queue()
+    ANALYSES_STARTED.inc()
     asyncio.create_task(_run(analysis_id, paper, verify))
     return {"id": analysis_id}
 
 
+def team_visible(user: str | None) -> list[dict]:
+    """The analyses a signed-in researcher may read, oldest first: every stored analysis, shared
+    across the whole team, once someone is signed in — one teammate's checked paper is everyone's
+    to search, graph, and open. Signed out (no Supabase configured), current_user() only ever
+    returns None, so this still narrows to analyses without an owner."""
+    if user is None:
+        return [analysis for analysis in analyses.values() if analysis.get("owner") is None]
+    return list(analyses.values())
+
+
 def visible_to(user: str | None) -> list[dict]:
-    """The analyses this user may see, oldest first. Signed out, only analyses without an owner."""
+    """The analyses this exact user owns. Kept owner-scoped even in the shared team library, for
+    the one place sharing must stop: deleting a user's own data must never touch a teammate's."""
     return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
 
 
 def _owned(analysis_id: str, user: str | None) -> dict:
-    """The analysis, if this user may see it. Someone else's analysis is a 404, not a 403,
-    so an id does not tell anyone that it exists."""
+    """The analysis, if this signed-in researcher may read it — shared across the team via
+    team_visible(). Missing, or (signed out) owned by someone else, is a 404, not a 403, so an id
+    does not tell anyone that it exists."""
+    analysis = analyses.get(analysis_id)
+    if analysis is None or analysis not in team_visible(user):
+        raise HTTPException(404, "no such analysis")
+    return analysis
+
+
+def _mine(analysis_id: str, user: str | None) -> dict:
+    """The analysis, only if this exact user created it. Used only for deleting one's own
+    analysis, so that action stays owner-scoped even though reading is now shared."""
     analysis = analyses.get(analysis_id)
     if analysis is None or analysis.get("owner") != user:
         raise HTTPException(404, "no such analysis")
@@ -350,7 +431,7 @@ async def upload_analysis(
 async def list_analyses(user: str | None = Depends(current_user)):
     # The list leaves out what only one analysis's own view needs.
     left_out = ("stages", "references", "markers", "outline")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
+    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(team_visible(user))]
 
 
 @app.get("/analyses/{analysis_id}")
@@ -369,7 +450,7 @@ async def _delete_one(analysis_id: str) -> None:
 
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    _owned(analysis_id, user)
+    _mine(analysis_id, user)
     await _delete_one(analysis_id)
     return {"deleted": analysis_id}
 
@@ -400,10 +481,10 @@ async def analysis_events(analysis_id: str, user: str | None = Depends(current_u
 
 
 def papers_of(user: str | None) -> set[str]:
-    """The file names of the papers this user may open: the analysed paper of each of their
-    analyses, and each cited paper a check read for one of them."""
+    """The file names of the papers this user may open: the analysed paper of each analysis they
+    may read (team_visible), and each cited paper a check read for one of them."""
     names = set()
-    for analysis in visible_to(user):
+    for analysis in team_visible(user):
         if analysis.get("file"):
             names.add(Path(analysis["file"]).name)
         for claim in analysis.get("claims", []):
@@ -509,13 +590,13 @@ def _project(project_id: str, stored: list[dict]) -> dict:
 
 @app.get("/researcher/home")
 async def researcher_home(user: str | None = Depends(current_user)):
-    return researcher.home(visible_to(user))
+    return await asyncio.to_thread(researcher.home, team_visible(user))
 
 
 @app.get("/researcher/projects")
 async def researcher_projects(user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    return researcher.projects(stored, visible_to(user))
+    return await asyncio.to_thread(researcher.projects, stored, team_visible(user))
 
 
 @app.post("/researcher/projects")
@@ -533,7 +614,7 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
 @app.get("/researcher/projects/{project_id}/library")
 async def project_library(project_id: str, user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    found = researcher.library(project_id, stored, visible_to(user))
+    found = await asyncio.to_thread(researcher.library, project_id, stored, team_visible(user))
     if found is None:
         raise HTTPException(404, "no such project")
     return found
@@ -543,7 +624,7 @@ async def project_library(project_id: str, user: str | None = Depends(current_us
 async def add_to_project(
     project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
 ):
-    """Put one of the caller's analysed papers in one of their projects."""
+    """Put an analysed paper the caller may read (team_visible) into one of their own projects."""
     _owned(request.analysis_id, user)
     stored = await asyncio.to_thread(store.load_projects, user)
     project = _project(project_id, stored)
@@ -551,19 +632,20 @@ async def add_to_project(
         project["analyses"].append(request.analysis_id)
     project["updated"] = datetime.now(timezone.utc).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    return researcher.projects([project], visible_to(user))[0]
+    projected = await asyncio.to_thread(researcher.projects, [project], team_visible(user))
+    return projected[0]
 
 
 @app.post("/researcher/consensus")
 async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
-    """What the works cited in the caller's papers say about a question. Reuses the verdicts
-    already found; it makes no LLM calls."""
-    return researcher.consensus(request.question, visible_to(user))
+    """What the works cited across the team's analysed papers say about a question. Reuses the
+    verdicts already found; it makes no LLM calls."""
+    return await asyncio.to_thread(researcher.consensus, request.question, team_visible(user))
 
 
 @app.get("/researcher/graph")
 async def knowledge_graph(user: str | None = Depends(current_user)):
-    return researcher.graph(visible_to(user))
+    return await asyncio.to_thread(researcher.graph, team_visible(user))
 
 
 # --- account settings, shared by every role (Settings modal) ---
@@ -607,16 +689,45 @@ async def patch_preferences(request: PreferencesPatch, user: str | None = Depend
 @app.delete("/user/data")
 async def delete_all_data(user: str | None = Depends(current_user)):
     """Every analysis (and researcher project) this user owns — Settings → Your data →
-    Delete all. The confirm dialog is the UI's job; this call is unconditional."""
-    ids = [analysis["id"] for analysis in visible_to(user)]
+    Delete all. The confirm dialog is the UI's job; this call is unconditional.
+
+    An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
+    indexing `analyses`/`streams`, so popping them here would make its next `_publish`
+    raise inside the task after this call already answered 200."""
+    mine = visible_to(user)
+    ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
     await asyncio.to_thread(store.delete_projects, user)
-    return {"deleted": len(ids)}
+    return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 
 def _avatar_path(user: str | None) -> Path | None:
     return next(iter(AVATARS_DIR.glob(f"{user or 'anon'}.*")), None)
+
+
+# One avatar file per user is kept by glob-unlink-write, a read-modify-write like
+# _merge_preferences: two uploads for the same user at once (double-click, two tabs) could
+# both pass the glob and leave two files with different extensions, and _avatar_path would
+# then serve whichever the filesystem lists first. The file work runs on a worker thread
+# (disk I/O off the loop) under this lock. Lock order, should anything ever need both:
+# _avatar_lock first, then _preferences_lock — never _avatar_lock while holding
+# _preferences_lock. Today nothing holds both: the avatarUrl preference is a separate PATCH.
+_avatar_lock = threading.Lock()
+
+
+def _replace_avatar(key: str, ext: str, content: bytes) -> None:
+    with _avatar_lock:
+        AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+        for old in AVATARS_DIR.glob(f"{key}.*"):
+            old.unlink(missing_ok=True)
+        (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+
+
+def _remove_avatar(key: str) -> None:
+    with _avatar_lock:
+        for old in AVATARS_DIR.glob(f"{key}.*"):
+            old.unlink(missing_ok=True)
 
 
 @app.post("/user/avatar")
@@ -624,14 +735,15 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
     ext = AVATAR_TYPES.get(file.content_type or "")
     if not ext:
         raise HTTPException(400, "avatar must be a PNG, JPEG or WebP image")
-    content = await file.read()
+    # The cap is checked before anything is buffered: on the declared size when the client
+    # sent one, and otherwise by reading at most one byte past the cap, so an oversized body
+    # is never read whole.
+    if file.size is not None and file.size > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "avatar must be under 2MB")
+    content = await file.read(MAX_AVATAR_BYTES + 1)
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(413, "avatar must be under 2MB")
-    key = user or "anon"
-    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
-    for old in AVATARS_DIR.glob(f"{key}.*"):
-        old.unlink(missing_ok=True)
-    (AVATARS_DIR / f"{key}{ext}").write_bytes(content)
+    await asyncio.to_thread(_replace_avatar, user or "anon", ext, content)
     # Cache-bust: the frontend keeps this url in its settings blob indefinitely, so a
     # same-name re-upload needs a new url or the browser (and its own blob-url cache) would
     # keep showing the old image.
@@ -640,9 +752,7 @@ async def upload_avatar(file: UploadFile = AVATAR_UPLOAD, user: str | None = Dep
 
 @app.delete("/user/avatar")
 async def remove_avatar(user: str | None = Depends(current_user)):
-    key = user or "anon"
-    for old in AVATARS_DIR.glob(f"{key}.*"):
-        old.unlink(missing_ok=True)
+    await asyncio.to_thread(_remove_avatar, user or "anon")
     return {"deleted": True}
 
 
@@ -670,6 +780,16 @@ async def health():
     """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
     check at most 30 s old. `degraded` is true when a required one did not answer."""
     return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus text format: analysis success rate, duration, queueing, verdicts, audit
+    findings, LLM token usage (app/metrics.py). Scraped by the `gateway` job in
+    deploy/monitoring/prometheus.yml, behind the opt-in `monitoring` compose profile. Reads an
+    in-memory registry only, so unlike /health this needs no thread hop.
+    """
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 if __name__ == "__main__":

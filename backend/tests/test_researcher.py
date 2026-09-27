@@ -75,6 +75,9 @@ UNCHECKED = {
 RUNNING = {"id": "c1", "paper": "x.pdf", "status": "running", "claims": []}
 ANALYSES = [CHECKED, UNCHECKED, RUNNING]
 
+# A single-claim check (POST /verify) is never stored against a paper: no `file`, no `paper`.
+CHECK_ONLY = {"id": "e1", "status": "done", "claims": [{"claim": "PLAID is fast.", "citations": []}]}
+
 
 def test_home_counts_claims_and_lists_the_contradicted_one():
     home = researcher.home(ANALYSES)
@@ -87,6 +90,12 @@ def test_home_counts_claims_and_lists_the_contradicted_one():
     assert home["conflicts"][0]["against"] == ["ColBERT"]
     assert home["conflicts"][0]["analysis"] == "a1"
     assert home["alert"].startswith("1 claim in your papers")
+
+
+def test_a_finished_check_with_no_paper_is_skipped_instead_of_crashing_the_library():
+    home = researcher.home(ANALYSES + [CHECK_ONLY])
+    assert home["library"]["papers"] == 2  # e1 does not count as a library paper
+    assert researcher.library_papers(ANALYSES + [CHECK_ONLY]) == researcher.library_papers(ANALYSES)
 
 
 def test_the_reading_queue_suggests_works_cited_more_than_once_that_are_not_analysed():
@@ -118,6 +127,69 @@ def test_papers_in_no_project_are_unsorted_and_a_project_lists_its_own():
     assert library["papers"][0]["contradicted"] == 1
     assert researcher.library("unsorted", stored, ANALYSES)["papers"][0]["backed"] is None
     assert researcher.library("missing", stored, ANALYSES) is None
+
+
+def test_library_rows_count_how_many_cited_sources_are_publicly_indexed():
+    url_only = {"title": "", "authors": [], "year": "", "doi": "", "arxiv": "", "url": "http://example.com/x"}
+    paper = {
+        "id": "f1",
+        "paper": "data/papers/f1.pdf",
+        "file": "data/papers/f1.pdf",
+        "status": "done",
+        "claims": [
+            {
+                "claim": "A",
+                "citations": [COLBERT],
+                "verdicts": [
+                    {
+                        "verdict": "supports",
+                        "cited": "2004.12832",
+                        "indexed_in": {"index": "semantic-scholar"},
+                        "quote": "",
+                        "evidence": [],
+                    }
+                ],
+            },
+            {
+                "claim": "B",
+                "citations": [url_only],
+                "verdicts": [
+                    {"verdict": "insufficient", "cited": "http://example.com/x", "quote": "", "evidence": []}
+                ],
+            },
+        ],
+    }
+    row = researcher.library(researcher.UNSORTED, [], [paper])["papers"][0]
+    assert row["sourcesIndexed"] == 1
+    assert row["sourcesNotIndexed"] == 1
+
+
+def test_library_and_graph_mark_whether_the_analysed_paper_itself_is_indexed():
+    checked_and_found = {
+        "id": "f2", "paper": "data/papers/f2.pdf", "file": "data/papers/f2.pdf",
+        "status": "done", "title": "Found Paper", "claims": [],
+        "indexed_in": {"index": "arxiv", "ids": {}},
+    }
+    checked_and_not_found = {
+        "id": "f3", "paper": "data/papers/f3.pdf", "file": "data/papers/f3.pdf",
+        "status": "done", "title": "Missing Paper", "claims": [],
+        "indexed_in": {"index": "", "ids": {}},
+    }
+    not_yet_checked = {
+        "id": "f4", "paper": "data/papers/f4.pdf", "file": "data/papers/f4.pdf",
+        "status": "done", "title": "Unchecked Paper", "claims": [],
+    }
+    analyses = [checked_and_found, checked_and_not_found, not_yet_checked]
+
+    rows = {row["id"]: row for row in researcher.library(researcher.UNSORTED, [], analyses)["papers"]}
+    assert rows["f2"]["indexed"] == "yes" and rows["f2"]["index"] == "arXiv"
+    assert rows["f3"]["indexed"] == "no" and rows["f3"]["index"] == ""
+    assert rows["f4"]["indexed"] == "" and rows["f4"]["index"] == ""
+
+    nodes = {n["label"]: n for n in researcher.graph(analyses)["nodes"] if n["kind"] == "paper"}
+    assert nodes["Found Paper"]["indexed"] == "yes"
+    assert nodes["Missing Paper"]["indexed"] == "no"
+    assert nodes["Unchecked Paper"]["indexed"] == ""
 
 
 def test_consensus_reuses_the_verdicts_of_matching_claims():

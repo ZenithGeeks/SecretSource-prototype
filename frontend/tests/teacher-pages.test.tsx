@@ -46,7 +46,7 @@ describe('Teacher home and class pages', () => {
     const onOpen = vi.fn()
     renderWithQuery(<Home onOpen={onOpen} />)
 
-    expect(await screen.findByRole('heading', { name: 'Good morning, Vitawat' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Good morning, Alex' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Check student essays/ }))
     expect(onOpen).toHaveBeenCalledWith({

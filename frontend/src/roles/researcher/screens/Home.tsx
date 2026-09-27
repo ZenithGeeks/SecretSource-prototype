@@ -1,17 +1,17 @@
 /**
  * 09 Home (Researcher) — greeting, quick actions, conflicts, reading queue, library
  * summary, all from the user's own analyses (useResearcherHome). `onOpen` navigates to
- * another researcher screen; a conflict opens its analysis, and a queued paper is analysed.
+ * another researcher screen; a conflict or a queued paper both open the analysis that cites it.
  */
 
-import { FileSearch, FileText, Library, Plus, Search, Waypoints } from 'lucide-react'
+import { FileSearch, FileText, Library, Search, Waypoints } from 'lucide-react'
 import type { ComponentType } from 'react'
-import { useState } from 'react'
 
-import { Card } from '../../../components/ui'
-import type { ClaimStanding, ClaimTally, QueueEntry } from '../../../lib/researcher'
-import { useSettings } from '../../../lib/settings'
-import { useResearcherActions, useResearcherHome } from '../../../lib/useResearcher'
+import { Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
+import { greeting, useSettings } from '../../../lib/settings'
+import { useAuth } from '../../../lib/useAuth'
+import { useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
 
@@ -59,26 +59,22 @@ export function Home({
   onOpen: (screen: ResearcherScreen) => void
   onOpenAnalysis: (id: string) => void
 }) {
-  const home = useResearcherHome().data
+  const { data: home, isError } = useResearcherHome()
   const { displayName } = useSettings()
-  const { analyseQueued } = useResearcherActions()
-  const [starting, setStarting] = useState<string | null>(null)
-  if (!home) return null
+  const { session } = useAuth()
+  if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
+  if (!home) return <LoadingScreen label="Loading your library…" />
 
-  const analyse = async (entry: QueueEntry) => {
-    setStarting(entry.identifier)
-    try {
-      onOpenAnalysis(await analyseQueued(entry))
-    } finally {
-      setStarting(null)
-    }
-  }
+  // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
+  // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
+  const metaName = session?.user?.user_metadata?.full_name as string | undefined
+  const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
 
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
         <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          Good morning, {displayName}
+          {greeting(firstName)}
         </h1>
         <p className="text-sm text-ink-muted">{home.alert}</p>
       </header>
@@ -103,8 +99,8 @@ export function Home({
       <div className="flex flex-col gap-4 lg:flex-row">
         <Card className="flex-1">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Conflicts in your library</h2>
-            <button type="button" onClick={() => onOpen('field-consensus')} className="text-xs text-accent hover:underline">
+            <h2 className="text-sm font-semibold text-ink">Conflicts in your papers</h2>
+            <button type="button" onClick={() => onOpen('library')} className="text-xs text-accent hover:underline">
               see all
             </button>
           </div>
@@ -148,21 +144,18 @@ export function Home({
           )}
           <ul className="mt-2.5 flex flex-col gap-2.5">
             {home.queue.map((entry) => (
-              <li key={entry.paper} className="flex items-start gap-2">
-                <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-ink">{entry.paper}</p>
-                  <p className="text-xs text-ink-muted">{entry.note}</p>
-                </div>
+              <li key={entry.paper}>
                 <button
                   type="button"
-                  onClick={() => analyse(entry)}
-                  disabled={starting !== null}
-                  title="Analyse this paper"
-                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-accent-soft hover:text-ink disabled:opacity-50"
+                  onClick={() => onOpenAnalysis(entry.analysis)}
+                  title="Open the analysis that cites it"
+                  className="flex w-full items-start gap-2 rounded-lg p-1.5 text-left hover:bg-accent-soft"
                 >
-                  <Plus className="size-4" />
-                  {starting === entry.identifier ? 'Starting…' : 'Analyse'}
+                  <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-ink">{entry.paper}</p>
+                    <p className="text-xs text-ink-muted">{entry.note}</p>
+                  </div>
                 </button>
               </li>
             ))}
@@ -184,6 +177,6 @@ export function Home({
         </div>
         <TallyBar tally={home.library.tally} />
       </button>
-    </>
+    </FadeIn>
   )
 }

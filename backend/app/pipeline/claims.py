@@ -5,6 +5,7 @@ Each claim keeps the sentence it came from, located back in the PDF (page and bo
 UI can show the place instead of telling the reader to go looking.
 """
 
+import hashlib
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -14,7 +15,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pydantic
 from pydantic import Field
 
-from app.config import CLAIM_LIMIT, GROBID_URL
+from app import store
+from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
+from app.metrics import record_llm_usage
 from app.pipeline.sources import local_pdf
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
@@ -298,9 +301,15 @@ def _build_claim_extractor():
     extract = dspy.ChainOfThought(ExtractClaims)
 
     def run(paper_text: str) -> list[str]:
+        key = store.cache_key("extract", VLLM_MODEL, paper_text)
+        if (cached := store.recall_cache(key)) is not None:
+            return cached["claims"]
         # JSONAdapter: without it the model splits the list across lines and only one claim parses
-        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            return extract(paper=paper_text).claims
+        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+            claims = extract(paper=paper_text).claims
+        record_llm_usage("extract", usage)
+        store.remember_cache(key, {"claims": claims})
+        return claims
 
     return run
 
@@ -332,20 +341,33 @@ def extract_claims(pdf_path: str) -> dict:
 
 def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ()) -> ET.Element:
     """GROBID's TEI for a PDF. `coordinates` names the elements that should get a `coords`
-    attribute with their place on the page, for example ("ref",)."""
+    attribute with their place on the page, for example ("ref",).
+
+    Cached by the PDF's own bytes plus the endpoint and coordinates asked for, so the same file
+    re-analysed (a retry, or two people uploading the same paper) never re-parses it — GROBID has
+    no concurrency limit of its own and this is a full-document parse, the slower half of
+    extraction alongside the LLM calls below.
+    """
     import requests
 
     from app.clients.service_auth import auth_headers
 
     with open(pdf_path, "rb") as pdf_file:
-        response = requests.post(
-            f"{GROBID_URL}/api/{endpoint}",
-            files={"input": pdf_file},
-            data={"teiCoordinates": list(coordinates)},
-            headers=auth_headers(GROBID_URL),
-            timeout=300,
-        )
+        pdf_bytes = pdf_file.read()
+    content = hashlib.sha256(pdf_bytes).hexdigest()
+    key = store.cache_key("grobid", endpoint, ",".join(coordinates), content)
+    if (cached := store.recall_cache(key)) is not None:
+        return ET.fromstring(cached["tei"])
+
+    response = requests.post(
+        f"{GROBID_URL}/api/{endpoint}",
+        files={"input": pdf_bytes},
+        data={"teiCoordinates": list(coordinates)},
+        headers=auth_headers(GROBID_URL),
+        timeout=300,
+    )
     response.raise_for_status()
+    store.remember_cache(key, {"tei": response.text})
     return ET.fromstring(response.text)
 
 
@@ -917,8 +939,14 @@ def _build_cited_claim_extractor():
     extract = dspy.ChainOfThought(ExtractCitedClaims)
 
     def run(paper_text: str) -> list:
-        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            return extract(paper=paper_text).claims
+        key = store.cache_key("extract-cited", VLLM_MODEL, paper_text)
+        if (cached := store.recall_cache(key)) is not None:
+            return [CitedClaim(**c) for c in cached["claims"]]
+        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+            claims = extract(paper=paper_text).claims
+        record_llm_usage("extract", usage)
+        store.remember_cache(key, {"claims": [c.model_dump() for c in claims]})
+        return claims
 
     return run
 

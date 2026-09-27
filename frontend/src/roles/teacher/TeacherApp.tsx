@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
+import { settingsRequested } from '../../lib/settingsDeepLink'
 import { teacherWorkspaceKey } from '../../lib/teacher'
 import {
   parseTeacherRoute,
@@ -55,7 +56,8 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const queryClient = useQueryClient()
   const [route, setRoute] = useState<TeacherRoute>(() => parseTeacherRoute(window.location.search))
   const [connectionError, setConnectionError] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
+  const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   const importClass = useImportTeacherClass()
 
   useEffect(() => {

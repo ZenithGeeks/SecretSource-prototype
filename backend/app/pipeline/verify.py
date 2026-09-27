@@ -10,8 +10,10 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
+from app import store
 from app.clients import retrieval
-from app.config import FIGURE_WAIT, PARALLEL_SOURCES
+from app.config import FIGURE_WAIT, PARALLEL_SOURCES, VLLM_MODEL
+from app.metrics import record_llm_usage
 
 EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
@@ -164,14 +166,20 @@ def _build_judge():
     judge = dspy.ChainOfThought(JudgeClaim)
 
     def run(claim: str, evidence: list[str]) -> dict:
-        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+        key = store.cache_key("judge", VLLM_MODEL, claim, "\x00".join(evidence))
+        if (cached := store.recall_cache(key)) is not None:
+            return cached
+        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
             prediction = judge(claim=claim, evidence=evidence)
+        record_llm_usage("judge", usage)
         verdict = prediction.verdict.strip().lower()
-        return {
+        result = {
             "verdict": verdict if verdict in LABELS else "insufficient",
             "quote": prediction.quote,
             "reasoning": prediction.reasoning,
         }
+        store.remember_cache(key, result)
+        return result
 
     return run
 

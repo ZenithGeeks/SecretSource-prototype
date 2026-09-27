@@ -8,7 +8,7 @@
 import { ChevronRight, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Input } from '../../../components/ui'
+import { Button, Empty, FadeIn, Input, LoadingScreen } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
@@ -180,8 +180,9 @@ function ProjectDetail({
   const [filter, setFilter] = useState('All')
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [picking, setPicking] = useState(false)
-  const library = useResearcherLibrary(projectId).data
-  if (!library) return null
+  const { data: library, isError } = useResearcherLibrary(projectId)
+  if (isError) return <Empty title="This project could not load" hint="Refresh the page to try again." />
+  if (!library) return <LoadingScreen label="Loading this project…" />
   const hasClusters = library.papers.some((p) => p.cluster)
 
   const clusterNames = [...new Set(library.papers.map((p) => p.cluster))]
@@ -198,7 +199,7 @@ function ProjectDetail({
     )
 
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
         <span className="font-medium text-accent hover:underline">← Projects</span>
         <span className="text-ink-muted">· {projectName}</span>
@@ -233,17 +234,17 @@ function ProjectDetail({
           className="max-w-xl"
         />
         <div className="flex flex-wrap gap-2">
-          {library.clusters.map((cluster) => (
+          {library.clusters.map((option) => (
             <button
-              key={cluster}
+              key={option}
               type="button"
-              onClick={() => setFilter(cluster)}
+              onClick={() => setFilter(option)}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-xs font-medium text-ink',
-                filter === cluster ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
+                filter === option ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
               )}
             >
-              {cluster}
+              {option}
             </button>
           ))}
         </div>
@@ -269,7 +270,25 @@ function ProjectDetail({
             className="flex w-full items-center gap-4 border-t border-border-subtle px-4 py-3 text-left first:border-t-0 hover:bg-accent-soft md:px-5 md:py-2.5 md:first:border-t"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-ink">{paper.title}</p>
+              <p className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-ink">{paper.title}</span>
+                {paper.indexed === 'no' && (
+                  <span
+                    className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
+                    title="This paper was not found in Semantic Scholar, arXiv, or Unpaywall. This is not a Scopus check."
+                  >
+                    not indexed
+                  </span>
+                )}
+                {paper.sourcesNotIndexed > 0 && (
+                  <span
+                    className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
+                    title={`${paper.sourcesNotIndexed} cited ${paper.sourcesNotIndexed === 1 ? 'source is' : 'sources are'} not in a public index`}
+                  >
+                    sources not indexed
+                  </span>
+                )}
+              </p>
               <p className="text-xs text-ink-muted">{paper.cite}</p>
               {/* On a phone the number columns do not fit, so they read as one line here. */}
               <p className="mt-1 text-xs text-ink-muted md:hidden">
@@ -300,7 +319,7 @@ function ProjectDetail({
           </p>
         )}
       </div>
-    </>
+    </FadeIn>
   )
 }
 
@@ -380,9 +399,10 @@ export function Library({
   const [showNew, setShowNew] = useState(
     () => new URLSearchParams(window.location.search).get('new') === '1',
   )
-  const projects = useProjects().data
+  const { data: projects, isError } = useProjects()
   const { createProject } = useResearcherActions()
-  if (!projects) return null
+  if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
+  if (!projects) return <LoadingScreen label="Loading your projects…" />
 
   if (openId) {
     const project = projects.find((p) => p.id === openId)
@@ -398,7 +418,7 @@ export function Library({
     )
   }
   return (
-    <>
+    <FadeIn className="flex flex-col gap-5">
       <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} />
       {showNew && (
         <NewProjectDialog
@@ -409,6 +429,6 @@ export function Library({
           }}
         />
       )}
-    </>
+    </FadeIn>
   )
 }

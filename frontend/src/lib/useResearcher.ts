@@ -3,8 +3,6 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api } from './api'
-import type { QueueEntry } from './researcher'
 import { researcherApi } from './researcher'
 
 /** The researcher's actions. Each calls the gateway, then refreshes what it changed. */
@@ -20,12 +18,6 @@ export function useResearcherActions() {
     addToProject: async (projectId: string, analysisId: string) => {
       await researcherApi.addToProject(projectId, analysisId)
       await qc.invalidateQueries({ queryKey: ['researcher'] })
-    },
-    /** Start analysing a paper from the reading queue; returns the new analysis id. */
-    analyseQueued: async (entry: QueueEntry) => {
-      const { id } = await api.startAnalysis(entry.identifier, true)
-      await qc.invalidateQueries({ queryKey: ['analyses'] })
-      return id
     },
   }
 }

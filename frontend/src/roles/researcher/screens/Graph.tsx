@@ -17,13 +17,15 @@
 
 import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
-import { AlertCircle, Bookmark, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
 import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
+import { Empty, LoadingScreen } from '../../../components/ui'
 import { reasonText } from '../../../lib/api'
 import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
+import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 
@@ -245,8 +247,15 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
 // applied in the elements) and cola runs a finite, non-random simulation, so every reload lays
 // the graph out identically (SCRUM-182's "reload gives the same layout"). Nodes stay draggable
 // once it settles; the initial fit runs on the layout's `layoutstop`, not a timer.
+//
+// animate:true runs the simulation on animation frames instead of one blocking synchronous pass,
+// so a large library no longer freezes the page while the graph lays out (nodes paint at their
+// seeded positions immediately, then ease into place). maxSimulationTime caps the work so even a
+// big graph settles and fits within a couple of seconds. Determinism comes from randomize:false
+// plus the seeded start, not from the animation, so reloads still match.
 const LAYOUT = {
-  name: 'cola', animate: false, infinite: false, fit: false, randomize: false,
+  name: 'cola', animate: true, infinite: false, fit: false, randomize: false,
+  maxSimulationTime: 2000, convergenceThreshold: 0.01,
   nodeDimensionsIncludeLabels: true, edgeLength: 170, nodeSpacing: 14, handleDisconnected: true,
 } as const
 
@@ -255,6 +264,36 @@ function seedPosition(i: number, n: number): { x: number; y: number } {
   const radius = Math.max(340, 16 * n)
   const angle = (2 * Math.PI * i) / Math.max(1, n)
   return { x: Math.round(radius * Math.cos(angle)), y: Math.round(radius * Math.sin(angle)) }
+}
+
+// Replaying saved positions with `preset` is instant, so a revisit skips the physics — the slow
+// part on a big library. The cola run only happens on a cache miss (a new or changed graph).
+const PRESET = { name: 'preset', fit: false } as const
+
+// Settled node positions, cached per graph so reopening the tab is instant and lays out the same
+// way every time. Keyed by view + a hash of the node ids, so a changed library recomputes. Stored
+// in localStorage across sessions; any storage failure just falls back to recomputing.
+const POS_CACHE_KEY = 'ss-graph-positions-v1'
+type PosMap = Record<string, { x: number; y: number }>
+function hashIds(ids: string[]): string {
+  let h = 5381
+  for (const s of ids) for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+function readPosCache(key: string): PosMap | null {
+  try {
+    return (JSON.parse(localStorage.getItem(POS_CACHE_KEY) || '{}')[key] as PosMap) ?? null
+  } catch {
+    return null
+  }
+}
+function writePosCache(key: string, positions: PosMap): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(POS_CACHE_KEY) || '{}')
+    localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ ...all, [key]: positions }))
+  } catch {
+    /* storage full or blocked — recompute next time */
+  }
 }
 
 /** Fit the whole graph, but never so far out that it reads tiny: below 0.9 the labels blur, so
@@ -365,9 +404,24 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
   const claim = graph.nodes.find((n) => n.id === claimId)
   const edges = graph.edges.filter((e) => e.target === claimId)
   const paper = (id: string) => graph.nodes.find((n) => n.id === id)
+  const [copied, setCopied] = useState(false)
   if (!claim || claim.kind !== 'claim') return null
   const contradicts = edges.some((e) => e.relation === 'contradicts')
   const singleOrigin = edges.filter((e) => e.relation === 'asserts').length <= 1
+
+  const copyParagraph = async () => {
+    const p = (id: string) => paper(id)
+    const lines = edges
+      .filter((e) => e.relation !== 'asserts' && e.quote)
+      .map((e) => {
+        const node = p(e.source)
+        const label = node?.kind === 'paper' ? node.label : e.source
+        return `${label} — ${RELATION_LABEL[e.relation]}: "${e.quote}"`
+      })
+    await navigator.clipboard.writeText([claim.label, ...lines].join('\n\n'))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   return (
     <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
@@ -412,9 +466,21 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
         </div>
       )}
       <div className="mt-4 flex flex-col gap-1.5 text-sm">
-        <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><FileText className="size-4" /> Show the deciding page</button>
-        <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><Bookmark className="size-4" /> Add these {edges.length} to reading queue</button>
-        <button type="button" className="flex items-center gap-2 text-ink hover:text-accent"><Copy className="size-4" /> Copy as related-work paragraph</button>
+        <button
+          type="button"
+          onClick={() => {
+            const deciding = edges.find((e) => e.relation !== 'asserts') ?? edges[0]
+            if (!deciding) return
+            const id = deciding.source.replace(/^a:/, '')
+            window.open(`${window.location.pathname}?screen=history&analysis=${id}`, '_blank')
+          }}
+          className="flex items-center gap-2 text-ink hover:text-accent"
+        >
+          <FileText className="size-4" /> Show the deciding page
+        </button>
+        <button type="button" onClick={copyParagraph} className="flex items-center gap-2 text-ink hover:text-accent">
+          <Copy className="size-4" /> {copied ? 'Copied ✓' : 'Copy as related-work paragraph'}
+        </button>
       </div>
     </aside>
   )
@@ -472,15 +538,24 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
       ) : (
         <p className="mt-2 text-[13px] text-ink-muted">No shared passages indexed for this pair yet.</p>
       )}
-      <button type="button" className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-accent">
+      <button
+        type="button"
+        onClick={() => {
+          const idA = edge.a.replace(/^a:/, '')
+          const idB = edge.b.replace(/^a:/, '')
+          window.open(`${window.location.pathname}?screen=history&analysis=${idA}`, '_blank')
+          window.open(`${window.location.pathname}?screen=history&analysis=${idB}`, '_blank')
+        }}
+        className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-accent"
+      >
         <ExternalLink className="size-4" /> Open both side by side
       </button>
     </aside>
   )
 }
 
-export function Graph() {
-  const graph = useKnowledgeGraph().data
+function GraphCanvas() {
+  const { data: graph, isError } = useKnowledgeGraph()
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
@@ -534,6 +609,25 @@ export function Graph() {
 
   const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
 
+  // The backend builds paper nodes oldest-first, so the last "Analysed" one is the most
+  // recently uploaded paper — where the view opens centred, so a fresh upload is what greets
+  // the reader instead of wherever the whole-graph fit happened to land.
+  const latestPaperId = useMemo(
+    () => graph?.nodes.filter((n) => n.kind === 'paper' && n.cluster === 'Analysed').at(-1)?.id ?? null,
+    [graph],
+  )
+
+  // The node ids shown in the current view, and a cache key from them. Cached positions (if any)
+  // let the layout replay instantly instead of re-running cola.
+  const shownNodeIds = useMemo(() => {
+    if (!graph) return [] as string[]
+    return view === 'claims'
+      ? graph.nodes.filter((n) => n.kind === 'claim' || paperIds.has(n.id)).map((n) => n.id)
+      : graph.nodes.filter((n) => n.kind === 'paper').map((n) => n.id)
+  }, [graph, view, paperIds])
+  const cacheKey = useMemo(() => `${view}:${hashIds(shownNodeIds)}`, [view, shownNodeIds])
+  const cachedPositions = useMemo(() => readPosCache(cacheKey), [cacheKey])
+
   const elements = useMemo(() => {
     if (!graph) return []
     if (view === 'claims') {
@@ -550,7 +644,7 @@ export function Graph() {
             n.kind === 'paper'
               ? { ...n, short: paperShort(n), weight: deg[n.id] ?? 1 }
               : { ...n, standing: claimStanding(claimEdges[n.id] ?? []) },
-          position: seedPosition(i, shown.length),
+          position: cachedPositions?.[n.id] ?? seedPosition(i, shown.length),
         })),
         ...graph.edges.map((e) => ({ data: e })),
       ]
@@ -567,13 +661,13 @@ export function Graph() {
     return [
       ...papers.map((n, i) => ({
         data: { ...n, weight: deg[n.id] ?? 1, short: paperShort(n) },
-        position: seedPosition(i, papers.length),
+        position: cachedPositions?.[n.id] ?? seedPosition(i, papers.length),
       })),
       ...edges.map((e) => ({
         data: { id: e.id, source: e.a, target: e.b, kind: 'paper', cites: e.cites ? 1 : 0, similarity: e.similarity },
       })),
     ]
-  }, [graph, view, pFilter, paperIds])
+  }, [graph, view, pFilter, paperIds, cachedPositions])
 
   // Spotlight one node/edge's neighbourhood and fade the rest. A click selection wins; otherwise
   // hovering spotlights (Obsidian-style); otherwise the claims filter dims non-matches.
@@ -619,7 +713,8 @@ export function Graph() {
     if (cy && graph) cy.style(stylesheet(pal, graph.clusters, view))
   }, [pal, view, graph])
 
-  if (!graph) return null
+  if (isError) return <Empty title="The graph could not load" hint="Refresh the page to try again." />
+  if (!graph) return <LoadingScreen label="Loading the graph…" />
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =
@@ -741,7 +836,7 @@ export function Graph() {
             key={view}
             elements={elements}
             stylesheet={stylesheet(pal, graph.clusters, view)}
-            layout={LAYOUT}
+            layout={cachedPositions ? PRESET : LAYOUT}
             style={{ width: '100%', height: '100%' }}
             cy={(cy: cytoscape.Core) => {
               // react-cytoscapejs calls this on every render (componentDidUpdate), not just mount.
@@ -773,10 +868,42 @@ export function Graph() {
               })
               cy.on('drag', 'node', () => setTip(null))
               cy.on('pan zoom', () => setTip(null))
+              // Pan (zoom stays whatever fitReadable set) so the latest upload is what's centred
+              // on open, not wherever the whole-graph bounding box happened to land it.
+              const focusLatest = () => {
+                if (!latestPaperId) return
+                const node = cy.$id(latestPaperId)
+                if (node.nonempty()) cy.center(node)
+              }
               // Fit once the layout has actually settled (cola emits layoutstop), not on a fixed
               // timer that can fire while nodes are still bunched. It re-runs only when the element
               // set changes (e.g. switching Claims/Papers), which re-runs the layout.
-              cy.on('layoutstop', () => fitReadable(cy))
+              cy.on('layoutstop', () => {
+                fitReadable(cy)
+                focusLatest()
+                // Save the settled positions so the next visit replays them instantly with `preset`
+                // instead of re-running cola — and so reloads lay out identically.
+                const pos: PosMap = {}
+                cy.nodes().forEach((node) => {
+                  const p = node.position()
+                  pos[node.id()] = { x: Math.round(p.x), y: Math.round(p.y) }
+                })
+                writePosCache(cacheKey, pos)
+              })
+              // react-cytoscapejs runs `preset` synchronously inside componentDidMount, before
+              // this `cy` prop is ever called — so on a cached revisit, layoutstop above already
+              // fired and is gone; the listener never sees it. Positions are final either way for
+              // `preset` (no simulation to wait for), so just fit/centre directly here instead.
+              // The double rAF waits for the canvas div's first real layout pass — at this exact
+              // point it can still be a zero-size placeholder, which would fit to the wrong box.
+              if (cachedPositions) {
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => {
+                    fitReadable(cy)
+                    focusLatest()
+                  }),
+                )
+              }
               setReady(true)
             }}
           />
@@ -800,5 +927,40 @@ export function Graph() {
         {view === 'papers' && selectedEdge && <PapersDetail graph={graph} edge={selectedEdge} />}
       </div>
     </>
+  )
+}
+
+/** The Graph tab. It hosts two views behind one toggle: the knowledge graph (GraphCanvas,
+ * unchanged) and Field Consensus, which asks one claim across the whole library. Field consensus
+ * used to be its own screen — it now lives here, so the graph and the cross-paper question share
+ * one place. `initialTab` lets the router open straight to Consensus from an older link. */
+export function Graph({
+  onOpenAnalysis,
+  initialTab = 'graph',
+}: {
+  onOpenAnalysis: (id: string) => void
+  initialTab?: 'graph' | 'consensus'
+}) {
+  const [tab, setTab] = useState<'graph' | 'consensus'>(initialTab)
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="flex items-center gap-1 self-start rounded-xl border border-border-subtle bg-surface p-1">
+        {(['graph', 'consensus'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            aria-pressed={tab === t}
+            className={cn(
+              'rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
+              tab === t ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:text-ink',
+            )}
+          >
+            {t === 'graph' ? 'Graph' : 'Field Consensus'}
+          </button>
+        ))}
+      </div>
+      {tab === 'graph' ? <GraphCanvas /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
+    </div>
   )
 }

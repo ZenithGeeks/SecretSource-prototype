@@ -1,0 +1,82 @@
+# Builds and deploys only the gateway container to Cloud Run on every push to main that
+# touches backend/. Replaces deploy-backend.yml (which ran on a self-hosted runner on
+# ss-core) — this runs on a normal GitHub-hosted runner, since Cloud Run is public HTTPS and
+# needs no VPN or box-local runner to reach it.
+#
+# Points at the team's existing shared colbert/colpali/grobid/vllm/Qdrant services (see
+# deploy/team-cloud-services-setup.md) and does not touch, rebuild, or redeploy them — that
+# is deploy/cloudrun.sh's job, unrelated to this workflow. On Cloud Run the gateway's own
+# service account mints the identity token those shared services need (SERVICE_AUTH=
+# google-id-token), so no service-account key file is required at runtime, only at deploy
+# time (GCP_SA_KEY, used by gcloud/Cloud Build here).
+#
+# --allow-unauthenticated matches every other service in deploy/cloudrun.sh and ss-core's
+# current setup (nothing there checks who is calling either) — the Vercel frontend has no
+# way to do GCP IAM auth itself, so this is parity with what already runs, not a new gap.
+#
+# Required repository secrets:
+#   GCP_SA_KEY, GCP_PROJECT          the same service-account key deploy.yml uses
+#   S2_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+#   GROBID_URL, COLBERT_URL, COLPALI_URL
+#   VLLM_URL, VLLM_MODEL, VLLM_API_KEY
+#   QDRANT_URL, QDRANT_API_KEY
+#
+# After the first run, point Vercel's VITE_GATEWAY_URL at the URL this workflow prints, then
+# redeploy the web app there.
+name: deploy-gateway
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**"]
+  workflow_dispatch:
+
+env:
+  REGION: asia-southeast1
+  REPO: secretsource
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+
+      - name: Ensure the Artifact Registry repo exists
+        run: |
+          gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+            artifactregistry.googleapis.com --quiet
+          gcloud artifacts repositories describe "$REPO" --location "$REGION" >/dev/null 2>&1 || \
+            gcloud artifacts repositories create "$REPO" --repository-format docker --location "$REGION"
+
+      - name: Build and push the gateway image
+        env:
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/${{ env.REPO }}/gateway
+        run: gcloud builds submit backend --tag "$IMAGE" --quiet
+
+      - name: Deploy to Cloud Run
+        env:
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/${{ env.REPO }}/gateway
+          GROBID_URL: ${{ secrets.GROBID_URL }}
+          COLBERT_URL: ${{ secrets.COLBERT_URL }}
+          COLPALI_URL: ${{ secrets.COLPALI_URL }}
+          VLLM_URL: ${{ secrets.VLLM_URL }}
+          VLLM_MODEL: ${{ secrets.VLLM_MODEL }}
+          VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          S2_API_KEY: ${{ secrets.S2_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
+            --port 8080 --memory 4Gi --allow-unauthenticated \
+            --set-env-vars "SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY,S2_API_KEY=$S2_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY"
+
+      - name: Print the gateway URL
+        run: gcloud run services describe gateway --region "$REGION" --format 'value(status.url)'

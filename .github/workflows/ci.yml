@@ -8,6 +8,12 @@ on:
   push:
     branches: [main]
 
+# A new push on the same PR or branch makes the previous run's results moot before it even
+# finishes, so cancel it instead of burning minutes on an answer nobody will read.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
     runs-on: ubuntu-latest

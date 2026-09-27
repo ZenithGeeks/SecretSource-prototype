@@ -21,7 +21,8 @@ export type Conflict = {
 export type QueueEntry = {
   paper: string
   note: string // why it is suggested, in a reader's words
-  identifier: string // DOI, arXiv ID or title, to analyse it
+  identifier: string // DOI, arXiv ID or title
+  analysis: string // the analysis that cites it, to open on click
 }
 
 export type LibrarySummary = {
@@ -70,6 +71,10 @@ export type LibraryPaper = {
   backed: number | null // null when the paper has not been verified yet
   contradicted: number | null
   linked: string[] // other library papers it cites or is cited by
+  sourcesIndexed: number // distinct cited works a public index knew (#21)
+  sourcesNotIndexed: number // distinct cited works no public index knew
+  indexed: 'yes' | 'no' | '' // whether the paper itself (not what it cites) is known to a public index
+  index: string // the index that answered, e.g. "Semantic Scholar"; '' when not known or not found
 }
 
 export type ResearcherLibrary = {

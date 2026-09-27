@@ -1,8 +1,8 @@
 /**
  * Researcher role router: which researcher screen is showing, rendered inside the shared
  * AppShell with the researcher nav. `?screen=` deep-links one and `?analysis=` opens that
- * analysis on History. field-consensus is reached from Home's "What does the field say"
- * action and lights the Library nav (as in Figma).
+ * analysis on History. field-consensus now lives inside the Graph tab as a Consensus toggle, so
+ * it lights the Graph nav and the `field-consensus` screen opens the Graph with that tab active.
  *
  * History is where a paper gets analyzed (Figma row "Analyze a paper"): the form and the
  * results in main, past analyses under the nav. Home's "Analyze a paper" action and
@@ -17,10 +17,10 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { HistoryList } from '../../components/HistoryList'
 import { SettingsModal } from '../../components/SettingsModal'
+import { settingsRequested } from '../../lib/settingsDeepLink'
 import { AnalysisContents } from '../../components/TableOfContents'
 import type { ContentsRow } from '../../lib/outline'
 import { useAnalyses } from '../../lib/useAnalysis'
-import { FieldConsensus } from './screens/FieldConsensus'
 import { Graph } from './screens/Graph'
 import { History } from './screens/History'
 import { Home } from './screens/Home'
@@ -38,11 +38,13 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'history', label: 'History', icon: HistoryIcon },
 ]
 
-// Which nav item lights for each screen; null means none (field-consensus lights Library).
+// Which nav item lights for each screen; null means none (field-consensus now lives in the Graph
+// tab as a Consensus toggle, so it lights Graph; Settings lights nothing — the profile button
+// carries its own active state instead).
 const NAV_FOR: Record<ResearcherScreen, NavKey | null> = {
   home: 'home',
   library: 'library',
-  'field-consensus': 'library',
+  'field-consensus': 'graph',
   graph: 'graph',
   history: 'history',
 }
@@ -78,7 +80,8 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [section, setSection] = useState<string | null>(null) // claims narrowed to one section
   const [current, setCurrent] = useState<string | null>(null) // section open in the page viewer
   const [jump, setJump] = useState<SectionJump | null>(null) // section page to open
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
+  const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   const analyses = useAnalyses()
 
   useEffect(() => syncScreenParams(screen, selected), [screen, selected])
@@ -118,7 +121,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       settingsActive={settingsOpen}
       // Graph is a whole-screen canvas, so give it the wide shell too (History uses it for the
       // page viewer).
-      wide={wide || screen === 'graph'}
+      wide={wide || screen === 'graph' || screen === 'field-consensus'}
       sidebar={
         screen === 'history' ? (
           <HistoryList
@@ -134,8 +137,9 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'library' && (
         <Library onAddPaper={() => navigate('history')} onOpenAnalysis={openAnalysis} />
       )}
-      {screen === 'field-consensus' && <FieldConsensus onOpenAnalysis={openAnalysis} />}
-      {screen === 'graph' && <Graph />}
+      {(screen === 'graph' || screen === 'field-consensus') && (
+        <Graph onOpenAnalysis={openAnalysis} initialTab={screen === 'field-consensus' ? 'consensus' : 'graph'} />
+      )}
       {screen === 'history' && (
         <History
           selected={selected}

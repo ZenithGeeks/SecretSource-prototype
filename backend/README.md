@@ -13,12 +13,15 @@ covers how to run the backend, how it is organised, and the HTTP API.
 - [Settings](#settings)
 - [Login](#login)
 - [Folder layout](#folder-layout)
+- [Profiling](#profiling)
+- [Monitoring](#monitoring)
 - [Tests](#tests)
 - [HTTP API](#http-api)
   - [Analyses](#analyses)
   - [Progress events](#progress-events)
   - [Papers](#papers)
   - [Researcher](#researcher)
+  - [Teacher](#teacher)
   - [Other routes](#other-routes)
 
 ## Run it
@@ -179,6 +182,7 @@ backend/
 │   ├── workflow.py      the same pipeline as an ADK Workflow graph
 │   ├── agents/team.py   chat agents: coordinator, rag_agent, paper_agent, verify_agent
 │   ├── clients/         HTTP clients for ColBERT, ColPali and GROBID, and identity tokens
+│   ├── teacher/         Google Classroom: OAuth, roster sync, essay-check review (see Teacher below)
 │   └── pipeline/
 │       ├── claims.py    reads a paper and extracts claims with their citations
 │       ├── sources.py   finds and downloads a cited paper
@@ -209,6 +213,24 @@ docker exec <gateway-container> py-spy top --pid 1     # live, updating view of 
 would have caught #224/#228 (`asyncio.to_thread` missing on a synchronous route) directly,
 instead of by reading `main.py` line by line. Needs `SYS_PTRACE` (docker-compose.yml grants it
 to the `gateway` service); without it py-spy fails with a permission error, not a hang.
+
+## Monitoring
+
+`GET /metrics` on the gateway itself, always on: analysis success rate, queue wait and duration,
+claim verdicts, audit findings, and LLM token usage, in Prometheus format (`app/metrics.py`).
+Container-level CPU/memory (cadvisor) and Grafana are opt-in, off by default so a small box like
+a shared VM doesn't run three extra containers it never asked for:
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+Starts cadvisor (`:8085`), Prometheus (`:9090`, scrapes both cadvisor and the gateway's
+`/metrics` every 15s), and Grafana (`:3001`) with the Prometheus datasource and a
+"System evaluation" dashboard already provisioned — nothing to add by hand. See
+[deploy/monitoring/README.md](../deploy/monitoring/README.md) for what the dashboard shows. This
+exists because ss-core (2GB RAM, 1 vCPU) OOM-crashed once with nothing showing memory climbing
+beforehand, and because until now nothing at all said whether analyses were actually succeeding.
 
 ## Tests
 
@@ -443,6 +465,272 @@ The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: 
 `asserts`, `backs`, `contradicts`, `silent` or `unchecked`) and `paperEdges` (paper to paper).
 A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
 when the run does not say.
+
+### Teacher
+
+Routes below live under `/teacher` (`/api/teacher` from the browser) and back the teacher's
+Google Classroom workspace. Every route needs a signed-in caller and returns `401` with
+`sign in to use Google Classroom` otherwise, except `GET /teacher/google/callback`, which
+Google's browser redirect calls directly and which authenticates by its own one-time state
+instead of a bearer token.
+
+Six routes call the Google Classroom API live and share three error cases: `503` with
+`Google Classroom integration is disabled` when `TEACHER_GOOGLE_ENABLED` is off, `409` with
+`Google Classroom is not connected` when the caller has no stored connection, and `502` with
+`stored Google Classroom credentials are unusable` when the stored refresh token fails to
+decrypt. A live Classroom API call that then fails returns `502`, with the Google-reported
+message when there is one or `Google Classroom request failed` otherwise. Those routes are
+called out below; every other route reads and writes local storage only, and works the same
+whether or not a Google account is connected.
+
+**Google connection**
+
+#### `GET /teacher/google/connect`
+
+Starts the OAuth flow and returns the URL to send the teacher to. `503` when
+`TEACHER_GOOGLE_ENABLED` is off.
+
+| Query | Required | Meaning |
+| --- | --- | --- |
+| `loginHint` | no | pre-fills the Google account picker |
+| `switch` | no | forces the account chooser (`prompt=consent select_account`) instead of just `consent`; default `false` |
+
+Response: `{"authorizationUrl": "<url>"}`. Errors: `502` when the authorization request could
+not be built or saved.
+
+#### `GET /teacher/google/callback`
+
+The OAuth redirect target. Google calls this directly; it is the only route in this module
+that does not require sign-in. On success it redirects (`303`) to
+`TEACHER_GOOGLE_SUCCESS_REDIRECT`, so it does not return JSON.
+
+| Query | Required | Meaning |
+| --- | --- | --- |
+| `state` | yes | the opaque state issued by `/google/connect` |
+| `code` | no | the authorization code |
+| `error` | no | set by Google when the teacher declined or the flow failed |
+
+Errors: `503` when `TEACHER_GOOGLE_ENABLED` is off, `400` when `error` is set
+(`Google OAuth was not completed: <error>`), `400` when `code` is missing, and `400` when the
+exchange succeeds but is rejected: the state is invalid, expired, or already used; the Google
+account returned differs from the one already connected for this teacher; or Google returned no
+refresh token for a first-time connection (it omits one on a repeat consent). `502` on any
+other failure completing the exchange.
+
+#### `GET /teacher/google/status`
+
+| Field | Meaning |
+| --- | --- |
+| `connected` | whether a Google account is stored for this teacher |
+| `email` | the connected Google account; omitted when not connected |
+| `scopes` | the OAuth scopes actually granted; omitted when not connected |
+| `sync.status`, `sync.lastSyncedAt`, `sync.error` | the most recent class import/refresh result; all `null` when never synced or not connected |
+
+#### `DELETE /teacher/google`
+
+Deletes the stored connection. Response: `{"connected": false, "connectionDeleted": <bool>,
+"importedDataDeleted": false}`. `connectionDeleted` is `false` when there was nothing to
+delete. `importedDataDeleted` is hardcoded `false`: previously imported courses, coursework,
+and submissions are not deleted by disconnecting.
+
+**Home**
+
+#### `GET /teacher/home`
+
+A dashboard summary built from the caller's first imported class and that class's first
+assignment (whatever order the repository returns them in; there is no "current class"
+selector yet).
+
+| Field | Meaning |
+| --- | --- |
+| `user` | the caller's id |
+| `course`, `courseId` | the first class, or `""` when none is imported |
+| `checkedEssays` | submissions with an analysis started |
+| `totalEssays` | total submissions for that class |
+| `citationsNeedingAttention` | currently always equal to `checkedEssays` |
+| `assignment`, `assignmentId` | the first assignment in that class, or `""` |
+| `submissions` | that assignment's submissions, each the same shape as a workspace submission (see below) plus `initial`, `summary` (`"Ready for review"` or `"Not checked yet"`), `standing` (always `"unchecked"`) |
+| `library` | `paperCount` (equals `checkedEssays`), `visibility` (always `"Private to this teacher"`), `papers` (always `[]`) |
+| `mostMisusedSource` | always `null` |
+
+No error cases beyond the shared `401`; an unconnected or empty account just returns empty
+fields.
+
+**Classes and rosters**
+
+`GET /classes`, `GET .../workspace` and `GET .../assignments/{assignment_id}` read local
+storage only. `GET .../importable`, `GET .../importable/{course_id}/preview`,
+`POST .../import` and `POST .../refresh` call Google Classroom live and can return the shared
+`503`/`409`/`502` errors described above.
+
+#### `GET /teacher/classes`
+
+The caller's already-imported classes. Each entry: `id`, `name`, `section`, `subject`,
+`status` (always `"active"`), `teacherName`, `studentCount`, `assignmentCount`, `topicCount`,
+`announcementCount`, `linkedFileCount`, `lastSyncedAt`.
+
+#### `GET /teacher/classes/importable`
+
+The teacher's Google Classroom courses that are not yet imported. Same per-course shape as
+`GET /classes` above, but built straight from the raw Classroom course listing without a
+roster or coursework fetch, so only `id`, `name`, `section`, `subject`, and `status` are
+meaningful: `teacherName` is always `""`, and `studentCount`, `assignmentCount`, `topicCount`,
+`announcementCount`, `linkedFileCount` are always `0`.
+
+#### `GET /teacher/classes/importable/{course_id}/preview`
+
+What importing one course would bring in, without importing it.
+
+| Field | Meaning |
+| --- | --- |
+| `course` | the course, same shape as `GET /classes/importable`, but with a real roster fetch behind it so `studentCount` and `teacherName` are correct; `assignmentCount`, `topicCount`, `announcementCount` and `linkedFileCount` are still always `0` here too — use `resources` below for those counts |
+| `resources` | four entries, each `key`, `label`, `count`, `detail`, covering `course`, `classwork`, `people`, and `drive` (materials, announcements and topics combined) |
+
+Errors: `404` when `course_id` is not one of the teacher's Google Classroom courses.
+
+#### `POST /teacher/classes/{course_id}/import`
+
+Imports a course: its roster, coursework, materials, announcements, topics, and every
+student's submissions, into local storage.
+
+Response: `{"course": <same shape as GET /classes>, "sync": {"course_id": "...",
+"submission_count": <int>}}`. Errors: `404` when `course_id` is not one of the teacher's
+Google Classroom courses.
+
+#### `GET /teacher/classes/{course_id}/workspace`
+
+The imported class's workspace.
+
+| Field | Meaning |
+| --- | --- |
+| `course` | same shape as `GET /classes` |
+| `description` | the course description |
+| `assignments` | each: `id`, `courseId`, `title`, `dueAt`, `enrolledCount`, `submittedCount`, `missingCount`, `returnedCount`, `pendingReviewCount`, `status` (`not-started`, `pending`, or `returned`), `materials` |
+| `submissions` | each: `id`, `assignmentId`, `studentId`, `studentName`, `fileName`, `state` (`missing`, `submitted`, or `returned`), `submittedAt`, `attachments` |
+| `people` | teachers and students: `id`, `name`, `initials`, `role`, `isCourseOwner` |
+| `latestAnnouncement` | `title`, `postedBy` (always empty), `postedAt`, `body`; `null` when there is none |
+| `materials` | standalone classwork materials: `id`, `title`, `kind`, `accessible` |
+| `topics` | `id`, `name`, `assignmentCount` |
+
+Errors: `404` when the course was never imported for this teacher.
+
+#### `POST /teacher/classes/{course_id}/refresh`
+
+Re-imports a course (identical work to `POST .../import`) and returns the refreshed workspace.
+
+Response: `{"workspace": <same shape as GET .../workspace>, "sync": {"course_id": "...",
+"submission_count": <int>}}`. Errors: `404` when `course_id` is not one of the teacher's
+Google Classroom courses.
+
+#### `GET /teacher/classes/{course_id}/assignments/{assignment_id}`
+
+Response: `{"assignment": <same shape as a workspace assignments entry>, "submissions":
+[<same shape as workspace submissions entries>]}`. Errors: `404` when the course was never
+imported, or the assignment id is not coursework in that course.
+
+**Essay checks and reviews**
+
+Each route below addresses a submission by `student_id` and returns `404` with
+`submission not found` when that student has no submission for the assignment. Only
+`POST .../analyze` calls Google live (and can return the shared `503`/`409`/`502` errors); the
+rest work entirely from local storage, including from a previously imported analysis after the
+Google account has since been disconnected.
+
+#### `POST /teacher/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/analyze`
+
+Downloads the student's Drive attachment and starts an analysis on it through the same
+pipeline as `POST /analyses`.
+
+| Query | Required | Meaning |
+| --- | --- | --- |
+| `verify` | no | check each claim against its cited paper; default `true` |
+
+Response: `{"id": "<analysis id>", "status": "running", "submission_id": "<id>"}`. Errors:
+`409` when the submission has no supported Drive attachment (a PDF or a Google Doc), `404`
+when the submission is not found.
+
+#### `GET /teacher/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/essay-check`
+
+The essay-check screen for one submission. The response is nested; the pieces are:
+
+- `assignment`: `assignmentId`, `courseId`, `course`, `name`, `courseWorkId` (the last two
+  currently just repeat the ids, not a fetched title).
+- `student`: `id`, `name`, `fileName`.
+- `citationSummary`: `total`, `contradicted`, `silent`, `backed` — counts over `reviews`.
+- `reviews`: one card per citation in the underlying analysis, each `id`, `standing`
+  (`supports`, `refutes`, `insufficient`, or `unchecked`), `citation`, `claim`, `sourceQuote`,
+  `sourceLocation`, `explanation`, `supportingUrls` (list of `id`, `url`, `title`, `excerpt`,
+  `location`), `paperUrl`, and `professorReview` (`outcome`, `note`; `outcome` is
+  `not-reviewed` until a teacher saves one — see the `PATCH` route below for the other values).
+- `feedback`: `body`, `preview`, `citedPages`, `citationIds`.
+- `navigation`: currently always `{}`.
+- `analysis`: `id`, `status` (`missing` when no analysis has been started yet, otherwise the
+  analysis's own `running`/`done`/`error`), `error` (present only when `status` is `error`).
+
+Errors: `404` when the submission is not found.
+
+#### `PATCH /teacher/classes/{course_id}/assignments/{assignment_id}/essay-check/reviews/{review_id}`
+
+Saves the teacher's own verdict on one citation card. `review_id` is a `reviews[].id` from the
+essay-check response above, and may itself contain `/`, hence the path-matching route.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `studentId` | string | yes | which student's essay check this belongs to |
+| `outcome` | string | yes | one of `not-reviewed`, `supports`, `contradicts`, `inconclusive` |
+| `note` | string | no | free text; default `""` |
+
+Returns the updated essay-check object (same shape as `GET .../essay-check`). Errors: `404`
+when the submission is not found, `404` when `review_id` is not one of that submission's
+review card ids, `422` when `outcome` is not one of the four listed values.
+
+#### `PUT /teacher/classes/{course_id}/assignments/{assignment_id}/essay-check/feedback`
+
+Saves a draft of the feedback to send back to the student.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `studentId` | string | yes | which student's essay check this belongs to |
+| `body` | string | no | the feedback text; default `""` |
+| `citationIds` | list of string | no | `reviews[].id`s the feedback cites; default `[]` |
+
+Returns the updated essay-check object. Errors: `404` when the submission is not found, `422`
+when `citationIds` contains an id that is not one of that submission's review card ids.
+
+#### `POST /teacher/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/essay-check/feedback/send`
+
+Marks the saved feedback sent. Classroom has no per-student private-comment API, so this only
+updates local status and never posts anything to Classroom itself.
+
+The body is the same shape as `PUT .../feedback` above, and is optional: when given, it is
+saved first (same `404`/`422` rules as `PUT .../feedback`); when omitted, whatever `PUT
+.../feedback` last saved is sent as-is.
+
+Response: `{"assignmentId": "...", "studentId": "...", "status": "sent", "sentAt": "<ISO
+timestamp>"}`. Errors: `404` when the submission is not found, `404` when there is no saved
+feedback to send (nothing was ever saved with `PUT .../feedback`).
+
+**Grading**
+
+#### `POST /teacher/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/grade-and-return`
+
+Sets the assigned grade in Google Classroom and returns the submission to the student. Calls
+Google live and can return the shared `503`/`409`/`502` errors described above.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `grade` | number | yes | the grade to assign; must be `>= 0` |
+
+Response: `{"submissionId": "...", "studentId": "...", "grade": <number>, "status":
+"returned"}`. Errors: `404` when the course, assignment, or submission is not found or not the
+caller's.
+
+Setting the grade in Classroom can fail with the shared `502` Google-error shape. A failure
+after that point returns `502` with a `detail` object instead of a string, so the caller can
+tell Classroom's state and local state may now disagree: `{"message": "grade saved but return
+failed", "partial": true}` when returning the submission fails, or `{"message": "grade
+returned but local submission update failed", "partial": true}` when Classroom accepted the
+return but the local submission record could not be updated to match.
 
 ### Other routes
 
