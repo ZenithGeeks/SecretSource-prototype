@@ -5,6 +5,7 @@
  * analysed papers; in Unsorted it hands off to History, where a paper is analysed.
  */
 
+import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronRight, Plus } from 'lucide-react'
 import { useState } from 'react'
 
@@ -26,6 +27,21 @@ const STANDINGS: { key: ClaimStanding; color: string }[] = [
   { key: 'contradicted', color: 'bg-refutes' },
   { key: 'unchecked', color: 'bg-ink-muted' },
 ]
+
+/** The two dialogs' enter/exit: the scrim fades, the panel fades and settles in from slightly
+ * smaller. Their call sites sit inside AnimatePresence, or the exit would never play. */
+const BACKDROP_MOTION = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.15 },
+}
+const PANEL_MOTION = {
+  initial: { opacity: 0, scale: 0.96 },
+  animate: { opacity: 1, scale: 1 },
+  exit: { opacity: 0, scale: 0.96 },
+  transition: { duration: 0.15 },
+}
 
 function TallyBar({ tally }: { tally: ClaimTally }) {
   const total = STANDINGS.reduce((sum, s) => sum + tally[s.key], 0)
@@ -123,8 +139,11 @@ function AddPapersDialog({
 
   return (
     <div role="dialog" aria-modal="true" onKeyDown={(e) => e.key === 'Escape' && onClose()} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-ink/45" onClick={onClose} />
-      <div className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
+      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onClose} />
+      <motion.div
+        {...PANEL_MOTION}
+        className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
+      >
         <h2 className="font-serif text-xl font-semibold text-ink">Add papers</h2>
         <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in History first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
@@ -157,7 +176,7 @@ function AddPapersDialog({
             Done
           </Button>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }
@@ -217,13 +236,15 @@ function ProjectDetail({
           </Button>
         </div>
       </header>
-      {picking && (
-        <AddPapersDialog
-          projectId={projectId}
-          inProject={new Set(library.papers.map((p) => p.id))}
-          onClose={() => setPicking(false)}
-        />
-      )}
+      <AnimatePresence>
+        {picking && (
+          <AddPapersDialog
+            projectId={projectId}
+            inProject={new Set(library.papers.map((p) => p.id))}
+            onClose={() => setPicking(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Search + cluster filters */}
       <div className="flex flex-wrap items-center gap-3">
@@ -341,8 +362,9 @@ function NewProjectDialog({
       onKeyDown={(e) => e.key === 'Escape' && onCancel()}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
-      <div className="absolute inset-0 bg-ink/45" onClick={onCancel} />
-      <form
+      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onCancel} />
+      <motion.form
+        {...PANEL_MOTION}
         onSubmit={(e) => {
           e.preventDefault()
           const n = name.trim()
@@ -381,7 +403,7 @@ function NewProjectDialog({
             Create project
           </Button>
         </div>
-      </form>
+      </motion.form>
     </div>
   )
 }
@@ -420,15 +442,17 @@ export function Library({
   return (
     <FadeIn className="flex flex-col gap-5">
       <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} />
-      {showNew && (
-        <NewProjectDialog
-          onCancel={() => setShowNew(false)}
-          onCreate={async (name, description) => {
-            setShowNew(false)
-            setOpenId(await createProject(name, description))
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {showNew && (
+          <NewProjectDialog
+            onCancel={() => setShowNew(false)}
+            onCreate={async (name, description) => {
+              setShowNew(false)
+              setOpenId(await createProject(name, description))
+            }}
+          />
+        )}
+      </AnimatePresence>
     </FadeIn>
   )
 }
