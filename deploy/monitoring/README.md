@@ -40,11 +40,13 @@ on first login) and the dashboard is already there — nothing to add by hand, e
 `grafana-data` volume.
 
 **System evaluation** panels: success rate (15m), analyses running/started/errored, throughput,
-queue wait (p50/p95 — see `PARALLEL_ANALYSES` in `backend/app/config.py`), analysis duration
-(p50/p95/p99), LLM token usage and call rate by phase (`extract`/`judge`), claim verdict
-distribution, failed-check reasons, and audit findings per finished analysis. All from
-`GET /metrics` on the gateway (`backend/app/metrics.py`), scraped by the `gateway` job in
-`deploy/monitoring/prometheus.yml`.
+queue wait (p50/p95 — time a job waited in the RQ queue before a worker started it), analysis
+duration (p50/p95/p99), LLM token usage and call rate by phase (`extract`/`judge`), claim
+verdict distribution, failed-check reasons, and audit findings per finished analysis. Analyses
+started comes from `GET /metrics` on the gateway, scraped by the `gateway` job. Everything else
+is counted in the RQ worker processes and served on `WORKER_METRICS_PORT` (default `9101`,
+`backend/worker.py`), scraped by the `worker` job, which finds every replica by DNS
+(`backend/app/metrics.py`, `deploy/monitoring/prometheus.yml`).
 
 Container-level panels (cAdvisor) are not part of this dashboard — build one from a metric
 directly, e.g. `container_memory_usage_bytes` (filter by the `name` label), or import a
@@ -73,3 +75,18 @@ Three env vars point the datasource at it (see `.env.example`): `GRAFANA_DB_HOST
 the Supabase session pooler), `GRAFANA_DB_USER` (the whole `grafana_ro.<project-ref>` username),
 and `GRAFANA_DB_PASSWORD` (set by hand on the role — see the migration file's comment; never
 committed).
+
+## Cloud Run services
+
+Cloud Run services (`gateway`, `grobid`, `colbert`, `colpali`) are private, so Prometheus cannot
+scrape them. Grafana reads their metrics from Google Cloud Monitoring instead, through the
+"Google Cloud Monitoring" data source (`provisioning/datasources/google-cloud-monitoring.yml`).
+
+It needs `backend/secrets/service-auth.json`, which compose mounts read-only into the `grafana`
+container. The bundled plugin reads only a bare PEM key, so `grafana/gcp-jwt-entrypoint.sh`
+copies the key's `private_key` to `/tmp` inside the container at start. Without the file, the
+data source fails and everything else still works.
+
+The "Cloud Run services" dashboard (`dashboards/cloud-run.json`) has a service picker and shows
+requests by response class (2xx/4xx/5xx), latency p50/p95/p99, instance count, and CPU and memory
+use.

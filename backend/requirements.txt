@@ -15,3 +15,5 @@ asyncpg>=0.29  # Postgres driver for agent sessions (app/sessions.py), only used
 cryptography>=42.0
 py-spy>=0.3  # attach to the running gateway (pid 1) for live profiling: py-spy dump/top --pid 1
 prometheus-client>=0.20  # /metrics endpoint (app/metrics.py), scraped by deploy/monitoring/prometheus.yml
+redis>=5  # the queue's backing store (app/queue.py); also used directly for cross-process SSE
+rq>=1.16  # POST /analyses enqueues here instead of an in-process asyncio.Task; worker.py runs the jobs

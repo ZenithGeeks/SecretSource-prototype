@@ -55,10 +55,18 @@ def two_runs(monkeypatch):
             # Made inside the loop the runs use; the gateway's own are made once at import.
             monkeypatch.setattr(main, "all_sources", asyncio.Semaphore(sources_total))
             monkeypatch.setattr(main, "all_checks", asyncio.Semaphore(checks_total))
-            main._start("a", True, None)
-            main._start("b", True, None)
-            while any(analysis["status"] == "running" for analysis in main.analyses.values()):
-                await asyncio.sleep(0.01)
+            # Runs no longer go through _start() (which now enqueues onto RQ); drive
+            # _run_queued directly, the way a worker's run_analysis_job would.
+            analysis_a = main._new_analysis("a", "a", None)
+            analysis_b = main._new_analysis("b", "b", None)
+            main.analyses["a"] = analysis_a
+            main.analyses["b"] = analysis_b
+            main.streams["a"] = asyncio.Queue()
+            main.streams["b"] = asyncio.Queue()
+            await asyncio.gather(
+                main._run_queued("a", analysis_a, "a", True),
+                main._run_queued("b", analysis_b, "b", True),
+            )
             return sorted(analysis["status"] for analysis in main.analyses.values())
 
         return asyncio.run(scenario())

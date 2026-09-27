@@ -1,0 +1,239 @@
+"""The cutover from in-process execution to RQ workers: _start() now enqueues instead of
+running the pipeline itself, restore() consults the queue instead of assuming every "running"
+row was orphaned, delete refuses to drop a job still in flight, and a job that dies outside
+run_analysis_job's own except (timeout, worker crash) is caught by an on-failure callback.
+"""
+
+import asyncio
+import copy
+import time
+
+import pytest
+from app import main
+from app.queue import _on_analysis_job_failure
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def clean_state(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)  # login off: no token needed
+    main.analyses.clear()
+    main.streams.clear()
+    main._deleted.clear()
+    yield
+    main.analyses.clear()
+    main.streams.clear()
+    main._deleted.clear()
+
+
+# --- _start() enqueues, and holds the "queued" stage locally the same way it hands it to RQ ---
+
+
+def test_start_records_one_queued_stage_enqueues_it_and_stores_it(monkeypatch):
+    calls = []
+    saved = []
+    monkeypatch.setattr(
+        main, "enqueue_analysis",
+        lambda analysis_id, paper, verify, owner, stages: calls.append((analysis_id, stages)),
+    )
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(copy.deepcopy(analysis)))
+
+    async def scenario():
+        result = main._start("paper.pdf", True, None)
+        await main._saved(result["id"])
+        return result
+
+    result = asyncio.run(scenario())
+
+    analysis_id = result["id"]
+    # Stored before any worker runs it, so a gateway restart while it is queued still finds it.
+    assert [(row["id"], row["status"], len(row["stages"])) for row in saved] == [(analysis_id, "running", 1)]
+    stages = main.analyses[analysis_id]["stages"]
+    assert len(stages) == 1
+    assert stages[0]["stage"] == "queued"
+    queued_on_stream = main.streams[analysis_id].get_nowait()
+    assert queued_on_stream == stages[0]
+    assert calls == [(analysis_id, [stages[0]])]
+
+
+def test_start_returns_503_and_leaves_nothing_behind_when_enqueue_fails(monkeypatch):
+    def boom(analysis_id, paper, verify, owner, stages):
+        raise ConnectionError("redis is down")
+
+    monkeypatch.setattr(main, "enqueue_analysis", boom)
+    monkeypatch.setattr(main.dependencies, "report", lambda: {"degraded": False, "dependencies": []})
+    client = TestClient(main.app)
+
+    response = client.post("/analyses", json={"paper": "paper.pdf"})
+
+    assert response.status_code == 503
+    assert main.analyses == {}
+    assert main.streams == {}
+
+
+# --- run_analysis_job carries the queued stage through, and owns ANALYSES_RUNNING ---
+
+
+def test_run_analysis_job_keeps_the_queued_stage_and_tracks_analyses_running(monkeypatch):
+    from app.metrics import ANALYSES_RUNNING
+    from app.queue import run_analysis_job
+
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: _NullRedis())
+    monkeypatch.setattr(
+        main, "extract_claims_with_citations",
+        lambda paper: {"status": "ok", "file": f"{paper}.pdf", "title": "T", "claims": []},
+    )
+    monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "audit", lambda analysis: [])
+    monkeypatch.setattr(main, "index_paper", lambda title: f"indexed:{title}")
+
+    def running_value():
+        return next(s.value for s in ANALYSES_RUNNING.collect()[0].samples)
+
+    before = running_value()
+    queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
+
+    result = run_analysis_job("job-cutover", "paper.pdf", True, None, [queued])
+
+    assert result["status"] == "done"
+    assert running_value() == before
+    assert "job-cutover" not in main.analyses
+
+
+class _NullRedis:
+    def publish(self, channel, message):
+        pass
+
+
+# --- restore(): a "running" row may still belong to a live RQ job ---
+
+
+def _stored_running(analysis_id: str) -> dict:
+    return {
+        "id": analysis_id, "paper": "p.pdf", "status": "running", "owner": None,
+        "stages": [{"stage": "queued", "at": 1.0}, {"stage": "extracting", "at": 2.0}],
+        "claims": [],
+    }
+
+
+def test_restore_marks_interrupted_only_when_the_job_is_confirmed_gone(monkeypatch):
+    stored = {
+        "dead": _stored_running("dead"),
+        "alive": _stored_running("alive"),
+        "unknown": _stored_running("unknown"),
+    }
+    monkeypatch.setattr(main.store, "load_all", lambda: copy.deepcopy(stored))
+    saved = []
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
+    monkeypatch.setattr(
+        main, "job_is_alive",
+        lambda analysis_id: {"dead": False, "alive": True, "unknown": None}[analysis_id],
+    )
+
+    main.restore()
+
+    assert main.analyses["dead"]["status"] == "error"
+    assert main.analyses["dead"]["message"] == "interrupted by a restart"
+    assert main.analyses["dead"]["stages"][-1]["stage"] == "error"
+    assert any(a["id"] == "dead" for a in saved)
+
+    assert main.analyses["alive"]["status"] == "running"
+    assert main.analyses["unknown"]["status"] == "running"
+    assert not any(a["id"] in ("alive", "unknown") for a in saved)
+
+
+def test_restore_gives_a_left_running_analysis_a_stream_with_its_stages(monkeypatch):
+    stored = {"alive": _stored_running("alive")}
+    monkeypatch.setattr(main.store, "load_all", lambda: copy.deepcopy(stored))
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "job_is_alive", lambda analysis_id: True)
+
+    main.restore()
+
+    assert "alive" in main.streams
+    drained = []
+    while not main.streams["alive"].empty():
+        drained.append(main.streams["alive"].get_nowait())
+    assert drained == stored["alive"]["stages"]
+
+
+# --- delete: a running analysis is only deletable if its job was still queued ---
+
+
+def test_delete_succeeds_when_the_queued_job_is_cancelled(monkeypatch):
+    main.analyses["r1"] = {"id": "r1", "paper": "p.pdf", "status": "running", "owner": None,
+                            "stages": [], "claims": []}
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: True)
+    monkeypatch.setattr(main.store, "delete", lambda analysis_id: True)
+    client = TestClient(main.app)
+
+    response = client.delete("/analyses/r1")
+
+    assert response.status_code == 200
+    assert "r1" not in main.analyses
+
+
+def test_delete_refuses_when_the_job_already_started(monkeypatch):
+    main.analyses["r2"] = {"id": "r2", "paper": "p.pdf", "status": "running", "owner": None,
+                            "stages": [], "claims": []}
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: False)
+    client = TestClient(main.app)
+
+    response = client.delete("/analyses/r2")
+
+    assert response.status_code == 409
+    assert "r2" in main.analyses
+
+
+# --- the on-failure callback: whatever escapes run_analysis_job's own except ---
+
+
+class _FakeJob:
+    def __init__(self, id, args, kwargs=None):
+        self.id = id
+        self.args = args
+        self.kwargs = kwargs or {}
+
+
+def test_failure_callback_marks_a_stored_running_row_as_error(monkeypatch):
+    stored = {"job-f1": {
+        "id": "job-f1", "paper": "p.pdf", "status": "running", "owner": None,
+        "stages": [{"stage": "extracting", "at": 1.0}], "claims": [],
+    }}
+    monkeypatch.setattr(main.store, "load_all", lambda: copy.deepcopy(stored))
+    saved = []
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
+    published = []
+    monkeypatch.setattr(
+        "app.queue.redis_connection",
+        lambda: type("R", (), {"publish": staticmethod(lambda ch, msg: published.append((ch, msg)))})(),
+    )
+    job = _FakeJob("job-f1", ["job-f1", "p.pdf", True, None, []])
+
+    _on_analysis_job_failure(job, None, RuntimeError, RuntimeError("boom"), None)
+
+    assert len(saved) == 1
+    assert saved[0]["status"] == "error"
+    assert saved[0]["message"] == "boom"
+    assert saved[0]["stages"][-1]["stage"] == "error"
+    assert published  # best-effort publish was attempted
+
+
+def test_failure_callback_builds_from_job_args_with_no_stored_row(monkeypatch):
+    monkeypatch.setattr(main.store, "load_all", lambda: {})
+    saved = []
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
+    monkeypatch.setattr("app.queue.redis_connection", lambda: _NullRedis())
+    queued = {"stage": "queued", "at": 1.0}
+    job = _FakeJob("job-f2", ["job-f2", "p.pdf", True, "owner-1", [queued]])
+
+    _on_analysis_job_failure(job, None, RuntimeError, RuntimeError("worker died"), None)
+
+    assert len(saved) == 1
+    analysis = saved[0]
+    assert analysis["id"] == "job-f2"
+    assert analysis["owner"] == "owner-1"
+    assert analysis["status"] == "error"
+    assert analysis["stages"][0] == queued
+    assert analysis["stages"][-1]["stage"] == "error"

@@ -1,4 +1,4 @@
-# Default (no profile): grobid + gateway + web. Retrieval and the LLM come from wherever
+# Default (no profile): grobid + redis + gateway + worker + web. Retrieval and the LLM come from wherever
 # .env points (the shared cloud services, see README). Nothing here needs a GPU.
 #   docker compose up -d --build                      then open http://localhost:5173
 #
@@ -136,6 +136,7 @@ services:
       COLBERT_URL: ${COLBERT_URL:-http://colbert:8893}
       COLPALI_URL: ${COLPALI_URL:-http://colpali:8894} # optional; visual hints are skipped when it is not running
       GROBID_URL: ${GROBID_URL:-http://grobid:8070}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0} # the analysis queue and cross-process SSE (app/queue.py)
       SERVICE_AUTH: ${SERVICE_AUTH:-none} # google-id-token for the shared Cloud Run services
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-} # e.g. secrets/service-auth.json
       PAPERS_DIR: data/papers
@@ -173,8 +174,36 @@ services:
       - hf-cache:/root/.cache/huggingface # docling's layout and table models, downloaded once
     depends_on:
       - grobid # vllm / colbert are only dependencies under --profile gpu; .env decides
+      - redis
     cap_add:
       - SYS_PTRACE # lets py-spy attach to pid 1 for live profiling (backend/README.md#profiling)
+    restart: unless-stopped
+
+  # Backs the analysis queue (app/queue.py) and cross-process SSE delivery (app/main.py's
+  # Redis Pub/Sub subscriber). A named volume so the queue itself survives a restart, not
+  # just the app data. No published port: only gateway/worker reach it, by service name.
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  # Runs analyses pulled off the queue (app/queue.py), one at a time in this process.
+  # Horizontally scalable: the number of workers is how many analyses run at once.
+  #   docker compose up -d --scale worker=3
+  worker:
+    build: ./backend
+    command: python worker.py
+    environment: *gateway-env
+    volumes:
+      - ${PAPERS_HOST_DIR:-./data/papers}:/app/data/papers
+      - ./backend/secrets:/app/secrets:ro
+      - analyses:/app/data/db
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      - redis
+      - grobid
     restart: unless-stopped
 
   # TLS in front of the gateway, for a frontend hosted on a different origin (e.g. Vercel) that
@@ -287,16 +316,20 @@ services:
   grafana:
     profiles: [monitoring]
     image: grafana/grafana:latest
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
+    # Extracts the GCP private key for the Cloud Monitoring data source, then runs /run.sh.
+    entrypoint: ["sh", "/etc/grafana/gcp-jwt-entrypoint.sh"]
     environment:
+      # Only applies when grafana-data is empty; change it later in Grafana itself.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       # The Analyses (Postgres) datasource's connection — see
       # deploy/monitoring/grafana/provisioning/datasources/analyses-postgres.yml. Empty
       # leaves that datasource unable to connect, which is fine when nobody has provisioned
       # grafana_ro yet.
-      - GRAFANA_DB_HOST=${GRAFANA_DB_HOST:-}
-      - GRAFANA_DB_USER=${GRAFANA_DB_USER:-}
-      - GRAFANA_DB_PASSWORD=${GRAFANA_DB_PASSWORD:-}
+      GRAFANA_DB_HOST: ${GRAFANA_DB_HOST:-}
+      GRAFANA_DB_USER: ${GRAFANA_DB_USER:-}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       # Provisioned on start: the Prometheus datasource and the "System evaluation" dashboard,
@@ -304,6 +337,9 @@ services:
       # hand — see deploy/monitoring/README.md.
       - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/files:ro
+      # For the Google Cloud Monitoring data source.
+      - ./backend/secrets/service-auth.json:/etc/grafana/gcp/service-auth.json:ro
+      - ./deploy/monitoring/grafana/gcp-jwt-entrypoint.sh:/etc/grafana/gcp-jwt-entrypoint.sh:ro
     depends_on:
       - prometheus
     restart: unless-stopped
@@ -313,3 +349,4 @@ volumes:
   qdrant-storage:
   hf-cache:
   grafana-data:
+  redis-data:

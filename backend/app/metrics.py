@@ -22,7 +22,7 @@ ANALYSIS_DURATION_SECONDS = Histogram(
 )
 ANALYSIS_QUEUE_WAIT_SECONDS = Histogram(
     "analysis_queue_wait_seconds",
-    "Time an analysis waited for a free PARALLEL_ANALYSES slot before extraction started",
+    "Time an analysis waited in the job queue before a worker started it",
     buckets=(0, 1, 5, 15, 30, 60, 120, 300, float("inf")),
 )
 ANALYSES_RUNNING = Gauge(

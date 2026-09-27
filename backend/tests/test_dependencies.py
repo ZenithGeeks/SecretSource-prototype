@@ -54,6 +54,9 @@ def services(monkeypatch):
     monkeypatch.setattr(dependencies, "auth_headers", lambda url: {})
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+    monkeypatch.setattr(dependencies, "REDIS_URL", "redis://default:hunter2@redis:6379/0")
+    monkeypatch.setattr(dependencies, "redis_ping", lambda: (True, "PONG"))
+    monkeypatch.setattr(dependencies, "worker_status", lambda: (True, "1 worker, 0 waiting"))
     monkeypatch.setattr(dependencies, "_last", None)
     return types.SimpleNamespace(answers=answers, seen=seen)
 
@@ -71,6 +74,8 @@ def test_every_dependency_answering_is_not_degraded(services):
         "colbert": True,
         "colpali": True,
         "supabase": True,
+        "redis": True,
+        "worker": True,
     }
 
 
@@ -125,6 +130,46 @@ def test_no_secret_reaches_the_report(services, monkeypatch):
     for secret in ("hunter2", "key=abc", "sk-secret", "service-role"):
         assert secret not in text
     assert by_name(dependencies.check())["llm"]["url"] == "https://llm.example/v1"
+
+
+def test_redis_down_makes_redis_and_worker_not_ok_and_degraded(services, monkeypatch):
+    monkeypatch.setattr(dependencies, "redis_ping", lambda: (False, "ConnectionError: refused"))
+    monkeypatch.setattr(
+        dependencies, "worker_status", lambda: (False, "redis unreachable: ConnectionError: refused")
+    )
+    result = dependencies.check()
+    named = by_name(result)
+    assert result["degraded"]
+    assert named["redis"]["ok"] is False
+    assert named["worker"]["ok"] is False
+    assert "redis" in named["worker"]["detail"].lower()
+
+
+def test_redis_up_but_no_worker_is_not_ok_and_degraded(services, monkeypatch):
+    monkeypatch.setattr(dependencies, "worker_status", lambda: (False, "0 workers, 2 waiting"))
+    result = dependencies.check()
+    named = by_name(result)
+    assert result["degraded"]
+    assert named["redis"]["ok"] is True
+    assert named["worker"]["ok"] is False
+    assert "0 workers" in named["worker"]["detail"]
+
+
+def test_worker_detail_mentions_worker_count_and_waiting_jobs(services, monkeypatch):
+    monkeypatch.setattr(dependencies, "worker_status", lambda: (True, "1 worker, 3 waiting"))
+    worker = by_name(dependencies.check())["worker"]
+    assert worker["ok"] is True
+    assert "1 worker" in worker["detail"]
+    assert "3 waiting" in worker["detail"]
+
+
+def test_redis_password_never_reaches_the_report(services):
+    result = dependencies.check()
+    named = by_name(result)
+    text = str(result)
+    assert "hunter2" not in text
+    assert named["redis"]["url"] == "redis://redis:6379/0"
+    assert named["worker"]["url"] == "redis://redis:6379/0"
 
 
 def test_report_reuses_a_recent_check(services):
