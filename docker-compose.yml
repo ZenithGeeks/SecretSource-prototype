@@ -318,6 +318,9 @@ services:
     image: grafana/grafana:latest
     # Extracts the GCP private key for the Cloud Monitoring data source, then runs /run.sh.
     entrypoint: ["sh", "/etc/grafana/gcp-jwt-entrypoint.sh"]
+    environment:
+      # Only applies when grafana-data is empty; change it later in Grafana itself.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
     environment:
