@@ -75,3 +75,18 @@ Three env vars point the datasource at it (see `.env.example`): `GRAFANA_DB_HOST
 the Supabase session pooler), `GRAFANA_DB_USER` (the whole `grafana_ro.<project-ref>` username),
 and `GRAFANA_DB_PASSWORD` (set by hand on the role — see the migration file's comment; never
 committed).
+
+## Cloud Run services
+
+Cloud Run services (`gateway`, `grobid`, `colbert`, `colpali`) are private, so Prometheus cannot
+scrape them. Grafana reads their metrics from Google Cloud Monitoring instead, through the
+"Google Cloud Monitoring" data source (`provisioning/datasources/google-cloud-monitoring.yml`).
+
+It needs `backend/secrets/service-auth.json`, which compose mounts read-only into the `grafana`
+container. The bundled plugin reads only a bare PEM key, so `grafana/gcp-jwt-entrypoint.sh`
+copies the key's `private_key` to `/tmp` inside the container at start. Without the file, the
+data source fails and everything else still works.
+
+The "Cloud Run services" dashboard (`dashboards/cloud-run.json`) has a service picker and shows
+requests by response class (2xx/4xx/5xx), latency p50/p95/p99, instance count, and CPU and memory
+use.
