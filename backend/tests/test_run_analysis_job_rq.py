@@ -1,4 +1,4 @@
-"""Integration test: a real RQ SimpleWorker (in-process, so monkeypatches apply) actually
+"""Integration test: a real AnalysisWorker (an RQ SimpleWorker, in-process, so monkeypatches apply)
 running run_analysis_job() against a real Redis, not just calling the function directly.
 Skipped when no Redis is reachable at REDIS_URL.
 """
@@ -13,9 +13,11 @@ from app import main
 from app.config import REDIS_URL
 from app.queue import (
     JOB_TIMEOUT,
+    AnalysisWorker,
     redis_connection,
     run_analysis_job,  # noqa: F401  (referenced by name when enqueuing)
 )
+from rq.serializers import JSONSerializer
 
 try:
     redis.Redis.from_url(REDIS_URL, socket_connect_timeout=1).ping()
@@ -57,7 +59,7 @@ def test_run_analysis_job_via_rq_simple_worker(stubbed_pipeline):
     # A unique queue per test run: flushing only our own keys isn't practical against a
     # shared Redis, so we use a throwaway queue name and delete it afterwards instead.
     queue_name = f"test-analyses-{uuid.uuid4().hex}"
-    queue = rq.Queue(queue_name, connection=redis_connection())
+    queue = rq.Queue(queue_name, connection=redis_connection(), serializer=JSONSerializer)
     try:
         job = queue.enqueue(
             run_analysis_job, "job-rq", "paper.pdf", True, "owner-1",
@@ -65,7 +67,7 @@ def test_run_analysis_job_via_rq_simple_worker(stubbed_pipeline):
         )
         # SimpleWorker runs the job in this same process (no fork), so our monkeypatches
         # on `main` are visible to it. The default forking Worker would not see them.
-        rq.SimpleWorker([queue], connection=redis_connection()).work(burst=True)
+        AnalysisWorker([queue], connection=redis_connection(), serializer=JSONSerializer).work(burst=True)
 
         job.refresh()
         assert job.get_status() == "finished"
@@ -96,21 +98,43 @@ def test_a_job_that_escapes_run_analysis_job_is_saved_as_error_by_the_failure_ca
     monkeypatch.setattr(main, "_run_queued", broken)
 
     queue_name = f"test-analyses-{uuid.uuid4().hex}"
-    queue = rq.Queue(queue_name, connection=redis_connection())
+    queue = rq.Queue(queue_name, connection=redis_connection(), serializer=JSONSerializer)
     try:
         queue.enqueue(
             run_analysis_job, "job-rq-fail", "paper.pdf", True, "owner-1", [],
             job_id="job-rq-fail", job_timeout=JOB_TIMEOUT,
             on_failure=Callback(_on_analysis_job_failure),
         )
-        rq.SimpleWorker([queue], connection=redis_connection()).work(burst=True)
+        AnalysisWorker([queue], connection=redis_connection(), serializer=JSONSerializer).work(burst=True)
 
-        job = rq.job.Job.fetch("job-rq-fail", connection=redis_connection())
+        job = rq.job.Job.fetch("job-rq-fail", connection=redis_connection(), serializer=JSONSerializer)
         assert job.get_status() == "failed"
 
         last = saves[-1]
         assert last["id"] == "job-rq-fail"
         assert last["status"] == "error"
         assert last["stages"][-1]["stage"] == "error"
+    finally:
+        queue.delete(delete_jobs=True)
+
+
+CALLED: list[str] = []
+
+
+def not_an_analysis(marker: str) -> None:
+    CALLED.append(marker)
+
+
+def test_a_job_naming_another_function_is_refused_and_never_runs():
+    CALLED.clear()
+    queue_name = f"test-analyses-{uuid.uuid4().hex}"
+    queue = rq.Queue(queue_name, connection=redis_connection(), serializer=JSONSerializer)
+    try:
+        queue.enqueue(not_an_analysis, "ran", job_id="job-rq-foreign")
+        AnalysisWorker([queue], connection=redis_connection(), serializer=JSONSerializer).work(burst=True)
+
+        job = rq.job.Job.fetch("job-rq-foreign", connection=redis_connection(), serializer=JSONSerializer)
+        assert job.get_status() == "failed"
+        assert CALLED == []
     finally:
         queue.delete(delete_jobs=True)

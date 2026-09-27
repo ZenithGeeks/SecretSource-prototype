@@ -9,11 +9,11 @@ of the gateway: `docker compose up -d --scale worker=3`.
 import os
 
 import prometheus_client
-from app.queue import QUEUE_NAME, redis_connection
-from rq import SimpleWorker
+from app.queue import QUEUE_NAME, AnalysisWorker, redis_connection
+from rq.serializers import JSONSerializer
 
 if __name__ == "__main__":
-    # SimpleWorker runs jobs in-process; the default Worker forks a child per job, which would
-    # leave the pipeline's Prometheus metrics stuck in a short-lived child, never scraped here.
+    # A SimpleWorker (AnalysisWorker) runs jobs in-process; the default Worker forks a child per
+    # job, which would leave the pipeline's Prometheus metrics stuck in a short-lived child.
     prometheus_client.start_http_server(int(os.getenv("WORKER_METRICS_PORT", "9101")))
-    SimpleWorker([QUEUE_NAME], connection=redis_connection()).work()
+    AnalysisWorker([QUEUE_NAME], connection=redis_connection(), serializer=JSONSerializer).work()

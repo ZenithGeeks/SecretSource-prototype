@@ -13,8 +13,9 @@ import time
 
 import redis
 import redis.asyncio
-from rq import Queue
+from rq import Queue, SimpleWorker
 from rq.job import Callback, Job, JobStatus
+from rq.serializers import JSONSerializer
 
 from app.config import REDIS_URL
 from app.metrics import ANALYSES_RUNNING, ANALYSIS_QUEUE_WAIT_SECONDS
@@ -42,7 +43,7 @@ def redis_connection() -> redis.Redis:
 def analysis_queue() -> Queue:
     global _queue
     if _queue is None:
-        _queue = Queue(QUEUE_NAME, connection=redis_connection())
+        _queue = Queue(QUEUE_NAME, connection=redis_connection(), serializer=JSONSerializer)
     return _queue
 
 
@@ -144,7 +145,7 @@ def job_is_alive(analysis_id: str) -> bool | None:
     timeout so a restart never hangs on this)."""
     try:
         connection = redis.Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
-        job = Job.fetch(analysis_id, connection=connection)
+        job = Job.fetch(analysis_id, connection=connection, serializer=JSONSerializer)
         return job.get_status(refresh=True) in _ALIVE_STATUSES
     except redis.exceptions.RedisError:
         return None
@@ -155,10 +156,35 @@ def job_is_alive(analysis_id: str) -> bool | None:
 def cancel_if_queued(analysis_id: str) -> bool:
     """True only if the job was still queued (never started) and is now cancelled."""
     try:
-        job = Job.fetch(analysis_id, connection=redis_connection())
+        job = Job.fetch(analysis_id, connection=redis_connection(), serializer=JSONSerializer)
     except Exception:
         return False
     if job.get_status(refresh=True) != JobStatus.QUEUED:
         return False
     job.cancel()
     return True
+
+
+ANALYSIS_JOB = f"{__name__}.run_analysis_job"
+FAILURE_CALLBACK = f"{__name__}._on_analysis_job_failure"
+
+
+class AnalysisWorker(SimpleWorker):
+    """Runs analysis jobs and nothing else.
+
+    Anyone who can write to Redis can queue a job that names any importable function, and RQ
+    would call it. JSON (not pickle) keeps reading a job from running code; this check keeps the
+    worker from calling anything but the analysis job and its own failure callback.
+    """
+
+    def perform_job(self, job: Job, queue: Queue) -> bool:
+        if (
+            job.func_name != ANALYSIS_JOB
+            or job._success_callback_name
+            or job._stopped_callback_name
+            or job._failure_callback_name not in (None, FAILURE_CALLBACK)
+        ):
+            self.log.warning("refusing job %s: %s is not an analysis job", job.id, job.func_name)
+            self.handle_job_failure(job, queue, exc_string="refused: not an analysis job")
+            return False
+        return super().perform_job(job, queue)
