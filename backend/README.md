@@ -89,6 +89,7 @@ default".
 | `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
 | `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |
 | `DOCLING_OCR` | `auto` | `auto` runs OCR only on a PDF without a text layer (a scan); `always` or `never` overrides that |
+| `DOCLING_PARALLEL` | `1` | how many PDFs Docling converts at the same time in one process. Default 1. Each one uses about 2 GB of memory |
 | `FIGURE_WAIT` | empty | empty: a cited paper's checks wait until its figures are indexed, so the judge can read their captions. A number of seconds is a fast mode: after that the check is judged on the text alone, and a later run of the paper gets the figures. `0` took 85 s instead of 264 s on 15 checks, with one verdict wrong |
 | `TEACHER_GOOGLE_ENABLED` | `false` | validates and enables the optional Classroom OAuth connection |
 | `TEACHER_GOOGLE_CLIENT_ID` | empty | Google OAuth web-client id |

@@ -115,6 +115,9 @@ PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 # keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.
 PARALLEL_SOURCES_TOTAL = int(os.getenv("PARALLEL_SOURCES_TOTAL") or PARALLEL_SOURCES)
 PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECKS)
+# How many Docling PDF conversions run at once in this process. Each one holds about 2 GB of
+# layout and table models while it runs, which killed Cloud Run gateway instances at 4Gi and 8Gi.
+DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
 # How long a cited paper's checks wait for its figures to be indexed. Empty: until they are, so
 # every verdict can use the figure captions. A number of seconds is a fast mode: after that the
 # check is judged on the text alone, and a later run of the paper gets the figures. On the same
