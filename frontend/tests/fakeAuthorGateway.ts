@@ -11,7 +11,7 @@ import { vi } from 'vitest'
 import { parseBib } from '../src/lib/bibtex'
 import { findCites, parseProject } from '../src/lib/latexProject'
 import { summarize } from '../src/lib/verdict'
-import type { CheckRun, Citation, Draft, ProjectFile, SavedSource, SearchResult, Verdict } from '../src/types/draftCheck'
+import type { CheckRun, Citation, Draft, ProjectFile, SavedSource, Verdict } from '../src/types/draftCheck'
 
 type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks'> & { savedHash?: string }
 type StoredProject = { id: string; name: string; bib: { name: string; content: string } | null; pdfs: Record<string, string>; created: string; updated: string }
@@ -24,7 +24,6 @@ export type FakeGateway = {
   projects: Map<string, StoredProject>
   checks: Map<string, StoredCheck>
   sources: Map<string, SavedSource>
-  searchResults: SearchResult[]
   verdictFor: VerdictRule
   /** Every request seen, for assertions: "PUT /author/drafts/d1/files/related-work.tex". */
   calls: string[]
@@ -46,33 +45,6 @@ export const DEFAULT_VERDICTS: VerdictRule = (key) => {
   if (key === 'thakur2021') return { verdict: 'insufficient', passage: '', explanation: 'BEIR does not compare against single-vector retrievers.' }
   if (key === 'nguyen2016') return { verdict: 'unavailable', reason: 'no-open-access', message: 'no free copy published' }
   return { verdict: 'supports', passage: `the paper says so about ${key}`, page: 4, explanation: 'It matches.' }
-}
-
-export const SEARCH_RESULTS: SearchResult[] = [
-  {
-    id: 'p1', key: 'santhanam2022b', title: 'ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction', authors: 'Santhanam et al.',
-    authorsList: ['Keshav Santhanam', 'Omar Khattab'], year: 2022, venue: 'NAACL', doi: '10.18653/v1/2022.naacl-main.272', arxiv: '2112.01488',
-    url: 'https://arxiv.org/pdf/2112.01488', identifier: '10.18653/v1/2022.naacl-main.272', openAccess: true, citedBy: 320, similarity: 0.91, similarityBasis: 'abstract',
-    inLibrary: false, bibtex: '@inproceedings{santhanam2022b,\n  title = {ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction},\n  author = {Keshav Santhanam and Omar Khattab},\n  year = {2022},\n  booktitle = {NAACL},\n  doi = {10.18653/v1/2022.naacl-main.272},\n}',
-  },
-  {
-    id: 'p2', key: 'santhanam2022plaid', title: 'PLAID: An Efficient Engine for Late Interaction Retrieval', authors: 'Santhanam et al.', authorsList: ['Keshav Santhanam'],
-    year: 2022, venue: 'CIKM', doi: '10.1145/3511808.3557325', arxiv: '2205.09707', url: 'https://arxiv.org/pdf/2205.09707', identifier: '10.1145/3511808.3557325',
-    openAccess: true, citedBy: 120, similarity: 0.84, similarityBasis: 'abstract', inLibrary: false,
-    bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID: An Efficient Engine for Late Interaction Retrieval},\n  author = {Keshav Santhanam},\n  year = {2022},\n  booktitle = {CIKM},\n  doi = {10.1145/3511808.3557325},\n}',
-  },
-  {
-    id: 'bib:proj1:khattab2020', key: 'khattab2020', title: 'ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT',
-    authors: 'Khattab & Zaharia', authorsList: ['Omar Khattab', 'Matei Zaharia'], year: 2020, venue: 'SIGIR', doi: '10.1145/3397271.3401075', arxiv: '', url: '',
-    identifier: '10.1145/3397271.3401075', openAccess: true, citedBy: 900, similarity: 0.62, similarityBasis: 'title', inLibrary: true, cited: true, projectId: 'proj1', bibName: 'main.bib',
-    bibtex: '@inproceedings{khattab2020,\n  title = {ColBERT},\n}',
-  },
-]
-
-export const VERIFY_RESULTS: Record<string, { verdict: Verdict; passage: string; page: number; explanation: string }> = {
-  '10.18653/v1/2022.naacl-main.272': { verdict: 'supports', passage: 'residual compression reduces the space footprint of ColBERT by 6–10× with no loss in quality', page: 4, explanation: 'It states the reduction.' },
-  '10.1145/3511808.3557325': { verdict: 'supports', passage: 'building on ColBERTv2 compressed representations (6–10× smaller)', page: 2, explanation: 'It repeats the figure.' },
-  '10.1145/3397271.3401075': { verdict: 'refutes', passage: 'the index occupies 154 GiB; we leave compression of the embeddings to future work', page: 7, explanation: 'The 2020 paper defers compression.' },
 }
 
 const SENTENCE_END = /[.!?]["”’)}]?(?=\s|$)/
@@ -111,7 +83,6 @@ export function installFakeGateway(options: { files?: { name: string; content: s
     projects: new Map(),
     checks: new Map(),
     sources: new Map(),
-    searchResults: SEARCH_RESULTS.map((r) => ({ ...r })),
     verdictFor: options.verdictFor ?? DEFAULT_VERDICTS,
     calls: [],
     fetch: vi.fn(),
@@ -519,20 +490,6 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       source.pdf = file.name
       return json(view(source))
     }
-  }
-
-  // find a source
-  if (parts[1] === 'search' && parts.length === 2) {
-    const q = url.searchParams.get('q') ?? ''
-    if (!q.trim()) return json({ results: [], libraryCount: 0 })
-    return json({ results: gateway.searchResults, libraryCount: 7 })
-  }
-  if (parts[1] === 'search' && parts[2] === 'verify') {
-    const identifier = String(body?.identifier ?? '')
-    if (!String(body?.claim ?? '').trim() || !identifier) return fail(400, 'a claim and a source identifier are needed')
-    const found = VERIFY_RESULTS[identifier]
-    if (!found) return json({ verdict: 'unavailable', reason: 'no-open-access', message: 'no free copy published', cached: false })
-    return json({ verdict: found.verdict, explanation: found.explanation, evidence: { passage: found.passage, pdf: `${identifier.replace(/[^a-z0-9]+/gi, '-')}.pdf`, page: found.page }, quote: found.passage, reasoning: found.explanation, cached: false })
   }
 
   if (parts[1] === 'export') return json({ exportedAt: now(), projects: [...gateway.projects.values()], drafts: [...gateway.drafts.values()], sources: [...gateway.sources.values()], checks: [...gateway.checks.values()] })

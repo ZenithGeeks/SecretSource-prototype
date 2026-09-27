@@ -15,11 +15,10 @@ import { cn } from '../../../lib/utils'
 import { statusLabel, VERDICTS } from '../../../lib/verdict'
 import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
-import { copiedMessage, copyText } from '../searchHelpers'
+import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { CitationBadge } from '../components/Verdicts'
 import { issues } from '../labels'
-import type { ReplacementRequest } from './DraftCheck'
 
 export const UNSORTED = 'unsorted'
 
@@ -134,7 +133,7 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
     <Card className="flex flex-col gap-2.5" aria-labelledby="unsorted-sources-title">
       <CardHead id="unsorted-sources-title" title="Unsorted sources" aside={<span className="text-ink-muted">{sources.length} saved</span>} />
       {sources.length === 0 ? (
-        <Empty title="No unsorted sources" hint="“Add to library” on a Find a source result lands here when no project is open." />
+        <Empty title="No unsorted sources" hint="Sources saved to no project land here." />
       ) : (
         <ul>
           {sources.map((source) => (
@@ -180,7 +179,6 @@ export function ProjectDetail({
   onBack: () => void
   onOpenEditor: (draftId: string, file?: string, line?: number) => void
   onOpenDraft: (draftId: string) => void
-  onFindSource: (request?: ReplacementRequest) => void
 }) {
   const unsorted = projectId === UNSORTED
   const project = useAuthorProject(unsorted ? null : projectId)
@@ -218,7 +216,7 @@ export function ProjectDetail({
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Unsorted sources</h1>
-            <p className="text-sm text-ink-muted">Sources saved from Find a source, and drafts that are in no project yet.</p>
+            <p className="text-sm text-ink-muted">Drafts that are in no project yet, and sources saved to no project.</p>
           </div>
           <Button onClick={() => void newDraft()} className="self-start sm:self-auto">
             <Plus className="size-4" aria-hidden="true" />

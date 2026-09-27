@@ -17,28 +17,21 @@ import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/
 import { errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorDrafts, useAuthorParse, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue } from '../../../lib/verdict'
-import type { Citation, Draft, SearchResult, Verification } from '../../../types/draftCheck'
+import type { Citation, Draft } from '../../../types/draftCheck'
 import { CheckProgress } from '../components/CheckProgress'
 import { CitationCheckCard } from '../components/CitationCheckCard'
 import { EvidencePanel } from '../components/EvidencePanel'
-import { FindSourcesCard } from '../components/FindSourcesCard'
 import { ParsedDraftCard } from '../components/ParsedDraftCard'
 import { QuickActions } from '../components/QuickActions'
 import { Toast } from '../components/Toast'
 import { YourDraftsCard } from '../components/YourDraftsCard'
 import type { EditorTarget } from '../editorTarget'
-import { replacementLabel } from '../labels'
-
-/** Where "Find a replacement" sends the author: Find a source, with the sentence and the
- * citation it should replace. */
-export type ReplacementRequest = { draftId: string; checkId: string; citationId: string; claim: string }
 
 export function DraftCheck({
   draftId,
   onSelectDraft,
   onOpenEditor,
   onOpenHistory,
-  onFindSource,
   onTargetChange,
 }: {
   draftId: string | null
@@ -46,7 +39,6 @@ export function DraftCheck({
   onOpenEditor: (target: EditorTarget) => void
   /** "View check history": the draft's project in the Library. */
   onOpenHistory: (draft: Draft) => void
-  onFindSource: (request?: ReplacementRequest) => void
   /** The page viewer opened or closed, so the shell can make room for it. */
   onTargetChange?: (open: boolean) => void
 }) {
@@ -100,7 +92,6 @@ export function DraftCheck({
           setToast(`Could not add ${name}: ${errorMessage(error)}`)
         }
       }}
-      onFindSource={() => onFindSource()}
     />
   )
 
@@ -142,7 +133,6 @@ export function DraftCheck({
       onSelectDraft={onSelectDraft}
       onOpenEditor={onOpenEditor}
       onOpenHistory={onOpenHistory}
-      onFindSource={onFindSource}
       onTargetChange={onTargetChange}
       onNewDraft={() => void newDraft('Untitled draft').then((d) => d && onOpenEditor({ draftId: d.id, file: 'main.tex', line: 1 }))}
     />
@@ -159,7 +149,6 @@ function DraftCheckBody({
   onSelectDraft,
   onOpenEditor,
   onOpenHistory,
-  onFindSource,
   onTargetChange,
   onNewDraft,
 }: {
@@ -172,7 +161,6 @@ function DraftCheckBody({
   onSelectDraft: (id: string) => void
   onOpenEditor: (target: EditorTarget) => void
   onOpenHistory: (draft: Draft) => void
-  onFindSource: (request?: ReplacementRequest) => void
   onTargetChange?: (open: boolean) => void
   onNewDraft: () => void
 }) {
@@ -203,18 +191,6 @@ function DraftCheckBody({
     start.mutate(draft.data.id, {
       onError: (error) => setToast(`Could not start the check: ${errorMessage(error)}`),
     })
-  }
-
-  const replace = async (citation: Citation, result: SearchResult, verification: Verification | undefined) => {
-    if (!draft.data || !checkId) return
-    try {
-      const check = await actions.replaceCitation(draft.data, checkId, citation, result, verification)
-      const next = (check.citations ?? []).filter(isOpenIssue)
-      setSelectedId(next[0]?.id ?? null)
-      setToast(`Citation replaced with ${replacementLabel(result)}`)
-    } catch (error) {
-      setToast(`Could not replace the citation: ${errorMessage(error)}`)
-    }
   }
 
   const override = async (citation: Citation, note: string) => {
@@ -303,7 +279,6 @@ function DraftCheckBody({
             citation={selected}
             issues={issues}
             onNext={nextIssue}
-            onFindReplacement={(c) => checkId && onFindSource({ draftId: current.id, checkId, citationId: c.id, claim: c.claim })}
             onOverride={(c, note) => void override(c, note)}
             onReopen={(c) => {
               if (checkId) void actions.reopenCitation(current.id, checkId, c).catch((error) => setToast(`Could not reopen: ${errorMessage(error)}`))
@@ -318,18 +293,6 @@ function DraftCheckBody({
           />
 
           <div className="grid items-start gap-4 lg:grid-cols-2">
-            <FindSourcesCard
-              key={selected?.id ?? 'none'}
-              selectedIssue={selected && issues.some((c) => c.id === selected.id) ? selected : undefined}
-              onInsert={(issue, result, verification) => void replace(issue, result, verification)}
-              onSave={(result, verification, claim) =>
-                void actions
-                  .saveSource({ ...result, projectId: current.projectId, claim, verdict: verification?.verdict ?? null, evidence: verification?.evidence ?? null })
-                  .then(() => setToast(`Saved ${result.key} to ${current.projectId ? 'the project' : 'Unsorted sources'}`))
-                  .catch((error) => setToast(`Could not save: ${errorMessage(error)}`))
-              }
-              onCopied={setToast}
-            />
             <YourDraftsCard drafts={drafts} currentId={current.id} onSelect={onSelectDraft} onNew={onNewDraft} onHistory={onOpenHistory} />
           </div>
         </div>

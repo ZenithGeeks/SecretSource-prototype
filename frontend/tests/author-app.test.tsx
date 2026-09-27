@@ -1,5 +1,5 @@
 /**
- * The Author role's shell: its nav is Home, Library, Find a source and History — no Graph —
+ * The Author role's shell: its nav is Home, Library and History — no Find a source, no Graph —
  * and its History screen is the Researcher's History component (through useHistoryWorkspace),
  * not a copy. Against the fake gateway, with login off.
  */
@@ -34,7 +34,7 @@ function renderApp(search = '') {
   return { onChangeRole }
 }
 
-/** The sidebar nav — screens have their own buttons with the same names (Find a source). */
+/** The sidebar nav — screens have their own buttons too. */
 function nav() {
   return within(screen.getAllByRole('navigation')[0])
 }
@@ -55,10 +55,11 @@ afterEach(() => {
 })
 
 describe('AuthorApp', () => {
-  test('the nav is exactly Home, Library, Find a source, History — no Graph', async () => {
+  test('the nav is exactly Home, Library, History — no Find a source, no Graph', async () => {
     renderApp()
     await screen.findAllByRole('navigation')
-    expect(navLabels()).toEqual(['Home', 'Library', 'Find a source', 'History'])
+    expect(navLabels()).toEqual(['Home', 'Library', 'History'])
+    expect(nav().queryByRole('button', { name: 'Find a source' })).toBeNull()
     expect(nav().queryByRole('button', { name: 'Graph' })).toBeNull()
     expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
@@ -70,10 +71,6 @@ describe('AuthorApp', () => {
     expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('library')
     expect(await screen.findByRole('button', { name: /Unsorted sources/ })).toBeInTheDocument()
-
-    fireEvent.click(nav().getByRole('button', { name: 'Find a source' }))
-    expect(new URLSearchParams(window.location.search).get('screen')).toBe('find-source')
-    expect(screen.getByRole('textbox', { name: 'Search for a source' })).toBeInTheDocument()
 
     fireEvent.click(nav().getByRole('button', { name: 'History' }))
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('history')

@@ -9,10 +9,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import { followEvents } from './api'
-import { authorApi, type CitationPatch, type NewSource } from './author'
+import { authorApi } from './author'
 import { parseBib } from './bibtex'
-import { replaceCiteKey } from './latexProject'
-import type { CheckRun, CheckStage, Citation, Draft, SearchResult, Verification } from '../types/draftCheck'
+import type { CheckRun, CheckStage, Citation, Draft } from '../types/draftCheck'
 
 export const AUTHOR_KEYS = {
   all: ['author'] as const,
@@ -26,8 +25,6 @@ export const AUTHOR_KEYS = {
   projects: ['author', 'projects'] as const,
   project: (id: string) => ['author', 'project', id] as const,
   sources: (projectId?: string) => ['author', 'sources', projectId ?? ''] as const,
-  search: (query: string) => ['author', 'search', query] as const,
-  verify: (claim: string, identifier: string) => ['author', 'verify', claim, identifier] as const,
 }
 
 export function useAuthorDrafts() {
@@ -141,49 +138,6 @@ export function useSavedSources(projectId?: string) {
   return useQuery({ queryKey: AUTHOR_KEYS.sources(projectId), queryFn: () => authorApi.listSources(projectId) })
 }
 
-/** Search results for a query; nothing is fetched for an empty one. A search is a public-index
- * call, so an answer is kept for a while rather than refetched on every focus. */
-export function useAuthorSearch(query: string) {
-  const trimmed = query.trim()
-  return useQuery({
-    queryKey: AUTHOR_KEYS.search(trimmed),
-    queryFn: () => authorApi.search(trimmed),
-    enabled: trimmed.length > 0,
-    staleTime: 5 * 60_000,
-    retry: false,
-  })
-}
-
-// At most two verifications in flight from this browser at once: each is a retrieval plus a
-// model call on the gateway, and the top results of a search all ask for one at the same
-// time. The rest wait here; the gateway caches each (claim, source) pair, so a repeat is free.
-const VERIFY_CONCURRENCY = 2
-let inFlight = 0
-const waiting: (() => void)[] = []
-
-async function verifyLimited(claim: string, identifier: string): Promise<Verification> {
-  if (inFlight >= VERIFY_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve))
-  inFlight += 1
-  try {
-    return await authorApi.verify(claim, identifier)
-  } finally {
-    inFlight -= 1
-    waiting.shift()?.()
-  }
-}
-
-/** Does this source actually say it? Runs when `enabled` (the top results automatically, the
- * rest when the user asks), and never twice for the same claim and source. */
-export function useVerification(claim: string, identifier: string, enabled: boolean) {
-  return useQuery({
-    queryKey: AUTHOR_KEYS.verify(claim.trim(), identifier),
-    queryFn: () => verifyLimited(claim.trim(), identifier),
-    enabled: enabled && claim.trim().length > 0 && identifier.length > 0,
-    staleTime: Infinity,
-    retry: false,
-  })
-}
-
 /** "Re-check": starts a run and hands back its id; the caller follows it with useAuthorCheck. */
 export function useStartCheck() {
   const qc = useQueryClient()
@@ -223,22 +177,6 @@ export function useAuthorActions() {
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.projects })
     void qc.invalidateQueries({ queryKey: ['author', 'project'] })
     void qc.invalidateQueries({ queryKey: ['author', 'sources'] })
-    void qc.invalidateQueries({ queryKey: ['author', 'search'] })
-  }
-
-  /** Appends a BibTeX entry to the bibliography the draft cites from: its own .bib when it
-   * has one, else the project's shared .bib, else a new main.bib in the draft. */
-  const addBibEntry = async (draft: Draft, bibtex: string): Promise<void> => {
-    const own = draft.files.find((f) => f.kind === 'bib' && !f.shared)
-    const shared = draft.files.find((f) => f.kind === 'bib' && f.shared)
-    const append = (content: string) => `${content.trimEnd()}\n\n${bibtex}\n`.replace(/^\n+/, '')
-    if (own) {
-      await authorApi.putFile(draft.id, own.name, append(own.content))
-    } else if (shared && draft.projectId) {
-      await authorApi.updateProject(draft.projectId, { bib: append(shared.content), bibName: shared.name })
-    } else {
-      await authorApi.putFile(draft.id, 'main.bib', append(''))
-    }
   }
 
   return {
@@ -295,45 +233,6 @@ export function useAuthorActions() {
       return result
     },
 
-    /** "Replace with …" / "Insert \cite" / "Cite this": rewrites the \cite in the source,
-     * adds the entry to the bibliography when it is new, and records the resolution on the
-     * check with the verdict the replacement was verified with (unchecked until a re-check
-     * when it was not). Returns the updated check. */
-    replaceCitation: async (
-      draft: Draft,
-      checkId: string,
-      citation: Citation,
-      result: Pick<SearchResult, 'key' | 'title' | 'authors' | 'year' | 'venue' | 'doi' | 'url' | 'bibtex'>,
-      verification?: Verification | null,
-    ): Promise<CheckRun> => {
-      const file = draft.files.find((f) => f.name === citation.file)
-      if (file) {
-        const next = replaceCiteKey(file.content, citation.line, citation.key, result.key)
-        if (next !== file.content) await authorApi.putFile(draft.id, file.name, next)
-      }
-      if (!bibKeysOf(draft).has(result.key)) await addBibEntry(draft, result.bibtex)
-      const patch: CitationPatch = {
-        resolution: { kind: 'replaced', previousKey: citation.key },
-        key: result.key,
-        sourceRef: {
-          key: result.key,
-          title: result.title,
-          authors: result.authors,
-          year: result.year,
-          venue: result.venue,
-          doi: result.doi,
-          url: result.url,
-          pdf: verification?.evidence?.pdf,
-        },
-        verdict: verification?.verdict ?? 'unchecked',
-      }
-      if (verification?.evidence) patch.evidence = verification.evidence
-      if (verification?.explanation) patch.explanation = verification.explanation
-      const check = await authorApi.patchCitation(checkId, citation.id, patch)
-      qc.setQueryData(AUTHOR_KEYS.check(checkId), check)
-      touched(draft.id)
-      return check
-    },
     overrideCitation: async (draftId: string, checkId: string, citation: Citation, note: string): Promise<CheckRun> => {
       const check = await authorApi.patchCitation(checkId, citation.id, { resolution: { kind: 'overridden', note: note.trim() } })
       qc.setQueryData(AUTHOR_KEYS.check(checkId), check)
@@ -382,11 +281,6 @@ export function useAuthorActions() {
       return result
     },
 
-    saveSource: async (body: NewSource) => {
-      const source = await authorApi.saveSource(body)
-      libraryChanged()
-      return source
-    },
     deleteSource: async (sourceId: string) => {
       await authorApi.deleteSource(sourceId)
       libraryChanged()

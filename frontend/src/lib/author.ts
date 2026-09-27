@@ -15,10 +15,8 @@ import type {
   ProjectDetail,
   Resolution,
   SavedSource,
-  SearchResult,
   SourceRef,
   Verdict,
-  Verification,
 } from '../types/draftCheck'
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -43,19 +41,6 @@ export type CitationPatch = {
   verdict?: Verdict
   evidence?: { passage: string; pdf: string; page: number | null }
   explanation?: string
-}
-
-export type NewSource = Pick<
-  SearchResult,
-  'title' | 'authorsList' | 'year' | 'venue' | 'doi' | 'arxiv' | 'url' | 'identifier' | 'openAccess' | 'citedBy'
-> & {
-  key?: string
-  authors?: string
-  bibtex?: string
-  projectId?: string | null
-  claim?: string | null
-  verdict?: Verdict | null
-  evidence?: Verification['evidence'] | null
 }
 
 export const authorApi = {
@@ -108,17 +93,10 @@ export const authorApi = {
   /** All saved sources, or one project's; '' is the unsorted ones (saved to no project). */
   listSources: (projectId?: string) =>
     request<SavedSource[]>(`/author/sources${projectId === undefined ? '' : `?project=${enc(projectId)}`}`),
-  saveSource: (body: NewSource) => request<SavedSource>('/author/sources', json('POST', body)),
   deleteSource: (id: string) => request<{ deleted: string }>(`/author/sources/${enc(id)}`, { method: 'DELETE' }),
   addSourceToBib: (id: string, projectId: string) =>
     request<SavedSource>(`/author/sources/${enc(id)}/add-to-bib`, json('POST', { projectId })),
   attachSourcePdf: (id: string, file: File) => request<SavedSource>(`/author/sources/${enc(id)}/pdf`, upload(file)),
-
-  // find a source
-  search: (q: string, limit = 8) =>
-    request<{ results: SearchResult[]; libraryCount: number }>(`/author/search?q=${enc(q)}&limit=${limit}`),
-  verify: (claim: string, identifier: string) =>
-    request<Verification>('/author/search/verify', json('POST', { claim, identifier })),
 
   // your data
   exportData: () => request<Record<string, unknown>>('/author/export'),

@@ -1,5 +1,5 @@
 /** The editor's own top bar (the screen is full-bleed, outside the AppShell sidebar): brand,
- * breadcrumb with save state, the Editor / Find a source / Export / History tabs, Re-check,
+ * breadcrumb with save state, the Editor / Export / History tabs, Re-check,
  * and the role chip. `exportSlot` is where the Export dropdown mounts in a later PR. */
 
 import { Loader2, Pen, Search } from 'lucide-react'
@@ -10,7 +10,7 @@ import { RoleChip } from '../../../../components/RoleChip'
 import { Button } from '../../../../components/ui'
 import { cn } from '../../../../lib/utils'
 
-export type EditorTab = 'editor' | 'find-source' | 'history'
+export type EditorTab = 'editor' | 'history'
 
 function TabButton({ active, onClick, children }: { active?: boolean; onClick: () => void; children: ReactNode }) {
   return (
@@ -73,7 +73,6 @@ export function EditorTopBar({
         <TabButton active onClick={() => onNavigate('editor')}>
           Editor
         </TabButton>
-        <TabButton onClick={() => onNavigate('find-source')}>Find a source</TabButton>
         {exportSlot ?? (
           <span className="cursor-default px-1 text-[15px] font-medium text-ink-muted" title="Export arrives in a later PR">
             Export ▾

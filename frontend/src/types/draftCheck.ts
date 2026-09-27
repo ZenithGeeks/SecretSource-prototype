@@ -1,7 +1,7 @@
 /**
  * The data model shared by every Author screen: Check a draft (Figma 558:3647), the LaTeX
- * editor (565:3957) and its Export menu (565:4207), the Library (597:3631), a project's
- * detail (597:4404) and Find a source (597:3930). These are the shapes the gateway's
+ * editor (565:3957) and its Export menu (565:4207), the Library (597:3631) and a project's
+ * detail (597:4404). These are the shapes the gateway's
  * /author routes answer with (backend/app/author/router.py), defined once here so the
  * service, the hooks and the screens agree.
  *
@@ -179,47 +179,7 @@ export type Comparison = {
   rows: CompareRow[]
 }
 
-/** A paper found by Find a source (Semantic Scholar, merged with the user's own library). */
-export type SearchResult = {
-  id: string
-  key: string // the bib key it would get
-  title: string
-  authors: string // "Santhanam et al."
-  authorsList: string[]
-  year: number | null
-  venue: string
-  doi: string
-  arxiv: string
-  url: string
-  /** What the gateway verifies the claim against: a DOI, arXiv id, URL or title. */
-  identifier: string
-  openAccess: boolean
-  citedBy: number | null
-  /** 0..1 word overlap of the query with the title and abstract — a ranking, not a verdict. */
-  similarity: number
-  similarityBasis: 'abstract' | 'title'
-  inLibrary: boolean
-  /** One of the user's drafts already cites this entry. */
-  cited?: boolean
-  projectId?: string
-  bibName?: string | null
-  bibtex: string
-  saved?: boolean
-}
-
-/** What POST /author/search/verify says about one result and one claim. */
-export type Verification = {
-  verdict: Verdict
-  explanation?: string
-  evidence?: Evidence
-  quote?: string
-  reasoning?: string
-  reason?: string
-  message?: string
-  cached: boolean
-}
-
-/** A source saved from Find a source, into a project or into Unsorted sources. */
+/** A source kept in a project (or in Unsorted sources) that need not be in a .bib. */
 export type SavedSource = {
   id: string
   projectId: string | null

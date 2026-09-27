@@ -37,21 +37,11 @@ function page(): ShadowRoot {
 }
 
 function renderPane(content: string, extra: Partial<Parameters<typeof PreviewPane>[0]> = {}) {
-  const onFindReplacement = vi.fn()
   const onKeepMine = vi.fn()
   const view = render(
-    <PreviewPane
-      content={content}
-      citations={citations}
-      bibEntries={bib}
-      verdictColors
-      onToggleVerdictColors={() => undefined}
-      onFindReplacement={onFindReplacement}
-      onKeepMine={onKeepMine}
-      {...extra}
-    />,
+    <PreviewPane content={content} citations={citations} bibEntries={bib} verdictColors onToggleVerdictColors={() => undefined} onKeepMine={onKeepMine} {...extra} />,
   )
-  return { ...view, onFindReplacement, onKeepMine }
+  return { ...view, onKeepMine }
 }
 
 describe('decorateCitations', () => {
@@ -115,7 +105,6 @@ describe('PreviewPane', () => {
         bibEntries={bib}
         verdictColors
         onToggleVerdictColors={() => undefined}
-        onFindReplacement={() => undefined}
         onKeepMine={() => undefined}
       />,
     )
@@ -125,8 +114,8 @@ describe('PreviewPane', () => {
     expect(page().querySelector('h2')?.textContent).toMatch(/Related work/)
   }, 20000)
 
-  test('a flagged marker opens the popover; Find a replacement and Keep mine call back; Escape closes', async () => {
-    const { onFindReplacement, onKeepMine } = renderPane(RELATED_WORK_TEX)
+  test('a flagged marker opens the popover; Keep mine calls back; Escape closes', async () => {
+    const { onKeepMine } = renderPane(RELATED_WORK_TEX)
     await waitFor(() => expect(page().querySelector('.ss-cite[data-verdict="refutes"]')).toBeTruthy(), { timeout: 15000 })
 
     fireEvent.click(page().querySelector('.ss-cite[data-verdict="refutes"]')!)
@@ -134,8 +123,8 @@ describe('PreviewPane', () => {
     expect(dialog).toHaveTextContent('source contradicts')
     expect(dialog).toHaveTextContent('[1] Khattab & Zaharia, 2020')
     expect(dialog).toHaveTextContent('1 of 3 issues')
-    fireEvent.click(screen.getByRole('button', { name: /Find a replacement/ }))
-    expect(onFindReplacement).toHaveBeenCalledWith(expect.objectContaining({ key: 'khattab2020', verdict: 'refutes' }))
+    expect(screen.queryByRole('button', { name: /Find a replacement/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
     fireEvent.click(page().querySelector('.ss-cite[data-verdict="insufficient"]')!)

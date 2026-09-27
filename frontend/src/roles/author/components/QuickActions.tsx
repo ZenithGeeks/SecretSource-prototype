@@ -1,8 +1,7 @@
-/** The four ways a draft gets in (Figma "quick actions — draft input"). Upload and Add
- * bibliography open a file picker; Write a draft opens a fresh draft in the editor; Find a
- * source opens the search screen. */
+/** The three ways a draft gets in (Figma "quick actions — draft input"). Upload and Add
+ * bibliography open a file picker; Write a draft opens a fresh draft in the editor. */
 
-import { FileText, FileUp, Library, Search } from 'lucide-react'
+import { FileText, FileUp, Library } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useRef } from 'react'
 
@@ -55,18 +54,16 @@ export function QuickActions({
   onUpload,
   onWrite,
   onAddBibliography,
-  onFindSource,
 }: {
   onUpload: (file: File) => void
   onWrite: () => void
   onAddBibliography: (file: File) => void
-  onFindSource: () => void
 }) {
   const texInput = useRef<HTMLInputElement>(null)
   const bibInput = useRef<HTMLInputElement>(null)
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-3">
       <ActionCard
         icon={FileUp}
         title="Upload .tex or .zip"
@@ -82,7 +79,6 @@ export function QuickActions({
         onClick={() => bibInput.current?.click()}
       />
       <FilePicker accept=".bib,.bbl,.txt" inputRef={bibInput} onFile={onAddBibliography} label="Upload a .bib file" />
-      <ActionCard icon={Search} title="Find a source" hint="Search papers for any claim in your draft" onClick={onFindSource} />
     </div>
   )
 }

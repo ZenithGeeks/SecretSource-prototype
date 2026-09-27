@@ -61,7 +61,6 @@ export function PreviewPane({
   bibEntries,
   verdictColors,
   onToggleVerdictColors,
-  onFindReplacement,
   onKeepMine,
 }: {
   content: string
@@ -70,7 +69,6 @@ export function PreviewPane({
   bibEntries: BibEntry[]
   verdictColors: boolean
   onToggleVerdictColors: () => void
-  onFindReplacement: (citation: Citation) => void
   onKeepMine: (citation: Citation, note: string) => void
 }) {
   const debounced = useDebounced(content, RENDER_DELAY_MS)
@@ -239,10 +237,6 @@ export function PreviewPane({
             anchor={open.anchor}
             containerWidth={open.containerWidth}
             numberOf={(key) => numbers.get(key) ?? null}
-            onFindReplacement={() => {
-              onFindReplacement(current)
-              close()
-            }}
             onKeepMine={(note) => {
               onKeepMine(current, note)
               close()

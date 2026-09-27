@@ -31,7 +31,6 @@ import { SplitPane } from '../components/editor/SplitPane'
 import { StatusBar } from '../components/editor/StatusBar'
 import { Toast } from '../components/Toast'
 import type { EditorTarget } from '../editorTarget'
-import type { ReplacementRequest } from './DraftCheck'
 
 const COMMIT_DELAY_MS = 600
 
@@ -39,17 +38,11 @@ export function Editor({
   target,
   onFileChange,
   onNavigate,
-  onSearch,
-  onFindReplacement,
 }: {
   target: EditorTarget
   /** The open file changed (for the URL). */
   onFileChange: (file: string) => void
   onNavigate: (tab: EditorTab | 'home') => void
-  /** The "search '…'" completion: open Find a source with this query. */
-  onSearch: (query: string) => void
-  /** The popover's "Find a replacement". */
-  onFindReplacement: (request: ReplacementRequest) => void
 }) {
   const { draftId } = target
   const draft = useAuthorDraft(draftId)
@@ -232,8 +225,8 @@ export function Editor({
       .filter((e) => (seen.has(e.key) ? false : (seen.add(e.key), true)))
       .map((e) => ({ key: e.key, detail: `${e.file} · ${(e.fields.title ?? '').split(':')[0].slice(0, 28)}` }))
     const suggested = (saved.data ?? []).filter((s) => !seen.has(s.key)).map((s) => ({ key: s.key, detail: 'saved · not in .bib' }))
-    return { bibKeys, suggested, onSearch }
-  }, [entries, saved.data, onSearch])
+    return { bibKeys, suggested }
+  }, [entries, saved.data])
 
   if (draft.isPending) {
     return (
@@ -327,7 +320,6 @@ export function Editor({
             bibEntries={entries}
             verdictColors={verdictColors}
             onToggleVerdictColors={() => setVerdictColors((v) => !v)}
-            onFindReplacement={(citation) => checkId && onFindReplacement({ draftId, checkId, citationId: citation.id, claim: citation.claim })}
             onKeepMine={(citation, note) => void keepMine(citation, note)}
           />
         }

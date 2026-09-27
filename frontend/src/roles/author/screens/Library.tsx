@@ -1,7 +1,7 @@
 /**
  * Library (Figma 597:3631): "The sources behind your drafts. Each project keeps its own .bib,
  * PDFs and check results." Project cards, the Unsorted sources card, "+ New project" from a
- * .bib or an Overleaf .zip, then what needs attention and what was saved from Find a source.
+ * .bib or an Overleaf .zip, then what needs attention and the sources saved to projects.
  * Opening a card shows the project detail (597:4404); `?project=` deep-links it.
  */
 
@@ -13,11 +13,10 @@ import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
-import { copiedMessage, copyText } from '../searchHelpers'
+import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { VerdictBar } from '../components/Verdicts'
 import { issues } from '../labels'
-import type { ReplacementRequest } from './DraftCheck'
 import { ProjectDetail, UNSORTED } from './ProjectDetail'
 
 function count(n: number, noun: string): string {
@@ -49,14 +48,14 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
 }
 
 const ATTENTION_ICON = { replace: AlertCircle, 'upload-pdf': FileText, remove: FileText } as const
-const ATTENTION_ACTION = { replace: 'Replace', 'upload-pdf': 'Upload PDF', remove: 'Remove' } as const
+// A contradicted citation is dealt with on Check a draft (its evidence, "Keep mine", the editor).
+const ATTENTION_ACTION = { replace: 'Open draft', 'upload-pdf': 'Upload PDF', remove: 'Remove' } as const
 
 export function Library({
   projectId,
   draftId,
   onOpenProject,
   onOpenEditor,
-  onFindSource,
   onOpenDraft,
 }: {
   /** `?project=`: a project's detail, "unsorted", or none for the landing. */
@@ -65,7 +64,6 @@ export function Library({
   draftId?: string | null
   onOpenProject: (id: string | null) => void
   onOpenEditor: (draftId: string, file?: string, line?: number) => void
-  onFindSource: (request?: ReplacementRequest) => void
   onOpenDraft: (draftId: string) => void
 }) {
   const library = useLibrary()
@@ -85,7 +83,6 @@ export function Library({
         onBack={() => onOpenProject(null)}
         onOpenEditor={onOpenEditor}
         onOpenDraft={onOpenDraft}
-        onFindSource={onFindSource}
       />
     )
   }
@@ -104,8 +101,8 @@ export function Library({
   }
 
   const attention = async (row: AttentionRow) => {
-    if (row.kind === 'replace' && row.draftId && row.checkId && row.citationId) {
-      onFindSource({ draftId: row.draftId, checkId: row.checkId, citationId: row.citationId, claim: row.detail })
+    if (row.kind === 'replace' && row.draftId) {
+      onOpenDraft(row.draftId)
       return
     }
     if (row.kind === 'upload-pdf') {
@@ -253,7 +250,7 @@ export function Library({
                   .join(' · ')}
           </p>
           <div className="mt-1 flex items-center justify-between">
-            <span className="text-xs text-ink-muted">Sources saved from Find a source land here</span>
+            <span className="text-xs text-ink-muted">Sources kept outside a project land here</span>
             <ArrowRight className="size-4 text-accent" aria-hidden="true" />
           </div>
         </button>
@@ -294,9 +291,9 @@ export function Library({
         </Card>
 
         <Card className="flex flex-col gap-2.5" aria-labelledby="saved-title">
-          <CardHead id="saved-title" title="Saved sources" aside={<TextLink onClick={() => onFindSource()}>Find a source</TextLink>} />
+          <CardHead id="saved-title" title="Saved sources" aside={<span className="text-ink-muted">{count(saved.length, 'source')}</span>} />
           {saved.length === 0 ? (
-            <Empty title="No saved sources yet" hint="“Add to library” on a Find a source result keeps it here." />
+            <Empty title="No saved sources" hint="Sources kept in a project without being in its .bib show up here." />
           ) : (
             <ul>
               {saved.map((source) => (

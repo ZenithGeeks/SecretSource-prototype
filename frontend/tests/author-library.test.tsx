@@ -26,12 +26,9 @@ function renderWithQuery(ui: ReactNode) {
 function renderLibrary(projectId: string | null = null) {
   const onOpenProject = vi.fn()
   const onOpenEditor = vi.fn()
-  const onFindSource = vi.fn()
   const onOpenDraft = vi.fn()
-  const view = renderWithQuery(
-    <Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={onOpenEditor} onFindSource={onFindSource} onOpenDraft={onOpenDraft} />,
-  )
-  return { ...view, onOpenProject, onOpenEditor, onFindSource, onOpenDraft }
+  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={onOpenEditor} onOpenDraft={onOpenDraft} />)
+  return { ...view, onOpenProject, onOpenEditor, onOpenDraft }
 }
 
 beforeEach(() => {
@@ -57,13 +54,14 @@ describe('Author Library', () => {
     expect(attention.getByText('\\cite{khattab2020} contradicts a claim in Related work — thesis ch.2')).toBeInTheDocument()
     expect(attention.getByText('nguyen2016 · no DOI or PDF')).toBeInTheDocument()
     expect(attention.getByText('karpukhin2020 · in main.bib')).toBeInTheDocument()
-    expect(screen.getByText('No saved sources yet')).toBeInTheDocument()
+    expect(screen.getByText('No saved sources')).toBeInTheDocument()
   })
 
-  test('Replace opens Find a source for the citation; Remove deletes the entry after a confirm', async () => {
-    const { onFindSource } = renderLibrary()
-    fireEvent.click(await screen.findByRole('button', { name: 'Replace' }))
-    expect(onFindSource).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'd1', citationId: expect.any(String) }))
+  test('a contradicted citation opens its draft on Check a draft; Remove deletes the entry after a confirm', async () => {
+    const { onOpenDraft } = renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open draft' }))
+    expect(onOpenDraft).toHaveBeenCalledWith('d1')
+    expect(screen.queryByRole('button', { name: /Find a source/ })).not.toBeInTheDocument()
 
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))

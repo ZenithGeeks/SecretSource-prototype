@@ -29,10 +29,8 @@ function renderWithQuery(ui: ReactNode) {
 function renderEditor(target = { draftId: 'd1', file: 'related-work.tex', line: 10 }) {
   const onFileChange = vi.fn()
   const onNavigate = vi.fn()
-  const onSearch = vi.fn()
-  const onFindReplacement = vi.fn()
-  renderWithQuery(<Editor target={target} onFileChange={onFileChange} onNavigate={onNavigate} onSearch={onSearch} onFindReplacement={onFindReplacement} />)
-  return { onFileChange, onNavigate, onSearch, onFindReplacement }
+  renderWithQuery(<Editor target={target} onFileChange={onFileChange} onNavigate={onNavigate} />)
+  return { onFileChange, onNavigate }
 }
 
 beforeEach(() => {
@@ -78,12 +76,11 @@ describe('Author LaTeX editor', () => {
     expect(gateway.drafts.get('d1')!.files.some((f) => f.name === 'methods.tex')).toBe(true)
   })
 
-  test('the top bar navigates, Re-check starts a run, and Ctrl+S saves a new version', async () => {
+  test('the top bar navigates (no Find a source tab), Re-check starts a run, and Ctrl+S saves a new version', async () => {
     const { onNavigate } = renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'Check a draft' }))
     expect(onNavigate).toHaveBeenCalledWith('home')
-    fireEvent.click(screen.getByRole('button', { name: 'Find a source' }))
-    expect(onNavigate).toHaveBeenCalledWith('find-source')
+    expect(screen.queryByRole('button', { name: 'Find a source' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'History' }))
     expect(onNavigate).toHaveBeenCalledWith('history')
 

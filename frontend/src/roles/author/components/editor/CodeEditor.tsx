@@ -35,10 +35,11 @@ export type LineMark = {
   shadeFrom?: number
 }
 
+/** What `\cite{` can complete to: the keys of the project's .bib files, then the sources
+ * saved to the project that are not in a .bib yet. */
 export type CiteCompletionSource = {
   bibKeys: { key: string; detail: string }[]
   suggested: { key: string; detail: string }[]
-  onSearch: (query: string) => void
 }
 
 export type CursorPosition = { line: number; column: number }
@@ -161,13 +162,8 @@ function completeCite(context: CompletionContext, source: CiteCompletionSource) 
   const options: Completion[] = [
     ...source.bibKeys.filter((k) => matches(k.key)).map((k) => ({ label: k.key, detail: k.detail, type: 'bib' })),
     ...source.suggested.filter((k) => matches(k.key)).map((k) => ({ label: k.key, detail: k.detail, type: 'suggested' })),
-    {
-      label: `search “${word}”…`,
-      detail: 'S2 · Crossref · arXiv',
-      type: 'search',
-      apply: () => source.onSearch(word),
-    },
   ]
+  if (options.length === 0) return null
   return { from, options, filter: false, validFor: /^[\w:./-]*$/ }
 }
 
@@ -221,7 +217,6 @@ const theme = EditorView.theme({
   '.cm-completionIcon': { width: '1em', opacity: '0.8', paddingRight: '0' },
   '.cm-completionIcon-bib::after': { content: '"▤"' },
   '.cm-completionIcon-suggested::after': { content: '"✦"' },
-  '.cm-completionIcon-search::after': { content: '"⌕"' },
 })
 
 export function CodeEditor({

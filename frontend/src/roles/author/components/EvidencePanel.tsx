@@ -1,14 +1,14 @@
 /**
  * "Evidence — issue N of M": the selected citation's sentence beside the passage the verdict
- * rests on, why, and the three ways to act on it: find a replacement, upload the source PDF,
- * or keep the citation with a note. "Override · add note" and the editor's "Keep mine" are
- * the same action, so the note form lives here and the popover reuses the wording.
+ * rests on, why, and the two ways to act on it: upload the source PDF, or keep the citation
+ * with a note. "Override · add note" and the editor's "Keep mine" are the same action, so the
+ * note form lives here and the popover reuses the wording.
  *
  * "show in the paper" opens the source PDF at the passage in the shared PageViewer, the way
  * a researcher's claim card does: the gateway locates the text, the viewer highlights it.
  */
 
-import { ChevronRight, PencilLine, RotateCcw, Search, Upload } from 'lucide-react'
+import { ChevronRight, PencilLine, RotateCcw, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import type { Target } from '../../../components/PageViewer'
@@ -23,7 +23,6 @@ export function EvidencePanel({
   citation,
   issues,
   onNext,
-  onFindReplacement,
   onOverride,
   onReopen,
   onAttachPdf,
@@ -33,8 +32,6 @@ export function EvidencePanel({
   /** The open issues, for the "N of M" pager. */
   issues: Citation[]
   onNext: () => void
-  /** Open Find a source for this sentence, so "Cite this" replaces the citation. */
-  onFindReplacement: (citation: Citation) => void
   onOverride: (citation: Citation, note: string) => void
   onReopen: (citation: Citation) => void
   onAttachPdf: (citation: Citation, file: File) => void
@@ -195,10 +192,6 @@ export function EvidencePanel({
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={() => onFindReplacement(citation)}>
-                <Search className="size-4" aria-hidden="true" />
-                Find a replacement
-              </Button>
               <Button variant="ghost" onClick={() => pdfInput.current?.click()}>
                 <Upload className="size-4" aria-hidden="true" />
                 Upload source PDF

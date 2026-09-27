@@ -1,14 +1,14 @@
 /**
  * The popover that opens on a flagged [n] in the preview (Figma 565:3957): the verdict
- * badge, the source, why, the passage, "Find a replacement" and "Keep mine", and the pager.
- * "Keep mine" is Draft check's "Override · add note" — it opens the same note field and
- * ends in the same gateway call.
+ * badge, the source, why, the passage, "Keep mine", and the pager. "Keep mine" is Draft
+ * check's "Override · add note" — it opens the same note field and ends in the same gateway
+ * call.
  *
  * A non-modal dialog positioned inside the preview's scroll box: Escape or a click outside
  * closes it and focus goes back to the marker that opened it.
  */
 
-import { ChevronRight, Search } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../../components/ui'
@@ -27,7 +27,6 @@ export function IssuePopover({
   anchor,
   containerWidth,
   numberOf,
-  onFindReplacement,
   onKeepMine,
   onNext,
   onClose,
@@ -40,7 +39,6 @@ export function IssuePopover({
   containerWidth: number
   /** The reference number a key has in the preview, or null when it is not in the .bib yet. */
   numberOf: (key: string) => number | null
-  onFindReplacement: () => void
   onKeepMine: (note: string) => void
   onNext: () => void
   onClose: () => void
@@ -127,10 +125,6 @@ export function IssuePopover({
         </form>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={onFindReplacement} className="px-3 py-1.5 text-[13px]">
-            <Search className="size-4" aria-hidden="true" />
-            Find a replacement
-          </Button>
           <Button variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setNoteOpen(true)}>
             Keep mine
           </Button>

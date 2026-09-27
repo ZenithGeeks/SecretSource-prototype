@@ -30,11 +30,8 @@ function renderDraftCheck(draftId: string | null = 'd1') {
   const onSelectDraft = vi.fn()
   const onOpenEditor = vi.fn()
   const onOpenHistory = vi.fn()
-  const onFindSource = vi.fn()
-  const view = renderWithQuery(
-    <DraftCheck draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={onOpenEditor} onOpenHistory={onOpenHistory} onFindSource={onFindSource} />,
-  )
-  return { ...view, onSelectDraft, onOpenEditor, onOpenHistory, onFindSource }
+  const view = renderWithQuery(<DraftCheck draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={onOpenEditor} onOpenHistory={onOpenHistory} />)
+  return { ...view, onSelectDraft, onOpenEditor, onOpenHistory }
 }
 
 beforeEach(() => {
@@ -98,31 +95,6 @@ describe('Author Check a draft', () => {
     expect(await screen.findByRole('button', { name: /1 of 2 issues/ })).toBeInTheDocument()
   })
 
-  test('"Find a replacement" opens Find a source for the selected citation', async () => {
-    const { onFindSource } = renderDraftCheck()
-    fireEvent.click(await screen.findByRole('button', { name: /Find a replacement/ }))
-    expect(onFindSource).toHaveBeenCalledWith(
-      expect.objectContaining({ draftId: 'd1', checkId: expect.stringMatching(/^check/), claim: expect.stringContaining('token-level vectors') }),
-    )
-  })
-
-  test('Find sources searches the selected issue and "Insert \\cite" rewrites the draft and the .bib', async () => {
-    renderDraftCheck()
-    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
-    expect(await screen.findByDisplayValue(/token-level vectors/)).toBeInTheDocument()
-    const inserts = await screen.findAllByRole('button', { name: 'Insert \\cite' })
-    fireEvent.click(inserts[0])
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Citation replaced with Santhanam 2022')
-    await waitFor(() => expect(screen.getByText(/2 need work/)).toBeInTheDocument())
-    const draft = gateway.drafts.get('d1')!
-    const related = draft.files.find((f) => f.name === 'related-work.tex')!
-    expect(related.content).toMatch(/score them with MaxSim~\\cite\{santhanam2022b\}/)
-    expect(draft.files.find((f) => f.name === 'main.bib')!.content).toContain('@inproceedings{santhanam2022b,')
-    expect(gateway.calls).toContain('PUT /author/drafts/d1/files/related-work.tex')
-    expect(gateway.calls).toContain('PUT /author/drafts/d1/files/main.bib')
-  })
-
   test('warnings and "Fix in editor" open the editor at the file and line', async () => {
     const { onOpenEditor } = renderDraftCheck()
     fireEvent.click(await screen.findByRole('button', { name: /Duplicate key/ }))
@@ -152,11 +124,23 @@ describe('Author Check a draft', () => {
     expect(gateway.calls).toContain('POST /author/drafts/d1/check')
   })
 
-  test('with no drafts the screen offers the quick actions and an empty state', async () => {
+  test('with no drafts the screen offers the three quick actions and an empty state', async () => {
     gateway = installFakeGateway({})
     renderDraftCheck(null)
     expect(await screen.findByText('No drafts yet')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Upload \.tex or \.zip/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Write a draft/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add bibliography/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Find a source/ })).not.toBeInTheDocument()
+  })
+
+  test('the evidence panel offers Upload source PDF and Override, and no search', async () => {
+    renderDraftCheck()
+    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+    expect(screen.getByRole('button', { name: /Upload source PDF/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Override · add note/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Find a replacement/ })).not.toBeInTheDocument()
+    expect(gateway.calls.some((c) => c.includes('/author/search'))).toBe(false)
   })
 
   test('a draft that does not exist shows an honest message, not a crash', async () => {
