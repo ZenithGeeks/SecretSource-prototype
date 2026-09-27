@@ -55,8 +55,9 @@ flowchart TD
     F --> G["Done"]
 ```
 
-1. **Start.** `POST /analyses` creates an analysis with a 12-character id and returns the
-   id right away. The work runs in the background. The web app follows it through
+1. **Start.** `POST /analyses` creates an analysis with a 12-character id, records a
+   `queued` stage, and puts the analysis on a Redis job queue (`app/queue.py`) for an RQ
+   worker to pick up. It returns the id right away. The web app follows progress through
    `GET /analyses/{id}/events` (server-sent events).
 2. **Read the paper.** `extract_claims_with_citations` in `claims.py` does four things.
    Docling turns the PDF into text. GROBID reads the reference list. The LLM finds the
@@ -69,9 +70,10 @@ flowchart TD
    same paper, but each paper is prepared only once. Up to `PARALLEL_SOURCES` papers
    (default 3) are prepared at the same time.
 5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
-   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. When several analyses
-   run at once, `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` cap steps 4 and 5 across
-   all of them (default: the per-run values), and the runs take turns.
+   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. A worker runs one analysis
+   at a time, so `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` (default: the per-run
+   values) only limit that one run. With N workers (see [Services](#services)), up to N times
+   that load reaches the retrieval services and the LLM.
 6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
    `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
    keeps only figures whose caption gives their number, like "Figure 2: ...". The web app
@@ -80,8 +82,11 @@ flowchart TD
 7. **Audit.** `audit.py` checks the finished analysis for problems, for example a quote
    that is not in the evidence. It only reports problems. It never changes a verdict.
 
-After every step the gateway calls `_publish`. This saves the analysis and sends one event
-to the web app. Checks finish in any order, so every event says which claim it is about.
+After every step, the worker running the analysis calls `_publish`. This saves the analysis
+and publishes the whole analysis on a Redis channel (`analysis:<id>`). A background task in
+the gateway (`_subscribe_forever`) picks that up and turns it into the same in-memory state
+and event stream the web app reads. Checks finish in any order, so every event says which
+claim it is about.
 
 Reading the paper is also split into parts. Up to 3 parts (`EXTRACT_WORKERS`) go to the
 LLM at the same time.
@@ -271,7 +276,7 @@ flowchart LR
     RF --> AU["audit_analysis"]
 ```
 
-- We keep the graph and the gateway's `_run` in step. Both use the same pipeline
+- We keep the graph and the gateway's `_run_queued` in step. Both use the same pipeline
   functions, `fold_check` to add a result to its claim, `paper_figures` and `audit`. If
   you change the steps in one, change the other. The graph reads the figures after the
   checks; the gateway reads them while it checks.
@@ -311,7 +316,7 @@ paper, judging a claim), and plain code decides the order of the steps.
 
 ```mermaid
 flowchart TD
-    subgraph ANALYSIS ["Analysis of a paper: sequential, custom code in _run / analysis_workflow"]
+    subgraph ANALYSIS ["Analysis of a paper: sequential, custom code in _run_queued / analysis_workflow"]
         P["Read the paper<br/>parallel windows, EXTRACT_WORKERS = 3<br/>LLM"]
         PL["Plan checks<br/>code"]
         subgraph PREP ["Parallel: PARALLEL_SOURCES = 3"]
@@ -344,7 +349,7 @@ flowchart TD
 
 | Part | Code | Pattern | Why |
 | --- | --- | --- | --- |
-| Analysis of a paper | `_run` in `main.py`, `analysis_workflow` in `workflow.py` | Sequential | Every paper goes through the same steps in the same order. Nothing is decided while it runs. |
+| Analysis of a paper | `_run_queued` in `main.py`, `analysis_workflow` in `workflow.py` | Sequential | Every paper goes through the same steps in the same order. Nothing is decided while it runs. |
 | Getting cited papers ready, judging claims | `prepare_source`, `check_prepared` in `verify.py` | Parallel | Independent jobs. Running 3 at a time cut a run from 376 s to 246 s (commit `1b10b3a`). |
 | Reading the paper | `extract_claims_with_citations` in `claims.py` | Parallel | Parts of up to 12,000 characters. Up to 3 parts (`EXTRACT_WORKERS`) go to the model at once. |
 | Judging one claim | `JudgeClaim` in `verify.py` | One model call, not an agent | Code runs the searches first. The model only reads the passages and picks one of three verdicts. |
@@ -352,8 +357,8 @@ flowchart TD
 | Chat agents | `root_agent` in `team.py` | Coordinator | A chat message can ask for many things, so a model has to pick the specialist. |
 | One claim against several papers, in chat | `check_claim` in `team.py` | Parallel, gathered by the coordinator | The checks do not depend on each other. The coordinator gets every verdict back and writes one answer. |
 
-- The gateway runs the steps with plain `asyncio` in `_run`, not the ADK graph, because it
-  sends an event to the web app after every check. The guide calls this the custom logic
+- The worker runs the steps with plain `asyncio` in `_run_queued`, not the ADK graph, because
+  it sends an event to the web app after every check. The guide calls this the custom logic
   pattern.
 - Verdicts are not merged. `fold_check` keeps each one, and the web app shows both when two
   cited papers disagree.
@@ -395,14 +400,36 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
 | `grobid` | reads references and full text from PDFs | compose container (port 8070) or Cloud Run |
 | `qdrant` | stores the ColBERT and ColPali indexes | compose container, or a VM in the cloud |
 | LLM | extracts claims and judges them | any OpenAI-compatible endpoint (`VLLM_URL`) |
-| `gateway` | the HTTP API | `backend/`, port 8080 |
+| `gateway` | the HTTP API; queues each analysis for a worker | `backend/`, port 8080 |
+| `redis` | the analysis job queue, and progress from a worker back to the gateway | compose container, no published port |
+| `worker` | runs analyses pulled off the queue, one at a time in its own process; scale for more analyses at once | `backend/worker.py`; compose service `worker` |
 | `web` | the user interface (nginx) | `frontend/`, port 5173 |
 | `a2a` | the chat agents over A2A | `backend/a2a_server.py`, port 8002, `--profile a2a` |
 
 - Every setting is an environment variable, read in `backend/app/config.py`. Change `.env`
   to point at local containers or cloud services. No code change is needed.
-- `web` and `gateway` are built images. After a code change, run
+- `web`, `gateway` and `worker` are built images. After a code change, run
   `docker compose up -d --build <service>`.
+- `docker compose up -d --scale worker=N` sets how many analyses run at once. Each worker runs
+  one analysis at a time, so N workers put up to N times one run's load on the retrieval
+  services and the LLM (see step 5 above).
+
+**Deploying this.** `.github/workflows/deploy-gateway.yml` builds and deploys only the
+`gateway` container to Cloud Run, and it sets no `REDIS_URL`. Nothing deploys a worker yet. A
+real deployment of this code needs a Redis both the gateway and the worker can reach (set as
+`REDIS_URL` on both), and at least one always-running worker process with the same settings as
+the gateway. Without that, `POST /analyses` returns `503` and nothing runs.
+
+**Known limits.**
+
+- Nothing limits the load across workers: `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL`
+  only limit the run inside one worker (see step 5).
+- The gateway keeps analyses in memory, fed by a worker's Redis snapshots (`_subscribe_forever`).
+  If Redis cannot be reached when the gateway starts, an analysis that was `running` is left
+  `running` rather than checked against its job.
+- The analysed paper's own `indexed_in` badge (`_index_self`) is saved by the worker after the
+  run finishes, but that save is not published to Redis, so a running gateway only shows it
+  after a restart or a fresh load from the store.
 
 ## MCP and A2A
 
@@ -430,9 +457,12 @@ reach it: `a2a:8002` from another compose service, `localhost:8002` from your ma
 ## Where data is stored
 
 - While an analysis runs, it lives in memory in `main.py` (`analyses`, and one event queue
-  per analysis in `streams`).
-- Every `_publish` also saves the whole analysis through `backend/app/store.py`. So history
-  survives a restart. On startup, analyses that were still running are marked as
+  per analysis in `streams`). The pipeline itself runs in a separate `worker` process; the
+  gateway's copy is kept in sync from the worker's Redis snapshots (`_subscribe_forever`).
+- Every `_publish`, made by the worker running the analysis, also saves the whole analysis
+  through `backend/app/store.py`. So history survives a restart. On startup, an analysis that
+  was still `running` stays `running`, and catches up from the worker's snapshots, as long as
+  its RQ job is still queued or executing; only when that job is gone is it marked as
   interrupted.
 - The store is SQLite by default. If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set,
   it uses Supabase Postgres. The service role key must stay on the server.

@@ -275,8 +275,8 @@ async def _publish(analysis_id: str, stage: str, **fields):
     publish call would block the loop while other claims' checks are running concurrently
     (asyncio.gather in _run_queued), so it runs in a thread, same reasoning as _save_soon.
 
-    Best-effort: with Redis down, a raise here would kill the run with its status left at
-    "running" forever, since _run's first publish sits outside _run_queued's try.
+    Best-effort: a Redis blip must not fail an analysis that is otherwise going fine. The gateway
+    catches up from the next snapshot that gets through.
     """
     event = {"stage": stage, **fields, "at": round(time.time(), 1)}
     analyses[analysis_id]["stages"].append(event)
@@ -781,9 +781,8 @@ async def delete_all_data(user: str | None = Depends(current_user)):
     """Every analysis (and researcher project) this user owns — Settings → Your data →
     Delete all. The confirm dialog is the UI's job; this call is unconditional.
 
-    An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
-    indexing `analyses`/`streams`, so popping them here would make its next `_publish`
-    raise inside the task after this call already answered 200."""
+    An analysis still running is skipped and counted in `skipped`: its worker keeps saving it,
+    so a deleted row would come back on the next restart (same reason as delete_analysis)."""
     mine = visible_to(user)
     ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:

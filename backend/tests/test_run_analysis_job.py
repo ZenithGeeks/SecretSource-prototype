@@ -1,7 +1,7 @@
 """run_analysis_job() (app/queue.py) is what a worker process actually runs for one
 analysis: it rebuilds the skeleton the gateway's _start() would have built, runs the
-pipeline via _run_queued directly (skipping _run's "queued" stage -- RQ already queued
-the job), waits for _index_self's detached work, and cleans up analyses[]/streams[].
+pipeline via _run_queued directly (RQ already queued the job), waits for _index_self's
+detached work, and cleans up analyses[]/streams[].
 """
 
 import asyncio

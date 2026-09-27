@@ -52,12 +52,12 @@ Replace `asyncio.create_task(_run(...))` (in-process, one gateway, no restart su
 
 ### Phase 5: Docs
 
-- [ ] Task 6: Update `backend/README.md`, `ARCHITECTURE.md`, `.env.example`
+- [x] Task 6: Update `backend/README.md`, `ARCHITECTURE.md`, `.env.example`
 
 ### Checkpoint: Complete
-- [ ] All acceptance criteria met across tasks 1-6
-- [ ] `ruff check backend services` clean
-- [ ] Ready for review / PR
+- [x] All acceptance criteria met across tasks 1-6
+- [x] `ruff check backend services` clean
+- [x] Ready for review / PR
 
 ## Risks and Mitigations
 

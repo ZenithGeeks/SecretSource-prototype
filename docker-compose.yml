@@ -1,4 +1,4 @@
-# Default (no profile): grobid + gateway + web. Retrieval and the LLM come from wherever
+# Default (no profile): grobid + redis + gateway + worker + web. Retrieval and the LLM come from wherever
 # .env points (the shared cloud services, see README). Nothing here needs a GPU.
 #   docker compose up -d --build                      then open http://localhost:5173
 #
@@ -189,8 +189,8 @@ services:
       - redis-data:/data
     restart: unless-stopped
 
-  # Runs analyses pulled off the queue (app/queue.py). Horizontally scalable — the
-  # replacement for the old PARALLEL_ANALYSES semaphore:
+  # Runs analyses pulled off the queue (app/queue.py), one at a time in this process.
+  # Horizontally scalable: the number of workers is how many analyses run at once.
   #   docker compose up -d --scale worker=3
   worker:
     build: ./backend

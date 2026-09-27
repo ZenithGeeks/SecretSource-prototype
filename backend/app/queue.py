@@ -80,7 +80,7 @@ def run_analysis_job(
 
             ANALYSES_RUNNING.inc()
             try:
-                # Not _run: RQ already did the queueing its semaphore approximated.
+                # _run_queued directly: RQ already did the queueing.
                 await main._run_queued(analysis_id, analysis, paper, verify)
             finally:
                 ANALYSES_RUNNING.dec()

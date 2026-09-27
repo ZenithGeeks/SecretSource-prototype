@@ -29,9 +29,14 @@ covers how to run the backend, how it is organised, and the HTTP API.
 The usual way is Docker Compose from the repository root:
 
 ```bash
-docker compose up -d gateway
+docker compose up -d gateway worker
 curl http://localhost:8080/health
 ```
+
+`gateway` only accepts a request and puts the analysis on a Redis queue; `worker` is the
+process that actually runs it (see [ARCHITECTURE.md#services](../ARCHITECTURE.md#services)).
+Starting `gateway` alone brings up its dependencies (`redis`, `grobid`) but not `worker`, so
+analyses would queue and never run.
 
 The gateway needs GROBID, ColBERT and an LLM endpoint. ColPali is optional. Their URLs come
 from `.env` (see the root [README](../README.md)).
@@ -43,6 +48,9 @@ cd backend
 pip install -r requirements.txt
 python -m uvicorn app.main:app --port 8080
 ```
+
+You also need a Redis server reachable at `REDIS_URL`, and, in another terminal from the same
+`backend/` folder, `python worker.py` running the actual analyses.
 
 On the host, use `localhost` URLs in `.env`, not compose service names. The host also needs
 `dspy` and `pymupdf`, which `requirements.txt` installs.
@@ -69,6 +77,8 @@ default".
 | `GROBID_URL` | `http://localhost:8070` | GROBID, reads references and body text |
 | `COLBERT_URL` | `http://localhost:8893` | ColBERT text search service |
 | `COLPALI_URL` | `http://localhost:8894` | ColPali figure and page search; skipped when down |
+| `REDIS_URL` | `redis://localhost:6379/0` | the analysis job queue (`app/queue.py`), and how a worker's progress reaches the gateway |
+| `WORKER_METRICS_PORT` | `9101` | host runs of `worker.py` only: the port its Prometheus metrics are served on (under compose it is always 9101) |
 | `SERVICE_AUTH` | `none` | `google-id-token` adds an identity token for private Cloud Run services |
 | `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
 | `PAPERS_DIR` | `data/papers` | downloaded PDFs and figure crops |
@@ -83,8 +93,8 @@ default".
 | `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
 | `PARALLEL_SOURCES` | `3` | cited papers downloaded and indexed at the same time |
 | `PARALLEL_CHECKS` | `3` | claims judged at the same time |
-| `PARALLEL_SOURCES_TOTAL` | `PARALLEL_SOURCES` | cited papers prepared at the same time across all running analyses |
-| `PARALLEL_CHECKS_TOTAL` | `PARALLEL_CHECKS` | claims judged at the same time across all running analyses |
+| `PARALLEL_SOURCES_TOTAL` | `PARALLEL_SOURCES` | cited papers prepared at the same time inside one worker; a worker runs one analysis at a time, so this only limits that run |
+| `PARALLEL_CHECKS_TOTAL` | `PARALLEL_CHECKS` | claims judged at the same time inside one worker; a worker runs one analysis at a time, so this only limits that run |
 | `GATEWAY_PORT` | `8080` | port when started with `python -m app.main` |
 | `PAGE_CACHE` | `/tmp/pages` | where rendered page images are cached |
 | `DOCLING_FORMULAS` | empty | `1` also reads formulas as LaTeX (downloads another model) |
@@ -172,7 +182,8 @@ image was built with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (build arg
 ```
 backend/
 ├── app/
-│   ├── main.py          HTTP gateway: the routes below and the analysis run (_run)
+│   ├── main.py          HTTP gateway: the routes below; POST /analyses queues the run for a worker
+│   ├── queue.py         the Redis job queue an RQ worker pulls analyses from
 │   ├── config.py        all settings
 │   ├── store.py         saves analyses and source lookups (SQLite or Supabase)
 │   ├── auth.py          who is asking: the Supabase user behind a request's token
@@ -194,6 +205,7 @@ backend/
 ├── adk_agents/          entry points for `adk web` (chat and analysis)
 ├── cli.py               terminal chat with the coordinator
 ├── a2a_server.py        the agents over A2A
+├── worker.py            runs analyses pulled off the queue (RQ worker process)
 └── tests/
 ```
 
@@ -217,18 +229,21 @@ to the `gateway` service); without it py-spy fails with a permission error, not 
 
 ## Monitoring
 
-`GET /metrics` on the gateway itself, always on: analysis success rate, queue wait and duration,
-claim verdicts, audit findings, and LLM token usage, in Prometheus format (`app/metrics.py`).
-Container-level CPU/memory (cadvisor) and Grafana are opt-in, off by default so a small box like
-a shared VM doesn't run three extra containers it never asked for:
+`GET /metrics` on the gateway itself, always on, counts analyses accepted
+(`analyses_started_total`). The rest of the pipeline's metrics — success rate, queue wait and
+duration, claim verdicts, audit findings, and LLM token usage — are counted where the pipeline
+actually runs now, the RQ worker processes, and served on `WORKER_METRICS_PORT` (default
+`9101`), in Prometheus format (`app/metrics.py`). Container-level CPU/memory (cadvisor) and
+Grafana are opt-in, off by default so a small box like a shared VM doesn't run three extra
+containers it never asked for:
 
 ```bash
 docker compose --profile monitoring up -d
 ```
 
-Starts cadvisor (`:8085`), Prometheus (`:9090`, scrapes both cadvisor and the gateway's
-`/metrics` every 15s), and Grafana (`:3001`) with the Prometheus datasource and a
-"System evaluation" dashboard already provisioned — nothing to add by hand. See
+Starts cadvisor (`:8085`), Prometheus (`:9090`, scrapes cadvisor, the gateway's `/metrics`, and
+every `worker` replica's metrics every 15s), and Grafana (`:3001`) with the Prometheus
+datasource and a "System evaluation" dashboard already provisioned — nothing to add by hand. See
 [deploy/monitoring/README.md](../deploy/monitoring/README.md) for what the dashboard shows. This
 exists because ss-core (2GB RAM, 1 vCPU) OOM-crashed once with nothing showing memory climbing
 beforehand, and because until now nothing at all said whether analyses were actually succeeding.
@@ -260,7 +275,8 @@ Errors use FastAPI's shape: `{"detail": "<message>"}` with a `400` or `404` stat
 
 #### `POST /analyses`
 
-Starts an analysis. It returns at once; the work runs in the background.
+Starts an analysis. It records a `queued` stage and puts the analysis on the Redis job queue
+(`app/queue.py`) for a worker to run, then returns at once.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -275,10 +291,12 @@ curl -X POST http://localhost:8080/analyses \
 
 Response: `{"id": "3f9c2a7b1d04"}`, a 12-character id.
 
+Errors: `503` when the queue (Redis) cannot be reached; nothing is created.
+
 #### `POST /analyses/upload`
 
-Starts an analysis of an uploaded PDF. The file is saved in `PAPERS_DIR` under its own file
-name.
+Starts an analysis of an uploaded PDF, the same way as `POST /analyses`. The file is saved in
+`PAPERS_DIR` under its own file name.
 
 | Parameter | In | Required | Meaning |
 | --- | --- | --- | --- |
@@ -286,6 +304,8 @@ name.
 | `verify` | query | no | default `true` |
 
 Response: `{"id": "<analysis id>"}`.
+
+Errors: `503` when the queue (Redis) cannot be reached; nothing is created.
 
 #### `GET /analyses`
 
@@ -332,11 +352,14 @@ Errors: `404` when the id is unknown.
 
 #### `DELETE /analyses/{id}`
 
-Deletes an analysis. Response: `{"deleted": "<analysis id>"}`. Errors: `404` when the id is
-unknown.
+Deletes an analysis. A queued analysis (its job not yet started) is deleted right away, and
+its job is cancelled. Response: `{"deleted": "<analysis id>"}`. Errors: `404` when the id is
+unknown, `409` when a worker has already started the job; delete it once it finishes.
 
-A server restart keeps all analyses, because each change is saved. An analysis that was
-still running at the restart is marked `error` with the message `interrupted by a restart`.
+A server restart keeps all analyses, because each change is saved. An analysis whose job is
+still queued or running in a worker stays `running` after a gateway restart, and catches up
+from the worker's progress. Only an analysis whose job is gone is marked `error` with the
+message `interrupted by a restart`.
 
 ### Progress events
 
@@ -349,6 +372,7 @@ Each event is one `data:` line with a JSON object:
 
 | `stage` | Extra fields | When |
 | --- | --- | --- |
+| `queued` | `message` | waiting for a free worker |
 | `extracting` | `message` | reading the paper started |
 | `extracted` | `claims`, `extracted`, `windows` | claims found; `extracted` is the count before repeats and the cap were removed |
 | `planned` | `checks`, `sources` | how many checks will run, against how many cited works |
@@ -648,7 +672,7 @@ pipeline as `POST /analyses`.
 
 Response: `{"id": "<analysis id>", "status": "running", "submission_id": "<id>"}`. Errors:
 `409` when the submission has no supported Drive attachment (a PDF or a Google Doc), `404`
-when the submission is not found.
+when the submission is not found, `503` when the analysis queue (Redis) cannot be reached.
 
 #### `GET /teacher/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/essay-check`
 

@@ -142,12 +142,12 @@ docker run --rm -v "$(pwd -W):/repo" -w /repo secretsource-prototype-gateway sh 
 **Description:** Update `backend/README.md`, `ARCHITECTURE.md`, and `.env.example` to describe the new `redis`/`worker` services, the new `REDIS_URL` var, and that `PARALLEL_ANALYSES` is gone (replaced by `docker compose up -d --scale worker=N`).
 
 **Acceptance criteria:**
-- [ ] `backend/README.md` describes the queue/worker model
-- [ ] `ARCHITECTURE.md` updated to reflect the new execution model
-- [ ] `.env.example` has `REDIS_URL`
+- [x] `backend/README.md` describes the queue/worker model
+- [x] `ARCHITECTURE.md` updated to reflect the new execution model
+- [x] `.env.example` has `REDIS_URL`
 
 **Verification:**
-- [ ] Docs read correctly, no stale references to `PARALLEL_ANALYSES` or the old in-process execution model remain
+- [x] Docs read correctly, no stale references to `PARALLEL_ANALYSES` or the old in-process execution model remain
 
 **Dependencies:** Task 5 (describes the final, cut-over state)
 

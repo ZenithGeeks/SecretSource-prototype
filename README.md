@@ -146,7 +146,7 @@ NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 2. Start the services:
 
    ```sh
-   docker compose up -d --build qdrant grobid colbert colpali gateway web
+   docker compose up -d --build qdrant grobid colbert colpali redis gateway worker web
    ```
 
 3. The models are ColBERTv2 (`colbert-ir/colbertv2.0`, about 0.5 GB) and ColPali (`COLPALI_MODEL=vidore/colqwen2-v1.0`, about 4 GB). In a test run, both together used about 7 to 9 GB of GPU memory.
@@ -255,6 +255,7 @@ backend/            gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/teacher/        Google Classroom: OAuth, roster sync, essay-check review
   a2a_server.py       the agent tree over A2A (docker compose --profile a2a)
   cli.py              agent REPL
+  worker.py           runs analyses pulled off the Redis queue (RQ worker process)
 frontend/           React + Vite UI, served by nginx which proxies /api to the gateway
 services/colbert/   ColBERTv2 text retrieval (HTTP + MCP, Qdrant)
 services/colpali/   ColPali visual retrieval (HTTP + MCP, Qdrant, opt-in)
@@ -271,6 +272,10 @@ deploys grobid, colbert, colpali, vllm, gateway and web to Cloud Run. Set `VISIO
 colpali. Qdrant runs on a small VM with its own disk (`deploy/qdrant-startup.sh`). To use a
 Qdrant cluster instead, set `QDRANT_URL` and `QDRANT_API_KEY`. For the vLLM part (quota,
 start-up time, cost), read [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
+
+Neither this script nor `.github/workflows/deploy-gateway.yml` sets up Redis or a worker yet,
+and the gateway cannot run an analysis without them. See "Deploying this" in
+[ARCHITECTURE.md](ARCHITECTURE.md#services).
 </details>
 
 <details>

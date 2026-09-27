@@ -40,11 +40,13 @@ on first login) and the dashboard is already there — nothing to add by hand, e
 `grafana-data` volume.
 
 **System evaluation** panels: success rate (15m), analyses running/started/errored, throughput,
-queue wait (p50/p95 — see `PARALLEL_ANALYSES` in `backend/app/config.py`), analysis duration
-(p50/p95/p99), LLM token usage and call rate by phase (`extract`/`judge`), claim verdict
-distribution, failed-check reasons, and audit findings per finished analysis. All from
-`GET /metrics` on the gateway (`backend/app/metrics.py`), scraped by the `gateway` job in
-`deploy/monitoring/prometheus.yml`.
+queue wait (p50/p95 — time a job waited in the RQ queue before a worker started it), analysis
+duration (p50/p95/p99), LLM token usage and call rate by phase (`extract`/`judge`), claim
+verdict distribution, failed-check reasons, and audit findings per finished analysis. Analyses
+started comes from `GET /metrics` on the gateway, scraped by the `gateway` job. Everything else
+is counted in the RQ worker processes and served on `WORKER_METRICS_PORT` (default `9101`,
+`backend/worker.py`), scraped by the `worker` job, which finds every replica by DNS
+(`backend/app/metrics.py`, `deploy/monitoring/prometheus.yml`).
 
 Container-level panels (cAdvisor) are not part of this dashboard — build one from a metric
 directly, e.g. `container_memory_usage_bytes` (filter by the `name` label), or import a
