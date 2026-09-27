@@ -80,8 +80,8 @@ jobs:
           # to deploy rather than ship that. The worker that drains the queue runs on ss-core.
           if [ -z "$REDIS_URL" ]; then echo "::error::the REDIS_URL secret is not set"; exit 1; fi
           # 8Gi: Docling on an uploaded PDF went over 4Gi and Cloud Run killed the instance.
-          # One instance with CPU always on: analyses run inside the gateway process, so a second
-          # instance's restore() marked a live run "interrupted", and a throttled CPU stalled it.
+          # One instance with CPU always on: the gateway keeps analyses and their event streams in
+          # memory, fed by a background Redis subscriber that a throttled CPU would stall.
           gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
             --port 8080 --memory 8Gi --allow-unauthenticated \
             --max-instances 1 --no-cpu-throttling --cpu 4 \

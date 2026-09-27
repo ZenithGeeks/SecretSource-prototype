@@ -321,16 +321,15 @@ services:
     environment:
       # Only applies when grafana-data is empty; change it later in Grafana itself.
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
-    environment:
       # The Analyses (Postgres) datasource's connection — see
       # deploy/monitoring/grafana/provisioning/datasources/analyses-postgres.yml. Empty
       # leaves that datasource unable to connect, which is fine when nobody has provisioned
       # grafana_ro yet.
-      - GRAFANA_DB_HOST=${GRAFANA_DB_HOST:-}
-      - GRAFANA_DB_USER=${GRAFANA_DB_USER:-}
-      - GRAFANA_DB_PASSWORD=${GRAFANA_DB_PASSWORD:-}
+      GRAFANA_DB_HOST: ${GRAFANA_DB_HOST:-}
+      GRAFANA_DB_USER: ${GRAFANA_DB_USER:-}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       # Provisioned on start: the Prometheus datasource and the "System evaluation" dashboard,
