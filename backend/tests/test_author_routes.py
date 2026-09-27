@@ -561,6 +561,17 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
                     "citationCount": 100,
                     "abstract": "",
                 },
+                {  # no DOI and a title unlike any entry: stays an index result
+                    "paperId": "p3",
+                    "title": "Never cited again",
+                    "year": 2021,
+                    "venue": "",
+                    "authors": [{"name": "Nobody"}],
+                    "externalIds": {},
+                    "openAccessPdf": None,
+                    "citationCount": 0,
+                    "abstract": "index size",
+                },
             ]
         }
 
@@ -576,7 +587,10 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
     by_id = {r["id"]: r for r in found["results"]}
     assert by_id["p1"]["key"] == "santhanam2022" and by_id["p1"]["identifier"] == "10.1/cv2"
     assert by_id["p1"]["openAccess"] is True and by_id["p1"]["inLibrary"] is False
-    assert [r["inLibrary"] for r in found["results"]] == [True, False], "own entries first, then the index"
+    assert [r["inLibrary"] for r in found["results"]] == [True, False, False], (
+        "own entries first, then the index"
+    )
+    assert by_id["p3"]["inLibrary"] is False and by_id["p3"]["key"] == "nobody2021"
     assert "@inproceedings{santhanam2022" in by_id["p1"]["bibtex"]
     # the ColBERT paper is already in the project's .bib, so it shows once, as the library entry
     library_rows = [r for r in found["results"] if r["inLibrary"]]
@@ -584,6 +598,19 @@ def test_search_merges_semantic_scholar_with_the_library_and_reports_an_outage(c
     assert library_rows[0]["projectId"] and library_rows[0]["bibName"] == "main.bib"
     assert library_rows[0]["cited"] is True  # ch2.tex cites khattab2020
     assert "p2" not in by_id
+
+    # a draft with its own copy of the .bib holds the same works: each still shows once
+    client.post(
+        "/author/drafts",
+        headers=ADA,
+        json={
+            "title": "notes",
+            "files": [{"name": "notes.tex", "content": TEX}, {"name": "main.bib", "content": BIB}],
+        },
+    )
+    again = client.get("/author/search", headers=ADA, params={"q": "index size compression"}).json()
+    assert again["libraryCount"] == 3
+    assert [r["key"] for r in again["results"] if r["inLibrary"]] == ["khattab2020"]
     assert client.get("/author/search", headers=ADA, params={"q": ""}).json() == {
         "results": [],
         "libraryCount": 0,

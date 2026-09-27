@@ -1121,7 +1121,9 @@ def _s2_result(paper: dict, query: str) -> dict:
 
 
 def _title_key(title: str) -> str:
-    return logic._WORD.sub("", (title or "").lower())
+    """A title reduced to its letters and digits, for matching an index hit against a .bib
+    entry that has no DOI ("ColBERT: Efficient..." and "colbert efficient" are one work)."""
+    return "".join(logic._WORD.findall((title or "").lower()))
 
 
 def _cited_keys(projects: list[dict], drafts: list[dict]) -> dict[str, set[str]]:
@@ -1185,23 +1187,38 @@ def _bib_holders(projects: list[dict], drafts: list[dict]) -> list[dict]:
     return holders
 
 
+def _library_entries(holders: list[dict]) -> list[tuple[dict, dict, dict]]:
+    """Every distinct work the user's .bib files hold, as (holder, entry, ref). The same work
+    in two files (a project's .bib and a draft's copy of it, a key defined twice) is one
+    entry: the first holder's, projects before drafts, and a file's first definition."""
+    seen: set[str] = set()
+    works: list[tuple[dict, dict, dict]] = []
+    for project in holders:
+        bib = project.get("bib") or {}
+        seen_keys: set[str] = set()
+        for entry in logic.parse_bib(bib.get("content", "")):
+            if entry["key"] in seen_keys:
+                continue
+            seen_keys.add(entry["key"])
+            ref = logic.source_ref(entry, project.get("pdfs"))
+            work = f"doi:{ref['doi'].lower()}" if ref["doi"] else "title:" + _title_key(ref["title"])
+            if work in seen:
+                continue
+            seen.add(work)
+            works.append((project, entry, ref))
+    return works
+
+
 def _library_results(
     query: str, holders: list[dict], sources: list[dict], cited: dict[str, set[str]]
 ) -> list[dict]:
     """What the user already has that matches the query's words: the .bib entries of the
     projects and of drafts with their own .bib, and saved sources."""
     results = []
-    for project in holders:
-        bib = project.get("bib") or {}
-        seen_keys: set[str] = set()
-        for entry in logic.parse_bib(bib.get("content", "")):
-            if entry["key"] in seen_keys:
-                continue  # a key defined twice is one work; the first definition is the check's
-            seen_keys.add(entry["key"])
-            ref = logic.source_ref(entry, project.get("pdfs"))
-            row = _library_row(query, project, entry, ref, cited.get(project["id"]))
-            if row["similarity"] > 0:
-                results.append(row)
+    for project, entry, ref in _library_entries(holders):
+        row = _library_row(query, project, entry, ref, cited.get(project["id"]))
+        if row["similarity"] > 0:
+            results.append(row)
     for source in sources:
         score = logic.similarity(query, f"{source.get('title', '')} {source.get('authors', '')}")
         if score <= 0:
@@ -1253,14 +1270,12 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
     # A public-index hit that is already in one of the user's .bib files shows once, as the
     # library entry: its own key, flagged in-library, with the index's citation count added.
     in_bib: dict[str, dict] = {}
-    for project in holders:
-        bib = project.get("bib") or {}
-        for entry in logic.parse_bib(bib.get("content", "")):
-            ref = logic.source_ref(entry, project.get("pdfs"))
-            keys = [f"doi:{ref['doi'].lower()}"] if ref["doi"] else []
-            keys.append("title:" + _title_key(ref["title"]))
-            for k in keys:
-                in_bib.setdefault(k, {"entry": entry, "ref": ref, "project": project})
+    works = _library_entries(holders)
+    for project, entry, ref in works:
+        keys = [f"doi:{ref['doi'].lower()}"] if ref["doi"] else []
+        keys.append("title:" + _title_key(ref["title"]))
+        for k in keys:
+            in_bib.setdefault(k, {"entry": entry, "ref": ref, "project": project})
     by_place = {r["id"]: r for r in library}
     results = list(library)
     for paper in found.get("data") or []:
@@ -1286,10 +1301,7 @@ async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends
     # then the index's answers in the order it ranked them. Word overlap is shown on every row
     # but does not reorder the index: its ranking reads the abstract, overlap only counts words.
     results.sort(key=lambda r: (0, -r["similarity"]) if r["inLibrary"] else (1, 0))
-    library_count = sum(len(logic.parse_bib((p.get("bib") or {}).get("content", ""))) for p in holders) + len(
-        sources
-    )
-    return {"results": results, "libraryCount": library_count}
+    return {"results": results, "libraryCount": len(works) + len(sources)}
 
 
 class VerifyIn(BaseModel):
