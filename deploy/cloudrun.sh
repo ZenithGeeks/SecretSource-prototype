@@ -166,6 +166,7 @@ MODEL_ENV="VLLM_URL=$(url_of vllm)/v1,VLLM_MODEL=$VLLM_SERVED_NAME,VLLM_API_KEY=
 
 build_and_push gateway ./backend
 deploy gateway --port 8080 --memory 8Gi --allow-unauthenticated \
+    --max-instances 1 --no-cpu-throttling \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
     --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
     --set-env-vars "SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV"
