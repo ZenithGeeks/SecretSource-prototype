@@ -10,8 +10,14 @@
  * differ — waiting for the pause, in flight, or refused — and that is what the tabs' dot,
  * the top bar's "saving… / saved / not saved · Retry" and the leave-page warning read.
  *
- *  - A reply is applied only if it answers the newest write of that file (a sequence number
- *    per file), so a slow, older reply can never put earlier text back on screen.
+ *  - One write of a file is in flight at a time: the next waits for its answer, so the
+ *    gateway can never apply two writes of the same file in the wrong order. A reply is
+ *    applied only if it answers the newest write of that file (a sequence number per file),
+ *    so a superseded reply never puts earlier text back on screen.
+ *  - Every write carries the draft's `updated` this editor last saw (from the draft it read,
+ *    then from each write's answer). The gateway refuses a write whose value is stale (409):
+ *    another tab saved in between. The file stays dirty with the author's text, the draft is
+ *    refetched, and the error names it; Retry then overwrites with the text here.
  *  - Content arriving through the draft query (a refetch, a replacement made elsewhere) is
  *    adopted only for files that are clean. A dirty file keeps the author's text, including
  *    after a refused write, until its own write lands.
@@ -48,6 +54,9 @@ const COMMIT_DELAY_MS = 600
 
 type Texts = Record<string, string>
 
+/** The gateway refused the write because the draft changed since this editor last saw it. */
+const isConflict = (error: unknown) => error instanceof Error && error.message.startsWith('409: ')
+
 export function Editor({
   target,
   onFileChange,
@@ -72,6 +81,9 @@ export function Editor({
   const actions = useAuthorActions()
   const actionsRef = useRef(actions)
   const onWriteFailedRef = useRef(onWriteFailed)
+  const refetchDraftRef = useRef(draft.refetch)
+  /** The draft's `updated` as this editor last saw it, sent with every write (see the header). */
+  const lastUpdated = useRef<string | undefined>(undefined)
 
   const files: ProjectFile[] = useMemo(() => draft.data?.files ?? [], [draft.data])
   const [activeName, setActiveName] = useState<string | null>(target.file ?? null)
@@ -89,6 +101,7 @@ export function Editor({
     confirmedRef.current = confirmed
     actionsRef.current = actions
     onWriteFailedRef.current = onWriteFailed
+    refetchDraftRef.current = draft.refetch
   })
   const timers = useRef<Record<string, number>>({})
   const sequence = useRef<Record<string, number>>({})
@@ -101,6 +114,7 @@ export function Editor({
   // replacement made on Check a draft, a refetch); a dirty file keeps the author's text.
   useEffect(() => {
     if (!draft.data) return
+    lastUpdated.current = draft.data.updated
     const nextTexts = { ...textsRef.current }
     const nextConfirmed = { ...confirmedRef.current }
     let changed = false
@@ -118,8 +132,11 @@ export function Editor({
     }
   }, [draft.data])
 
-  /** Writes one file's current text. Resolves true when the gateway took it. A reply to an
-   * older write of the same file is dropped, so only the newest text is ever confirmed. */
+  /** Writes one file's current text. Resolves true when the gateway took it. The write goes
+   * out once the file's previous write has answered (one in flight per file), so the gateway
+   * applies them in order; by then a newer commit may have superseded this one, which then
+   * sends nothing. A reply to a superseded write is dropped, so only the newest text is ever
+   * confirmed. */
   const commit = useCallback(
     (name: string): Promise<boolean> => {
       window.clearTimeout(timers.current[name])
@@ -128,18 +145,33 @@ export function Editor({
       if (content === undefined || content === confirmedRef.current[name]) return Promise.resolve(true)
       const seq = (sequence.current[name] ?? 0) + 1
       sequence.current[name] = seq
-      const write = actionsRef.current
-        .writeFile(draftId, name, content)
-        .then((updated: Draft) => {
-          if (sequence.current[name] !== seq) return true // superseded; the newer write answers
-          setConfirmed((c) => ({ ...c, [name]: content }))
-          actionsRef.current.acceptWrite(draftId, updated)
-          setWriteError(null)
-          return true
-        })
-        .catch((error: unknown) => {
-          if (sequence.current[name] === seq) setWriteError(`Could not save ${name}: ${errorMessage(error)}`)
-          return false
+      const previous = inFlight.current[name] ?? Promise.resolve(true)
+      const write: Promise<boolean> = previous
+        .then(() => {
+          if (sequence.current[name] !== seq) return true // superseded before it went out; the newer write answers
+          return actionsRef.current
+            .writeFile(draftId, name, content, lastUpdated.current)
+            .then((updated: Draft) => {
+              lastUpdated.current = updated.updated
+              if (sequence.current[name] !== seq) return true // superseded; the newer write answers
+              setConfirmed((c) => ({ ...c, [name]: content }))
+              actionsRef.current.acceptWrite(draftId, updated)
+              setWriteError(null)
+              return true
+            })
+            .catch((error: unknown) => {
+              if (isConflict(error)) {
+                // Another tab saved since this editor last did. Refetch so `lastUpdated` and the
+                // confirmed text catch up; this file stays dirty with the author's text.
+                void refetchDraftRef.current()
+                if (sequence.current[name] === seq) {
+                  setWriteError(`${name} was changed elsewhere (another tab?) since this editor last saved it. Retry now overwrites it with the text here.`)
+                }
+              } else if (sequence.current[name] === seq) {
+                setWriteError(`Could not save ${name}: ${errorMessage(error)}`)
+              }
+              return false
+            })
         })
         .finally(() => {
           if (inFlight.current[name] === write) delete inFlight.current[name]
@@ -174,10 +206,14 @@ export function Editor({
       for (const name of Object.keys(textsRef.current)) {
         if (!isDirty(name)) continue
         const content = textsRef.current[name]
-        actionsRef.current
-          .writeFile(draftId, name, content)
-          .then((updated) => actionsRef.current.acceptWrite(draftId, updated))
-          .catch((error: unknown) => onWriteFailedRef.current?.(`Your last edits to ${name} were not saved: ${errorMessage(error)}`))
+        // After the file's in-flight write, if any, for the same reason commit() waits.
+        const previous = inFlight.current[name] ?? Promise.resolve(true)
+        void previous.then(() =>
+          actionsRef.current
+            .writeFile(draftId, name, content, lastUpdated.current)
+            .then((updated) => actionsRef.current.acceptWrite(draftId, updated))
+            .catch((error: unknown) => onWriteFailedRef.current?.(`Your last edits to ${name} were not saved: ${errorMessage(error)}`)),
+        )
       }
     },
     [draftId, isDirty],

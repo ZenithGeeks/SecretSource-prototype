@@ -211,8 +211,9 @@ export function useAuthorActions() {
     },
     /** The editor's own write while typing: the file goes to the gateway and the cache is
      * left alone until the editor accepts the answer with `acceptWrite` — so a reply that
-     * arrives after a newer write can be dropped instead of putting old text back. */
-    writeFile: (draftId: string, name: string, content: string): Promise<Draft> => authorApi.putFile(draftId, name, content),
+     * arrives after a newer write can be dropped instead of putting old text back. `updated`
+     * is the draft's `updated` the editor last saw (see authorApi.putFile). */
+    writeFile: (draftId: string, name: string, content: string, updated?: string): Promise<Draft> => authorApi.putFile(draftId, name, content, updated),
     /** Puts a write's answer in the cache without the refetch storm; only the files and
      * the timestamp move, and the parse (warnings, citation lines) is refetched. */
     acceptWrite: (draftId: string, draft: Draft): void => {

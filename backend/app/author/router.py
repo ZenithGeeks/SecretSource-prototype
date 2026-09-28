@@ -203,6 +203,11 @@ class DraftIn(BaseModel):
 
 class FileIn(BaseModel):
     content: str
+    # The draft's `updated` as the editor last saw it: the draft it read, or the answer to its
+    # own last write. A write that carries one is refused (409) unless it is the row's current
+    # value, compared as the stored string and never as a time, so a second tab that saved in
+    # between is noticed instead of silently overwritten. Left out, the write is not checked.
+    updated: str | None = None
 
 
 def _new_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
@@ -333,6 +338,8 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
     here — that is what Save does — so typing never makes a v4 out of a v3."""
     name = _safe_name(name)
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
+    if request.updated is not None and request.updated != draft.get("updated"):
+        raise HTTPException(409, "the draft was changed elsewhere since this editor last saved it")
     if len(request.content.encode("utf-8")) > MAX_TEXT_FILE:
         raise HTTPException(413, "a draft file must be under 2MB")
     existing = next((f for f in draft["files"] if f["name"] == name), None)

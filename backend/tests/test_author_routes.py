@@ -338,6 +338,28 @@ def test_a_check_whose_setup_fails_leaves_no_row_behind(client, monkeypatch):
     assert client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).status_code == 200
 
 
+def test_a_write_carrying_a_stale_updated_is_refused_and_a_chained_one_is_not(client):
+    """PR #291 review: the editor sends the draft's `updated` it last saw with each write.
+    Its own writes chain, each carrying the previous answer's value, and pass; a write from
+    a tab that read the draft before those writes is a 409 and changes nothing. A client
+    that sends no `updated` (an older one) is not checked."""
+    draft = make_draft(client)
+    url = f"/author/drafts/{draft['id']}/files/related-work.tex"
+
+    first = client.put(url, headers=ADA, json={"content": "one", "updated": draft["updated"]})
+    assert first.status_code == 200 and first.json()["updated"] != draft["updated"]
+    second = client.put(url, headers=ADA, json={"content": "two", "updated": first.json()["updated"]})
+    assert second.status_code == 200
+
+    stale = client.put(url, headers=ADA, json={"content": "old", "updated": draft["updated"]})
+    assert stale.status_code == 409 and "changed elsewhere" in stale.json()["detail"]
+    stored = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
+    assert stored["files"][0]["content"] == "two"
+    assert stored["updated"] == second.json()["updated"]
+
+    assert client.put(url, headers=ADA, json={"content": "three"}).status_code == 200
+
+
 def test_a_second_check_while_one_runs_is_refused(client):
     draft = make_draft(client)
     first = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]

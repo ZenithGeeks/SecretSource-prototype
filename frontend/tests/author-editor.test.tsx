@@ -206,14 +206,20 @@ describe('Author LaTeX editor — saving', () => {
     await waitFor(() => expect(gateway.drafts.get('d1')!.version).toBe(4))
   })
 
-  test('a slow reply to an older write never puts the older text back', async () => {
+  test('an edit made while a write is in flight waits for its answer: the gateway applies the two in order, neither is refused, and the newest text is what it holds', async () => {
     renderEditor()
     await screen.findByRole('tab', { name: /related-work\.tex/ })
     await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const before = writes()
+    const putBodies = () =>
+      gateway.fetch.mock.calls
+        .filter(([url, init]) => String(url).endsWith('/files/related-work.tex') && (init as RequestInit)?.method === 'PUT')
+        .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { content: string; updated?: string })
 
-    // hold the first write until the second has been applied
+    // hold the first write's reply
     let releaseFirst: (() => void) | null = null
     let held = 0
+    let updatedAfterFirst = ''
     gateway.beforeWrite = (_name, content) => {
       if (content.startsWith('% one') && !content.startsWith('% one\n% two')) {
         held += 1
@@ -221,21 +227,58 @@ describe('Author LaTeX editor — saving', () => {
           releaseFirst = resolve
         })
       }
+      updatedAfterFirst = gateway.drafts.get('d1')!.updated
       return Promise.resolve()
     }
     type('% one\n')
     await waitFor(() => expect(held).toBe(1), { timeout: 3000 })
     type('% two\n', '% one\n'.length)
-    await waitFor(() => expect(stored().startsWith('% one\n% two\n')).toBe(true), { timeout: 3000 })
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    // past the pause, the second write has not gone out: one PUT of this file is in flight
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    expect(writes()).toBe(before + 1)
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saving…')
 
     releaseFirst!()
-    // the first write lands on the gateway last, so the gateway holds the older text now…
-    await waitFor(() => expect(stored().startsWith('% one\n')).toBe(true))
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    // …but the editor kept the newer text and shows the older reply as an outstanding difference
-    expect(source()).toContain('% two')
-    expect(source()).toContain('% one')
+    await waitFor(() => expect(writes()).toBe(before + 2), { timeout: 3000 })
+    await waitFor(() => expect(stored().startsWith('% one\n% two\n')).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(source()).toContain('% one% two') // CodeMirror's textContent has no line breaks
+
+    // each write carried the draft's `updated` the editor last saw: the second, the first's answer
+    const bodies = putBodies().slice(-2)
+    expect(bodies.map((b) => b.content.startsWith('% one\n% two'))).toEqual([false, true])
+    expect(bodies.map((b) => typeof b.updated)).toEqual(['string', 'string'])
+    expect(bodies[1].updated).toBe(updatedAfterFirst)
+  })
+
+  test('a write from an editor another tab has overtaken is refused: the text stays, the error names it, and Retry overwrites', async () => {
+    renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const original = stored()
+    const reads = () => gateway.calls.filter((c) => c === 'GET /author/drafts/d1').length
+    const readsBefore = reads()
+
+    // another tab saves the file: the draft's `updated` moves on without this editor seeing it
+    const draft = gateway.drafts.get('d1')!
+    draft.files.find((f) => f.name === 'related-work.tex')!.content = `% from another tab\n${original}`
+    draft.updated = new Date(Date.now() + 60_000).toISOString()
+
+    type('% here\n')
+    const alert = await screen.findByRole('alert', {}, { timeout: 3000 })
+    expect(alert).toHaveTextContent('related-work.tex was changed elsewhere (another tab?) since this editor last saved it.')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · not saved')
+    expect(stored().startsWith('% from another tab\n')).toBe(true) // nothing was overwritten
+    expect(source()).toContain('% here') // and the author's text is still on screen
+    expect(source()).not.toContain('% from another tab')
+    // the draft was read again, so the editor now knows the gateway's `updated`
+    await waitFor(() => expect(reads()).toBeGreaterThan(readsBefore))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(stored().startsWith('% here\n')).toBe(true), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   test('switching drafts keeps each draft its own text', async () => {

@@ -291,6 +291,10 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         const content = String(body?.content ?? '')
         if (gateway.beforeWrite) await gateway.beforeWrite(name, content)
         if (gateway.failWrites) return fail(503, 'the gateway is down')
+        // As the real route: a write carrying the `updated` the editor last saw is refused
+        // when the draft has changed since (another tab saved); one carrying none is not checked.
+        const updated = body?.updated as string | undefined
+        if (updated !== undefined && updated !== draft.updated) return fail(409, 'the draft was changed elsewhere since this editor last saved it')
         const existing = draft.files.find((f) => f.name === name)
         if (existing) existing.content = content
         else draft.files.push({ name, kind: kindOf(name), content })
