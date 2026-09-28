@@ -17,7 +17,10 @@ def _passage(source):
 
 
 def _hit(source):
-    return {"source": source, "page": 1, "score": 0.5, "kind": "page", "label": "", "caption": "", "image": ""}
+    return {
+        "source": source, "page": 1, "score": 0.5,
+        "kind": "page", "label": "", "caption": "", "image": "",
+    }
 
 
 def test_evidence_passes_source_and_still_drops_other_sources(monkeypatch):
