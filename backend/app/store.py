@@ -129,6 +129,16 @@ def save(analysis: dict) -> None:
         database.commit()
 
 
+def load(analysis_id: str) -> dict | None:
+    """One stored analysis, or None if there is no such row."""
+    if _use_supabase():
+        rows = _supabase().table("analyses").select("data").eq("id", analysis_id).execute().data
+        return rows[0]["data"] if rows else None
+    with _sqlite() as database:
+        row = database.execute("SELECT data FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
 def load_all() -> dict[str, dict]:
     """Every stored analysis, oldest first, keyed by id."""
     if _use_supabase():

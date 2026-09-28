@@ -149,3 +149,88 @@ def test_subscribe_forever_retries_on_connection_errors_and_cancels_cleanly(monk
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=5))
     assert len(attempts) >= 2
+
+
+def test_resync_applies_stages_missed_while_disconnected(monkeypatch):
+    """A worker published "checking" and "done" while the subscriber was reconnecting. Those
+    snapshots are gone, but the store has them."""
+    main._apply_snapshot({"id": "a1", "status": "running", "stages": [{"stage": "queued"}], "claims": []})
+    _drain(main.streams["a1"])
+    stored = {
+        "id": "a1", "status": "done", "claims": [],
+        "stages": [{"stage": "queued"}, {"stage": "checking"}, {"stage": "done"}],
+    }
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: stored if analysis_id == "a1" else None)
+
+    asyncio.run(main._resync_running())
+
+    assert main.analyses["a1"]["status"] == "done"
+    assert _drain(main.streams["a1"]) == [{"stage": "checking"}, {"stage": "done"}, None]
+
+
+def test_resync_reads_only_running_analyses(monkeypatch):
+    main._apply_snapshot({"id": "done1", "status": "done", "stages": [{"stage": "done"}], "claims": []})
+    asked = []
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: asked.append(analysis_id))
+
+    asyncio.run(main._resync_running())
+
+    assert asked == []
+
+
+def test_subscriber_resyncs_every_time_it_subscribes(monkeypatch):
+    monkeypatch.setattr(main, "_SUBSCRIBE_BACKOFF_START", 0.01)
+    monkeypatch.setattr(main, "_SUBSCRIBE_BACKOFF_MAX", 0.01)
+    resyncs = []
+
+    async def resync():
+        resyncs.append(1)
+
+    monkeypatch.setattr(main, "_resync_running", resync)
+
+    class FakePubSub:
+        async def psubscribe(self, *args, **kwargs):
+            pass
+
+        async def listen(self):
+            raise ConnectionError("dropped")
+            yield  # an async generator that fails on first read
+
+    class FakeClient:
+        def pubsub(self):
+            return FakePubSub()
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(main, "pubsub_client", lambda: FakeClient())
+
+    async def scenario():
+        task = asyncio.create_task(main._subscribe_forever())
+        while len(resyncs) < 2:
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+    assert len(resyncs) >= 2  # once per (re)subscription
+
+
+def test_event_stream_sends_a_keep_alive_while_idle(monkeypatch):
+    monkeypatch.setattr(main, "HEARTBEAT_SECONDS", 0.05)
+    main._apply_snapshot({"id": "a1", "status": "running", "stages": [{"stage": "queued"}], "claims": []})
+
+    async def scenario():
+        response = await main.analysis_events("a1", user=None)
+        body = response.body_iterator
+        first = await body.__anext__()  # the replayed stage
+        second = await body.__anext__()  # nothing new: a keep-alive comment
+        main.streams["a1"].put_nowait(None)
+        rest = [chunk async for chunk in body]
+        return first, second, rest
+
+    first, second, rest = asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+    assert first.startswith("data: ")
+    assert second == ": keep-alive\n\n"
+    assert all(chunk == ": keep-alive\n\n" for chunk in rest)  # then it ends at the None
