@@ -153,6 +153,16 @@ def _apply_snapshot(snapshot: dict) -> None:
         queue.put_nowait(None)
 
 
+async def _resync_running() -> None:
+    """Snapshots published while the subscriber was disconnected are gone: pub/sub keeps
+    nothing. The worker also saves each stage to the store, so read running analyses back
+    from there. _apply_snapshot skips whatever this gateway already has."""
+    for analysis_id in [a["id"] for a in analyses.values() if a["status"] == "running"]:
+        stored = await asyncio.to_thread(store.load, analysis_id)
+        if stored:
+            _apply_snapshot(stored)
+
+
 _SUBSCRIBE_BACKOFF_START = 1.0
 _SUBSCRIBE_BACKOFF_MAX = 30.0
 
@@ -169,6 +179,10 @@ async def _subscribe_forever() -> None:
             pubsub = client.pubsub()
             await pubsub.psubscribe("analysis:*")
             backoff = _SUBSCRIBE_BACKOFF_START
+            try:
+                await _resync_running()
+            except Exception:
+                logger.exception("reading running analyses back from the store failed")
             async for message in pubsub.listen():
                 if message["type"] != "pmessage":
                     continue
@@ -545,6 +559,11 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
     return {"deleted": analysis_id}
 
 
+# A stage can take minutes with nothing to send. A comment line keeps proxies from closing
+# the idle stream; the web app skips events that carry no data.
+HEARTBEAT_SECONDS = 15
+
+
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
     """Server-sent events: the stages already recorded, then each new one as it happens.
@@ -558,7 +577,14 @@ async def analysis_events(analysis_id: str, user: str | None = Depends(current_u
         if analyses[analysis_id]["status"] != "running":
             return
         # the queue still holds everything replayed above, in the same order
-        while (event := await streams[analysis_id].get()) is not None:
+        while True:
+            try:
+                event = await asyncio.wait_for(streams[analysis_id].get(), HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if event is None:
+                return
             if replayed:
                 replayed.pop(0)
                 continue
