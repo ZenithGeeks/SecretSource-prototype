@@ -203,3 +203,22 @@ def test_an_analysis_id_is_not_found_on_the_check_routes(client):
     assert client.get("/analyses/p0", headers=ada).status_code == 200
 
     main.streams.pop("p1", None)
+
+
+def test_a_check_that_is_not_finished_cannot_be_deleted(client):
+    """Only a finished check can go (PR #291 review): _run_check still writes to the row and
+    saves it from its finally block, so any status other than done/error is a 409."""
+    ada = {"Authorization": "Bearer token-ada"}
+    for status in ("running", "queued", None):
+        row = {"id": "c1", "kind": "check", "owner": "user-ada", "status": status, "stages": []}
+        if status is None:
+            del row["status"]
+        main.analyses["c1"] = row
+        response = client.delete("/checks/c1", headers=ada)
+        assert response.status_code == 409, status
+        assert "c1" in main.analyses
+    for status in main.FINISHED:
+        row = {"id": "c1", "kind": "check", "owner": "user-ada", "status": status, "stages": []}
+        main.analyses["c1"] = row
+        assert client.delete("/checks/c1", headers=ada).status_code == 200, status
+        assert "c1" not in main.analyses

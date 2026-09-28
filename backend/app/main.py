@@ -646,9 +646,18 @@ async def get_check(check_id: str, user: str | None = Depends(current_user)):
     return _mine(check_id, user, kind="check")
 
 
+# The statuses a check or analysis ends in; anything else means its task is still writing.
+FINISHED = ("done", "error")
+
+
 @app.delete("/checks/{check_id}")
 async def delete_check(check_id: str, user: str | None = Depends(current_user)):
-    _mine(check_id, user, kind="check")
+    check = _mine(check_id, user, kind="check")
+    if check.get("status") not in FINISHED:
+        # _run_check is still writing to analyses[check_id] and streams[check_id], and its
+        # finally block saves the row: deleting now would either crash that task or bring the
+        # row back. Same rule as delete_analysis, minus the queue (checks run in-process).
+        raise HTTPException(409, "this check is still running; delete it once it finishes")
     await _delete_one(check_id)
     return {"deleted": check_id}
 

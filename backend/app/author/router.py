@@ -599,7 +599,7 @@ async def compare_checks(check_id: str, user: str | None = Depends(current_user)
 @router.delete("/checks/{check_id}")
 async def delete_check(check_id: str, user: str | None = Depends(current_user)):
     run = _check(check_id, user)
-    if run.get("status") == "running":
+    if run.get("status") not in _gateway().FINISHED:
         raise HTTPException(409, "the check is still running")
     await _gateway()._delete_one(check_id)
     return {"deleted": check_id}
