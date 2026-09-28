@@ -1,7 +1,7 @@
 """_evidence and _visual pass the cited paper's name to the retrieval services as `source`,
-so Qdrant filters server-side. They also keep the client-side source check as a guard: a
-ColBERT/ColPali service that has not been redeployed yet ignores the unknown field and
-returns global results, and those must still be dropped.
+so each service scores only that one paper's vector file. They also keep the client-side
+source check as a guard: a ColBERT/ColPali service that has not been redeployed yet ignores
+the unknown field and returns global results, and those must still be dropped.
 """
 
 from pathlib import Path
