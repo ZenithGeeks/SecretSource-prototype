@@ -98,15 +98,22 @@ def _public(row: dict) -> dict:
 # --- drafts and their checks ------------------------------------------------------------
 
 
+def _checks_by_draft(user: str | None) -> dict[str, list[dict]]:
+    """Every check this user ran, grouped by draft, each group oldest first: one pass over
+    the gateway's rows for a whole request, however many drafts it lists."""
+    by_draft: dict[str, list[dict]] = {}
+    for a in _gateway().analyses.values():
+        if a.get("kind") == DRAFT_CHECK and a.get("owner") == user:
+            by_draft.setdefault(a.get("draftId"), []).append(a)
+    for runs in by_draft.values():
+        runs.sort(key=lambda a: a.get("startedAt", ""))
+    return by_draft
+
+
 def _checks_of(draft_id: str, user: str | None) -> list[dict]:
-    """Every check run on a draft, oldest first."""
-    gateway = _gateway()
-    runs = [
-        a
-        for a in gateway.analyses.values()
-        if a.get("kind") == DRAFT_CHECK and a.get("draftId") == draft_id and a.get("owner") == user
-    ]
-    return sorted(runs, key=lambda a: a.get("startedAt", ""))
+    """Every check run on a draft, oldest first. For one draft; a route that lists many uses
+    _checks_by_draft once instead of this once per draft."""
+    return _checks_by_draft(user).get(draft_id, [])
 
 
 def _latest_done(runs: list[dict]) -> dict | None:
@@ -255,7 +262,8 @@ def _text_files_from_upload(name: str, content: bytes) -> list[dict]:
 @router.get("/drafts")
 async def list_drafts(user: str | None = Depends(current_user)):
     drafts = await asyncio.to_thread(_rows, DRAFTS, user)
-    views = [draft_view(d, _checks_of(d["id"], user)) for d in drafts]
+    runs = _checks_by_draft(user)
+    views = [draft_view(d, runs.get(d["id"])) for d in drafts]
     return sorted(views, key=lambda d: d.get("updated", ""), reverse=True)
 
 
@@ -767,7 +775,7 @@ async def list_projects(user: str | None = Depends(current_user)):
     projects, drafts = await asyncio.gather(
         asyncio.to_thread(_rows, PROJECTS, user), asyncio.to_thread(_rows, DRAFTS, user)
     )
-    runs = {d["id"]: _checks_of(d["id"], user) for d in drafts}
+    runs = _checks_by_draft(user)
     return [_project_view(p, drafts, runs) for p in projects]
 
 
@@ -802,11 +810,11 @@ async def get_project(project_id: str, user: str | None = Depends(current_user))
     """Project detail: the project, its drafts, and every draft's check history."""
     project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
     drafts = [d for d in await asyncio.to_thread(_rows, DRAFTS, user) if d.get("projectId") == project_id]
-    runs = {d["id"]: _checks_of(d["id"], user) for d in drafts}
+    runs = _checks_by_draft(user)
     history = {}
     for draft in drafts:
         views, done_before = [], None
-        for run in runs[draft["id"]]:
+        for run in runs.get(draft["id"], []):
             views.append(check_view(run, done_before if run.get("status") == "done" else None, full=False))
             if run.get("status") == "done":
                 done_before = run
@@ -814,7 +822,7 @@ async def get_project(project_id: str, user: str | None = Depends(current_user))
     view = _project_view(project, drafts, runs)
     view["bib"] = project.get("bib")
     view["draftList"] = sorted(
-        (draft_view(d, runs[d["id"]]) for d in drafts), key=lambda d: d.get("updated", ""), reverse=True
+        (draft_view(d, runs.get(d["id"])) for d in drafts), key=lambda d: d.get("updated", ""), reverse=True
     )
     view["history"] = history
     return view
@@ -987,7 +995,7 @@ async def library(user: str | None = Depends(current_user)):
         asyncio.to_thread(_rows, DRAFTS, user),
         asyncio.to_thread(_rows, SOURCES, user),
     )
-    runs = {d["id"]: _checks_of(d["id"], user) for d in drafts}
+    runs = _checks_by_draft(user)
     by_id = {p["id"]: p for p in projects}
     unsorted = [s for s in sources if not s.get("projectId")]
     unsorted_drafts = [d for d in drafts if not d.get("projectId")]
@@ -1355,7 +1363,8 @@ async def export_data(user: str | None = Depends(current_user)):
         asyncio.to_thread(_rows, DRAFTS, user),
         asyncio.to_thread(_rows, SOURCES, user),
     )
-    checks = [check_view(r) for d in drafts for r in _checks_of(d["id"], user)]
+    runs = _checks_by_draft(user)
+    checks = [check_view(r) for d in drafts for r in runs.get(d["id"], [])]
     return {
         "exportedAt": logic.now_iso(),
         "projects": [_public(p) for p in projects],
