@@ -5,6 +5,10 @@ scrape_configs:
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]
+  # The host: disk space, memory, load (docker-compose.yml, node-exporter).
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
   # Application metrics (success rate, queueing, verdicts, audit findings, LLM token usage):
   # app/metrics.py, exposed at GET /metrics on the gateway itself (backend/app/main.py).
   - job_name: gateway
