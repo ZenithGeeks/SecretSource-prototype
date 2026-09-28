@@ -70,7 +70,10 @@ services:
 
   colbert:
     profiles: [gpu]
-    build: ./services/colbert
+    build:
+      context: ./services/colbert
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu130
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8893:8893"
     volumes:

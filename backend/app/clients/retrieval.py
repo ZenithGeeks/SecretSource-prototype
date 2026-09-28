@@ -48,7 +48,7 @@ def colbert_add(path: str) -> dict:
     """Index one PDF. Safe to run again: re-adding replaces the paper's passages."""
     with open(path, "rb") as pdf:
         response = requests.post(
-            f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=600
+            f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=900
         )
     if not response.ok:
         return {"status": "error", "message": _detail(response), "reason": "indexing-failed"}
