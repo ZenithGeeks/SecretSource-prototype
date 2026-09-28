@@ -291,6 +291,17 @@ services:
       - /var/lib/docker:/var/lib/docker:ro
     restart: unless-stopped
 
+  # The host's own numbers (disk, memory, load), which cAdvisor does not report. Grafana's
+  # disk alert reads these: deploy/monitoring/grafana/provisioning/alerting/disk.yml.
+  node-exporter:
+    profiles: [monitoring]
+    image: prom/node-exporter:v1.8.2
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+
   prometheus:
     profiles: [monitoring]
     image: prom/prometheus:latest
@@ -300,6 +311,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:9090:9090"
     depends_on:
       - cadvisor
+      - node-exporter
     restart: unless-stopped
 
   grafana:

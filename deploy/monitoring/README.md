@@ -57,6 +57,15 @@ RQ worker — so its file lives under `deploy/monitoring/grafana/dashboards-disa
 `dashboards/`, where the dashboard provider won't load it; move it back with `git mv` to turn it
 back on.
 
+## Disk alert
+
+`node-exporter` reports the host's own disk, memory and load, which cAdvisor does not.
+Grafana loads one alert rule from `grafana/provisioning/alerting/disk.yml`: "Disk over 80% full"
+fires when `/` or `/var/lib/docker` stays over 80% for 10 minutes. It shows under Alerting in
+Grafana. It is not emailed until Grafana has SMTP settings (`GF_SMTP_*` environment variables).
+On ss-core a weekly job, `/etc/cron.weekly/docker-prune`, removes stopped containers, untagged
+images and old build cache.
+
 ## Analyses dashboard
 
 The **"Analyses"** dashboard reads the `analyses` table directly (Supabase Postgres) instead of
