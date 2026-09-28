@@ -193,7 +193,11 @@ services:
   # Horizontally scalable: the number of workers is how many analyses run at once.
   #   docker compose up -d --scale worker=3
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # "<2.4" on a CPU without SSE4.2 (ss-core); empty elsewhere. See backend/app/native.py.
+        NUMPY_SPEC: ${WORKER_NUMPY_SPEC:-}
     command: python worker.py
     environment: *gateway-env
     volumes:
