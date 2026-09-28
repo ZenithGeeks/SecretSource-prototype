@@ -82,9 +82,9 @@ gcloud run deploy grobid --image lfoppiano/grobid:0.8.2 --region "$REGION" \
     --port 8070 --memory 4Gi --allow-unauthenticated --quiet
 
 build_and_push colbert ./services/colbert
-deploy colbert --port 8893 --memory 4Gi --allow-unauthenticated \
-    --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
-    --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
+# The weights are in the image (services/colbert/Dockerfile). The server waits up to 900 s so a
+# long paper indexed on a cold instance finishes instead of returning a 504.
+deploy colbert --port 8893 --memory 4Gi --timeout 900 --allow-unauthenticated \
     --set-env-vars "VECTOR_STORE=$VECTOR_STORE"
 
 COLPALI_ENV=""
