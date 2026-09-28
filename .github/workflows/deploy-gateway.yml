@@ -3,7 +3,7 @@
 # ss-core) — this runs on a normal GitHub-hosted runner, since Cloud Run is public HTTPS and
 # needs no VPN or box-local runner to reach it.
 #
-# Points at the team's existing shared colbert/colpali/grobid/vllm/Qdrant services (see
+# Points at the team's existing shared colbert/colpali/grobid/vllm services (see
 # deploy/team-cloud-services-setup.md) and does not touch, rebuild, or redeploy them — that
 # is deploy/cloudrun.sh's job, unrelated to this workflow. On Cloud Run the gateway's own
 # service account mints the identity token those shared services need (SERVICE_AUTH=
@@ -19,7 +19,6 @@
 #   S2_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 #   GROBID_URL, COLBERT_URL, COLPALI_URL
 #   VLLM_URL, VLLM_MODEL, VLLM_API_KEY
-#   QDRANT_URL, QDRANT_API_KEY
 #
 # After the first run, point Vercel's VITE_GATEWAY_URL at the URL this workflow prints, then
 # redeploy the web app there.
@@ -69,8 +68,6 @@ jobs:
           VLLM_URL: ${{ secrets.VLLM_URL }}
           VLLM_MODEL: ${{ secrets.VLLM_MODEL }}
           VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
-          QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           S2_API_KEY: ${{ secrets.S2_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -85,7 +82,7 @@ jobs:
           gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
             --port 8080 --memory 8Gi --allow-unauthenticated \
             --max-instances 1 --no-cpu-throttling --cpu 4 \
-            --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY,S2_API_KEY=$S2_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL"
+            --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,S2_API_KEY=$S2_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL"
 
       - name: Print the gateway URL
         run: gcloud run services describe gateway --region "$REGION" --format 'value(status.url)'

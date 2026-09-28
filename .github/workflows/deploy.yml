@@ -6,8 +6,6 @@
 # Required repository secrets:
 #   GCP_SA_KEY        service-account JSON key with Cloud Run / Artifact Registry / Storage roles
 #   GCP_PROJECT       project id
-#   QDRANT_URL        Qdrant Cloud cluster URL
-#   QDRANT_API_KEY    its API key
 # Optional:
 #   VLLM_API_KEY      keeps the same vLLM key across deploys (otherwise each deploy mints one)
 #   HF_TOKEN          lifts Hugging Face's anonymous rate limit
@@ -40,8 +38,6 @@ jobs:
           PROJECT: ${{ secrets.GCP_PROJECT }}
           REGION: ${{ inputs.region }}
           MODEL: ${{ inputs.model }}
-          QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: ./deploy/cloudrun.sh

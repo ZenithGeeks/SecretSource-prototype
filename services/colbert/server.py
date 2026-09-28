@@ -50,14 +50,14 @@ def add_paper(path: str) -> dict:
     """Index a PDF so search_passages can find its passages. Re-adding replaces them."""
     if not Path(path).is_file():
         return {"status": "error", "message": f"no such file: {path}"}
-    return {"status": "ok", "added": store().add_pdf(path), "total": len(store())}
+    return {"status": "ok", "added": store().add_pdf(path), "papers": len(store())}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _store
-    _store = Store()  # loads the model + connects to Qdrant once
-    print(f"{len(_store)} passages on {_store.encoder.device}")
+    _store = Store()  # loads the model + opens the vector file store once
+    print(f"{len(_store)} papers on {_store.encoder.device}")
     async with mcp.session_manager.run():
         yield
 
@@ -90,7 +90,7 @@ def search_post(body: SearchBody):
 def add(body: AddBody):
     if not Path(body.path).is_file():
         raise HTTPException(404, f"no such file: {body.path}")
-    return {"added": store().add_pdf(body.path), "total": len(store())}
+    return {"added": store().add_pdf(body.path), "papers": len(store())}
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
@@ -110,12 +110,12 @@ def upload(file: UploadFile = PDF_UPLOAD):
     """Index a PDF sent in the request body. Use this instead of /api/add when the caller
     does not share this disk (a gateway on another machine, or on Cloud Run)."""
     path = receive(file, PAPERS_DIR)
-    return {"added": store().add_pdf(path), "total": len(store())}
+    return {"added": store().add_pdf(path), "papers": len(store())}
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "passages": len(store())}
+    return {"ok": True, "papers": len(store())}
 
 
 if __name__ == "__main__":

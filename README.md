@@ -39,8 +39,11 @@ heavy retrieval services are shared and already run in the cloud:
 | ColBERT (`colbert`) | finds text passages in the cited papers | shared cloud service |
 | ColPali (`colpali`) | finds matching figures and pages | shared cloud service (GPU; first request after idle takes about a minute) |
 | GROBID (`grobid`) | reads a PDF's reference list and full text | shared cloud service |
-| Qdrant | stores the ColBERT and ColPali indexes | shared cloud; only ColBERT and ColPali talk to it, so you never configure it |
 | LLM | extracts claims and writes verdicts (any OpenAI-compatible endpoint) | shared endpoint |
+
+ColBERT and ColPali store one vector file per paper in a GCS bucket rather than a database — a
+claim check only ever searches one cited paper's ~150 passages, which plain torch scores in
+milliseconds.
 
 The cloud services only accept requests with a Google identity token. The gateway adds the
 token for you after you do steps 3 and 4 below.
@@ -148,7 +151,7 @@ NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 2. Start the services:
 
    ```sh
-   docker compose up -d --build qdrant grobid colbert colpali redis gateway worker web
+   docker compose up -d --build grobid colbert colpali redis gateway worker web
    ```
 
 3. The models are ColBERTv2 (`colbert-ir/colbertv2.0`, about 0.5 GB) and ColPali (`COLPALI_MODEL=vidore/colqwen2-v1.0`, about 4 GB). In a test run, both together used about 7 to 9 GB of GPU memory.
@@ -239,7 +242,7 @@ frontend (React)  ──► gateway (FastAPI)
                          ├─ Docling         PDF → text, figure crops (a library inside the gateway)
                          ├─ vLLM            claim extraction + verdicts (any OpenAI-compatible server)
                          ├─ colbert service text retrieval  ─┐
-                         └─ colpali service visual retrieval ─┴─► Qdrant (MaxSim multivectors)
+                         └─ colpali service visual retrieval ─┴─► GCS bucket (safetensors, MaxSim in torch)
 
 paper.pdf
    └─ extract_claims_with_citations   claim + the references it cites (GROBID + LLM)
@@ -263,9 +266,9 @@ backend/            gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   cli.py              agent REPL
   worker.py           runs analyses pulled off the Redis queue (RQ worker process)
 frontend/           React + Vite UI, served by nginx which proxies /api to the gateway
-services/colbert/   ColBERTv2 text retrieval (HTTP + MCP, Qdrant)
-services/colpali/   ColPali visual retrieval (HTTP + MCP, Qdrant, opt-in)
-deploy/             Cloud Run deploy script, Qdrant VM startup script, vLLM-on-Cloud-Run guide
+services/colbert/   ColBERTv2 text retrieval (HTTP + MCP, per-paper vector files)
+services/colpali/   ColPali visual retrieval (HTTP + MCP, per-paper vector files, opt-in)
+deploy/             Cloud Run deploy script, vLLM-on-Cloud-Run guide
 data/papers/        downloaded PDFs and figure crops (gitignored, shared volume in compose)
 ```
 </details>
@@ -275,9 +278,10 @@ data/papers/        downloaded PDFs and figure crops (gitignored, shared volume 
 
 Run `PROJECT=<gcp-project> ./deploy/cloudrun.sh`. It builds every image with Cloud Build and
 deploys grobid, colbert, colpali, vllm, gateway and web to Cloud Run. Set `VISION=0` to skip
-colpali. Qdrant runs on a small VM with its own disk (`deploy/qdrant-startup.sh`). To use a
-Qdrant cluster instead, set `QDRANT_URL` and `QDRANT_API_KEY`. For the vLLM part (quota,
-start-up time, cost), read [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
+colpali. ColBERT and ColPali store their vectors in a GCS bucket (`gs://<project>-vectors` by
+default, override with `VECTOR_BUCKET`) that the script creates and grants the Cloud Run
+service account access to. For the vLLM part (quota, start-up time, cost), read
+[deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
 
 In production, the gateway instead deploys through `.github/workflows/deploy-gateway.yml`, which
 runs on every push to `main` that touches `backend/**` and refuses to deploy if the `REDIS_URL`
@@ -324,7 +328,7 @@ python -m uvicorn app.main:app --port 8080
 # agent REPL (from the repo root)
 python backend/cli.py
 
-# retrieval service (from services/colbert/; needs Qdrant: docker compose up -d qdrant)
+# retrieval service (from services/colbert/; writes vector files under ./vectors by default)
 cd services/colbert && pip install -r requirements.txt
 python server.py
 
@@ -372,6 +376,6 @@ Ask @EarthWittawat for the shared .env values and the credentials file.
 
 ## Acknowledgements
 
-[ColBERT](https://github.com/stanford-futuredata/ColBERT), [ColPali](https://github.com/illuin-tech/colpali), [GROBID](https://github.com/kermitt2/grobid), [Docling](https://github.com/docling-project/docling), [DSPy](https://github.com/stanfordnlp/dspy), [Google ADK](https://github.com/google/adk-python), [Qdrant](https://github.com/qdrant/qdrant), [vLLM](https://github.com/vllm-project/vllm), [Awesome Readme Template](https://github.com/Louis3797/awesome-readme-template)
+[ColBERT](https://github.com/stanford-futuredata/ColBERT), [ColPali](https://github.com/illuin-tech/colpali), [GROBID](https://github.com/kermitt2/grobid), [Docling](https://github.com/docling-project/docling), [DSPy](https://github.com/stanfordnlp/dspy), [Google ADK](https://github.com/google/adk-python), [safetensors](https://github.com/huggingface/safetensors), [vLLM](https://github.com/vllm-project/vllm), [Awesome Readme Template](https://github.com/Louis3797/awesome-readme-template)
 
 No license has been chosen yet; all rights reserved by the project team.
