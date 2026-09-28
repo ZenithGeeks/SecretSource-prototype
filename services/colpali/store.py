@@ -154,11 +154,12 @@ class Store:
         ]
         return self._upsert(rows, vectors, content_hash)
 
-    def search(self, query: str, k: int = 5) -> list[dict]:
-        """Top-k figures or pages by MaxSim."""
+    def search(self, query: str, k: int = 5, source: str | None = None) -> list[dict]:
+        """Top-k figures or pages by MaxSim, optionally restricted to one source paper."""
         vector = self.encoder.query(query).tolist()
         hits = self.client.query_points(
-            COLLECTION, query=vector, using=VECTOR_NAME, limit=k, with_payload=True
+            COLLECTION, query=vector, using=VECTOR_NAME, limit=k, with_payload=True,
+            query_filter=self._source_filter(source) if source is not None else None,
         ).points
         return [
             {"rank": i + 1, "score": round(hit.score, 4), **hit.payload}
