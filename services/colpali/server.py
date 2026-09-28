@@ -3,9 +3,9 @@
     python server.py            # http://0.0.0.0:8894  (COLPALI_PORT to change)
 
 HTTP:
-    GET  /api/search?query=...&k=5       -> {"topk": [{"rank", "score", "page", "kind", "label",
-                                                        "caption", "image", "title", "source"}, ...]}
-    POST /api/search {"query", "k"}      -> same
+    GET  /api/search?query=...&k=5&source=...  -> {"topk": [{"rank", "score", "page", "kind",
+                                                    "label", "caption", "image", "title", "source"}, ...]}
+    POST /api/search {"query", "k", "source"}  -> same. source (optional) restricts to one paper
     POST /api/add    {"path": "x.pdf"}   -> {"added": pages, "total": rows}   whole pages
     POST /api/add_figures {"source", "title", "figures": [{"label", "page", "caption", "image"}]}
     POST /api/upload          multipart "file"                        -> like /api/add
@@ -60,9 +60,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def search_media(query: str, k: int = 5) -> dict:
+def search_media(query: str, k: int = 5, source: str | None = None) -> dict:
     """Search indexed figures and pages by how they look. Returns labeled hits with captions."""
-    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50))}
+    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
 @asynccontextmanager
@@ -81,6 +81,7 @@ app.mount("/mcp", mcp.streamable_http_app())
 class SearchBody(BaseModel):
     query: str
     k: int = 5
+    source: str | None = None
 
 
 class AddBody(BaseModel):
@@ -101,13 +102,13 @@ class AddFiguresBody(BaseModel):
 
 
 @app.get("/api/search")
-def search(query: str, k: int = 5):
-    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50))}
+def search(query: str, k: int = 5, source: str | None = None):
+    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
-    return search(body.query, body.k)
+    return search(body.query, body.k, body.source)
 
 
 @app.post("/api/add")

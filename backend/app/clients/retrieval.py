@@ -30,10 +30,13 @@ def _pdf(path: str, handle) -> dict:
     return {"file": (Path(path).name, handle, "application/pdf")}
 
 
-def colbert_search(query: str, k: int = 10) -> list[dict]:
+def colbert_search(query: str, k: int = 10, source: str | None = None) -> list[dict]:
+    body = {"query": query, "k": k}
+    if source is not None:
+        body["source"] = source
     response = requests.post(
         f"{COLBERT_URL}/api/search",
-        json={"query": query, "k": k},
+        json=body,
         headers=auth_headers(COLBERT_URL),
         timeout=120,
     )
@@ -83,10 +86,13 @@ def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
         )
 
 
-def colpali_search(query: str, k: int = 20) -> dict:
+def colpali_search(query: str, k: int = 20, source: str | None = None) -> dict:
+    body = {"query": query, "k": k}
+    if source is not None:
+        body["source"] = source
     response = requests.post(
         f"{COLPALI_URL}/api/search",
-        json={"query": query, "k": k},
+        json=body,
         headers=auth_headers(COLPALI_URL),
         timeout=60,
     )

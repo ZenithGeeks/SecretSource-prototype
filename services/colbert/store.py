@@ -135,12 +135,14 @@ class Store:
             self.client.upsert(COLLECTION, points[start : start + UPSERT_BATCH])
         return len(points)
 
-    def search(self, query: str, k: int = 10) -> list[dict]:
-        """Top-k passages by MaxSim. Each query token finds its best-matching doc token,
-        and the scores are added up. Qdrant does this scoring for multivectors itself."""
+    def search(self, query: str, k: int = 10, source: str | None = None) -> list[dict]:
+        """Top-k passages by MaxSim, optionally restricted to one source paper. Each query
+        token finds its best-matching doc token, and the scores are added up. Qdrant does
+        this scoring for multivectors itself."""
         vector = self.encoder.query(query).tolist()
         hits = self.client.query_points(
-            COLLECTION, query=vector, using=VECTOR_NAME, limit=k, with_payload=True
+            COLLECTION, query=vector, using=VECTOR_NAME, limit=k, with_payload=True,
+            query_filter=self._source_filter(source) if source is not None else None,
         ).points
         return [
             {

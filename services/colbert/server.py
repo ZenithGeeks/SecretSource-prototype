@@ -40,9 +40,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def search_passages(query: str, k: int = 10) -> dict:
+def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
     """Search the indexed papers. Returns the top-k passages with page and span for each."""
-    return {"topk": store().search(query, min(k, 100))}
+    return {"topk": store().search(query, min(k, 100), source)}
 
 
 @mcp.tool()
@@ -69,6 +69,7 @@ app.mount("/mcp", mcp.streamable_http_app())
 class SearchBody(BaseModel):
     query: str
     k: int = 10
+    source: str | None = None
 
 
 class AddBody(BaseModel):
@@ -76,13 +77,13 @@ class AddBody(BaseModel):
 
 
 @app.get("/api/search")
-def search(query: str, k: int = 10):
-    return {"topk": store().search(query, min(k, 100))}
+def search(query: str, k: int = 10, source: str | None = None):
+    return {"topk": store().search(query, min(k, 100), source)}
 
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
-    return search(body.query, body.k)
+    return search(body.query, body.k, body.source)
 
 
 @app.post("/api/add")

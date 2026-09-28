@@ -30,6 +30,7 @@ class FakeQdrantClient:
         self.points_by_source: dict[str, list[dict]] = {}
         self.deletes = []
         self.upsert_calls = 0
+        self.query_calls = []
 
     def collection_exists(self, name):
         return True
@@ -62,6 +63,15 @@ class FakeQdrantClient:
         for point in points:
             self.points_by_source.setdefault(point.payload["source"], []).append(point.payload)
 
+    def query_points(self, collection, query, using, limit, with_payload, **kwargs):
+        self.query_calls.append(kwargs)
+        return FakePoints([])
+
+
+class FakePoints:
+    def __init__(self, points):
+        self.points = points
+
 
 class FakeEncoder:
     def __init__(self, device=None):
@@ -70,6 +80,9 @@ class FakeEncoder:
     def docs(self, texts):
         self.doc_calls += 1
         return [np.ones((1, 4), dtype=np.float32) for _ in texts]
+
+    def query(self, text):
+        return np.ones(4, dtype=np.float32)
 
 
 @pytest.fixture
@@ -122,3 +135,19 @@ def test_changed_content_under_the_same_name_re_encodes_and_replaces(tmp_path, f
 
     assert fresh_store.encoder.doc_calls == 2  # re-encoded
     assert fresh_store.client.deletes == ["paper.pdf", "paper.pdf"]  # old points replaced each time
+
+
+def test_search_with_source_passes_a_query_filter(fresh_store):
+    fresh_store.search("a claim", k=3, source="a.pdf")
+
+    [kwargs] = fresh_store.client.query_calls
+    condition = kwargs["query_filter"].must[0]
+    assert condition.key == "source"
+    assert condition.match.value == "a.pdf"
+
+
+def test_search_without_source_passes_no_filter(fresh_store):
+    fresh_store.search("a claim", k=3)
+
+    [kwargs] = fresh_store.client.query_calls
+    assert kwargs.get("query_filter") is None
