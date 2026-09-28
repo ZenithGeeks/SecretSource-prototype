@@ -57,6 +57,10 @@ def add_paper(path: str) -> dict:
 async def lifespan(app: FastAPI):
     global _store
     _store = Store()  # loads the model + opens the vector file store once
+    # One throwaway encode of each kind: torch sets itself up on its first forward pass, and
+    # without this the first real search on a new instance paid for it (about 8 s).
+    _store.encoder.query("warm up")
+    _store.encoder.docs(["warm up"])
     print(f"{len(_store)} papers on {_store.encoder.device}")
     async with mcp.session_manager.run():
         yield
