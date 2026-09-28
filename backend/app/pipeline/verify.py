@@ -5,6 +5,7 @@ query, and the LLM judges whether they support it: supports / refutes / insuffic
 Visual evidence (ColPali) is optional and skipped when that service is down.
 """
 
+import logging
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -14,6 +15,8 @@ from app import store
 from app.clients import retrieval
 from app.config import FIGURE_WAIT, PARALLEL_SOURCES, VLLM_MODEL
 from app.metrics import record_llm_usage
+
+logger = logging.getLogger(__name__)
 
 EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
@@ -123,8 +126,9 @@ def _index_visually_if_available(source: Path):
     try:
         if retrieval.colpali_available():
             _index_visually(source)
-    except Exception:
-        pass  # _visual reports nothing when the visual index is missing
+    except Exception as error:
+        # _visual reports nothing when the visual index is missing, so say why here
+        logger.warning("indexing %s in ColPali failed: %s", source.name, error)
 
 
 def _visual(claim: str, source: Path) -> tuple[list[dict], str]:
