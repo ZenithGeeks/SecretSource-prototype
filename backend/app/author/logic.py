@@ -295,8 +295,11 @@ def plain_text(latex: str) -> str:
     s = CITE.sub("", latex)
     s = re.sub(r"(?<!\\)%.*", "", s)
     s = re.sub(r"\\(?:label|ref|eqref|pageref|footnote|index)\{[^}]*\}", "", s)
-    s = re.sub(r"\\[A-Za-z]+\*?(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", s)
-    s = re.sub(r"\\[A-Za-z]+\*?(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", s)  # one level of nesting
+    # Unwrap formatting commands, twice on purpose. The pattern's [^{}]* argument matches
+    # only an innermost {...}, so one pass turns \textbf{\emph{x}} into \textbf{x} and a
+    # second is needed to reach x. Two passes cover the two levels of nesting prose has.
+    for _ in range(2):
+        s = re.sub(r"\\[A-Za-z]+\*?(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", s)
     s = re.sub(r"\$([^$]*)\$", r"\1", s)
     for command, word in (
         ("\\times", "×"),

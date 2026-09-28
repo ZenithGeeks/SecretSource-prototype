@@ -243,3 +243,10 @@ def test_report_html_lists_every_citation_with_its_verdict_and_passage():
     assert "Source contradicts" in html and "ColBERT &lt;b&gt;" in html
     assert "colbert.pdf p.7" in html and "we leave compression to future work" in html
     assert "no free copy published" in html
+
+
+def test_plain_text_unwraps_two_levels_of_formatting():
+    """plain_text runs its unwrap twice on purpose (PR #291 review): each pass reaches only an
+    innermost {...}, so nested formatting needs the second."""
+    assert logic.plain_text(r"We show \textbf{\emph{strong}} gains.") == "We show strong gains."
+    assert logic.plain_text(r"A \emph{clear} claim.") == "A clear claim."
