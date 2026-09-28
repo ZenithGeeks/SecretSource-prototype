@@ -376,6 +376,7 @@ describe('Teacher application routing', () => {
 
     expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
     await waitFor(() => expect(refreshClass).toHaveBeenCalledWith('class-literary-2b'))
+    expect(refreshClass).toHaveBeenCalledTimes(1)
   })
 
   test('shows recent checked submissions in the History page before one is selected', async () => {
