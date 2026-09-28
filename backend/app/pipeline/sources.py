@@ -5,9 +5,11 @@ The rest go to Semantic Scholar, then Unpaywall. Results are cached in SQLite, s
 re-run makes no API call. PDFs are saved in PAPERS_DIR so they can be indexed.
 """
 
+import os
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import NamedTuple
 
@@ -293,7 +295,11 @@ def _download(pdf_url: str, name: str) -> Path:
         if "html" in response.headers.get("Content-Type", "").lower():
             raise WebSource(f"a web page, not a paper: {pdf_url}")
         raise NotDownloadable(f"not a PDF: {pdf_url}")
-    path.write_bytes(response.content)
+    # Written aside, then renamed, as save_upload does: another worker that finds this name
+    # never reads half a file.
+    partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
+    partial.write_bytes(response.content)
+    os.replace(partial, path)
     return path
 
 
