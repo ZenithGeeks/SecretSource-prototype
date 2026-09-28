@@ -202,7 +202,15 @@ export async function printTeacherFeedbackReport(printWindow: Window, html: stri
     })
   }))
 
-  await new Promise<void>((resolve) => printWindow.setTimeout(resolve, 100))
+  await printWindow.document.fonts?.ready
+  if (printWindow.requestAnimationFrame) {
+    await new Promise<void>((resolve) => {
+      printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(() => resolve()))
+    })
+  } else {
+    await new Promise<void>((resolve) => printWindow.setTimeout(resolve, 250))
+  }
+  void printWindow.document.body?.offsetHeight
   printWindow.focus()
   printWindow.print()
 }
