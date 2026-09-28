@@ -23,7 +23,8 @@
  *    length it does not know, replaces every use of it with a grey placeholder (or nothing,
  *    for a counter) and parses again, collecting what it replaced with the lines. What it
  *    learnt is kept between renders and applied before parsing, so an edit to a file with
- *    known unknowns costs one parse; an entry that no longer matches anything is dropped.
+ *    known unknowns costs one parse; an entry that no longer matches anything is dropped,
+ *    and only the MAX_SCOPES most recently rendered package sets are remembered at all.
  *    Only a real syntax error — an unclosed group, a missing \end{document} — is reported.
  * 3. `SECRETSOURCE_MACROS` adds the commands the chapter still needs as LaTeX.js custom
  *    macros (\footnote, \url, \eqref, \pageref, \caption, \includegraphics as a labelled
@@ -504,8 +505,14 @@ const MAX_UNKNOWN = 40
  * LaTeX.js's own message, so the next render applies it before parsing. */
 type Neutralization = { what: string; apply: (source: string) => { source: string; lines: number[] } }
 /** Per set of loaded packages: \textalpha is unknown without textgreek and fine with it, so
- * what one file taught must not be applied to a file that loads different packages. */
+ * what one file taught must not be applied to a file that loads different packages. Ordered
+ * by last use (a render moves its scope to the end), so the first entry is the one to drop. */
 const learnt = new Map<string, Map<string, Neutralization>>()
+/** How many package sets `learnt` keeps. A scope a draft stops using (another file, a removed
+ * package, a closed draft) would otherwise stay for the page's lifetime, one per combination
+ * a long session met; the least recently rendered one goes instead. Re-learning it costs one
+ * parse per unknown, as on a first render. */
+const MAX_SCOPES = 8
 
 /** The bundled packages a prepared source loads, as a cache key. */
 function packageScope(source: string): string {
@@ -516,8 +523,14 @@ function packageScope(source: string): string {
     .join(',')
 }
 
-/** How many times LaTeX.js has parsed, for the tests that check the cache. */
-export const previewStats = { parses: 0 }
+/** How many times LaTeX.js has parsed, and how many package sets are remembered, for the
+ * tests that check the cache. */
+export const previewStats = {
+  parses: 0,
+  get scopes(): number {
+    return learnt.size
+  },
+}
 
 /** Forgets what earlier renders learnt (tests). */
 export function forgetUnknowns(): void {
@@ -547,7 +560,13 @@ export async function renderLatex(source: string): Promise<RenderResult> {
   let current = source
   const scope = packageScope(source)
   const known = learnt.get(scope) ?? new Map<string, Neutralization>()
+  // Re-inserted so the map's order is by last use; then the oldest go while over the cap.
+  learnt.delete(scope)
   learnt.set(scope, known)
+  for (const oldest of learnt.keys()) {
+    if (learnt.size <= MAX_SCOPES) break
+    learnt.delete(oldest)
+  }
   // What earlier renders learnt, applied first; an entry with nothing left to match is gone.
   for (const [key, entry] of known) {
     const applied = entry.apply(current)

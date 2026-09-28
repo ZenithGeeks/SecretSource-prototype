@@ -134,6 +134,28 @@ describe('LaTeX.js on a thesis chapter', () => {
     expect(edited.unknown.map((u) => u.what)).toEqual(['tikzpicture environment', '\\node'])
   }, 30000)
 
+  test('the cache keeps the eight most recently rendered package sets; an older one is re-learnt', async () => {
+    const doc = (packages: string[], body = 'plain text') =>
+      prepareSource(`\\documentclass{article}\n${packages.map((p) => `\\usepackage{${p}}`).join('\n')}\n\\begin{document}\n${body}\n\\end{document}\n`)
+    // A scope with something to learn: \zz is unknown, so its second render normally costs one parse.
+    const first = await renderLatex(doc(['multicol'], 'a \\zz{b} c'))
+    expect(first.unknown.map((u) => u.what)).toEqual(['\\zz'])
+    let before = previewStats.parses
+    await renderLatex(doc(['multicol'], 'a \\zz{b} c, edited'))
+    expect(previewStats.parses - before).toBe(1)
+
+    // Eight other package sets rendered since: the cap holds and the first scope is the one dropped.
+    const others = [[], ['textgreek'], ['gensymb'], ['textcomp'], ['hyperref'], ['graphicx'], ['xcolor'], ['textgreek', 'gensymb']]
+    for (const packages of others) await renderLatex(doc(packages))
+    expect(previewStats.scopes).toBe(8)
+
+    before = previewStats.parses
+    const relearnt = await renderLatex(doc(['multicol'], 'a \\zz{b} c, again'))
+    expect(previewStats.parses - before).toBe(2) // the first try, then one for \zz
+    expect(relearnt.unknown.map((u) => u.what)).toEqual(['\\zz'])
+    expect(previewStats.scopes).toBe(8)
+  }, 60000)
+
   test('what one file taught about a macro does not reach a file whose packages define it', async () => {
     // latexsym, which no other test loads: LaTeX.js keeps a package's symbols for the whole
     // process once loaded, so this must be the first render in the file to meet \\Box.
