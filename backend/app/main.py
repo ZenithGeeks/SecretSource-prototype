@@ -335,6 +335,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
+        analysis["completed"] = datetime.now(timezone.utc).isoformat()
         await _publish(analysis_id, "done")
         _detach(_index_self(analysis_id, analysis["title"]))
     except Exception as error:
@@ -351,6 +352,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
 def _start(paper: str, verify: bool, owner: str | None) -> dict:
     analysis_id = uuid.uuid4().hex[:12]
     analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
+                             "started": datetime.now(timezone.utc).isoformat(),
                              "owner": owner, "stages": [], "claims": []}
     streams[analysis_id] = asyncio.Queue()
     ANALYSES_STARTED.inc()

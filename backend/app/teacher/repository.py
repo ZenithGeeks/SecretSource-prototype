@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app import store
@@ -267,16 +267,27 @@ class TeacherGoogleRepository:
         return reviews[0] if reviews else None
 
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
+        row = {**review.to_row(), "updated_at": datetime.now(UTC).isoformat()}
         self._upsert(
             "teacher_professor_reviews",
-            review.to_row(),
+            row,
             "owner,course_id,coursework_id,submission_id,review_id",
         )
 
+    def list_professor_review_activity(self, owner: str) -> list[dict[str, Any]]:
+        return (
+            self._client.table("teacher_professor_reviews")
+            .select("owner,course_id,coursework_id,submission_id,updated_at,created_at")
+            .eq("owner", owner)
+            .execute()
+            .data
+        )
+
     def save_feedback(self, feedback: TeacherFeedback) -> None:
+        row = {**feedback.to_row(), "updated_at": datetime.now(UTC).isoformat()}
         self._upsert(
             "teacher_feedback",
-            feedback.to_row(),
+            row,
             "owner,course_id,coursework_id,submission_id",
         )
 
@@ -295,6 +306,15 @@ class TeacherGoogleRepository:
             .data
         )
         return _feedback_from_row(rows[0]) if rows else None
+
+    def list_feedback_activity(self, owner: str) -> list[dict[str, Any]]:
+        return (
+            self._client.table("teacher_feedback")
+            .select("owner,course_id,coursework_id,submission_id,feedback_text,status,updated_at,created_at,sent_at")
+            .eq("owner", owner)
+            .execute()
+            .data
+        )
 
     def _upsert(self, table: str, row: dict[str, Any], conflict_keys: str) -> None:
         self._client.table(table).upsert(row, on_conflict=conflict_keys).execute()

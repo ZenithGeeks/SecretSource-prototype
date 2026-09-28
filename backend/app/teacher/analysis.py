@@ -298,5 +298,5 @@ class TeacherEssayAnalysisService:
             "preview": feedback.feedback_text if feedback is not None else "",
             "citedPages": [locations[citation_id] for citation_id in citation_ids if locations.get(citation_id)],
             "citationIds": citation_ids,
-            "sharingOptions": feedback.sharing_options or {},
+            "sharingOptions": (feedback.sharing_options if feedback is not None else {}) or {},
         }

@@ -8,6 +8,24 @@ vi.mock('../src/lib/teacherStore', () => ({ store: {} }))
 import { createRemoteTeacherApi, teacherEssayCheckKey } from '../src/lib/teacher'
 
 describe('remote Teacher API', () => {
+  it('loads teacher history from the authenticated gateway', async () => {
+    request.mockResolvedValue([])
+
+    await createRemoteTeacherApi().getHistory()
+
+    expect(request).toHaveBeenCalledWith('/teacher/history')
+    request.mockClear()
+  })
+
+  it('runs a Classroom sync when a class refresh is requested', async () => {
+    request.mockResolvedValue({ workspace: { course: { courseId: 'course-1' } }, sync: { submission_count: 1 } })
+
+    await createRemoteTeacherApi().refreshClass('course-1')
+
+    expect(request).toHaveBeenCalledWith('/teacher/classes/course-1/refresh', { method: 'POST' })
+    request.mockClear()
+  })
+
   it('requests a fresh analysis only when recheck is explicitly selected', async () => {
     request.mockResolvedValue({ id: 'new-analysis', status: 'running' })
     await createRemoteTeacherApi().analyzeSubmission({ courseId: 'course-1', assignmentId: 'work-1', studentId: 'student-1', force: true })

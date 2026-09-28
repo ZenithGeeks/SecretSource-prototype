@@ -28,6 +28,7 @@ import type {
   TeacherClassImportPreview,
   TeacherCourseWork,
   TeacherHome,
+  TeacherHistoryEntry,
   TeacherReadingQuestion,
   TeacherReadingQuestionsPage,
   TeacherWorkspace,
@@ -40,6 +41,7 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 type TeacherDb = {
   home: TeacherHome
+  history: TeacherHistoryEntry[]
   classes: TeacherClass[]
   workspaces: Record<string, TeacherWorkspace>
   assignments: TeacherAssignment[]
@@ -51,6 +53,21 @@ type TeacherDb = {
 
 const initialDb = (): TeacherDb => ({
   home: clone(MOCK_TEACHER_HOME),
+  history: clone(MOCK_TEACHER_HOME.submissions
+    .filter((item) => item.reviewStatus === 'analysis-ready' && item.courseId && item.assignmentId)
+    .map((item) => ({
+      id: `${item.courseId}:${item.assignmentId}:${item.studentId}`,
+      courseId: item.courseId!,
+      courseName: item.courseName ?? '',
+      assignmentId: item.assignmentId,
+      assignmentTitle: item.assignmentTitle ?? item.assignmentId,
+      submissionId: item.id,
+      studentId: item.studentId,
+      studentName: item.studentName,
+      fileName: item.fileName,
+      checkedAt: item.submittedAt ?? '',
+      activity: ['analysis'],
+    } satisfies TeacherHistoryEntry))),
   classes: clone(MOCK_TEACHER_CLASSES),
   workspaces: clone(MOCK_TEACHER_WORKSPACES),
   assignments: clone(MOCK_TEACHER_ASSIGNMENTS),
@@ -82,9 +99,40 @@ function feedbackPreview(body: string, citedPages: string[]): string {
   return `"${sentence.replace(/^['"]|['"]$/g, '')}" - ${lines} lines${pages}`
 }
 
+function touchHistory(essay: EssayCheck, activity: TeacherHistoryEntry['activity'][number]) {
+  const courseId = essay.assignment.courseId
+  const assignmentId = essay.assignment.assignmentId
+  const studentId = essay.student.id
+  const id = `${courseId}:${assignmentId}:${studentId}`
+  const existing = db.history.find((entry) => entry.id === id)
+  const activities = new Set(existing?.activity ?? [])
+  activities.add(activity)
+  db.history = [
+    {
+      id,
+      courseId,
+      courseName: essay.assignment.course,
+      assignmentId,
+      assignmentTitle: essay.assignment.name,
+      submissionId: existing?.submissionId ?? studentId,
+      studentId,
+      studentName: essay.student.name,
+      fileName: essay.student.fileName,
+      checkedAt: new Date().toISOString(),
+      analysisId: essay.analysis?.id,
+      activity: (['analysis', 'professor-review', 'feedback'] as const).filter((item) => activities.has(item)),
+    },
+    ...db.history.filter((entry) => entry.id !== id),
+  ]
+}
+
 export const teacherStore = {
   async getHome(): Promise<TeacherHome> {
     return clone(db.home)
+  },
+
+  async getHistory(): Promise<TeacherHistoryEntry[]> {
+    return clone(db.history)
   },
 
   async getClasses(): Promise<TeacherClass[]> {
@@ -145,6 +193,7 @@ export const teacherStore = {
     if (!essay || !review) throw new Error('That citation could not be found.')
 
     review.professorReview = { outcome: input.outcome, note: input.note }
+    touchHistory(essay, 'professor-review')
     return clone(essay)
   },
 
@@ -167,6 +216,7 @@ export const teacherStore = {
       citedPages,
       preview: feedbackPreview(input.body, citedPages),
     }
+    if (input.body.trim()) touchHistory(essay, 'feedback')
     return clone(essay)
   },
 

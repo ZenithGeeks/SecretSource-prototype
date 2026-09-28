@@ -56,6 +56,24 @@ test('updating a professor result changes only the selected review', async () =>
   assert.equal(updated.reviews.find((review) => review.id === 'review-dpr')?.professorReview.outcome, 'not-reviewed')
 })
 
+test('teacher history merges new activity into the existing submission', async () => {
+  resetTeacherStore()
+  const before = await teacherStore.getHistory()
+  const ananBefore = before.find((entry) => entry.studentId === 'student-anan')
+  assert.ok(ananBefore)
+
+  await teacherStore.saveFeedback('assignment-essay', 'student-anan', {
+    body: 'Please revise the evidence.',
+    citationIds: ['review-colbert'],
+  })
+
+  const after = await teacherStore.getHistory()
+  const ananAfter = after.filter((entry) => entry.studentId === 'student-anan')
+  assert.equal(ananAfter.length, 1)
+  assert.equal(ananAfter[0]?.submissionId, ananBefore?.submissionId)
+  assert.deepEqual(ananAfter[0]?.activity, ['analysis', 'feedback'])
+})
+
 test('reading question mutations regenerate, edit, and remove local records', async () => {
   resetTeacherStore()
   const regenerated = await teacherStore.regenerateReadingQuestions({ paperId: 'paper-colbert', level: 'graduate', types: ['critique'] })

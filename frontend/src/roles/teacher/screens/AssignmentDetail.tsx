@@ -6,12 +6,13 @@ import type { TeacherSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import { Breadcrumbs, LoadingState, MetricCard, StatusPill } from '../components/TeacherUi'
 
-export function AssignmentDetail({ courseId, assignmentId, onOpenEssay, onNavigate, onRefresh }: {
+export function AssignmentDetail({ courseId, assignmentId, onOpenEssay, onNavigate, onRefresh, refreshing = false }: {
   courseId: string
   assignmentId: string
   onOpenEssay: (studentId: string) => void
   onNavigate: (route: TeacherRoute) => void
   onRefresh: () => void
+  refreshing?: boolean
 }) {
   const detail = useTeacherAssignmentDetail(courseId, assignmentId)
   const workspace = useTeacherWorkspace(courseId)
@@ -30,7 +31,7 @@ export function AssignmentDetail({ courseId, assignmentId, onOpenEssay, onNaviga
       ]} />
       <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div><h1 className="font-serif text-[29px] font-semibold leading-[41px]">{assignment.title}</h1><p className="text-[11px] text-ink-muted">Assignment details · Google Classroom</p></div>
-        <button type="button" onClick={onRefresh} disabled={workspace.isFetching} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-muted hover:bg-accent-soft"><RefreshCw className={workspace.isFetching ? 'size-3.5 animate-spin' : 'size-3.5'} />Refresh</button>
+        <button type="button" onClick={onRefresh} disabled={refreshing || workspace.isFetching} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-muted hover:bg-accent-soft"><RefreshCw className={refreshing || workspace.isFetching ? 'size-3.5 animate-spin' : 'size-3.5'} />{refreshing ? 'Syncing Classroom' : 'Refresh'}</button>
       </header>
 
       <div role="tablist" aria-label="Class workspace" className="flex min-h-[44px] items-center gap-1.5 border-b border-border-subtle py-1">

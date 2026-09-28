@@ -33,7 +33,7 @@ export function ClassWorkspaceHeader({
             Open in Classroom <ExternalLink className="size-3" />
           </a>
           <button type="button" onClick={onRefresh} disabled={refreshing} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-muted hover:bg-accent-soft hover:text-accent disabled:opacity-60">
-            <RefreshCw className={refreshing ? 'size-3.5 animate-spin' : 'size-3.5'} />{refreshing ? 'Refreshing' : 'Refresh'}
+            <RefreshCw className={refreshing ? 'size-3.5 animate-spin' : 'size-3.5'} />{refreshing ? 'Syncing Classroom' : 'Refresh'}
           </button>
         </div>
       </div>

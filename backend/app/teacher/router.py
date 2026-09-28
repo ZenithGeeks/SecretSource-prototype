@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -26,6 +27,7 @@ from app.teacher.sync import TeacherGoogleSyncService
 
 # The browser uses /api/teacher; Vite/nginx remove /api before forwarding to FastAPI.
 router = APIRouter(prefix="/teacher", tags=["teacher"])
+logger = logging.getLogger(__name__)
 
 
 class ReviewUpdate(BaseModel):
@@ -442,34 +444,167 @@ def teacher_home(
     repository: TeacherGoogleRepository = Depends(get_repository),
 ) -> dict[str, Any]:
     courses = repository.list_courses(owner)
-    course = courses[0] if courses else None
-    coursework = repository.list_coursework(owner, course.course_id) if course else []
-    assignments = [item for item in coursework if item.resource_type == "coursework"]
-    submissions = repository.list_submissions(owner, course.course_id) if course else []
-    checked = sum(bool(item.analysis_id) for item in submissions)
-    selected_assignment = assignments[0] if assignments else None
-    selected_submissions = [item for item in submissions if selected_assignment and item.coursework_id == selected_assignment.coursework_id]
+    now = datetime.now(UTC)
+    assignments_by_id: dict[tuple[str, str], tuple[TeacherCourse, TeacherCoursework, list[TeacherSubmission]]] = {}
+    submissions: list[tuple[TeacherCourse, TeacherCoursework | None, TeacherSubmission]] = []
+    due_soon: list[dict[str, Any]] = []
+
+    for course in courses:
+        coursework = repository.list_coursework(owner, course.course_id)
+        assignments = [item for item in coursework if item.resource_type == "coursework"]
+        course_submissions = repository.list_submissions(owner, course.course_id)
+        by_assignment: dict[str, list[TeacherSubmission]] = {}
+        for submission in course_submissions:
+            by_assignment.setdefault(submission.coursework_id, []).append(submission)
+            assignment = next((item for item in assignments if item.coursework_id == submission.coursework_id), None)
+            submissions.append((course, assignment, submission))
+
+        for assignment in assignments:
+            assignment_submissions = by_assignment.get(assignment.coursework_id, [])
+            assignments_by_id[(course.course_id, assignment.coursework_id)] = (course, assignment, assignment_submissions)
+            if assignment.due_at is None:
+                continue
+            due_at = assignment.due_at if assignment.due_at.tzinfo else assignment.due_at.replace(tzinfo=UTC)
+            overdue = due_at < now
+            view = _assignment_view(assignment, assignment_submissions, course)
+            if (not overdue and due_at <= now + timedelta(days=7)) or (
+                overdue and (view["missingCount"] > 0 or view["pendingReviewCount"] > 0)
+            ):
+                due_soon.append({**view, "courseName": course.name, "overdue": overdue})
+
+    primary_course = courses[0] if courses else None
+    primary_assignment = next(
+        (assignment for course, assignment, _ in assignments_by_id.values() if course == primary_course),
+        None,
+    )
+    queue = [entry for entry in submissions if entry[2].state == "TURNED_IN"]
+    queue.sort(key=lambda entry: str((entry[2].raw or {}).get("updateTime") or (entry[2].raw or {}).get("creationTime") or ""), reverse=True)
+    due_soon.sort(key=lambda entry: entry["dueAt"])
+    home_submissions = []
+    for course, assignment, submission in queue[:8]:
+        checked = bool(submission.analysis_id)
+        home_submissions.append({
+            **_submission_view(submission),
+            "courseId": course.course_id,
+            "courseName": course.name,
+            "assignmentTitle": assignment.title if assignment and assignment.title else submission.coursework_id,
+            "initial": _initials(submission.student_name or submission.student_id),
+            "summary": "Analysis on file · open to review" if checked else "New submission · not checked",
+            "reviewStatus": "analysis-ready" if checked else "not-checked",
+        })
     return {
         "user": owner,
-        "course": course.name if course else "",
-        "courseId": course.course_id if course else "",
-        "checkedEssays": checked,
+        "course": primary_course.name if primary_course else "",
+        "courseId": primary_course.course_id if primary_course else None,
+        "checkedEssays": sum(bool(entry[2].analysis_id) for entry in submissions),
         "totalEssays": len(submissions),
-        "citationsNeedingAttention": checked,
-        "assignment": selected_assignment.title if selected_assignment else "",
-        "assignmentId": selected_assignment.coursework_id if selected_assignment else "",
-        "submissions": [
-            {
-                **_submission_view(item),
-                "initial": _initials(item.student_name or item.student_id),
-                "summary": "Ready for review" if item.analysis_id else "Not checked yet",
-                "standing": "unchecked",
-            }
-            for item in selected_submissions
-        ],
-        "library": {"paperCount": checked, "visibility": "Private to this teacher", "papers": []},
-        "mostMisusedSource": None,
+        "reviewQueueCount": len(queue),
+        "assignment": primary_assignment.title if primary_assignment else "",
+        "assignmentId": primary_assignment.coursework_id if primary_assignment else None,
+        "submissions": home_submissions,
+        "dueSoon": due_soon[:8],
     }
+
+
+def _history_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+@router.get("/history")
+def teacher_history(
+    owner: str = Depends(require_teacher_user),
+    repository: TeacherGoogleRepository = Depends(get_repository),
+) -> list[dict[str, Any]]:
+    """Recent checked Classroom submissions for the authenticated teacher."""
+    from app.main import analyses
+
+    courses = repository.list_courses(owner)
+    courses_by_id = {course.course_id: course for course in courses}
+    assignments_by_key: dict[tuple[str, str], TeacherCoursework] = {}
+    submissions: dict[tuple[str, str, str], TeacherSubmission] = {}
+    for course in courses:
+        for assignment in repository.list_coursework(owner, course.course_id):
+            if assignment.resource_type == "coursework":
+                assignments_by_key[(course.course_id, assignment.coursework_id)] = assignment
+        for submission in repository.list_submissions(owner, course.course_id):
+            submissions[(course.course_id, submission.coursework_id, submission.submission_id)] = submission
+
+    review_activity: dict[tuple[str, str, str], list[Any]] = {}
+    for review in repository.list_professor_review_activity(owner):
+        if review.get("owner") != owner:
+            continue
+        key = (str(review.get("course_id") or ""), str(review.get("coursework_id") or ""), str(review.get("submission_id") or ""))
+        review_activity.setdefault(key, []).extend((review.get("updated_at"), review.get("created_at")))
+
+    feedback_activity: dict[tuple[str, str, str], list[Any]] = {}
+    for feedback in repository.list_feedback_activity(owner):
+        if feedback.get("owner") != owner or not str(feedback.get("feedback_text") or "").strip():
+            continue
+        key = (str(feedback.get("course_id") or ""), str(feedback.get("coursework_id") or ""), str(feedback.get("submission_id") or ""))
+        feedback_activity.setdefault(key, []).extend((feedback.get("updated_at"), feedback.get("created_at"), feedback.get("sent_at")))
+
+    history: list[tuple[datetime, dict[str, Any]]] = []
+    for key, submission in submissions.items():
+        course_id, coursework_id, submission_id = key
+        course = courses_by_id.get(course_id)
+        if course is None:
+            continue
+
+        activity: list[str] = []
+        timestamps: list[datetime] = []
+        analysis_id: str | None = None
+        if submission.analysis_id:
+            snapshot = analyses.get(submission.analysis_id)
+            if snapshot and snapshot.get("owner") == owner and snapshot.get("status") == "done":
+                analysis_id = submission.analysis_id
+                activity.append("analysis")
+                checked = _history_timestamp(snapshot.get("completed") or snapshot.get("started"))
+                if checked:
+                    timestamps.append(checked)
+
+        review_times = review_activity.get(key, [])
+        if review_times:
+            activity.append("professor-review")
+            timestamps.extend(parsed for value in review_times if (parsed := _history_timestamp(value)))
+
+        feedback_times = feedback_activity.get(key, [])
+        if feedback_times:
+            activity.append("feedback")
+            timestamps.extend(parsed for value in feedback_times if (parsed := _history_timestamp(value)))
+
+        if not activity or not timestamps:
+            continue
+
+        assignment = assignments_by_key.get((course_id, coursework_id))
+        submission_view = _submission_view(submission)
+        latest = max(timestamps)
+        entry = {
+            "id": f"{course_id}:{coursework_id}:{submission_id}",
+            "courseId": course_id,
+            "courseName": course.name,
+            "assignmentId": coursework_id,
+            "assignmentTitle": assignment.title if assignment and assignment.title else coursework_id,
+            "submissionId": submission_id,
+            "studentId": submission.student_id,
+            "studentName": submission.student_name or submission.student_id,
+            "fileName": submission_view["fileName"],
+            "checkedAt": latest.isoformat(),
+            "analysisId": analysis_id,
+            "activity": activity,
+        }
+        history.append((latest, entry))
+
+    history.sort(key=lambda item: item[0], reverse=True)
+    return [entry for _, entry in history]
 
 
 @router.get("/classes")
@@ -722,18 +857,29 @@ def send_feedback(
     owner: str = Depends(require_teacher_user),
     service: TeacherEssayAnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any]:
-    submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
-    if request is not None:
-        essay = _essay_or_error(service, owner, course_id, assignment_id, submission_id)
-        allowed = {review["id"] for review in essay.get("reviews", [])}
-        if not set(request.citation_ids).issubset(allowed):
-            raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
-        if not set(request.sharing_options).issubset(allowed):
-            raise HTTPException(status_code=422, detail="feedback sharing settings contain an unknown citation")
-        try:
+    try:
+        submission_id = _submission_id(service, owner, course_id, assignment_id, student_id)
+        if request is not None:
+            essay = _essay_or_error(service, owner, course_id, assignment_id, submission_id)
+            allowed = {review["id"] for review in essay.get("reviews", [])}
+            if not set(request.citation_ids).issubset(allowed):
+                raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
+            if not set(request.sharing_options).issubset(allowed):
+                raise HTTPException(status_code=422, detail="feedback sharing settings contain an unknown citation")
             service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options)
-        except ValueError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
+    except HTTPException:
+        raise
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except Exception as error:
+        logger.exception(
+            "Unable to prepare teacher feedback before email delivery",
+            extra={"course_id": course_id, "assignment_id": assignment_id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Feedback could not be prepared. No email was sent. Please try again.",
+        ) from error
     try:
         sent = service.send_feedback(owner, course_id, assignment_id, submission_id, request.report_html if request else None)
     except ValueError as error:

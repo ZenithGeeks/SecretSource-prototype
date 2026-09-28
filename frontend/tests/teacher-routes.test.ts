@@ -58,8 +58,27 @@ test('legacy coursework identifiers are translated by the route parser', () => {
 })
 
 test('teacher navigation matches the Figma destinations without Library or Graph', () => {
-  assert.deepEqual(TEACHER_NAV_KEYS, ['home', 'classes', 'settings'])
+  assert.deepEqual(TEACHER_NAV_KEYS, ['home', 'classes', 'history', 'settings'])
   assert.equal(teacherNavForScreen('essay-check'), 'classes')
+  assert.equal(teacherNavForScreen('history'), 'history')
   assert.equal(teacherNavForScreen('reading-questions'), null)
   assert.deepEqual(parseTeacherRoute('?role=teacher&screen=graph'), { screen: 'home' })
+})
+
+test('teacher History keeps the selected class, assignment, and student in the URL', () => {
+  const route: TeacherRoute = {
+    screen: 'history',
+    courseId: 'class-2b',
+    assignmentId: 'essay',
+    studentId: 'anan',
+  }
+
+  assert.equal(
+    serializeTeacherRoute(route),
+    '?role=teacher&screen=history&courseId=class-2b&assignmentId=essay&studentId=anan',
+  )
+  assert.deepEqual(
+    parseTeacherRoute('?role=teacher&screen=history&courseId=class-2b&assignmentId=essay&studentId=anan'),
+    route,
+  )
 })

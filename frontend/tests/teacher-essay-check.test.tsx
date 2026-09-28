@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   analyzePending: false,
   analyzeError: null as Error | null,
   updateReview: vi.fn(),
+  refreshClassroom: vi.fn(),
   essayCheck: null as EssayCheckData | null,
   analysis: null as Analysis | null,
 }))
@@ -31,6 +32,7 @@ vi.mock('../src/lib/useTeacher', () => ({
   useAnalyzeTeacherSubmission: () => ({ mutate: mocks.analyze, isPending: mocks.analyzePending, isError: Boolean(mocks.analyzeError), error: mocks.analyzeError }),
   useUpdateProfessorReview: () => ({ mutate: mocks.updateReview, isPending: false }),
   useSaveTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRefreshTeacherClass: () => ({ mutate: mocks.refreshClassroom, isPending: false, isError: false, error: null }),
   useSendTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => <div /> }))
@@ -176,5 +178,15 @@ describe('Teacher essay check', () => {
     expect(mocks.updateReview).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'contradicts', reviewId: 'claim-0:10.1234/source:0' }))
     expect(screen.getByRole('textbox', { name: 'Feedback to student' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add to feedback' })).toBeInTheDocument()
+  })
+
+  it('offers a Classroom sync when the student email is missing', () => {
+    render(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Feedback to student' }), { target: { value: 'Please revise your thesis.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to student' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync Classroom now' }))
+
+    expect(mocks.refreshClassroom).toHaveBeenCalledWith('course-1')
   })
 })

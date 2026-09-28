@@ -1,14 +1,12 @@
 /** Teacher role route owner. Every destination is URL-backed so refresh keeps the current page. */
 
-import { useQueryClient } from '@tanstack/react-query'
-import { GraduationCap, Home as HomeIcon } from 'lucide-react'
+import { GraduationCap, History as HistoryIcon, Home as HomeIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
-import { teacherWorkspaceKey } from '../../lib/teacher'
 import {
   parseTeacherRoute,
   serializeTeacherRoute,
@@ -18,11 +16,12 @@ import {
   type TeacherRoute,
   type TeacherScreen,
 } from '../../lib/teacherRoutes'
-import { useImportTeacherClass } from '../../lib/useTeacher'
+import { useImportTeacherClass, useRefreshTeacherClass } from '../../lib/useTeacher'
 import { teacherApi, teacherRemoteEnabled } from '../../lib/teacher'
 import { supabase } from '../../lib/supabase'
 import { AssignmentDetail } from './screens/AssignmentDetail'
 import { EssayCheckRoster } from './components/EssayCheckRoster'
+import { TeacherHistoryList, TeacherHistoryPage } from './screens/History'
 import { AddClass } from './screens/AddClass'
 import { Classes } from './screens/Classes'
 import { ClassWorkspace } from './screens/ClassWorkspace'
@@ -35,15 +34,16 @@ export type { TeacherRoute, TeacherScreen }
 const TEACHER_NAV: NavEntry<TeacherNavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'classes', label: 'Classes', icon: GraduationCap },
+  { key: 'history', label: 'History', icon: HistoryIcon },
 ]
 
 export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
-  const queryClient = useQueryClient()
   const [route, setRoute] = useState<TeacherRoute>(() => parseTeacherRoute(window.location.search))
   const [connectionError, setConnectionError] = useState('')
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   const importClass = useImportTeacherClass()
+  const refreshClass = useRefreshTeacherClass()
 
   useEffect(() => {
     const nextSearch = serializeTeacherRoute(route, window.location.search)
@@ -74,7 +74,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const workspaceTab = route.screen === 'classwork' ? 'classwork' : route.screen === 'people' ? 'people' : 'overview'
 
   const refreshWorkspace = () => {
-    if (route.courseId) void queryClient.invalidateQueries({ queryKey: teacherWorkspaceKey(route.courseId) })
+    if (route.courseId) refreshClass.mutate(route.courseId)
   }
 
   const handleImport = (courseId: string) => {
@@ -103,7 +103,12 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsActive={settingsOpen}
-      sidebar={route.screen === 'essay-check' ? (
+      sidebar={route.screen === 'history' && route.courseId && route.assignmentId && route.studentId ? (
+        <TeacherHistoryList
+          selected={route}
+          onSelect={(entry) => navigate({ screen: 'history', courseId: entry.courseId, assignmentId: entry.assignmentId, studentId: entry.studentId })}
+        />
+      ) : route.screen === 'essay-check' ? (
         <EssayCheckRoster
           courseId={route.courseId ?? ''}
           assignmentId={route.assignmentId ?? ''}
@@ -124,11 +129,15 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       ) : route.screen === 'add-class-review' ? (
         <AddClass step="review" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-course', courseId: route.courseId })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
       ) : route.screen === 'class-overview' || route.screen === 'classwork' || route.screen === 'people' ? (
-        <ClassWorkspace courseId={route.courseId ?? ''} tab={workspaceTab} onNavigate={navigate} onRefresh={refreshWorkspace} />
+        <ClassWorkspace courseId={route.courseId ?? ''} tab={workspaceTab} onNavigate={navigate} onRefresh={refreshWorkspace} refreshing={refreshClass.isPending} />
       ) : route.screen === 'assignment-detail' ? (
-        <AssignmentDetail courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} onOpenEssay={(studentId) => navigate({ screen: 'essay-check', courseId: route.courseId, assignmentId: route.assignmentId, studentId })} onNavigate={navigate} onRefresh={refreshWorkspace} />
+        <AssignmentDetail courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} onOpenEssay={(studentId) => navigate({ screen: 'essay-check', courseId: route.courseId, assignmentId: route.assignmentId, studentId })} onNavigate={navigate} onRefresh={refreshWorkspace} refreshing={refreshClass.isPending} />
       ) : route.screen === 'essay-check' ? (
-        <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} onNavigate={navigate} />
+        <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} onNavigate={navigate} onReconnectGoogle={() => void connectGoogle()} />
+      ) : route.screen === 'history' ? (
+        route.courseId && route.assignmentId && route.studentId ? (
+          <EssayCheck courseId={route.courseId} assignmentId={route.assignmentId} studentId={route.studentId} onBack={() => navigate({ screen: 'history' })} onNavigate={navigate} onReconnectGoogle={() => void connectGoogle()} />
+        ) : <TeacherHistoryPage onSelect={(entry) => navigate({ screen: 'history', courseId: entry.courseId, assignmentId: entry.assignmentId, studentId: entry.studentId })} />
       ) : route.screen === 'reading-questions' ? (
         <ReadingQuestions paperId={route.paperId} onNavigate={navigate} />
       ) : null}

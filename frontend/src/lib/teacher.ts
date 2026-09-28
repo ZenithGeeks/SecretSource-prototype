@@ -105,9 +105,18 @@ export type TeacherClassImportPreview = {
 }
 
 export type TeacherHomeSubmission = TeacherSubmission & {
+  courseId?: string
+  courseName?: string
+  assignmentTitle?: string
   initial: string
   summary: string
-  standing: TeacherStanding
+  reviewStatus?: 'not-checked' | 'analysis-ready'
+  standing?: TeacherStanding
+}
+
+export type TeacherHomeAssignment = TeacherAssignment & {
+  courseName: string
+  overdue: boolean
 }
 
 export type ClassPaper = {
@@ -124,20 +133,36 @@ export type MostMisusedSource = {
 
 export type TeacherHome = {
   user: string
-  course: string
-  courseId: string
+  course?: string
+  courseId?: string
   checkedEssays: number
   totalEssays: number
-  citationsNeedingAttention: number
-  assignment: string
-  assignmentId: string
+  reviewQueueCount?: number
+  assignment?: string
+  assignmentId?: string
   submissions: TeacherHomeSubmission[]
-  library: {
-    paperCount: number
-    visibility: string
-    papers: ClassPaper[]
-  }
-  mostMisusedSource: MostMisusedSource | null
+  dueSoon?: TeacherHomeAssignment[]
+  /** Deprecated mock fields retained while legacy fixtures are migrated. */
+  citationsNeedingAttention?: number
+  library?: { paperCount: number; visibility: string; papers: ClassPaper[] }
+  mostMisusedSource?: MostMisusedSource | null
+}
+
+export type TeacherHistoryActivity = 'analysis' | 'professor-review' | 'feedback'
+
+export type TeacherHistoryEntry = {
+  id: string
+  courseId: string
+  courseName: string
+  assignmentId: string
+  assignmentTitle: string
+  submissionId: string
+  studentId: string
+  studentName: string
+  fileName: string
+  checkedAt: string
+  analysisId?: string | null
+  activity: TeacherHistoryActivity[]
 }
 
 export type SupportingUrl = {
@@ -199,6 +224,11 @@ export type TeacherGoogleConnection = {
   connected: boolean
   email: string | null
   scopes?: string[]
+  sync?: {
+    status: string | null
+    lastSyncedAt: string | null
+    error?: string | null
+  }
 }
 
 export type AnalyzeTeacherSubmissionRequest = {
@@ -322,6 +352,7 @@ export type TeacherCourseWork = {
 export type QueueCourseWorkResult = { queued: string[]; skipped: { id: string; reason: string }[] }
 
 export const TEACHER_HOME_KEY = ['teacher', 'home'] as const
+export const TEACHER_HISTORY_KEY = ['teacher', 'history'] as const
 export const TEACHER_CLASSES_KEY = ['teacher', 'classes'] as const
 export const READING_QUESTIONS_KEY = ['teacher', 'reading-questions'] as const
 export const teacherClassImportKey = (courseId: string) => ['teacher', 'class-import', courseId] as const
@@ -342,12 +373,14 @@ function normalizedAssignmentId(input: { assignmentId?: string; courseWorkId?: s
 
 const mockTeacherApi = {
   getHome: async (): Promise<TeacherHome> => store.getHome(),
+  getHistory: async (): Promise<TeacherHistoryEntry[]> => store.getHistory(),
   getClasses: async (): Promise<TeacherClass[]> => store.getClasses(),
   getImportableClasses: async (): Promise<TeacherClass[]> => store.getImportableClasses(),
   getClassImportPreview: async (courseId: string): Promise<TeacherClassImportPreview | null> =>
     store.getClassImportPreview(courseId),
   importClass: async (courseId: string): Promise<TeacherClass> => store.importClass(courseId),
   getWorkspace: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
+  refreshClass: async (courseId: string): Promise<TeacherWorkspace | null> => store.getWorkspace(courseId),
   getAssignmentDetail: async (courseId: string, assignmentId: string): Promise<TeacherAssignmentDetail | null> =>
     store.getAssignmentDetail(courseId, assignmentId),
   analyzeSubmission: async (_input: AnalyzeTeacherSubmissionRequest) => {
@@ -397,11 +430,14 @@ export const teacherRemoteEnabled = import.meta.env.VITE_TEACHER_BACKEND === 're
 
 export const createRemoteTeacherApi = () => ({
   ...mockTeacherApi,
+  getHome: () => request<TeacherHome>('/teacher/home'),
+  getHistory: () => request<TeacherHistoryEntry[]>('/teacher/history'),
   getClasses: () => request<TeacherClass[]>('/teacher/classes'),
   getImportableClasses: () => request<TeacherClass[]>('/teacher/classes/importable'),
   getClassImportPreview: (courseId: string) => request<TeacherClassImportPreview>(`/teacher/classes/importable/${encodeURIComponent(courseId)}/preview`),
   importClass: async (courseId: string) => (await request<{ course: TeacherClass }>(`/teacher/classes/${encodeURIComponent(courseId)}/import`, { method: 'POST' })).course,
   getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),
+  refreshClass: async (courseId: string) => (await request<{ workspace: TeacherWorkspace }>(`/teacher/classes/${encodeURIComponent(courseId)}/refresh`, { method: 'POST' })).workspace,
   getAssignmentDetail: (courseId: string, assignmentId: string) =>
     request<TeacherAssignmentDetail>(`/teacher/classes/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}`),
   getEssayCheck: (assignmentId: string, studentId: string, courseId?: string) =>

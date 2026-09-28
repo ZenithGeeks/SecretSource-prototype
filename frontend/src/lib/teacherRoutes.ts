@@ -3,6 +3,7 @@
 export type TeacherScreen =
   | 'home'
   | 'classes'
+  | 'history'
   | 'add-class-connect'
   | 'add-class-course'
   | 'add-class-review'
@@ -13,7 +14,7 @@ export type TeacherScreen =
   | 'essay-check'
   | 'reading-questions'
 
-export type TeacherNavKey = 'home' | 'classes' | 'settings'
+export type TeacherNavKey = 'home' | 'classes' | 'history' | 'settings'
 export type TeacherRouteNavKey = Exclude<TeacherNavKey, 'settings'>
 
 export type TeacherRoute = {
@@ -24,11 +25,12 @@ export type TeacherRoute = {
   paperId?: string
 }
 
-export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'settings']
+export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'history', 'settings']
 
 const SCREENS: readonly TeacherScreen[] = [
   'home',
   'classes',
+  'history',
   'add-class-connect',
   'add-class-course',
   'add-class-review',
@@ -127,6 +129,17 @@ export function parseTeacherRoute(input: string): TeacherRoute {
         if (studentId) route.studentId = studentId
         return route
       }
+    case 'history':
+      {
+        const route: TeacherRoute = { screen }
+        const courseId = valueOrUndefined(params.get('courseId'))
+        const assignmentId = valueOrUndefined(params.get('assignmentId'))
+        const studentId = valueOrUndefined(params.get('studentId'))
+        if (courseId) route.courseId = courseId
+        if (assignmentId) route.assignmentId = assignmentId
+        if (studentId) route.studentId = studentId
+        return route
+      }
     case 'essay-check':
       {
         const route: TeacherRoute = { screen }
@@ -157,6 +170,8 @@ function consumedContext(screen: TeacherScreen): (keyof Omit<TeacherRoute, 'scre
       return ['courseId', 'assignmentId', 'studentId']
     case 'essay-check':
       return ['courseId', 'assignmentId', 'studentId']
+    case 'history':
+      return ['courseId', 'assignmentId', 'studentId']
     case 'reading-questions':
       return ['paperId']
     default:
@@ -186,6 +201,7 @@ export function teacherRouteForNav(key: TeacherRouteNavKey): TeacherRoute {
   switch (key) {
     case 'home':
     case 'classes':
+    case 'history':
       return { screen: key }
   }
 }
@@ -196,6 +212,8 @@ export function teacherNavForScreen(screen: TeacherScreen): TeacherNavKey | null
       return 'home'
     case 'classes':
       return 'classes'
+    case 'history':
+      return 'history'
     case 'reading-questions':
       return null
     default:

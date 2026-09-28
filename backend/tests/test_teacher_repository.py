@@ -400,3 +400,30 @@ def test_get_feedback_returns_saved_citation_ids_for_the_owned_submission():
     assert feedback is not None
     assert feedback.feedback_text == "Good work."
     assert feedback.citation_ids == ("citation-1",)
+
+
+def test_history_activity_is_owner_scoped_and_saves_update_timestamps():
+    from app.teacher.models import TeacherFeedback, TeacherProfessorReview
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    client.rows["teacher_professor_reviews"] = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "updated_at": "2026-09-20T12:00:00+00:00"},
+        {"owner": "teacher-b", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-2", "updated_at": "2026-09-21T12:00:00+00:00"},
+    ]
+    repo = TeacherGoogleRepository(client)
+
+    reviews = repo.list_professor_review_activity("teacher-a")
+    assert [row["submission_id"] for row in reviews] == ["sub-1"]
+
+    repo.save_professor_review(TeacherProfessorReview(
+        "teacher-a", "course-1", "work-1", "sub-1", "student-1", "analysis-1", "supports", "Checked.", "citation-1",
+    ))
+    repo.save_feedback(TeacherFeedback(
+        "teacher-a", "course-1", "work-1", "sub-1", "student-1", "Good work.", "draft", None, (), {},
+    ))
+
+    review_row = next(row for row in client.rows["teacher_professor_reviews"] if row.get("review_id") == "citation-1")
+    feedback_row = next(row for row in client.rows["teacher_feedback"] if row.get("owner") == "teacher-a")
+    assert review_row["updated_at"]
+    assert feedback_row["updated_at"]

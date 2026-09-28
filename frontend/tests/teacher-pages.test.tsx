@@ -368,6 +368,31 @@ describe('Teacher review and worksheet pages', () => {
 })
 
 describe('Teacher application routing', () => {
+  test('syncs the connected Classroom course when the Course page opens', async () => {
+    window.history.replaceState(null, '', '/?role=teacher&screen=class-overview&courseId=class-literary-2b')
+    vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: true, email: 'teacher@example.edu' })
+    const refreshClass = vi.spyOn(teacherApi, 'refreshClass').mockResolvedValue(null)
+    renderWithQuery(<TeacherApp />)
+
+    expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
+    await waitFor(() => expect(refreshClass).toHaveBeenCalledWith('class-literary-2b'))
+  })
+
+  test('shows recent checked submissions in the History page before one is selected', async () => {
+    window.history.replaceState(null, '', '/?role=teacher&screen=history')
+    renderWithQuery(<TeacherApp />)
+
+    const main = screen.getByRole('main')
+    expect(await within(main).findByRole('navigation', { name: 'Recent checked work' })).toBeInTheDocument()
+    const recentCheck = within(main).getByRole('button', { name: /Anan P\./ })
+    expect(recentCheck).toBeInTheDocument()
+    expect(within(main).queryByText('Choose checked work')).not.toBeInTheDocument()
+
+    fireEvent.click(recentCheck)
+    expect(await within(main).findByRole('heading', { name: 'Anan P.' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('studentId')).toBe('student-anan')
+  })
+
   test('Teacher breadcrumbs navigate between Classes, Course, and Assignment', async () => {
     vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: true, email: 'teacher@example.edu' })
     window.history.replaceState(null, '', '/?role=teacher&screen=classes')

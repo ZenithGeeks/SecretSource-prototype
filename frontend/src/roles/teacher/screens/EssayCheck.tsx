@@ -23,6 +23,7 @@ import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import {
   useAnalyzeTeacherSubmission,
   useSaveTeacherFeedback,
+  useRefreshTeacherClass,
   useSendTeacherFeedback,
   useTeacherGoogleConnection,
   useTeacherEssayCheck,
@@ -79,17 +80,19 @@ function reviewIdFor(claim: Claim, claimIndex: number, citationIndex: number) {
 }
 
 /** Teacher's single-submission review: submitted paper beside claims, with feedback in the same flow. */
-export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNavigate }: {
+export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNavigate, onReconnectGoogle }: {
   courseId: string
   assignmentId: string
   studentId: string
   onBack: () => void
   onNavigate: (route: TeacherRoute) => void
+  onReconnectGoogle?: () => void
 }) {
   const essay = useTeacherEssayCheck(courseId, assignmentId, studentId)
   const analyze = useAnalyzeTeacherSubmission()
   const updateReview = useUpdateProfessorReview()
   const saveFeedback = useSaveTeacherFeedback()
+  const refreshClassroom = useRefreshTeacherClass()
   const sendFeedback = useSendTeacherFeedback()
   const googleConnection = useTeacherGoogleConnection()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
@@ -104,7 +107,19 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
     return <Empty title="Essay check needs more context" hint="Open a submitted essay from Assignment Detail to review it." />
   }
   if (essay.isPending) return <LoadingState label="Loading essay check..." />
-  if (essay.isError || !essay.data) return <Empty title="Essay check unavailable" hint="This student does not have a local Essay Check record." />
+  if (essay.isError || !essay.data) {
+    const hint = essay.isError && essay.error instanceof Error
+      ? `The teacher service could not load this essay check: ${essay.error.message}`
+      : 'There is no essay check record for this student yet.'
+    return (
+      <div className="space-y-3">
+        <Empty title="Essay check unavailable" hint={hint} />
+        <div className="flex justify-center">
+          <Button type="button" variant="ghost" onClick={() => void essay.refetch()}>Try again</Button>
+        </div>
+      </div>
+    )
+  }
 
   const data = essay.data
   const analysis = data.analysis
@@ -116,6 +131,12 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
     : { key: draftKey, body: data.feedback.body, citationIds: data.feedback.citationIds, sharingOptions: data.feedback.sharingOptions ?? {} }
   const { body, citationIds, sharingOptions } = draft
   const gmailScope = 'https://www.googleapis.com/auth/gmail.send'
+  const classroomEmailScope = 'https://www.googleapis.com/auth/classroom.profile.emails'
+  const missingClassroomEmailScope = Boolean(
+    googleConnection.data?.connected
+    && googleConnection.data.scopes
+    && !googleConnection.data.scopes.includes(classroomEmailScope),
+  )
   const deliveryReady = Boolean(
     teacherRemoteEnabled
     && data.student.email
@@ -130,7 +151,9 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
       : googleConnection.isError
         ? 'Could not verify the Google email connection. Try again before sending.'
         : !data.student.email
-          ? "Refresh Classroom to sync the student's email address."
+          ? missingClassroomEmailScope
+            ? 'Google needs permission to read student email addresses. Reconnect your Google account, then sync Classroom again.'
+            : "Sync Classroom to fetch the student's email address."
           : !googleConnection.data?.connected
             ? 'Connect your Google account in teacher settings before sending.'
             : !googleConnection.data.email
@@ -395,6 +418,10 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
         preview={preview}
         onClose={() => setFeedbackOpen(false)}
         onSend={send}
+        onRefreshClassroom={missingClassroomEmailScope ? undefined : () => refreshClassroom.mutate(courseId)}
+        onReconnectGoogle={missingClassroomEmailScope ? onReconnectGoogle : undefined}
+        refreshingClassroom={refreshClassroom.isPending}
+        refreshClassroomError={refreshClassroom.isError ? (refreshClassroom.error instanceof Error ? refreshClassroom.error.message : 'Please try again.') : undefined}
       />
     </div>
   )

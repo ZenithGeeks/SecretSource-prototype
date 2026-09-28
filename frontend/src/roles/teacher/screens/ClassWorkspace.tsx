@@ -1,7 +1,8 @@
 import { AlertCircle, FileText } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 
 import { Button, Card, Empty } from '../../../components/ui'
-import { useTeacherWorkspace } from '../../../lib/useTeacher'
+import { useTeacherGoogleConnection, useTeacherWorkspace } from '../../../lib/useTeacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import type { TeacherWorkspace } from '../../../lib/teacher'
 import { workspaceStats, type WorkspaceTab } from '../../../lib/teacherSelectors'
@@ -10,13 +11,23 @@ import { InitialAvatar, LoadingState } from '../components/TeacherUi'
 import { Classwork } from './Classwork'
 import { People } from './People'
 
-export function ClassWorkspace({ courseId, tab, onNavigate, onRefresh }: {
+export function ClassWorkspace({ courseId, tab, onNavigate, onRefresh, refreshing = false }: {
   courseId: string
   tab: WorkspaceTab
   onNavigate: (route: TeacherRoute) => void
   onRefresh: () => void
+  refreshing?: boolean
 }) {
   const workspace = useTeacherWorkspace(courseId)
+  const googleConnection = useTeacherGoogleConnection()
+  const autoSyncedCourse = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!googleConnection.data?.connected || autoSyncedCourse.current === courseId) return
+    autoSyncedCourse.current = courseId
+    onRefresh()
+  }, [courseId, googleConnection.data?.connected, onRefresh])
+
   if (workspace.isPending) return <LoadingState label="Loading class workspace..." />
   if (workspace.isError || !workspace.data) return <Empty title="Class workspace unavailable" hint="This class is not available in the local teacher session." />
 
@@ -25,7 +36,7 @@ export function ClassWorkspace({ courseId, tab, onNavigate, onRefresh }: {
 
   return (
     <div className="space-y-3">
-      <ClassWorkspaceHeader workspace={data} activeTab={tab} onTabChange={setTab} onNavigate={onNavigate} onRefresh={onRefresh} refreshing={workspace.isFetching} />
+      <ClassWorkspaceHeader workspace={data} activeTab={tab} onTabChange={setTab} onNavigate={onNavigate} onRefresh={onRefresh} refreshing={refreshing || workspace.isFetching} />
       {tab === 'overview' ? (
         <OverviewTab
           workspace={data}
