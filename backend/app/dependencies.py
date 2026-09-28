@@ -160,14 +160,28 @@ def _worker() -> dict:
     }
 
 
+def _not_probed(name: str, url: str) -> dict:
+    """A GPU service that scales to zero. Cloud Run bills a GPU instance for as long as it
+    is up, and asking every minute kept one up around the clock (~$38 a day). The pipeline
+    still asks it before each use (retrieval.colpali_available)."""
+    return {
+        "name": name,
+        "url": _shown(url),
+        "auth": _signed(url),
+        "required": False,
+        "ok": None,
+        "detail": "not probed: a GPU service that scales to zero, and asking would keep it up",
+    }
+
+
 def check() -> dict:
     """Ask every dependency at once. `degraded` is true when a required one did not answer."""
     checks = (
         _llm,
         lambda: _service("grobid", GROBID_URL, "/api/isalive", required=True),
         lambda: _service("colbert", COLBERT_URL, "/health", required=True),
-        # Figures are optional: a check goes on with text passages when ColPali is down.
-        lambda: _service("colpali", COLPALI_URL, "/health", required=False),
+        # Figures are optional, and ColPali is not asked: see _not_probed.
+        lambda: _not_probed("colpali", COLPALI_URL),
         _supabase,
         _redis,
         _worker,
