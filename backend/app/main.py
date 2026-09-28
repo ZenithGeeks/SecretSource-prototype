@@ -72,6 +72,7 @@ from app.metrics import (
     CLAIM_CHECKS_FAILED,
     CLAIM_VERDICTS,
 )
+from app.ownership import require_owner
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
@@ -517,22 +518,18 @@ def visible_to(user: str | None) -> list[dict]:
     return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
 
 
-def _owned(analysis_id: str, user: str | None) -> dict:
-    """The analysis, if this exact user owns it (visible_to). Missing, or owned by someone
-    else, is a 404, not a 403, so an id does not tell anyone that it exists."""
-    analysis = analyses.get(analysis_id)
-    if analysis is None or analysis not in visible_to(user):
-        raise HTTPException(404, "no such analysis")
-    return analysis
+def _owned(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
+    """The analysis, if this exact user owns it (visible_to) and it is a `kind` row. Missing,
+    owned by someone else, or another kind (a check's id on an analysis route) is a 404, not
+    a 403, so an id does not tell anyone that it exists. The rule itself lives in
+    app/ownership.py, shared with the Author role's rows."""
+    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
 
 
-def _mine(analysis_id: str, user: str | None) -> dict:
-    """The analysis, only if this exact user created it. Same test as visible_to(); kept as
-    its own function since deleting one's own analysis is a distinct action from reading it."""
-    analysis = analyses.get(analysis_id)
-    if analysis is None or analysis.get("owner") != user:
-        raise HTTPException(404, "no such analysis")
-    return analysis
+def _mine(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
+    """The analysis, only if this exact user created it. Same test as _owned(); kept as its
+    own function since deleting one's own analysis is a distinct action from reading it."""
+    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
 
 
 @app.post("/analyses")
@@ -641,22 +638,24 @@ async def start_check(request: CheckRequest, user: str | None = Depends(current_
 
 
 # A check is one author's own work: like an analysis it is private to its owner (visible_to),
-# and every check route is owner-scoped, so `_mine` rather than `_owned`.
+# and every check route is owner-scoped, so `_mine` rather than `_owned`. Checks share the
+# `analyses` dict with paper analyses, so each route also asks for its own kind: a paper's id
+# here, or a check's id on an /analyses route, is a 404.
 @app.get("/checks/{check_id}")
 async def get_check(check_id: str, user: str | None = Depends(current_user)):
-    return _mine(check_id, user)
+    return _mine(check_id, user, kind="check")
 
 
 @app.delete("/checks/{check_id}")
 async def delete_check(check_id: str, user: str | None = Depends(current_user)):
-    _mine(check_id, user)
+    _mine(check_id, user, kind="check")
     await _delete_one(check_id)
     return {"deleted": check_id}
 
 
 @app.get("/checks/{check_id}/events")
 async def check_events(check_id: str, user: str | None = Depends(current_user)):
-    _mine(check_id, user)
+    _mine(check_id, user, kind="check")
     return StreamingResponse(_event_stream(check_id), media_type="text/event-stream")
 
 

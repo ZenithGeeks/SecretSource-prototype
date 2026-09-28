@@ -27,6 +27,7 @@ from app.auth import current_user
 from app.author import logic
 from app.author.verify import citation_outcome, verify_cached
 from app.config import PARALLEL_CHECKS
+from app.ownership import require_owner
 
 # The browser uses /api/author; Vite/nginx remove /api before forwarding to FastAPI.
 router = APIRouter(prefix="/author", tags=["author"])
@@ -80,11 +81,8 @@ def _rows(table: str, user: str | None) -> list[dict]:
 
 def _row(table: str, row_id: str, user: str | None, what: str) -> dict:
     """One of the caller's rows. Someone else's is a 404 like a missing one, so an id never
-    tells anyone that it exists."""
-    row = store.load_author_row(table, row_id)
-    if row is None or row.get("owner") != user:
-        raise HTTPException(404, f"no such {what}")
-    return row
+    tells anyone that it exists (app/ownership.py, the same rule as the gateway's analyses)."""
+    return require_owner(store.load_author_row(table, row_id), user, what)
 
 
 def _save(table: str, row: dict) -> dict:
@@ -559,11 +557,9 @@ async def list_draft_checks(draft_id: str, user: str | None = Depends(current_us
 
 
 def _check(check_id: str, user: str | None) -> dict:
-    gateway = _gateway()
-    run = gateway.analyses.get(check_id)
-    if run is None or run.get("kind") != DRAFT_CHECK or run.get("owner") != user:
-        raise HTTPException(404, "no such check")
-    return run
+    """One of the caller's draft checks; a paper analysis or a Find-a-source check with that
+    id is a 404 like a missing one."""
+    return require_owner(_gateway().analyses.get(check_id), user, "check", kind=DRAFT_CHECK)
 
 
 def _previous_of(run: dict, user: str | None) -> dict | None:

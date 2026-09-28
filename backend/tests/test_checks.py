@@ -170,3 +170,36 @@ def test_an_unexpected_failure_is_also_an_honest_error(running_check, monkeypatc
     assert check["status"] == "error"
     assert check["message"] == "colbert unreachable"
     assert "verdict" not in check
+
+
+# --- a check's id on an analysis route, and the reverse, is a 404 (PR #291 review) ---
+
+
+def test_a_check_id_is_not_found_on_the_analysis_routes(client):
+    main.analyses["c1"] = {"id": "c1", "kind": "check", "owner": "user-ada", "status": "done", "stages": []}
+    main.streams["c1"] = asyncio.Queue()
+    ada = {"Authorization": "Bearer token-ada"}
+
+    assert client.get("/analyses/c1", headers=ada).status_code == 404
+    assert client.get("/analyses/c1/events", headers=ada).status_code == 404
+    assert client.delete("/analyses/c1", headers=ada).status_code == 404
+    assert "c1" in main.analyses  # the check was not deleted through the wrong route
+
+    main.streams.pop("c1", None)
+
+
+def test_an_analysis_id_is_not_found_on_the_check_routes(client):
+    main.analyses["p1"] = {"id": "p1", "kind": "paper", "owner": "user-ada", "status": "done", "stages": []}
+    main.analyses["p0"] = {"id": "p0", "owner": "user-ada", "status": "done", "stages": []}  # before `kind`
+    main.streams["p1"] = asyncio.Queue()
+    ada = {"Authorization": "Bearer token-ada"}
+
+    for analysis_id in ("p1", "p0"):
+        assert client.get(f"/checks/{analysis_id}", headers=ada).status_code == 404
+        assert client.get(f"/checks/{analysis_id}/events", headers=ada).status_code == 404
+        assert client.delete(f"/checks/{analysis_id}", headers=ada).status_code == 404
+        assert analysis_id in main.analyses
+    assert client.get("/analyses/p1", headers=ada).status_code == 200
+    assert client.get("/analyses/p0", headers=ada).status_code == 200
+
+    main.streams.pop("p1", None)
