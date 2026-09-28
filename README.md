@@ -30,9 +30,9 @@ Google ADK runs the agents and the order of the steps. DSPy is used for each LLM
 must return exact data, like the claims and the verdicts. See
 [How DSPy is used](ARCHITECTURE.md#how-dspy-is-used).
 
-On your machine, Docker runs two things: `web` (the UI at http://localhost:5173) and
-`gateway` (the API at http://localhost:8080). The heavy services are shared and already
-run in the cloud:
+On your machine, Docker runs `web` (the UI at http://localhost:5173), `gateway` (the API at
+http://localhost:8080), `redis` (the analysis queue), and `worker` (runs the analyses). The
+heavy retrieval services are shared and already run in the cloud:
 
 | Service | What it does | Where |
 | --- | --- | --- |
@@ -101,8 +101,9 @@ Author draft check (sample data):
    - `CLAIM_LIMIT`: the most claims to check per paper. Default `20`. `0` means all.
    - `PARALLEL_SOURCES`: how many cited papers are prepared at the same time. Default `3`.
    - `PARALLEL_CHECKS`: how many claims are judged at the same time. Default `3`.
-   - `PARALLEL_SOURCES_TOTAL`, `PARALLEL_CHECKS_TOTAL`: the same two limits across every analysis
-     running at once. Default: the per-run values.
+   - `PARALLEL_SOURCES_TOTAL`, `PARALLEL_CHECKS_TOTAL`: the same two limits, but per worker
+     process. Default: the per-run values. Each worker applies its own limit, so more workers
+     put more load on the retrieval services and the LLM.
 
    Teacher Google Classroom is optional. Keep `TEACHER_GOOGLE_ENABLED=false` and
    `VITE_TEACHER_BACKEND=mock` for the existing local teacher experience. For Google Cloud OAuth
@@ -119,8 +120,8 @@ Author draft check (sample data):
    docker compose up -d --build
    ```
 
-   This also starts a local `grobid` container. It is not used when `GROBID_URL` points to
-   the cloud one.
+   This also starts `redis` (the queue), `worker` (runs the analyses), and a local `grobid`
+   container. `grobid` is not used when `GROBID_URL` points to the cloud one.
 
 6. **Check the setup:**
 
@@ -128,9 +129,10 @@ Author draft check (sample data):
    curl http://localhost:8080/health
    ```
 
-   It lists each service the gateway uses (the LLM, GROBID, ColBERT, ColPali, Supabase) with its
-   URL and whether it answered. `"degraded": false` means every required one answered. The
-   gateway log shows the same list when it starts: `docker compose logs gateway`.
+   It lists each service the gateway uses (the LLM, GROBID, ColBERT, ColPali, Supabase, Redis,
+   and the worker) with its URL or detail and whether it answered. `"degraded": false` means
+   every required one answered. The gateway log shows the same list when it starts:
+   `docker compose logs gateway`.
 
 7. **Open the app:** go to http://localhost:5173 and paste an arXiv ID (for example `2112.01488`) or upload a PDF.
 
@@ -146,7 +148,7 @@ NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 2. Start the services:
 
    ```sh
-   docker compose up -d --build qdrant grobid colbert colpali gateway web
+   docker compose up -d --build qdrant grobid colbert colpali redis gateway worker web
    ```
 
 3. The models are ColBERTv2 (`colbert-ir/colbertv2.0`, about 0.5 GB) and ColPali (`COLPALI_MODEL=vidore/colqwen2-v1.0`, about 4 GB). In a test run, both together used about 7 to 9 GB of GPU memory.
@@ -174,6 +176,8 @@ instead of `:` on Windows).
 
 - Stop the stack: `docker compose down`
 - After `git pull`, rebuild: `docker compose up -d --build`
+- Run more analyses at once: `docker compose up -d --scale worker=3` (one worker runs one
+  analysis at a time)
 - After you edit `.env`, run `docker compose up -d`. Containers read `.env` only when they start
 - Logs: `docker compose logs -f gateway`
 - A slow or stuck request: `docker exec <gateway-container> py-spy dump --pid 1` (see
@@ -196,6 +200,8 @@ while it runs. Past analyses are in History.
 | Most citations show as unresolved / Semantic Scholar 429 | set `S2_API_KEY` |
 | No figure or page hints | ColPali is still starting. The check still works, just without figure hints |
 | Port 5173 or 8080 already in use | another copy is running. Run `docker compose down` in that folder first |
+| An analysis stays `queued` and never moves | no worker is running. Check the `worker` entry in `/health`, then `docker compose up -d worker` |
+| 503 when starting an analysis | Redis is unreachable. Check the `redis` entry in `/health` and that `REDIS_URL` in `.env` is correct |
 
 ## API
 
@@ -255,6 +261,7 @@ backend/            gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/teacher/        Google Classroom: OAuth, roster sync, essay-check review
   a2a_server.py       the agent tree over A2A (docker compose --profile a2a)
   cli.py              agent REPL
+  worker.py           runs analyses pulled off the Redis queue (RQ worker process)
 frontend/           React + Vite UI, served by nginx which proxies /api to the gateway
 services/colbert/   ColBERTv2 text retrieval (HTTP + MCP, Qdrant)
 services/colpali/   ColPali visual retrieval (HTTP + MCP, Qdrant, opt-in)
@@ -271,6 +278,22 @@ deploys grobid, colbert, colpali, vllm, gateway and web to Cloud Run. Set `VISIO
 colpali. Qdrant runs on a small VM with its own disk (`deploy/qdrant-startup.sh`). To use a
 Qdrant cluster instead, set `QDRANT_URL` and `QDRANT_API_KEY`. For the vLLM part (quota,
 start-up time, cost), read [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
+
+In production, the gateway instead deploys through `.github/workflows/deploy-gateway.yml`, which
+runs on every push to `main` that touches `backend/**` and refuses to deploy if the `REDIS_URL`
+repository secret is empty. The web app runs on Vercel, which proxies `/api/*` to the gateway.
+Redis runs on Redis Cloud, and the worker runs by itself on a separate machine, as the compose
+service `worker`, not on Cloud Run. See "Deploying this" in
+[ARCHITECTURE.md](ARCHITECTURE.md#services).
+</details>
+
+<details>
+<summary>Monitoring</summary>
+
+Two Google Cloud Monitoring uptime alerts watch `/health` in production: one for the health
+check failing, one for too many 5xx responses. Grafana shows more detail: analysis throughput,
+queue wait, and Cloud Run request and latency graphs. Grafana is not public. Reach it over an
+SSH tunnel to the box it runs on. See [deploy/monitoring/README.md](deploy/monitoring/README.md).
 </details>
 
 <details>

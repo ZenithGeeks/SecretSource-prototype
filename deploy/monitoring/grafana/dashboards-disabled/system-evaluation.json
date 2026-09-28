@@ -61,7 +61,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "analyses_running"
+          "expr": "sum(analyses_running)"
         }
       ]
     },
@@ -145,7 +145,7 @@
     },
     {
       "id": 6,
-      "title": "Queue wait (time waiting for a free PARALLEL_ANALYSES slot)",
+      "title": "Queue wait (time in the job queue before a worker starts it)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },

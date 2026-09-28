@@ -19,11 +19,14 @@ from app.config import (
     COLBERT_URL,
     COLPALI_URL,
     GROBID_URL,
+    REDIS_URL,
     SERVICE_AUTH,
     VLLM_API_KEY,
     VLLM_MODEL,
     VLLM_URL,
 )
+from app.queue import ping as redis_ping
+from app.queue import worker_status
 
 TIMEOUT = 5  # seconds per check; a service slower than this to say it is alive is a problem too
 CACHE_SECONDS = 30  # /health answers from the last report this recent, so polling it stays cheap
@@ -129,6 +132,34 @@ def _supabase() -> dict:
     }
 
 
+def _redis_auth() -> str:
+    return "url password" if urlsplit(REDIS_URL).password else "none"
+
+
+def _redis() -> dict:
+    ok, detail = redis_ping()
+    return {
+        "name": "redis",
+        "url": _shown(REDIS_URL),
+        "auth": _redis_auth(),
+        "required": True,
+        "ok": ok,
+        "detail": detail,
+    }
+
+
+def _worker() -> dict:
+    ok, detail = worker_status()
+    return {
+        "name": "worker",
+        "url": _shown(REDIS_URL),
+        "auth": _redis_auth(),
+        "required": True,
+        "ok": ok,
+        "detail": detail,
+    }
+
+
 def check() -> dict:
     """Ask every dependency at once. `degraded` is true when a required one did not answer."""
     checks = (
@@ -138,6 +169,8 @@ def check() -> dict:
         # Figures are optional: a check goes on with text passages when ColPali is down.
         lambda: _service("colpali", COLPALI_URL, "/health", required=False),
         _supabase,
+        _redis,
+        _worker,
     )
     with ThreadPoolExecutor(max_workers=len(checks)) as pool:
         dependencies = list(pool.map(lambda run: run(), checks))

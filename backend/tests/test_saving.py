@@ -71,8 +71,11 @@ def test_a_save_writes_a_copy_not_the_live_analysis(slow_store):
     assert rows["a"]["claims"] == []
 
 
-def test_a_save_in_flight_does_not_bring_back_a_deleted_analysis(slow_store):
+def test_a_save_in_flight_does_not_bring_back_a_deleted_analysis(slow_store, monkeypatch):
     rows, _ = slow_store
+    # Not what this test is about: a "running" row can only be deleted once its RQ job is
+    # confirmed still queued (app/main.py's delete_analysis).
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: True)
 
     async def scenario():
         running("a")

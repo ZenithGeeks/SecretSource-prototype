@@ -34,7 +34,7 @@ import re
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,7 +51,6 @@ from app.auth import current_user
 from app.config import (
     AVATARS_DIR,
     PAPERS_DIR,
-    PARALLEL_ANALYSES,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
     PARALLEL_SOURCES,
@@ -59,10 +58,8 @@ from app.config import (
 )
 from app.metrics import (
     ANALYSES_FINISHED,
-    ANALYSES_RUNNING,
     ANALYSES_STARTED,
     ANALYSIS_DURATION_SECONDS,
-    ANALYSIS_QUEUE_WAIT_SECONDS,
     AUDIT_FINDINGS,
     CLAIM_CHECKS_FAILED,
     CLAIM_VERDICTS,
@@ -78,6 +75,7 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
+from app.queue import cancel_if_queued, enqueue_analysis, job_is_alive, pubsub_client, redis_connection
 from app.teacher.router import router as teacher_router
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
@@ -94,29 +92,98 @@ FIGURE_NAME = re.compile(r"figure-\d+")
 
 analyses: dict[str, dict] = {}
 streams: dict[str, asyncio.Queue] = {}
+_deleted: set[str] = set()
 
 # Shared by every run, so N analyses at once are not N times the load on the retrieval
-# services and the LLM (#170). _run takes its own limit first, then one of these.
+# services and the LLM (#170). _run_queued takes its own limit first, then one of these.
 all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
 all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
-# Extraction (GROBID + EXTRACT_WORKERS LLM calls) has no limit of its own, unlike the two above,
-# so a burst of starts used to send all of it at once. A run waits here before extraction, then
-# an accepted run is unaffected by later starts still waiting.
-all_analyses = asyncio.Semaphore(PARALLEL_ANALYSES)
 
 
 def restore():
-    """Load stored analyses on startup. Ones still marked running were interrupted."""
+    """Load stored analyses on startup. A "running" row may belong to a job an RQ worker is
+    still executing (or was, before this gateway process last exited); only mark it interrupted
+    when the job itself is confirmed gone, and otherwise let the snapshot subscriber catch it up."""
     analyses.clear()
     analyses.update(store.load_all())
     for analysis in analyses.values():
-        if analysis["status"] == "running":
+        if analysis["status"] != "running":
+            continue
+        alive = job_is_alive(analysis["id"])
+        if alive is False:
             analysis.update(status="error", message="interrupted by a restart")
             # Add a final stage. A client that reconnects then sees the run is over.
             analysis["stages"].append(
                 {"stage": "error", "message": "interrupted by a restart"}
             )
             store.save(analysis)
+        else:
+            if alive is None:
+                logger.warning(
+                    "could not reach Redis to check job %s on restart; leaving it running",
+                    analysis["id"],
+                )
+            # SSE replay invariant: a stream must hold every stage already recorded.
+            queue = streams.setdefault(analysis["id"], asyncio.Queue())
+            for stage in analysis["stages"]:
+                queue.put_nowait(stage)
+
+
+def _apply_snapshot(snapshot: dict) -> None:
+    """Turn a Redis analysis snapshot into the gateway's in-memory state and live SSE events.
+
+    While runs still execute in-process, _publish appends a stage locally before publishing,
+    so the local stage count is always >= the snapshot's for those runs, making this a no-op
+    for them automatically. Once a stage count truly is newer, this is the only writer that
+    replaces analyses[id], so it never mutates a dict another part of the process still holds.
+    """
+    analysis_id = snapshot["id"]
+    if analysis_id in _deleted:
+        return
+    local = analyses.get(analysis_id)
+    seen = len(local["stages"]) if local else 0
+    new = snapshot["stages"][seen:]
+    if not new:
+        return
+    analyses[analysis_id] = snapshot
+    queue = streams.setdefault(analysis_id, asyncio.Queue())
+    for stage in new:
+        queue.put_nowait(stage)
+    if snapshot["status"] in ("done", "error"):
+        queue.put_nowait(None)
+
+
+_SUBSCRIBE_BACKOFF_START = 1.0
+_SUBSCRIBE_BACKOFF_MAX = 30.0
+
+
+async def _subscribe_forever() -> None:
+    """Background task: apply every analysis snapshot published by a worker process. Retries
+    quietly on any Redis outage so a gateway with no Redis (e.g. under TestClient) still
+    starts and shuts down cleanly."""
+    backoff = _SUBSCRIBE_BACKOFF_START
+    while True:
+        client = None
+        try:
+            client = pubsub_client()
+            pubsub = client.pubsub()
+            await pubsub.psubscribe("analysis:*")
+            backoff = _SUBSCRIBE_BACKOFF_START
+            async for message in pubsub.listen():
+                if message["type"] != "pmessage":
+                    continue
+                try:
+                    _apply_snapshot(json.loads(message["data"]))
+                except Exception:
+                    logger.exception("applying a Redis analysis snapshot failed")
+        except Exception as error:
+            logger.warning("analysis snapshot subscriber lost Redis (%s); retrying", error)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, _SUBSCRIBE_BACKOFF_MAX)
+        finally:
+            if client is not None:
+                with suppress(Exception):
+                    await client.aclose()
 
 
 @asynccontextmanager
@@ -124,7 +191,11 @@ async def lifespan(app: FastAPI):
     restore()
     # Log where each dependency is and whether it answers, without holding up startup.
     app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))
+    app.state.snapshot_subscriber = asyncio.create_task(_subscribe_forever())
     yield
+    app.state.snapshot_subscriber.cancel()
+    with suppress(asyncio.CancelledError):
+        await app.state.snapshot_subscriber
 
 
 class PathWithoutQuery(logging.Filter):
@@ -196,11 +267,26 @@ async def _saved(analysis_id: str) -> None:
 
 async def _publish(analysis_id: str, stage: str, **fields):
     """Record a stage on the analysis and send it to the open event stream. `at` is the Unix
-    time, so the web app can show how long a run has taken."""
+    time, so the web app can show how long a run has taken.
+
+    Also publishes the whole current analysis (not just this event) to Redis, so a gateway
+    process running in a separate process from whatever runs the pipeline can pick it up
+    (its own subscriber turns this into the same streams[]/analyses[] updates below). A sync
+    publish call would block the loop while other claims' checks are running concurrently
+    (asyncio.gather in _run_queued), so it runs in a thread, same reasoning as _save_soon.
+
+    Best-effort: a Redis blip must not fail an analysis that is otherwise going fine. The gateway
+    catches up from the next snapshot that gets through.
+    """
     event = {"stage": stage, **fields, "at": round(time.time(), 1)}
     analyses[analysis_id]["stages"].append(event)
     _save_soon(analysis_id)
     await streams[analysis_id].put(event)
+    snapshot = json.dumps(analyses[analysis_id], default=str)
+    try:
+        await asyncio.to_thread(redis_connection().publish, f"analysis:{analysis_id}", snapshot)
+    except Exception as error:
+        logger.warning("publishing analysis %s to Redis failed: %s", analysis_id, error)
 
 
 _background: set[asyncio.Task] = set()
@@ -224,19 +310,6 @@ async def _index_self(analysis_id: str, title: str) -> None:
         return
     analysis["indexed_in"] = await asyncio.to_thread(index_paper, title)
     _save_soon(analysis_id)
-
-
-async def _run(analysis_id: str, paper: str, verify: bool):
-    analysis = analyses[analysis_id]
-    queued_at = time.monotonic()
-    await _publish(analysis_id, "queued", message="waiting for a free analysis slot")
-    async with all_analyses:
-        ANALYSIS_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
-        ANALYSES_RUNNING.inc()
-        try:
-            await _run_queued(analysis_id, analysis, paper, verify)
-        finally:
-            ANALYSES_RUNNING.dec()
 
 
 async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
@@ -349,46 +422,57 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         await _saved(analysis_id)
 
 
+def _new_analysis(analysis_id: str, paper: str, owner: str | None) -> dict:
+    """The skeleton dict an analysis starts as, shared by the gateway's in-process `_start`
+    and the worker's job (app/queue.py), so the two can never drift apart."""
+    return {"id": analysis_id, "paper": paper, "status": "running",
+            "owner": owner, "stages": [], "claims": []}
+
+
 def _start(paper: str, verify: bool, owner: str | None) -> dict:
+    """Records a "queued" stage locally (so the caller sees it immediately) and hands the run to
+    an RQ worker."""
     analysis_id = uuid.uuid4().hex[:12]
-    analyses[analysis_id] = {"id": analysis_id, "paper": paper, "status": "running",
-                             "started": datetime.now(timezone.utc).isoformat(),
-                             "owner": owner, "stages": [], "claims": []}
+    analysis = _new_analysis(analysis_id, paper, owner)
+    analysis["started"] = datetime.now(timezone.utc).isoformat()
+    queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
+    analysis["stages"].append(queued)
+    analyses[analysis_id] = analysis
     streams[analysis_id] = asyncio.Queue()
+    streams[analysis_id].put_nowait(queued)
+    try:
+        enqueue_analysis(analysis_id, paper, verify, owner, [queued])
+    except Exception:
+        analyses.pop(analysis_id, None)
+        streams.pop(analysis_id, None)
+        logger.warning("enqueuing analysis %s failed", analysis_id)
+        raise HTTPException(503, "the analysis queue is unavailable, try again shortly") from None
     ANALYSES_STARTED.inc()
-    asyncio.create_task(_run(analysis_id, paper, verify))
+    # Stored now so a gateway restart before a worker picks the job up still finds it (else it
+    # 404s, and the web app's event stream stops retrying). The worker's saves supersede this.
+    _save_soon(analysis_id)
     return {"id": analysis_id}
 
 
-def team_visible(user: str | None) -> list[dict]:
-    """The analyses a signed-in researcher may read, oldest first: every stored analysis, shared
-    across the whole team, once someone is signed in — one teammate's checked paper is everyone's
-    to search, graph, and open. Signed out (no Supabase configured), current_user() only ever
-    returns None, so this still narrows to analyses without an owner."""
-    if user is None:
-        return [analysis for analysis in analyses.values() if analysis.get("owner") is None]
-    return list(analyses.values())
-
-
 def visible_to(user: str | None) -> list[dict]:
-    """The analyses this exact user owns. Kept owner-scoped even in the shared team library, for
-    the one place sharing must stop: deleting a user's own data must never touch a teammate's."""
+    """The analyses this exact user may read, oldest first: their own when signed in, or the
+    ones with no owner when signed out (current_user() only ever returns None then). Every
+    analysis is private to its owner; nothing here is shared across users."""
     return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
 
 
 def _owned(analysis_id: str, user: str | None) -> dict:
-    """The analysis, if this signed-in researcher may read it — shared across the team via
-    team_visible(). Missing, or (signed out) owned by someone else, is a 404, not a 403, so an id
-    does not tell anyone that it exists."""
+    """The analysis, if this exact user owns it (visible_to). Missing, or owned by someone
+    else, is a 404, not a 403, so an id does not tell anyone that it exists."""
     analysis = analyses.get(analysis_id)
-    if analysis is None or analysis not in team_visible(user):
+    if analysis is None or analysis not in visible_to(user):
         raise HTTPException(404, "no such analysis")
     return analysis
 
 
 def _mine(analysis_id: str, user: str | None) -> dict:
-    """The analysis, only if this exact user created it. Used only for deleting one's own
-    analysis, so that action stays owner-scoped even though reading is now shared."""
+    """The analysis, only if this exact user created it. Same test as visible_to(); kept as
+    its own function since deleting one's own analysis is a distinct action from reading it."""
     analysis = analyses.get(analysis_id)
     if analysis is None or analysis.get("owner") != user:
         raise HTTPException(404, "no such analysis")
@@ -433,7 +517,7 @@ async def upload_analysis(
 async def list_analyses(user: str | None = Depends(current_user)):
     # The list leaves out what only one analysis's own view needs.
     left_out = ("stages", "references", "markers", "outline")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(team_visible(user))]
+    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
 
 
 @app.get("/analyses/{analysis_id}")
@@ -442,6 +526,8 @@ async def get_analysis(analysis_id: str, user: str | None = Depends(current_user
 
 
 async def _delete_one(analysis_id: str) -> None:
+    # A worker may still publish a snapshot after this delete; it must not come back.
+    _deleted.add(analysis_id)
     # Out of memory first, so no new save starts. A save already running would store the row
     # again after the delete, so wait for it.
     analyses.pop(analysis_id, None)
@@ -452,7 +538,11 @@ async def _delete_one(analysis_id: str) -> None:
 
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    _mine(analysis_id, user)
+    analysis = _mine(analysis_id, user)
+    if analysis["status"] == "running":
+        # A started job keeps saving to the store, so a deleted row would come back on restart.
+        if not await asyncio.to_thread(cancel_if_queued, analysis_id):
+            raise HTTPException(409, "this analysis is still running; delete it once it finishes")
     await _delete_one(analysis_id)
     return {"deleted": analysis_id}
 
@@ -484,9 +574,9 @@ async def analysis_events(analysis_id: str, user: str | None = Depends(current_u
 
 def papers_of(user: str | None) -> set[str]:
     """The file names of the papers this user may open: the analysed paper of each analysis they
-    may read (team_visible), and each cited paper a check read for one of them."""
+    may read (visible_to), and each cited paper a check read for one of them."""
     names = set()
-    for analysis in team_visible(user):
+    for analysis in visible_to(user):
         if analysis.get("file"):
             names.add(Path(analysis["file"]).name)
         for claim in analysis.get("claims", []):
@@ -592,13 +682,13 @@ def _project(project_id: str, stored: list[dict]) -> dict:
 
 @app.get("/researcher/home")
 async def researcher_home(user: str | None = Depends(current_user)):
-    return await asyncio.to_thread(researcher.home, team_visible(user))
+    return await asyncio.to_thread(researcher.home, visible_to(user))
 
 
 @app.get("/researcher/projects")
 async def researcher_projects(user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    return await asyncio.to_thread(researcher.projects, stored, team_visible(user))
+    return await asyncio.to_thread(researcher.projects, stored, visible_to(user))
 
 
 @app.post("/researcher/projects")
@@ -616,7 +706,7 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
 @app.get("/researcher/projects/{project_id}/library")
 async def project_library(project_id: str, user: str | None = Depends(current_user)):
     stored = await asyncio.to_thread(store.load_projects, user)
-    found = await asyncio.to_thread(researcher.library, project_id, stored, team_visible(user))
+    found = await asyncio.to_thread(researcher.library, project_id, stored, visible_to(user))
     if found is None:
         raise HTTPException(404, "no such project")
     return found
@@ -626,7 +716,7 @@ async def project_library(project_id: str, user: str | None = Depends(current_us
 async def add_to_project(
     project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
 ):
-    """Put an analysed paper the caller may read (team_visible) into one of their own projects."""
+    """Put an analysed paper the caller may read (visible_to) into one of their own projects."""
     _owned(request.analysis_id, user)
     stored = await asyncio.to_thread(store.load_projects, user)
     project = _project(project_id, stored)
@@ -634,20 +724,20 @@ async def add_to_project(
         project["analyses"].append(request.analysis_id)
     project["updated"] = datetime.now(timezone.utc).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    projected = await asyncio.to_thread(researcher.projects, [project], team_visible(user))
+    projected = await asyncio.to_thread(researcher.projects, [project], visible_to(user))
     return projected[0]
 
 
 @app.post("/researcher/consensus")
 async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
-    """What the works cited across the team's analysed papers say about a question. Reuses the
+    """What the works cited across the caller's own analysed papers say about a question. Reuses the
     verdicts already found; it makes no LLM calls."""
-    return await asyncio.to_thread(researcher.consensus, request.question, team_visible(user))
+    return await asyncio.to_thread(researcher.consensus, request.question, visible_to(user))
 
 
 @app.get("/researcher/graph")
 async def knowledge_graph(user: str | None = Depends(current_user)):
-    return await asyncio.to_thread(researcher.graph, team_visible(user))
+    return await asyncio.to_thread(researcher.graph, visible_to(user))
 
 
 # --- account settings, shared by every role (Settings modal) ---
@@ -693,9 +783,8 @@ async def delete_all_data(user: str | None = Depends(current_user)):
     """Every analysis (and researcher project) this user owns — Settings → Your data →
     Delete all. The confirm dialog is the UI's job; this call is unconditional.
 
-    An analysis still running is skipped and counted in `skipped`: its `_run` task keeps
-    indexing `analyses`/`streams`, so popping them here would make its next `_publish`
-    raise inside the task after this call already answered 200."""
+    An analysis still running is skipped and counted in `skipped`: its worker keeps saving it,
+    so a deleted row would come back on the next restart (same reason as delete_analysis)."""
     mine = visible_to(user)
     ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:

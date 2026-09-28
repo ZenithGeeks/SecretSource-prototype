@@ -12,7 +12,12 @@ def uploads(monkeypatch, tmp_path):
     monkeypatch.delenv("SUPABASE_URL", raising=False)  # login off: no token needed
     monkeypatch.setattr(main, "PAPERS_DIR", tmp_path)
     started = []
-    monkeypatch.setattr(main, "_start", lambda paper, verify, owner: started.append(paper) or {"id": "x"})
+    monkeypatch.setattr(
+        main, "enqueue_analysis",
+        lambda analysis_id, paper, verify, owner, stages: started.append(paper),
+    )
+    main.analyses.clear()
+    main.streams.clear()
     client = TestClient(main.app)
 
     def upload(name: str, content: bytes) -> str:
