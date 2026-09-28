@@ -8,7 +8,7 @@
 prepare_sources downloads and indexes each cited work once, several at a time.
 check_sources then judges each claim against its prepared work, several at a time.
 
-This is a maintained second way to run the pipeline, next to `_run` in app/main.py. Both
+This is a maintained second way to run the pipeline, next to `_run_queued` in app/main.py. Both
 call the same functions: the pipeline steps, fold_check to add a result to its claim,
 paper_figures and audit. The gateway reads the figures while it checks the claims; the
 graph reads them after. Both read PARALLEL_SOURCES and PARALLEL_CHECKS from app.config.

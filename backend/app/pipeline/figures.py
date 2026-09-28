@@ -14,7 +14,7 @@ import threading
 from collections import Counter
 from pathlib import Path
 
-from app.config import PAPERS_DIR
+from app.config import DOCLING_PARALLEL, PAPERS_DIR
 
 IMAGE_SCALE = 2.0  # crops rendered at twice the page's own resolution
 MANIFEST = "media.json"  # cache: Docling runs once per paper
@@ -27,6 +27,16 @@ _converters: dict[tuple[bool, bool], object] = {}  # by (ocr, pictures): loading
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 _converter_guard = threading.Lock()
+# Bounds concurrent Docling conversions: each one peaks around 2 GB (layout and table models).
+# Conversions run in worker threads (asyncio.to_thread), so a threading semaphore is the right
+# primitive; only .convert() itself is held under it, so nothing else queues behind a slow PDF.
+_convert_semaphore = threading.BoundedSemaphore(DOCLING_PARALLEL)
+
+
+def convert(converter, pdf_path):
+    """Run a Docling converter's .convert(), limited to DOCLING_PARALLEL at a time."""
+    with _convert_semaphore:
+        return converter.convert(pdf_path)
 
 
 def _lock_for(pdf: Path) -> threading.Lock:
@@ -210,7 +220,7 @@ def paper_media(pdf_path: str, refresh: bool = False) -> dict:
             if not refresh and (cached := _read_manifest(pdf)):
                 return {"status": "ok", "cached": True, **_named(cached)}
 
-            document = docling_converter(needs_ocr(pdf_path)).convert(pdf).document
+            document = convert(docling_converter(needs_ocr(pdf_path)), pdf).document
 
             media = _named(
                 {
