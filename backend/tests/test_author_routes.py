@@ -10,6 +10,7 @@ directly under asyncio.run, as test_checks.py does for _run_check.
 import asyncio
 import io
 import json
+import time
 import zipfile
 from datetime import datetime, timedelta
 
@@ -287,6 +288,54 @@ def test_timestamps_are_iso_8601_in_utc_with_the_offset_written(client, monkeypa
         parsed = datetime.fromisoformat(stamp)
         assert parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0), (name, stamp)
         assert stamp.endswith("+00:00"), (name, stamp)
+
+
+def test_two_simultaneous_check_requests_start_one_check(client, monkeypatch):
+    """The "one check at a time" guard holds across the awaits that follow it (PR #291
+    review): two requests in flight at once, both past the ownership lookup, still start one
+    check. The project lookup is slowed so the second request is handled while the first
+    is still inside it."""
+    draft = make_draft(client)
+
+    def slow_project_of(draft, user):
+        time.sleep(0.05)
+        return None
+
+    monkeypatch.setattr(author, "_project_of", slow_project_of)
+
+    async def both():
+        return await asyncio.gather(
+            author.start_draft_check(draft["id"], "user-ada"),
+            author.start_draft_check(draft["id"], "user-ada"),
+            return_exceptions=True,
+        )
+
+    first, second = asyncio.run(both())
+    started = [r for r in (first, second) if isinstance(r, dict)]
+    refused = [r for r in (first, second) if not isinstance(r, dict)]
+    assert len(started) == 1 and len(refused) == 1
+    assert refused[0].status_code == 409 and started[0]["id"] in refused[0].detail
+    running = [r for r in main.analyses.values() if r.get("draftId") == draft["id"]]
+    assert [r["id"] for r in running] == [started[0]["id"]]
+
+
+def test_a_check_whose_setup_fails_leaves_no_row_behind(client, monkeypatch):
+    """When the work between the guard and the run raises (or is cancelled), the reserved
+    row goes with it; otherwise every later Re-check would be refused as "already running"."""
+    draft = make_draft(client)
+
+    def failing_project_of(draft, user):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(author, "_project_of", failing_project_of)
+    streams_before = set(main.streams)
+    with pytest.raises(RuntimeError):
+        asyncio.run(author.start_draft_check(draft["id"], "user-ada"))
+    assert not [r for r in main.analyses.values() if r.get("draftId") == draft["id"]]
+    assert set(main.streams) == streams_before
+
+    monkeypatch.setattr(author, "_project_of", lambda draft, user: None)
+    assert client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).status_code == 200
 
 
 def test_a_second_check_while_one_runs_is_refused(client):

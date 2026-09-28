@@ -512,32 +512,46 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
     """Re-check. One run per draft at a time: a second request while one is running gets a
     409 with the running check's id, rather than a second run the screen would lose."""
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
+    gateway = _gateway()
+    # The guard and the row it guards, with no await between them: the event loop cannot
+    # switch to a second request (a double-click on Re-check, a client retry) after this one
+    # saw no running check and before its own row is in place, so at most one of them gets
+    # past here. The row is filled in below; until then it is a running check to everyone.
     running = next((r for r in _checks_of(draft_id, user) if r.get("status") == "running"), None)
     if running:
         raise HTTPException(409, f"a check is already running: {running['id']}")
-    # A check runs on a saved version: unsaved edits are saved first (as Ctrl+S would), so
-    # the history's "vN" names exactly the content that was checked.
-    if _unsaved(draft):
-        _bump_version(draft)
-        await asyncio.to_thread(_save, DRAFTS, draft)
-    project = await asyncio.to_thread(_project_of, draft, user)
-    gateway = _gateway()
     check_id = _new_id()
-    gateway.analyses[check_id] = {
+    run = {
         "id": check_id,
         "kind": DRAFT_CHECK,
         "owner": user,
         "draftId": draft_id,
         "draftTitle": draft["title"],
         "version": draft.get("version", 1),
-        # the draft's files plus the project's .bib: what "unchanged since the previous check" compares
-        "contentHash": logic.content_hash(_draft_files(draft, project)),
+        "contentHash": None,
         "status": "running",
         "startedAt": logic.now_iso(),
         "stages": [],
         "citations": [],
     }
+    gateway.analyses[check_id] = run
     gateway.streams[check_id] = asyncio.Queue()
+    try:
+        # A check runs on a saved version: unsaved edits are saved first (as Ctrl+S would),
+        # so the history's "vN" names exactly the content that was checked.
+        if _unsaved(draft):
+            _bump_version(draft)
+            await asyncio.to_thread(_save, DRAFTS, draft)
+        project = await asyncio.to_thread(_project_of, draft, user)
+        run["version"] = draft.get("version", 1)
+        # the draft's files plus the project's .bib: what "unchanged since the previous check" compares
+        run["contentHash"] = logic.content_hash(_draft_files(draft, project))
+    except BaseException:
+        # A failed or cancelled save must not leave a check that never runs, which would
+        # refuse every later Re-check of this draft.
+        gateway.analyses.pop(check_id, None)
+        gateway.streams.pop(check_id, None)
+        raise
     _spawn(_run_draft_check(check_id, user))
     return {"id": check_id}
 
