@@ -441,7 +441,7 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     streams[analysis_id] = asyncio.Queue()
     streams[analysis_id].put_nowait(queued)
     try:
-        enqueue_analysis(analysis_id, paper, verify, owner, [queued])
+        enqueue_analysis(analysis_id, paper, verify, owner, [queued], analysis["started"])
     except Exception:
         analyses.pop(analysis_id, None)
         streams.pop(analysis_id, None)

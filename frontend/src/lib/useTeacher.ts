@@ -33,7 +33,6 @@ export function useTeacherHistory() {
   return useQuery({
     queryKey: TEACHER_HISTORY_KEY,
     queryFn: teacherApi.getHistory,
-    refetchInterval: 10_000,
   })
 }
 
@@ -113,7 +112,13 @@ export function useRefreshTeacherClass() {
 export function useTeacherGoogleConnection() {
   return useQuery({
     queryKey: ['teacher', 'google-connection'],
-    queryFn: ({ signal }) => teacherApi.getGoogleConnection(AbortSignal.any([signal, AbortSignal.timeout(10_000)])),
+    queryFn: ({ signal }) => {
+      const timeout = AbortSignal.timeout(10_000)
+      const requestSignal = typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([signal, timeout])
+        : timeout
+      return teacherApi.getGoogleConnection(requestSignal)
+    },
     retry: false,
   })
 }

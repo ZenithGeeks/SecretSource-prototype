@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   ArrowUpRight,
+  BookOpen,
   CalendarClock,
   ChevronRight,
   FileCheck2,
@@ -11,6 +12,7 @@ import {
 import { Button, Card, Empty } from '../../../components/ui'
 import { useAuth } from '../../../lib/useAuth'
 import { useSettings } from '../../../lib/settings'
+import { homeRouteForAction } from '../../../lib/teacherSelectors'
 import type { TeacherHomeAssignment, TeacherHomeSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import { useTeacherGoogleConnection, useTeacherHome } from '../../../lib/useTeacher'
@@ -87,10 +89,11 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
         </p>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-3" aria-label="Quick actions">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Quick actions">
         <QuickAction icon={FileCheck2} title="Check student essays" detail="Review submitted work and citation checks" onClick={() => openEssayCheck()} />
         <QuickAction icon={ListChecks} title="Review queue" detail={`${reviewCount} ${reviewCount === 1 ? 'submission' : 'submissions'} waiting for review`} onClick={openReviewQueue} />
         <QuickAction icon={CalendarClock} title="Due soon" detail={`${assignments.length} assignments · next 7 days and overdue`} onClick={() => assignments[0] ? onOpen({ screen: 'assignment-detail', courseId: assignments[0].courseId, assignmentId: assignments[0].id }) : onOpen({ screen: 'classes' })} />
+        <QuickAction icon={BookOpen} title="Make reading questions" detail="Create questions from a research paper" onClick={() => onOpen(homeRouteForAction('reading-questions'))} />
       </section>
 
       <section className="grid items-start gap-4 xl:grid-cols-2">

@@ -452,11 +452,12 @@ def teacher_home(
     for course in courses:
         coursework = repository.list_coursework(owner, course.course_id)
         assignments = [item for item in coursework if item.resource_type == "coursework"]
+        assignments_by_coursework_id = {item.coursework_id: item for item in assignments}
         course_submissions = repository.list_submissions(owner, course.course_id)
         by_assignment: dict[str, list[TeacherSubmission]] = {}
         for submission in course_submissions:
             by_assignment.setdefault(submission.coursework_id, []).append(submission)
-            assignment = next((item for item in assignments if item.coursework_id == submission.coursework_id), None)
+            assignment = assignments_by_coursework_id.get(submission.coursework_id)
             submissions.append((course, assignment, submission))
 
         for assignment in assignments:
@@ -479,7 +480,8 @@ def teacher_home(
     )
     queue = [entry for entry in submissions if entry[2].state == "TURNED_IN"]
     queue.sort(key=lambda entry: str((entry[2].raw or {}).get("updateTime") or (entry[2].raw or {}).get("creationTime") or ""), reverse=True)
-    due_soon.sort(key=lambda entry: entry["dueAt"])
+    # Keep near-term work visible when older overdue assignments still have missing work.
+    due_soon.sort(key=lambda entry: (entry["overdue"], entry["dueAt"]))
     home_submissions = []
     for course, assignment, submission in queue[:8]:
         checked = bool(submission.analysis_id)

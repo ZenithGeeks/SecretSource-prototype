@@ -89,7 +89,7 @@ export function teacherFeedbackMarkdown(report: TeacherFeedbackReport): string {
   return sections.join('\n\n')
 }
 
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({
+export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]!))
 

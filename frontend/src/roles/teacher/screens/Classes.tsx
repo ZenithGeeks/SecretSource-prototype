@@ -16,12 +16,22 @@ export function Classes({ onOpenClass, onOpenHome, onAddClass, onConnectGoogle, 
   connectionError?: string
 }) {
   const connection = useTeacherGoogleConnection()
-  const classes = useTeacherClasses(connection.data?.connected === true)
+  const classes = useTeacherClasses()
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => filterTeacherClasses(classes.data ?? [], query), [classes.data, query])
 
-  if (connection.isPending) return <LoadingState label="Checking Google Classroom connection..." />
-  if (connection.isError) {
+  if (classes.isPending) return <LoadingState label="Loading classes..." />
+  if (classes.isError) {
+    return (
+      <div className="space-y-4">
+        <Breadcrumbs items={[{ label: 'Teacher workspace', onClick: onOpenHome }, { label: 'Classes' }]} />
+        <Empty title="Classes could not load" hint="Try refreshing the page to load your Classroom courses." />
+        <Button type="button" onClick={() => void classes.refetch()}>Retry</Button>
+      </div>
+    )
+  }
+  if (!classes.data?.length && connection.isPending) return <LoadingState label="Checking Google Classroom connection..." />
+  if (!classes.data?.length && connection.isError) {
     return (
       <div className="space-y-4">
         <Breadcrumbs items={[{ label: 'Teacher workspace', onClick: onOpenHome }, { label: 'Classes' }]} />
@@ -30,12 +40,9 @@ export function Classes({ onOpenClass, onOpenHome, onAddClass, onConnectGoogle, 
       </div>
     )
   }
-  if (!connection.data?.connected) {
+  if (!classes.data?.length && !connection.data?.connected) {
     return <AddClass step="connect" error={connectionError} onBack={() => undefined} onContinue={onConnectGoogle} onSelectCourse={() => undefined} onImport={() => undefined} />
   }
-
-  if (classes.isPending) return <LoadingState label="Loading classes..." />
-  if (classes.isError) return <Empty title="Classes could not load" hint="Try refreshing the page to load your Classroom courses." />
 
   return (
     <div className="space-y-7">

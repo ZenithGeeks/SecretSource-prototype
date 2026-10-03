@@ -1,5 +1,6 @@
 import { AlertCircle, FileText } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { Button, Card, Empty } from '../../../components/ui'
 import { useTeacherGoogleConnection, useTeacherWorkspace } from '../../../lib/useTeacher'
@@ -20,13 +21,16 @@ export function ClassWorkspace({ courseId, tab, onNavigate, onRefresh, refreshin
 }) {
   const workspace = useTeacherWorkspace(courseId)
   const googleConnection = useTeacherGoogleConnection()
-  const autoSyncedCourse = useRef<string | null>(null)
+  const queryClient = useQueryClient()
 
   useEffect(() => {
-    if (!googleConnection.data?.connected || autoSyncedCourse.current === courseId) return
-    autoSyncedCourse.current = courseId
+    if (!googleConnection.data?.connected) return
+    const syncKey = ['teacher', 'class-auto-sync', courseId]
+    const lastSyncedAt = queryClient.getQueryData<number>(syncKey)
+    if (lastSyncedAt && Date.now() - lastSyncedAt < 5 * 60_000) return
+    queryClient.setQueryData(syncKey, Date.now())
     onRefresh()
-  }, [courseId, googleConnection.data?.connected, onRefresh])
+  }, [courseId, googleConnection.data?.connected, onRefresh, queryClient])
 
   if (workspace.isPending) return <LoadingState label="Loading class workspace..." />
   if (workspace.isError || !workspace.data) return <Empty title="Class workspace unavailable" hint="This class is not available in the local teacher session." />

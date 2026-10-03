@@ -65,7 +65,7 @@ async function buildFeedbackData(analysis: Analysis | undefined, reviews: EssayR
     sourceName: citation.title || citation.doi || citation.url,
     cropDataUrl: crops[index],
   }))
-  return { course, assignment, fileName: pdfName, student, feedback, claims }
+  return { course, assignment, fileName: fileName ?? pdfName, student, feedback, claims }
 }
 
 async function buildFeedbackHtml(analysis: Analysis, reviews: EssayReview[], selectedIds: string[], sharingOptions: FeedbackSharingByCitation, student: string, course: string, assignment: string, feedback: string, fileName: string) {

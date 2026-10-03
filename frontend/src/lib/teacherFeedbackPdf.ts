@@ -1,8 +1,4 @@
-import type { TeacherFeedbackReport } from './teacherFeedbackExport'
-
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]!))
+import { escapeHtml, type TeacherFeedbackReport } from './teacherFeedbackExport'
 
 /** Build the polished, self-contained A4 HTML document used for print-to-PDF and email. */
 export function teacherFeedbackPdfHtml(report: TeacherFeedbackReport): string {

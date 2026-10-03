@@ -139,7 +139,7 @@ def test_force_rechecks_an_unchanged_completed_submission():
     assert result["id"] == "analysis-1"
     assert calls == ["started"]
     assert drive.downloads == ["essay"]
-    assert repository.resets == [("teacher-1", "course-1", "work-1", "submission-1")]
+    assert repository.resets == []
 
 
 def test_force_does_not_duplicate_a_running_analysis_even_if_file_changed():

@@ -87,6 +87,14 @@ class TeacherEssayAnalysisService:
             raise ValueError("submission has no supported Drive attachment")
         metadata = self.client.get_drive_metadata(file_id) if hasattr(self.client, "get_drive_metadata") else attachment
         file_version = str(metadata.get("version") or metadata.get("modifiedTime") or metadata.get("md5Checksum") or "")
+        submission_file_changed = bool(submission.analysis_id) and (
+            (bool(submission.analysis_file_id) and submission.analysis_file_id != file_id)
+            or (
+                bool(submission.analysis_file_version)
+                and bool(file_version)
+                and submission.analysis_file_version != file_version
+            )
+        )
         if (
             not force
             and submission.analysis_id
@@ -105,7 +113,7 @@ class TeacherEssayAnalysisService:
         analysis_id = job.get("id")
         if not analysis_id:
             raise ValueError("analysis pipeline did not return an id")
-        if submission.analysis_id and hasattr(self.repository, "reset_submission_review"):
+        if submission_file_changed and hasattr(self.repository, "reset_submission_review"):
             self.repository.reset_submission_review(owner, course_id, coursework_id, submission_id)
         self.repository.link_submission_analysis(
             owner, course_id, coursework_id, submission_id, analysis_id, file_id=file_id, file_version=file_version
