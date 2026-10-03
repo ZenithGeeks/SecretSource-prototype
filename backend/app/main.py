@@ -47,6 +47,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from app import dependencies, researcher, store
+from app.analysis_table import AnalysisTable
 from app.auth import current_user
 from app.config import (
     AVATARS_DIR,
@@ -90,7 +91,7 @@ DEFAULT_DPI, MAX_DPI = 110, 300
 # The request only sends a number, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
 
-analyses: dict[str, dict] = {}
+analyses = AnalysisTable()
 streams: dict[str, asyncio.Queue] = {}
 _deleted: set[str] = set()
 
@@ -470,7 +471,34 @@ def visible_to(user: str | None) -> list[dict]:
     """The analyses this exact user may read, oldest first: their own when signed in, or the
     ones with no owner when signed out (current_user() only ever returns None then). Every
     analysis is private to its owner; nothing here is shared across users."""
-    return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
+    return analyses.owned_by(user)
+
+
+# What papers_of and the knowledge graph built for each owner, and the state of that owner's
+# analyses they were built from. A page image request runs papers_of each time, and the graph
+# rebuilds from every claim, so both are reused until one of the owner's rows changes.
+_derived: dict[tuple[str, str | None], tuple[tuple, object]] = {}
+
+
+def _rows_state(rows: list[dict]) -> tuple:
+    """Changes whenever a row does. A worker snapshot replaces the row (a new object); in place,
+    the gateway only adds stages, ends a run (status), or records where the paper is indexed
+    after it is done (_index_self), and the graph reads that last one."""
+    return tuple(
+        (row["id"], id(row), row.get("status"), len(row.get("stages") or ()), "indexed_in" in row)
+        for row in rows
+    )
+
+
+def _per_owner(name: str, user: str | None, build):
+    rows = visible_to(user)
+    state = _rows_state(rows)
+    cached = _derived.get((name, user))
+    if cached is not None and cached[0] == state:
+        return cached[1]
+    value = build(rows)
+    _derived[(name, user)] = (state, value)
+    return value
 
 
 def _owned(analysis_id: str, user: str | None) -> dict:
@@ -596,16 +624,20 @@ async def analysis_events(analysis_id: str, user: str | None = Depends(current_u
 # --- the paper itself, so the UI can show the page a claim or a passage came from ---
 
 
-def papers_of(user: str | None) -> set[str]:
+def papers_of(user: str | None) -> frozenset[str]:
     """The file names of the papers this user may open: the analysed paper of each analysis they
     may read (visible_to), and each cited paper a check read for one of them."""
+    return _per_owner("papers", user, _paper_names)
+
+
+def _paper_names(rows: list[dict]) -> frozenset[str]:
     names = set()
-    for analysis in visible_to(user):
+    for analysis in rows:
         if analysis.get("file"):
             names.add(Path(analysis["file"]).name)
         for claim in analysis.get("claims", []):
             names.update(Path(v["source"]).name for v in claim.get("verdicts", []) if v.get("source"))
-    return names
+    return frozenset(names)
 
 
 def _paper(name: str, user: str | None) -> Path:
@@ -761,7 +793,7 @@ async def field_consensus(request: ConsensusRequest, user: str | None = Depends(
 
 @app.get("/researcher/graph")
 async def knowledge_graph(user: str | None = Depends(current_user)):
-    return await asyncio.to_thread(researcher.graph, visible_to(user))
+    return await asyncio.to_thread(_per_owner, "graph", user, researcher.graph)
 
 
 # --- account settings, shared by every role (Settings modal) ---
