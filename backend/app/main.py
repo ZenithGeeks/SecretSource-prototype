@@ -463,6 +463,14 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     # Stored now so a gateway restart before a worker picks the job up still finds it (else it
     # 404s, and the web app's event stream stops retrying). The worker's saves supersede this.
     _save_soon(analysis_id)
+    # Cloud Run can run several gateway instances, each with its own `analyses`. The others only
+    # learn of a run from a snapshot on Redis, and the worker sends its first one when it starts
+    # the job. Until then (minutes, while a worker is busy with another run) they answered 404 for
+    # this analysis (#259). Best-effort, like _publish: a later snapshot catches them up.
+    try:
+        redis_connection().publish(f"analysis:{analysis_id}", json.dumps(analysis, default=str))
+    except Exception as error:
+        logger.warning("publishing queued analysis %s to Redis failed: %s", analysis_id, error)
     return {"id": analysis_id}
 
 
