@@ -138,7 +138,12 @@ def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:
 
 
 def enqueue_analysis(
-    analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict], started: str | None = None,
+    analysis_id: str,
+    paper: str,
+    verify: bool,
+    owner: str | None,
+    stages: list[dict],
+    started: str | None = None,
 ):
     return analysis_queue().enqueue(
         run_analysis_job, analysis_id, paper, verify, owner, stages, started,
