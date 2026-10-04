@@ -47,6 +47,13 @@ export function Classes({ onOpenClass, onOpenHome, onAddClass, onConnectGoogle, 
   return (
     <div className="space-y-7">
       <Breadcrumbs items={[{ label: 'Teacher workspace', onClick: onOpenHome }, { label: 'Classes' }]} />
+      {connectionError && <p role="alert" className="text-sm text-refutes">{connectionError}</p>}
+      {connection.isError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface px-4 py-3">
+          <p className="text-sm text-ink-muted">Google Classroom connection status could not be checked.</p>
+          <Button type="button" variant="ghost" onClick={() => void connection.refetch()}>Retry</Button>
+        </div>
+      )}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="font-serif text-[34px] font-semibold leading-[40px] text-ink">Classes</h1>

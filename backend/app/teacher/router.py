@@ -606,7 +606,7 @@ def teacher_history(
         history.append((latest, entry))
 
     history.sort(key=lambda item: item[0], reverse=True)
-    return [entry for _, entry in history]
+    return [entry for _, entry in history[:50]]
 
 
 @router.get("/classes")

@@ -28,6 +28,7 @@ class FakeQuery:
         self.action = "select"
         self.payload = None
         self.filters = []
+        self.row_range = None
 
     def insert(self, payload):
         self.action, self.payload = "insert", payload
@@ -65,6 +66,10 @@ class FakeQuery:
     def limit(self, _value):
         return self
 
+    def range(self, start, end):
+        self.row_range = (start, end + 1)
+        return self
+
     def execute(self):
         rows = self.client.rows.setdefault(self.table_name, [])
 
@@ -81,6 +86,8 @@ class FakeQuery:
             for row in rows if all(matches(row, filter_) for filter_ in self.filters)
         ]
         if self.action == "select":
+            if self.row_range is not None:
+                matched = matched[slice(*self.row_range)]
             response = FakeResponse([row.copy() for row in matched])
             callback = getattr(self.client, "after_select", None)
             if callback is not None:

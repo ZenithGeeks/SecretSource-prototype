@@ -76,7 +76,7 @@ class TeacherEssayAnalysisService:
     ) -> dict[str, Any]:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         snapshot = self._analysis(submission.analysis_id) if submission.analysis_id else {}
-        if snapshot.get("status") == "running":
+        if snapshot.get("status") == "running" and not force:
             return {"id": submission.analysis_id, "status": "running", "submission_id": submission_id}
         attachments = select_supported_attachments(submission.attachments)
         if len(attachments) != 1:

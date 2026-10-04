@@ -21,7 +21,7 @@ export function teacherFeedbackPdfHtml(report: TeacherFeedbackReport): string {
       </div>
       <h3 class="claim-title">${escapeHtml(claim.claim)}</h3>
       ${claim.sentence ? `<div class="essay-passage"><span class="eyebrow">In your essay${claim.sourcePage ? ` · page ${claim.sourcePage}` : ''}</span><p>“${escapeHtml(claim.sentence)}”</p></div>` : ''}
-      ${claim.cropDataUrl ? `<figure class="essay-crop"><img alt="Passage from your submitted paper${claim.sourcePage ? `, page ${claim.sourcePage}` : ''}" src="${claim.cropDataUrl}"><figcaption>Passage from your essay${claim.sourcePage ? ` · page ${claim.sourcePage}` : ''}</figcaption></figure>` : ''}
+      ${claim.cropDataUrl ? `<figure class="essay-crop"><img alt="Passage from your submitted paper${claim.sourcePage ? `, page ${claim.sourcePage}` : ''}" src="${escapeHtml(claim.cropDataUrl)}"><figcaption>Passage from your essay${claim.sourcePage ? ` · page ${claim.sourcePage}` : ''}</figcaption></figure>` : ''}
       <div class="details-grid">
         ${claim.sourceName ? `<section class="detail"><h4>Cited source</h4><p>${escapeHtml(claim.sourceName)}</p></section>` : ''}
         ${claim.evidence ? `<section class="detail evidence"><h4>What the source says</h4><blockquote>“${escapeHtml(claim.evidence)}”</blockquote></section>` : ''}

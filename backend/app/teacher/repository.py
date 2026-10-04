@@ -17,6 +17,20 @@ from app.teacher.models import (
     TeacherSubmission,
 )
 
+_ACTIVITY_PAGE_SIZE = 500
+
+
+def _all_pages(query: Any) -> list[dict[str, Any]]:
+    """Read every matching row despite Supabase's per-request result limit."""
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = query.range(offset, offset + _ACTIVITY_PAGE_SIZE - 1).execute().data
+        rows.extend(page)
+        if len(page) < _ACTIVITY_PAGE_SIZE:
+            return rows
+        offset += _ACTIVITY_PAGE_SIZE
+
 
 def _datetime_or_none(value: datetime | str | None) -> datetime | None:
     if value is None or isinstance(value, datetime):
@@ -275,13 +289,12 @@ class TeacherGoogleRepository:
         )
 
     def list_professor_review_activity(self, owner: str) -> list[dict[str, Any]]:
-        return (
+        query = (
             self._client.table("teacher_professor_reviews")
             .select("owner,course_id,coursework_id,submission_id,updated_at,created_at")
             .eq("owner", owner)
-            .execute()
-            .data
         )
+        return _all_pages(query)
 
     def save_feedback(self, feedback: TeacherFeedback) -> None:
         row = {**feedback.to_row(), "updated_at": datetime.now(UTC).isoformat()}
@@ -308,13 +321,12 @@ class TeacherGoogleRepository:
         return _feedback_from_row(rows[0]) if rows else None
 
     def list_feedback_activity(self, owner: str) -> list[dict[str, Any]]:
-        return (
+        query = (
             self._client.table("teacher_feedback")
             .select("owner,course_id,coursework_id,submission_id,feedback_text,status,updated_at,created_at,sent_at")
             .eq("owner", owner)
-            .execute()
-            .data
         )
+        return _all_pages(query)
 
     def _upsert(self, table: str, row: dict[str, Any], conflict_keys: str) -> None:
         self._client.table(table).upsert(row, on_conflict=conflict_keys).execute()

@@ -94,14 +94,15 @@ describe('Teacher home and class pages', () => {
     expect(onOpenClass).toHaveBeenCalledWith('class-modern-writing-1a')
   })
 
-  test('Classes shows the connection experience when Google Classroom is disconnected', async () => {
+  test('Classes keeps imported courses visible when Google Classroom is disconnected', async () => {
     const onConnectGoogle = vi.fn()
     vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: false, email: null })
     renderWithQuery(<Classes onOpenClass={vi.fn()} onAddClass={vi.fn()} onConnectGoogle={onConnectGoogle} />)
 
-    expect(await screen.findByRole('heading', { name: 'Connect Google Classroom' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }))
-    expect(onConnectGoogle).toHaveBeenCalledOnce()
+    expect(await screen.findByRole('heading', { name: 'Classes' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue with Google' })).not.toBeInTheDocument()
+    expect(onConnectGoogle).not.toHaveBeenCalled()
   })
 
   test('Classes shows Google connection start errors on the connection screen', async () => {
@@ -109,6 +110,7 @@ describe('Teacher home and class pages', () => {
     renderWithQuery(<Classes onOpenClass={vi.fn()} onAddClass={vi.fn()} onConnectGoogle={vi.fn()} connectionError="Google is unavailable." />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Google is unavailable.')
+    expect(screen.getByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
   })
 
   test('Classes lets the teacher retry when connection status fails to load', async () => {
@@ -117,8 +119,9 @@ describe('Teacher home and class pages', () => {
       .mockResolvedValue({ connected: false, email: null })
     renderWithQuery(<Classes onOpenClass={vi.fn()} onAddClass={vi.fn()} onConnectGoogle={vi.fn()} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
-    expect(await screen.findByRole('heading', { name: 'Connect Google Classroom' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
     expect(getGoogleConnection).toHaveBeenCalledTimes(2)
   })
 
@@ -443,7 +446,7 @@ describe('Teacher application routing', () => {
     window.history.replaceState(null, '', '/?role=teacher&screen=classes')
     renderWithQuery(<TeacherApp />)
 
-    expect(await screen.findByRole('heading', { name: 'Connect Google Classroom' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Classes' })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('classes')
     fireEvent.click(screen.getByRole('button', { name: 'Home' }))
     fireEvent.click(await screen.findByRole('button', { name: /Make reading questions/ }))

@@ -65,7 +65,7 @@ describe('Teacher essay check', () => {
     completedEssay()
     fireEvent.click(screen.getByRole('button', { name: 'Recheck essay' }))
     expect(screen.getByRole('dialog', { name: 'Recheck this essay?' })).toBeInTheDocument()
-    expect(screen.getByText(/reset saved review decisions and feedback/i)).toBeInTheDocument()
+    expect(screen.getByText(/cleared only if the submitted file has changed/i)).toBeInTheDocument()
     expect(mocks.analyze).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

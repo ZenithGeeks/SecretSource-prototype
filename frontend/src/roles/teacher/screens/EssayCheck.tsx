@@ -275,6 +275,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
               {included ? <Check className="size-4" /> : <MessageSquarePlus className="size-4" />}{included ? 'Added to feedback' : 'Add to feedback'}
             </button>
             <div className="grid gap-x-4 gap-y-2 border-t border-border-subtle pt-3 sm:grid-cols-2">
+              <p className="text-xs text-ink-muted sm:col-span-2">These choices control the student report generated in this browser.</p>
               {([
                 ['automated', 'Include automated finding'],
                 ['evidence', 'Include source evidence'],
@@ -303,7 +304,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
       <TeacherDialog
         open={recheckOpen}
         title="Recheck this essay?"
-        description="This will run a fresh API analysis for this student and reset saved review decisions and feedback. It may take several minutes."
+        description="This will run a fresh analysis for this student. Saved decisions and feedback are cleared only if the submitted file has changed. It may take several minutes."
         onClose={() => setRecheckOpen(false)}
       >
         <p className="text-sm text-ink-muted">{data.student.name} — {data.student.fileName}</p>
