@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { findCites, parseProject, replaceCiteKey, sentenceStart } from '../src/lib/latexProject.ts'
+import { bibEntries, findCites, parseProject, replaceCiteKey, sentenceStart, withContent } from '../src/lib/latexProject.ts'
 import type { ProjectFile } from '../src/types/draftCheck.ts'
 import { INTRO_TEX, MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
 
@@ -38,6 +38,31 @@ test('parseProject derives the four Draft check warnings from the thesis project
     ],
   )
   assert.equal(result.warnings[2].file, 'main.bib')
+})
+
+test('a keystroke in one file leaves the other files scanned once: same objects, same entries', () => {
+  const chapter = tex('related-work.tex', RELATED_WORK_TEX)
+  const refs = bib('main.bib', MAIN_BIB)
+  const texts: Record<string, string> = { 'related-work.tex': RELATED_WORK_TEX + '\nmore~\\cite{nguyen2016}.' }
+  const live = () => [chapter, refs].map((f) => withContent(f, texts[f.name] ?? f.content))
+
+  const first = live()
+  assert.equal(first[1], refs) // untouched: the file itself
+  assert.notEqual(first[0], chapter)
+  assert.equal(parseProject(first).citeCommands, parseProject([chapter, refs]).citeCommands + 1)
+
+  // typing more in the chapter: the bibliography's entries are the ones already parsed
+  const entries = bibEntries(first)
+  texts['related-work.tex'] += ' And more.'
+  const second = live()
+  assert.notEqual(second[0], first[0])
+  assert.equal(bibEntries(second)[0], entries[0])
+  // the same text again gives the same object, so its scan is reused too
+  assert.equal(live()[0], second[0])
+
+  // a changed .bib is read again
+  texts['main.bib'] = MAIN_BIB + '\n@misc{new2024, title={New}, url={https://example.org}}\n'
+  assert.equal(bibEntries(live()).length, entries.length + 1)
 })
 
 test('sentenceStart walks up to the first line of a sentence that runs on', () => {

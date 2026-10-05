@@ -34,9 +34,39 @@ export function findCites(file: Pick<ProjectFile, 'name' | 'content'>): CiteRef[
 
 /** Every entry of every .bib in the project, in file order. */
 export function bibEntries(files: ProjectFile[]): (BibEntry & { file: string })[] {
-  return files
-    .filter((f) => f.kind === 'bib')
-    .flatMap((f) => parseBib(f.content).map((e) => ({ ...e, file: f.name })))
+  return files.filter((f) => f.kind === 'bib').flatMap(entriesIn)
+}
+
+// One file's scan, remembered by the file object (files are never changed in place: an edit
+// makes a new object, see withContent). The editor reads the whole project on every keystroke
+// for its warnings and completions; with these only the file being typed in is scanned again.
+// Weak, so a file nobody holds any more takes its scan with it.
+const citesOf = new WeakMap<ProjectFile, CiteRef[]>()
+const entriesOf = new WeakMap<ProjectFile, (BibEntry & { file: string })[]>()
+const edited = new WeakMap<ProjectFile, ProjectFile>()
+
+function citesIn(file: ProjectFile): CiteRef[] {
+  let cites = citesOf.get(file)
+  if (!cites) citesOf.set(file, (cites = findCites(file)))
+  return cites
+}
+
+function entriesIn(file: ProjectFile): (BibEntry & { file: string })[] {
+  let entries = entriesOf.get(file)
+  if (!entries) entriesOf.set(file, (entries = parseBib(file.content).map((e) => ({ ...e, file: file.name }))))
+  return entries
+}
+
+/** `file` with `content`: the file itself when that is already its text, and otherwise the
+ * same object for as long as the text stays the same, so a file that was not typed in keeps
+ * its scan from one keystroke to the next. */
+export function withContent(file: ProjectFile, content: string): ProjectFile {
+  if (file.content === content) return file
+  const known = edited.get(file)
+  if (known?.content === content) return known
+  const next = { ...file, content }
+  edited.set(file, next)
+  return next
 }
 
 /** The bib keys a \cite can complete to. */
@@ -46,7 +76,7 @@ export function bibKeys(files: ProjectFile[]): string[] {
 
 export function parseProject(files: ProjectFile[]): ParseResult {
   const tex = files.filter((f) => f.kind === 'tex')
-  const cites = tex.flatMap(findCites)
+  const cites = tex.flatMap(citesIn)
   const entries = bibEntries(files)
   const known = new Set(entries.map((e) => e.key))
   const cited = new Set(cites.map((c) => c.key))

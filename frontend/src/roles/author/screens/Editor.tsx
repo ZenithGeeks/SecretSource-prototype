@@ -36,7 +36,7 @@ import { Button, Card } from '../../../components/ui'
 import { errorMessage } from '../../../lib/author'
 import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
 import { downloadBlob, downloadText } from '../../../lib/csv'
-import { bibEntries, findCites, parseProject, sentenceStart } from '../../../lib/latexProject'
+import { bibEntries, findCites, parseProject, sentenceStart, withContent } from '../../../lib/latexProject'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue, summarize } from '../../../lib/verdict'
 import type { Citation, Draft, ProjectFile } from '../../../types/draftCheck'
@@ -352,8 +352,9 @@ export function Editor({
   )
   const counts = useMemo(() => summarize(fileCitations).counts, [fileCitations])
   const citeCount = useMemo(() => (active ? findCites({ name: active.name, content: text }).length : 0), [active, text])
-  // Warnings come from the project text as typed, so they follow the keystrokes.
-  const liveFiles = useMemo(() => files.map((f) => ({ ...f, content: texts[f.name] ?? f.content })), [files, texts])
+  // Warnings come from the project text as typed, so they follow the keystrokes. A file that
+  // was not typed in stays the same object, so only the edited one is scanned again.
+  const liveFiles = useMemo(() => files.map((f) => withContent(f, texts[f.name] ?? f.content)), [files, texts])
   const warningCount = useMemo(() => parseProject(liveFiles).warnings.filter((w) => w.file === active?.name).length, [liveFiles, active?.name])
 
   const entries = useMemo(() => bibEntries(liveFiles), [liveFiles])
