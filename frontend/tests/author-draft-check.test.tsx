@@ -115,6 +115,35 @@ describe('Author Check a draft', () => {
     expect(gateway.calls).toContain('POST /author/drafts')
   })
 
+  test('a row names the source of a quoted passage even when no page is known, as the Evidence panel does', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: (key) =>
+        key === 'khattab2020'
+          ? { verdict: 'refutes', passage: 'we leave compression to future work', explanation: 'Deferred.' }
+          : key === 'santhanam2022'
+            ? { verdict: 'refutes', explanation: 'Nothing was quoted.' }
+            : { verdict: 'supports', passage: 'all good', page: 1 },
+    })
+    renderDraftCheck()
+    const list = await screen.findByRole('list', { name: 'Citations' })
+    await waitFor(() => expect(within(list).getAllByRole('button').length).toBeGreaterThan(0))
+    const notes = within(list)
+      .getAllByRole('button')
+      .map((row) => row.textContent ?? '')
+    const quoted = notes.filter((note) => note.includes('\\cite{khattab2020}'))
+    expect(quoted.length).toBeGreaterThan(0)
+    for (const note of quoted) {
+      expect(note).toContain('\\cite{khattab2020} · khattab2020.pdf')
+      expect(note).not.toContain('p.')
+      expect(note).not.toContain('no passage quoted')
+    }
+    const unquoted = notes.filter((note) => note.includes('\\cite{santhanam2022}'))
+    expect(unquoted.length).toBeGreaterThan(0)
+    for (const note of unquoted) expect(note).toContain('no passage quoted')
+    expect(screen.getByText('“we leave compression to future work”')).toBeInTheDocument()
+  })
+
   test('Re-check starts a run on the gateway and the new verdicts land', async () => {
     renderDraftCheck()
     await screen.findByText(/3 need work/)

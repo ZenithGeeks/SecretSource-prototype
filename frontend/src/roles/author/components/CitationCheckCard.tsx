@@ -38,7 +38,11 @@ function rowNote(c: Citation): string {
   if (c.resolution?.kind === 'overridden') return `${key} · kept, with a note`
   if (c.verdict === 'unavailable') return `${key} · ${c.message || 'source PDF unavailable'}`
   if (c.verdict === 'unchecked') return `${key} · ${c.reason === 'missing-key' ? 'no bib entry' : 'not checked yet'}`
-  if (c.evidence?.page) return `${key} · ${c.evidence.pdf} p.${c.evidence.page}`
+  // A passage can be quoted with no page known (the verdict's own quote, no located evidence).
+  if (c.evidence?.passage) {
+    const where = [c.evidence.pdf, c.evidence.page ? `p.${c.evidence.page}` : ''].filter(Boolean).join(' ')
+    return `${key} · ${where || 'passage quoted'}`
+  }
   return `${key} · no passage quoted`
 }
 
