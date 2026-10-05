@@ -1,4 +1,4 @@
-# Runs on every PR and on main. Fast checks only: lint + typecheck + build.
+# Runs on every PR and on main: lint, typecheck, build, and the backend unit tests.
 # Docker images are not built here — the retrieval images pull multi-GB torch wheels,
 # which is deploy-time work (see deploy.yml).
 name: ci
@@ -28,6 +28,41 @@ jobs:
         run: ruff check backend services
       - name: Syntax check
         run: python -m compileall -q backend/app backend/cli.py services
+
+  backend-tests:
+    runs-on: [self-hosted, ci]
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      # Same order as backend/Dockerfile: CPU torch first, so pip does not pull the multi-GB
+      # CUDA build. NumPy <2.4 because this runner (ss-core) has no SSE4.2 and NumPy 2.4+
+      # refuses to import there (app/native.py). The image apt-installs libGL for opencv; this
+      # host has no libGL, so opencv-python is swapped for the headless build of the same
+      # version, which is the same cv2 without the GUI libraries. A fresh venv each run:
+      # checkout cleans the workspace, and the runner's own Python stays as it was.
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -r requirements-dev.txt "numpy<2.4"
+          version=$(.venv/bin/python -c "import importlib.metadata as m; print(m.version('opencv-python'))")
+          .venv/bin/pip uninstall -y opencv-python
+          .venv/bin/pip install "opencv-python-headless==$version"
+      # Unit tests only: tests/conftest.py replaces Redis. REDIS_URL points at a closed port, so
+      # the real-Redis tests skip and never publish test analyses to production Redis, which
+      # runs on this same machine.
+      - name: Test
+        env:
+          REDIS_URL: redis://127.0.0.1:1/0
+        run: .venv/bin/python -m pytest -q
 
   frontend:
     runs-on: [self-hosted, ci]
