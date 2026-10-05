@@ -54,7 +54,6 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(author, "_spawn", lambda coroutine: coroutine.close())
     main.analyses.clear()
     main.streams.clear()
-    author.verified_pdfs.clear()
     yield TestClient(main.app)
     main.analyses.clear()
     main.streams.clear()
