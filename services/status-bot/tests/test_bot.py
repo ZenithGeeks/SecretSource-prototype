@@ -4,6 +4,7 @@ from status_bot import bot
 from status_bot.bot import StatusService, handle_status, load_config
 from status_bot.grafana import (
     CLOUD_REQUEST,
+    COST30_REQUEST,
     JOBS_REQUEST,
     QUEUE_REQUEST,
     GrafanaError,
@@ -21,6 +22,7 @@ class FakeGrafana:
             id(QUEUE_REQUEST): (QUEUE_REQUEST, "response_queue.json"),
             id(CLOUD_REQUEST): (CLOUD_REQUEST, "response_cloud.json"),
             id(JOBS_REQUEST): (JOBS_REQUEST, "response_jobs.json"),
+            id(COST30_REQUEST): (COST30_REQUEST, "response_cost30.json"),
         }
 
     async def query(self, body):
@@ -75,15 +77,15 @@ async def test_second_call_within_30s_uses_cache():
     g = FakeGrafana()
     svc = StatusService(g, clock=lambda: now[0])
     await handle_status(FakeInteraction([]), svc)
-    assert len(g.calls) == 4  # three queries + alerts
+    assert len(g.calls) == 5  # four queries + alerts
     now[0] += 29
     ix = FakeInteraction([])
     await handle_status(ix, svc)
-    assert len(g.calls) == 4
+    assert len(g.calls) == 5
     assert ix.sent[0][1]["file"].fp.read(4) == b"\x89PNG"  # fresh File each time
     now[0] += 2  # 31 s after the first fetch
     await handle_status(FakeInteraction([]), svc)
-    assert len(g.calls) == 8
+    assert len(g.calls) == 10
 
 
 async def test_grafana_unreachable_sends_short_message():

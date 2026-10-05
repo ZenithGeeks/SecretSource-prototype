@@ -80,6 +80,35 @@ CLOUD_REQUEST: dict[str, Any] = {
     ],
 }
 
+COST30_REQUEST: dict[str, Any] = {
+    "from": "now-30d",
+    "to": "now",
+    "queries": [
+        {
+            "refId": "instances_30d",
+            "datasource": {"type": "stackdriver", "uid": "gcp-cloud-monitoring"},
+            "queryType": "timeSeriesList",
+            "intervalMs": 3600000,
+            "maxDataPoints": 800,
+            "timeSeriesList": {
+                "projectName": "gcp-edu-471706",
+                "filters": [
+                    "metric.type",
+                    "=",
+                    "run.googleapis.com/container/instance_count",
+                ],
+                "perSeriesAligner": "ALIGN_MEAN",
+                "alignmentPeriod": "3600s",
+                "crossSeriesReducer": "REDUCE_SUM",
+                "groupBys": [
+                    "resource.label.service_name",
+                    "metric.label.state",
+                ],
+            },
+        }
+    ],
+}
+
 _DONE_ERR = "  count(*) filter (where data->>'status' = '{s}' and started > now() - interval '{i}') as {n}"
 
 JOBS_REQUEST: dict[str, Any] = {
@@ -249,6 +278,12 @@ class GrafanaClient:
                 timeout=aiohttp.ClientTimeout(total=TIMEOUT_S),
             )
         return self._session
+
+    async def __aenter__(self) -> GrafanaClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
 
     async def close(self) -> None:
         if self._session is not None and not self._session.closed:

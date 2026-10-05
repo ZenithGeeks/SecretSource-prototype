@@ -76,7 +76,7 @@ def test_unpriced_service_listed_but_free():
 
 
 def test_real_fixtures_report(real):
-    r = build_report(real["queue"], real["cloud"], real["jobs"], real["alerts"])
+    r = build_report(real["queue"], real["cloud"], real["jobs"], real["alerts"], real["cost30"])
     assert r.healthy
     assert r.workers == 1
     assert (r.queued, r.started, r.failed) == (0, 0, 0)

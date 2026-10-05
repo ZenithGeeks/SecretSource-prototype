@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from status_bot.grafana import (
     CLOUD_REQUEST,
+    COST30_REQUEST,
     JOBS_REQUEST,
     QUEUE_REQUEST,
     parse_alerts,
@@ -24,5 +25,6 @@ def real():
         "queue": parse_response(QUEUE_REQUEST, load("response_queue.json")),
         "cloud": parse_response(CLOUD_REQUEST, load("response_cloud.json")),
         "jobs": parse_response(JOBS_REQUEST, load("response_jobs.json")),
+        "cost30": parse_response(COST30_REQUEST, load("response_cost30.json")),
         "alerts": parse_alerts(load("response_alerts.json")),
     }

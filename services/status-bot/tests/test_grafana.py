@@ -1,6 +1,7 @@
 import pytest
 from status_bot.grafana import (
     CLOUD_REQUEST,
+    COST30_REQUEST,
     JOBS_REQUEST,
     QUEUE_REQUEST,
     GrafanaClient,
@@ -18,6 +19,7 @@ from .conftest import load
         (QUEUE_REQUEST, "request_queue.json"),
         (CLOUD_REQUEST, "request_cloud.json"),
         (JOBS_REQUEST, "request_jobs.json"),
+        (COST30_REQUEST, "request_cost30.json"),
     ],
 )
 def test_request_bodies_equal_verified_fixtures(body, name):

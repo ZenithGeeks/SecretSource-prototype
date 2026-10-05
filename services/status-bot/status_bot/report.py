@@ -3,12 +3,17 @@
 Privacy: only the specific columns and refIds below are read. Analysis ids,
 error messages, paper names and owners are never selected by the queries and
 are never copied from a row.
+
+Money is computed in USD (the rates are USD list prices) and shown as THB with
+USD in brackets, using the configured USD_THB rate.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import discord
 
@@ -20,6 +25,9 @@ STEP_S = 300
 MAX_ALERTS = 5
 FOOTER = "Estimate from list prices. Not the bill; credit left is not visible."
 
+DEFAULT_TZ = "Asia/Bangkok"
+DEFAULT_USD_THB = 33.57
+
 GREEN = 0x2ECC71
 RED = 0xE74C3C
 
@@ -28,6 +36,10 @@ RED = 0xE74C3C
 class Report:
     healthy: bool = False
     reasons: list[str] = field(default_factory=list)
+    # display settings
+    tz_name: str = DEFAULT_TZ
+    usd_thb: float = DEFAULT_USD_THB
+    updated: str | None = None  # "HH:MM" in the display zone
     # queue
     queued: float | None = None
     started: float | None = None
@@ -45,16 +57,21 @@ class Report:
     duration_available: bool = False
     p50_min: float | None = None
     p95_min: float | None = None
-    daily: list[tuple[int, int, int]] = field(default_factory=list)  # (day_ms, done, error)
     # cloud run
     cloud_available: bool = False
     instances: dict[str, float] = field(default_factory=dict)
     unpriced: list[str] = field(default_factory=list)
-    cost_now: float | None = None
+    cost_now: float | None = None  # USD per hour
     cost_day: float | None = None
     spend_24h: float | None = None
     cost_times: list[int] = field(default_factory=list)
-    cost_series: dict[str, list[float]] = field(default_factory=dict)  # $/h per time
+    cost_series: dict[str, list[float]] = field(default_factory=dict)  # USD/h per time
+    # 30 days
+    cost30_available: bool = False
+    cost_days: list[date] = field(default_factory=list)  # calendar days in tz, sorted
+    cost_days_series: dict[str, list[float]] = field(default_factory=dict)  # USD per day
+    spend_30d: float | None = None
+    avg_day_7d: float | None = None  # USD, last 7 full days in the display zone
     # alerts
     alerts: list[str] | None = None
 
@@ -87,10 +104,10 @@ def _rows(parsed: Parsed | None, ref: str) -> list[dict[str, Any]] | None:
     return rows if isinstance(rows, list) else None
 
 
-def _series(parsed: Parsed | None) -> list[Series] | None:
-    if parsed is None or "instances" in parsed.errors:
+def _series(parsed: Parsed | None, ref: str = "instances") -> list[Series] | None:
+    if parsed is None or ref in parsed.errors:
         return None
-    value = parsed.values.get("instances")
+    value = parsed.values.get(ref)
     return value if isinstance(value, list) else None
 
 
@@ -118,12 +135,6 @@ def _fill_jobs(r: Report, jobs: Parsed | None) -> None:
             finished = r.done_7d + r.error_7d
             r.success_rate = r.done_7d / finished if finished else None
         r.jobs_available = r.done_7d is not None and r.error_7d is not None
-    daily = _rows(jobs, "daily")
-    if daily is not None:
-        for row in daily:
-            day, done, error = _int(row.get("day")), _int(row.get("done")), _int(row.get("error"))
-            if day is not None:
-                r.daily.append((day, done or 0, error or 0))
     duration = _rows(jobs, "duration")
     if duration is not None:
         r.duration_available = True
@@ -151,7 +162,7 @@ def _fill_cloud(r: Report, cloud: Parsed | None) -> None:
         ts = max(stamps)
         r.instances[service] = sum(_value_at(states.get(st, []), ts) for st in ("active", "idle"))
 
-    # $/h at every timestamp, priced services only
+    # USD/h at every timestamp, priced services only
     times = sorted({t for _, _, pts in series for t, _ in pts})
     r.cost_times = times
     for service in sorted(by_service):
@@ -175,14 +186,52 @@ def _fill_cloud(r: Report, cloud: Parsed | None) -> None:
         r.cost_now = r.cost_day = r.spend_24h = 0.0
 
 
+def _fill_cost30(r: Report, cost30: Parsed | None, tz: ZoneInfo, now: datetime | None) -> None:
+    """Daily cost per service: each hourly point is worth one hour of its mean instance count."""
+    series = _series(cost30, "instances_30d")
+    if series is None:
+        return
+    r.cost30_available = True
+    per_day: dict[str, dict[date, float]] = {}
+    days: set[date] = set()
+    for service, state, points in series:
+        rate = RATES.get(service)
+        if rate is None or state not in ("active", "idle"):
+            continue
+        price = rate[0] if state == "active" else rate[1]
+        bucket = per_day.setdefault(service, {})
+        for ts, value in points:  # None values are already dropped by the parser
+            day = datetime.fromtimestamp(ts / 1000, tz).date()
+            bucket[day] = bucket.get(day, 0.0) + value * price
+            days.add(day)
+    r.cost_days = sorted(days)
+    for service in sorted(per_day):
+        r.cost_days_series[service] = [per_day[service].get(d, 0.0) for d in r.cost_days]
+    totals = [sum(col) for col in zip(*r.cost_days_series.values(), strict=True)]
+    r.spend_30d = sum(totals)
+    # The burn rate that matters for the credit is the recent one: a 30-day average also counts
+    # days when billing was off or a leak was running. Today is left out because it is not over.
+    today = (now or datetime.now(tz)).astimezone(tz).date()
+    full_days = [total for day, total in zip(r.cost_days, totals, strict=True) if day < today][-7:]
+    r.avg_day_7d = sum(full_days) / len(full_days) if full_days else None
+
+
 def build_report(
     queue: Parsed | None,
     cloud: Parsed | None,
     jobs: Parsed | None,
     alerts: list[str] | None,
+    cost30: Parsed | None = None,
+    *,
+    tz: ZoneInfo | None = None,
+    usd_thb: float = DEFAULT_USD_THB,
+    now: datetime | None = None,
 ) -> Report:
     """Any input may be None (query failed); its fields then read "unavailable"."""
-    r = Report(alerts=alerts)
+    tz = tz or ZoneInfo(DEFAULT_TZ)
+    r = Report(alerts=alerts, tz_name=tz.key, usd_thb=usd_thb)
+    if now is not None:
+        r.updated = now.astimezone(tz).strftime("%H:%M")
     r.queued = _prom_state(queue, "jobs", "queued")
     r.started = _prom_state(queue, "jobs", "started")
     r.failed = _prom_state(queue, "jobs", "failed")
@@ -191,6 +240,7 @@ def build_report(
     r.longest_running_s = _prom_scalar(queue, "longest_running_s")
     _fill_jobs(r, jobs)
     _fill_cloud(r, cloud)
+    _fill_cost30(r, cost30, tz, now)
 
     worker_up = _prom_scalar(queue, "worker_up")
     redis_up = _prom_scalar(queue, "redis_up")
@@ -220,16 +270,36 @@ def fmt_duration(seconds: float | None) -> str:
     return f"{m}m {s}s"
 
 
+def fmt_thb(thb: float) -> str:
+    """Thousands separators and no decimals from 100 up; two decimals below."""
+    if abs(thb) < 100:
+        return f"฿{thb:,.2f}"
+    return f"฿{thb:,.0f}"
+
+
+def fmt_money(usd: float | None, usd_thb: float, suffix: str = "") -> str:
+    """THB first, USD in brackets: '฿24.84/h ($0.74/h)'."""
+    if usd is None:
+        return UNAVAILABLE
+    return f"{fmt_thb(usd * usd_thb)}{suffix} (${usd:,.2f}{suffix})"
+
+
+def tz_label(tz_name: str, at: datetime | None = None) -> str:
+    """'Asia/Bangkok, UTC+07:00'."""
+    tz = ZoneInfo(tz_name)
+    offset = (at or datetime.now(tz)).astimezone(tz).utcoffset()
+    minutes = int(offset.total_seconds() // 60) if offset else 0
+    sign = "+" if minutes >= 0 else "-"
+    hh, mm = divmod(abs(minutes), 60)
+    return f"{tz_name}, UTC{sign}{hh:02d}:{mm:02d}"
+
+
 def _count(value: float | int | None) -> str:
     return UNAVAILABLE if value is None else str(int(round(value)))
 
 
 def _plain(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".") or "0"
-
-
-def _usd(value: float | None, digits: int = 2) -> str:
-    return UNAVAILABLE if value is None else f"${value:.{digits}f}"
 
 
 def _minutes(available: bool, value: float | None) -> str:
@@ -287,13 +357,20 @@ def _cloud_text(r: Report) -> str:
 
 
 def _cost_text(r: Report) -> str:
-    if not r.cloud_available:
+    if not r.cloud_available and not r.cost30_available:
         return UNAVAILABLE
-    lines = [
-        f"Now: {_usd(r.cost_now)}/h",
-        f"≈ {_usd(r.cost_day)}/day at this rate",
-        f"Last 24 h: {_usd(r.spend_24h)}",
-    ]
+    k = r.usd_thb
+    if r.cloud_available:
+        lines = [
+            f"Now: {fmt_money(r.cost_now, k, '/h')}",
+            f"≈ {fmt_money(r.cost_day, k, '/day')} at this rate",
+            f"Last 24 h: {fmt_money(r.spend_24h, k)}",
+        ]
+    else:
+        lines = [f"Now: {UNAVAILABLE}", f"Last 24 h: {UNAVAILABLE}"]
+    lines.append(f"Last 30 days: {fmt_money(r.spend_30d if r.cost30_available else None, k)}")
+    avg_7d = r.avg_day_7d if r.cost30_available else None
+    lines.append(f"Average per day (last 7 full days): {fmt_money(avg_7d, k)}")
     if r.unpriced:
         lines.append("Unpriced: " + ", ".join(r.unpriced))
     return "\n".join(lines)
@@ -310,6 +387,14 @@ def _alerts_text(r: Report) -> str:
     return text
 
 
+def footer_text(r: Report) -> str:
+    parts = []
+    if r.updated:
+        parts.append(f"Updated {r.updated} ({r.tz_name})")
+    parts.append(f"1 USD = {r.usd_thb:.2f} THB (USD_THB)")
+    return " · ".join(parts) + "\n" + FOOTER
+
+
 def build_embed(r: Report) -> discord.Embed:
     embed = discord.Embed(
         title="SecretSource status",
@@ -321,7 +406,7 @@ def build_embed(r: Report) -> discord.Embed:
     embed.add_field(name="Cloud Run instances", value=_cloud_text(r), inline=False)
     embed.add_field(name="Cost (estimate)", value=_cost_text(r), inline=False)
     embed.add_field(name="Firing alerts", value=_alerts_text(r), inline=False)
-    embed.set_footer(text=FOOTER)
+    embed.set_footer(text=footer_text(r))
     return embed
 
 

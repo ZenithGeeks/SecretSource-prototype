@@ -13,7 +13,7 @@ def size(png):
 
 
 def test_chart_from_real_fixtures(real):
-    r = build_report(real["queue"], real["cloud"], real["jobs"], real["alerts"])
+    r = build_report(real["queue"], real["cloud"], real["jobs"], real["alerts"], real["cost30"])
     png = render_chart(r)
     assert png.startswith(PNG)
     assert size(png) == (900, 700)

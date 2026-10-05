@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import math
 import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 from discord import app_commands
@@ -17,12 +20,13 @@ from discord import app_commands
 from .chart import render_chart
 from .grafana import (
     CLOUD_REQUEST,
+    COST30_REQUEST,
     JOBS_REQUEST,
     QUEUE_REQUEST,
     GrafanaClient,
     GrafanaError,
 )
-from .report import build_embed, build_report
+from .report import DEFAULT_TZ, DEFAULT_USD_THB, build_embed, build_report
 
 log = logging.getLogger("status_bot")
 
@@ -37,9 +41,14 @@ class Config:
     guild_id: int = 0
     grafana_url: str = "http://grafana:3000"
     grafana_token: str = ""
+    usd_thb: float = DEFAULT_USD_THB
+    display_tz: str = DEFAULT_TZ
 
     def __repr__(self) -> str:  # never leak the tokens
-        return f"Config(guild_id={self.guild_id}, grafana_url={self.grafana_url!r})"
+        return (
+            f"Config(guild_id={self.guild_id}, grafana_url={self.grafana_url!r}, "
+            f"usd_thb={self.usd_thb}, display_tz={self.display_tz!r})"
+        )
 
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
@@ -57,6 +66,20 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             guild_id = int(raw_guild)
         except ValueError:
             problems.append("DISCORD_GUILD_ID must be an integer")
+    usd_thb = DEFAULT_USD_THB
+    raw_rate = env.get("USD_THB", "").strip()
+    if raw_rate:
+        try:
+            usd_thb = float(raw_rate)
+            if not math.isfinite(usd_thb) or usd_thb <= 0:
+                raise ValueError(raw_rate)
+        except ValueError:
+            problems.append("USD_THB must be a positive number")
+    display_tz = env.get("DISPLAY_TZ", "").strip() or DEFAULT_TZ
+    try:
+        ZoneInfo(display_tz)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        problems.append(f"DISPLAY_TZ {display_tz!r} is not a known time zone")
     if problems:
         raise SystemExit("status-bot configuration error: " + "; ".join(problems))
     return Config(
@@ -64,14 +87,24 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         guild_id=guild_id,
         grafana_url=env.get("GRAFANA_URL", "").strip() or "http://grafana:3000",
         grafana_token=env["GRAFANA_TOKEN"].strip(),
+        usd_thb=usd_thb,
+        display_tz=display_tz,
     )
 
 
 class StatusService:
     """Queries Grafana, builds the embed and chart, and caches the result."""
 
-    def __init__(self, grafana: Any, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        grafana: Any,
+        clock: Callable[[], float] = time.monotonic,
+        tz_name: str = DEFAULT_TZ,
+        usd_thb: float = DEFAULT_USD_THB,
+    ) -> None:
         self._grafana = grafana
+        self._tz = ZoneInfo(tz_name)
+        self._usd_thb = usd_thb
         self._clock = clock
         self._cached: tuple[float, discord.Embed, bytes] | None = None
         self._lock = asyncio.Lock()
@@ -88,20 +121,26 @@ class StatusService:
 
     async def _build(self) -> tuple[discord.Embed, bytes]:
         g = self._grafana
-        queue, cloud, jobs, alerts = await asyncio.gather(
+        raw = await asyncio.gather(
             g.query(QUEUE_REQUEST),
             g.query(CLOUD_REQUEST),
             g.query(JOBS_REQUEST),
             g.alerts(),
+            g.query(COST30_REQUEST),
             return_exceptions=True,
         )
-        results = [None if isinstance(x, BaseException) else x for x in (queue, cloud, jobs, alerts)]
-        for x in (queue, cloud, jobs, alerts):
+        results = [None if isinstance(x, BaseException) else x for x in raw]
+        for x in raw:
             if isinstance(x, BaseException) and not isinstance(x, GrafanaError):
                 raise x
         if all(x is None for x in results[:3]):
             raise GrafanaError("Grafana unreachable")
-        report = build_report(*results)
+        report = build_report(
+            *results,
+            tz=self._tz,
+            usd_thb=self._usd_thb,
+            now=datetime.now(self._tz),
+        )
         png = await asyncio.to_thread(render_chart, report)
         embed = build_embed(report)
         embed.set_image(url=f"attachment://{IMAGE_NAME}")
@@ -128,7 +167,7 @@ class StatusBot(discord.Client):
         super().__init__(intents=discord.Intents.default())
         self.config = config
         self.grafana = grafana or GrafanaClient(config.grafana_url, config.grafana_token)
-        self.service = StatusService(self.grafana)
+        self.service = StatusService(self.grafana, tz_name=config.display_tz, usd_thb=config.usd_thb)
         self.tree = app_commands.CommandTree(self)
         self._guild = discord.Object(id=config.guild_id)
 
@@ -144,8 +183,10 @@ class StatusBot(discord.Client):
         await self.tree.sync(guild=self._guild)
 
     async def close(self) -> None:
-        await self.grafana.close()
-        await super().close()
+        try:
+            await self.grafana.close()
+        finally:
+            await super().close()
 
     async def on_ready(self) -> None:
         log.info("logged in as %s", self.user)
