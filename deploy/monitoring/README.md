@@ -66,6 +66,22 @@ Grafana. It is not emailed until Grafana has SMTP settings (`GF_SMTP_*` environm
 On ss-core a weekly job, `/etc/cron.weekly/docker-prune`, removes stopped containers, untagged
 images and old build cache.
 
+## GPU cost guard
+
+A GPU on Cloud Run bills an instance for its whole lifetime (~$1.6/h for an L4), so ColPali or
+vLLM left up costs ~$38 a day. `deploy/gpu-guard.sh install` sets up two things in Google Cloud,
+outside Grafana, because Grafana here cannot send email:
+
+- a Cloud Scheduler job per GPU service, `gpu-guard-<service>`, that puts the service back on
+  automatic scaling with min 0 every hour. Manual scaling or a service-level minimum set in the
+  Console overrides the revision's min 0, which is how ColPali ran for three days straight
+  (2026-10-02 to 2026-10-05). Pause the job before keeping an instance warm on purpose.
+- a Cloud Monitoring alert, "GPU Cloud Run service billed continuously", that emails when a GPU
+  service is billed for more than 50 of the last 60 minutes for half an hour.
+
+`deploy/gpu-guard.sh check` prints each GPU service's scaling and billed hours over the last hour
+and day. Never point an uptime check, health probe or warm-up loop at a GPU service (#328).
+
 ## Analyses dashboard
 
 The **"Analyses"** dashboard reads the `analyses` table directly (Supabase Postgres) instead of
