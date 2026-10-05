@@ -295,3 +295,39 @@ groups:
               type: threshold
               expression: B
               conditions: [{evaluator: {type: gt, params: [5]}}]
+      - uid: ops-gateway-never-idle
+        title: The gateway has not scaled to zero in 6 hours
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: 'The gateway averaged {{ humanize $values.B.Value }} instances over the last 6 hours.'
+          description: >-
+            The gateway scales to zero when idle (#345); an always-on instance costs about $9 a day.
+            Something keeps it awake: group its request log by user agent and path, or check whether
+            its scaling was pinned again (PROJECT=gcp-edu-471706 ./deploy/gpu-guard.sh check).
+        data:
+          - refId: A
+            relativeTimeRange: {from: 21600, to: 0}
+            datasourceUid: gcp-cloud-monitoring
+            model:
+              refId: A
+              queryType: timeSeriesList
+              timeSeriesList:
+                projectName: gcp-edu-471706
+                filters: [metric.type, "=", run.googleapis.com/container/instance_count, AND, resource.label.service_name, "=", gateway]
+                perSeriesAligner: ALIGN_MEAN
+                alignmentPeriod: "21600s"
+                crossSeriesReducer: REDUCE_SUM
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [0.9]}}]
