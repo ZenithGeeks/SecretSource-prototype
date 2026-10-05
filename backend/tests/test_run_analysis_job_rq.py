@@ -24,6 +24,8 @@ try:
 except Exception:
     pytest.skip("needs a reachable Redis at REDIS_URL", allow_module_level=True)
 
+pytestmark = pytest.mark.real_redis  # conftest.py's no_real_redis leaves these tests alone
+
 
 @pytest.fixture
 def stubbed_pipeline(monkeypatch):
