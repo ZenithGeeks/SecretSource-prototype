@@ -107,8 +107,19 @@ def _checks_by_draft(user: str | None) -> dict[str, list[dict]]:
 
 def _checks_of(draft_id: str, user: str | None) -> list[dict]:
     """Every check run on a draft, oldest first. For one draft; a route that lists many uses
-    _checks_by_draft once instead of this once per draft."""
-    return _checks_by_draft(user).get(draft_id, [])
+    _checks_by_draft once instead of this once per draft.
+
+    Filtered before anything is sorted or grouped: a citation PATCH or a draft read costs one
+    pass over the gateway's rows plus this draft's own checks, not a grouping and a sort of
+    every check the user ever ran. (No per-draft index: `analyses` is written from five
+    places, and a missed one would hide a check from its draft.)"""
+    runs = [
+        a
+        for a in _gateway().analyses.values()
+        if a.get("draftId") == draft_id and a.get("kind") == DRAFT_CHECK and a.get("owner") == user
+    ]
+    runs.sort(key=lambda a: a.get("startedAt", ""))
+    return runs
 
 
 def _latest_done(runs: list[dict]) -> dict | None:

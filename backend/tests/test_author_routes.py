@@ -1,5 +1,5 @@
-"""The Author role's routes (app/author/router.py): drafts, projects, sources, draft checks,
-search and the report, each scoped to its owner like every other route.
+"""The Author role's routes (app/author/router.py): drafts, projects, sources, draft checks
+and the report, each scoped to its owner like every other route.
 
 Same fixture shape as test_checks.py / test_user_settings.py: login is on with a table of
 known tokens, storage is a temp SQLite file, and the pipeline's verify_claim is replaced by
@@ -358,6 +358,29 @@ def test_a_write_carrying_a_stale_updated_is_refused_and_a_chained_one_is_not(cl
     assert stored["updated"] == second.json()["updated"]
 
     assert client.put(url, headers=ADA, json={"content": "three"}).status_code == 200
+
+
+def test_one_drafts_checks_are_only_its_own_oldest_first(monkeypatch):
+    def row(check_id, draft, started, owner="ada", kind=author.DRAFT_CHECK):
+        return {"id": check_id, "draftId": draft, "startedAt": started, "owner": owner, "kind": kind}
+
+    rows = [
+        row("late", "d1", "2026-09-28T10:00:00+00:00"),
+        row("other-draft", "d2", "2026-09-28T09:00:00+00:00"),
+        row("early", "d1", "2026-09-27T10:00:00+00:00"),
+        row("someone-else", "d1", "2026-09-26T10:00:00+00:00", owner="bo"),
+        row("single-claim", "d1", "2026-09-25T10:00:00+00:00", kind="check"),
+        {"id": "paper", "owner": "ada", "status": "done"},
+    ]
+    monkeypatch.setattr(main, "analyses", {r["id"]: r for r in rows})
+
+    assert [r["id"] for r in author._checks_of("d1", "ada")] == ["early", "late"]
+    assert author._checks_of("d3", "ada") == []
+    # the same answer the per-request grouping gives the list routes
+    assert author._checks_of("d1", "ada") == author._checks_by_draft("ada")["d1"]
+    assert author._previous_of(rows[0] | {"status": "done"}, "ada") is None  # `early` is not done
+    rows[2]["status"] = "done"
+    assert author._previous_of(rows[0], "ada")["id"] == "early"
 
 
 def test_a_second_check_while_one_runs_is_refused(client):
