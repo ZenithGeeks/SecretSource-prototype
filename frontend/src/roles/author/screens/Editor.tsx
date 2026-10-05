@@ -106,9 +106,16 @@ export function Editor({
   const timers = useRef<Record<string, number>>({})
   const sequence = useRef<Record<string, number>>({})
   const inFlight = useRef<Record<string, Promise<boolean>>>({})
+  /** The files with a write in flight, as state: `inFlight` for what the screen shows. */
+  const [writing, setWriting] = useState<ReadonlySet<string>>(new Set())
   const [writeError, setWriteError] = useState<string | null>(null)
 
   const isDirty = useCallback((name: string, t: Texts = textsRef.current, c: Texts = confirmedRef.current) => t[name] !== undefined && t[name] !== c[name], [])
+  /** True while the gateway may not hold this file's text: it differs from the last confirmed
+   * text, or a write is still in flight. The second matters when the author types, the write
+   * goes out, and they undo before it answers: the text matches the confirmed one again, yet
+   * the gateway is about to hold what was typed. */
+  const isUnsettled = useCallback((name: string) => textsRef.current[name] !== undefined && (isDirty(name) || inFlight.current[name] !== undefined), [isDirty])
 
   // What the gateway holds: adopted for a file the author has not changed (first load, a
   // replacement made on Check a draft, a refetch); a dirty file keeps the author's text.
@@ -136,16 +143,18 @@ export function Editor({
    * out once the file's previous write has answered (one in flight per file), so the gateway
    * applies them in order; by then a newer commit may have superseded this one, which then
    * sends nothing. A reply to a superseded write is dropped, so only the newest text is ever
-   * confirmed. */
+   * confirmed. Text equal to the confirmed one is still written when a write is in flight:
+   * that write carries other text, and this one puts the gateway back in step. */
   const commit = useCallback(
     (name: string): Promise<boolean> => {
       window.clearTimeout(timers.current[name])
       delete timers.current[name]
       const content = textsRef.current[name]
-      if (content === undefined || content === confirmedRef.current[name]) return Promise.resolve(true)
+      const pending = inFlight.current[name]
+      if (content === undefined || (content === confirmedRef.current[name] && !pending)) return Promise.resolve(true)
       const seq = (sequence.current[name] ?? 0) + 1
       sequence.current[name] = seq
-      const previous = inFlight.current[name] ?? Promise.resolve(true)
+      const previous = pending ?? Promise.resolve(true)
       const write: Promise<boolean> = previous
         .then(() => {
           if (sequence.current[name] !== seq) return true // superseded before it went out; the newer write answers
@@ -174,9 +183,12 @@ export function Editor({
             })
         })
         .finally(() => {
-          if (inFlight.current[name] === write) delete inFlight.current[name]
+          if (inFlight.current[name] !== write) return
+          delete inFlight.current[name]
+          setWriting((names) => new Set([...names].filter((n) => n !== name)))
         })
       inFlight.current[name] = write
+      setWriting((names) => (names.has(name) ? names : new Set([...names, name])))
       return write
     },
     [draftId],
@@ -189,12 +201,12 @@ export function Editor({
     timers.current[name] = window.setTimeout(() => void commit(name), COMMIT_DELAY_MS)
   }
 
-  /** Writes every dirty file now; true when the gateway holds all of them. */
+  /** Writes every file the gateway may not hold now; true when it holds all of them. */
   const flush = useCallback(async (): Promise<boolean> => {
-    const names = Object.keys(textsRef.current).filter((name) => isDirty(name))
+    const names = Object.keys(textsRef.current).filter((name) => isUnsettled(name))
     const results = await Promise.all(names.map((name) => commit(name)))
     return results.every(Boolean)
-  }, [commit, isDirty])
+  }, [commit, isUnsettled])
 
   // Leaving the screen: send what is still waiting for the pause. The cache is updated when
   // the reply lands, so Check a draft shows the same text; a refusal is reported through the
@@ -204,7 +216,7 @@ export function Editor({
       for (const name of Object.keys(timers.current)) window.clearTimeout(timers.current[name])
       timers.current = {}
       for (const name of Object.keys(textsRef.current)) {
-        if (!isDirty(name)) continue
+        if (!isUnsettled(name)) continue
         const content = textsRef.current[name]
         // After the file's in-flight write, if any, for the same reason commit() waits.
         const previous = inFlight.current[name] ?? Promise.resolve(true)
@@ -216,10 +228,13 @@ export function Editor({
         )
       }
     },
-    [draftId, isDirty],
+    [draftId, isUnsettled],
   )
 
-  const dirtyNames = useMemo(() => new Set(files.map((f) => f.name).filter((name) => isDirty(name, texts, confirmed))), [files, texts, confirmed, isDirty])
+  const dirtyNames = useMemo(
+    () => new Set(files.map((f) => f.name).filter((name) => isDirty(name, texts, confirmed) || writing.has(name))),
+    [files, texts, confirmed, writing, isDirty],
+  )
   const status: SaveStatus = writeError ? 'error' : dirtyNames.size > 0 ? 'saving' : 'saved'
 
   // Closing the tab with a dirty file: the browser asks first.

@@ -252,6 +252,45 @@ describe('Author LaTeX editor — saving', () => {
     expect(bodies[1].updated).toBe(updatedAfterFirst)
   })
 
+  test('undoing an edit whose write is still in flight is not clean: Ctrl+S waits, the gateway gets the undone text back, and only then a version', async () => {
+    renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const original = stored()
+    const before = writes()
+
+    // hold the reply to the write of what was typed
+    let release: (() => void) | null = null
+    let held = 0
+    gateway.beforeWrite = (_name, content) => {
+      if (!content.startsWith('% typed')) return Promise.resolve()
+      held += 1
+      return new Promise<void>((resolve) => {
+        release = resolve
+      })
+    }
+    type('% typed\n')
+    await waitFor(() => expect(held).toBe(1), { timeout: 3000 })
+
+    // undo: the text on screen is the last confirmed text again, with that write unanswered
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!
+    act(() => view.dispatch({ changes: { from: 0, to: '% typed\n'.length, insert: '' } }))
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saving…')
+    fireEvent.keyDown(screen.getByLabelText('related-work.tex source'), { key: 's', ctrlKey: true })
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    expect(gateway.calls).not.toContain('POST /author/drafts/d1/save')
+    expect(writes()).toBe(before + 1)
+
+    release!()
+    await waitFor(() => expect(gateway.drafts.get('d1')!.version).toBe(4), { timeout: 3000 })
+    expect(writes()).toBe(before + 2) // the typed text, then the undone text
+    expect(stored()).toBe(original) // what v4 names is what the gateway holds
+    const put = gateway.calls.lastIndexOf('PUT /author/drafts/d1/files/related-work.tex')
+    expect(put).toBeLessThan(gateway.calls.indexOf('POST /author/drafts/d1/save'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v4 · saved'))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   test('a write from an editor another tab has overtaken is refused: the text stays, the error names it, and Retry overwrites', async () => {
     renderEditor()
     await screen.findByRole('tab', { name: /related-work\.tex/ })
