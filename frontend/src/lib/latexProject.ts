@@ -34,8 +34,15 @@ export function findCites(file: Pick<ProjectFile, 'name' | 'content'>): CiteRef[
 
 /** Every entry of every .bib in the project, in file order. */
 export function bibEntries(files: ProjectFile[]): (BibEntry & { file: string })[] {
-  return files.filter((f) => f.kind === 'bib').flatMap(entriesIn)
+  const bibs = files.filter((f) => f.kind === 'bib')
+  // The same .bib files as last time give the same list back, so what is derived from it (the
+  // preview's reference numbers, the editor's completions) is not redone while a .tex is typed.
+  if (lastBibs && lastBibs.files.length === bibs.length && bibs.every((f, i) => f === lastBibs!.files[i])) return lastBibs.entries
+  lastBibs = { files: bibs, entries: bibs.flatMap(entriesIn) }
+  return lastBibs.entries
 }
+
+let lastBibs: { files: ProjectFile[]; entries: (BibEntry & { file: string })[] } | null = null
 
 // One file's scan, remembered by the file object (files are never changed in place: an edit
 // makes a new object, see withContent). The editor reads the whole project on every keystroke

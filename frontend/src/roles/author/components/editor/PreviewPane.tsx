@@ -97,10 +97,11 @@ export function PreviewPane({
     }
   }, [debounced, prepared])
 
-  // Numbered like plainnat: only the works this file cites, by first author.
+  // Numbered like plainnat: only the works this file cites, by first author. From the debounced
+  // text, like the render the numbers decorate: not a scan and a redecoration per keystroke.
   const numbers = useMemo(
-    () => referenceNumbers(bibEntries, new Set(findCites({ name: 'preview', content }).map((c) => c.key))),
-    [bibEntries, content],
+    () => referenceNumbers(bibEntries, new Set(findCites({ name: 'preview', content: debounced }).map((c) => c.key))),
+    [bibEntries, debounced],
   )
   const issues = useMemo(() => citations.filter(isOpenIssue), [citations])
 

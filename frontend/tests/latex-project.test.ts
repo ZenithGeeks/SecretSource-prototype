@@ -56,7 +56,7 @@ test('a keystroke in one file leaves the other files scanned once: same objects,
   texts['related-work.tex'] += ' And more.'
   const second = live()
   assert.notEqual(second[0], first[0])
-  assert.equal(bibEntries(second)[0], entries[0])
+  assert.equal(bibEntries(second), entries) // the list itself, so what is derived from it holds
   // the same text again gives the same object, so its scan is reused too
   assert.equal(live()[0], second[0])
 
