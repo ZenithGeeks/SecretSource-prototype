@@ -33,9 +33,13 @@ class FakeRepository:
         self.course, self.assignment, self.submission = _fixtures()
         self.reviews = []
         self.feedback = None
+        self.review_activity = []
+        self.feedback_activity = []
         self.deleted = False
         self.disconnected = []
         self.list_submissions_calls = 0
+        self.fail_feedback_save = False
+        self.fail_feedback_read = False
 
     def list_courses(self, owner):
         return [self.course] if owner == "teacher-a" else []
@@ -62,6 +66,9 @@ class FakeRepository:
     def get_professor_reviews(self, *args):
         return list(self.reviews)
 
+    def list_professor_review_activity(self, owner):
+        return [item for item in self.review_activity if item.get("owner") == owner]
+
     def get_professor_review(self, *args):
         return self.reviews[0] if self.reviews else None
 
@@ -70,9 +77,16 @@ class FakeRepository:
         self.reviews.append(review)
 
     def get_feedback(self, *args):
+        if self.fail_feedback_read:
+            raise RuntimeError("database read failed")
         return self.feedback
 
+    def list_feedback_activity(self, owner):
+        return [item for item in self.feedback_activity if item.get("owner") == owner]
+
     def save_feedback(self, feedback):
+        if self.fail_feedback_save:
+            raise RuntimeError("database write failed")
         self.feedback = feedback
 
     def save_submission(self, submission):
@@ -168,6 +182,61 @@ def test_teacher_reads_are_owner_scoped_and_map_assignment_and_essay_contract(te
     assert essay.json()["reviews"][0]["sourceLocation"] == "p.2"
 
 
+def test_teacher_history_lists_completed_analysis_and_saved_teacher_activity(teacher_client, monkeypatch):
+    from app import main
+
+    client, repository, _ = teacher_client
+    _, _, first = _fixtures()
+    second = replace(
+        first,
+        submission_id="submission-2",
+        student_id="student-2",
+        student_name="Lin",
+        analysis_id=None,
+        attachments=[{"id": "file-2", "name": "Lin essay.pdf", "mimeType": "application/pdf"}],
+    )
+    other_teacher = replace(
+        first,
+        submission_id="submission-3",
+        student_id="student-3",
+        student_name="Mali",
+        analysis_id="another-teacher-analysis",
+    )
+    still_running = replace(
+        first,
+        submission_id="submission-4",
+        student_id="student-4",
+        analysis_id="analysis-running",
+    )
+    repository.list_submissions = lambda owner, course_id, coursework_id=None: [first, second, other_teacher, still_running]
+    repository.review_activity = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "submission-2", "updated_at": "2026-09-20T12:00:00+00:00"},
+        {"owner": "teacher-b", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "submission-2", "updated_at": "2026-09-25T12:00:00+00:00"},
+    ]
+    repository.feedback_activity = [
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "submission-2", "feedback_text": "Good evidence.", "status": "draft", "updated_at": "2026-09-21T12:00:00+00:00", "sent_at": None},
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "submission-4", "feedback_text": "   ", "status": "draft", "updated_at": "2026-09-25T12:00:00+00:00", "sent_at": None},
+    ]
+    monkeypatch.setattr(main, "analyses", {
+        "analysis-1": {"id": "analysis-1", "owner": "teacher-a", "status": "done", "started": "2026-09-19T12:00:00+00:00", "completed": "2026-09-22T12:00:00+00:00"},
+        "another-teacher-analysis": {"id": "another-teacher-analysis", "owner": "teacher-b", "status": "done", "started": "2026-09-22T12:00:00+00:00"},
+        "analysis-running": {"id": "analysis-running", "owner": "teacher-a", "status": "running", "started": "2026-09-23T12:00:00+00:00"},
+    })
+
+    response = client.get("/teacher/history")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert [row["studentId"] for row in rows] == ["student-1", "student-2"]
+    assert rows[0]["checkedAt"] == "2026-09-22T12:00:00+00:00"
+    assert rows[0]["analysisId"] == "analysis-1"
+    assert rows[0]["activity"] == ["analysis"]
+    assert rows[1]["checkedAt"] == "2026-09-21T12:00:00+00:00"
+    assert rows[1]["activity"] == ["professor-review", "feedback"]
+    assert rows[1]["courseName"] == "Research Methods"
+    assert rows[1]["assignmentTitle"] == "Essay"
+
+
 def test_teacher_review_feedback_and_grade_return_mutations_are_scoped(teacher_client):
     client, repository, google = teacher_client
     review_id = "claim-0:10.1/example:0"
@@ -235,6 +304,22 @@ def test_google_disconnect_removes_the_connection_without_deleting_imported_data
     assert repository.deleted is False
 
 
+def test_recheck_route_forces_a_new_analysis_for_the_same_file(teacher_client):
+    client, repository, google = teacher_client
+    repository.submission = replace(repository.submission, analysis_file_id="file-1", analysis_file_version="1")
+    path = "/teacher/classes/course-1/assignments/work-1/students/student-1/analyze"
+    cached = client.post(path)
+    assert cached.status_code == 200
+    assert cached.json()["id"] == "analysis-1"
+    assert repository.analysis_starts == []
+
+    response = client.post(path + "?force=true")
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == "prepared-1"
+    assert repository.analysis_starts == ["start"]
+    assert google.downloads == ["file-1"]
+
+
 def test_analyze_submission_runs_on_the_event_loop():
     """Break caught: the analysis route runs in FastAPI's worker thread without an event loop."""
     from app.teacher.router import analyze_submission
@@ -292,6 +377,34 @@ def test_feedback_is_not_marked_sent_without_student_email(teacher_client):
     assert response.status_code == 404
     assert response.json()["detail"] == "student email is unavailable; refresh Classroom student email access"
     assert repository.feedback.status == "draft"
+
+
+def test_feedback_send_reports_draft_save_failure_without_attempting_email(teacher_client):
+    client, repository, google = teacher_client
+    repository.fail_feedback_save = True
+
+    response = client.post(
+        "/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
+        json={"studentId": "student-1", "body": "Please revise.", "citationIds": []},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Feedback could not be prepared. No email was sent. Please try again."
+    assert google.sent_emails == []
+
+
+def test_feedback_send_reports_feedback_read_failure_without_attempting_email(teacher_client):
+    client, repository, google = teacher_client
+    repository.fail_feedback_read = True
+
+    response = client.post(
+        "/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
+        json={"studentId": "student-1", "body": "Please revise.", "citationIds": []},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Feedback could not be prepared. No email was sent. Please try again."
+    assert google.sent_emails == []
 
 
 def test_essay_review_citation_ids_are_unique_even_when_citations_have_no_identifiers():

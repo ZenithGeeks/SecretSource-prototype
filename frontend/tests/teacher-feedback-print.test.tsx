@@ -48,4 +48,34 @@ describe('teacher feedback export', () => {
     expect(printWindow.focus).toHaveBeenCalledOnce()
     expect(printWindow.print).toHaveBeenCalledOnce()
   })
+
+  it('waits for report fonts and browser layout before printing', async () => {
+    let finishFonts!: () => void
+    const fontsReady = new Promise<void>((resolve) => { finishFonts = resolve })
+    const events: string[] = []
+    const document = {
+      open: vi.fn(),
+      write: vi.fn(),
+      close: vi.fn(),
+      images: [],
+      fonts: { ready: fontsReady },
+      body: { get offsetHeight() { events.push('layout'); return 600 } },
+    }
+    const printWindow = {
+      document,
+      focus: vi.fn(),
+      print: vi.fn(() => events.push('print')),
+      requestAnimationFrame: (callback: FrameRequestCallback) => { events.push('frame'); callback(0); return 1 },
+      setTimeout: (callback: () => void) => callback(),
+    } as unknown as Window
+
+    const printing = printTeacherFeedbackReport(printWindow, '<html><body>Full report</body></html>')
+    await Promise.resolve()
+    expect(events).not.toContain('print')
+
+    finishFonts()
+    await printing
+
+    expect(events).toEqual(['frame', 'frame', 'layout', 'print'])
+  })
 })

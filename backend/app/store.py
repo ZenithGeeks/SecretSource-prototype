@@ -158,12 +158,16 @@ def load(analysis_id: str) -> dict | None:
 def load_all() -> dict[str, dict]:
     """Every stored analysis, oldest first, keyed by id."""
     if _use_supabase():
-        rows = _supabase().table("analyses").select("data").order("started").execute().data
+        rows = _supabase().table("analyses").select("started,data").order("started").execute().data
         analyses = [row["data"] for row in rows]
+        for row, analysis in zip(rows, analyses, strict=True):
+            analysis.setdefault("started", row.get("started"))
         return {analysis["id"]: analysis for analysis in analyses}
     with _sqlite() as database:
-        rows = database.execute("SELECT data FROM analyses ORDER BY started").fetchall()
+        rows = database.execute("SELECT started, data FROM analyses ORDER BY started").fetchall()
     analyses = [json.loads(row["data"]) for row in rows]
+    for row, analysis in zip(rows, analyses, strict=True):
+        analysis.setdefault("started", row["started"])
     return {analysis["id"]: analysis for analysis in analyses}
 
 

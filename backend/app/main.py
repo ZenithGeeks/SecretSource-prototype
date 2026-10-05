@@ -437,6 +437,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
+        analysis["completed"] = datetime.now(timezone.utc).isoformat()
         await _publish(analysis_id, "done")
         _detach(_index_self(analysis_id, analysis["title"]))
     except Exception as error:
@@ -462,13 +463,14 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     an RQ worker."""
     analysis_id = uuid.uuid4().hex[:12]
     analysis = _new_analysis(analysis_id, paper, owner)
+    analysis["started"] = datetime.now(timezone.utc).isoformat()
     queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
     analysis["stages"].append(queued)
     analyses[analysis_id] = analysis
     streams[analysis_id] = asyncio.Queue()
     streams[analysis_id].put_nowait(queued)
     try:
-        enqueue_analysis(analysis_id, paper, verify, owner, [queued])
+        enqueue_analysis(analysis_id, paper, verify, owner, [queued], analysis["started"])
     except Exception:
         analyses.pop(analysis_id, None)
         streams.pop(analysis_id, None)

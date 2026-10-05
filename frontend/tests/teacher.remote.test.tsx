@@ -8,6 +8,30 @@ vi.mock('../src/lib/teacherStore', () => ({ store: {} }))
 import { createRemoteTeacherApi, teacherEssayCheckKey } from '../src/lib/teacher'
 
 describe('remote Teacher API', () => {
+  it('loads teacher history from the authenticated gateway', async () => {
+    request.mockResolvedValue([])
+
+    await createRemoteTeacherApi().getHistory()
+
+    expect(request).toHaveBeenCalledWith('/teacher/history')
+    request.mockClear()
+  })
+
+  it('runs a Classroom sync when a class refresh is requested', async () => {
+    request.mockResolvedValue({ workspace: { course: { courseId: 'course-1' } }, sync: { submission_count: 1 } })
+
+    await createRemoteTeacherApi().refreshClass('course-1')
+
+    expect(request).toHaveBeenCalledWith('/teacher/classes/course-1/refresh', { method: 'POST' })
+    request.mockClear()
+  })
+
+  it('requests a fresh analysis only when recheck is explicitly selected', async () => {
+    request.mockResolvedValue({ id: 'new-analysis', status: 'running' })
+    await createRemoteTeacherApi().analyzeSubmission({ courseId: 'course-1', assignmentId: 'work-1', studentId: 'student-1', force: true })
+    expect(request).toHaveBeenLastCalledWith('/teacher/classes/course-1/assignments/work-1/students/student-1/analyze?force=true', { method: 'POST' })
+    request.mockClear()
+  })
   it('uses the Classroom essay-check routes instead of the browser mock store', async () => {
     const api = createRemoteTeacherApi()
     const essay = { assignment: { assignmentId: 'work-1' }, student: { id: 'student-1' } }
@@ -52,6 +76,16 @@ describe('remote Teacher API', () => {
     expect(teacherEssayCheckKey('course-1', 'work-1', 'student-1')).not.toEqual(
       teacherEssayCheckKey('course-2', 'work-1', 'student-1'),
     )
+  })
+
+  it('passes a cancellation signal to the Google connection status request', async () => {
+    const api = createRemoteTeacherApi()
+    const signal = new AbortController().signal
+    request.mockResolvedValue({ connected: false, email: null })
+
+    await api.getGoogleConnection(signal)
+
+    expect(request).toHaveBeenCalledWith('/teacher/google/status', { signal })
   })
 
   it('prepares the selected classwork through the batch Essay Check pipeline route', async () => {

@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 
 import App from './App'
 import { authEnabled, supabase } from './lib/supabase'
+import { consumeTeacherGoogleReturn } from './lib/teacherGoogleReturn'
 import { useAuth } from './lib/useAuth'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
 import { TeacherApp } from './roles/teacher/TeacherApp'
@@ -22,6 +23,13 @@ import { Onboarding } from './screens/Onboarding'
 type Screen = 'onboarding' | Role | 'app'
 
 function initialScreen(): Screen {
+  if (consumeTeacherGoogleReturn()) {
+    const params = new URLSearchParams(window.location.search)
+    params.set('role', 'teacher')
+    params.set('screen', 'add-class-course')
+    window.history.replaceState(null, '', `?${params.toString()}`)
+    return 'teacher'
+  }
   const role = new URLSearchParams(window.location.search).get('role')
   if (role === 'researcher' || role === 'writer' || role === 'teacher' || role === 'app') return role
   return 'onboarding'

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Analysis } from '../src/lib/api'
@@ -6,7 +6,10 @@ import type { EssayCheck as EssayCheckData } from '../src/lib/teacher'
 
 const mocks = vi.hoisted(() => ({
   analyze: vi.fn(),
+  analyzePending: false,
+  analyzeError: null as Error | null,
   updateReview: vi.fn(),
+  refreshClassroom: vi.fn(),
   essayCheck: null as EssayCheckData | null,
   analysis: null as Analysis | null,
 }))
@@ -26,9 +29,10 @@ vi.mock('../src/lib/useTeacher', () => ({
     },
   }),
   useTeacherGoogleConnection: () => ({ data: { connected: false, email: null, scopes: [] }, isPending: false, isError: false }),
-  useAnalyzeTeacherSubmission: () => ({ mutate: mocks.analyze, isPending: false, isError: false }),
+  useAnalyzeTeacherSubmission: () => ({ mutate: mocks.analyze, isPending: mocks.analyzePending, isError: Boolean(mocks.analyzeError), error: mocks.analyzeError }),
   useUpdateProfessorReview: () => ({ mutate: mocks.updateReview, isPending: false }),
   useSaveTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRefreshTeacherClass: () => ({ mutate: mocks.refreshClassroom, isPending: false, isError: false, error: null }),
   useSendTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => <div /> }))
@@ -41,16 +45,65 @@ describe('Teacher essay check', () => {
     vi.clearAllMocks()
     mocks.essayCheck = null
     mocks.analysis = null
+    mocks.analyzePending = false
+    mocks.analyzeError = null
+  })
+
+  function completedEssay(status = 'done') {
+    mocks.essayCheck = {
+      assignment: { assignmentId: 'work-1', courseId: 'course-1', course: 'Course', name: 'Essay' },
+      student: { id: 'student-1', name: 'Student', fileName: 'essay.pdf' },
+      citationSummary: { total: 0, contradicted: 0, silent: 0, backed: 0 },
+      reviews: [], feedback: { body: '', preview: '', citedPages: [], citationIds: [] }, navigation: {},
+      analysis: { id: 'analysis-1', status, error: null },
+    }
+    mocks.analysis = { id: 'analysis-1', paper: 'essay.pdf', status: 'done', claims: [], stages: [] }
+    render(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
+  }
+
+  it('requires confirmation before rechecking and lets the teacher cancel', () => {
+    completedEssay()
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck essay' }))
+    expect(screen.getByRole('dialog', { name: 'Recheck this essay?' })).toBeInTheDocument()
+    expect(screen.getByText(/cleared only if the submitted file has changed/i)).toBeInTheDocument()
+    expect(mocks.analyze).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(mocks.analyze).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck essay' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck', exact: true }))
+    expect(mocks.analyze).toHaveBeenCalledWith({ courseId: 'course-1', assignmentId: 'work-1', studentId: 'student-1', force: true })
+  })
+
+  it('disables recheck while the current analysis is running', () => {
+    completedEssay('running')
+    expect(screen.getByRole('button', { name: 'Recheck essay' })).toBeDisabled()
+    expect(screen.getByText(/Analysis is running/)).toBeInTheDocument()
+  })
+
+  it('disables recheck while its API request is pending', () => {
+    mocks.analyzePending = true
+    completedEssay()
+    expect(screen.getByRole('button', { name: 'Starting analysis...' })).toBeDisabled()
+  })
+
+  it('shows an API failure and allows another attempt', () => {
+    mocks.analyzeError = new Error('API connection failed. Try again.')
+    completedEssay()
+    expect(screen.getByRole('alert')).toHaveTextContent('API connection failed. Try again.')
+    expect(screen.getByRole('button', { name: 'Recheck essay' })).toBeEnabled()
   })
 
   it('starts an analysis for the current Classroom submission', () => {
+    const onBack = vi.fn()
+    const onNavigate = vi.fn()
     render(
       <EssayCheck
         courseId="course-1"
         assignmentId="work-1"
         studentId="student-1"
-        onNavigate={vi.fn()}
-        onBack={vi.fn()}
+        onBack={onBack}
+        onNavigate={onNavigate}
       />,
     )
 
@@ -63,7 +116,7 @@ describe('Teacher essay check', () => {
     })
   })
 
-  it('saves the human decision and note from a claim in the loaded analysis', () => {
+  it('keeps citation decisions and student feedback in the PDF review flow', () => {
     mocks.essayCheck = {
       assignment: { assignmentId: 'work-1', courseId: 'course-1', course: 'Course', name: 'Essay' },
       student: { id: 'student-1', name: 'Student', fileName: 'essay.pdf' },
@@ -98,42 +151,42 @@ describe('Teacher essay check', () => {
       stages: [],
     }
 
+    const onBack = vi.fn()
+    const onNavigate = vi.fn()
     render(
       <EssayCheck
         courseId="course-1"
         assignmentId="work-1"
         studentId="student-1"
-        onNavigate={vi.fn()}
-        onBack={vi.fn()}
+        onBack={onBack}
+        onNavigate={onNavigate}
       />,
     )
 
-    const decision = screen.getByRole('combobox', { name: 'Human final decision for Source paper' })
-    fireEvent.change(decision, { target: { value: 'contradicts' } })
-    expect(mocks.updateReview).toHaveBeenCalledWith({
-      courseId: 'course-1',
-      assignmentId: 'work-1',
-      studentId: 'student-1',
-      reviewId: 'claim-0:10.1234/source:0',
-      outcome: 'contradicts',
-      note: '',
-    })
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
+    const breadcrumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Classes' }))
+    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'classes' })
+    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Course' }))
+    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'class-overview', courseId: 'course-1' })
+    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Essay' }))
+    expect(onBack).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'CSV' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('combobox', { name: 'Human final decision for Source paper' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Human final decision for Source paper' }), { target: { value: 'contradicts' } })
+    expect(mocks.updateReview).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'contradicts', reviewId: 'claim-0:10.1234/source:0' }))
+    expect(screen.getByRole('textbox', { name: 'Feedback to student' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add to feedback' })).toBeInTheDocument()
+  })
 
-    const includeButton = screen.getByRole('button', { name: 'Add to feedback' })
-    fireEvent.click(includeButton)
-    expect(includeButton).toHaveAttribute('aria-pressed', 'true')
+  it('offers a Classroom sync when the student email is missing', () => {
+    render(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Feedback to student' }), { target: { value: 'Please revise your thesis.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to student' }))
 
-    mocks.essayCheck.reviews[0].professorReview.outcome = 'contradicts'
-    const note = screen.getByRole('textbox', { name: 'Teacher note for Source paper' })
-    fireEvent.change(note, { target: { value: 'Check the source context.' } })
-    fireEvent.blur(note)
-    expect(mocks.updateReview).toHaveBeenLastCalledWith({
-      courseId: 'course-1',
-      assignmentId: 'work-1',
-      studentId: 'student-1',
-      reviewId: 'claim-0:10.1234/source:0',
-      outcome: 'contradicts',
-      note: 'Check the source context.',
-    })
+    fireEvent.click(screen.getByRole('button', { name: 'Sync Classroom now' }))
+
+    expect(mocks.refreshClassroom).toHaveBeenCalledWith('course-1')
   })
 })

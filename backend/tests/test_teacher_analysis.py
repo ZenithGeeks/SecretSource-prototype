@@ -19,8 +19,8 @@ class Repository:
     def link_submission_analysis(self, *args, **kwargs):
         self.links.append((args, kwargs))
 
-    def reset_submission_review(self, *args):
-        self.resets.append(args)
+    def reset_submission_review(self, *args, **kwargs):
+        self.resets.append((args, kwargs))
 
 
 class Drive:
@@ -125,6 +125,46 @@ def test_same_pdf_version_reuses_its_existing_pipeline_analysis():
     assert repository.links == []
 
 
+def test_force_rechecks_an_unchanged_completed_submission():
+    calls = []
+    submission = make_submission(
+        [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
+        analysis_id="analysis-existing", analysis_file_id="essay", analysis_file_version="3",
+    )
+    service, repository, drive = service_for(submission, calls)
+    service._analysis_lookup = lambda _id: {"status": "done"}
+
+    result = service.start("teacher-1", "course-1", "work-1", "submission-1", force=True)
+
+    assert result["id"] == "analysis-1"
+    assert calls == ["started"]
+    assert drive.downloads == ["essay"]
+    assert repository.resets == [(
+        ("teacher-1", "course-1", "work-1", "submission-1"),
+        {"preserve_sent_history": True},
+    )]
+
+
+def test_force_restarts_a_running_analysis():
+    calls = []
+    submission = make_submission(
+        [{"id": "essay", "name": "essay.pdf", "mimeType": "application/pdf"}],
+        analysis_id="analysis-existing", analysis_file_id="essay", analysis_file_version="3",
+    )
+    service, repository, drive = service_for(submission, calls)
+    service._analysis_lookup = lambda _id: {"status": "running"}
+
+    result = service.start("teacher-1", "course-1", "work-1", "submission-1", force=True)
+
+    assert result["id"] == "analysis-1"
+    assert calls == ["started"]
+    assert drive.downloads == ["essay"]
+    assert repository.resets == [(
+        ("teacher-1", "course-1", "work-1", "submission-1"),
+        {"preserve_sent_history": True},
+    )]
+
+
 def test_changed_pdf_version_starts_a_new_pipeline_analysis():
     calls = []
     submission = make_submission(
@@ -139,7 +179,10 @@ def test_changed_pdf_version_starts_a_new_pipeline_analysis():
     assert drive.downloads == ["essay"]
     assert calls == ["started"]
     assert repository.links[0][1]["file_version"] == "3"
-    assert repository.resets == [("teacher-1", "course-1", "work-1", "submission-1")]
+    assert repository.resets == [(
+        ("teacher-1", "course-1", "work-1", "submission-1"),
+        {"preserve_sent_history": False},
+    )]
 
 
 def test_failed_analysis_for_the_same_pdf_can_be_retried():
