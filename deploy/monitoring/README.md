@@ -88,6 +88,7 @@ recreate Grafana. Without it the alerts still show under Alerting in Grafana, bu
 | ColPali GPU billed for most of the last hour | over 0.83 instances on average for an hour, held 30 minutes |
 | A Cloud Run service runs more instances than usual | gateway, colbert or grobid over 1.5 instances on average for an hour |
 | A Cloud Run service is returning 5xx errors | more than 5 in 15 minutes |
+| The gateway has not scaled to zero in 6 hours | over 0.9 instances on average for 6 hours (something keeps it awake) |
 
 Each alert's description says what to check first. The exact check before the credit runs out is a
 Cloud Billing budget alert, which only the billing account owner can create.
@@ -116,6 +117,17 @@ outside Grafana, because Grafana here cannot send email:
 
 `deploy/gpu-guard.sh check` prints each GPU service's scaling and billed hours over the last hour
 and day. Never point an uptime check, health probe or warm-up loop at a GPU service (#328).
+
+The gateway scales to zero too (#345). It ran one instance around the clock (about $9 a day at list
+price): its scaling was pinned to one instance in the Console, and the `gateway-health` uptime check
+called it every few minutes, 1,767 of its 1,800 requests in a day. That check and its alert
+"Gateway /health is failing" are deleted, because any uptime check keeps the gateway awake: the
+slowest allowed period is 15 minutes, and an idle instance stays up 15 minutes. The first request
+after 15 idle minutes now waits about 10 s for a cold start. `gpu-guard.sh install` also creates
+`scale-guard-gateway`, which resets the gateway's scaling every hour the same way (services listed
+in `ZERO_SERVICES`). What still alerts on the gateway: "Gateway returns 5xx" (Cloud Monitoring),
+the 5xx and "has not scaled to zero in 6 hours" rules in Grafana, and `/status` in Discord. Nothing
+alerts on a gateway that is down while nobody is using it.
 
 ## Analyses dashboard
 

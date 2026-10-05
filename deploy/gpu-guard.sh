@@ -27,11 +27,17 @@
 #   gcloud scheduler jobs pause  gpu-guard-colpali --location "$REGION"
 #   gcloud scheduler jobs resume gpu-guard-colpali --location "$REGION"
 # Never point an uptime check, health probe or warm-up loop at a GPU service.
+#
+# ZERO_SERVICES (default: gateway) are CPU services that should also scale to zero. They get
+# the same hourly reset job, named scale-guard-<service>, but not the GPU alert. The gateway
+# was pinned to one instance and kept awake by an uptime check until 2026-10-05 (#345), about
+# $9/day at list price; it now starts in ~10 s on the first request after 15 idle minutes.
 set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT}"
 REGION="${REGION:-asia-southeast1}"
 GPU_SERVICES="${GPU_SERVICES:-colpali vllm}"
+ZERO_SERVICES="${ZERO_SERVICES:-gateway}"
 SCHEDULE="${SCHEDULE:-7 * * * *}"
 POLICY_NAME="GPU Cloud Run service billed continuously"
 CHANNEL_NAME="GPU guard email"
@@ -53,11 +59,11 @@ PY=python3
 "$PY" -c pass 2>/dev/null || PY=python
 py() { "$PY" -c "$@" | tr -d '\r'; }
 
-existing_services() {
+existing_services() { # existing_services NAME... -> the ones deployed in this region
     local live
     live=" $(gcloud run services list --project "$PROJECT" --region "$REGION" \
         --format='value(metadata.name)' | tr -d '\r' | tr '\n' ' ') "
-    for s in $GPU_SERVICES; do
+    for s in "$@"; do
         case "$live" in *" $s "*) echo "$s" ;; esac
     done
 }
@@ -78,7 +84,8 @@ print(round(sum(p['value'].get('doubleValue',0) for s in d.get('timeSeries',[]) 
 
 check() {
     local bad=0 s scaling h1 h24
-    for s in $(existing_services); do
+    # shellcheck disable=SC2086 # the lists are space-separated names
+    for s in $(existing_services $GPU_SERVICES $ZERO_SERVICES); do
         scaling=$(api GET "$RUN_API/$s" | py "import json,sys; c=json.load(sys.stdin).get('scaling',{})
 print(c.get('scalingMode','AUTOMATIC'), c.get('manualInstanceCount',0), c.get('minInstanceCount',0))")
         read -r mode manual min <<<"$scaling"
@@ -98,25 +105,31 @@ print(c.get('scalingMode','AUTOMATIC'), c.get('manualInstanceCount',0), c.get('m
 }
 
 install_jobs() {
-    local sa s verb headers body
+    local s
+    # shellcheck disable=SC2086 # the lists are space-separated names
+    for s in $(existing_services $GPU_SERVICES); do install_job "gpu-guard-$s" "$s"; done
+    # shellcheck disable=SC2086
+    for s in $(existing_services $ZERO_SERVICES); do install_job "scale-guard-$s" "$s"; done
+}
+
+install_job() { # install_job JOB_NAME SERVICE
+    local job=$1 s=$2 sa verb headers body
     sa="${GUARD_SA:-$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
     body='{"scaling":{"scalingMode":"AUTOMATIC","minInstanceCount":0}}'
-    for s in $(existing_services); do
-        verb=create headers=--headers
-        if gcloud scheduler jobs describe "gpu-guard-$s" --project "$PROJECT" --location "$REGION" \
-            >/dev/null 2>&1; then
-            verb=update headers=--update-headers
-        fi
-        gcloud scheduler jobs "$verb" http "gpu-guard-$s" --project "$PROJECT" --location "$REGION" \
-            --schedule "$SCHEDULE" --time-zone UTC \
-            --uri "$RUN_API/$s?updateMask=scaling" --http-method POST \
-            "$headers" Content-Type=application/json,X-HTTP-Method-Override=PATCH \
-            --message-body "$body" \
-            --oauth-service-account-email "$sa" \
-            --oauth-token-scope https://www.googleapis.com/auth/cloud-platform \
-            --description "Reset $s to automatic scaling, min 0 (deploy/gpu-guard.sh)" --quiet >/dev/null
-        echo "scheduler job gpu-guard-$s: ${verb}d"
-    done
+    verb=create headers=--headers
+    if gcloud scheduler jobs describe "$job" --project "$PROJECT" --location "$REGION" \
+        >/dev/null 2>&1; then
+        verb=update headers=--update-headers
+    fi
+    gcloud scheduler jobs "$verb" http "$job" --project "$PROJECT" --location "$REGION" \
+        --schedule "$SCHEDULE" --time-zone UTC \
+        --uri "$RUN_API/$s?updateMask=scaling" --http-method POST \
+        "$headers" Content-Type=application/json,X-HTTP-Method-Override=PATCH \
+        --message-body "$body" \
+        --oauth-service-account-email "$sa" \
+        --oauth-token-scope https://www.googleapis.com/auth/cloud-platform \
+        --description "Reset $s to automatic scaling, min 0 (deploy/gpu-guard.sh)" --quiet >/dev/null
+    echo "scheduler job $job: ${verb}d"
 }
 
 install_alert() {
