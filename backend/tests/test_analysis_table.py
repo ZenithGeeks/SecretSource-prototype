@@ -59,9 +59,11 @@ def test_setdefault_indexes_the_row_it_inserts():
 
 
 @pytest.fixture
-def gateway():
+def gateway(monkeypatch):
     main.analyses.clear()
     main._derived.clear()
+    # papers_of also reads the Author role's rows from the store; none here unless a test adds them.
+    monkeypatch.setattr(main, "author_pdfs", lambda user: set())
     yield main
     main.analyses.clear()
     main._derived.clear()
@@ -103,6 +105,16 @@ def test_papers_of_sees_a_row_that_changed_in_place(gateway):
     row["claims"][0]["verdicts"].append({"source": "papers/cited.pdf"})
     row["stages"].append({"stage": "verified"})
     assert gateway.papers_of("a") == {"one.pdf", "cited.pdf"}
+
+
+def test_papers_of_sees_an_author_pdf_added_after_it_was_cached(gateway, monkeypatch):
+    """Author PDFs are stored outside `analyses`, so the per-owner cache cannot see them change."""
+    author = set()
+    monkeypatch.setattr(gateway, "author_pdfs", lambda user: set(author))
+    gateway.analyses["p1"] = _paper("p1", "a", "papers/one.pdf")
+    assert gateway.papers_of("a") == {"one.pdf"}
+    author.add("draft-source.pdf")
+    assert gateway.papers_of("a") == {"one.pdf", "draft-source.pdf"}
 
 
 def test_the_graph_is_rebuilt_when_a_paper_is_indexed_after_it_finished(gateway, monkeypatch):
