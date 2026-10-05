@@ -29,9 +29,13 @@ def fake_projects(monkeypatch):
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
+    # SUPABASE_URL only turns login on; the store (papers_of reads the Author role's rows)
+    # stays on a temp SQLite file
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "test.db"))
+    monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
     monkeypatch.setattr(auth, "_user_id_for", TOKENS.get)
     monkeypatch.setattr(main.store, "delete", lambda analysis_id: True)
     monkeypatch.setattr(main.dependencies, "report", lambda: {"degraded": False, "dependencies": []})

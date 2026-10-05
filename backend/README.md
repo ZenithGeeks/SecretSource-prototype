@@ -204,6 +204,7 @@ backend/
 │   ├── workflow.py      the same pipeline as an ADK Workflow graph
 │   ├── agents/team.py   chat agents: coordinator, rag_agent, paper_agent, verify_agent
 │   ├── clients/         HTTP clients for ColBERT, ColPali and GROBID, and identity tokens
+│   ├── author/          the Author role: drafts, projects, sources, draft checks, search (see Author below)
 │   ├── teacher/         Google Classroom: OAuth, roster sync, essay-check review (see Teacher below)
 │   └── pipeline/
 │       ├── claims.py    reads a paper and extracts claims with their citations
@@ -515,6 +516,89 @@ The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: 
 `asserts`, `backs`, `contradicts`, `silent` or `unchecked`) and `paperEdges` (paper to paper).
 A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
 when the run does not say.
+
+### Author
+
+The Author role's own records: LaTeX drafts, the projects (a `.bib` plus drafts) they belong
+to, saved sources, and draft checks. Everything is owner-scoped — unlike analyses, nothing here
+is shared with the team; another user's row is a `404`. Code in `app/author/`.
+
+A draft is `{id, projectId, title, version, files, pdfs, status, lastCheckedAt, lastCheckId,
+runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name, kind, content}`
+(`kind` is `tex` or `bib`; the project's `.bib` is included with `shared: true`). `status` is
+`{checked, counts, open}` from the latest finished check, with `counts` per verdict:
+`supports`, `refutes`, `insufficient`, `unavailable` (the source could not be read),
+`unchecked` (no bib entry, or no check yet).
+
+#### Drafts
+
+| Route | Does |
+| --- | --- |
+| `GET /author/drafts` | the caller's drafts, newest change first |
+| `POST /author/drafts` | body `{"title", "projectId", "files": [{"name", "content"}]}`; an empty `main.tex` when no files |
+| `POST /author/drafts/upload?projectId=` | multipart `.tex`, `.bib` or Overleaf `.zip` (its `.tex`/`.bib` files; figures are left out) |
+| `GET /author/drafts/{id}` | the draft with its files and uploaded PDFs |
+| `PATCH /author/drafts/{id}` | `title`, `projectId` (empty to unfile) |
+| `DELETE /author/drafts/{id}` | the draft and its finished checks |
+| `PUT /author/drafts/{id}/files/{name}` | body `{"content"}`; a new name adds the file. Does not bump the version |
+| `DELETE /author/drafts/{id}/files/{name}` | keeps at least one file |
+| `POST /author/drafts/{id}/save` | Ctrl/Cmd+S: `version + 1`. A check on a draft with unsaved edits saves first, the same way, so every check's `version` names the content it checked |
+| `GET /author/drafts/{id}/parse` | `{texFiles, citeCommands, bibEntries, warnings}`; a warning is `{type, detail, file, line}` with `type` one of `missing-key`, `duplicate-key`, `unused-entry`, `no-doi-url` |
+| `POST /author/drafts/{id}/citations/{key}/pdf` | multipart PDF for a bib key no check can read; used instead of a lookup by the next check |
+| `POST /author/drafts/{id}/report` | the verification report of the latest check as `application/pdf`; `409` before any check |
+
+#### Draft checks
+
+`POST /author/drafts/{id}/check` → `{"id"}`. Every `\cite` in the draft's `.tex` files is
+verified against the work its bib entry names (an uploaded PDF, else DOI, arXiv id, URL or
+title), `PARALLEL_CHECKS` at a time and never over the gateway-wide limit. The same
+(claim, source) pair is judged once and read from the `cache` table after that; `POST /checks`
+shares that cache. `409` while a check of that draft is running.
+
+| Route | Does |
+| --- | --- |
+| `GET /author/drafts/{id}/checks` | history, newest first: `{id, version, status, startedAt, finishedAt, summary, sinceLastCheck, previousVersion, previousId, unchanged}`; `unchanged` is a re-check of the same text and bibliography as the check before. Every timestamp is ISO 8601 in UTC with the offset written (`+00:00`) |
+| `GET /author/checks/{id}` | the same plus `citations` and `stages` |
+| `GET /author/checks/{id}/events` | SSE, like `/analyses/{id}/events`: `planned`, `checking`/`checked` per citation, then `done` or `error` |
+| `GET /author/checks/{id}/compare` | against the finished check before it: `{current, previous, rows}`; a row's `change` is `added`, `removed`, `fixed`, `new`, `changed` or `same` |
+| `PATCH /author/checks/{id}/citations/{cid}` | what the author did: `resolution` `{kind: replaced|overridden, note, previousKey}` (or `null` to reopen), and for a replacement the new `key`, `sourceRef`, `verdict`, `evidence` |
+| `DELETE /author/checks/{id}` | `409` while running |
+
+A citation is `{id, key, file, line, column, section, sentence, claim, verdict, sourceRef,
+evidence: {passage, pdf, page}, explanation, reason, message, resolution}`. An overridden
+resolution is carried over to the next check when the same key still cites the same sentence.
+`sinceLastCheck` is `{addedCitations, fixedIssues, newIssues}`.
+
+#### Projects and the Library
+
+| Route | Does |
+| --- | --- |
+| `GET /author/projects` | cards: `{id, name, bibName, entries, cited, needWork, tally, drafts, checkedAt}` |
+| `POST /author/projects` | body `{"name", "bib", "bibName"}` |
+| `POST /author/projects/import` | multipart `.bib` (the bibliography) or `.zip` (its `.bib` plus one draft from its `.tex` files) |
+| `GET /author/projects/{id}` | the card plus `bib`, `draftList` and `history` (check rows per draft id) |
+| `PATCH /author/projects/{id}` | `name`, `bib`, `bibName` |
+| `DELETE /author/projects/{id}` | the drafts stay and become unfiled |
+| `DELETE /author/projects/{id}/bib/{key}` | drops every entry with that key |
+| `POST /author/projects/{id}/bib/{key}/pdf` | like the draft route, for the project's `.bib` |
+| `GET /author/library` | `{projects, unsorted: {sources, pdfs, drafts}, attention, saved}`; an attention row is `{kind: replace|upload-pdf|remove, key, title, detail, draftId, projectId, checkId, citationId}` |
+
+#### Saved sources
+
+| Route | Does |
+| --- | --- |
+| `GET /author/sources?project=` | newest first, each with `inBib` and `bibName` |
+| `POST /author/sources` | a work to keep (`title`, `authorsList`, `year`, `venue`, `doi`, `arxiv`, `url`, `identifier`, `projectId`, `claim`, `verdict`); a unique `key` and `bibtex` are made when missing |
+| `POST /author/sources/{id}/add-to-bib` | body `{"projectId"}`; appends the entry, `409` when the key is there already |
+| `POST /author/sources/{id}/pdf` | multipart PDF |
+| `DELETE /author/sources/{id}` | |
+
+#### Your data
+
+`GET /author/export` → `{exportedAt, projects, drafts, sources, checks}`. `DELETE
+/user/data?scope=author` (the Author tab's Settings → Delete all) removes these and the
+caller's draft checks, and nothing of the Researcher's; `scope=researcher` is the reverse,
+and `scope=all` (the default) both.
 
 ### Teacher
 

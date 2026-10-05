@@ -13,6 +13,7 @@ source-resolution cache and the researcher's projects. Three tables:
 | `analyses` | `id text pk`, `started timestamptz`, `data jsonb` | one analysis per row |
 | `sources`  | `key text pk`, `data jsonb` | resolved cited-work lookups (cache) |
 | `projects` | `id text pk`, `owner text`, `data jsonb` | a user's grouping of analysed papers |
+| `author_projects`, `author_drafts`, `author_sources` | `id text pk`, `owner text`, `data jsonb` | the Author role's projects (a `.bib` plus drafts), drafts (their `.tex`/`.bib` files) and saved sources |
 
 - **Server-only**: RLS enabled with **no policies**; the gateway connects with the **service
   role**, which bypasses RLS. Browsers get nothing.
@@ -58,5 +59,6 @@ them again is safe. In order:
 
 - `20260909150239_blob_store.sql` — `analyses` + `sources`.
 - `20260913160000_researcher_projects.sql` — `projects` (+ `projects_owner_idx`).
+- `20260927120000_author_role.sql` — `author_projects`, `author_drafts`, `author_sources` (+ owner indexes).
 - `20260914120000_adk_sessions.sql` — the `adk` schema for chat sessions, locked away from the
   browser roles (ADK creates its own tables inside it at runtime).

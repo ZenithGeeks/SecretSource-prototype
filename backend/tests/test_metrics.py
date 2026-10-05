@@ -161,3 +161,47 @@ def test_analyses_started_is_not_touched_by_the_worker(stub_pipeline, monkeypatc
     _run_to_completion("job-metrics-started", "paper-started")
 
     assert _value(ANALYSES_STARTED) == before
+
+
+def test_author_verifications_count_like_an_analysis_does(monkeypatch, tmp_path):
+    """app.author.verify.verify_cached is where every Author verification passes (a draft
+    check's citations, a single-claim check), so the same counters move there: once per claim
+    checked, a remembered answer included, a failure under the reason an analysis would use."""
+    from app.author.verify import verify_cached
+
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "metrics.db"))
+    monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
+    calls = []
+
+    def run(claim, source):
+        calls.append(source)
+        if source == "crash":
+            raise RuntimeError("the pipeline fell over")
+        if source == "blog":
+            return {"status": "error", "reason": "unresolvable", "message": "not found"}
+        if source == "paywalled":
+            return {"status": "error", "reason": "no-open-access", "message": "no free copy"}
+        return {"status": "ok", "verdict": "refutes", "quote": "q", "reasoning": "r"}
+
+    refutes = _value(CLAIM_VERDICTS, verdict="refutes")
+    verify_cached("a claim", "10.1/x", run)
+    assert _value(CLAIM_VERDICTS, verdict="refutes") == refutes + 1
+    again = verify_cached("a claim", "10.1/x", run)  # read back from the cache: still a verdict
+    assert again["cached"] is True and calls == ["10.1/x"]
+    assert _value(CLAIM_VERDICTS, verdict="refutes") == refutes + 2
+
+    paywalled = _value(CLAIM_CHECKS_FAILED, reason="no-open-access")
+    web = _value(CLAIM_CHECKS_FAILED, reason="web-source")
+    unresolvable = _value(CLAIM_CHECKS_FAILED, reason="unresolvable")
+    failed = _value(CLAIM_CHECKS_FAILED, reason="failed")
+    verify_cached("a claim", "paywalled", run)
+    # a cited work with a link that is not found is a web page, not a lookup that failed
+    verify_cached("a claim", "blog", run, {"url": "https://example.org/post"})
+    verify_cached("a claim", "blog", run, {"title": "No link"})
+    with pytest.raises(RuntimeError):
+        verify_cached("a claim", "crash", run)
+    assert _value(CLAIM_CHECKS_FAILED, reason="no-open-access") == paywalled + 1
+    assert _value(CLAIM_CHECKS_FAILED, reason="web-source") == web + 1
+    assert _value(CLAIM_CHECKS_FAILED, reason="unresolvable") == unresolvable + 1
+    assert _value(CLAIM_CHECKS_FAILED, reason="failed") == failed + 1
+    assert _value(CLAIM_VERDICTS, verdict="refutes") == refutes + 2

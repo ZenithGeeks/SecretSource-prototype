@@ -14,7 +14,7 @@ import { authEnabled, supabase } from './lib/supabase'
 import { useAuth } from './lib/useAuth'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
 import { TeacherApp } from './roles/teacher/TeacherApp'
-import { WriterApp } from './roles/writer/WriterApp'
+import { AuthorApp } from './roles/author/AuthorApp'
 import { Auth } from './screens/auth/Auth'
 import type { Role } from './screens/Onboarding'
 import { Onboarding } from './screens/Onboarding'
@@ -73,7 +73,7 @@ export function Root() {
     case 'researcher':
       return <ResearcherApp onChangeRole={() => setScreen('onboarding')} />
     case 'writer':
-      return <WriterApp onChangeRole={() => setScreen('onboarding')} />
+      return <AuthorApp onChangeRole={() => setScreen('onboarding')} />
     case 'teacher':
       return <TeacherApp onChangeRole={() => setScreen('onboarding')} />
     case 'app':
