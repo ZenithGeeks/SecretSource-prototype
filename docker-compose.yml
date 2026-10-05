@@ -3,7 +3,7 @@
 #   docker compose up -d --build                      then open http://localhost:5173
 #
 # Everything on one machine with an NVIDIA GPU:
-#   docker compose --profile gpu up -d --build        adds vllm, qdrant, colbert
+#   docker compose --profile gpu up -d --build        adds vllm, colbert
 #   docker compose --profile vision up -d colpali     adds figure/page retrieval (~4 GB model)
 #
 # Only backend/cli.py stays on the host: it is the interactive REPL and spawns the
@@ -60,19 +60,6 @@ services:
     gpus: all
     restart: unless-stopped
 
-  # Only the local retrieval services use it; with COLBERT_URL / COLPALI_URL pointing at the
-  # cloud it stays off. `docker compose up -d qdrant` starts it on its own for a host run.
-  qdrant:
-    profiles: [gpu, vision]
-    image: qdrant/qdrant:v1.13.4
-    ports:
-      # Always local, even with BIND_ADDRESS set: anyone who reaches it can read or delete
-      # every index. Use a Qdrant with an API key (QDRANT_URL) for anything shared.
-      - "127.0.0.1:6333:6333"
-    volumes:
-      - qdrant-storage:/qdrant/storage # both retrieval indexes survive rebuilds
-    restart: unless-stopped
-
   grobid:
     environment:
       JAVA_TOOL_OPTIONS: -XX:-UseContainerSupport
@@ -83,20 +70,20 @@ services:
 
   colbert:
     profiles: [gpu]
-    build: ./services/colbert
+    build:
+      context: ./services/colbert
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu130
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8893:8893"
     volumes:
       - hf-cache:/root/.cache/huggingface
       - ./data/papers:/app/data/papers # so add("data/papers/x.pdf") resolves in both worlds
+      - vectors:/data/vectors # per-paper safetensors files, shared with colpali
     environment:
-      # Set QDRANT_URL in .env (e.g. a Qdrant Cloud cluster) and the local qdrant
-      # container stops being used. QDRANT_API_KEY is what that one wants.
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      # A gs://bucket/prefix moves this to the cloud; unset, it writes under the volume above.
+      VECTOR_STORE: /data/vectors
       HF_TOKEN: ${HF_TOKEN:-}
-    depends_on:
-      - qdrant
     gpus: all
     restart: unless-stopped
 
@@ -111,13 +98,11 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
       - ./data/papers:/app/data/papers
+      - vectors:/data/vectors # per-paper safetensors files, shared with colbert
     environment:
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      VECTOR_STORE: /data/vectors
       COLPALI_MODEL: ${COLPALI_MODEL:-vidore/colqwen2-v1.0}
       HF_TOKEN: ${HF_TOKEN:-}
-    depends_on:
-      - qdrant
     gpus: all
     restart: unless-stopped
 
@@ -193,7 +178,11 @@ services:
   # Horizontally scalable: the number of workers is how many analyses run at once.
   #   docker compose up -d --scale worker=3
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # "<2.4" on a CPU without SSE4.2 (ss-core); empty elsewhere. See backend/app/native.py.
+        NUMPY_SPEC: ${WORKER_NUMPY_SPEC:-}
     command: python worker.py
     environment: *gateway-env
     volumes:
@@ -302,6 +291,17 @@ services:
       - /var/lib/docker:/var/lib/docker:ro
     restart: unless-stopped
 
+  # The host's own numbers (disk, memory, load), which cAdvisor does not report. Grafana's
+  # disk alert reads these: deploy/monitoring/grafana/provisioning/alerting/disk.yml.
+  node-exporter:
+    profiles: [monitoring]
+    image: prom/node-exporter:v1.8.2
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+
   prometheus:
     profiles: [monitoring]
     image: prom/prometheus:latest
@@ -311,6 +311,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:9090:9090"
     depends_on:
       - cadvisor
+      - node-exporter
     restart: unless-stopped
 
   grafana:
@@ -346,7 +347,7 @@ services:
 
 volumes:
   analyses:
-  qdrant-storage:
+  vectors:
   hf-cache:
   grafana-data:
   redis-data:

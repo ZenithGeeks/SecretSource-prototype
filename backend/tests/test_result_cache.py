@@ -38,6 +38,8 @@ def test_remember_and_recall_round_trip():
 
 
 class _FakeGrobidResponse:
+    status_code = 200
+
     def __init__(self, text):
         self.text = text
 

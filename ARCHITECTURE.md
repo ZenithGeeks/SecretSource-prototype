@@ -16,15 +16,17 @@ flowchart LR
     WK --> CB["ColBERT<br/>text search"]
     WK --> CP["ColPali<br/>figure and page search"]
     WK --> L["LLM<br/>OpenAI-compatible"]
-    CB --> Q[("Qdrant")]
-    CP --> Q
+    CB --> V[("GCS bucket<br/>safetensors per paper")]
+    CP --> V
     WK --> S[("SQLite or Supabase")]
 ```
 
 - `web` is the user interface. It sends every `/api` request to the gateway.
 - `gateway` takes each request and puts an analysis job on `redis`. The code is in `backend/`.
 - `worker` takes jobs off `redis` and runs the analysis. The code is in `backend/worker.py`.
-- ColBERT and ColPali are separate services in `services/`. Both store their indexes in Qdrant.
+- ColBERT and ColPali are separate services in `services/`. Each paper is one safetensors file
+  (`services/colbert/vectorfiles.py`, `services/colpali/vectorfiles.py`), in a GCS bucket or a
+  local folder; a claim check searches one cited paper's ~150 passages, scored in plain torch.
 - Docling is not a service. It is a library inside the worker that turns a PDF into text
   and cuts out figures.
 
@@ -186,8 +188,8 @@ For every query token, take its highest dot-product similarity to any single tok
 candidate, then sum those maxima across the query. A query token needs only one matching
 token anywhere in the candidate to score well. So a number in row eight of a table scores the
 same as if it were the passage's opening sentence. A single-vector embedding cannot do this: it
-has already averaged that row away before search ever runs. Qdrant's multivector search
-executes this scoring natively. Neither service re-ranks candidates in application code.
+has already averaged that row away before search ever runs. `vectorfiles.maxsim` executes this
+scoring in plain torch. Neither service re-ranks candidates in application code.
 
 **Our four DSPy programs**
 
@@ -409,7 +411,6 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
 | `colbert` | text index and search; also MCP at `/mcp/` | `services/colbert`; local GPU or Cloud Run |
 | `colpali` | index and search over figures and pages | `services/colpali`; local GPU or Cloud Run |
 | `grobid` | reads references and full text from PDFs | compose container (port 8070) or Cloud Run |
-| `qdrant` | stores the ColBERT and ColPali indexes | compose container, or a VM in the cloud |
 | LLM | extracts claims and judges them | any OpenAI-compatible endpoint (`VLLM_URL`) |
 | `gateway` | the HTTP API; queues each analysis for a worker | `backend/`, port 8080 |
 | `redis` | the analysis job queue, and progress from a worker back to the gateway | compose container, no published port |
@@ -505,6 +506,8 @@ reach it: `a2a:8002` from another compose service, `localhost:8002` from your ma
 - The store also caches resolved sources, so running the same paper again does not repeat
   the lookups.
 - Downloaded PDFs and figure crops are files in `data/papers/`.
+- ColBERT and ColPali each write one safetensors file per cited paper under `VECTOR_STORE`
+  (a GCS bucket in production, a local folder or the `vectors` compose volume otherwise).
 - Chat agent sessions (`backend/cli.py`, the A2A server) live in memory by default. If
   `SESSION_DB_URL` is set to a Postgres URL, `backend/app/sessions.py` keeps them in
   Postgres with ADK's `DatabaseSessionService`, so a session continues after a restart

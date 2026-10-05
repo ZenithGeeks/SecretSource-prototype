@@ -3,9 +3,9 @@
     python server.py            # http://0.0.0.0:8894  (COLPALI_PORT to change)
 
 HTTP:
-    GET  /api/search?query=...&k=5       -> {"topk": [{"rank", "score", "page", "kind", "label",
-                                                        "caption", "image", "title", "source"}, ...]}
-    POST /api/search {"query", "k"}      -> same
+    GET  /api/search?query=...&k=5&source=...  -> {"topk": [{"rank", "score", "page", "kind",
+                                                    "label", "caption", "image", "title", "source"}, ...]}
+    POST /api/search {"query", "k", "source"}  -> same. source (optional) restricts to one paper
     POST /api/add    {"path": "x.pdf"}   -> {"added": pages, "total": rows}   whole pages
     POST /api/add_figures {"source", "title", "figures": [{"label", "page", "caption", "image"}]}
     POST /api/upload          multipart "file"                        -> like /api/add
@@ -60,16 +60,16 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def search_media(query: str, k: int = 5) -> dict:
+def search_media(query: str, k: int = 5, source: str | None = None) -> dict:
     """Search indexed figures and pages by how they look. Returns labeled hits with captions."""
-    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50))}
+    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _store
-    _store = Store()  # loads the model and connects to Qdrant once
-    print(f"{CHECKPOINT}: {len(_store)} rows on {_store.encoder.device}")
+    _store = Store()  # loads the model and opens the vector file store once
+    print(f"{CHECKPOINT}: {len(_store)} papers on {_store.encoder.device}")
     async with mcp.session_manager.run():
         yield
 
@@ -81,6 +81,7 @@ app.mount("/mcp", mcp.streamable_http_app())
 class SearchBody(BaseModel):
     query: str
     k: int = 5
+    source: str | None = None
 
 
 class AddBody(BaseModel):
@@ -101,20 +102,20 @@ class AddFiguresBody(BaseModel):
 
 
 @app.get("/api/search")
-def search(query: str, k: int = 5):
-    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50))}
+def search(query: str, k: int = 5, source: str | None = None):
+    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
-    return search(body.query, body.k)
+    return search(body.query, body.k, body.source)
 
 
 @app.post("/api/add")
 def add(body: AddBody):
     if not Path(body.path).is_file():
         raise HTTPException(404, f"no such file: {body.path}")
-    return {"added": store().add_pdf(body.path), "total": len(store())}
+    return {"added": store().add_pdf(body.path), "papers": len(store())}
 
 
 @app.post("/api/add_figures")
@@ -125,7 +126,7 @@ def add_figures(body: AddFiguresBody):
     if missing:
         raise HTTPException(404, f"no such crop: {missing[0]}")
     added = store().add_figures(body.source, body.title or body.source, figures)
-    return {"added": added, "total": len(store())}
+    return {"added": added, "papers": len(store())}
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
@@ -144,7 +145,7 @@ def receive(upload: UploadFile, folder: Path) -> Path:
 def upload(file: UploadFile = PDF_UPLOAD):
     """Index a PDF's pages from a file in the request body."""
     path = receive(file, PAPERS_DIR)
-    return {"added": store().add_pdf(path), "total": len(store())}
+    return {"added": store().add_pdf(path), "papers": len(store())}
 
 
 @app.post("/api/upload_figures")
@@ -171,12 +172,12 @@ def upload_figures(
             raise HTTPException(400, f"no upload for crop {figure.image}")
         rows.append({**figure.model_dump(), "image": path.as_posix()})
     added = store().add_figures(source, title or source, rows)
-    return {"added": added, "total": len(store())}
+    return {"added": added, "papers": len(store())}
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "model": CHECKPOINT, "rows": len(store())}
+    return {"ok": True, "model": CHECKPOINT, "papers": len(store())}
 
 
 if __name__ == "__main__":

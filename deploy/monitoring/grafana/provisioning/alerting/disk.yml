@@ -1,0 +1,49 @@
+apiVersion: 1
+
+# Fires when the host's root disk or Docker's disk is over 80% full for 10 minutes.
+# Docker lives on its own volume on ss-core (/var/lib/docker), so both are watched.
+# With no SMTP settings (GF_SMTP_*), the alert shows in Grafana > Alerting but is not emailed.
+groups:
+  - orgId: 1
+    name: host
+    folder: Host
+    interval: 1m
+    rules:
+      - uid: host-disk-over-80
+        title: Disk over 80% full
+        condition: C
+        for: 10m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} is {{ humanize $values.B.Value }}% full"
+          description: >-
+            Free space with docker system prune (a weekly job does this on ss-core:
+            /etc/cron.weekly/docker-prune), or grow the volume.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: >-
+                100 * (1 - node_filesystem_avail_bytes{mountpoint=~"/|/var/lib/docker",fstype!~"tmpfs|overlay"}
+                / node_filesystem_size_bytes{mountpoint=~"/|/var/lib/docker",fstype!~"tmpfs|overlay"})
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [80]}

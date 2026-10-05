@@ -40,9 +40,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def search_passages(query: str, k: int = 10) -> dict:
+def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
     """Search the indexed papers. Returns the top-k passages with page and span for each."""
-    return {"topk": store().search(query, min(k, 100))}
+    return {"topk": store().search(query, min(k, 100), source)}
 
 
 @mcp.tool()
@@ -50,14 +50,18 @@ def add_paper(path: str) -> dict:
     """Index a PDF so search_passages can find its passages. Re-adding replaces them."""
     if not Path(path).is_file():
         return {"status": "error", "message": f"no such file: {path}"}
-    return {"status": "ok", "added": store().add_pdf(path), "total": len(store())}
+    return {"status": "ok", "added": store().add_pdf(path), "papers": len(store())}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _store
-    _store = Store()  # loads the model + connects to Qdrant once
-    print(f"{len(_store)} passages on {_store.encoder.device}")
+    _store = Store()  # loads the model + opens the vector file store once
+    # One throwaway encode of each kind: torch sets itself up on its first forward pass, and
+    # without this the first real search on a new instance paid for it (about 8 s).
+    _store.encoder.query("warm up")
+    _store.encoder.docs(["warm up"])
+    print(f"{len(_store)} papers on {_store.encoder.device}")
     async with mcp.session_manager.run():
         yield
 
@@ -69,6 +73,7 @@ app.mount("/mcp", mcp.streamable_http_app())
 class SearchBody(BaseModel):
     query: str
     k: int = 10
+    source: str | None = None
 
 
 class AddBody(BaseModel):
@@ -76,20 +81,20 @@ class AddBody(BaseModel):
 
 
 @app.get("/api/search")
-def search(query: str, k: int = 10):
-    return {"topk": store().search(query, min(k, 100))}
+def search(query: str, k: int = 10, source: str | None = None):
+    return {"topk": store().search(query, min(k, 100), source)}
 
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
-    return search(body.query, body.k)
+    return search(body.query, body.k, body.source)
 
 
 @app.post("/api/add")
 def add(body: AddBody):
     if not Path(body.path).is_file():
         raise HTTPException(404, f"no such file: {body.path}")
-    return {"added": store().add_pdf(body.path), "total": len(store())}
+    return {"added": store().add_pdf(body.path), "papers": len(store())}
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
@@ -109,12 +114,12 @@ def upload(file: UploadFile = PDF_UPLOAD):
     """Index a PDF sent in the request body. Use this instead of /api/add when the caller
     does not share this disk (a gateway on another machine, or on Cloud Run)."""
     path = receive(file, PAPERS_DIR)
-    return {"added": store().add_pdf(path), "total": len(store())}
+    return {"added": store().add_pdf(path), "papers": len(store())}
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "passages": len(store())}
+    return {"ok": True, "papers": len(store())}
 
 
 if __name__ == "__main__":

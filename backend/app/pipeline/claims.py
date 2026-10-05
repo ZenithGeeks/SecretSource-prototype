@@ -7,6 +7,7 @@ UI can show the place instead of telling the reader to go looking.
 
 import hashlib
 import re
+import time
 import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -342,6 +343,10 @@ def extract_claims(pdf_path: str) -> dict:
         return {"status": "error", "message": str(error)}
 
 
+GROBID_ATTEMPTS = 2
+GROBID_RETRY_PAUSE = 5  # seconds
+
+
 def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ()) -> ET.Element:
     """GROBID's TEI for a PDF. `coordinates` names the elements that should get a `coords`
     attribute with their place on the page, for example ("ref",).
@@ -362,13 +367,24 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
     if (cached := store.recall_cache(key)) is not None:
         return ET.fromstring(cached["tei"])
 
-    response = requests.post(
-        f"{GROBID_URL}/api/{endpoint}",
-        files={"input": pdf_bytes},
-        data={"teiCoordinates": list(coordinates)},
-        headers=auth_headers(GROBID_URL),
-        timeout=300,
-    )
+    # One timeout or 5xx used to fail the whole analysis, since nothing works without the
+    # paper's text. GROBID also answers 503 while all its workers are busy, which passes.
+    for attempt in range(1, GROBID_ATTEMPTS + 1):
+        try:
+            response = requests.post(
+                f"{GROBID_URL}/api/{endpoint}",
+                files={"input": pdf_bytes},
+                data={"teiCoordinates": list(coordinates)},
+                headers=auth_headers(GROBID_URL),
+                timeout=300,
+            )
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == GROBID_ATTEMPTS:
+                raise
+        else:
+            if response.status_code < 500 or attempt == GROBID_ATTEMPTS:
+                break
+        time.sleep(GROBID_RETRY_PAUSE)
     response.raise_for_status()
     store.remember_cache(key, {"tei": response.text})
     return ET.fromstring(response.text)

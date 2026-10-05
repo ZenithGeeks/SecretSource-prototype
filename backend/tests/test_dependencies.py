@@ -72,7 +72,7 @@ def test_every_dependency_answering_is_not_degraded(services):
         "llm": True,
         "grobid": True,
         "colbert": True,
-        "colpali": True,
+        "colpali": None,  # not probed, see test_colpali_is_never_asked
         "supabase": True,
         "redis": True,
         "worker": True,
@@ -105,11 +105,14 @@ def test_a_refusal_says_why_in_the_services_words(services):
     assert grobid["detail"] == "HTTP 500: Error: billing is disabled for this project"
 
 
-def test_colpali_down_is_reported_but_not_degraded(services):
-    del services.answers["http://colpali:8894/health"]
+def test_colpali_is_never_asked(services):
+    """Asking a scale-to-zero GPU service on every /health kept it billed around the clock."""
     result = dependencies.check()
-    assert by_name(result)["colpali"]["ok"] is False
-    assert not result["degraded"]  # checks go on with text passages without it
+    colpali = by_name(result)["colpali"]
+    assert colpali["ok"] is None and not colpali["required"]
+    assert colpali["url"] == "http://colpali:8894"
+    assert not any("colpali" in url for url, _ in services.seen)
+    assert not result["degraded"]
 
 
 def test_supabase_not_set_means_sqlite_not_a_failure(services, monkeypatch):

@@ -12,10 +12,11 @@
 #   VISION=1 (default) deploys colpali on an L4 GPU; VISION=0 skips it. COLPALI_GPU=0
 #   deploys it CPU-only instead (works, but a query takes minutes — demo only).
 #
-# Qdrant: Cloud Run has no persistent disk for it, so this script keeps a small GCE VM
-# (e2-small + 10 GB disk, ~$13/month) running the qdrant container. Pass QDRANT_URL /
-# QDRANT_API_KEY to use an external cluster (e.g. Qdrant Cloud) and no VM is touched.
+# Vectors: colbert and colpali store one safetensors file per paper in a GCS bucket
+# (VECTOR_STORE=gs://<bucket>/v1) instead of a database, since a claim check only ever
+# searches one cited paper's ~150 passages -- plain torch scores that in milliseconds.
 #
+
 # NOTE the Cloud Run L4 quota is per project per region and this project has 1. Both vllm
 # and colpali deploy against it (allocation is checked per running instance, and both
 # scale to zero), but they cannot be up at the same time until the quota is raised to 2.
@@ -56,33 +57,18 @@ deploy() {
 
 url_of() { gcloud run services describe "$1" --region "$REGION" --format 'value(status.url)'; }
 
-# --- qdrant: one small VM with a disk that outlives it ------------------------
+# --- vector bucket: one safetensors file per paper, no VM to keep up --------
 
-QDRANT_API_KEY="${QDRANT_API_KEY:-}"
-if [ -z "${QDRANT_URL:-}" ]; then
-    if gcloud compute instances describe qdrant --zone "$ZONE" >/dev/null 2>&1; then
-        # Re-run: recover the key the VM was created with instead of minting a mismatched one.
-        QDRANT_API_KEY="${QDRANT_API_KEY:-$(gcloud compute instances describe qdrant --zone "$ZONE" \
-            --format 'value(metadata.items.qdrant-api-key)')}"
-    fi
-    QDRANT_API_KEY="${QDRANT_API_KEY:-$(openssl rand -hex 24)}"
-    if ! gcloud compute instances describe qdrant --zone "$ZONE" >/dev/null 2>&1; then
-        # create-with-container is discontinued, so a COS image plus a startup script
-        # that mounts the data disk and `docker run`s qdrant (deploy/qdrant-startup.sh).
-        gcloud compute instances create qdrant \
-            --zone "$ZONE" --machine-type e2-small --tags qdrant \
-            --image-family cos-stable --image-project cos-cloud \
-            --create-disk "name=qdrant-data,device-name=qdrant-data,size=10GB,auto-delete=no" \
-            --metadata-from-file startup-script=deploy/qdrant-startup.sh \
-            --metadata "qdrant-api-key=$QDRANT_API_KEY"
-        gcloud compute firewall-rules describe allow-qdrant >/dev/null 2>&1 ||
-            gcloud compute firewall-rules create allow-qdrant \
-                --allow tcp:6333 --target-tags qdrant --source-ranges 0.0.0.0/0
-    fi
-    QDRANT_IP=$(gcloud compute instances describe qdrant --zone "$ZONE" \
-        --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
-    QDRANT_URL="http://$QDRANT_IP:6333"
-fi
+VECTOR_BUCKET="${VECTOR_BUCKET:-$PROJECT-vectors}"
+gcloud storage buckets describe "gs://$VECTOR_BUCKET" >/dev/null 2>&1 ||
+    gcloud storage buckets create "gs://$VECTOR_BUCKET" --location "$REGION" --uniform-bucket-level-access
+
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)')
+RUNTIME_SA="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
+gcloud storage buckets add-iam-policy-binding "gs://$VECTOR_BUCKET" \
+    --member "serviceAccount:$RUNTIME_SA" --role roles/storage.objectAdmin --quiet >/dev/null
+
+VECTOR_STORE="gs://$VECTOR_BUCKET/v1"
 
 # --- the HF cache bucket: cold starts read weights from GCS, not Hugging Face --
 
@@ -96,10 +82,10 @@ gcloud run deploy grobid --image lfoppiano/grobid:0.8.2 --region "$REGION" \
     --port 8070 --memory 4Gi --allow-unauthenticated --quiet
 
 build_and_push colbert ./services/colbert
-deploy colbert --port 8893 --memory 4Gi --allow-unauthenticated \
-    --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
-    --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
-    --set-env-vars "QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY"
+# The weights are in the image (services/colbert/Dockerfile). The server waits up to 900 s so a
+# long paper indexed on a cold instance finishes instead of returning a 504.
+deploy colbert --port 8893 --memory 4Gi --timeout 900 --allow-unauthenticated \
+    --set-env-vars "VECTOR_STORE=$VECTOR_STORE"
 
 COLPALI_ENV=""
 if [ "$VISION" = "1" ]; then
@@ -108,7 +94,7 @@ if [ "$VISION" = "1" ]; then
     # GCS FUSE takes ~45 minutes, past the 30-minute startup probe. A fresh Hub download to
     # the instance disk is a couple of minutes.
     colpali_flags=(--port 8894 --allow-unauthenticated
-        --set-env-vars "QDRANT_URL=$QDRANT_URL,QDRANT_API_KEY=$QDRANT_API_KEY,HF_TOKEN=${HF_TOKEN:-}"
+        --set-env-vars "VECTOR_STORE=$VECTOR_STORE,HF_TOKEN=${HF_TOKEN:-}"
         --max-instances 1 --concurrency 4 --timeout 600
         --startup-probe "tcpSocket.port=8894,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1")
     if [ "$COLPALI_GPU" = "1" ]; then
@@ -180,7 +166,7 @@ deploy web --port 80 --allow-unauthenticated \
 echo
 echo "UI:          $(url_of web)"
 echo "Gateway:     $(url_of gateway)"
-echo "Qdrant:      $QDRANT_URL   (api key: $QDRANT_API_KEY — keep it out of git)"
+echo "Vectors:     $VECTOR_STORE"
 echo "ColBERT MCP: $(url_of colbert)/mcp"
 [ "$VISION" = "1" ] && echo "ColPali MCP: $(url_of colpali)/mcp"
 echo "Model:       $VLLM_HF_MODEL served as '$VLLM_SERVED_NAME' on a $GPU_TYPE"

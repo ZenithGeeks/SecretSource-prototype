@@ -9,6 +9,10 @@ COPY requirements.txt .
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir torch torchvision --index-url ${TORCH_INDEX} \
     && pip install --no-cache-dir -r requirements.txt
+# NUMPY_SPEC, e.g. "<2.4", pins NumPy for a CPU without SSE4.2: NumPy 2.4+ refuses to import
+# there. Empty (the default) keeps whatever requirements.txt resolved. See app/native.py.
+ARG NUMPY_SPEC=
+RUN if [ -n "$NUMPY_SPEC" ]; then pip install --no-cache-dir "numpy${NUMPY_SPEC}" && pip check; fi
 # Docling's table model imports opencv, which needs these native libraries; without them
 # converting a PDF dies with "ImportError: libxcb.so.1". graphviz is for `adk web`, which
 # draws the pipeline graph with it (adk_agents/). Kept after pip so editing

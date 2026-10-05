@@ -10,13 +10,31 @@ be on another machine or on Cloud Run.
 """
 
 import json
+import threading
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.clients.service_auth import auth_headers
 from app.config import COLBERT_URL, COLPALI_URL
+
+# One session for every call, so connections to Cloud Run are reused instead of a new TLS
+# handshake each time. One retry for a refused connection or a 502/503/504, which is what a
+# scaling or restarting instance returns. Never on a read timeout: an upload can take 900 s,
+# and retrying it would double the wait. POST is listed because urllib3 skips it by default;
+# requests builds the multipart body in memory, so a retry resends the whole file.
+RETRY = Retry(
+    total=1, connect=1, read=0, status=1, backoff_factor=1,
+    status_forcelist=(502, 503, 504), allowed_methods=frozenset({"GET", "POST"}),
+    raise_on_status=False,
+)
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(max_retries=RETRY, pool_maxsize=16))
+_session.mount("http://", HTTPAdapter(max_retries=RETRY, pool_maxsize=16))
 
 
 def _detail(response: requests.Response) -> str:
@@ -30,10 +48,13 @@ def _pdf(path: str, handle) -> dict:
     return {"file": (Path(path).name, handle, "application/pdf")}
 
 
-def colbert_search(query: str, k: int = 10) -> list[dict]:
-    response = requests.post(
+def colbert_search(query: str, k: int = 10, source: str | None = None) -> list[dict]:
+    body = {"query": query, "k": k}
+    if source is not None:
+        body["source"] = source
+    response = _session.post(
         f"{COLBERT_URL}/api/search",
-        json={"query": query, "k": k},
+        json=body,
         headers=auth_headers(COLBERT_URL),
         timeout=120,
     )
@@ -44,27 +65,41 @@ def colbert_search(query: str, k: int = 10) -> list[dict]:
 def colbert_add(path: str) -> dict:
     """Index one PDF. Safe to run again: re-adding replaces the paper's passages."""
     with open(path, "rb") as pdf:
-        response = requests.post(
-            f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=600
+        response = _session.post(
+            f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=900
         )
     if not response.ok:
         return {"status": "error", "message": _detail(response), "reason": "indexing-failed"}
     return {"status": "ok", **response.json()}
 
 
+HEALTH_TTL = 30  # seconds
+_health: dict = {"at": float("-inf"), "ok": False}
+_health_lock = threading.Lock()
+
+
 def colpali_available() -> bool:
+    """Whether ColPali answers, remembered for HEALTH_TTL. It is asked before every index and
+    search, and each ask was a round trip that also woke a scaled-to-zero GPU instance."""
+    with _health_lock:
+        if time.monotonic() - _health["at"] < HEALTH_TTL:
+            return _health["ok"]
     try:
-        requests.get(f"{COLPALI_URL}/health", headers=auth_headers(COLPALI_URL), timeout=5).raise_for_status()
-        return True
+        _session.get(f"{COLPALI_URL}/health", headers=auth_headers(COLPALI_URL), timeout=5).raise_for_status()
+        ok = True
     except Exception:
-        return False
+        ok = False
+    with _health_lock:
+        _health.update(at=time.monotonic(), ok=ok)
+    return ok
 
 
 def colpali_add_pdf(path: str) -> None:
     with open(path, "rb") as pdf:
-        requests.post(
+        response = _session.post(
             f"{COLPALI_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLPALI_URL), timeout=600
         )
+    response.raise_for_status()
 
 
 def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
@@ -74,19 +109,23 @@ def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
         for figure in figures:
             handle = open_files.enter_context(open(figure["image"], "rb"))
             images.append(("images", (Path(figure["image"]).name, handle, "image/png")))
-        requests.post(
+        response = _session.post(
             f"{COLPALI_URL}/api/upload_figures",
             data={"source": source, "title": title, "figures": json.dumps(figures)},
             files=images,
             headers=auth_headers(COLPALI_URL),
             timeout=600,
         )
+    response.raise_for_status()
 
 
-def colpali_search(query: str, k: int = 20) -> dict:
-    response = requests.post(
+def colpali_search(query: str, k: int = 20, source: str | None = None) -> dict:
+    body = {"query": query, "k": k}
+    if source is not None:
+        body["source"] = source
+    response = _session.post(
         f"{COLPALI_URL}/api/search",
-        json={"query": query, "k": k},
+        json=body,
         headers=auth_headers(COLPALI_URL),
         timeout=60,
     )
