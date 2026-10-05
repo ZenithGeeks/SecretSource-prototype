@@ -31,7 +31,7 @@
 # ZERO_SERVICES (default: gateway) are CPU services that should also scale to zero. They get
 # the same hourly reset job, named scale-guard-<service>, but not the GPU alert. The gateway
 # was pinned to one instance and kept awake by an uptime check until 2026-10-05 (#345), about
-# $9/day at list price; it now starts in ~10 s on the first request after 15 idle minutes.
+# $9/day at list price; the first request after ~15 idle minutes now takes ~13 s (cold start).
 set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT}"

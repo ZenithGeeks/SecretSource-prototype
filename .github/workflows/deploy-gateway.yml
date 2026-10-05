@@ -87,7 +87,7 @@ jobs:
           # 8Gi: Docling on an uploaded PDF went over 4Gi and Cloud Run killed the instance.
           # One instance with CPU always on: the gateway keeps analyses and their event streams in
           # memory, fed by a background Redis subscriber that a throttled CPU would stall.
-          # Scales to zero when idle (~10 s cold start): an always-on instance was ~$9/day.
+          # Scales to zero when idle (~13 s cold start, measured): an always-on instance was ~$9/day.
           # --scaling auto --min 0 also clears a "manual, 1 instance" pin set in the Console (#345).
           gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
             --port 8080 --memory 8Gi --allow-unauthenticated \

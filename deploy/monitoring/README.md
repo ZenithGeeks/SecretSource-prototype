@@ -123,7 +123,7 @@ price): its scaling was pinned to one instance in the Console, and the `gateway-
 called it every few minutes, 1,767 of its 1,800 requests in a day. That check and its alert
 "Gateway /health is failing" are deleted, because any uptime check keeps the gateway awake: the
 slowest allowed period is 15 minutes, and an idle instance stays up 15 minutes. The first request
-after 15 idle minutes now waits about 10 s for a cold start. `gpu-guard.sh install` also creates
+after 15 idle minutes now takes about 13 s: a cold start measured at 12.6 s on 2026-10-05. `gpu-guard.sh install` also creates
 `scale-guard-gateway`, which resets the gateway's scaling every hour the same way (services listed
 in `ZERO_SERVICES`). What still alerts on the gateway: "Gateway returns 5xx" (Cloud Monitoring),
 the 5xx and "has not scaled to zero in 6 hours" rules in Grafana, and `/status` in Discord. Nothing
