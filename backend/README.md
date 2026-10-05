@@ -553,7 +553,7 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 verified against the work its bib entry names (an uploaded PDF, else DOI, arXiv id, URL or
 title), `PARALLEL_CHECKS` at a time and never over the gateway-wide limit. The same
 (claim, source) pair is judged once and read from the `cache` table after that; `POST /checks`
-and the search verification share that cache. `409` while a check of that draft is running.
+shares that cache. `409` while a check of that draft is running.
 
 | Route | Does |
 | --- | --- |
@@ -588,25 +588,10 @@ resolution is carried over to the next check when the same key still cites the s
 | Route | Does |
 | --- | --- |
 | `GET /author/sources?project=` | newest first, each with `inBib` and `bibName` |
-| `POST /author/sources` | a search result (`title`, `authorsList`, `year`, `venue`, `doi`, `arxiv`, `url`, `identifier`, `projectId`, `claim`, `verdict`); a unique `key` and `bibtex` are made when missing |
+| `POST /author/sources` | a work to keep (`title`, `authorsList`, `year`, `venue`, `doi`, `arxiv`, `url`, `identifier`, `projectId`, `claim`, `verdict`); a unique `key` and `bibtex` are made when missing |
 | `POST /author/sources/{id}/add-to-bib` | body `{"projectId"}`; appends the entry, `409` when the key is there already |
 | `POST /author/sources/{id}/pdf` | multipart PDF |
 | `DELETE /author/sources/{id}` | |
-
-#### Find a source
-
-`GET /author/search?q=&limit=` → `{results, libraryCount}`. Semantic Scholar's paper search
-merged with the caller's own `.bib` entries and saved sources: a result already in a `.bib`
-shows once, as that entry (`inLibrary: true`, its `key`, `projectId`, `bibName`). Each result
-has `id`, `key` (the bib key it would get), `title`, `authors`, `authorsList`, `year`, `venue`,
-`doi`, `arxiv`, `url`, `identifier` (what to verify against), `openAccess`, `citedBy`,
-`similarity` (0..1 word overlap of the query with the title and abstract — a ranking, not a
-verdict; `similarityBasis` says what it was computed from) and `bibtex`. `503` when the index
-did not answer.
-
-`POST /author/search/verify` with `{"claim", "identifier"}` → `{verdict, explanation,
-evidence: {passage, pdf, page}, quote, reasoning, cached}`, or `{verdict: "unavailable",
-reason, message}`. Same cache as the draft checks; `400` when either field is blank.
 
 #### Your data
 

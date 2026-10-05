@@ -514,57 +514,7 @@ def compare(current: list[dict], previous: list[dict]) -> list[dict]:
     return rows
 
 
-# --- search -----------------------------------------------------------------------------
-
-
-_WORD = re.compile(r"[a-z0-9]+")
-_STOP = {
-    "the",
-    "a",
-    "an",
-    "of",
-    "and",
-    "or",
-    "to",
-    "in",
-    "on",
-    "for",
-    "with",
-    "by",
-    "is",
-    "are",
-    "that",
-    "this",
-    "we",
-    "it",
-    "as",
-    "at",
-    "from",
-    "be",
-}
-
-
-def similarity(query: str, text: str) -> float:
-    """How much of the query's vocabulary a text shares (0..1), for ranking search results
-    before a passage has been read: word overlap, not meaning. The real match comes from the
-    verification, which reads the paper."""
-    q = {w for w in _WORD.findall(query.lower()) if w not in _STOP}
-    t = set(_WORD.findall(text.lower()))
-    if not q:
-        return 0.0
-    return round(len(q & t) / len(q), 2)
-
-
-def search_terms(query: str, limit: int = 12) -> str:
-    """The words worth sending a public index: a whole sentence ("ColBERTv2 further reduces
-    index size by 6–10× while matching retrieval quality.") gets keyword-matched on its
-    filler, so the stop words and one-letter tokens go and the first `limit` content words
-    stay, in order. A short query (a title, a DOI) passes through untouched."""
-    words = [w.rstrip(".,;:") for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9./:-]*", query)]
-    words = [w for w in words if w.lower() not in _STOP and len(w) > 1]
-    if len(words) <= 3:
-        return query.strip()
-    return " ".join(words[:limit])
+# --- saved sources ----------------------------------------------------------------------
 
 
 def bib_key_for(authors: list[str], year: str | int | None, taken: set[str] | None = None) -> str:
@@ -585,7 +535,7 @@ def latex_escape(text: str) -> str:
 
 
 def bibtex_for(result: dict, key: str | None = None) -> str:
-    """A BibTeX entry for a search result, LaTeX-escaped."""
+    """A BibTeX entry for a saved source, LaTeX-escaped."""
     key = key or result.get("key") or bib_key_for(result.get("authorsList", []), result.get("year"))
     venue = (result.get("venue") or "").lower()
     kind = "article" if any(w in venue for w in ("journal", "transactions", "letters")) else "inproceedings"

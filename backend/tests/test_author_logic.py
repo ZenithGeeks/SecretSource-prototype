@@ -171,15 +171,7 @@ def test_summary_delta_and_compare():
     assert changes[("c", None, "insufficient")] == "added"
 
 
-def test_search_terms_keeps_the_content_words_of_a_sentence():
-    assert logic.search_terms(
-        "ColBERTv2 further reduces index size by 6–10× while matching retrieval quality."
-    ) == ("ColBERTv2 further reduces index size 10 while matching retrieval quality")
-    assert logic.search_terms("10.1145/3397271.3401075") == "10.1145/3397271.3401075"
-    assert logic.search_terms("ColBERT") == "ColBERT"
-
-
-def test_search_helpers_make_unique_escaped_bibtex():
+def test_saved_source_helpers_make_unique_escaped_bibtex():
     assert (
         logic.bib_key_for(["Keshav Santhanam", "Omar Khattab"], 2022, {"santhanam2022"}) == "santhanam2022b"
     )
@@ -197,14 +189,6 @@ def test_search_helpers_make_unique_escaped_bibtex():
     assert "booktitle = {NAACL}" in entry and "doi = {10.1/x}" in entry
     journal = logic.bibtex_for({"title": "T", "authorsList": ["A B"], "year": 2020, "venue": "Journal of X"})
     assert journal.startswith("@article{b2020,") and "journal = {Journal of X}" in journal
-    assert (
-        logic.similarity(
-            "compressing token-level embeddings makes the index smaller",
-            "Compression of token-level embeddings for a smaller index",
-        )
-        > 0.5
-    )
-    assert logic.similarity("", "anything") == 0.0
 
 
 def test_report_html_lists_every_citation_with_its_verdict_and_passage():

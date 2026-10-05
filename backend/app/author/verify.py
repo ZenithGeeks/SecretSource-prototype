@@ -1,10 +1,10 @@
 """One claim against one source, cached, for every place the Author role checks something.
 
-The single-claim route (POST /checks), a draft check (one call per \\cite) and the lazy
-verification of a search result all come through here, so the same (claim, source) pair is
-judged once: the second time it is read back from the `cache` table (app/store.py). Only a
-successful verdict is remembered — a lookup that failed (rate limit, no open-access copy)
-should be tried again next time, not repeated forever.
+The single-claim route (POST /checks) and a draft check (one call per \\cite) both come
+through here, so the same (claim, source) pair is judged once: the second time it is read
+back from the `cache` table (app/store.py). Only a successful verdict is remembered — a
+lookup that failed (rate limit, no open-access copy) should be tried again next time, not
+repeated forever.
 
 The key includes the judge model, like the pipeline's own judge cache, so a model change
 never reads another model's verdict.

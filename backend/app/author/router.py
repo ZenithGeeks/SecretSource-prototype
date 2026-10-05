@@ -1,5 +1,5 @@
-"""HTTP routes for the Author role: drafts, projects, saved sources, draft checks, source
-search and the verification report. Mounted under /author by app/main.py.
+"""HTTP routes for the Author role: drafts, projects, saved sources, draft checks and the
+verification report. Mounted under /author by app/main.py.
 
 Storage: projects, drafts and sources are one JSON row each in their own tables
 (app/store.py's *_author_row functions), always owner-scoped. A draft check is an `analyses`
@@ -37,11 +37,6 @@ DRAFT_CHECK = "draft-check"
 FILE_UPLOAD = File(...)
 MAX_TEXT_FILE = 2 * 1024 * 1024  # a chapter, not a scan
 MAX_ZIP_FILES = 200
-SEARCH_FIELDS = "title,authors,year,venue,externalIds,openAccessPdf,citationCount,abstract"
-
-# PDFs verified from Find a source this process lifetime, per user, so "show in the paper"
-# can open them (app.main.papers_of). Draft checks persist their PDFs on the check row.
-verified_pdfs: dict[str | None, set[str]] = {}
 
 
 def _gateway():
@@ -586,8 +581,8 @@ async def list_draft_checks(draft_id: str, user: str | None = Depends(current_us
 
 
 def _check(check_id: str, user: str | None) -> dict:
-    """One of the caller's draft checks; a paper analysis or a Find-a-source check with that
-    id is a 404 like a missing one."""
+    """One of the caller's draft checks; a paper analysis or a single-claim check (POST /checks)
+    with that id is a 404 like a missing one."""
     return require_owner(_gateway().analyses.get(check_id), user, "check", kind=DRAFT_CHECK)
 
 
@@ -1053,7 +1048,7 @@ async def list_sources(project: str | None = None, user: str | None = Depends(cu
 
 @router.post("/sources")
 async def save_source(request: SourceIn, user: str | None = Depends(current_user)):
-    """Save a search result into a project or, with no project, into Unsorted sources."""
+    """Save a work into a project or, with no project, into Unsorted sources."""
     if request.projectId:
         await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
     data = request.model_dump()
@@ -1113,252 +1108,6 @@ async def upload_source_pdf(
     return _source_view(source, {})
 
 
-# --- Find a source ----------------------------------------------------------------------
-
-
-def _s2_result(paper: dict, query: str) -> dict:
-    ids = paper.get("externalIds") or {}
-    authors = [a.get("name", "") for a in paper.get("authors") or [] if a.get("name")]
-    doi = ids.get("DOI", "") or ""
-    arxiv = ids.get("ArXiv", "") or ""
-    pdf = (paper.get("openAccessPdf") or {}).get("url") or ""
-    identifier = doi or arxiv or pdf or paper.get("title", "")
-    result = {
-        "id": paper.get("paperId") or logic.bib_key_for(authors, paper.get("year")),
-        "key": logic.bib_key_for(authors, paper.get("year")),
-        "title": paper.get("title", ""),
-        "authors": logic.short_authors(" and ".join(authors)),
-        "authorsList": authors,
-        "year": paper.get("year"),
-        "venue": paper.get("venue") or "",
-        "doi": doi,
-        "arxiv": arxiv,
-        "url": pdf or (f"https://doi.org/{doi}" if doi else ""),
-        "identifier": identifier,
-        "openAccess": bool(pdf or arxiv),
-        "citedBy": paper.get("citationCount"),
-        "similarity": logic.similarity(query, f"{paper.get('title', '')} {paper.get('abstract') or ''}"),
-        "similarityBasis": "abstract",
-        "inLibrary": False,
-    }
-    result["bibtex"] = logic.bibtex_for(result, result["key"])
-    return result
-
-
-def _title_key(title: str) -> str:
-    """A title reduced to its letters and digits, for matching an index hit against a .bib
-    entry that has no DOI ("ColBERT: Efficient..." and "colbert efficient" are one work)."""
-    return "".join(logic._WORD.findall((title or "").lower()))
-
-
-def _cited_keys(projects: list[dict], drafts: list[dict]) -> dict[str, set[str]]:
-    """Per project, the bib keys its drafts cite — the "Cited by my drafts" chip."""
-    by_id = {p["id"]: p for p in projects}
-    cited: dict[str, set[str]] = {p["id"]: set() for p in projects}
-    for draft in drafts:
-        project = by_id.get(draft.get("projectId") or "")
-        if project:
-            cited[project["id"]].update(c["key"] for c in logic.find_cites(_draft_files(draft, project)))
-    return cited
-
-
-def _library_row(query: str, project: dict, entry: dict, ref: dict, cited: set[str] | None = None) -> dict:
-    bib = project.get("bib") or {}
-    identifier = logic.lookup_identifier(entry, project.get("pdfs"))
-    return {
-        "id": f"bib:{project['id']}:{entry['key']}",
-        "key": entry["key"],
-        "title": ref["title"],
-        "authors": ref["authors"],
-        "authorsList": [
-            a.strip()
-            for a in re.split(r"\s+and\s+", entry["fields"].get("author", ""), flags=re.I)
-            if a.strip()
-        ],
-        "year": ref["year"],
-        "venue": ref["venue"],
-        "doi": ref["doi"],
-        "arxiv": "",
-        "url": ref["url"],
-        "identifier": identifier or "",
-        "openAccess": bool(ref["url"] or ref["doi"]),
-        "citedBy": None,
-        "similarity": logic.similarity(query, f"{ref['title']} {ref['authors']}"),
-        "similarityBasis": "title",
-        "inLibrary": True,
-        "cited": entry["key"] in (cited or set()),
-        "projectId": project["id"] if not project["id"].startswith("draft:") else None,
-        "draftId": project["id"][6:] if project["id"].startswith("draft:") else None,
-        "bibName": bib.get("name"),
-        "bibtex": logic.serialize_bib(entry),
-    }
-
-
-def _bib_holders(projects: list[dict], drafts: list[dict]) -> list[dict]:
-    """Everything with a .bib of its own: the projects, and the drafts that carry one
-    instead of citing from a project's. A draft holder looks like a project to _library_row
-    (an id, a `bib`, its `pdfs`)."""
-    holders = list(projects)
-    for draft in drafts:
-        for f in draft.get("files", []):
-            if f.get("kind") == "bib":
-                holders.append(
-                    {
-                        "id": f"draft:{draft['id']}",
-                        "bib": {"name": f["name"], "content": f.get("content", "")},
-                        "pdfs": draft.get("pdfs", {}),
-                    }
-                )
-    return holders
-
-
-def _library_entries(holders: list[dict]) -> list[tuple[dict, dict, dict]]:
-    """Every distinct work the user's .bib files hold, as (holder, entry, ref). The same work
-    in two files (a project's .bib and a draft's copy of it, a key defined twice) is one
-    entry: the first holder's, projects before drafts, and a file's first definition."""
-    seen: set[str] = set()
-    works: list[tuple[dict, dict, dict]] = []
-    for project in holders:
-        bib = project.get("bib") or {}
-        seen_keys: set[str] = set()
-        for entry in logic.parse_bib(bib.get("content", "")):
-            if entry["key"] in seen_keys:
-                continue
-            seen_keys.add(entry["key"])
-            ref = logic.source_ref(entry, project.get("pdfs"))
-            work = f"doi:{ref['doi'].lower()}" if ref["doi"] else "title:" + _title_key(ref["title"])
-            if work in seen:
-                continue
-            seen.add(work)
-            works.append((project, entry, ref))
-    return works
-
-
-def _library_results(
-    query: str, holders: list[dict], sources: list[dict], cited: dict[str, set[str]]
-) -> list[dict]:
-    """What the user already has that matches the query's words: the .bib entries of the
-    projects and of drafts with their own .bib, and saved sources."""
-    results = []
-    for project, entry, ref in _library_entries(holders):
-        row = _library_row(query, project, entry, ref, cited.get(project["id"]))
-        if row["similarity"] > 0:
-            results.append(row)
-    for source in sources:
-        score = logic.similarity(query, f"{source.get('title', '')} {source.get('authors', '')}")
-        if score <= 0:
-            continue
-        results.append(
-            {
-                **_public(source),
-                "similarity": score,
-                "similarityBasis": "title",
-                "inLibrary": True,
-                "saved": True,
-            }
-        )
-    return results
-
-
-@router.get("/search")
-async def search_sources(q: str = "", limit: int = 8, user: str | None = Depends(current_user)):
-    """Find a source: what the user's own library already holds (first), then Semantic
-    Scholar's answers in its order; every row carries the query's word overlap, and the real
-    match comes from verifying a result against the claim. A public-index outage is a 503,
-    not an empty list."""
-    query = q.strip()
-    if not query:
-        return {"results": [], "libraryCount": 0}
-    from app.pipeline.sources import LookupUnavailable, _semantic_scholar
-
-    projects, sources, drafts = await asyncio.gather(
-        asyncio.to_thread(_rows, PROJECTS, user),
-        asyncio.to_thread(_rows, SOURCES, user),
-        asyncio.to_thread(_rows, DRAFTS, user),
-    )
-    cited = _cited_keys(projects, drafts)
-    for draft in drafts:  # a draft's own .bib: cited keys count for its holder too
-        if any(f.get("kind") == "bib" for f in draft.get("files", [])):
-            cited[f"draft:{draft['id']}"] = {c["key"] for c in logic.find_cites(draft.get("files", []))}
-    holders = _bib_holders(projects, drafts)
-    library = _library_results(query, holders, sources, cited)
-    try:
-        found = await asyncio.to_thread(
-            _semantic_scholar,
-            "/search",
-            {"query": logic.search_terms(query), "limit": max(1, min(limit, 20)), "fields": SEARCH_FIELDS},
-        )
-    except LookupUnavailable as error:
-        raise HTTPException(503, str(error)) from error
-    except Exception as error:  # requests errors: the index did not answer
-        raise HTTPException(503, f"Semantic Scholar did not answer: {error}") from error
-    # A public-index hit that is already in one of the user's .bib files shows once, as the
-    # library entry: its own key, flagged in-library, with the index's citation count added.
-    in_bib: dict[str, dict] = {}
-    works = _library_entries(holders)
-    for project, entry, ref in works:
-        keys = [f"doi:{ref['doi'].lower()}"] if ref["doi"] else []
-        keys.append("title:" + _title_key(ref["title"]))
-        for k in keys:
-            in_bib.setdefault(k, {"entry": entry, "ref": ref, "project": project})
-    by_place = {r["id"]: r for r in library}
-    results = list(library)
-    for paper in found.get("data") or []:
-        result = _s2_result(paper, query)
-        match = in_bib.get(f"doi:{result['doi'].lower()}") if result["doi"] else None
-        match = match or in_bib.get("title:" + _title_key(result["title"]))
-        if match:
-            row_id = f"bib:{match['project']['id']}:{match['entry']['key']}"
-            row = by_place.get(row_id)
-            if row is None:
-                row = _library_row(
-                    query, match["project"], match["entry"], match["ref"], cited.get(match["project"]["id"])
-                )
-                row["similarity"] = result["similarity"]
-                row["similarityBasis"] = result["similarityBasis"]
-                by_place[row_id] = row
-                results.append(row)
-            row.update({k: v for k, v in result.items() if k in ("citedBy", "openAccess", "arxiv") and v})
-            row["identifier"] = row.get("identifier") or result["identifier"]
-            continue
-        results.append(result)
-    # The user's own matching entries first, by how many of the query's words they share;
-    # then the index's answers in the order it ranked them. Word overlap is shown on every row
-    # but does not reorder the index: its ranking reads the abstract, overlap only counts words.
-    results.sort(key=lambda r: (0, -r["similarity"]) if r["inLibrary"] else (1, 0))
-    return {"results": results, "libraryCount": len(works) + len(sources)}
-
-
-class VerifyIn(BaseModel):
-    claim: str
-    identifier: str
-
-
-@router.post("/search/verify")
-async def verify_result(request: VerifyIn, user: str | None = Depends(current_user)):
-    """Does this source actually say it? One verification of the claim against the result's
-    paper, read from the cache when the pair was judged before. Runs under the gateway-wide
-    check limit like every other verification."""
-    claim, identifier = request.claim.strip(), request.identifier.strip()
-    if not claim or not identifier:
-        raise HTTPException(400, "a claim and a source identifier are needed")
-    gateway = _gateway()
-    async with gateway.all_checks:
-        try:
-            result = await asyncio.to_thread(verify_cached, claim, identifier, gateway.verify_claim)
-        except Exception as error:
-            result = {"status": "error", "reason": "failed", "message": str(error)}
-    outcome = citation_outcome(result)
-    if outcome.get("evidence", {}).get("pdf"):
-        verified_pdfs.setdefault(user, set()).add(Path(outcome["evidence"]["pdf"]).name)
-    return {
-        **outcome,
-        "cached": bool(result.get("cached")),
-        "quote": result.get("quote", ""),
-        "reasoning": result.get("reasoning", ""),
-    }
-
-
 # --- Your data --------------------------------------------------------------------------
 
 
@@ -1383,8 +1132,8 @@ async def export_data(user: str | None = Depends(current_user)):
 
 def author_pdfs(user: str | None) -> set[str]:
     """The PDFs this user's Author work may open: uploaded sources, and the papers a draft
-    check or a search verification read. app.main.papers_of adds these to its own set."""
-    names: set[str] = set(verified_pdfs.get(user, set()))
+    check read. app.main.papers_of adds these to its own set."""
+    names: set[str] = set()
     for table in (PROJECTS, DRAFTS, SOURCES):
         for row in store.load_author_rows(table, user):
             names.update(Path(p).name for p in row.get("pdfs", {}).values())
