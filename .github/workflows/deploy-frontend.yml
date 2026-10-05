@@ -33,7 +33,9 @@ name: deploy-frontend
 on:
   push:
     branches: [main]
-    paths: ["frontend/**"]
+    # Tests and docs are not in the deployed build. Each run is billed GitHub-hosted minutes,
+    # and the org's free plan has 2,000 a month (2,022 were used in September 2026).
+    paths: ["frontend/**", "!frontend/tests/**", "!frontend/**/*.md"]
   workflow_dispatch:
 
 # Only the latest push to main needs to actually deploy; a superseded run's minutes are wasted
