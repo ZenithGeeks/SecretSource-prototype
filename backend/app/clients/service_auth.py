@@ -69,10 +69,17 @@ def mcp_http_client_factory(url: str):
     went out with no token, and the card silently lost the toolset's skills."""
     import asyncio
 
-    import httpx
     from google.adk.tools.mcp_tool.mcp_session_manager import create_mcp_http_client
 
-    class IdTokenAuth(httpx.Auth):
+    # The client comes from httpx under MCP SDK 1.x and httpx2 under 2.x, and each
+    # rejects the other's Auth class. ADK makes that choice in this module, so take
+    # Auth from the same place. ADK releases without it only support MCP 1.x.
+    try:
+        from google.adk.dependencies._httpx import Auth
+    except ImportError:
+        from httpx import Auth
+
+    class IdTokenAuth(Auth):
         async def async_auth_flow(self, request):
             # A token refresh is blocking I/O. Keep it off the event loop.
             request.headers.update(await asyncio.to_thread(auth_headers, url))
