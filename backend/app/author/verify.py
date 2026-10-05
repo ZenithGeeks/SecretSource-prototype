@@ -14,19 +14,43 @@ from collections.abc import Callable
 
 from app import store
 from app.config import VLLM_MODEL
+from app.metrics import CLAIM_CHECKS_FAILED, CLAIM_VERDICTS
+from app.pipeline.verify import unchecked_reason
 
 
-def verify_cached(claim: str, source: str, run: Callable[[str, str], dict]) -> dict:
+def verify_cached(
+    claim: str, source: str, run: Callable[[str, str], dict], citation: dict | None = None
+) -> dict:
     """`run(claim, source)` is app.pipeline.verify.verify_claim, passed in rather than
-    imported so the gateway's own binding (which its tests monkeypatch) is what runs."""
+    imported so the gateway's own binding (which its tests monkeypatch) is what runs.
+    `citation` is the cited work as the caller knows it (its `url`, if any), for the reason
+    a failure is counted under."""
     key = store.cache_key("author-verify", VLLM_MODEL, claim.strip(), source.strip())
     cached = store.recall_cache(key)
     if cached is not None:
-        return {**cached, "cached": True}
-    result = run(claim, source)
-    if result.get("status") == "ok":
-        store.remember_cache(key, result)
+        result = {**cached, "cached": True}
+    else:
+        try:
+            result = run(claim, source)
+        except Exception:
+            CLAIM_CHECKS_FAILED.labels(reason="failed").inc()
+            raise
+        if result.get("status") == "ok":
+            store.remember_cache(key, result)
+    _count(result, citation or {})
     return result
+
+
+def _count(result: dict, citation: dict) -> None:
+    """The claim-verdict counters, counted the way a paper analysis counts them (the check()
+    closure in app/main.py), so the dashboards mean the same thing for both roles: once per
+    claim checked against a source, a remembered answer included (an analysis counts above
+    the judge's cache too), a verdict under its label and a failure under unchecked_reason's.
+    """
+    if result.get("status") == "ok":
+        CLAIM_VERDICTS.labels(verdict=result["verdict"]).inc()
+    else:
+        CLAIM_CHECKS_FAILED.labels(reason=unchecked_reason(result, citation)).inc()
 
 
 def citation_outcome(result: dict) -> dict:

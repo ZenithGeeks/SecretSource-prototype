@@ -499,7 +499,7 @@ async def _run_draft_check(check_id: str, user: str | None):
                 )
                 try:
                     result = await asyncio.to_thread(
-                        verify_cached, citation["claim"], identifier, gateway.verify_claim
+                        verify_cached, citation["claim"], identifier, gateway.verify_claim, entry["fields"]
                     )
                 except Exception as error:  # a crash in the pipeline is an honest "unavailable"
                     result = {"status": "error", "reason": "failed", "message": str(error)}
