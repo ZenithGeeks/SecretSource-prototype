@@ -113,8 +113,14 @@ class TeacherEssayAnalysisService:
         analysis_id = job.get("id")
         if not analysis_id:
             raise ValueError("analysis pipeline did not return an id")
-        if submission_file_changed and hasattr(self.repository, "reset_submission_review"):
-            self.repository.reset_submission_review(owner, course_id, coursework_id, submission_id)
+        if submission.analysis_id and hasattr(self.repository, "reset_submission_review"):
+            self.repository.reset_submission_review(
+                owner,
+                course_id,
+                coursework_id,
+                submission_id,
+                preserve_sent_history=not submission_file_changed,
+            )
         self.repository.link_submission_analysis(
             owner, course_id, coursework_id, submission_id, analysis_id, file_id=file_id, file_version=file_version
         )

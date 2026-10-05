@@ -19,8 +19,8 @@ class Repository:
     def link_submission_analysis(self, *args, **kwargs):
         self.links.append((args, kwargs))
 
-    def reset_submission_review(self, *args):
-        self.resets.append(args)
+    def reset_submission_review(self, *args, **kwargs):
+        self.resets.append((args, kwargs))
 
 
 class Drive:
@@ -139,7 +139,10 @@ def test_force_rechecks_an_unchanged_completed_submission():
     assert result["id"] == "analysis-1"
     assert calls == ["started"]
     assert drive.downloads == ["essay"]
-    assert repository.resets == []
+    assert repository.resets == [(
+        ("teacher-1", "course-1", "work-1", "submission-1"),
+        {"preserve_sent_history": True},
+    )]
 
 
 def test_force_restarts_a_running_analysis():
@@ -156,7 +159,10 @@ def test_force_restarts_a_running_analysis():
     assert result["id"] == "analysis-1"
     assert calls == ["started"]
     assert drive.downloads == ["essay"]
-    assert repository.resets == []
+    assert repository.resets == [(
+        ("teacher-1", "course-1", "work-1", "submission-1"),
+        {"preserve_sent_history": True},
+    )]
 
 
 def test_changed_pdf_version_starts_a_new_pipeline_analysis():
@@ -173,7 +179,10 @@ def test_changed_pdf_version_starts_a_new_pipeline_analysis():
     assert drive.downloads == ["essay"]
     assert calls == ["started"]
     assert repository.links[0][1]["file_version"] == "3"
-    assert repository.resets == [("teacher-1", "course-1", "work-1", "submission-1")]
+    assert repository.resets == [(
+        ("teacher-1", "course-1", "work-1", "submission-1"),
+        {"preserve_sent_history": False},
+    )]
 
 
 def test_failed_analysis_for_the_same_pdf_can_be_retried():

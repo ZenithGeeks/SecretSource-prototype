@@ -29,6 +29,7 @@ class FakeQuery:
         self.payload = None
         self.filters = []
         self.row_range = None
+        self.orders = []
 
     def insert(self, payload):
         self.action, self.payload = "insert", payload
@@ -55,12 +56,20 @@ class FakeQuery:
         self.filters.append((column, value))
         return self
 
+    def order(self, column, desc=False):
+        self.orders.append((column, desc))
+        return self
+
     def is_(self, column, value):
         self.filters.append((column, None if value == "null" else value))
         return self
 
     def gt(self, column, value):
         self.filters.append((column, ">", value))
+        return self
+
+    def neq(self, column, value):
+        self.filters.append((column, "!=", value))
         return self
 
     def limit(self, _value):
@@ -79,6 +88,8 @@ class FakeQuery:
             value, expected = row.get(filter_[0]), filter_[2]
             if isinstance(value, datetime) and isinstance(expected, str):
                 expected = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+            if filter_[1] == "!=":
+                return value != expected
             return value > expected
 
         matched = [
@@ -86,6 +97,8 @@ class FakeQuery:
             for row in rows if all(matches(row, filter_) for filter_ in self.filters)
         ]
         if self.action == "select":
+            for column, desc in reversed(self.orders):
+                matched.sort(key=lambda row: row.get(column) or "", reverse=desc)
             if self.row_range is not None:
                 matched = matched[slice(*self.row_range)]
             response = FakeResponse([row.copy() for row in matched])
@@ -415,13 +428,14 @@ def test_history_activity_is_owner_scoped_and_saves_update_timestamps():
 
     client = FakeSupabase()
     client.rows["teacher_professor_reviews"] = [
-        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "updated_at": "2026-09-20T12:00:00+00:00"},
+        {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1", "review_id": "review-1", "updated_at": "2026-09-20T12:00:00+00:00"},
+        {"owner": "teacher-a", "course_id": "course-2", "coursework_id": "work-2", "submission_id": "sub-2", "review_id": "review-2", "updated_at": "2026-09-22T12:00:00+00:00"},
         {"owner": "teacher-b", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-2", "updated_at": "2026-09-21T12:00:00+00:00"},
     ]
     repo = TeacherGoogleRepository(client)
 
     reviews = repo.list_professor_review_activity("teacher-a")
-    assert [row["submission_id"] for row in reviews] == ["sub-1"]
+    assert [row["submission_id"] for row in reviews] == ["sub-2", "sub-1"]
 
     repo.save_professor_review(TeacherProfessorReview(
         "teacher-a", "course-1", "work-1", "sub-1", "student-1", "analysis-1", "supports", "Checked.", "citation-1",
@@ -434,3 +448,26 @@ def test_history_activity_is_owner_scoped_and_saves_update_timestamps():
     feedback_row = next(row for row in client.rows["teacher_feedback"] if row.get("owner") == "teacher-a")
     assert review_row["updated_at"]
     assert feedback_row["updated_at"]
+
+
+def test_reset_for_same_file_preserves_sent_feedback_but_clears_old_review_links():
+    from app.teacher.repository import TeacherGoogleRepository
+
+    client = FakeSupabase()
+    key = {"owner": "teacher-a", "course_id": "course-1", "coursework_id": "work-1", "submission_id": "sub-1"}
+    client.rows["teacher_professor_reviews"] = [{**key, "review_id": "claim-3:doi:0", "decision": "supports"}]
+    client.rows["teacher_feedback"] = [
+        {**key, "feedback_text": "Sent report", "status": "sent", "sent_at": "2026-09-22T12:00:00+00:00", "citation_ids": ["claim-3:doi:0"], "sharing_options": {"decisions": True}},
+        {**key, "course_id": "course-2", "feedback_text": "Other", "status": "sent", "sent_at": "yesterday", "citation_ids": ["other"], "sharing_options": {}},
+    ]
+
+    TeacherGoogleRepository(client).reset_submission_review(
+        "teacher-a", "course-1", "work-1", "sub-1", preserve_sent_history=True,
+    )
+
+    assert client.rows["teacher_professor_reviews"] == []
+    assert client.rows["teacher_feedback"][0] == {
+        **key, "feedback_text": "Sent report", "status": "sent", "sent_at": "2026-09-22T12:00:00+00:00",
+        "citation_ids": [], "sharing_options": {},
+    }
+    assert client.rows["teacher_feedback"][1]["feedback_text"] == "Other"

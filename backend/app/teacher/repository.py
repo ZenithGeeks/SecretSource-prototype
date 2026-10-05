@@ -251,13 +251,29 @@ class TeacherGoogleRepository:
         )
 
     def reset_submission_review(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str,
+        *, preserve_sent_history: bool = False,
     ) -> None:
-        """Remove decisions and drafts tied to an older student PDF version."""
+        """Remove stale decisions and drafts, optionally retaining the sent report record."""
         self._client.table("teacher_professor_reviews").delete().eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
-        self._client.table("teacher_feedback").update({
-            "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [], "sharing_options": {},
-        }).eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
+        def feedback_query():
+            return (
+                self._client.table("teacher_feedback")
+                .eq("owner", owner)
+                .eq("course_id", course_id)
+                .eq("coursework_id", coursework_id)
+                .eq("submission_id", submission_id)
+            )
+
+        if preserve_sent_history:
+            feedback_query().update({"citation_ids": [], "sharing_options": {}}).eq("status", "sent").execute()
+            feedback_query().update({
+                "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [], "sharing_options": {},
+            }).neq("status", "sent").execute()
+        else:
+            feedback_query().update({
+                "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [], "sharing_options": {},
+            }).execute()
 
     def get_professor_reviews(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str
@@ -291,8 +307,13 @@ class TeacherGoogleRepository:
     def list_professor_review_activity(self, owner: str) -> list[dict[str, Any]]:
         query = (
             self._client.table("teacher_professor_reviews")
-            .select("owner,course_id,coursework_id,submission_id,updated_at,created_at")
+            .select("owner,course_id,coursework_id,submission_id,review_id,updated_at,created_at")
             .eq("owner", owner)
+            .order("updated_at", desc=True)
+            .order("course_id")
+            .order("coursework_id")
+            .order("submission_id")
+            .order("review_id")
         )
         return _all_pages(query)
 
@@ -325,6 +346,10 @@ class TeacherGoogleRepository:
             self._client.table("teacher_feedback")
             .select("owner,course_id,coursework_id,submission_id,feedback_text,status,updated_at,created_at,sent_at")
             .eq("owner", owner)
+            .order("updated_at", desc=True)
+            .order("course_id")
+            .order("coursework_id")
+            .order("submission_id")
         )
         return _all_pages(query)
 

@@ -43,7 +43,7 @@ describe('Essay Check action placement', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Download feedback report' }))
     expect(onDownloadReport).toHaveBeenCalledOnce()
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy Markdown' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send to student' })).toBeInTheDocument()
   })
 })

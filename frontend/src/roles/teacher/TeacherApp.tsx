@@ -7,6 +7,7 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
+import { markTeacherGoogleReturn } from '../../lib/teacherGoogleReturn'
 import {
   parseTeacherRoute,
   serializeTeacherRoute,
@@ -86,6 +87,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       if (!teacherRemoteEnabled) return navigate({ screen: 'add-class-course' })
       const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
       const { authorizationUrl } = await teacherApi.startGoogleConnection(data.session?.user.email)
+      markTeacherGoogleReturn()
       window.location.assign(authorizationUrl)
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : 'Google connection could not start. Try again.')

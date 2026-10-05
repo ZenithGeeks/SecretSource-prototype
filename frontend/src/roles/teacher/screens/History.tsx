@@ -84,6 +84,9 @@ export function TeacherHistoryPage({ onSelect }: {
           <HistoryIcon className="size-4 text-accent" />
           <h2 id="teacher-history-recent-heading" className="text-sm font-semibold text-ink">Recent checked work</h2>
         </div>
+        {history.data?.length === 50 && (
+          <p className="text-xs text-ink-muted">Showing the newest 50 entries.</p>
+        )}
         {history.isPending ? (
           <LoadingState label="Loading checked work..." />
         ) : history.isError ? (

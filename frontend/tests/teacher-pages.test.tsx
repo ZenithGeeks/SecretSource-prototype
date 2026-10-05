@@ -397,6 +397,15 @@ describe('Teacher application routing', () => {
     expect(new URLSearchParams(window.location.search).get('studentId')).toBe('student-anan')
   })
 
+  test('explains when History is showing its newest 50 entries', async () => {
+    window.history.replaceState(null, '', '/?role=teacher&screen=history')
+    const entry = (await teacherApi.getHistory())[0]!
+    vi.spyOn(teacherApi, 'getHistory').mockResolvedValue(Array.from({ length: 50 }, (_, index) => ({ ...entry, id: `entry-${index}` })))
+    renderWithQuery(<TeacherApp />)
+
+    expect(await screen.findByText('Showing the newest 50 entries.')).toBeInTheDocument()
+  })
+
   test('Teacher breadcrumbs navigate between Classes, Course, and Assignment', async () => {
     vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: true, email: 'teacher@example.edu' })
     window.history.replaceState(null, '', '/?role=teacher&screen=classes')
@@ -427,7 +436,7 @@ describe('Teacher application routing', () => {
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('assignment-detail')
   })
 
-  test('keeps the Essay Check roster and opens Settings from the Teacher navigation', async () => {
+  test('keeps the Essay Check roster and opens Settings from the profile menu', async () => {
     window.history.replaceState(null, '', '/?role=teacher&screen=essay-check&courseId=class-literary-2b&assignmentId=assignment-essay&studentId=student-anan')
     renderWithQuery(<TeacherApp />)
 
@@ -436,10 +445,11 @@ describe('Teacher application routing', () => {
     expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Graph' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    fireEvent.click(screen.getByRole('button', { name: /Alex/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }))
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: /Alex/ })).toHaveClass('border-accent')
   })
 
   test('TeacherApp keeps Reading Questions available from Home without a Library tab', async () => {

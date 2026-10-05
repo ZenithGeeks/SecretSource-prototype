@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, test } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null }))
 vi.mock('../src/lib/useAuth', () => ({ useAuth: () => ({ session: null, loading: false }) }))
+vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => null }))
 
 import { Root } from '../src/Root'
 import { TEACHER_GOOGLE_RETURN_KEY } from '../src/lib/teacherGoogleReturn'
