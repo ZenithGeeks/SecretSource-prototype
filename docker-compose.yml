@@ -361,7 +361,7 @@ services:
       GRAFANA_TOKEN: ${GRAFANA_STATUS_BOT_TOKEN:-}
       USD_THB: ${USD_THB:-33.57}
       DISPLAY_TZ: ${DISPLAY_TZ:-Asia/Bangkok}
-    # ss-core has 2 GB of RAM and has run out of it before (#230).
+    # A cap so a leak in the bot cannot starve the worker; ss-core has run out of memory before (#230).
     mem_limit: 256m
     restart: unless-stopped
 
