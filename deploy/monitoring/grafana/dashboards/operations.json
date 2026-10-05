@@ -1,0 +1,3088 @@
+{
+  "title": "Operations",
+  "uid": "operations",
+  "tags": [
+    "ops"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "Cloud Run services",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/cloud-run-services",
+      "targetBlank": false
+    },
+    {
+      "title": "Analyses",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/analyses",
+      "targetBlank": false
+    },
+    {
+      "title": "System evaluation",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/system-evaluation",
+      "targetBlank": false
+    }
+  ],
+  "panels": [
+    {
+      "id": 101,
+      "title": "Google Cloud services",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 1,
+      "title": "Instances now",
+      "type": "stat",
+      "description": "Current number of running container instances for each Cloud Run service (last value, summed over revisions and states).",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-cloud-monitoring"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MAX",
+            "alignmentPeriod": "60s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count"
+            ],
+            "groupBys": [
+              "resource.label.service_name"
+            ]
+          },
+          "aliasBy": "{{resource.label.service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "5xx responses (last hour)",
+      "type": "stat",
+      "description": "Server errors (HTTP 5xx) returned by each Cloud Run service in the last hour; shows 0 when there were none.",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-cloud-monitoring"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "alignmentPeriod": "3600s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/request_count",
+              "AND",
+              "metric.label.response_code_class",
+              "=",
+              "5xx"
+            ],
+            "groupBys": [
+              "resource.label.service_name"
+            ]
+          },
+          "aliasBy": "{{resource.label.service_name}}"
+        }
+      ],
+      "timeFrom": "1h"
+    },
+    {
+      "id": 3,
+      "title": "Instances by service",
+      "type": "timeseries",
+      "description": "Mean number of container instances per Cloud Run service over time.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-cloud-monitoring"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count"
+            ],
+            "groupBys": [
+              "resource.label.service_name"
+            ]
+          },
+          "aliasBy": "{{resource.label.service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Requests by service",
+      "type": "timeseries",
+      "description": "Request rate per Cloud Run service over time.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-cloud-monitoring"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_RATE",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/request_count"
+            ],
+            "groupBys": [
+              "resource.label.service_name"
+            ]
+          },
+          "aliasBy": "{{resource.label.service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Cost estimate (list prices, asia-southeast1)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "title": "How the estimate is built",
+      "type": "text",
+      "description": "Explains where the cost numbers come from, what they leave out, and the per-instance-hour rates used.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Costs are **estimated** from instance counts in Cloud Monitoring multiplied by Cloud Run list prices for asia-southeast1 (Tier 2), read from the Cloud Billing catalog on 2026-10-05. They are not the bill.\n\nNot counted: Artifact Registry storage, Compute Engine disks, network egress, Cloud Build, Cloud Scheduler, Cloud Monitoring, and the free tier. Credit left is not visible to this project (the billing account is owner-only).\n\nRates in USD per instance-hour (the `state` label of `instance_count` is `active` or `idle`):\n\n| service | active | idle |\n|---|---|---|\n| colpali | 1.705104 | 1.705104 |\n| gateway | 0.38016 | 0.38016 |\n| colbert | 0.29232 | 0.0756 |\n| grobid | 0.17136 | 0.063 |\n"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Estimated cost now ($/h)",
+      "type": "stat",
+      "description": "Estimated Cloud Run spend per hour, per service and in total; each active/idle term is its own math expression and the services and total are summed in the panel (Add field from calculation, sum across row) so a missing series counts as zero instead of blanking the total.",
+      "gridPos": {
+        "h": 5,
+        "w": 10,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "__expr__",
+        "uid": "__expr__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "CA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "CI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "colpali_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CA * 1.705104"
+        },
+        {
+          "refId": "colpali_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CI * 1.705104"
+        },
+        {
+          "refId": "gateway_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GA * 0.38016"
+        },
+        {
+          "refId": "gateway_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GI * 0.38016"
+        },
+        {
+          "refId": "colbert_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BA * 0.29232"
+        },
+        {
+          "refId": "colbert_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BI * 0.0756"
+        },
+        {
+          "refId": "grobid_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RA * 0.17136"
+        },
+        {
+          "refId": "grobid_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RI * 0.063"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "Time",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali_active",
+                "colpali_idle"
+              ]
+            },
+            "alias": "colpali",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "gateway_active",
+                "gateway_idle"
+              ]
+            },
+            "alias": "gateway",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colbert_active",
+                "colbert_idle"
+              ]
+            },
+            "alias": "colbert",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "grobid_active",
+                "grobid_idle"
+              ]
+            },
+            "alias": "grobid",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali",
+                "gateway",
+                "colbert",
+                "grobid"
+              ]
+            },
+            "alias": "total",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "colpali_active": true,
+              "colpali_idle": true,
+              "gateway_active": true,
+              "gateway_idle": true,
+              "colbert_active": true,
+              "colbert_idle": true,
+              "grobid_active": true,
+              "grobid_idle": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "At this rate: per day / per 30 days",
+      "type": "stat",
+      "description": "Total estimated cost extrapolated from the current rate to 24 hours and 720 hours, computed in the panel (not a server-side expression) for the same missing-series reason as the Estimated cost now panel.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 10,
+        "y": 24
+      },
+      "datasource": {
+        "type": "__expr__",
+        "uid": "__expr__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "CA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "CI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "colpali_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CA * 1.705104"
+        },
+        {
+          "refId": "colpali_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CI * 1.705104"
+        },
+        {
+          "refId": "gateway_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GA * 0.38016"
+        },
+        {
+          "refId": "gateway_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GI * 0.38016"
+        },
+        {
+          "refId": "colbert_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BA * 0.29232"
+        },
+        {
+          "refId": "colbert_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BI * 0.0756"
+        },
+        {
+          "refId": "grobid_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RA * 0.17136"
+        },
+        {
+          "refId": "grobid_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RI * 0.063"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "Time",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali_active",
+                "colpali_idle"
+              ]
+            },
+            "alias": "colpali",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "gateway_active",
+                "gateway_idle"
+              ]
+            },
+            "alias": "gateway",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colbert_active",
+                "colbert_idle"
+              ]
+            },
+            "alias": "colbert",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "grobid_active",
+                "grobid_idle"
+              ]
+            },
+            "alias": "grobid",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali",
+                "gateway",
+                "colbert",
+                "grobid"
+              ]
+            },
+            "alias": "total",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binary",
+            "binary": {
+              "left": "total",
+              "operator": "*",
+              "right": {
+                "fixed": "24"
+              }
+            },
+            "alias": "per day",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binary",
+            "binary": {
+              "left": "total",
+              "operator": "*",
+              "right": {
+                "fixed": "720"
+              }
+            },
+            "alias": "per 30 days",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "colpali_active": true,
+              "colpali_idle": true,
+              "gateway_active": true,
+              "gateway_idle": true,
+              "colbert_active": true,
+              "colbert_idle": true,
+              "grobid_active": true,
+              "grobid_idle": true,
+              "colpali": true,
+              "gateway": true,
+              "colbert": true,
+              "grobid": true,
+              "total": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Average $/h in the selected range",
+      "type": "stat",
+      "description": "Average estimated total $/h over the selected time range (Grafana expressions cannot multiply by the range length, so this shows the mean rate; multiply by the hours in the range for the spend).",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "datasource": {
+        "type": "__expr__",
+        "uid": "__expr__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "mean"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "CA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "CI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "colpali_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CA * 1.705104"
+        },
+        {
+          "refId": "colpali_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CI * 1.705104"
+        },
+        {
+          "refId": "gateway_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GA * 0.38016"
+        },
+        {
+          "refId": "gateway_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GI * 0.38016"
+        },
+        {
+          "refId": "colbert_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BA * 0.29232"
+        },
+        {
+          "refId": "colbert_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BI * 0.0756"
+        },
+        {
+          "refId": "grobid_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RA * 0.17136"
+        },
+        {
+          "refId": "grobid_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RI * 0.063"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "Time",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali_active",
+                "colpali_idle"
+              ]
+            },
+            "alias": "colpali",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "gateway_active",
+                "gateway_idle"
+              ]
+            },
+            "alias": "gateway",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colbert_active",
+                "colbert_idle"
+              ]
+            },
+            "alias": "colbert",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "grobid_active",
+                "grobid_idle"
+              ]
+            },
+            "alias": "grobid",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali",
+                "gateway",
+                "colbert",
+                "grobid"
+              ]
+            },
+            "alias": "total",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "colpali_active": true,
+              "colpali_idle": true,
+              "gateway_active": true,
+              "gateway_idle": true,
+              "colbert_active": true,
+              "colbert_idle": true,
+              "grobid_active": true,
+              "grobid_idle": true,
+              "colpali": true,
+              "gateway": true,
+              "colbert": true,
+              "grobid": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Estimated $/h by service",
+      "type": "timeseries",
+      "description": "Estimated Cloud Run spend per hour over time, stacked by service.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "__expr__",
+        "uid": "__expr__"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 40
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "CA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "CI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colpali",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "GI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "gateway",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "BI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "colbert",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RA",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "active"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "RI",
+          "datasource": {
+            "type": "stackdriver",
+            "uid": "gcp-cloud-monitoring"
+          },
+          "queryType": "timeSeriesList",
+          "timeSeriesList": {
+            "projectName": "gcp-edu-471706",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "alignmentPeriod": "300s",
+            "filters": [
+              "metric.type",
+              "=",
+              "run.googleapis.com/container/instance_count",
+              "AND",
+              "resource.label.service_name",
+              "=",
+              "grobid",
+              "AND",
+              "metric.label.state",
+              "=",
+              "idle"
+            ],
+            "groupBys": []
+          },
+          "hide": true
+        },
+        {
+          "refId": "colpali_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CA * 1.705104"
+        },
+        {
+          "refId": "colpali_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$CI * 1.705104"
+        },
+        {
+          "refId": "gateway_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GA * 0.38016"
+        },
+        {
+          "refId": "gateway_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$GI * 0.38016"
+        },
+        {
+          "refId": "colbert_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BA * 0.29232"
+        },
+        {
+          "refId": "colbert_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$BI * 0.0756"
+        },
+        {
+          "refId": "grobid_active",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RA * 0.17136"
+        },
+        {
+          "refId": "grobid_idle",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "$RI * 0.063"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "Time",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali_active",
+                "colpali_idle"
+              ]
+            },
+            "alias": "colpali",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "gateway_active",
+                "gateway_idle"
+              ]
+            },
+            "alias": "gateway",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colbert_active",
+                "colbert_idle"
+              ]
+            },
+            "alias": "colbert",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "grobid_active",
+                "grobid_idle"
+              ]
+            },
+            "alias": "grobid",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum",
+              "include": [
+                "colpali",
+                "gateway",
+                "colbert",
+                "grobid"
+              ]
+            },
+            "alias": "total",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "colpali_active": true,
+              "colpali_idle": true,
+              "gateway_active": true,
+              "gateway_idle": true,
+              "colbert_active": true,
+              "colbert_idle": true,
+              "grobid_active": true,
+              "grobid_idle": true,
+              "total": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "title": "Queue (Redis / RQ)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "title": "Redis reachable",
+      "type": "stat",
+      "description": "Whether the worker can reach Redis (rq_up: 1 = up, 0 = down).",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "up",
+                  "color": "green",
+                  "index": 0
+                },
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "grey",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rq_up{job=\"worker\"})"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Jobs by state now",
+      "type": "stat",
+      "description": "Number of RQ jobs currently in each state (queued, started, deferred, scheduled, failed, finished, canceled).",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 4,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (state) (rq_jobs{job=\"worker\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Workers",
+      "type": "stat",
+      "description": "Number of RQ workers registered with the queue.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rq_workers{job=\"worker\"})"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Oldest queued job waiting",
+      "type": "stat",
+      "description": "How long the oldest queued job has been waiting to start.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 600
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rq_oldest_queued_job_age_seconds{job=\"worker\"})"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Longest running job",
+      "type": "stat",
+      "description": "How long the longest currently running job has been going.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1800
+              },
+              {
+                "color": "red",
+                "value": 2400
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(rq_longest_running_job_seconds{job=\"worker\"})"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Jobs by state over time",
+      "type": "timeseries",
+      "description": "Number of RQ jobs in each state over time.",
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 0,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (state) (rq_jobs{job=\"worker\"})",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Worker scrape",
+      "type": "stat",
+      "description": "Whether Prometheus can scrape the worker's metrics endpoint (up: 1 = reachable, 0 = down).",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "up",
+                  "color": "green",
+                  "index": 0
+                },
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "grey",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"worker\"}"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "title": "Jobs: succeeded vs failed",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Succeeded",
+      "type": "stat",
+      "description": "Analyses that finished with status done, among those started in the selected range.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 52
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "table",
+          "rawSql": "select count(*) as count\nfrom public.analyses\nwhere data->>'status' = 'done' and $__timeFilter(started)",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Failed",
+      "type": "stat",
+      "description": "Analyses that ended with status error, among those started in the selected range.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 52
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "table",
+          "rawSql": "select count(*) as count\nfrom public.analyses\nwhere data->>'status' = 'error' and $__timeFilter(started)",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Running",
+      "type": "stat",
+      "description": "Analyses currently in status running, among those started in the selected range.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 52
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "table",
+          "rawSql": "select count(*) as count\nfrom public.analyses\nwhere data->>'status' = 'running' and $__timeFilter(started)",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Success rate",
+      "type": "stat",
+      "description": "Done divided by done plus error for analyses started in the selected range; empty when none have finished.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 52
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.8
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "table",
+          "rawSql": "select\n  case when count(*) filter (where data->>'status' in ('done','error')) = 0 then null\n  else count(*) filter (where data->>'status' = 'done')::float8 / count(*) filter (where data->>'status' in ('done','error'))\n  end as success_rate\nfrom public.analyses\nwhere $__timeFilter(started)",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Per day: succeeded vs failed",
+      "type": "timeseries",
+      "description": "Finished analyses per day by outcome (done or error), by the day they started.",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 56
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "done"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "time_series",
+          "rawSql": "select $__timeGroup(started, '1d') as time,\n  data->>'status' as metric,\n  count(*) as value\nfrom public.analyses\nwhere data->>'status' in ('done', 'error') and $__timeFilter(started)\ngroup by 1, 2\norder by 1",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Run time p50 / p95 (minutes)",
+      "type": "stat",
+      "description": "Median and 95th percentile run time of finished analyses, first stage to last stage timestamp; runs without timestamps are excluded.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 56
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "m",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "table",
+          "rawSql": "with s as (\n  select id, started, data,\n    (select min((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as first_at,\n    (select max((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as last_at\n  from public.analyses\n  where data->>'status' in ('done', 'error') and $__timeFilter(started)\n)\nselect percentile_cont(0.5) within group (order by (last_at - first_at) / 60.0) as \"p50\",\n  percentile_cont(0.95) within group (order by (last_at - first_at) / 60.0) as \"p95\"\nfrom s\nwhere first_at is not null and last_at is not null and last_at > first_at",
+          "rawQuery": true
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Each run",
+      "type": "table",
+      "description": "The 100 newest analyses in the range with status, run time and last stage; owners and paper titles are deliberately not shown.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "analyses-db"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "done": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "error": {
+                        "color": "red",
+                        "index": 1
+                      },
+                      "running": {
+                        "color": "blue",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "analyses-db"
+          },
+          "format": "table",
+          "rawSql": "with s as (\n  select id, started, data,\n    (select min((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as first_at,\n    (select max((elem->>'at')::double precision) from jsonb_array_elements(coalesce(data->'stages', '[]'::jsonb)) elem where elem ? 'at') as last_at\n  from public.analyses\n  where $__timeFilter(started)\n)\nselect id,\n  started,\n  data->>'status' as status,\n  round((case\n    when data->>'status' = 'running' then extract(epoch from (now() - started))\n    when first_at is not null and last_at is not null then last_at - first_at\n  end / 60.0)::numeric, 1) as minutes,\n  data->'stages'->-1->>'stage' as \"last stage\",\n  left(data->>'message', 120) as message\nfrom s\norder by started desc\nlimit 100",
+          "rawQuery": true
+        }
+      ]
+    }
+  ]
+}

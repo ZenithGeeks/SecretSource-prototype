@@ -13,6 +13,7 @@ import sys
 import prometheus_client
 from app.native import prepare_and_check
 from app.queue import QUEUE_NAME, AnalysisWorker, redis_connection
+from app.rq_metrics import RQCollector
 from rq.serializers import JSONSerializer
 
 if __name__ == "__main__":
@@ -27,4 +28,6 @@ if __name__ == "__main__":
     # A SimpleWorker (AnalysisWorker) runs jobs in-process; the default Worker forks a child per
     # job, which would leave the pipeline's Prometheus metrics stuck in a short-lived child.
     prometheus_client.start_http_server(int(os.getenv("WORKER_METRICS_PORT", "9101")))
+    # Queue depth, ages and worker count, read from Redis on each scrape. Only here, not in the gateway.
+    prometheus_client.REGISTRY.register(RQCollector())
     AnalysisWorker([QUEUE_NAME], connection=redis_connection(), serializer=JSONSerializer).work()

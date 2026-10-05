@@ -329,6 +329,9 @@ services:
       GRAFANA_DB_HOST: ${GRAFANA_DB_HOST:-}
       GRAFANA_DB_USER: ${GRAFANA_DB_USER:-}
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:-}
+      # Where the alerts in deploy/monitoring/grafana/provisioning/alerting/ go. An empty URL
+      # fails alerting provisioning, so the default is a placeholder that only fails to send.
+      GRAFANA_DISCORD_WEBHOOK_URL: ${GRAFANA_DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/0/not-set}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:3001:3000"
     volumes:
