@@ -52,17 +52,52 @@ Container-level panels (cAdvisor) are not part of this dashboard — build one f
 directly, e.g. `container_memory_usage_bytes` (filter by the `name` label), or import a
 ready-made one: Dashboards -> New -> Import, dashboard ID `14282`.
 
-**System evaluation** is disabled for now — it stays empty until analyses actually run on the
-RQ worker — so its file lives under `deploy/monitoring/grafana/dashboards-disabled/` instead of
-`dashboards/`, where the dashboard provider won't load it; move it back with `git mv` to turn it
-back on.
+In production the gateway runs on Cloud Run, so the `gateway` scrape target on ss-core is always
+down, and "Started" and part of "Throughput" in System evaluation read 0. Everything else on that
+dashboard comes from the worker. The target stays for a local box that runs the gateway container.
+
+## Operations dashboard
+
+One page for running the system (`grafana/dashboards/operations.json`):
+
+- Google Cloud services: Cloud Run instances now, 5xx in the last hour, instances and requests over time.
+- Cost estimate: instance counts from Cloud Monitoring times Cloud Run list prices for asia-southeast1,
+  read from the Cloud Billing catalog on 2026-10-05. It is not the bill. Artifact Registry, disks,
+  network, Cloud Build and the free tier are not counted, and the credit balance is not visible to
+  this project. With no traffic the estimate is about $12.50 a day, most of it the gateway's one
+  always-on instance. If prices or service sizes change, edit the rates in the panel expressions.
+- Queue (Redis / RQ): jobs per state, workers, the oldest queued job's age and the longest running
+  job. These come from `backend/app/rq_metrics.py` on the worker's `/metrics`, read from Redis Cloud
+  on each scrape.
+- Jobs: succeeded vs failed, success rate, run time p50/p95, and a table of each run's duration
+  (from the `analyses` table; no owners or titles).
+
+## Alerts (Discord)
+
+`grafana/provisioning/alerting/ops.yml` sends every alert, including the disk alert below, to a
+Discord webhook. Put the webhook in ss-core's `.env` as `GRAFANA_DISCORD_WEBHOOK_URL`, then
+recreate Grafana. Without it the alerts still show under Alerting in Grafana, but nothing is sent.
+
+| Alert | Fires when |
+|---|---|
+| RQ worker is down | Prometheus cannot scrape the worker for 5 minutes |
+| Redis is unreachable | `rq_up` is 0 for 5 minutes |
+| A queued analysis has waited over 45 minutes | the oldest queued job is older than 45 minutes |
+| An analysis has run over 40 minutes | longer than `JOB_TIMEOUT` (30 minutes) plus a margin |
+| An analysis failed | any pipeline error or RQ failed job in 15 minutes |
+| ColPali GPU billed for most of the last hour | over 0.83 instances on average for an hour, held 30 minutes |
+| A Cloud Run service runs more instances than usual | gateway, colbert or grobid over 1.5 instances on average for an hour |
+| A Cloud Run service is returning 5xx errors | more than 5 in 15 minutes |
+
+Each alert's description says what to check first. The exact check before the credit runs out is a
+Cloud Billing budget alert, which only the billing account owner can create.
 
 ## Disk alert
 
 `node-exporter` reports the host's own disk, memory and load, which cAdvisor does not.
 Grafana loads one alert rule from `grafana/provisioning/alerting/disk.yml`: "Disk over 80% full"
-fires when `/` or `/var/lib/docker` stays over 80% for 10 minutes. It shows under Alerting in
-Grafana. It is not emailed until Grafana has SMTP settings (`GF_SMTP_*` environment variables).
+fires when `/` or `/var/lib/docker` stays over 80% for 10 minutes. It goes to Discord with the
+alerts above.
 On ss-core a weekly job, `/etc/cron.weekly/docker-prune`, removes stopped containers, untagged
 images and old build cache.
 
