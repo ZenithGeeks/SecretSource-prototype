@@ -348,6 +348,26 @@ services:
       - prometheus
     restart: unless-stopped
 
+  # Discord /status command (services/status-bot). Reads everything through Grafana's query API
+  # with a read-only service account token, so it holds no Google key or database password.
+  # It only connects outward to Discord, so it publishes no port. Its own profile, so it starts only
+  # where its tokens are set: docker compose --profile monitoring --profile status-bot up -d.
+  # Defaults are empty (not :?, which would break every compose command); the bot exits saying
+  # which variable is missing.
+  status-bot:
+    profiles: [status-bot]
+    build: ./services/status-bot
+    environment:
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_TOKEN: ${GRAFANA_STATUS_BOT_TOKEN:-}
+      USD_THB: ${USD_THB:-33.57}
+      DISPLAY_TZ: ${DISPLAY_TZ:-Asia/Bangkok}
+    # A cap so a leak in the bot cannot starve the worker; ss-core has run out of memory before (#230).
+    mem_limit: 256m
+    restart: unless-stopped
+
 volumes:
   analyses:
   vectors:
