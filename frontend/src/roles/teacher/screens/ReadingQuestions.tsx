@@ -1,15 +1,16 @@
-import { BookOpen, Copy, Download, Edit3, ExternalLink, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, Download, Edit3, ExternalLink, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Card, Empty } from '../../../components/ui'
 import { downloadText } from '../../../lib/csv'
 import { filterReadingQuestions, worksheetText } from '../../../lib/teacherSelectors'
 import type { ReadingQuestionLevel, ReadingQuestionType, TeacherReadingQuestion } from '../../../lib/teacher'
+import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import { useDeleteReadingQuestion, useRegenerateReadingQuestions, useTeacherReadingQuestions, useUpdateReadingQuestion } from '../../../lib/useTeacher'
-import { Breadcrumbs, LoadingState, PageHeading, StatusPill } from '../components/TeacherUi'
+import { Breadcrumbs, LoadingState, StatusPill } from '../components/TeacherUi'
 import { TeacherDialog } from '../components/TeacherDialog'
 
-export function ReadingQuestions({ paperId }: { paperId?: string }) {
+export function ReadingQuestions({ paperId, onNavigate }: { paperId?: string; onNavigate?: (route: TeacherRoute) => void }) {
   const page = useTeacherReadingQuestions(paperId)
   const regenerate = useRegenerateReadingQuestions()
   const update = useUpdateReadingQuestion()
@@ -65,38 +66,63 @@ export function ReadingQuestions({ paperId }: { paperId?: string }) {
   }
 
   return (
-    <div className="space-y-7">
-      <Breadcrumbs items={[{ label: 'Library' }, { label: 'Reading questions' }]} />
-      <PageHeading
-        title="Reading questions"
-        description={`${data.paper.title} · ${data.paper.citation} · ${data.paper.verifiedClaims} verified claims`}
-        actions={(
-          <>
-            <Button type="button" variant="ghost" onClick={() => { downloadText(`${data.paper.title.toLowerCase()}-worksheet.txt`, worksheetText({ ...data, questions: visible }, false), 'text/plain;charset=utf-8'); announce('Worksheet exported locally.') }}><Download className="size-4" />Export worksheet</Button>
-            <Button type="button" onClick={() => regenerate.mutate({ paperId: data.paper.id, level, types }, { onSuccess: () => announce('Questions regenerated locally.') })} disabled={regenerate.isPending || types.length === 0}><RefreshCw className={regenerate.isPending ? 'size-4 animate-spin' : 'size-4'} />{regenerate.isPending ? 'Regenerating...' : 'Regenerate'}</Button>
-          </>
-        )}
-      />
-
-      <Card className="flex flex-col gap-4 bg-accent-soft/25 sm:flex-row sm:items-center"><span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-surface text-accent"><BookOpen className="size-5" /></span><div className="min-w-0"><p className="truncate font-serif text-xl font-semibold">{data.paper.fileName}</p><p className="mt-1 text-sm text-ink-muted">Questions are generated from the local verified paper record. Open in paper uses page anchors only.</p></div><StatusPill label={`${visible.length} shown`} tone="accent" /></Card>
+    <div className="space-y-5">
+      <Breadcrumbs items={[{ label: 'Home', onClick: () => onNavigate?.({ screen: 'home' }) }, { label: 'Make reading questions' }]} />
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
+        <div className="min-w-0">
+          <h1 className="font-serif text-[23px] font-semibold leading-7 tracking-[-0.025em] text-ink">Reading questions</h1>
+          <p className="mt-1 truncate text-[13px] text-ink-muted">{data.paper.title} ({data.paper.citation}) <span aria-hidden="true">·</span> built from {data.paper.verifiedClaims} verified claims</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button type="button" variant="ghost" onClick={() => regenerate.mutate({ paperId: data.paper.id, level, types }, { onSuccess: () => announce('Questions regenerated locally.') })} disabled={regenerate.isPending || types.length === 0}><RefreshCw className={regenerate.isPending ? 'size-4 animate-spin' : 'size-4'} />{regenerate.isPending ? 'Regenerating...' : 'Regenerate'}</Button>
+          <Button type="button" onClick={() => { downloadText(`${data.paper.title.toLowerCase()}-worksheet.txt`, worksheetText({ ...data, questions: visible }, false), 'text/plain;charset=utf-8'); announce('Worksheet exported locally.') }}><Download className="size-4" />Export worksheet</Button>
+        </div>
+      </header>
 
       {notice && <div role="status" className="rounded-lg bg-supports-soft px-4 py-3 text-sm text-supports">{notice}</div>}
-      <Card className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Level</p><div className="mt-3 flex flex-wrap gap-2">{(['undergrad', 'graduate'] as ReadingQuestionLevel[]).map((item) => <FilterButton key={item} active={level === item} onClick={() => setLevel(item)}>{item === 'undergrad' ? 'Undergrad' : 'Graduate'}</FilterButton>)}</div></div><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Type</p><div className="mt-3 flex flex-wrap gap-2">{(['comprehension', 'critique', 'discussion'] as ReadingQuestionType[]).map((item) => <FilterButton key={item} active={types.includes(item)} onClick={() => setFilterType(item)}>{item[0]!.toUpperCase() + item.slice(1)}</FilterButton>)}</div></div></Card>
 
-      <section className="space-y-4" aria-labelledby="question-list-heading"><div className="flex items-end justify-between gap-3"><div><h2 id="question-list-heading" className="font-serif text-2xl font-semibold">Questions</h2><p className="mt-1 text-sm text-ink-muted">Edit wording, inspect the source passage, or remove a question from this worksheet.</p></div><span className="text-xs text-ink-muted">{visible.length} of {data.questions.length}</span></div>{visible.length === 0 ? <Empty title="No questions match these filters" hint="Choose another level or turn on a question type." /> : visible.map((question, index) => <QuestionCard key={question.id} question={question} number={index + 1} onEdit={() => beginEdit(question)} onRemove={() => setRemoving(question)} onShow={() => openPaper(question)} />)}</section>
+      <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
+        <div className="flex items-center gap-2"><span className="text-[11px] font-semibold text-ink-muted">Level</span>{(['undergrad', 'graduate'] as ReadingQuestionLevel[]).map((item) => <FilterButton key={item} active={level === item} onClick={() => setLevel(item)}>{item === 'undergrad' ? 'Undergrad' : 'Graduate'}</FilterButton>)}</div>
+        <div className="flex flex-wrap items-center gap-2"><span className="text-[11px] font-semibold text-ink-muted">Type</span>{(['comprehension', 'critique', 'discussion'] as ReadingQuestionType[]).map((item) => <FilterButton key={item} active={types.includes(item)} onClick={() => setFilterType(item)}>{item[0]!.toUpperCase() + item.slice(1)}</FilterButton>)}</div>
+        <span className="ml-auto text-xs text-ink-muted">{visible.length} questions</span>
+      </Card>
 
-      <Card><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-accent">Answer key</p><h2 className="mt-1 font-serif text-2xl font-semibold">Teacher notes</h2><p className="mt-1 text-sm text-ink-muted">Answers stay separate from the student worksheet.</p></div><Button type="button" variant="ghost" onClick={() => void copy(worksheetText({ ...data, questions: visible }, true), 'Answer key copied locally.')}><Copy className="size-4" />Copy answer key</Button></div><div className="mt-5 divide-y divide-border-subtle">{visible.map((question) => <div key={question.id} className="py-3 first:pt-0 last:pb-0"><p className="text-sm font-medium">{question.prompt}</p><p className="mt-1 text-sm leading-6 text-ink-muted">{question.answer ?? 'No answer key available.'}</p></div>)}</div></Card>
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="space-y-3">
+          {visible.length === 0 ? <Empty title="No questions match these filters" hint="Choose another level or turn on a question type." /> : visible.map((question, index) => <QuestionCard key={question.id} question={question} number={index + 1} onEdit={() => beginEdit(question)} onRemove={() => setRemoving(question)} onShow={() => openPaper(question)} />)}
+        </section>
 
-      <TeacherDialog open={Boolean(editing)} title="Edit reading question" description="Only this local question's prompt and answer key will change." onClose={() => setEditing(null)}><div className="space-y-4"><label className="block text-sm font-medium">Question<textarea value={draft.prompt} onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))} rows={4} className="mt-2 w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm leading-6" /></label><label className="block text-sm font-medium">Answer key<textarea value={draft.answer} onChange={(event) => setDraft((current) => ({ ...current, answer: event.target.value }))} rows={3} className="mt-2 w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm leading-6" /></label><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" onClick={save} disabled={update.isPending || !draft.prompt.trim()}>{update.isPending ? 'Saving...' : 'Save question'}</Button></div></div></TeacherDialog>
-      <TeacherDialog open={Boolean(removing)} title="Remove this question?" description="The question will be removed from the local worksheet and answer key." onClose={() => setRemoving(null)}><div className="rounded-lg bg-canvas p-3 text-sm leading-6 text-ink-muted">{removing?.prompt}</div><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setRemoving(null)} disabled={remove.isPending}>Keep question</Button><Button type="button" className="bg-refutes hover:opacity-90" onClick={confirmRemove} disabled={remove.isPending}><Trash2 className="size-4" />{remove.isPending ? 'Removing...' : 'Remove'}</Button></div></TeacherDialog>
+        <aside className="xl:sticky xl:top-5">
+          <Card className="px-4 py-4">
+            <h2 className="font-serif text-[17px] font-semibold">Answer key</h2>
+            <p className="mt-2 text-[13px] leading-5 text-ink-muted">Each answer is the paper's own passage, so grading is a page check, not a judgment call.</p>
+            <div className="mt-3 divide-y divide-border-subtle">{visible.map((question, index) => <div key={question.id} className="py-3 first:pt-0 last:pb-0"><p className="text-[11px] leading-[17px]"><span className="font-semibold text-accent">Q{index + 1}</span><span className="text-ink-muted"> &nbsp;{question.anchor} — {question.answer ?? 'No answer key available.'}</span></p></div>)}</div>
+            <Button type="button" variant="ghost" className="mt-2 px-0 text-xs" onClick={() => void copy(worksheetText({ ...data, questions: visible }, true), 'Answer key copied locally.')}><Copy className="size-4" />Copy answer key</Button>
+          </Card>
+        </aside>
+      </div>
+
+      <TeacherDialog open={Boolean(editing)} title="Edit reading question" description="Only this local question's prompt and answer key will change." onClose={() => setEditing(null)}>
+        <div className="space-y-4"><label className="block text-sm font-medium">Question<textarea value={draft.prompt} onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))} rows={4} className="mt-2 w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm leading-6" /></label><label className="block text-sm font-medium">Answer key<textarea value={draft.answer} onChange={(event) => setDraft((current) => ({ ...current, answer: event.target.value }))} rows={3} className="mt-2 w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm leading-6" /></label><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" onClick={save} disabled={update.isPending || !draft.prompt.trim()}>{update.isPending ? 'Saving...' : 'Save question'}</Button></div></div>
+      </TeacherDialog>
+      <TeacherDialog open={Boolean(removing)} title="Remove this question?" description="The question will be removed from the local worksheet and answer key." onClose={() => setRemoving(null)}>
+        <div className="rounded-lg bg-canvas p-3 text-sm leading-6 text-ink-muted">{removing?.prompt}</div><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setRemoving(null)} disabled={remove.isPending}>Keep question</Button><Button type="button" className="bg-refutes hover:opacity-90" onClick={confirmRemove} disabled={remove.isPending}><Trash2 className="size-4" />{remove.isPending ? 'Removing...' : 'Remove'}</Button></div>
+      </TeacherDialog>
     </div>
   )
 }
 
 function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return <button type="button" aria-pressed={active} onClick={onClick} className={active ? 'rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white' : 'rounded-full border border-border-subtle px-3 py-1.5 text-xs font-semibold text-ink-muted hover:border-accent hover:text-accent'}>{children}</button>
+  return <button type="button" aria-pressed={active} onClick={onClick} className={active ? 'rounded-md bg-accent-soft px-2.5 py-1 text-[11px] font-semibold text-accent' : 'rounded-md border border-border-subtle px-2.5 py-1 text-[11px] font-medium text-ink-muted hover:border-accent hover:text-accent'}>{children}</button>
 }
 
 function QuestionCard({ question, number, onEdit, onRemove, onShow }: { question: TeacherReadingQuestion; number: number; onEdit: () => void; onRemove: () => void; onShow: () => void }) {
-  return <Card className="space-y-4"><div className="flex items-start gap-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent">{number}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><StatusPill label={question.type} tone={question.type === 'critique' ? 'warning' : question.type === 'discussion' ? 'accent' : 'success'} /><span className="text-xs text-ink-muted">{question.level}</span></div><h3 className="mt-3 text-base font-semibold leading-6">{question.prompt}</h3></div></div><div className="rounded-lg bg-canvas p-4"><p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">{question.anchor}</p>{question.excerpt ? <p className="mt-2 text-sm italic leading-6 text-ink-muted">{question.excerpt}</p> : <p className="mt-2 text-sm text-ink-muted">No passage excerpt available.</p>}</div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-4"><button type="button" onClick={onShow} className="inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:underline"><ExternalLink className="size-3.5" />Show in paper</button><div className="flex gap-2"><Button type="button" variant="ghost" onClick={onEdit}><Edit3 className="size-4" />Edit</Button><Button type="button" variant="ghost" className="text-refutes hover:bg-refutes-soft" onClick={onRemove}><Trash2 className="size-4" />Remove</Button></div></div></Card>
+  return (
+    <Card className="space-y-3 px-4 py-4">
+      <div className="flex items-center gap-2"><span className="w-3 shrink-0 text-xs font-medium text-ink-muted">{number}</span><StatusPill label={question.type} tone={question.type === 'critique' ? 'warning' : question.type === 'discussion' ? 'warning' : 'success'} /><span className="text-[11px] text-accent">anchored to {question.anchor}</span></div>
+      <h3 className="pl-5 text-sm leading-[22px] text-ink">{question.prompt}</h3>
+      {question.excerpt && <p className="border-l border-border-subtle pl-3 font-serif text-[12px] italic leading-5 text-ink-muted">“{question.excerpt}”</p>}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3"><button type="button" onClick={onShow} className="inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"><ExternalLink className="size-3.5" />Show in paper</button><div className="flex gap-1"><Button type="button" variant="ghost" onClick={onEdit}><Edit3 className="size-4" />Edit</Button><Button type="button" variant="ghost" className="text-refutes hover:bg-refutes-soft" onClick={onRemove}><Trash2 className="size-4" />Remove</Button></div></div>
+    </Card>
+  )
 }

@@ -1,66 +1,251 @@
-import { ArrowUpRight, BookOpen, ChevronRight, FileCheck2, FileText, LibraryBig, Sparkles } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowUpRight,
+  BookOpen,
+  CalendarClock,
+  ChevronRight,
+  FileCheck2,
+  GraduationCap,
+  ListChecks,
+} from 'lucide-react'
 
 import { Button, Card, Empty } from '../../../components/ui'
+import { useAuth } from '../../../lib/useAuth'
+import { useSettings } from '../../../lib/settings'
 import { homeRouteForAction } from '../../../lib/teacherSelectors'
-import type { TeacherHomeSubmission } from '../../../lib/teacher'
+import type { TeacherHomeAssignment, TeacherHomeSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
-import { useTeacherHome } from '../../../lib/useTeacher'
-import { InitialAvatar, LoadingState, PageHeading, StatusPill } from '../components/TeacherUi'
+import { useTeacherGoogleConnection, useTeacherHome } from '../../../lib/useTeacher'
+import { InitialAvatar, LoadingState, StatusPill } from '../components/TeacherUi'
 
 export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
   const home = useTeacherHome()
+  const connection = useTeacherGoogleConnection()
+  const { session } = useAuth()
+  const settings = useSettings()
+
   if (home.isPending) return <LoadingState label="Loading your teaching overview..." />
-  if (home.isError || !home.data) return <Empty title="Your overview could not load" hint="Refresh the page to reload the local teacher data." />
+
+  if (home.isError || !home.data) {
+    return (
+      <Card className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="mt-0.5 size-5 shrink-0 text-refutes" />
+          <div>
+            <h1 className="text-[14px] font-semibold">Your overview could not load</h1>
+            <p className="mt-1 text-[12px] leading-[18px] text-ink-muted">The teacher dashboard could not reach its data service.</p>
+          </div>
+        </div>
+        <Button type="button" onClick={() => void home.refetch()}>Try again</Button>
+      </Card>
+    )
+  }
 
   const data = home.data
-  return (
-    <div className="space-y-8">
-      <PageHeading
-        eyebrow="Teacher home"
-        title={`Good morning, ${data.user}`}
-        description={`${data.course} · ${data.checkedEssays} of ${data.totalEssays} essays checked · ${data.citationsNeedingAttention} cite sources that do not say that.`}
-      />
+  const submissions = data.submissions.filter((submission) => submission.state === 'submitted')
+  const reviewCount = data.reviewQueueCount ?? submissions.length
+  const assignments = data.dueSoon ?? []
+  const metadata = session?.user.user_metadata ?? {}
+  const authName = [metadata.full_name, metadata.name, metadata.display_name]
+    .find((value) => typeof value === 'string' && value.trim()) as string | undefined
+  const emailName = session?.user.email?.split('@')[0]?.replace(/[._-]+/g, ' ')
+  const teacherName = authName?.trim() || (settings.displayName !== 'Alex' ? settings.displayName : '') || emailName || settings.displayName
 
-      <section className="grid gap-4 md:grid-cols-3" aria-label="Quick actions">
-        <QuickAction icon={FileCheck2} title="Check student essays" detail="Review citations and prepare feedback." onClick={() => onOpen(homeRouteForAction('check-essays', data))} />
-        <QuickAction icon={Sparkles} title="Make reading questions" detail="Turn a paper into a class worksheet." onClick={() => onOpen(homeRouteForAction('reading-questions', data))} />
-        <QuickAction icon={LibraryBig} title="Class library" detail="See the sources your classes are using." />
+  const openEssayCheck = (submission?: TeacherHomeSubmission) => {
+    const target = submission ?? submissions[0]
+    if (target?.courseId) {
+      onOpen({ screen: 'assignment-detail', courseId: target.courseId, assignmentId: target.assignmentId })
+      return
+    }
+    const dueAssignment = assignments[0]
+    if (dueAssignment) {
+      onOpen({ screen: 'assignment-detail', courseId: dueAssignment.courseId, assignmentId: dueAssignment.id })
+      return
+    }
+    if (data.courseId && data.assignmentId) {
+      onOpen({ screen: 'assignment-detail', courseId: data.courseId, assignmentId: data.assignmentId })
+      return
+    }
+    onOpen({ screen: 'classes' })
+  }
+
+  const openReviewQueue = () => {
+    const submission = submissions[0]
+    if (submission?.courseId) {
+      onOpen({ screen: 'essay-check', courseId: submission.courseId, assignmentId: submission.assignmentId, studentId: submission.studentId })
+    } else if (submission) {
+      openEssayCheck(submission)
+    } else {
+      onOpen({ screen: 'classes' })
+    }
+  }
+
+  return (
+    <div className="space-y-[22px]">
+      <header className="space-y-1">
+        <h1 className="font-serif text-[22px] font-semibold leading-[30px] tracking-tight text-ink">Good morning, {teacherName}</h1>
+        <p className="text-[12px] leading-[18px] text-ink-muted">
+          {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review · {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
+        </p>
+      </header>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Quick actions">
+        <QuickAction icon={FileCheck2} title="Check student essays" detail="Review submitted work and citation checks" onClick={() => openEssayCheck()} />
+        <QuickAction icon={ListChecks} title="Review queue" detail={`${reviewCount} ${reviewCount === 1 ? 'submission' : 'submissions'} waiting for review`} onClick={openReviewQueue} />
+        <QuickAction icon={CalendarClock} title="Due soon" detail={`${assignments.length} assignments · next 7 days and overdue`} onClick={() => assignments[0] ? onOpen({ screen: 'assignment-detail', courseId: assignments[0].courseId, assignmentId: assignments[0].id }) : onOpen({ screen: 'classes' })} />
+        <QuickAction icon={BookOpen} title="Make reading questions" detail="Create questions from a research paper" onClick={() => onOpen(homeRouteForAction('reading-questions'))} />
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card className="p-0">
-          <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5 sm:p-6"><div><h2 className="font-serif text-2xl font-semibold">Essays to review</h2><p className="mt-1 text-sm text-ink-muted">{data.assignment} · a local review queue</p></div><StatusPill label={`${data.citationsNeedingAttention} need attention`} tone="warning" /></div>
+      <section className="grid items-start gap-4 xl:grid-cols-2">
+        <Card className="overflow-hidden p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
+            <h2 className="text-[14px] font-semibold">Review queue</h2>
+            <span className="text-[11px] text-accent">{reviewCount} waiting</span>
+          </div>
           <div className="divide-y divide-border-subtle">
-            {data.submissions.length === 0 ? <div className="p-6"><Empty title="Nothing to review" hint="Submitted essays will appear here." /></div> : data.submissions.map((submission) => <ReviewRow key={submission.id} submission={submission} onOpen={() => onOpen(submission.state === 'submitted' ? { screen: 'essay-check', courseId: submissionCourse(submission, data), assignmentId: data.assignmentId, studentId: submission.studentId } : { screen: 'assignment-detail', courseId: submissionCourse(submission, data), assignmentId: data.assignmentId })} />)}
+            {submissions.length === 0
+              ? <div className="p-5"><Empty title="Nothing to review" hint="New submitted essays will appear here." /></div>
+              : submissions.map((submission) => (
+                <ReviewRow
+                  key={submission.id}
+                  submission={submission}
+                  onOpen={() => submission.courseId
+                    ? onOpen({ screen: 'essay-check', courseId: submission.courseId, assignmentId: submission.assignmentId, studentId: submission.studentId })
+                    : openEssayCheck(submission)}
+                />
+              ))}
           </div>
-          <div className="border-t border-border-subtle p-5 sm:p-6"><Button type="button" variant="ghost" onClick={() => onOpen({ screen: 'assignment-detail', courseId: data.courseId, assignmentId: data.assignmentId })}>Open assignment <ChevronRight className="size-4" /></Button></div>
         </Card>
 
-        <Card>
-          <div className="flex items-start justify-between gap-3"><div><h2 className="font-serif text-2xl font-semibold">Class library</h2><p className="mt-1 text-sm text-ink-muted">{data.library.visibility}</p></div><BookOpen className="size-5 text-accent" /></div>
-          <p className="mt-5 text-3xl font-semibold text-ink">{data.library.paperCount}<span className="ml-2 text-sm font-normal text-ink-muted">papers available</span></p>
-          <div className="mt-5 space-y-3">
-            {data.library.papers.map((paper) => <div key={paper.id} className="flex w-full items-center gap-3 rounded-lg p-2"><span className="flex size-8 items-center justify-center rounded-md bg-canvas text-accent"><FileText className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{paper.title}</span><span className="mt-0.5 block text-xs text-ink-muted">{paper.citation} · {paper.note}</span></span></div>)}
+        <Card className="overflow-hidden p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
+            <h2 className="text-[14px] font-semibold">Due soon</h2>
+            <span className="text-[11px] text-accent">Next 7 days and overdue</span>
           </div>
-          <p className="mt-4 text-xs leading-5 text-ink-muted">The library card is informational in this frontend; no separate class-note page is created.</p>
+          <div className="divide-y divide-border-subtle">
+            {assignments.length === 0
+              ? <div className="p-5"><Empty title="No upcoming assignments" hint="Assignments due in the next 7 days or awaiting work after their due date will appear here." /></div>
+              : assignments.map((assignment) => (
+                <DueSoonRow
+                  key={`${assignment.courseId}-${assignment.id}`}
+                  assignment={assignment}
+                  onOpen={() => onOpen({ screen: 'assignment-detail', courseId: assignment.courseId, assignmentId: assignment.id })}
+                />
+              ))}
+          </div>
         </Card>
-      </div>
+      </section>
 
-      {data.mostMisusedSource && <Card className="border-insufficient bg-insufficient-soft/35"><div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.1em] text-insufficient">Most misused source</p><h2 className="mt-2 font-serif text-2xl font-semibold">{data.mostMisusedSource.title}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{data.mostMisusedSource.detail}</p></div><span className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-accent">Turn into a class note <ArrowUpRight className="size-4" /></span></div></Card>}
+      <ClassroomSync
+        connected={connection.data?.connected ?? false}
+        email={connection.data?.email ?? null}
+        lastSyncedAt={connection.data?.sync?.lastSyncedAt ?? null}
+        syncError={connection.data?.sync?.error ?? null}
+        loading={connection.isPending}
+        failed={connection.isError}
+        onRetry={() => void connection.refetch()}
+        onOpenClasses={() => onOpen({ screen: 'classes' })}
+      />
     </div>
   )
 }
 
-function QuickAction({ icon: Icon, title, detail, onClick }: { icon: typeof FileCheck2; title: string; detail: string; onClick?: () => void }) {
-  const content = <><span className="flex size-10 items-center justify-center rounded-lg bg-accent-soft text-accent"><Icon className="size-5" /></span><span className="mt-5 block font-serif text-xl font-semibold">{title}</span><span className="mt-1 block text-sm leading-6 text-ink-muted">{detail}</span><span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-accent">{onClick ? <>Open <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" /></> : 'Shared reference'}</span></>
-  return onClick ? <button type="button" onClick={onClick} className="group rounded-xl border border-border-subtle bg-surface p-5 text-left transition-shadow hover:border-accent hover:shadow-md">{content}</button> : <div className="rounded-xl border border-border-subtle bg-surface p-5">{content}</div>
+function QuickAction({ icon: Icon, title, detail, onClick }: { icon: typeof FileCheck2; title: string; detail: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="min-h-[107px] rounded-[12px] border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+      <Icon className="size-4 text-accent" />
+      <span className="mt-2 block text-[14px] font-medium text-ink">{title}</span>
+      <span className="mt-2 block text-[12px] leading-[18px] text-ink-muted">{detail}</span>
+    </button>
+  )
 }
 
 function ReviewRow({ submission, onOpen }: { submission: TeacherHomeSubmission; onOpen: () => void }) {
-  const tone = submission.standing === 'supports' ? 'success' : submission.standing === 'refutes' ? 'danger' : submission.standing === 'insufficient' ? 'warning' : 'neutral'
-  return <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 p-5 text-left hover:bg-canvas sm:p-6"><InitialAvatar initials={submission.initial} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{submission.studentName}</span><span className="mt-1 block truncate text-xs text-ink-muted">{submission.fileName} · {submission.summary}</span></span><span className="hidden sm:block"><StatusPill label={submission.standing === 'refutes' ? 'Needs review' : submission.standing === 'supports' ? 'Backed' : submission.standing === 'insufficient' ? 'Silent' : 'Not checked'} tone={tone} /></span><ChevronRight className="size-4 shrink-0 text-ink-muted" /></button>
+  const label = submission.reviewStatus === 'analysis-ready' ? 'Analysis on file' : 'Not checked'
+  const tone = submission.reviewStatus === 'analysis-ready' ? 'success' : 'neutral'
+  const details = [submission.courseName, submission.assignmentTitle, submission.reviewStatus === 'analysis-ready' ? 'Analysis on file' : 'Not checked']
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <button type="button" onClick={onOpen} className="flex min-h-[56px] w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent">
+      <InitialAvatar initials={submission.initial} className="size-7 text-[10px]" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12px] font-medium text-ink">{submission.studentName}</span>
+        <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{details}</span>
+      </span>
+      <span className="hidden sm:block"><StatusPill label={label} tone={tone} /></span>
+      <ChevronRight className="size-3.5 shrink-0 text-ink-muted" />
+    </button>
+  )
 }
 
-function submissionCourse(_submission: TeacherHomeSubmission, home: { courseId: string }): string {
-  return home.courseId
+function DueSoonRow({ assignment, onOpen }: { assignment: TeacherHomeAssignment; onOpen: () => void }) {
+  const date = assignment.dueAt ? new Date(assignment.dueAt) : null
+  const dueLabel = date && !Number.isNaN(date.valueOf())
+    ? `${assignment.overdue ? 'Overdue · ' : 'Due '}${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)}`
+    : 'Due date unavailable'
+  const detail = `${assignment.courseName} · ${assignment.pendingReviewCount} to review · ${assignment.missingCount} missing`
+  return (
+    <button type="button" onClick={onOpen} className="flex min-h-[62px] w-full items-center gap-3 px-4 py-3 text-left hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent">
+      <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${assignment.overdue ? 'bg-refutes-soft text-refutes' : 'bg-accent-soft text-accent'}`}>
+        <CalendarClock className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12px] font-medium text-ink">{assignment.title}</span>
+        <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{detail}</span>
+      </span>
+      <span className={`shrink-0 text-[11px] font-medium ${assignment.overdue ? 'text-refutes' : 'text-ink-muted'}`}>{dueLabel}</span>
+      <ChevronRight className="size-3.5 shrink-0 text-ink-muted" />
+    </button>
+  )
+}
+
+function ClassroomSync({
+  connected,
+  email,
+  lastSyncedAt,
+  syncError,
+  loading,
+  failed,
+  onRetry,
+  onOpenClasses,
+}: {
+  connected: boolean
+  email: string | null
+  lastSyncedAt: string | null
+  syncError: string | null
+  loading: boolean
+  failed: boolean
+  onRetry: () => void
+  onOpenClasses: () => void
+}) {
+  return (
+    <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <GraduationCap className="mt-0.5 size-5 shrink-0 text-accent" />
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[14px] font-semibold">Google Classroom sync</h2>
+            {connected && <StatusPill label="Connected" tone="success" />}
+          </div>
+          <p className="mt-1 text-[12px] leading-[18px] text-ink-muted">
+            {loading ? 'Checking your Classroom connection…'
+              : failed ? 'Connection status could not load.'
+                : connected ? [email, lastSyncedAt ? `Last synced ${formatSyncTime(lastSyncedAt)}` : 'No sync recorded yet', syncError ? `Sync issue: ${syncError}` : ''].filter(Boolean).join(' · ')
+                  : 'Connect an account to bring your Classroom courses into SecretSource.'}
+          </p>
+        </div>
+      </div>
+      {failed
+        ? <Button type="button" variant="ghost" onClick={onRetry}>Retry status</Button>
+        : <Button type="button" variant={connected ? 'ghost' : 'solid'} onClick={onOpenClasses}>
+          {connected ? <>View classes <ArrowUpRight className="size-3.5" /></> : 'Connect Google Classroom'}
+        </Button>}
+    </Card>
+  )
+}
+
+function formatSyncTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }

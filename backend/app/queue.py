@@ -54,7 +54,8 @@ def pubsub_client() -> redis.asyncio.Redis:
 
 
 def run_analysis_job(
-    analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict] | None = None
+    analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict] | None = None,
+    started: str | None = None,
 ) -> dict:
     """What a worker process actually runs for one analysis (RQ jobs are sync, so this
     wraps the async pipeline in its own event loop via asyncio.run)."""
@@ -71,6 +72,8 @@ def run_analysis_job(
 
             analysis = main._new_analysis(analysis_id, paper, owner)
             analysis["stages"] = list(stages or [])
+            if started:
+                analysis["started"] = started
             main.analyses[analysis_id] = analysis
             main.streams[analysis_id] = asyncio.Queue()
 
@@ -118,6 +121,8 @@ def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:
         paper, owner = job.args[1], job.args[3]
         analysis = main._new_analysis(analysis_id, paper, owner)
         analysis["stages"] = list(job.args[4] if len(job.args) > 4 else job.kwargs.get("stages") or [])
+        if len(job.args) > 5 and job.args[5]:
+            analysis["started"] = job.args[5]
 
     if analysis["status"] == "running":
         _, exc_value, _ = exc_info
@@ -132,9 +137,16 @@ def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:
             logger.warning("publishing failed-job snapshot for %s failed: %s", analysis_id, error)
 
 
-def enqueue_analysis(analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict]):
+def enqueue_analysis(
+    analysis_id: str,
+    paper: str,
+    verify: bool,
+    owner: str | None,
+    stages: list[dict],
+    started: str | None = None,
+):
     return analysis_queue().enqueue(
-        run_analysis_job, analysis_id, paper, verify, owner, stages,
+        run_analysis_job, analysis_id, paper, verify, owner, stages, started,
         job_id=analysis_id, job_timeout=JOB_TIMEOUT, on_failure=Callback(_on_analysis_job_failure),
     )
 

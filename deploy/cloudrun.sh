@@ -98,8 +98,11 @@ if [ "$VISION" = "1" ]; then
         --max-instances 1 --concurrency 4 --timeout 600
         --startup-probe "tcpSocket.port=8894,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1")
     if [ "$COLPALI_GPU" = "1" ]; then
+        # Manual scaling or a service-level minimum set in the Console overrides the
+        # revision's min 0 and survives a plain redeploy, billing the GPU all day.
+        # deploy/gpu-guard.sh also resets it every hour.
         colpali_flags+=(--gpu 1 --gpu-type "$GPU_TYPE" --no-gpu-zonal-redundancy
-            --cpu 8 --memory 32Gi --no-cpu-throttling)
+            --cpu 8 --memory 32Gi --no-cpu-throttling --scaling auto --min 0)
     else
         colpali_flags+=(--cpu 4 --memory 16Gi)
     fi
@@ -138,7 +141,7 @@ vllm_args_joined=$(
 gcloud run deploy vllm --image vllm/vllm-openai:v0.26.0 --region "$REGION" --quiet \
     --port 8000 --gpu 1 --gpu-type "$GPU_TYPE" --no-gpu-zonal-redundancy \
     --cpu "$GPU_CPU" --memory "$GPU_MEM" --no-cpu-throttling \
-    --max-instances 1 --min-instances "$MIN_INSTANCES" --concurrency 8 --timeout 900 \
+    --max-instances 1 --min-instances "$MIN_INSTANCES" --scaling auto --concurrency 8 --timeout 900 \
     --allow-unauthenticated \
     --startup-probe "tcpSocket.port=8000,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1" \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \

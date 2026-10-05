@@ -385,18 +385,26 @@ describe('roles group keyboard travel', () => {
   })
 })
 
+/** A gateway that answers DELETE /user/data and records which scope each call asked for. */
+function deleteGateway(answer: { deleted: number; skipped: number }) {
+  const deletes: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE' && url.includes('/api/user/data')) {
+        deletes.push(url.slice(url.indexOf('/api/user/data')))
+        return Promise.resolve(new Response(JSON.stringify(answer), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+  )
+  return deletes
+}
+
 describe('researcher Delete all', () => {
-  test('reports papers still being checked that the gateway kept', async () => {
+  test('reports papers still being checked that the gateway kept, and deletes only the Researcher scope', async () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-        if (url.endsWith('/api/user/data') && init?.method === 'DELETE') {
-          return Promise.resolve(new Response(JSON.stringify({ deleted: 2, skipped: 1 }), { status: 200 }))
-        }
-        return Promise.resolve(new Response('{}', { status: 200 }))
-      }),
-    )
+    const deletes = deleteGateway({ deleted: 2, skipped: 1 })
     renderModal('researcher')
     fireEvent.click(screen.getByRole('tab', { name: 'Your data' }))
     fireEvent.click(screen.getByRole('button', { name: 'Delete all' }))
@@ -404,5 +412,33 @@ describe('researcher Delete all', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       '2 papers deleted. 1 paper still being checked was kept; delete again once it finishes.',
     )
+    // PR #291 review: the Researcher's Delete all must not take the Author's drafts with it.
+    expect(deletes).toEqual(['/api/user/data?scope=researcher'])
+    expect(vi.mocked(window.confirm).mock.calls[0][0]).toMatch(/^Delete all uploaded papers\?/)
+  })
+})
+
+describe('author Delete all', () => {
+  test('deletes only the Author scope, so the Researcher papers stay, and reports checks still running', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const deletes = deleteGateway({ deleted: 3, skipped: 1 })
+    renderModal('writer')
+    fireEvent.click(screen.getByRole('tab', { name: 'Your data' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Every draft was deleted. 1 check still running was kept; delete again once it finishes.',
+    )
+    expect(deletes).toEqual(['/api/user/data?scope=author'])
+    expect(vi.mocked(window.confirm).mock.calls[0][0]).toMatch(/^Delete all drafts\?/)
+  })
+
+  test('a declined confirm sends nothing', () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const deletes = deleteGateway({ deleted: 0, skipped: 0 })
+    renderModal('writer')
+    fireEvent.click(screen.getByRole('tab', { name: 'Your data' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all' }))
+    expect(deletes).toEqual([])
   })
 })

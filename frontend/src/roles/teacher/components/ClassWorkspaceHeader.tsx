@@ -1,47 +1,40 @@
 import { ExternalLink, RefreshCw } from 'lucide-react'
 
-import { Button } from '../../../components/ui'
 import type { TeacherWorkspace } from '../../../lib/teacher'
 import type { WorkspaceTab } from '../../../lib/teacherSelectors'
+import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import { Breadcrumbs, WorkspaceTabs } from './TeacherUi'
 
 export function ClassWorkspaceHeader({
   workspace,
   activeTab,
   onTabChange,
+  onNavigate,
   onRefresh,
   refreshing = false,
 }: {
   workspace: TeacherWorkspace
   activeTab: WorkspaceTab
   onTabChange: (tab: WorkspaceTab) => void
+  onNavigate: (route: TeacherRoute) => void
   onRefresh: () => void
   refreshing?: boolean
 }) {
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Classes' }, { label: workspace.course.name }]} />
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-serif text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{workspace.course.name}</h1>
-            <span className="rounded-full bg-accent-soft px-2.5 py-1 text-xs font-semibold text-accent">{workspace.course.section}</span>
-          </div>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-ink-muted">{workspace.description}</p>
+      <Breadcrumbs items={[{ label: 'Classes', onClick: () => onNavigate({ screen: 'classes' }) }, { label: `${workspace.course.name} · ${workspace.course.section}` }]} />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-[29px] font-semibold leading-[41px] text-ink">{workspace.course.name} · {workspace.course.section}</h1>
+          <p className="text-[11px] leading-[15px] text-ink-muted">{workspace.course.subject} · Google Classroom mirror</p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <a
-            href="https://classroom.google.com"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-sm font-medium text-ink hover:border-accent hover:text-accent"
-          >
-            Open in Classroom <ExternalLink className="size-3.5" />
+        <div className="flex shrink-0 items-center gap-1">
+          <a href="https://classroom.google.com" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-muted hover:bg-accent-soft hover:text-accent">
+            Open in Classroom <ExternalLink className="size-3" />
           </a>
-          <Button type="button" variant="ghost" onClick={onRefresh} disabled={refreshing}>
-            <RefreshCw className={refreshing ? 'size-4 animate-spin' : 'size-4'} />
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </Button>
+          <button type="button" onClick={onRefresh} disabled={refreshing} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-muted hover:bg-accent-soft hover:text-accent disabled:opacity-60">
+            <RefreshCw className={refreshing ? 'size-3.5 animate-spin' : 'size-3.5'} />{refreshing ? 'Syncing Classroom' : 'Refresh'}
+          </button>
         </div>
       </div>
       <WorkspaceTabs active={activeTab} onChange={onTabChange} />

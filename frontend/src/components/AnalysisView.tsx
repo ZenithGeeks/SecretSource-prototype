@@ -37,6 +37,8 @@ export function AnalysisView({
   onCurrentSection,
   presentation = 'researcher',
   openPaperOnLoad = false,
+  paperLabel,
+  onTeacherFeedback,
   renderClaimActions,
 }: {
   id: string | null
@@ -53,6 +55,10 @@ export function AnalysisView({
   presentation?: 'researcher' | 'teacher'
   /** Automatically show the submitted PDF when a student analysis becomes available. */
   openPaperOnLoad?: boolean
+  /** Teacher's roster label for the student's submitted file. */
+  paperLabel?: string
+  /** Opens the teacher feedback composer below the claim review. */
+  onTeacherFeedback?: () => void
   /** Add teacher-only review controls inside the shared expanded claim card. */
   renderClaimActions?: (claim: NonNullable<Analysis['claims']>[number], index: number) => ReactNode
 }) {
@@ -76,8 +82,20 @@ export function AnalysisView({
   const sectionTarget = jump && file && jump.at > opened.at
     ? { paper: file, label: `Section ${jump.n} · ${jump.title}`, source: null, page: jump.page, section: jump.n }
     : null
+  const initialTeacherClaim = presentation === 'teacher' ? standings[0] : undefined
   const autoPaperTarget = id && file && openPaperOnLoad && paperDismissedFor !== id
-    ? { paper: file, label: 'The paper', source: null, page: 1 }
+    ? initialTeacherClaim?.claim.source
+      ? {
+          paper: file,
+          label: `Claim ${initialTeacherClaim.index + 1} in this paper`,
+          quote: initialTeacherClaim.claim.sentence,
+          source: initialTeacherClaim.claim.source,
+          page: initialTeacherClaim.claim.source.page,
+          verdict: ['supports', 'refutes', 'insufficient'].includes(initialTeacherClaim.standing)
+            ? initialTeacherClaim.standing as 'supports' | 'refutes' | 'insufficient'
+            : undefined,
+        }
+      : { paper: file, label: 'The paper', source: null, page: 1 }
     : null
   const target: Target | null = sectionTarget ?? opened.target ?? autoPaperTarget
 
@@ -127,7 +145,7 @@ export function AnalysisView({
 
   return (
     <>
-      <AnalysisProgress stages={analysis.data.stages} claims={analysis.data.claims} status={analysis.data.status} />
+      {(presentation !== 'teacher' || running) && <AnalysisProgress stages={analysis.data.stages} claims={analysis.data.claims} status={analysis.data.status} />}
 
       {analysis.data.status === 'error' && (
         <Card className="border-refutes text-refutes">{analysis.data.message}</Card>
@@ -163,7 +181,9 @@ export function AnalysisView({
               filter={filter}
               onFilter={setFilter}
               paper={file}
+              paperLabel={presentation === 'teacher' ? paperLabel : undefined}
               teacherMode={presentation === 'teacher'}
+              onTeacherFeedback={presentation === 'teacher' ? onTeacherFeedback : undefined}
               // The paper itself, from page 1, in the same viewer a claim opens: reading it
               // here keeps the claims in view, where a download or a new tab would not.
               onOpenPaper={file ? () => setTarget({ paper: file, label: 'The paper', source: null, page: 1 }) : undefined}

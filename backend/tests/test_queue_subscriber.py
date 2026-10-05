@@ -234,3 +234,32 @@ def test_event_stream_sends_a_keep_alive_while_idle(monkeypatch):
     assert first.startswith("data: ")
     assert second == ": keep-alive\n\n"
     assert all(chunk == ": keep-alive\n\n" for chunk in rest)  # then it ends at the None
+
+
+@pytest.mark.parametrize("kind", ["check", "draft-check"])
+def test_check_streams_send_the_same_keep_alive(monkeypatch, kind):
+    """A single-claim check and an Author draft check read the stream analyses do, so a long
+    verification with nothing to report does not get its stream closed by a proxy either."""
+    from app.author import router as author
+
+    monkeypatch.setattr(main, "HEARTBEAT_SECONDS", 0.05)
+    main.analyses["c1"] = {
+        "id": "c1", "kind": kind, "owner": None, "status": "running", "stages": [{"stage": "resolving"}],
+    }
+    main.streams["c1"] = asyncio.Queue()
+    main.streams["c1"].put_nowait({"stage": "resolving"})
+    events = main.check_events if kind == "check" else author.check_events
+
+    async def scenario():
+        response = await events("c1", user=None)
+        body = response.body_iterator
+        first = await body.__anext__()  # the replayed stage
+        second = await body.__anext__()  # nothing new: a keep-alive comment
+        main.streams["c1"].put_nowait(None)
+        rest = [chunk async for chunk in body]
+        return first, second, rest
+
+    first, second, rest = asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+    assert first.startswith("data: ")
+    assert second == ": keep-alive\n\n"
+    assert all(chunk == ": keep-alive\n\n" for chunk in rest)

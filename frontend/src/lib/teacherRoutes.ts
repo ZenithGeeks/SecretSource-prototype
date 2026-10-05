@@ -3,6 +3,7 @@
 export type TeacherScreen =
   | 'home'
   | 'classes'
+  | 'history'
   | 'add-class-connect'
   | 'add-class-course'
   | 'add-class-review'
@@ -12,9 +13,9 @@ export type TeacherScreen =
   | 'assignment-detail'
   | 'essay-check'
   | 'reading-questions'
-  | 'graph'
 
-export type TeacherNavKey = 'home' | 'classes' | 'library' | 'graph'
+export type TeacherNavKey = 'home' | 'classes' | 'history' | 'settings'
+export type TeacherRouteNavKey = Exclude<TeacherNavKey, 'settings'>
 
 export type TeacherRoute = {
   screen: TeacherScreen
@@ -24,11 +25,12 @@ export type TeacherRoute = {
   paperId?: string
 }
 
-export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'library', 'graph']
+export const TEACHER_NAV_KEYS: readonly TeacherNavKey[] = ['home', 'classes', 'history', 'settings']
 
 const SCREENS: readonly TeacherScreen[] = [
   'home',
   'classes',
+  'history',
   'add-class-connect',
   'add-class-course',
   'add-class-review',
@@ -38,7 +40,6 @@ const SCREENS: readonly TeacherScreen[] = [
   'assignment-detail',
   'essay-check',
   'reading-questions',
-  'graph',
 ]
 
 function isTeacherScreen(value: string | null): value is TeacherScreen {
@@ -128,6 +129,17 @@ export function parseTeacherRoute(input: string): TeacherRoute {
         if (studentId) route.studentId = studentId
         return route
       }
+    case 'history':
+      {
+        const route: TeacherRoute = { screen }
+        const courseId = valueOrUndefined(params.get('courseId'))
+        const assignmentId = valueOrUndefined(params.get('assignmentId'))
+        const studentId = valueOrUndefined(params.get('studentId'))
+        if (courseId) route.courseId = courseId
+        if (assignmentId) route.assignmentId = assignmentId
+        if (studentId) route.studentId = studentId
+        return route
+      }
     case 'essay-check':
       {
         const route: TeacherRoute = { screen }
@@ -158,6 +170,8 @@ function consumedContext(screen: TeacherScreen): (keyof Omit<TeacherRoute, 'scre
       return ['courseId', 'assignmentId', 'studentId']
     case 'essay-check':
       return ['courseId', 'assignmentId', 'studentId']
+    case 'history':
+      return ['courseId', 'assignmentId', 'studentId']
     case 'reading-questions':
       return ['paperId']
     default:
@@ -183,11 +197,11 @@ export function serializeTeacherRoute(route: TeacherRoute, search?: string): str
   return query ? `?${query}` : ''
 }
 
-export function teacherRouteForNav(key: TeacherNavKey): TeacherRoute {
+export function teacherRouteForNav(key: TeacherRouteNavKey): TeacherRoute {
   switch (key) {
-    case 'library':
-      return { screen: 'reading-questions' }
-    default:
+    case 'home':
+    case 'classes':
+    case 'history':
       return { screen: key }
   }
 }
@@ -198,10 +212,10 @@ export function teacherNavForScreen(screen: TeacherScreen): TeacherNavKey | null
       return 'home'
     case 'classes':
       return 'classes'
+    case 'history':
+      return 'history'
     case 'reading-questions':
-      return 'library'
-    case 'graph':
-      return 'graph'
+      return null
     default:
       return screen === 'add-class-connect' || screen === 'add-class-course' || screen === 'add-class-review'
         ? 'classes'

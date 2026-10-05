@@ -6,6 +6,8 @@
 
 import { request } from './api'
 
+export type DeleteScope = 'researcher' | 'author'
+
 export const accountApi = {
   getPreferences: () => request<Record<string, unknown>>('/user/preferences'),
 
@@ -24,9 +26,12 @@ export const accountApi = {
 
   removeAvatar: () => request<{ deleted: true }>('/user/avatar', { method: 'DELETE' }),
 
-  /** Deletes every analysis (and researcher project) the signed-in user owns. Analyses still
-   * running are left to finish and counted in `skipped`. Writer and teacher data has no
-   * backend store yet (writerStore / teacher mocks are local-only), so their own "Delete all"
-   * clears that local store instead of calling this. */
-  deleteAllData: () => request<{ deleted: number; skipped: number }>('/user/data', { method: 'DELETE' }),
+  /** Deletes what the signed-in user owns in one role: `researcher` is the paper analyses and
+   * researcher projects, `author` the draft checks and the Author role's drafts, projects and
+   * saved sources. Each role's Settings tab passes its own scope, so clearing one never touches
+   * the other (PR #291 review). Analyses (and draft checks) still running are left to finish
+   * and counted in `skipped`. Teacher data has no backend store yet (its mocks are local-only),
+   * so its own "Delete all" clears that local store instead of calling this. */
+  deleteAllData: (scope: DeleteScope) =>
+    request<{ deleted: number; skipped: number }>(`/user/data?scope=${scope}`, { method: 'DELETE' }),
 }

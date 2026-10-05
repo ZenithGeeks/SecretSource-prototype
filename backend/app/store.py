@@ -71,6 +71,20 @@ CREATE TABLE IF NOT EXISTS projects (
 
 # One row per user (owner "" when login is off, the same shared space analyses/projects use
 # for their own NULL — a plain TEXT key here instead, see _pref_key below).
+# The Author role's own records (backend/app/author/). One blob row per project, draft,
+# saved source; every row carries its owner so a user only ever sees their own. Draft checks
+# live in `analyses` with kind "draft-check" (the same discriminator SCRUM-236's single
+# checks use), so they get the SSE stream, restart recovery and delete-all for free.
+AUTHOR_TABLES = ("author_projects", "author_drafts", "author_sources")
+
+AUTHOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS {table} (
+    id    TEXT PRIMARY KEY,
+    owner TEXT,
+    data  TEXT NOT NULL
+)
+"""
+
 PREFERENCES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS preferences (
     owner TEXT PRIMARY KEY,
@@ -102,6 +116,8 @@ def _connect() -> sqlite3.Connection:
         _db.execute(CACHE_SCHEMA)
         _db.execute(PROJECTS_SCHEMA)
         _db.execute(PREFERENCES_SCHEMA)
+        for table in AUTHOR_TABLES:
+            _db.execute(AUTHOR_SCHEMA.format(table=table))
         _db_path = path
     return _db
 
@@ -142,12 +158,16 @@ def load(analysis_id: str) -> dict | None:
 def load_all() -> dict[str, dict]:
     """Every stored analysis, oldest first, keyed by id."""
     if _use_supabase():
-        rows = _supabase().table("analyses").select("data").order("started").execute().data
+        rows = _supabase().table("analyses").select("started,data").order("started").execute().data
         analyses = [row["data"] for row in rows]
+        for row, analysis in zip(rows, analyses, strict=True):
+            analysis.setdefault("started", row.get("started"))
         return {analysis["id"]: analysis for analysis in analyses}
     with _sqlite() as database:
-        rows = database.execute("SELECT data FROM analyses ORDER BY started").fetchall()
+        rows = database.execute("SELECT started, data FROM analyses ORDER BY started").fetchall()
     analyses = [json.loads(row["data"]) for row in rows]
+    for row, analysis in zip(rows, analyses, strict=True):
+        analysis.setdefault("started", row["started"])
     return {analysis["id"]: analysis for analysis in analyses}
 
 
@@ -287,3 +307,78 @@ def load_preferences(owner: str | None) -> dict | None:
         row = database.execute("SELECT data FROM preferences WHERE owner = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
 
+
+# --- the Author role's rows: projects, drafts and saved sources, one JSON blob each ---
+
+
+def _author_table(table: str) -> str:
+    if table not in AUTHOR_TABLES:
+        raise ValueError(f"not an author table: {table}")
+    return table
+
+
+def save_author_row(table: str, row: dict) -> None:
+    """Insert or replace one project, draft or source. `owner` is the user id, or None when
+    login is off."""
+    table = _author_table(table)
+    if _use_supabase():
+        _supabase().table(table).upsert(
+            {"id": row["id"], "owner": row.get("owner"), "data": row}
+        ).execute()
+        return
+    with _sqlite() as database:
+        database.execute(
+            f"INSERT INTO {table} (id, owner, data) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, data = excluded.data",
+            (row["id"], row.get("owner"), json.dumps(row)),
+        )
+        database.commit()
+
+
+def load_author_rows(table: str, owner: str | None) -> list[dict]:
+    """Every row of one owner, in insertion order. None means the rows made while login was off."""
+    table = _author_table(table)
+    if _use_supabase():
+        query = _supabase().table(table).select("data")
+        query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
+        return [row["data"] for row in query.execute().data]
+    with _sqlite() as database:
+        rows = database.execute(
+            f"SELECT data FROM {table} WHERE owner IS ? ORDER BY rowid", (owner,)
+        ).fetchall()
+    return [json.loads(row["data"]) for row in rows]
+
+
+def load_author_row(table: str, row_id: str) -> dict | None:
+    """One row by id, whoever owns it: the caller checks the owner (a 404 either way)."""
+    table = _author_table(table)
+    if _use_supabase():
+        rows = _supabase().table(table).select("data").eq("id", row_id).limit(1).execute().data
+        return rows[0]["data"] if rows else None
+    with _sqlite() as database:
+        row = database.execute(f"SELECT data FROM {table} WHERE id = ?", (row_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def delete_author_row(table: str, row_id: str) -> bool:
+    table = _author_table(table)
+    if _use_supabase():
+        deleted = _supabase().table(table).delete().eq("id", row_id).execute().data
+        return bool(deleted)
+    with _sqlite() as database:
+        deleted = database.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,)).rowcount
+        database.commit()
+    return bool(deleted)
+
+
+def delete_author_rows(owner: str | None) -> None:
+    """Every author row of one owner, for Settings → Your data → Delete all."""
+    for table in AUTHOR_TABLES:
+        if _use_supabase():
+            query = _supabase().table(table).delete()
+            query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
+            query.execute()
+            continue
+        with _sqlite() as database:
+            database.execute(f"DELETE FROM {table} WHERE owner IS ?", (owner,))
+            database.commit()

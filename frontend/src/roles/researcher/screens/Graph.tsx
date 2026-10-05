@@ -554,7 +554,10 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
   )
 }
 
-function GraphCanvas() {
+/** What a role shows in place of an empty canvas; a role that passes none gets the canvas. */
+export type GraphEmptyMessage = { title: string; hint: string }
+
+function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
   const { data: graph, isError } = useKnowledgeGraph()
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
@@ -715,6 +718,7 @@ function GraphCanvas() {
 
   if (isError) return <Empty title="The graph could not load" hint="Refresh the page to try again." />
   if (!graph) return <LoadingScreen label="Loading the graph…" />
+  if (emptyMessage && graph.nodes.length === 0) return <Empty title={emptyMessage.title} hint={emptyMessage.hint} />
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =
@@ -933,13 +937,17 @@ function GraphCanvas() {
 /** The Graph tab. It hosts two views behind one toggle: the knowledge graph (GraphCanvas,
  * unchanged) and Field Consensus, which asks one claim across the whole library. Field consensus
  * used to be its own screen — it now lives here, so the graph and the cross-paper question share
- * one place. `initialTab` lets the router open straight to Consensus from an older link. */
+ * one place. `initialTab` lets the router open straight to Consensus from an older link.
+ * `emptyMessage` is what a role with nothing analysed yet sees instead of a bare canvas (the
+ * Author passes one; the Researcher keeps the canvas). */
 export function Graph({
   onOpenAnalysis,
   initialTab = 'graph',
+  emptyMessage,
 }: {
   onOpenAnalysis: (id: string) => void
   initialTab?: 'graph' | 'consensus'
+  emptyMessage?: GraphEmptyMessage
 }) {
   const [tab, setTab] = useState<'graph' | 'consensus'>(initialTab)
   return (
@@ -960,7 +968,7 @@ export function Graph({
           </button>
         ))}
       </div>
-      {tab === 'graph' ? <GraphCanvas /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
+      {tab === 'graph' ? <GraphCanvas emptyMessage={emptyMessage} /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app import store
@@ -16,6 +16,20 @@ from app.teacher.models import (
     TeacherProfessorReview,
     TeacherSubmission,
 )
+
+_ACTIVITY_PAGE_SIZE = 500
+
+
+def _all_pages(query: Any) -> list[dict[str, Any]]:
+    """Read every matching row despite Supabase's per-request result limit."""
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = query.range(offset, offset + _ACTIVITY_PAGE_SIZE - 1).execute().data
+        rows.extend(page)
+        if len(page) < _ACTIVITY_PAGE_SIZE:
+            return rows
+        offset += _ACTIVITY_PAGE_SIZE
 
 
 def _datetime_or_none(value: datetime | str | None) -> datetime | None:
@@ -68,6 +82,7 @@ def _feedback_from_row(row: dict[str, Any]) -> TeacherFeedback:
         submission_id=row["submission_id"], student_id=row["student_id"],
         feedback_text=row["feedback_text"], status=row["status"], sent_at=_datetime_or_none(row.get("sent_at")),
         citation_ids=tuple(row.get("citation_ids") or ()),
+        sharing_options=dict(row.get("sharing_options") or {}),
     )
 
 
@@ -236,13 +251,29 @@ class TeacherGoogleRepository:
         )
 
     def reset_submission_review(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str,
+        *, preserve_sent_history: bool = False,
     ) -> None:
-        """Remove decisions and drafts tied to an older student PDF version."""
+        """Remove stale decisions and drafts, optionally retaining the sent report record."""
         self._client.table("teacher_professor_reviews").delete().eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
-        self._client.table("teacher_feedback").update({
-            "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [],
-        }).eq("owner", owner).eq("course_id", course_id).eq("coursework_id", coursework_id).eq("submission_id", submission_id).execute()
+        def feedback_query():
+            return (
+                self._client.table("teacher_feedback")
+                .eq("owner", owner)
+                .eq("course_id", course_id)
+                .eq("coursework_id", coursework_id)
+                .eq("submission_id", submission_id)
+            )
+
+        if preserve_sent_history:
+            feedback_query().update({"citation_ids": [], "sharing_options": {}}).eq("status", "sent").execute()
+            feedback_query().update({
+                "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [], "sharing_options": {},
+            }).neq("status", "sent").execute()
+        else:
+            feedback_query().update({
+                "feedback_text": "", "status": "draft", "sent_at": None, "citation_ids": [], "sharing_options": {},
+            }).execute()
 
     def get_professor_reviews(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str
@@ -266,16 +297,31 @@ class TeacherGoogleRepository:
         return reviews[0] if reviews else None
 
     def save_professor_review(self, review: TeacherProfessorReview) -> None:
+        row = {**review.to_row(), "updated_at": datetime.now(UTC).isoformat()}
         self._upsert(
             "teacher_professor_reviews",
-            review.to_row(),
+            row,
             "owner,course_id,coursework_id,submission_id,review_id",
         )
 
+    def list_professor_review_activity(self, owner: str) -> list[dict[str, Any]]:
+        query = (
+            self._client.table("teacher_professor_reviews")
+            .select("owner,course_id,coursework_id,submission_id,review_id,updated_at,created_at")
+            .eq("owner", owner)
+            .order("updated_at", desc=True)
+            .order("course_id")
+            .order("coursework_id")
+            .order("submission_id")
+            .order("review_id")
+        )
+        return _all_pages(query)
+
     def save_feedback(self, feedback: TeacherFeedback) -> None:
+        row = {**feedback.to_row(), "updated_at": datetime.now(UTC).isoformat()}
         self._upsert(
             "teacher_feedback",
-            feedback.to_row(),
+            row,
             "owner,course_id,coursework_id,submission_id",
         )
 
@@ -294,6 +340,18 @@ class TeacherGoogleRepository:
             .data
         )
         return _feedback_from_row(rows[0]) if rows else None
+
+    def list_feedback_activity(self, owner: str) -> list[dict[str, Any]]:
+        query = (
+            self._client.table("teacher_feedback")
+            .select("owner,course_id,coursework_id,submission_id,feedback_text,status,updated_at,created_at,sent_at")
+            .eq("owner", owner)
+            .order("updated_at", desc=True)
+            .order("course_id")
+            .order("coursework_id")
+            .order("submission_id")
+        )
+        return _all_pages(query)
 
     def _upsert(self, table: str, row: dict[str, Any], conflict_keys: str) -> None:
         self._client.table(table).upsert(row, on_conflict=conflict_keys).execute()

@@ -442,6 +442,7 @@ export const MOCK_ESSAY_CHECK: EssayCheck = {
     preview: '"Two of your citations attribute results to papers that do not contain them." - 7 lines, cites p.7, p.6, p.9',
     citedPages: ['p.7', 'p.6', 'p.9'],
     citationIds: ['review-colbert', 'review-dpr', 'review-beir'],
+    sharingOptions: {},
   },
   navigation: { next: { id: 'student-bee', name: 'Bee S.' } },
 }
@@ -461,21 +462,31 @@ export const MOCK_TEACHER_HOME: TeacherHome = {
   courseId: 'class-literary-2b',
   checkedEssays: 18,
   totalEssays: 24,
-  citationsNeedingAttention: 5,
   assignment: 'Assignment 2',
   assignmentId: 'assignment-essay',
+  dueSoon: [
+    { ...MOCK_TEACHER_ASSIGNMENTS[0]!, courseName: 'Literary Analysis', overdue: true },
+    { ...MOCK_TEACHER_ASSIGNMENTS[1]!, courseName: 'Literary Analysis', overdue: true },
+    { ...MOCK_TEACHER_ASSIGNMENTS[3]!, courseName: 'Literary Analysis', overdue: false },
+  ],
   submissions: [
     {
       ...essaySubmissions[0]!,
+      courseId: 'class-literary-2b',
+      courseName: 'Literary Analysis',
+      assignmentTitle: 'Assignment 2: Evidence-based essay',
       initial: 'A',
       summary: '2 citations contradicted · 3 checked',
-      standing: 'refutes',
+      reviewStatus: 'analysis-ready',
     },
     {
       ...essaySubmissions[1]!,
+      courseId: 'class-literary-2b',
+      courseName: 'Literary Analysis',
+      assignmentTitle: 'Assignment 2: Evidence-based essay',
       initial: 'B',
       summary: '1 source is silent · 4 checked',
-      standing: 'insufficient',
+      reviewStatus: 'not-checked',
     },
     {
       ...essaySubmissions[2]!,
