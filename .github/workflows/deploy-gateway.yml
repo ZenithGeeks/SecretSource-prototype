@@ -27,8 +27,16 @@ name: deploy-gateway
 on:
   push:
     branches: [main]
-    paths: ["backend/**"]
+    # Tests and docs are not in the deployed build. Each run is billed GitHub-hosted minutes,
+    # and the org's free plan has 2,000 a month (2,022 were used in September 2026).
+    paths: ["backend/**", "!backend/tests/**", "!backend/**/*.md", "!backend/pytest.ini", "!backend/requirements-dev.txt"]
   workflow_dispatch:
+
+# Merges in quick succession queue up instead of each running a full deploy: one runs, and
+# only the newest waiting push follows it. A running deploy is never cancelled halfway.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 env:
   REGION: asia-southeast1
