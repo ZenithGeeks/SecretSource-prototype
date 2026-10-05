@@ -103,10 +103,11 @@ export function duplicateKeys(entries: BibEntry[]): string[] {
   return [...dupes]
 }
 
-/** True when the entry gives no way to look the work up online. */
+/** True when the entry gives no way to look the work up online. The same fields as the
+ * gateway's lacks_locator (backend/app/author/logic.py), so both flag the same entries. */
 export function lacksLocator(entry: BibEntry): boolean {
   const f = entry.fields
-  return !(f.doi || f.url || f.eprint || f.arxivid)
+  return !(f.doi || f.url || f.eprint || f.arxiv)
 }
 
 /** "Khattab & Zaharia" · "Santhanam et al." from a BibTeX author field. */

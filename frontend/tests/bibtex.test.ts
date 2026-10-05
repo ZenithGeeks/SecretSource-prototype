@@ -45,6 +45,20 @@ test('duplicateKeys and lacksLocator flag what Parsed draft warns about', () => 
   assert.equal(lacksLocator(entries[1]), true)
 })
 
+test('lacksLocator accepts the locator fields the gateway does: doi, url, eprint, arxiv', () => {
+  const [doi, url, eprint, arxiv, none] = parseBib(
+    [
+      '@article{a, title={A}, doi={10.1/a}}',
+      '@misc{b, title={B}, url={https://example.org/b}}',
+      '@misc{c, title={C}, eprint={2112.01488}}',
+      '@misc{d, title={D}, arxiv={2004.12832}}',
+      '@misc{e, title={E}, arxivid={2004.12832}}',
+    ].join('\n'),
+  )
+  assert.deepEqual([doi, url, eprint, arxiv].map(lacksLocator), [false, false, false, false])
+  assert.equal(lacksLocator(none), true) // `arxivid` is not a field the gateway reads
+})
+
 test('serializeBib round-trips through parseBib', () => {
   const [entry] = parseBib(SAMPLE)
   const text = serializeBib(entry)
