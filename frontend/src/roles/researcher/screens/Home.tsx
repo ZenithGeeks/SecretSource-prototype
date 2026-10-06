@@ -2,7 +2,7 @@
  * 09 Home (Researcher) — date, greeting and one-line summary, the Analyze card, conflicts,
  * reading queue and library summary, all from the user's own analyses (useResearcherHome).
  * `onOpen` navigates to another researcher screen; a conflict or a queued paper both open the
- * analysis that cites it, and a queued paper's Add puts its identifier in the Analyze input.
+ * analysis that cites it, and a queued paper's Analyze puts its identifier in the Analyze input.
  */
 
 import { useRef, useState } from 'react'
@@ -149,14 +149,14 @@ export function Home({
                 </button>
                 <button
                   type="button"
-                  aria-label={`Add ${entry.paper} to the analyze box`}
+                  aria-label={`Put ${entry.paper} in the analyze box`}
                   onClick={() => {
                     setReference(entry.identifier)
                     analyzeInput.current?.focus()
                   }}
                   className="shrink-0 rounded-[9px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] font-medium text-ink hover:bg-accent-soft"
                 >
-                  Add
+                  Analyze
                 </button>
               </li>
             ))}

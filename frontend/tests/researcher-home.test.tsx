@@ -63,8 +63,8 @@ test('the library legend uses the count words and conflicts say what is missing'
   expect(screen.getByText('No counter-evidence yet')).toBeInTheDocument()
 })
 
-test('Add on a queued paper puts its identifier in the analyze box', async () => {
+test('Analyze on a queued paper puts its identifier in the analyze box', async () => {
   renderHome()
-  fireEvent.click(await screen.findByRole('button', { name: /^Add PLAID/ }))
+  fireEvent.click(await screen.findByRole('button', { name: /^Put PLAID/ }))
   expect(screen.getByLabelText('Paper to analyze')).toHaveValue('10.1/plaid')
 })
