@@ -273,11 +273,13 @@ hand.
 
 ## Tests
 
-The tests need `google-adk` and `pymupdf`, so run them inside the gateway image:
+The tests need `google-adk` and `pymupdf`, so run them inside the gateway image. Mount the
+whole repository, not only `backend/`: the teacher tests read `supabase/migrations/` and
+`.env.cloud` from the repository root.
 
 ```bash
 docker compose build gateway
-docker run --rm -v "$PWD/backend:/app" -w /app secretsource-prototype-gateway \
+docker run --rm -v "$PWD:/repo" -w /repo/backend secretsource-prototype-gateway \
   sh -c "pip install -q pytest && python -m pytest -q"
 ```
 
