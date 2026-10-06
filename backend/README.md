@@ -552,8 +552,7 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 `POST /author/drafts/{id}/check` → `{"id"}`. Every `\cite` in the draft's `.tex` files is
 verified against the work its bib entry names (an uploaded PDF, else DOI, arXiv id, URL or
 title), `PARALLEL_CHECKS` at a time and never over the gateway-wide limit. The same
-(claim, source) pair is judged once and read from the `cache` table after that; `POST /checks`
-shares that cache. `409` while a check of that draft is running.
+(claim, source) pair is judged once and read from the `cache` table after that. `409` while a check of that draft is running.
 
 | Route | Does |
 | --- | --- |
