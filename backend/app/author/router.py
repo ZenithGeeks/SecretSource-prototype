@@ -1151,8 +1151,8 @@ def author_pdfs(user: str | None) -> set[str]:
             if row.get("pdf"):
                 names.add(Path(row["pdf"]).name)
     gateway = _gateway()
-    for run in gateway.analyses.values():
-        if run.get("kind") == DRAFT_CHECK and run.get("owner") == user:
+    for run in gateway.analyses.owned_by(user):
+        if run.get("kind") == DRAFT_CHECK:
             for c in run.get("citations", []):
                 pdf = (c.get("evidence") or {}).get("pdf")
                 if pdf:
