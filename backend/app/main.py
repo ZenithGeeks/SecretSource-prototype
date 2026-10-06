@@ -148,6 +148,14 @@ def _apply_snapshot(snapshot: dict) -> None:
     replaces analyses[id], so it never mutates a dict another part of the process still holds.
     """
     analysis_id = snapshot["id"]
+    if snapshot.get("deleted"):
+        # Another instance deleted it: drop our copy and end any stream still open on it.
+        _deleted.add(analysis_id)
+        analyses.pop(analysis_id, None)
+        queue = streams.pop(analysis_id, None)
+        if queue is not None:
+            queue.put_nowait(None)
+        return
     if analysis_id in _deleted:
         return
     local = analyses.get(analysis_id)
@@ -644,6 +652,13 @@ async def _delete_one(analysis_id: str) -> None:
     streams.pop(analysis_id, None)
     await _saved(analysis_id)
     await asyncio.to_thread(store.delete, analysis_id)
+    # Tell the other instances, which may hold this row from the queued snapshot (#331). The
+    # tombstone carries only the id. Best-effort, like _publish.
+    try:
+        tombstone = json.dumps({"id": analysis_id, "deleted": True})
+        await asyncio.to_thread(redis_connection().publish, f"analysis:{analysis_id}", tombstone)
+    except Exception as error:
+        logger.warning("publishing the delete of analysis %s to Redis failed: %s", analysis_id, error)
 
 
 # A stage can take minutes with nothing to send. A comment line keeps proxies from closing
