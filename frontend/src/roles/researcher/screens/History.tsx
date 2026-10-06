@@ -1,13 +1,14 @@
 /**
- * History (Researcher) — the Figma "Analyze a paper" row (01 Empty, 02 Running, 03 Results,
- * 04 Page viewer) inside the researcher shell. Start an analysis from a DOI, arXiv ID, URL
- * or an uploaded PDF, follow the stages while it runs, read the claims. Past analyses are
- * listed under the nav by ResearcherApp, which owns which one is open.
+ * Analyses (Researcher) — the Figma "New analysis", "Running" and "Results" screens inside the
+ * researcher shell. With nothing open it is the form that starts an analysis from a DOI, arXiv
+ * ID, URL or an uploaded PDF; with one open it follows the stages while it runs and lists the
+ * claims. Past analyses are listed under the nav, and "+ New" returns to the form, both
+ * handled by the shell, which owns which analysis is open.
  */
 
 import type { SectionJump } from '../../../components/AnalysisView'
 import { AnalysisView } from '../../../components/AnalysisView'
-import { SubmitForm } from '../../../components/SubmitForm'
+import { NewAnalysis } from '../../../components/NewAnalysis'
 
 export function History({
   selected,
@@ -28,18 +29,17 @@ export function History({
   jump?: SectionJump | null
   onCurrentSection?: (section: string | null) => void
 }) {
+  if (!selected) return <NewAnalysis onStarted={onSelect} />
   return (
-    <>
-      <SubmitForm onStarted={onSelect} />
-      <AnalysisView
-        key={selected ?? 'none'}
-        id={selected}
-        onTargetChange={onTargetChange}
-        section={section}
-        onClearSection={onClearSection}
-        jump={jump}
-        onCurrentSection={onCurrentSection}
-      />
-    </>
+    <AnalysisView
+      key={selected}
+      id={selected}
+      onTargetChange={onTargetChange}
+      section={section}
+      onClearSection={onClearSection}
+      jump={jump}
+      onCurrentSection={onCurrentSection}
+      actionsInToolbar
+    />
   )
 }
