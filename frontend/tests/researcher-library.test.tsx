@@ -74,8 +74,7 @@ test('Add papers is one menu listing the existing add actions', async () => {
   const items = within(screen.getByRole('menu')).getAllByRole('menuitem')
   expect(items.map((i) => i.querySelector('span')?.textContent)).toEqual([
     'From your analysed papers',
-    'By DOI, arXiv ID or link',
-    'Upload a PDF',
+    'Analyze a new paper',
   ])
 })
 

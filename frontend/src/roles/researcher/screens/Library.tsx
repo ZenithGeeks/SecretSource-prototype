@@ -81,8 +81,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: strin
 function analyseItems(onAddPaper?: () => void): LibraryAddItem[] {
   if (!onAddPaper) return []
   return [
-    { label: 'By DOI, arXiv ID or link', hint: 'Starts a new analysis', onSelect: onAddPaper },
-    { label: 'Upload a PDF', hint: 'Starts a new analysis', onSelect: onAddPaper },
+    { label: 'Analyze a new paper', hint: 'DOI, arXiv ID, link or PDF', onSelect: onAddPaper },
   ]
 }
 
