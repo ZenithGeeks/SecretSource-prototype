@@ -309,7 +309,7 @@ export function PageViewer({
 
         {target.quote && (
           <div className="max-h-32 shrink-0 space-y-1.5 overflow-y-auto rounded-xl bg-neutral-soft px-3.5 py-3">
-            <h3 className="type-label text-ink-muted">This paper · page {page}</h3>
+            <h3 className="type-label text-ink-muted">Quoted passage · page {page}</h3>
             <blockquote className="font-serif text-[15px] leading-[23px] italic text-ink">“{target.quote}”</blockquote>
           </div>
         )}

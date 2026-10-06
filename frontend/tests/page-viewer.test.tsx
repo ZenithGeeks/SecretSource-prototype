@@ -48,7 +48,7 @@ test('Escape closes the viewer', () => {
   expect(onClose).toHaveBeenCalledTimes(1)
 })
 
-test('the quote panel heading reads "This paper · page N"', () => {
+test('the quote panel heading names the page', () => {
   render(<PageViewer target={target} onClose={() => {}} />)
-  expect(screen.getByRole('heading', { name: 'This paper · page 3' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Quoted passage · page 3' })).toBeInTheDocument()
 })
