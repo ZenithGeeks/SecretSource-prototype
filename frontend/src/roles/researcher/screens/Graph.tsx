@@ -472,7 +472,7 @@ function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: 
             const deciding = edges.find((e) => e.relation !== 'asserts') ?? edges[0]
             if (!deciding) return
             const id = deciding.source.replace(/^a:/, '')
-            window.open(`${window.location.pathname}?screen=history&analysis=${id}`, '_blank')
+            window.open(`${window.location.pathname}?screen=analyses&analysis=${id}`, '_blank')
           }}
           className="flex items-center gap-2 text-ink hover:text-accent"
         >
@@ -543,8 +543,8 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
         onClick={() => {
           const idA = edge.a.replace(/^a:/, '')
           const idB = edge.b.replace(/^a:/, '')
-          window.open(`${window.location.pathname}?screen=history&analysis=${idA}`, '_blank')
-          window.open(`${window.location.pathname}?screen=history&analysis=${idB}`, '_blank')
+          window.open(`${window.location.pathname}?screen=analyses&analysis=${idA}`, '_blank')
+          window.open(`${window.location.pathname}?screen=analyses&analysis=${idB}`, '_blank')
         }}
         className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-accent"
       >

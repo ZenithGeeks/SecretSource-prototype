@@ -11,6 +11,7 @@ import { useState, type ReactNode } from 'react'
 import type { SectionJump } from './AnalysisView'
 import { HistoryList } from './HistoryList'
 import { AnalysisContents } from './TableOfContents'
+import { analysisLabel } from '../lib/claims'
 import type { ContentsRow } from '../lib/outline'
 import { useAnalyses } from '../lib/useAnalysis'
 import { History } from '../roles/researcher/screens/History'
@@ -19,8 +20,10 @@ export function initialAnalysis(): string | null {
   return new URLSearchParams(window.location.search).get('analysis')
 }
 
-export function useHistoryWorkspace(): {
+export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}): {
   selected: string | null
+  /** File name of the open analysis, for a breadcrumb; null until its row has loaded. */
+  selectedName: string | null
   select: (id: string | null) => void
   /** Open one analysis, from anywhere a paper or claim is listed. */
   open: (id: string) => void
@@ -51,11 +54,19 @@ export function useHistoryWorkspace(): {
     setWide(true)
   }
 
+  const selectedAnalysis = analyses.data?.find((a) => a.id === selected)
   const sidebar = (
     <HistoryList
       analyses={analyses.data ?? []}
       selected={selected}
-      onSelect={select}
+      onSelect={(id) => {
+        select(id)
+        onPicked?.()
+      }}
+      onNew={() => {
+        select(null)
+        onPicked?.()
+      }}
       contents={selected ? <AnalysisContents id={selected} current={current} onPick={pickSection} /> : undefined}
     />
   )
@@ -71,5 +82,14 @@ export function useHistoryWorkspace(): {
     />
   )
 
-  return { selected, select, open: select, wide, closePage: () => setWide(false), sidebar, main }
+  return {
+    selected,
+    selectedName: selectedAnalysis ? analysisLabel(selectedAnalysis) : null,
+    select,
+    open: select,
+    wide,
+    closePage: () => setWide(false),
+    sidebar,
+    main,
+  }
 }

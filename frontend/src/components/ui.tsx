@@ -4,6 +4,8 @@ import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 
+import type { Standing } from '../lib/claims'
+import { STANDING_LABELS } from '../lib/claims'
 import { useSettings } from '../lib/settings'
 import { cn } from '../lib/utils'
 
@@ -46,75 +48,56 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   )
 }
 
-const VERDICT_STYLES = {
-  supports: 'bg-supports-soft text-supports',
-  refutes: 'bg-refutes-soft text-refutes',
-  insufficient: 'bg-insufficient-soft text-insufficient',
+/**
+ * The one verdict pill: a dot and words, never colour alone. Per-citation kinds are the
+ * three verdicts plus the two absences, "not checked" (the source could not be read) and
+ * "no citation" (nothing was cited). Only a real verdict gets a colour: colouring an absence
+ * would make an empty result look like a finding (#37). Words come from STANDING_LABELS.
+ */
+const PILL = {
+  refutes: { pill: 'bg-refutes-soft text-refutes', dot: 'bg-refutes' },
+  insufficient: { pill: 'bg-insufficient-soft text-insufficient', dot: 'bg-insufficient' },
+  supports: { pill: 'bg-supports-soft text-supports', dot: 'bg-supports' },
+  unchecked: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
+  uncited: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
 } as const
 
 export function VerdictBadge({
   verdict,
   text,
+  title,
 }: {
-  verdict: keyof typeof VERDICT_STYLES
-  /** Shown instead of the verdict name, e.g. "contradicts the claim". */
+  verdict: Standing
+  /** Replaces the standard words. Leave it off: the vocabulary is the same everywhere. */
   text?: string
+  title?: string
 }) {
   // The Settings "Colour the verdict badges" toggle: off shows plain text (for print/export).
+  // The dot stays, in the text colour, so the pill still reads as a status.
   const { colorBadges } = useSettings()
   return (
     <span
-      className={cn(
-        'rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide uppercase',
-        colorBadges ? VERDICT_STYLES[verdict] : 'text-ink',
-      )}
-    >
-      {text ?? verdict}
-    </span>
-  )
-}
-
-/**
- * A claim's standing, in a reader's words.
- *
- * Only an actual verdict gets a colour: "not checked" and "no source cited" are absences of
- * an answer, and colouring them would make an empty result look like a finding (#37).
- */
-const STANDING_STYLES = {
-  refutes: 'bg-refutes-soft text-refutes',
-  insufficient: 'bg-insufficient-soft text-insufficient',
-  supports: 'bg-supports-soft text-supports',
-  unchecked: 'bg-canvas text-ink-muted',
-  uncited: 'bg-canvas text-ink-muted',
-} as const
-
-export function StandingBadge({
-  standing,
-  title,
-}: {
-  standing: keyof typeof STANDING_STYLES
-  title?: string
-}) {
-  return (
-    <span
       title={title}
+      data-verdict={verdict}
       className={cn(
-        'inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide uppercase',
-        STANDING_STYLES[standing],
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
+        colorBadges ? PILL[verdict].pill : 'text-ink',
       )}
     >
-      {STANDING_TEXT[standing]}
+      <span
+        aria-hidden="true"
+        data-testid="verdict-dot"
+        className={cn('size-1.5 shrink-0 rounded-full', colorBadges ? PILL[verdict].dot : 'bg-current')}
+      />
+      {text ?? STANDING_LABELS[verdict]}
     </span>
   )
 }
 
-const STANDING_TEXT = {
-  refutes: 'source contradicts',
-  insufficient: 'source is silent',
-  supports: 'source backs it',
-  unchecked: 'not checked',
-  uncited: 'no source cited',
-} as const
+/** A claim's standing, in a reader's words. Same pill as VerdictBadge. */
+export function StandingBadge({ standing, title }: { standing: Standing; title?: string }) {
+  return <VerdictBadge verdict={standing} title={title} />
+}
 
 export function Empty({ title, hint }: { title: string; hint: string }) {
   return (

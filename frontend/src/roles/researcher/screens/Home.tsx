@@ -18,7 +18,7 @@ import type { ResearcherScreen } from '../ResearcherApp'
 type Icon = ComponentType<{ className?: string }>
 
 const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; to: ResearcherScreen }[] = [
-  { title: 'Analyze a paper', hint: 'DOI, arXiv ID, URL, or a PDF you upload', icon: FileSearch, to: 'history' },
+  { title: 'Analyze a paper', hint: 'DOI, arXiv ID, URL, or a PDF you upload', icon: FileSearch, to: 'analyses' },
   { title: 'Map my field', hint: 'Which works back or contradict your claims', icon: Waypoints, to: 'graph' },
   { title: 'What does the field say about…', hint: 'Ask a question, see the verdicts found so far', icon: Search, to: 'field-consensus' },
   { title: 'Organise papers', hint: 'Group the papers you analysed into projects', icon: Library, to: 'library' },

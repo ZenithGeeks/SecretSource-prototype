@@ -23,13 +23,6 @@ const VERDICT_BORDER = {
   insufficient: 'border-insufficient',
 } as const
 
-/** The verdict as a statement about the claim. A bare "refutes" does not say who refutes whom. */
-const VERDICT_TEXT = {
-  supports: 'backs the claim',
-  refutes: 'contradicts the claim',
-  insufficient: 'not enough evidence',
-} as const
-
 /** A small heading that says where the text under it comes from. */
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -201,7 +194,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
     // evidence for it, so a reader scrolling past a closed card still sees which sources
     // contradicted a claim without opening one (#22).
     <div className={cn('mt-2 rounded-lg border-l-[3px] bg-canvas p-3', VERDICT_BORDER[verdict.verdict])}>
-      <VerdictBadge verdict={verdict.verdict} text={VERDICT_TEXT[verdict.verdict]} />
+      <VerdictBadge verdict={verdict.verdict} />
 
       {verdict.quote && (
         <div className="mt-2 border-l-2 border-accent pl-3">
