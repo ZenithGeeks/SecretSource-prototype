@@ -13,6 +13,7 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  Scan,
   X,
   ZoomIn,
   ZoomOut,
@@ -44,6 +45,7 @@ export type Target = {
 
 const ZOOMS = [1, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
 const PAGE_GAP = 16 // px between pages, and around them
+const TOOLBAR_HEIGHT = 48 // px; the translucent toolbar floats over the top of the scrolling page
 const RENDERED_AROUND = 2 // pages drawn on each side of the one in view; the rest are placeholders
 const MAX_PAGE_WIDTH = 2400 // css px; wider than this only costs memory
 const MAX_CANVAS_WIDTH = 4096 // device px; a canvas this wide is already sharp at any zoom here
@@ -132,7 +134,7 @@ function IconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="size-11 px-0" // 44px: a real touch target, not a 24px icon
+      className="size-10 px-0" // 40px: a real touch target, not a 24px icon
     >
       {children}
     </Button>
@@ -203,7 +205,7 @@ export function PageViewer({
     const container = scroller.current
     if (!node || !container) return
     const inside = box && size ? (box.y0 / size.page_height) * node.offsetHeight - 80 : -PAGE_GAP
-    container.scrollTo({ top: node.offsetTop + Math.max(0, inside) - PAGE_GAP })
+    container.scrollTo({ top: node.offsetTop + Math.max(0, inside) - PAGE_GAP - TOOLBAR_HEIGHT })
     pageInView.current = number
     setPage(number)
   }, [])
@@ -299,16 +301,17 @@ export function PageViewer({
                 {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
               </IconButton>
             )}
-            <IconButton label="Close the page view" onClick={onClose}>
+            <IconButton label="Close" onClick={onClose}>
               <X className="size-4" />
             </IconButton>
           </div>
         </header>
 
         {target.quote && (
-          <blockquote className="max-h-20 shrink-0 overflow-y-auto border-l-2 border-accent pl-3 text-sm italic text-ink-muted">
-            “{target.quote}”
-          </blockquote>
+          <div className="max-h-32 shrink-0 space-y-1.5 overflow-y-auto rounded-xl bg-neutral-soft px-3.5 py-3">
+            <h3 className="type-label text-ink-muted">Quoted passage · page {page}</h3>
+            <blockquote className="font-serif text-[15px] leading-[23px] italic text-ink">“{target.quote}”</blockquote>
+          </div>
         )}
 
         {target.error && (
@@ -317,10 +320,64 @@ export function PageViewer({
           </p>
         )}
 
-        <div
-          ref={scroller}
-          className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-border-subtle bg-canvas"
-        >
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-border-subtle bg-canvas">
+          <div
+            role="toolbar"
+            aria-label="Page controls"
+            className="absolute inset-x-0 top-0 z-30 flex items-center gap-1 overflow-x-auto border-b border-border-subtle bg-surface/80 px-2 backdrop-blur-md"
+            style={{ height: TOOLBAR_HEIGHT }}
+          >
+            <IconButton label="Previous page" onClick={() => scrollToPage(Math.max(1, page - 1))} disabled={page <= 1}>
+              <ChevronLeft className="size-4" />
+            </IconButton>
+            <span className="min-w-24 text-center font-mono text-[13px] whitespace-nowrap text-ink-muted tabular-nums" aria-live="polite">
+              Page {page}
+              {pageCount ? ` of ${pageCount}` : ''}
+            </span>
+            <IconButton
+              label="Next page"
+              onClick={() => scrollToPage(Math.min(pageCount, page + 1))}
+              disabled={!pageCount || page >= pageCount}
+            >
+              <ChevronRight className="size-4" />
+            </IconButton>
+            <span className="flex-1" />
+            <IconButton
+              label="Zoom out"
+              onClick={() => setZoom(ZOOMS[Math.max(0, zoomIndex - 1)])}
+              disabled={zoomIndex <= 0}
+            >
+              <ZoomOut className="size-4" />
+            </IconButton>
+            <span className="min-w-10 text-center text-[13px] text-ink-muted tabular-nums">{zoom === 1 ? 'fit' : `${zoom}×`}</span>
+            <IconButton
+              label="Zoom in"
+              onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zoomIndex + 1)])}
+              disabled={zoomIndex >= ZOOMS.length - 1}
+            >
+              <ZoomIn className="size-4" />
+            </IconButton>
+            <IconButton label="Fit to view" onClick={() => setZoom(1)} disabled={zoom === 1}>
+              <Scan className="size-4" />
+            </IconButton>
+            {pdf.url && (
+              <a
+                href={pdf.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open original PDF"
+                title="Open original PDF"
+                className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-ink hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <ExternalLink className="size-4" />
+              </a>
+            )}
+          </div>
+          <div
+            ref={scroller}
+            className="h-full overflow-auto"
+            style={{ paddingTop: TOOLBAR_HEIGHT }}
+          >
           {panelWidth > 0 && !pdf.url && !pdf.failed && (
             <p className="flex items-center gap-2 p-4 text-sm text-ink-muted">
               <Loader2 className="size-4 animate-spin" />
@@ -414,55 +471,8 @@ export function PageViewer({
             </a>
           )}
           {pdf.failed && <p className="p-4 text-sm text-ink-muted">This paper could not be opened.</p>}
+          </div>
         </div>
-
-        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            <IconButton label="Previous page" onClick={() => scrollToPage(Math.max(1, page - 1))} disabled={page <= 1}>
-              <ChevronLeft className="size-4" />
-            </IconButton>
-            <span className="min-w-20 text-center text-sm tabular-nums" aria-live="polite">
-              page {page}
-              {pageCount ? ` of ${pageCount}` : ''}
-            </span>
-            <IconButton
-              label="Next page"
-              onClick={() => scrollToPage(Math.min(pageCount, page + 1))}
-              disabled={!pageCount || page >= pageCount}
-            >
-              <ChevronRight className="size-4" />
-            </IconButton>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <IconButton
-              label="Zoom out"
-              onClick={() => setZoom(ZOOMS[Math.max(0, zoomIndex - 1)])}
-              disabled={zoomIndex <= 0}
-            >
-              <ZoomOut className="size-4" />
-            </IconButton>
-            <span className="min-w-12 text-center text-sm tabular-nums">{zoom === 1 ? 'fit' : `${zoom}×`}</span>
-            <IconButton
-              label="Zoom in"
-              onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zoomIndex + 1)])}
-              disabled={zoomIndex >= ZOOMS.length - 1}
-            >
-              <ZoomIn className="size-4" />
-            </IconButton>
-            {pdf.url && (
-              <a
-                href={pdf.url}
-                target="_blank"
-                rel="noreferrer"
-                className="ml-2 inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                <ExternalLink className="size-3.5" />
-                Original PDF
-              </a>
-            )}
-          </div>
-        </footer>
       </aside>
     </>
   )
