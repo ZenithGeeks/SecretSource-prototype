@@ -5,7 +5,7 @@
  * "Copy evidence" is an icon button in the claim header.
  */
 
-import { Copy, X } from 'lucide-react'
+import { Copy, ExternalLink, X } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { VerdictBadge } from '../../../components/ui'
@@ -188,6 +188,17 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
       ) : (
         <p className="text-[13px] text-ink-muted">No shared passages indexed for this pair yet.</p>
       )}
+      <button
+        type="button"
+        onClick={() => {
+          for (const id of [edge.a, edge.b]) {
+            window.open(`${window.location.pathname}?screen=analyses&analysis=${id.replace(/^a:/, '')}`, '_blank')
+          }
+        }}
+        className="flex items-center gap-2 text-sm text-ink hover:text-accent"
+      >
+        <ExternalLink className="size-4" /> Open both side by side
+      </button>
     </aside>
   )
 }
