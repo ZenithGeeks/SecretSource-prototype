@@ -708,8 +708,9 @@ The caller's already-imported classes. Each entry: `id`, `name`, `section`, `sub
 The teacher's Google Classroom courses that are not yet imported. Same per-course shape as
 `GET /classes` above, but built straight from the raw Classroom course listing without a
 roster or coursework fetch, so only `id`, `name`, `section`, `subject`, and `status` are
-meaningful: `teacherName` is always `""`, and `studentCount`, `assignmentCount`, `topicCount`,
-`announcementCount`, `linkedFileCount` are always `0`.
+meaningful: `teacherName` is always `""`, `studentCount` is `0`, and `assignmentCount`,
+`topicCount`, `announcementCount`, `linkedFileCount` are `null` (not fetched). Use the preview
+below for real counts.
 
 #### `GET /teacher/classes/importable/{course_id}/preview`
 
