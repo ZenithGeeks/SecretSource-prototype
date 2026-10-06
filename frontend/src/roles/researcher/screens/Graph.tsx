@@ -17,18 +17,20 @@
 
 import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
-import { AlertCircle, CheckCircle2, Copy, ExternalLink, FileText, GitFork, HelpCircle, Maximize, Maximize2, Minimize, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlertCircle, CheckCircle2, GitFork, HelpCircle, Maximize2, Search, ZoomIn, ZoomOut } from 'lucide-react'
 import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
 import { Empty, LoadingScreen } from '../../../components/ui'
-import { reasonText } from '../../../lib/api'
-import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import type { GraphEdge, GraphRelation, KnowledgeGraph } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
 import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { fitReadable } from '../../../lib/graphFit'
 import { cn } from '../../../lib/utils'
+import { GraphClaimDetail, GraphPairDetail } from '../components/GraphDetail'
+import { GraphClaimsLegend, GraphPapersLegend } from '../components/GraphLegend'
+import { GraphSegmented } from '../components/GraphSegmented'
 
 let _colaReady = false
 if (!_colaReady) {
@@ -79,17 +81,6 @@ function usePalette(): { pal: Palette; dark: boolean } {
   return { pal: dark ? DARK : LIGHT, dark }
 }
 
-const RELATION_LABEL: Record<GraphRelation, string> = {
-  asserts: 'asserts', backs: 'backs', contradicts: 'contradicts', silent: 'silent', unchecked: "couldn't check",
-}
-
-function relationColor(pal: Palette, relation: GraphRelation): string {
-  return relation === 'backs' ? pal.supports
-    : relation === 'contradicts' ? pal.refutes
-      : relation === 'silent' ? pal.insufficient
-        : pal.inkMuted
-}
-
 /** Cluster → colour, cycled in cluster order so new clusters stay distinguishable. */
 function clusterColors(pal: Palette): string[] {
   return [pal.accent, pal.supports, pal.insufficient, pal.inkMuted, pal.refutes]
@@ -120,7 +111,7 @@ function paperShort(node: { label: string; year?: string }): string {
   return `${truncate(node.label, 18)}${node.year ? ` ${node.year}` : ''}`
 }
 
-type Insight = { key: string; count: number; label: string; icon: Icon; tone: string }
+type Insight = { key: string; count: number; label: string; icon: Icon; tone: string; ids: Set<string> }
 type Icon = ComponentType<{ className?: string }>
 
 /** The four headline findings the graph exists to surface, all read off the returned graph so
@@ -130,29 +121,33 @@ function computeInsights(graph: KnowledgeGraph): Insight[] {
   const cited: Record<string, GraphEdge[]> = {}
   for (const e of graph.edges) if (e.relation !== 'asserts') (cited[e.target] ??= []).push(e)
 
-  let singleSource = 0
-  let noPrimary = 0
-  let agreed = 0
+  const singleSource = new Set<string>()
+  const noPrimary = new Set<string>()
+  const agreed = new Set<string>()
   for (const node of graph.nodes) {
     if (node.kind !== 'claim') continue
     const sources = cited[node.id] ?? []
-    if (sources.length === 1) singleSource++
-    if (sources.length > 0 && !sources.some((e) => e.relation === 'backs')) noPrimary++
-    if (sources.length > 0 && sources.every((e) => e.relation === 'backs')) agreed++
+    if (sources.length === 1) singleSource.add(node.id)
+    if (sources.length > 0 && !sources.some((e) => e.relation === 'backs')) noPrimary.add(node.id)
+    if (sources.length > 0 && sources.every((e) => e.relation === 'backs')) agreed.add(node.id)
   }
 
   // A→B and B→A both present among the citation links between analysed papers.
   const directed = new Set(graph.paperEdges.filter((e) => e.cites).map((e) => `${e.a}>${e.b}`))
   const pairs = new Set<string>()
+  const cyclic = new Set<string>()
   for (const e of graph.paperEdges) {
-    if (e.cites && directed.has(`${e.b}>${e.a}`)) pairs.add([e.a, e.b].sort().join('~'))
+    if (e.cites && directed.has(`${e.b}>${e.a}`)) {
+      pairs.add([e.a, e.b].sort().join('~'))
+      cyclic.add(e.a).add(e.b)
+    }
   }
 
   return [
-    { key: 'single', count: singleSource, label: 'claims rest on a single source', icon: AlertCircle, tone: 'text-insufficient' },
-    { key: 'circular', count: pairs.size, label: 'circular citation (A cites B cites A)', icon: GitFork, tone: 'text-accent' },
-    { key: 'no-primary', count: noPrimary, label: 'claims with no primary evidence', icon: HelpCircle, tone: 'text-insufficient' },
-    { key: 'agreed', count: agreed, label: 'claims every paper agrees on', icon: CheckCircle2, tone: 'text-supports' },
+    { key: 'single', count: singleSource.size, label: 'claims rest on a single source', icon: AlertCircle, tone: 'text-insufficient', ids: singleSource },
+    { key: 'circular', count: pairs.size, label: 'circular citation (A cites B cites A)', icon: GitFork, tone: 'text-accent', ids: cyclic },
+    { key: 'no-primary', count: noPrimary.size, label: 'claims with no primary evidence', icon: HelpCircle, tone: 'text-insufficient', ids: noPrimary },
+    { key: 'agreed', count: agreed.size, label: 'claims every paper agrees on', icon: CheckCircle2, tone: 'text-supports', ids: agreed },
   ]
 }
 
@@ -205,7 +200,7 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
         'curve-style': 'unbundled-bezier',
         'control-point-distances': '50',
         'control-point-weights': '0.5',
-        width: 2,
+        width: 1.6,
         'target-arrow-shape': 'none',
         opacity: 0.9,
       },
@@ -297,253 +292,27 @@ function writePosCache(key: string, positions: PosMap): void {
   }
 }
 
-function InsightTile({ insight }: { insight: Insight }) {
+/** One headline finding. Pressing it highlights the claims (or papers) it counts on the canvas
+ * and dims the rest, so the tiles work as filters; press again to clear. */
+function InsightTile({ insight, active, onToggle }: { insight: Insight; active: boolean; onToggle: () => void }) {
   const { count, label, icon: Icon, tone } = insight
   return (
-    <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-border-subtle bg-surface px-3.5 py-2.5">
-      <Icon className={cn('size-4 shrink-0', tone)} />
-      <span className={cn('font-serif text-lg font-semibold', tone)}>{count}</span>
-      <span className="text-xs text-ink-muted">{label}</span>
-    </div>
-  )
-}
-
-/** The legend key for the dashed amber ring, with how many works carry it. */
-function NotIndexedKey({ pal, count }: { pal: Palette; count: number }) {
-  if (!count) return null
-  return (
-    <span
-      className="flex items-center gap-1.5 text-xs text-ink-muted"
-      title="Semantic Scholar, arXiv and Unpaywall found nothing for this reference as it is written. This is not a Scopus check."
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className={cn(
+        'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border bg-surface px-3.5 py-2.5 text-left transition-colors',
+        active ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent/50',
+      )}
     >
-      <span className="size-2.5 rounded-full border-[1.5px] border-dashed" style={{ borderColor: pal.insufficient }} />
-      {count} not found in a public index
-    </span>
+      <Icon className={cn('size-4 shrink-0', tone)} />
+      <span className={cn('font-mono text-[15px] leading-5 tracking-[-0.004em]', tone)}>{count}</span>
+      <span className="min-w-0 flex-1 text-xs leading-4 text-ink-muted">{label}</span>
+    </button>
   )
 }
 
-/** Two rows, as in Figma: what a claim dot's colour means, then what an edge's style means. */
-function ClaimsLegend({ pal, notIndexed }: { pal: Palette; notIndexed: number }) {
-  // Claim dot colours mirror node[standing] in the stylesheet; a grey dot is a claim no cited
-  // work has answered yet.
-  const dots: [GraphRelation, string][] = [
-    ['contradicts', 'contradicted'],
-    ['backs', 'backed'],
-    ['silent', 'silent'],
-    ['asserts', 'no verdict yet'],
-  ]
-  const lines: GraphRelation[] = ['asserts', 'backs', 'contradicts', 'silent', 'unchecked']
-  const lined = (r: GraphRelation) => r === 'asserts' || r === 'unchecked'
-  const row = 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur'
-  return (
-    <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-1.5">
-      <div className={row}>
-        <span className="text-xs font-medium text-ink">claim</span>
-        {dots.map(([rel, label]) => (
-          <span key={label} className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <span className="size-2.5 rounded-full" style={{ backgroundColor: relationColor(pal, rel) }} />
-            {label}
-          </span>
-        ))}
-      </div>
-      <div className={row}>
-        {lines.map((r) => (
-          <span key={r} className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <span
-              className={cn(
-                'inline-block h-0.5 w-5',
-                r === 'asserts' && 'border-t border-dashed',
-                r === 'unchecked' && 'border-t-2 border-dotted',
-              )}
-              style={lined(r) ? { borderColor: relationColor(pal, r) } : { backgroundColor: relationColor(pal, r) }}
-            />
-            {RELATION_LABEL[r]}
-          </span>
-        ))}
-        <NotIndexedKey pal={pal} count={notIndexed} />
-      </div>
-    </div>
-  )
-}
-
-function ClusterLegend({ pal, clusters, notIndexed }: { pal: Palette; clusters: string[]; notIndexed: number }) {
-  const colors = clusterColors(pal)
-  return (
-    <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-3 rounded-lg border border-border-subtle bg-surface/90 px-3 py-1.5 backdrop-blur">
-      {clusters.map((c, i) => (
-        <span key={c} className="flex items-center gap-1.5 text-xs text-ink-muted">
-          <span className="size-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }} />
-          {c}
-        </span>
-      ))}
-      <NotIndexedKey pal={pal} count={notIndexed} />
-    </div>
-  )
-}
-
-/** Under a cited work in a detail panel: which index knew it, or that none did. */
-function IndexNote({ node }: { node: GraphNode | undefined }) {
-  if (node?.kind !== 'paper' || !node.indexed) return null
-  return node.indexed === 'no' ? (
-    <p className="text-xs font-medium text-insufficient">Not found in a public index</p>
-  ) : (
-    <p className="text-xs text-ink-muted">Found in {node.index || 'a public index'}</p>
-  )
-}
-
-function ClaimDetail({ graph, claimId, pal }: { graph: KnowledgeGraph; claimId: string; pal: Palette }) {
-  const claim = graph.nodes.find((n) => n.id === claimId)
-  const edges = graph.edges.filter((e) => e.target === claimId)
-  const paper = (id: string) => graph.nodes.find((n) => n.id === id)
-  const [copied, setCopied] = useState(false)
-  if (!claim || claim.kind !== 'claim') return null
-  const contradicts = edges.some((e) => e.relation === 'contradicts')
-  const singleOrigin = edges.filter((e) => e.relation === 'asserts').length <= 1
-
-  const copyParagraph = async () => {
-    const p = (id: string) => paper(id)
-    const lines = edges
-      .filter((e) => e.relation !== 'asserts' && e.quote)
-      .map((e) => {
-        const node = p(e.source)
-        const label = node?.kind === 'paper' ? node.label : e.source
-        return `${label} — ${RELATION_LABEL[e.relation]}: "${e.quote}"`
-      })
-    await navigator.clipboard.writeText([claim.label, ...lines].join('\n\n'))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  return (
-    <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
-      <p className="mb-2 inline-block rounded bg-refutes-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-refutes">
-        {contradicts ? 'Source contradicts' : 'Traced'}
-      </p>
-      <span className="ml-2 text-xs text-ink-muted">claim · {edges.length} papers involved</span>
-      <h2 className="mt-2 font-serif text-lg font-semibold leading-snug text-ink">{claim.label}</h2>
-      <p className="mt-4 text-xs font-semibold text-ink-muted">Where it comes from</p>
-      <ul className="mt-2 flex flex-col gap-3">
-        {edges.map((e) => {
-          const p = paper(e.source)
-          return (
-            <li key={e.id} className="flex gap-2">
-              <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ backgroundColor: relationColor(pal, e.relation) }} />
-              <div className="min-w-0">
-                <p className="text-sm text-ink">
-                  {p?.kind === 'paper' ? `${p.label}${p.year ? ` · 20${p.year.replace(/\D/g, '')}` : ''}` : e.source}{' '}
-                  <span className="text-xs font-medium" style={{ color: relationColor(pal, e.relation) }}>
-                    {e.relation === 'asserts' ? 'origin — asserts' : RELATION_LABEL[e.relation]}
-                  </span>
-                </p>
-                {e.relation !== 'asserts' && <IndexNote node={p} />}
-                {e.relation === 'unchecked' ? (
-                  <p className="text-xs text-ink-muted">couldn't check: {reasonText(e.reason)}</p>
-                ) : (
-                  e.quote && (
-                    <p className="font-serif text-[13px] italic text-ink-muted">
-                      “{e.quote}” {e.page && <span className="not-italic">{e.page}</span>}
-                    </p>
-                  )
-                )}
-              </div>
-            </li>
-          )
-        })}
-      </ul>
-      {contradicts && singleOrigin && (
-        <div className="mt-4 rounded-lg bg-refutes-soft px-3 py-2 text-[13px] text-ink">
-          One source holds it up, and a paper it cites doesn't contain the result — the claim inherits
-          without new evidence.
-        </div>
-      )}
-      <div className="mt-4 flex flex-col gap-1.5 text-sm">
-        <button
-          type="button"
-          onClick={() => {
-            const deciding = edges.find((e) => e.relation !== 'asserts') ?? edges[0]
-            if (!deciding) return
-            const id = deciding.source.replace(/^a:/, '')
-            window.open(`${window.location.pathname}?screen=analyses&analysis=${id}`, '_blank')
-          }}
-          className="flex items-center gap-2 text-ink hover:text-accent"
-        >
-          <FileText className="size-4" /> Show the deciding page
-        </button>
-        <button type="button" onClick={copyParagraph} className="flex items-center gap-2 text-ink hover:text-accent">
-          <Copy className="size-4" /> {copied ? 'Copied ✓' : 'Copy as related-work paragraph'}
-        </button>
-      </div>
-    </aside>
-  )
-}
-
-function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge }) {
-  const node = (id: string) => graph.nodes.find((x) => x.id === id)
-  const label = (id: string) => {
-    const n = node(id)
-    return n?.kind === 'paper' ? n.label : id
-  }
-  const a = label(edge.a)
-  const b = label(edge.b)
-  const outside = [edge.a, edge.b].filter((id) => {
-    const n = node(id)
-    return n?.kind === 'paper' && n.indexed === 'no'
-  })
-  const stats = [
-    { value: edge.similarity.toFixed(2), label: edge.cites ? 'share of claims' : 'overlap' },
-    { value: String(edge.citations), label: edge.cites ? 'claims citing it' : 'works both cite' },
-    { value: String(edge.contradicted ?? 0), label: 'contradicted' },
-  ]
-  return (
-    <aside className="w-full overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 lg:w-80 lg:shrink-0">
-      <h2 className="font-serif text-lg font-semibold text-ink">{a} and {b}</h2>
-      {outside.map((id) => (
-        <p key={id} className="mt-1 text-xs font-medium text-insufficient">
-          {label(id)} was not found in a public index
-        </p>
-      ))}
-      <div className="mt-3 flex gap-2">
-        {stats.map((s) => (
-          <div key={s.label} className="flex-1 rounded-lg border border-border-subtle px-2.5 py-2">
-            <p className="font-serif text-base font-semibold text-ink">{s.value}</p>
-            <p className="text-[11px] text-ink-muted">{s.label}</p>
-          </div>
-        ))}
-      </div>
-      {edge.contradicted ? (
-        <p className="mt-3 text-xs text-ink">
-          <span className="mr-2 inline-block rounded bg-refutes-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-refutes">Refutes</span>
-          {edge.contradicted} claim {a} makes about {b} is contradicted
-        </p>
-      ) : null}
-      <p className="mt-4 text-xs font-semibold text-ink-muted">Closest passages</p>
-      {edge.passages.length ? (
-        <ul className="mt-2 flex flex-col gap-3">
-          {edge.passages.map((p, i) => (
-            <li key={i}>
-              <p className="text-xs font-medium text-accent">{p.paper} {p.page}</p>
-              <p className="font-serif text-[13px] italic text-ink-muted">“{p.quote}”</p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-[13px] text-ink-muted">No shared passages indexed for this pair yet.</p>
-      )}
-      <button
-        type="button"
-        onClick={() => {
-          const idA = edge.a.replace(/^a:/, '')
-          const idB = edge.b.replace(/^a:/, '')
-          window.open(`${window.location.pathname}?screen=analyses&analysis=${idA}`, '_blank')
-          window.open(`${window.location.pathname}?screen=analyses&analysis=${idB}`, '_blank')
-        }}
-        className="mt-4 flex items-center gap-2 text-sm text-ink hover:text-accent"
-      >
-        <ExternalLink className="size-4" /> Open both side by side
-      </button>
-    </aside>
-  )
-}
 
 /** What a role shows in place of an empty canvas; a role that passes none gets the canvas. */
 export type GraphEmptyMessage = { title: string; hint: string }
@@ -555,7 +324,6 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const [ready, setReady] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
 
   // Attach the ResizeObserver through a callback ref rather than an effect: an effect runs on the
   // first render, while the query is still loading and Graph returns null, when the canvas div
@@ -570,27 +338,14 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
     observerRef.current = observer
   }, [])
 
-  // Keep fullscreen state in sync (Esc also exits) and re-fit when the canvas resizes into or out
-  // of fullscreen.
-  useEffect(() => {
-    const onChange = () => {
-      setFullscreen(Boolean(document.fullscreenElement))
-      const cy = cyRef.current
-      if (cy) {
-        cy.resize()
-        cy.fit(undefined, 40)
-      }
-    }
-    document.addEventListener('fullscreenchange', onChange)
-    return () => document.removeEventListener('fullscreenchange', onChange)
-  }, [])
-
   const params = new URLSearchParams(window.location.search)
   const [view, setView] = useState<View>(params.get('view') === 'papers' ? 'papers' : 'claims')
   const [claimSel, setClaimSel] = useState<string | null>(params.get('claim'))
   const [pairSel, setPairSel] = useState<string | null>(params.get('pair'))
   const [filter, setFilter] = useState('')
   const [pFilter, setPFilter] = useState<PapersFilter>('all')
+  // The insight tile pressed to highlight its claims on the canvas (they act as filters).
+  const [insightKey, setInsightKey] = useState<string | null>(null)
   // Full label of the hovered node, positioned over the canvas — the on-node label is short.
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
   // The hovered node id: like Obsidian, hovering spotlights that node's neighbours and dims the rest.
@@ -602,6 +357,7 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
   )
 
   const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
+  const activeInsight = insights.find((i) => i.key === insightKey)
 
   // The backend builds paper nodes oldest-first, so the last "Analysed" one is the most
   // recently uploaded paper — where the view opens centred, so a fresh upload is what greets
@@ -684,6 +440,11 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
           edge.removeClass('faded').addClass('selected')
           edge.connectedNodes().removeClass('faded')
         }
+      } else if (view === 'claims' && activeInsight) {
+        // An insight tile is pressed: keep its claims (and what touches them) bright.
+        const hit = cy.nodes().filter((n) => activeInsight.ids.has(n.id()))
+        cy.elements().addClass('faded')
+        hit.closedNeighborhood().removeClass('faded')
       } else if (hovered) {
         const node = cy.$id(hovered)
         if (node.nonempty()) {
@@ -697,7 +458,7 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
         })
       }
     })
-  }, [view, filter, claimSel, pairSel, hovered, elements, ready])
+  }, [view, filter, claimSel, pairSel, hovered, activeInsight, elements, ready])
 
   // Recolour the existing graph on a theme change instead of rebuilding it. The CytoscapeComponent
   // key is `view` only (not the theme), so flipping light/dark keeps the instance and the user's
@@ -717,55 +478,57 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
       ? 'Claims and the papers that back, contradict, or ignore them. Click a claim to follow it back to the evidence it was born from.'
       : 'Dashed = a paper you analysed cites the other. Solid = two of your papers cite the same works. Thicker = more in common. Click a link to compare a pair.'
   const paperCount = graph.nodes.filter((n) => n.kind === 'paper').length
+  const claimCount = graph.nodes.filter((n) => n.kind === 'claim').length
   const notIndexed = graph.nodes.filter((n) => n.kind === 'paper' && n.indexed === 'no').length
   const selectedEdge = pairSel ? graph.paperEdges.find((e) => e.id === pairSel) : undefined
 
   return (
     <>
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
-          <p className="max-w-2xl text-sm text-ink-muted">{subtitle}</p>
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-serif text-[30px] leading-9 font-semibold tracking-[-0.01em] text-ink">{title}</h1>
+          <p className="max-w-3xl text-[15px] leading-6 text-ink-muted">{subtitle}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-          <div className="flex rounded-lg border border-border-subtle p-0.5 text-xs font-medium">
-            {(['claims', 'papers'] as View[]).map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setView(v)}
-                className={cn('rounded-md px-3 py-1 capitalize', view === v ? 'bg-accent-soft text-ink' : 'text-ink-muted')}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
-          {view === 'papers' && (
-            <div className="flex flex-wrap gap-1.5 text-xs font-medium">
-              {([['all', `All ${paperCount} papers`], ['strong', 'Strong links only'], ['citations', 'Citations']] as [PapersFilter, string][]).map(
-                ([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setPFilter(key)}
-                    className={cn(
-                      'rounded-lg border px-3 py-1',
-                      pFilter === key ? 'border-accent bg-accent-soft text-ink' : 'border-border-subtle text-ink-muted',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ),
-              )}
-            </div>
-          )}
+        <div className="flex shrink-0 flex-wrap items-center gap-3 sm:justify-end">
+          <GraphSegmented
+            label="Graph view"
+            value={view}
+            options={[
+              { key: 'claims', label: 'Claims' },
+              { key: 'papers', label: 'Papers' },
+            ]}
+            onChange={setView}
+          />
+          <span className="text-xs text-ink-muted">
+            {paperCount} papers · {claimCount} claims
+          </span>
         </div>
       </header>
 
+      {view === 'papers' && (
+        <div>
+          <GraphSegmented
+            label="Papers view filter"
+            value={pFilter}
+            options={[
+              { key: 'all', label: `All ${paperCount} papers` },
+              { key: 'strong', label: 'Strong links only' },
+              { key: 'citations', label: 'Citations' },
+            ]}
+            onChange={setPFilter}
+          />
+        </div>
+      )}
+
       {view === 'claims' && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
           {insights.map((insight) => (
-            <InsightTile key={insight.key} insight={insight} />
+            <InsightTile
+              key={insight.key}
+              insight={insight}
+              active={insightKey === insight.key}
+              onToggle={() => setInsightKey(insightKey === insight.key || insight.count === 0 ? null : insight.key)}
+            />
           ))}
         </div>
       )}
@@ -776,10 +539,10 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
             short window. The role shell is `wide` for Graph, so it also uses the screen width. */}
         <div
           ref={setCanvas}
-          className="relative min-h-[560px] min-w-0 flex-1 overflow-hidden rounded-xl border border-border-subtle bg-canvas lg:h-[calc(100dvh-13rem)]"
+          className="relative min-h-[560px] min-w-0 flex-1 overflow-hidden rounded-[14px] border border-border-subtle bg-canvas lg:h-[calc(100dvh-22rem)]"
         >
-          {/* Zoom, fit and fullscreen, so a dense library can be opened up and re-framed. */}
-          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface">
+          {/* Zoom and fit, so a dense library can be opened up and re-framed. */}
+          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-[10px] border border-border-subtle bg-surface">
             {[
               { icon: ZoomIn, label: 'Zoom in', factor: 1.3 },
               { icon: ZoomOut, label: 'Zoom out', factor: 1 / 1.3 },
@@ -792,7 +555,7 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
                 title={label}
                 onClick={() => {
                   const cy = cyRef.current
-                  if (!cy) return
+                  if (!cy || cy.destroyed()) return
                   if (factor === 0) cy.fit(undefined, 40)
                   else cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
                 }}
@@ -801,31 +564,18 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
                 <Icon className="size-4" />
               </button>
             ))}
-            <button
-              type="button"
-              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              onClick={() => {
-                if (document.fullscreenElement) void document.exitFullscreen()
-                else void canvasRef.current?.requestFullscreen?.()
-              }}
-              className="flex size-8 items-center justify-center border-t border-border-subtle text-ink-muted hover:bg-accent-soft hover:text-ink"
-            >
-              {fullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
-            </button>
           </div>
-          {view === 'claims' ? (
-            <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5">
-              <Search className="size-3.5 text-ink-muted" />
+          {view === 'claims' && (
+            <div className="absolute left-3 top-3 z-10 flex w-[220px] items-center gap-2 rounded-[9px] border border-border-subtle bg-surface px-2.5 py-[7px]">
+              <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
               <input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="filter claims…"
-                className="w-40 bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted"
+                placeholder="Filter claims…"
+                aria-label="Filter claims"
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
               />
             </div>
-          ) : (
-            <ClusterLegend pal={pal} clusters={graph.clusters} notIndexed={notIndexed} />
           )}
           <CytoscapeComponent
             key={view}
@@ -904,7 +654,11 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
               setReady(true)
             }}
           />
-          {view === 'claims' && <ClaimsLegend pal={pal} notIndexed={notIndexed} />}
+          {view === 'claims' ? (
+            <GraphClaimsLegend colors={pal} notIndexed={notIndexed} />
+          ) : (
+            <GraphPapersLegend colors={pal} clusters={graph.clusters} clusterColors={clusterColors(pal)} notIndexed={notIndexed} />
+          )}
           {tip && (
             // Near the top edge the above-the-node tooltip would render past y=0 and be clipped by
             // the overflow-hidden canvas, so flip it below the node there.
@@ -920,8 +674,8 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
           )}
         </div>
 
-        {view === 'claims' && claimSel && <ClaimDetail graph={graph} claimId={claimSel} pal={pal} />}
-        {view === 'papers' && selectedEdge && <PapersDetail graph={graph} edge={selectedEdge} />}
+        {view === 'claims' && claimSel && <GraphClaimDetail graph={graph} claimId={claimSel} onClose={() => setClaimSel(null)} />}
+        {view === 'papers' && selectedEdge && <GraphPairDetail graph={graph} edge={selectedEdge} onClose={() => setPairSel(null)} />}
       </div>
     </>
   )
@@ -937,30 +691,30 @@ export function Graph({
   onOpenAnalysis,
   initialTab = 'graph',
   emptyMessage,
+  hideTabs = false,
 }: {
   onOpenAnalysis: (id: string) => void
   initialTab?: 'graph' | 'consensus'
   emptyMessage?: GraphEmptyMessage
+  /** Leaves out the Graph | Ask the field switch, for a host that reaches each from its own nav. */
+  hideTabs?: boolean
 }) {
   const [tab, setTab] = useState<'graph' | 'consensus'>(initialTab)
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-4">
-      <div className="flex items-center gap-1 self-start rounded-xl border border-border-subtle bg-surface p-1">
-        {(['graph', 'consensus'] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            aria-pressed={tab === t}
-            className={cn(
-              'rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-              tab === t ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:text-ink',
-            )}
-          >
-            {t === 'graph' ? 'Graph' : 'Field Consensus'}
-          </button>
-        ))}
-      </div>
+      {!hideTabs && (
+        <div>
+          <GraphSegmented
+            label="Screen"
+            value={tab}
+            options={[
+              { key: 'graph', label: 'Graph' },
+              { key: 'consensus', label: 'Ask the field' },
+            ]}
+            onChange={setTab}
+          />
+        </div>
+      )}
       {tab === 'graph' ? <GraphCanvas emptyMessage={emptyMessage} /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
     </div>
   )
