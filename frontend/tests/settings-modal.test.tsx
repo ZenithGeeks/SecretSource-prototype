@@ -125,7 +125,7 @@ describe('settings tab list keyboard travel', () => {
     account.focus()
 
     fireEvent.keyDown(account, { key: 'ArrowDown' })
-    const roleTab = screen.getByRole('tab', { name: 'Role and home' })
+    const roleTab = screen.getByRole('tab', { name: 'Appearance' })
     expect(roleTab).toHaveAttribute('aria-selected', 'true')
     expect(document.activeElement).toBe(roleTab)
     expect(account).toHaveAttribute('aria-selected', 'false')

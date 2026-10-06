@@ -10,6 +10,7 @@
  * is left alone.
  */
 
+import { ChevronDown } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { cloneElement, isValidElement, useId } from 'react'
 
@@ -18,9 +19,9 @@ import { cn } from '../lib/utils'
 
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex w-full flex-col items-start py-2">
-      <div className="flex w-full items-center py-3 pb-2.5">
-        <h2 className="text-[17px] font-semibold text-ink">{title}</h2>
+    <section className="flex w-full flex-col items-start">
+      <div className="flex w-full items-center pb-3 pr-10">
+        <h2 className="text-[20px] font-semibold leading-[26px] tracking-[-0.012em] text-ink">{title}</h2>
       </div>
       <div className="w-full divide-y divide-border-subtle">{children}</div>
     </section>
@@ -45,12 +46,12 @@ export function Row({
   const child = isBareControl ? cloneElement(only, { 'aria-labelledby': labelId }) : children
 
   return (
-    <div className="flex w-full flex-col gap-3 border-t border-border-subtle py-4 first:border-t-0 sm:flex-row sm:items-center sm:gap-6">
+    <div className="flex w-full flex-col gap-3 border-t border-border-subtle py-3.5 sm:flex-row sm:items-center sm:gap-6">
       <div className="min-w-0 flex-1">
-        <p id={labelId} className="text-sm font-medium text-ink">
+        <p id={labelId} className="text-[13px] font-medium leading-[18px] text-ink">
           {label}
         </p>
-        {hint && <p className="mt-0.5 text-xs leading-[18px] text-ink-muted">{hint}</p>}
+        {hint && <p className="mt-0.5 text-xs leading-4 text-ink-muted">{hint}</p>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-3">{child}</div>
     </div>
@@ -79,7 +80,7 @@ export function Toggle({
       className={cn(
         'inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        on ? 'bg-accent' : 'bg-border-subtle',
+        on ? 'bg-accent' : 'bg-neutral',
       )}
     >
       <span
@@ -110,13 +111,14 @@ export function Select({
 }) {
   const entries = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
   return (
+    <span className="relative inline-flex">
     <select
       value={value}
       disabled={disabled}
       aria-labelledby={ariaLabelledBy}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
-        'h-9 w-[180px] rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink outline-none',
+        'h-9 w-[180px] appearance-none rounded-[9px] border border-border-subtle bg-surface py-2 pl-3 pr-9 text-[13px] font-medium text-ink outline-none',
         'focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50',
       )}
     >
@@ -126,6 +128,8 @@ export function Select({
         </option>
       ))}
     </select>
+    <ChevronDown aria-hidden className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+    </span>
   )
 }
 
