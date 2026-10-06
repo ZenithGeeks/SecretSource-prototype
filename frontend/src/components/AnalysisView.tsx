@@ -7,12 +7,11 @@
  * analysis and must not survive a switch to another.
  */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, paperName } from '../lib/api'
+import { paperName } from '../lib/api'
 import type { Analysis, Claim } from '../lib/api'
 import { countsOf, ranked, standingOf, verdictCountLabel } from '../lib/claims'
 import type { Standing } from '../lib/claims'
@@ -20,9 +19,7 @@ import { sectionName, sectionOfPage } from '../lib/outline'
 import { useAnalysis } from '../lib/useAnalysis'
 import { AnalysisHeader } from './AnalysisHeader'
 import { AnalysisProgress } from './AnalysisProgress'
-import { ToolbarActions } from './AppShell'
 import { ClaimCard } from './ClaimCard'
-import { TOOLBAR_BUTTON } from './ExportMenu'
 import type { Target } from './PageViewer'
 import { PageViewer } from './PageViewer'
 import { ResultsSummary } from './ResultsSummary'
@@ -35,35 +32,6 @@ export type SectionJump = { n: string; title: string; page: number; at: number }
 /** A claim the run has finished with: it has an answer, a failure, or nothing to check. */
 function settled(claim: Claim) {
   return (claim.verdicts ?? []).length > 0 || (claim.unchecked ?? []).length > 0 || claim.citations.length === 0
-}
-
-/** The one action while a run is going. Deleting a queued run cancels it; a started one cannot be
- * deleted yet, and the gateway's reason is shown. */
-function StopAnalysis({ id, onStopped, inToolbar }: { id: string; onStopped: () => void; inToolbar: boolean }) {
-  const queryClient = useQueryClient()
-  const stop = useMutation({
-    mutationFn: () => api.deleteAnalysis(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['analyses'] })
-      onStopped()
-    },
-  })
-  const button = (
-    <button type="button" onClick={() => stop.mutate()} disabled={stop.isPending} className={TOOLBAR_BUTTON}>
-      <X className="size-4" aria-hidden="true" />
-      Stop analysis
-    </button>
-  )
-  return (
-    <>
-      {inToolbar ? <ToolbarActions>{button}</ToolbarActions> : <div className="flex justify-end">{button}</div>}
-      {stop.isError && (
-        <p role="alert" className="text-sm text-refutes">
-          {(stop.error as Error).message}
-        </p>
-      )}
-    </>
-  )
 }
 
 /** A claim row that has not been answered yet, in the shape the answer will take. */
@@ -92,7 +60,6 @@ export function AnalysisView({
   paperLabel,
   onTeacherFeedback,
   renderClaimActions,
-  onStopped,
   actionsInToolbar = false,
 }: {
   id: string | null
@@ -115,9 +82,7 @@ export function AnalysisView({
   onTeacherFeedback?: () => void
   /** Add teacher-only review controls inside the shared expanded claim card. */
   renderClaimActions?: (claim: NonNullable<Analysis['claims']>[number], index: number) => ReactNode
-  /** Called once a running analysis has been stopped; the "Stop analysis" action shows only when given. */
-  onStopped?: () => void
-  /** Put "Stop analysis", "Open PDF" and "Export" in the shell's toolbar (the researcher shell has one). */
+  /** Put "Open PDF" and "Export" in the shell's toolbar (the researcher shell has one). */
   actionsInToolbar?: boolean
 }) {
   const [opened, setOpened] = useState<{ target: Target | null; at: number }>({ target: null, at: 0 })
@@ -209,9 +174,6 @@ export function AnalysisView({
   const content = (
     <>
       {!teacher && <AnalysisHeader analysis={analysis.data} />}
-      {!teacher && running && onStopped && (
-        <StopAnalysis id={analysis.data.id} onStopped={onStopped} inToolbar={actionsInToolbar} />
-      )}
       {(!teacher || running) && <AnalysisProgress stages={analysis.data.stages} claims={analysis.data.claims} status={analysis.data.status} />}
 
       {analysis.data.status === 'error' && (

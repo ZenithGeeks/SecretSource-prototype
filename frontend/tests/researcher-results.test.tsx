@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { api } from '../src/lib/api'
 import { verdictCountLabel } from '../src/lib/claims'
 
 const cite = (title: string) => ({ title, authors: ['Ioffe'], year: '2015', doi: `10/${title}`, arxiv: '', url: '' })
@@ -43,11 +42,11 @@ function finished() {
   }
 }
 
-function renderView(onStopped?: () => void) {
+function renderView() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <AnalysisView id="a1" onStopped={onStopped} />
+      <AnalysisView id="a1" />
     </QueryClientProvider>,
   )
 }
@@ -101,19 +100,13 @@ describe('researcher results', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Refuted claim.')))
   })
 
-  it('offers exactly one Stop analysis action while a run is going', async () => {
+  it('shows results so far while a run is going, with no stop or export action', async () => {
     data.analysis = { ...finished(), status: 'running', stages: [{ stage: 'extracting', at: 1 }] }
-    const deleted = vi.spyOn(api, 'deleteAnalysis').mockResolvedValue({ deleted: 'a1' })
-    const stopped = vi.fn()
-    renderView(stopped)
+    renderView()
 
-    const stop = screen.getAllByRole('button', { name: 'Stop analysis' })
-    expect(stop).toHaveLength(1)
-    expect(screen.getByText('Results so far')).toBeInTheDocument()
+    expect(await screen.findByText('Results so far')).toBeInTheDocument()
+    // There is no stop endpoint; deleting is the only thing the gateway offers, and it is not a stop.
+    expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
-
-    fireEvent.click(stop[0])
-    await waitFor(() => expect(stopped).toHaveBeenCalled())
-    expect(deleted).toHaveBeenCalledWith('a1')
   })
 })

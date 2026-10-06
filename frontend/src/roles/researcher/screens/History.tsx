@@ -39,7 +39,6 @@ export function History({
       onClearSection={onClearSection}
       jump={jump}
       onCurrentSection={onCurrentSection}
-      onStopped={() => onSelect(null)}
       actionsInToolbar
     />
   )
