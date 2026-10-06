@@ -85,6 +85,21 @@ describe('Author Library', () => {
     expect(gateway.projects.get('proj1')!.bib!.content).toContain('santhanam2022plaid')
   })
 
+  test('a saved source has a delete button that removes only the source, not the .bib entry', async () => {
+    gateway.sources.set('src9', {
+      id: 'src9', projectId: 'proj1', key: 'santhanam2022plaid', title: 'PLAID', authors: 'Santhanam et al.', authorsList: ['Keshav Santhanam'], year: 2022,
+      venue: 'CIKM', doi: '', arxiv: '', url: '', identifier: '', openAccess: true, citedBy: null, bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID},\n}',
+      inBib: false, bibName: 'main.bib', savedAt: '', verdict: 'supports',
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete PLAID' }))
+    expect(confirm).toHaveBeenCalled()
+    await waitFor(() => expect(gateway.calls).toContain('DELETE /author/sources/src9'))
+    await waitFor(() => expect(screen.queryByText(/Santhanam et al\. \(2022\) · PLAID/)).not.toBeInTheDocument())
+    expect(gateway.projects.get('proj1')!.bib!.content).toBe(MAIN_BIB)
+  })
+
   test('Import .bib creates a project on the gateway and opens it', async () => {
     const { onOpenProject } = renderLibrary()
     await screen.findByRole('button', { name: /Import \.bib/ })
