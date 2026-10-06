@@ -237,7 +237,7 @@ groups:
         annotations:
           summary: '{{ index $labels "resource.label.service_name" }} averaged {{ humanize $values.D.Value }} instances over the last hour.'
           description: >-
-            gateway, colbert and grobid normally run 1 instance each (~$12.50/day together at list price).
+            colbert and grobid normally run 1 instance each. The gateway is capped at 1 and has its own rule (ops-gateway-never-idle).
             More instances cost more for every hour they run. Check the Operations dashboard's
             Cost row and the service's request rate.
         data:
@@ -249,7 +249,7 @@ groups:
               queryType: timeSeriesList
               timeSeriesList:
                 projectName: gcp-edu-471706
-                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "!=", colpali]
+                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=~", "colbert|grobid"]
                 perSeriesAligner: ALIGN_SUM
                 alignmentPeriod: "3600s"
                 crossSeriesReducer: REDUCE_SUM
