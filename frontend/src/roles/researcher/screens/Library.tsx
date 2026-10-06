@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronRight, Plus } from 'lucide-react'
 import { useState } from 'react'
 
+import { ToolbarActions } from '../../../components/AppShell'
 import { Button, Empty, FadeIn, Input, LoadingScreen } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
@@ -16,9 +17,9 @@ import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
-
-/** Cluster dot colours, cycled in cluster order so new clusters stay distinguishable. */
-const DOT_COLORS = ['bg-accent', 'bg-supports', 'bg-insufficient', 'bg-ink-muted', 'bg-refutes']
+import { LibraryAddMenu, type LibraryAddItem } from '../components/LibraryAddMenu'
+import { count } from '../components/LibraryCount'
+import { LibraryPaperTable } from '../components/LibraryPaperTable'
 
 /** Display order + colour for a project's claim tally bar. */
 const STANDINGS: { key: ClaimStanding; color: string }[] = [
@@ -55,11 +56,6 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
   )
 }
 
-/** "1 paper", "3 papers". */
-function count(number: number, noun: string) {
-  return `${number} ${noun}${number === 1 ? '' : 's'}`
-}
-
 function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
   const meta = project.unsorted
     ? `${count(project.papers, 'paper')} · not in a project yet`
@@ -81,25 +77,42 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: strin
   )
 }
 
+/** The ways to start a new analysis. Both open Analyses, where a DOI, arXiv ID, link or PDF starts one. */
+function analyseItems(onAddPaper?: () => void): LibraryAddItem[] {
+  if (!onAddPaper) return []
+  return [
+    { label: 'By DOI, arXiv ID or link', hint: 'Starts a new analysis', onSelect: onAddPaper },
+    { label: 'Upload a PDF', hint: 'Starts a new analysis', onSelect: onAddPaper },
+  ]
+}
+
 function ProjectsLanding({
   projects,
   onOpen,
   onNew,
+  onAddPaper,
 }: {
   projects: Project[]
   onOpen: (id: string) => void
   onNew: () => void
+  onAddPaper?: () => void
 }) {
+  const papers = projects.reduce((sum, p) => sum + p.papers, 0)
+  const claims = projects.reduce((sum, p) => sum + p.claims, 0)
   return (
     <>
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Projects</h1>
-          <p className="text-sm text-ink-muted">
-            Group the papers you analysed into projects.
+      <ToolbarActions>
+        <LibraryAddMenu items={analyseItems(onAddPaper)} />
+      </ToolbarActions>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <p className="type-label text-accent">
+            {count(papers, 'paper')} · {count(claims, 'claim')}
           </p>
+          <h1 className="type-display text-ink">Library</h1>
+          <p className="text-sm text-ink-muted">Group the papers you analysed into projects.</p>
         </div>
-        <Button onClick={onNew} className="self-start sm:self-auto">
+        <Button variant="ghost" onClick={onNew} className="self-start border border-border-subtle sm:self-auto">
           <Plus className="size-4" />
           New project
         </Button>
@@ -144,8 +157,8 @@ function AddPapersDialog({
         {...PANEL_MOTION}
         className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
-        <h2 className="font-serif text-xl font-semibold text-ink">Add papers</h2>
-        <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in History first.</p>
+        <h2 className="type-title text-ink">Add papers</h2>
+        <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
           {choices.length === 0 && <li className="py-3 text-sm text-ink-muted">Every analysed paper is already in this project.</li>}
           {choices.map((analysis) => (
@@ -199,17 +212,41 @@ function ProjectDetail({
   const [filter, setFilter] = useState('All')
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [picking, setPicking] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const { data: library, isError } = useResearcherLibrary(projectId)
   if (isError) return <Empty title="This project could not load" hint="Refresh the page to try again." />
   if (!library) return <LoadingScreen label="Loading this project…" />
   const hasClusters = library.papers.some((p) => p.cluster)
+  const notAnalyzed = library.papers.filter((p) => p.backed === null).length
+  const withConflicts = library.papers.filter((p) => (p.contradicted ?? 0) > 0).length
+  const checked = library.papers.reduce((sum, p) => sum + (p.backed === null ? 0 : p.claims), 0)
+  const claimTotal = library.papers.reduce((sum, p) => sum + p.claims, 0)
 
-  const clusterNames = [...new Set(library.papers.map((p) => p.cluster))]
-  const dotFor = (cluster: string) => DOT_COLORS[clusterNames.indexOf(cluster) % DOT_COLORS.length]
+  // The filter keys are the gateway's ("All", "Unverified", cluster names); the words are ours.
+  // "Has conflicts" sits right after "All", as designed.
+  const countFor = (key: string) =>
+    key === 'All'
+      ? library.papers.length
+      : key === 'Unverified'
+        ? notAnalyzed
+        : library.papers.filter((p) => p.cluster === key).length
+  const [first, ...others] = library.clusters
+  const segments = [
+    ...(first === undefined ? [] : [{ key: first, label: first, n: countFor(first) }]),
+    { key: 'Conflicts', label: 'Has conflicts', n: withConflicts },
+    ...others.map((key) => ({ key, label: key === 'Unverified' ? 'Not analyzed' : key, n: countFor(key) })),
+  ]
+
   const q = query.trim().toLowerCase()
   const shown = library.papers
     .filter((p) =>
-      filter === 'All' ? true : filter === 'Unverified' ? p.backed === null : p.cluster === filter,
+      filter === 'All'
+        ? true
+        : filter === 'Unverified'
+          ? p.backed === null
+          : filter === 'Conflicts'
+            ? (p.contradicted ?? 0) > 0
+            : p.cluster === filter,
     )
     .filter((p) =>
       q === ''
@@ -217,24 +254,29 @@ function ProjectDetail({
         : `${p.title} ${p.cite} ${p.cluster} ${p.linked.join(' ')}`.toLowerCase().includes(q),
     )
 
+  const items: LibraryAddItem[] = [
+    ...(unsorted
+      ? []
+      : [{ label: 'From your analysed papers', hint: 'Pick papers already analysed', onSelect: () => setPicking(true) }]),
+    ...analyseItems(onAddPaper),
+  ]
+
   return (
-    <FadeIn className="flex flex-col gap-5">
+    <FadeIn className="flex flex-col gap-6">
+      <ToolbarActions>
+        <LibraryAddMenu items={items} />
+      </ToolbarActions>
       <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
         <span className="font-medium text-accent hover:underline">← Projects</span>
         <span className="text-ink-muted">· {projectName}</span>
       </button>
 
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{projectName}</h1>
-          <p className="text-sm text-ink-muted">{library.summary}</p>
-        </div>
-        <div className="flex gap-2 self-start sm:self-auto">
-          <Button onClick={unsorted ? onAddPaper : () => setPicking(true)}>
-            <Plus className="size-4" />
-            {unsorted ? 'Analyse a paper' : 'Add paper'}
-          </Button>
-        </div>
+      <header className="flex flex-col gap-2">
+        <p className="type-label text-accent">
+          {count(library.papers.length, 'paper')} · {count(claimTotal, 'claim')} · {checked} checked
+        </p>
+        <h1 className="type-display text-ink">{projectName}</h1>
+        <p className="text-sm text-ink-muted">{library.summary}</p>
       </header>
       <AnimatePresence>
         {picking && (
@@ -246,100 +288,42 @@ function ProjectDetail({
         )}
       </AnimatePresence>
 
-      {/* Search + cluster filters */}
+      {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-3">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search titles, authors and linked papers"
-          className="max-w-xl"
+          placeholder="Filter by title, author or claim"
+          aria-label="Filter papers"
+          className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
         />
-        <div className="flex flex-wrap gap-2">
-          {library.clusters.map((option) => (
+        <div className="flex flex-wrap gap-0.5 rounded-[9px] bg-neutral-soft p-0.5">
+          {segments.map((seg) => (
             <button
-              key={option}
+              key={seg.key}
               type="button"
-              onClick={() => setFilter(option)}
+              aria-pressed={filter === seg.key}
+              onClick={() => setFilter(seg.key)}
               className={cn(
-                'rounded-lg border px-3 py-1.5 text-xs font-medium text-ink',
-                filter === option ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent',
+                'rounded-[7px] px-3 py-[5px] text-[13px] font-medium',
+                filter === seg.key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
               )}
             >
-              {option}
+              {seg.label} {seg.n}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
-        <div className="hidden items-center gap-4 px-5 py-2.5 text-xs font-medium text-ink-muted md:flex">
-          <span className="flex-1">Paper</span>
-          {hasClusters && <span className="w-36 shrink-0">Cluster</span>}
-          <span className="w-16 shrink-0">Claims</span>
-          <span className="w-16 shrink-0">Backed</span>
-          <span className="w-24 shrink-0">Contradicted</span>
-          <span className="w-40 shrink-0">Linked to</span>
-          <span className="w-6 shrink-0" />
-        </div>
-        {shown.map((paper) => (
-          <button
-            key={paper.id}
-            type="button"
-            onClick={() => onOpenAnalysis(paper.id)}
-            title="Open this analysis"
-            className="flex w-full items-center gap-4 border-t border-border-subtle px-4 py-3 text-left first:border-t-0 hover:bg-accent-soft md:px-5 md:py-2.5 md:first:border-t"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium text-ink">{paper.title}</span>
-                {paper.indexed === 'no' && (
-                  <span
-                    className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
-                    title="This paper was not found in Semantic Scholar, arXiv, or Unpaywall. This is not a Scopus check."
-                  >
-                    not indexed
-                  </span>
-                )}
-                {paper.sourcesNotIndexed > 0 && (
-                  <span
-                    className="shrink-0 rounded-full bg-insufficient-soft px-2 py-0.5 text-[11px] font-semibold tracking-wide text-insufficient uppercase"
-                    title={`${paper.sourcesNotIndexed} cited ${paper.sourcesNotIndexed === 1 ? 'source is' : 'sources are'} not in a public index`}
-                  >
-                    sources not indexed
-                  </span>
-                )}
-              </p>
-              <p className="text-xs text-ink-muted">{paper.cite}</p>
-              {/* On a phone the number columns do not fit, so they read as one line here. */}
-              <p className="mt-1 text-xs text-ink-muted md:hidden">
-                {count(paper.claims, 'claim')}
-                {paper.backed !== null && <> · <span className="text-supports">{paper.backed} backed</span></>}
-                {paper.contradicted !== null && (
-                  <> · <span className="text-refutes">{paper.contradicted} contradicted</span></>
-                )}
-                {paper.linked.length > 0 && <> · linked to {paper.linked.join(', ')}</>}
-              </p>
-            </div>
-            {hasClusters && (
-              <span className="hidden w-36 shrink-0 items-center gap-1.5 text-xs text-ink-muted md:flex">
-                <span className={cn('size-2 rounded-full', dotFor(paper.cluster))} />
-                {paper.cluster}
-              </span>
-            )}
-            <span className="hidden w-16 shrink-0 text-sm font-medium text-ink md:inline">{paper.claims}</span>
-            <span className="hidden w-16 shrink-0 text-sm font-medium text-supports md:inline">{paper.backed ?? '—'}</span>
-            <span className="hidden w-24 shrink-0 text-sm font-medium text-refutes md:inline">{paper.contradicted ?? '—'}</span>
-            <span className="hidden w-40 shrink-0 truncate text-xs text-accent md:inline">{paper.linked.join(', ')}</span>
-            <ChevronRight className="size-4 shrink-0 text-ink-muted" />
-          </button>
-        ))}
-        {shown.length === 0 && (
-          <p className="border-t border-border-subtle px-5 py-6 text-sm text-ink-muted">
-            {library.papers.length === 0 ? 'No papers in this project yet.' : 'No papers match.'}
-          </p>
-        )}
-      </div>
+      <LibraryPaperTable
+        papers={shown}
+        hasClusters={hasClusters}
+        limit={7}
+        expanded={expanded || filter !== 'All' || q !== ''}
+        onExpand={() => setExpanded(true)}
+        onOpen={onOpenAnalysis}
+        emptyText={library.papers.length === 0 ? 'No papers in this project yet.' : 'No papers match.'}
+      />
     </FadeIn>
   )
 }
@@ -440,8 +424,8 @@ export function Library({
     )
   }
   return (
-    <FadeIn className="flex flex-col gap-5">
-      <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} />
+    <FadeIn className="flex flex-col gap-6">
+      <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} onAddPaper={onAddPaper} />
       <AnimatePresence>
         {showNew && (
           <NewProjectDialog
