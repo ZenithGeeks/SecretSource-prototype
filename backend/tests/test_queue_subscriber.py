@@ -236,19 +236,19 @@ def test_event_stream_sends_a_keep_alive_while_idle(monkeypatch):
     assert all(chunk == ": keep-alive\n\n" for chunk in rest)  # then it ends at the None
 
 
-@pytest.mark.parametrize("kind", ["check", "draft-check"])
-def test_check_streams_send_the_same_keep_alive(monkeypatch, kind):
-    """A single-claim check and an Author draft check read the stream analyses do, so a long
-    verification with nothing to report does not get its stream closed by a proxy either."""
+def test_draft_check_streams_send_the_same_keep_alive(monkeypatch):
+    """An Author draft check reads the stream analyses do, so a long verification with nothing
+    to report does not get its stream closed by a proxy either."""
     from app.author import router as author
 
     monkeypatch.setattr(main, "HEARTBEAT_SECONDS", 0.05)
     main.analyses["c1"] = {
-        "id": "c1", "kind": kind, "owner": None, "status": "running", "stages": [{"stage": "resolving"}],
+        "id": "c1", "kind": "draft-check", "owner": None, "status": "running",
+        "stages": [{"stage": "resolving"}],
     }
     main.streams["c1"] = asyncio.Queue()
     main.streams["c1"].put_nowait({"stage": "resolving"})
-    events = main.check_events if kind == "check" else author.check_events
+    events = author.check_events
 
     async def scenario():
         response = await events("c1", user=None)

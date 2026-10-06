@@ -4,7 +4,7 @@ verification report. Mounted under /author by app/main.py.
 Storage: projects, drafts and sources are one JSON row each in their own tables
 (app/store.py's *_author_row functions), always owner-scoped. A draft check is an `analyses`
 row with kind "draft-check" — the same dict, SSE stream, save-soon and restart recovery the
-single-claim checks of SCRUM-236 use — so it is reached through app.main's helpers, imported
+paper analyses use — so it is reached through app.main's helpers, imported
 lazily here (main imports this module first).
 
 Every route requires the same optional login as the rest of the gateway: with Supabase
@@ -592,8 +592,8 @@ async def list_draft_checks(draft_id: str, user: str | None = Depends(current_us
 
 
 def _check(check_id: str, user: str | None) -> dict:
-    """One of the caller's draft checks; a paper analysis or a single-claim check (POST /checks)
-    with that id is a 404 like a missing one."""
+    """One of the caller's draft checks; a paper analysis with that id is a 404 like a missing
+    one."""
     return require_owner(_gateway().analyses.get(check_id), user, "check", kind=DRAFT_CHECK)
 
 

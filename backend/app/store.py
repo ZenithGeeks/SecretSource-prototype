@@ -73,8 +73,9 @@ CREATE TABLE IF NOT EXISTS projects (
 # for their own NULL — a plain TEXT key here instead, see _pref_key below).
 # The Author role's own records (backend/app/author/). One blob row per project, draft,
 # saved source; every row carries its owner so a user only ever sees their own. Draft checks
-# live in `analyses` with kind "draft-check" (the same discriminator SCRUM-236's single
-# checks use), so they get the SSE stream, restart recovery and delete-all for free.
+# live in `analyses` with kind "draft-check" (the discriminator that
+# once told them from single-claim checks), so they get the SSE stream, restart recovery and
+# delete-all for free.
 AUTHOR_TABLES = ("author_projects", "author_drafts", "author_sources")
 
 AUTHOR_SCHEMA = """
