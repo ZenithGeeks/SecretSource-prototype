@@ -153,12 +153,19 @@ MODEL_ENV="VLLM_URL=$(url_of vllm)/v1,VLLM_MODEL=$VLLM_SERVED_NAME,VLLM_API_KEY=
 
 # --- gateway and UI -----------------------------------------------------------
 
+# Run history goes to Supabase when its keys are exported (deploy-gateway.yml always sets
+# them); without them the gateway falls back to SQLite on the container's disk.
+SUPABASE_ENV=""
+if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+    SUPABASE_ENV=",SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY"
+fi
+
 build_and_push gateway ./backend
 deploy gateway --port 8080 --memory 8Gi --allow-unauthenticated \
     --max-instances 1 --no-cpu-throttling --cpu 4 \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
     --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
-    --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV"
+    --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV$SUPABASE_ENV"
 
 build_and_push web ./frontend
 # 127.0.0.11 is Docker's DNS and does not exist here; nginx is pointed at the metadata
@@ -175,5 +182,7 @@ echo "ColBERT MCP: $(url_of colbert)/mcp"
 echo "Model:       $VLLM_HF_MODEL served as '$VLLM_SERVED_NAME' on a $GPU_TYPE"
 echo "             VLLM_API_KEY=$VLLM_API_KEY   (export it to keep the same key next deploy)"
 echo
-echo "Run history is SQLite on the container's disk and resets when an instance recycles."
-echo "Point ANALYSES_DB at Cloud SQL before anyone relies on it."
+if [ -z "$SUPABASE_ENV" ]; then
+    echo "Run history is SQLite on the container's disk and resets when an instance recycles."
+    echo "Export SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and deploy again to keep it in Supabase."
+fi
