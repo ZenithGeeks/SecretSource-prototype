@@ -27,6 +27,7 @@ import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } f
 import { useSettings } from '../../../lib/settings'
 import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
+import { fitReadable } from '../../../lib/graphFit'
 import { cn } from '../../../lib/utils'
 
 let _colaReady = false
@@ -293,16 +294,6 @@ function writePosCache(key: string, positions: PosMap): void {
     localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ ...all, [key]: positions }))
   } catch {
     /* storage full or blocked — recompute next time */
-  }
-}
-
-/** Fit the whole graph, but never so far out that it reads tiny: below 0.9 the labels blur, so
- * clamp to 0.9 and centre and let the user pan or press Fit. */
-function fitReadable(cy: cytoscape.Core): void {
-  cy.resize()
-  cy.fit(undefined, 40)
-  if (cy.zoom() < 0.9) {
-    cy.zoom({ level: 0.9, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
   }
 }
 
@@ -875,7 +866,7 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
               // Pan (zoom stays whatever fitReadable set) so the latest upload is what's centred
               // on open, not wherever the whole-graph bounding box happened to land it.
               const focusLatest = () => {
-                if (!latestPaperId) return
+                if (cy.destroyed() || !latestPaperId) return
                 const node = cy.$id(latestPaperId)
                 if (node.nonempty()) cy.center(node)
               }
@@ -883,6 +874,8 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
               // timer that can fire while nodes are still bunched. It re-runs only when the element
               // set changes (e.g. switching Claims/Papers), which re-runs the layout.
               cy.on('layoutstop', () => {
+                // Cola is async: this can fire after navigating away destroyed the graph.
+                if (cy.destroyed()) return
                 fitReadable(cy)
                 focusLatest()
                 // Save the settled positions so the next visit replays them instantly with `preset`
