@@ -1,112 +1,86 @@
-import { GraduationCap, Plus, Search } from 'lucide-react'
+import { ChevronRight, GraduationCap, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { Button, Card, Empty, Input } from '../../../components/ui'
 import { filterTeacherClasses } from '../../../lib/teacherSelectors'
-import { useTeacherClasses, useTeacherGoogleConnection } from '../../../lib/useTeacher'
+import { useTeacherClasses, useTeacherGoogleConnection, useTeacherHome } from '../../../lib/useTeacher'
 import type { TeacherClass } from '../../../lib/teacher'
-import { Breadcrumbs, LoadingState, StatusPill } from '../components/TeacherUi'
+import { LoadingState, StatusPill } from '../components/TeacherUi'
 import { AddClass } from './AddClass'
 
-export function Classes({ onOpenClass, onOpenHome, onAddClass, onConnectGoogle, connectionError }: {
+export function Classes({ onOpenClass, onConnectGoogle, connectionError }: {
   onOpenClass: (courseId: string) => void
   onOpenHome?: () => void
-  onAddClass: () => void
   onConnectGoogle: () => void
   connectionError?: string
 }) {
   const connection = useTeacherGoogleConnection()
   const classes = useTeacherClasses()
+  const home = useTeacherHome()
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => filterTeacherClasses(classes.data ?? [], query), [classes.data, query])
 
   if (classes.isPending) return <LoadingState label="Loading classes..." />
   if (classes.isError) {
-    return (
-      <div className="space-y-4">
-        <Breadcrumbs items={[{ label: 'Teacher workspace', onClick: onOpenHome }, { label: 'Classes' }]} />
-        <Empty title="Classes could not load" hint="Try refreshing the page to load your Classroom courses." />
-        <Button type="button" onClick={() => void classes.refetch()}>Retry</Button>
-      </div>
-    )
+    return <Empty title="Classes could not load" hint="The teacher data service could not retrieve your Classroom courses." />
   }
   if (!classes.data?.length && connection.isPending) return <LoadingState label="Checking Google Classroom connection..." />
   if (!classes.data?.length && connection.isError) {
-    return (
-      <div className="space-y-4">
-        <Breadcrumbs items={[{ label: 'Teacher workspace', onClick: onOpenHome }, { label: 'Classes' }]} />
-        <Empty title="Google Classroom connection could not be checked" hint="The SecretSource API did not respond. Check that it is reachable, then try again." />
-        <Button type="button" onClick={() => void connection.refetch()}>Retry</Button>
-      </div>
-    )
+    return <div className="space-y-4"><Empty title="Google Classroom connection could not be checked" hint="The SecretSource API did not respond. Check that it is reachable, then try again." /><Button type="button" onClick={() => void connection.refetch()}>Retry</Button></div>
   }
   if (!classes.data?.length && !connection.data?.connected) {
     return <AddClass step="connect" error={connectionError} onBack={() => undefined} onContinue={onConnectGoogle} onSelectCourse={() => undefined} onImport={() => undefined} />
   }
 
+  const submissions = home.data?.submissions ?? []
+  const pendingByCourse = new Map<string, number>()
+  for (const submission of submissions) {
+    if (submission.state === 'submitted' && submission.reviewStatus !== 'analysis-ready' && submission.courseId) {
+      pendingByCourse.set(submission.courseId, (pendingByCourse.get(submission.courseId) ?? 0) + 1)
+    }
+  }
+
   return (
     <div className="space-y-7">
-      <Breadcrumbs items={[{ label: 'Teacher workspace', onClick: onOpenHome }, { label: 'Classes' }]} />
       {connectionError && <p role="alert" className="text-sm text-refutes">{connectionError}</p>}
-      {connection.isError && (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface px-4 py-3">
-          <p className="text-sm text-ink-muted">Google Classroom connection status could not be checked.</p>
-          <Button type="button" variant="ghost" onClick={() => void connection.refetch()}>Retry</Button>
-        </div>
-      )}
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="font-serif text-[34px] font-semibold leading-[40px] text-ink">Classes</h1>
-          <p className="mt-1 text-[13px] leading-[18px] text-ink-muted">Your Google Classroom courses, mirrored in SecretSource.</p>
-        </div>
-        <Button type="button" onClick={onAddClass}><Plus className="size-4" />Add class</Button>
+      {connection.isError && <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface px-4 py-3"><p className="text-sm text-ink-muted">Google Classroom connection status could not be checked.</p><Button type="button" variant="ghost" onClick={() => void connection.refetch()}>Retry</Button></div>}
+      <header className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">{classes.data.length} active classes · from Google Classroom</p>
+        <h1 className="font-serif text-[34px] font-semibold leading-[40px] text-ink">Classes</h1>
       </header>
 
-      <section className="space-y-3" aria-labelledby="active-classes-heading">
-        <p id="active-classes-heading" className="text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-muted">Active classes</p>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="relative block w-full sm:max-w-[460px]">
-            <span className="sr-only">Search classes</span>
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your Classroom courses" className="h-[42px] rounded-lg pl-9 text-[12px]" />
-          </label>
-          <p className="text-[10px] text-ink-muted">{filtered.length} active {filtered.length === 1 ? 'course' : 'courses'}</p>
-        </div>
-
-        {filtered.length === 0 ? (
-          <Empty title="No matching classes" hint="Try another search term or add a class from Classroom." />
-        ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
-            {filtered.map((course) => <CourseCard key={course.id} course={course} onOpen={() => onOpenClass(course.id)} />)}
+      <section aria-label="Class list" className="space-y-5">
+        <label className="relative block w-full sm:max-w-[300px]">
+          <span className="sr-only">Search classes</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search classes" className="h-[36px] rounded-lg pl-9 text-[11px]" />
+        </label>
+        {filtered.length === 0 ? <Empty title="No matching classes" hint="Try another search term or add a class from Google Classroom." /> : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((course) => <CourseCard key={course.id} course={course} pendingReviews={pendingByCourse.get(course.id) ?? 0} onOpen={() => onOpenClass(course.id)} />)}
           </div>
         )}
       </section>
 
-      <Card className="flex min-h-[67px] items-center gap-3 rounded-[10px] bg-accent-soft px-4 py-3">
-        <GraduationCap className="size-[18px] shrink-0 text-accent" />
-        <p className="text-[11px] leading-4 text-ink">Add class connects a course you already teach. Courses are imported from Classroom; SecretSource does not create a new Classroom course.</p>
+      <Card className="flex min-h-[46px] items-center gap-3 rounded-lg bg-accent-soft/55 px-4 py-3">
+        <GraduationCap className="size-4 shrink-0 text-accent" />
+        <p className="text-[11px] leading-4 text-ink-muted"><span className="mr-2 rounded-full bg-accent-soft px-2 py-1 text-[9px] font-medium text-accent">Add class</span>Add class connects a course you already teach. Courses are imported from Classroom; SecretSource does not create a new Classroom course.</p>
       </Card>
     </div>
   )
 }
 
-function CourseCard({ course, onOpen }: { course: TeacherClass; onOpen: () => void }) {
+function CourseCard({ course, pendingReviews, onOpen }: { course: TeacherClass; pendingReviews: number; onOpen: () => void }) {
   return (
-    <Card className="flex min-h-[248px] flex-col gap-2.5 rounded-[12px] p-[17px]">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="truncate text-[16px] font-semibold leading-[22px]">{course.name} · {course.section}</h2>
-        <StatusPill label="Active" tone="success" />
+    <button type="button" onClick={onOpen} className="group flex min-h-[184px] w-full flex-col rounded-[14px] border border-border-subtle bg-surface p-4 text-left shadow-[0_5px_18px_rgba(35,24,38,0.05)] transition hover:-translate-y-0.5 hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+      <div className="flex w-full items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
+        <span>{course.section}</span><ChevronRight className="size-3.5 text-ink-muted transition group-hover:translate-x-0.5" />
       </div>
-      <p className="text-[11px] leading-[15px] text-ink-muted">Section {course.section} · Google Classroom</p>
-      <div className="grid grid-cols-3 gap-2 py-1 text-[11px] font-medium text-ink-muted">
-        <span>{course.studentCount} students</span>
-        <span>{course.assignmentCount} assignments</span>
-        <span>1 teacher</span>
+      <h2 className="mt-3 font-serif text-[21px] font-semibold leading-[26px] text-ink">{course.name}</h2>
+      <p className="mt-2 text-[11px] text-ink-muted">{course.studentCount} students · {course.assignmentCount} {course.assignmentCount === 1 ? 'assignment' : 'assignments'}</p>
+      <div className="mt-auto border-t border-border-subtle pt-3">
+        <StatusPill label={pendingReviews ? `${pendingReviews} ${pendingReviews === 1 ? 'essay' : 'essays'} to review` : 'Up to date'} tone={pendingReviews ? 'danger' : 'success'} />
       </div>
-      <div className="mt-auto flex items-center justify-between gap-3 border-t border-border-subtle pt-2.5">
-        <p className="text-[10px] text-ink-muted">Synced {course.lastSyncedAt}</p>
-        <Button type="button" variant="ghost" className="px-3 py-2 text-[14px] font-medium text-ink-muted" onClick={onOpen}>Open class</Button>
-      </div>
-    </Card>
+    </button>
   )
 }

@@ -1,4 +1,4 @@
-import { Check, FileText, MessageSquarePlus, Save } from 'lucide-react'
+import { Check, ChevronLeft, FileText, MessageSquarePlus, Save } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { AnalysisView } from '../../../components/AnalysisView'
@@ -19,17 +19,18 @@ import {
 } from '../../../lib/teacherFeedbackExport'
 import { teacherFeedbackPdfHtml } from '../../../lib/teacherFeedbackPdf'
 import { useAnalysis } from '../../../lib/useAnalysis'
-import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import {
   useAnalyzeTeacherSubmission,
   useSaveTeacherFeedback,
   useRefreshTeacherClass,
   useSendTeacherFeedback,
+  useTeacherAssignmentDetail,
   useTeacherGoogleConnection,
   useTeacherEssayCheck,
+  useTeacherWorkspace,
   useUpdateProfessorReview,
 } from '../../../lib/useTeacher'
-import { Breadcrumbs, LoadingState } from '../components/TeacherUi'
+import { LoadingState } from '../components/TeacherUi'
 import { TeacherDialog } from '../components/TeacherDialog'
 import { FeedbackDialog } from './FeedbackDialog'
 import { EssayCheckActions } from './EssayCheckActions'
@@ -80,15 +81,16 @@ function reviewIdFor(claim: Claim, claimIndex: number, citationIndex: number) {
 }
 
 /** Teacher's single-submission review: submitted paper beside claims, with feedback in the same flow. */
-export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNavigate, onReconnectGoogle }: {
+export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconnectGoogle }: {
   courseId: string
   assignmentId: string
   studentId: string
   onBack: () => void
-  onNavigate: (route: TeacherRoute) => void
   onReconnectGoogle?: () => void
 }) {
   const essay = useTeacherEssayCheck(courseId, assignmentId, studentId)
+  const assignmentDetails = useTeacherAssignmentDetail(courseId, assignmentId)
+  const workspace = useTeacherWorkspace(courseId)
   const analyze = useAnalyzeTeacherSubmission()
   const updateReview = useUpdateProfessorReview()
   const saveFeedback = useSaveTeacherFeedback()
@@ -122,6 +124,12 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
   }
 
   const data = essay.data
+  const courseLabel = data.assignment.course !== courseId
+    ? data.assignment.course
+    : workspace.data?.course.name || 'Class'
+  const assignmentLabel = data.assignment.name !== assignmentId
+    ? data.assignment.name
+    : assignmentDetails.data?.assignment.title || 'Assignment'
   const analysis = data.analysis
   const canAnalyze = !analysis || (analysis.status !== 'done' && analysis.status !== 'running')
   const draftKey = `${courseId}:${assignmentId}:${studentId}:${analysis?.id ?? ''}`
@@ -295,12 +303,16 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
   )
 
   return (
-    <div className="space-y-4">
-      {analysis?.id && <div className="flex justify-end">
-        <Button type="button" variant="ghost" disabled={recheckBusy} onClick={() => setRecheckOpen(true)}>
-          {analyze.isPending ? 'Starting analysis...' : 'Recheck essay'}
-        </Button>
-      </div>}
+    <div className="mx-auto w-full max-w-[1440px] space-y-5">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle pb-4">
+        <div className="min-w-0">
+          <button type="button" onClick={onBack} className="mb-2 inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted hover:text-accent"><ChevronLeft className="size-3.5" />Back to assignment</button>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">{courseLabel} / Essay review</p>
+          <h1 className="mt-1 truncate font-serif text-[29px] font-semibold leading-9 text-ink">{data.student.name} <span className="font-normal text-ink-muted">· {assignmentLabel}</span></h1>
+          <p className="mt-1 truncate text-[12px] text-ink-muted">{data.student.fileName} <span aria-hidden="true">·</span> {data.reviews.length} citations to review</p>
+        </div>
+        {analysis?.id && <Button type="button" variant="ghost" disabled={recheckBusy} onClick={() => setRecheckOpen(true)}>{analyze.isPending ? 'Starting analysis...' : 'Recheck essay'}</Button>}
+      </header>
       <TeacherDialog
         open={recheckOpen}
         title="Recheck this essay?"
@@ -318,12 +330,6 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onNaviga
           }}>Recheck</Button>
         </div>
       </TeacherDialog>
-      <Breadcrumbs items={[
-        { label: 'Classes', onClick: () => onNavigate({ screen: 'classes' }) },
-        { label: data.assignment.course, onClick: () => onNavigate({ screen: 'class-overview', courseId }) },
-        { label: data.assignment.name, onClick: onBack },
-      ]} />
-
       {analysis?.status === 'running' && (
         <div role="status"><Card className="flex items-center gap-3 py-3">
           <span className="size-2 animate-pulse rounded-full bg-accent" />

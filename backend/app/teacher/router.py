@@ -210,11 +210,12 @@ def _course_view(course: TeacherCourse, coursework: list[TeacherCoursework] | No
         "subject": course.description or "",
         "status": "active",
         "teacherName": _name((teachers[0] or {}).get("profile")) if teachers and isinstance(teachers[0], dict) else "",
+        "teacherCount": len(teachers),
         "studentCount": len(students),
-        "assignmentCount": sum(item.resource_type == "coursework" for item in work),
-        "topicCount": sum(item.resource_type == "topic" for item in work),
-        "announcementCount": sum(item.resource_type == "announcement" for item in work),
-        "linkedFileCount": sum(bool(_materials(item.raw)) for item in work),
+        "assignmentCount": raw.get("_preview_assignment_count", sum(item.resource_type == "coursework" for item in work)),
+        "topicCount": raw.get("_preview_topic_count", sum(item.resource_type == "topic" for item in work)),
+        "announcementCount": raw.get("_preview_announcement_count", sum(item.resource_type == "announcement" for item in work)),
+        "linkedFileCount": raw.get("_preview_linked_file_count", sum(bool(_materials(item.raw)) for item in work)),
         "lastSyncedAt": str(raw.get("_last_synced_at") or ""),
     }
 
@@ -275,7 +276,9 @@ def _assignment_view(
         "submittedCount": submitted,
         "missingCount": max(0, enrolled - submitted),
         "returnedCount": returned,
-        "pendingReviewCount": max(0, submitted - returned),
+        "pendingReviewCount": sum(
+            item.state == "TURNED_IN" and not item.analysis_id for item in submissions
+        ),
         "status": "returned" if submitted and returned == submitted else "pending" if submitted else "not-started",
         "materials": _materials(raw),
     }
@@ -478,18 +481,25 @@ def teacher_home(
         (assignment for course, assignment, _ in assignments_by_id.values() if course == primary_course),
         None,
     )
-    queue = [entry for entry in submissions if entry[2].state == "TURNED_IN"]
+    # An analysis is linked to its Classroom submission as soon as it starts. Once linked,
+    # that essay is no longer new work in the Home review queue; it remains available in
+    # Recently viewed for follow-up and professor review.
+    queue = [
+        entry for entry in submissions
+        if entry[2].state == "TURNED_IN" and not entry[2].analysis_id
+    ]
     queue.sort(key=lambda entry: str((entry[2].raw or {}).get("updateTime") or (entry[2].raw or {}).get("creationTime") or ""), reverse=True)
     # Keep near-term work visible when older overdue assignments still have missing work.
     due_soon.sort(key=lambda entry: (entry["overdue"], entry["dueAt"]))
     home_submissions = []
-    for course, assignment, submission in queue[:8]:
+    for course, assignment, submission in queue:
         checked = bool(submission.analysis_id)
         home_submissions.append({
             **_submission_view(submission),
             "courseId": course.course_id,
             "courseName": course.name,
             "assignmentTitle": assignment.title if assignment and assignment.title else submission.coursework_id,
+            "dueAt": _iso(assignment.due_at) if assignment and assignment.due_at else None,
             "initial": _initials(submission.student_name or submission.student_id),
             "summary": "Analysis on file · open to review" if checked else "New submission · not checked",
             "reviewStatus": "analysis-ready" if checked else "not-checked",
@@ -623,7 +633,31 @@ def importable_classes(
     service: TeacherGoogleSyncService = Depends(get_sync_service),
 ) -> list[dict[str, Any]]:
     try:
-        return [_raw_course_view(course) for course in service.import_preview(owner).get("courses", [])]
+        preview_courses = service.import_preview(owner).get("courses", [])
+        result = []
+        for raw_course in preview_courses:
+            course_id = str(raw_course.get("id") or "")
+            if not course_id:
+                continue
+            client = service.client
+            teachers = client.list_teachers(course_id)
+            students = client.list_students(course_id)
+            assignments = client.list_coursework(course_id)
+            materials = client.list_coursework_materials(course_id)
+            announcements = client.list_announcements(course_id)
+            topics = client.list_topics(course_id)
+            all_resources = [*assignments, *materials, *announcements]
+            enriched = {
+                **raw_course,
+                "teachers": teachers,
+                "students": students,
+                "_preview_assignment_count": len(assignments),
+                "_preview_topic_count": len(topics),
+                "_preview_announcement_count": len(announcements),
+                "_preview_linked_file_count": sum(len(_materials(item)) for item in all_resources),
+            }
+            result.append(_raw_course_view(enriched))
+        return result
     except Exception as error:
         raise _map_google_error(error) from error
 
@@ -646,6 +680,9 @@ def import_preview(
         materials = client.list_coursework_materials(course_id)
         announcements = client.list_announcements(course_id)
         topics = client.list_topics(course_id)
+        linked_material_count = sum(
+            len(_materials(item)) for item in [*assignments, *materials, *announcements]
+        )
         raw_course = {**raw_course, "students": students, "teachers": teachers}
         return {
             "course": _raw_course_view(raw_course),
@@ -653,7 +690,7 @@ def import_preview(
                 {"key": "course", "label": "Course", "count": 1, "detail": "Course details"},
                 {"key": "classwork", "label": "Classwork", "count": len(assignments), "detail": "Assignments and student submissions"},
                 {"key": "people", "label": "People", "count": len(students) + len(teachers), "detail": "Teachers and students"},
-                {"key": "drive", "label": "Materials", "count": len(materials) + len(announcements) + len(topics), "detail": "Classroom resources"},
+                {"key": "drive", "label": "Materials", "count": linked_material_count, "detail": "Files and links attached to this class"},
             ],
         }
     except HTTPException:

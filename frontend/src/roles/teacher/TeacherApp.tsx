@@ -1,7 +1,7 @@
 /** Teacher role route owner. Every destination is URL-backed so refresh keeps the current page. */
 
-import { GraduationCap, History as HistoryIcon, Home as HomeIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ChevronRight, GraduationCap, Home as HomeIcon, Plus, Search } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
@@ -17,12 +17,12 @@ import {
   type TeacherRoute,
   type TeacherScreen,
 } from '../../lib/teacherRoutes'
-import { useImportTeacherClass, useRefreshTeacherClass } from '../../lib/useTeacher'
+import { useImportTeacherClass, useRefreshTeacherClass, useTeacherGoogleConnection } from '../../lib/useTeacher'
 import { teacherApi, teacherRemoteEnabled } from '../../lib/teacher'
 import { supabase } from '../../lib/supabase'
 import { AssignmentDetail } from './screens/AssignmentDetail'
-import { EssayCheckRoster } from './components/EssayCheckRoster'
-import { TeacherHistoryList, TeacherHistoryPage } from './screens/History'
+import { TeacherSidebar } from './components/TeacherSidebar'
+import { TeacherHistoryPage } from './screens/History'
 import { AddClass } from './screens/AddClass'
 import { Classes } from './screens/Classes'
 import { ClassWorkspace } from './screens/ClassWorkspace'
@@ -35,7 +35,6 @@ export type { TeacherRoute, TeacherScreen }
 const TEACHER_NAV: NavEntry<TeacherNavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'classes', label: 'Classes', icon: GraduationCap },
-  { key: 'history', label: 'History', icon: HistoryIcon },
 ]
 
 export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
@@ -45,6 +44,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   const importClass = useImportTeacherClass()
   const refreshClass = useRefreshTeacherClass()
+  const googleConnection = useTeacherGoogleConnection()
 
   useEffect(() => {
     const nextSearch = serializeTeacherRoute(route, window.location.search)
@@ -60,11 +60,14 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
 
-  const navigate = (next: TeacherRoute) => {
-    const nextSearch = serializeTeacherRoute(next, window.location.search)
+  const navigate = useCallback((next: TeacherRoute) => {
+    const destination = next.screen === 'add-class-connect' && googleConnection.data?.connected
+      ? { screen: 'add-class-course' } satisfies TeacherRoute
+      : next
+    const nextSearch = serializeTeacherRoute(destination, window.location.search)
     window.history.pushState(null, '', `${window.location.pathname}${nextSearch}`)
-    setRoute(next)
-  }
+    setRoute(destination)
+  }, [googleConnection.data?.connected])
   const navigateNav = (key: TeacherNavKey) => {
     if (key === 'settings') {
       setSettingsOpen(true)
@@ -81,7 +84,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const handleImport = (courseId: string) => {
     importClass.mutate(courseId, { onSuccess: () => navigate({ screen: 'class-overview', courseId }) })
   }
-  const connectGoogle = async () => {
+  const startGoogleAuthorization = async () => {
     setConnectionError('')
     try {
       if (!teacherRemoteEnabled) return navigate({ screen: 'add-class-course' })
@@ -92,6 +95,17 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : 'Google connection could not start. Try again.')
     }
+  }
+  const connectGoogle = async () => {
+    setConnectionError('')
+    if (!teacherRemoteEnabled) return navigate({ screen: 'add-class-course' })
+    try {
+      const connection = await teacherApi.getGoogleConnection()
+      if (connection.connected) return navigate({ screen: 'add-class-course' })
+    } catch {
+      // If connection status is temporarily unavailable, let OAuth provide a fresh connection.
+    }
+    await startGoogleAuthorization()
   }
 
   return (
@@ -105,43 +119,34 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsActive={settingsOpen}
-      sidebar={route.screen === 'history' && route.courseId && route.assignmentId && route.studentId ? (
-        <TeacherHistoryList
-          selected={route}
-          onSelect={(entry) => navigate({ screen: 'history', courseId: entry.courseId, assignmentId: entry.assignmentId, studentId: entry.studentId })}
-        />
-      ) : route.screen === 'essay-check' ? (
-        <EssayCheckRoster
-          courseId={route.courseId ?? ''}
-          assignmentId={route.assignmentId ?? ''}
-          selectedStudentId={route.studentId ?? ''}
-          onSelect={(studentId) => navigate({ ...route, studentId })}
-        />
-      ) : undefined}
+      sidebar={<TeacherSidebar onOpen={navigate} />}
+      sidebarHeader={<TeacherClassSearch onOpenClasses={() => navigate({ screen: 'classes' })} />}
+      mainHeader={<TeacherToolbar route={route} onAddClass={() => navigate({ screen: 'add-class-connect' })} onOpenClasses={() => navigate({ screen: 'classes' })} />}
+      redesigned
       wide
     >
       {route.screen === 'home' ? (
         <Home onOpen={navigate} />
       ) : route.screen === 'classes' ? (
-        <Classes onOpenClass={(courseId) => navigate({ screen: 'class-overview', courseId })} onOpenHome={() => navigate({ screen: 'home' })} onAddClass={() => navigate({ screen: 'add-class-connect' })} onConnectGoogle={connectGoogle} connectionError={connectionError} />
+        <Classes onOpenClass={(courseId) => navigate({ screen: 'class-overview', courseId })} onOpenHome={() => navigate({ screen: 'home' })} onConnectGoogle={connectGoogle} connectionError={connectionError} />
       ) : route.screen === 'add-class-connect' ? (
         <AddClass step="connect" error={connectionError} onBack={() => navigate({ screen: 'classes' })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => void connectGoogle()} onSelectCourse={() => undefined} onImport={handleImport} />
       ) : route.screen === 'add-class-course' ? (
-        <AddClass step="course" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-connect' })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
+        <AddClass step="course" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-connect' })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} onReconnectGoogle={() => void startGoogleAuthorization()} />
       ) : route.screen === 'add-class-review' ? (
-        <AddClass step="review" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-course', courseId: route.courseId })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} />
+        <AddClass step="review" selectedCourseId={route.courseId} onBack={() => navigate({ screen: 'add-class-course', courseId: route.courseId })} onClasses={() => navigate({ screen: 'classes' })} onContinue={() => navigate({ screen: 'add-class-review', courseId: route.courseId })} onSelectCourse={(courseId) => navigate({ screen: 'add-class-course', courseId })} onImport={handleImport} importing={importClass.isPending} importError={importClass.variables === route.courseId && importClass.error ? importClass.error instanceof Error ? importClass.error.message : 'Class import failed. Please try again.' : undefined} />
       ) : route.screen === 'class-overview' || route.screen === 'classwork' || route.screen === 'people' ? (
         <ClassWorkspace courseId={route.courseId ?? ''} tab={workspaceTab} onNavigate={navigate} onRefresh={refreshWorkspace} refreshing={refreshClass.isPending} />
       ) : route.screen === 'assignment-detail' ? (
-        <AssignmentDetail courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} onOpenEssay={(studentId) => navigate({ screen: 'essay-check', courseId: route.courseId, assignmentId: route.assignmentId, studentId })} onNavigate={navigate} onRefresh={refreshWorkspace} refreshing={refreshClass.isPending} />
+        <AssignmentDetail courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} onOpenEssay={(studentId) => navigate({ screen: 'essay-check', courseId: route.courseId, assignmentId: route.assignmentId, studentId })} onNavigate={navigate} />
       ) : route.screen === 'essay-check' ? (
-        <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} onNavigate={navigate} onReconnectGoogle={() => void connectGoogle()} />
+        <EssayCheck courseId={route.courseId ?? ''} assignmentId={route.assignmentId ?? ''} studentId={route.studentId ?? ''} onBack={() => navigate({ screen: 'assignment-detail', courseId: route.courseId, assignmentId: route.assignmentId })} onReconnectGoogle={() => void connectGoogle()} />
       ) : route.screen === 'history' ? (
         route.courseId && route.assignmentId && route.studentId ? (
-          <EssayCheck courseId={route.courseId} assignmentId={route.assignmentId} studentId={route.studentId} onBack={() => navigate({ screen: 'history' })} onNavigate={navigate} onReconnectGoogle={() => void connectGoogle()} />
+          <EssayCheck courseId={route.courseId} assignmentId={route.assignmentId} studentId={route.studentId} onBack={() => navigate({ screen: 'history' })} onReconnectGoogle={() => void connectGoogle()} />
         ) : <TeacherHistoryPage onSelect={(entry) => navigate({ screen: 'history', courseId: entry.courseId, assignmentId: entry.assignmentId, studentId: entry.studentId })} />
       ) : route.screen === 'reading-questions' ? (
-        <ReadingQuestions paperId={route.paperId} onNavigate={navigate} />
+        <ReadingQuestions paperId={route.paperId} />
       ) : null}
       <SettingsModal
         open={settingsOpen}
@@ -152,4 +157,54 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     </AppShell>
     </div>
   )
+}
+
+function TeacherClassSearch({ onOpenClasses }: { onOpenClasses: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpenClasses}
+      aria-label="Search classes"
+      className="flex h-[36px] w-full items-center gap-2 rounded-[8px] border border-border-subtle bg-canvas px-2.5 text-left text-[11px] text-ink-muted hover:border-accent"
+    >
+      <Search className="size-3.5 shrink-0" />
+      <span className="flex-1">Search classes</span>
+      <kbd className="text-[10px]">⌘K</kbd>
+    </button>
+  )
+}
+
+function TeacherToolbar({ route, onAddClass, onOpenClasses }: { route: TeacherRoute; onAddClass: () => void; onOpenClasses: () => void }) {
+  const labels: Record<TeacherScreen, string> = {
+    home: 'Home',
+    classes: 'Classes',
+    history: 'Recently viewed',
+    'add-class-connect': 'Add class',
+    'add-class-course': 'Add class',
+    'add-class-review': 'Add class',
+    'class-overview': 'Class overview',
+    classwork: 'Classwork',
+    people: 'People',
+    'assignment-detail': 'Assignment',
+    'essay-check': 'Essay review',
+    'reading-questions': 'Reading questions',
+  }
+  const isAddClass = route.screen.startsWith('add-class-')
+  return (
+    <>
+      <nav aria-label="Page location" className="flex min-w-0 items-center gap-2 text-[11px] text-ink-muted">
+        {route.screen !== 'home' && <>
+          <button type="button" onClick={onOpenClasses} className="hover:text-accent">Classes</button>
+          <ChevronRight className="size-3 shrink-0" />
+        </>}
+        <span className="truncate text-ink">{labels[route.screen]}</span>
+      </nav>
+      {route.screen === 'classes' && <ButtonAddClass onClick={onAddClass} />}
+      {isAddClass && <span className="text-[11px] text-ink-muted">Google Classroom import</span>}
+    </>
+  )
+}
+
+function ButtonAddClass({ onClick }: { onClick: () => void }) {
+  return <button type="button" onClick={onClick} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-[11px] font-medium text-white hover:opacity-90"><Plus className="size-3.5" />Add class</button>
 }

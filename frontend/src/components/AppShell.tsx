@@ -149,6 +149,9 @@ export function AppShell<K extends string>({
   settingsActive = false,
   showProfileMenu = true,
   sidebar,
+  sidebarHeader,
+  mainHeader,
+  redesigned = false,
   wide = false,
   children,
 }: {
@@ -164,6 +167,10 @@ export function AppShell<K extends string>({
   settingsActive?: boolean
   showProfileMenu?: boolean
   sidebar?: ReactNode
+  sidebarHeader?: ReactNode
+  mainHeader?: ReactNode
+  /** Edge-to-edge shell used by the Teacher redesign; default keeps every other role unchanged. */
+  redesigned?: boolean
   wide?: boolean
   children: ReactNode
 }) {
@@ -185,6 +192,7 @@ export function AppShell<K extends string>({
 
   const sidebarContent = (
     <>
+      {sidebarHeader}
       <nav className="flex flex-col gap-0.5">
         {nav.map(({ key, label, icon: Icon }) => (
           <button
@@ -238,8 +246,9 @@ export function AppShell<K extends string>({
   return (
     <div
       className={cn(
-        'mx-auto flex min-h-screen flex-col gap-4 px-4 pb-6 transition-[max-width] duration-200 sm:px-6 lg:flex-row lg:gap-8 lg:pt-6',
-        wide ? 'max-w-[110rem]' : 'max-w-6xl',
+        redesigned
+          ? 'flex min-h-screen w-full flex-col gap-0 lg:flex-row'
+          : cn('mx-auto flex min-h-screen flex-col gap-4 px-4 pb-6 transition-[max-width] duration-200 sm:px-6 lg:flex-row lg:gap-8 lg:pt-6', wide ? 'max-w-[110rem]' : 'max-w-6xl'),
       )}
     >
       <header className="sticky top-0 z-30 -mx-4 flex items-center justify-between border-b border-border-subtle bg-canvas/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:hidden">
@@ -277,12 +286,22 @@ export function AppShell<K extends string>({
 
       {/* Sticky + viewport-height so the profile block stays pinned to the bottom of the screen,
           not the bottom of a long page (top-6 matches the container's lg:pt-6). */}
-      <aside className="hidden w-64 shrink-0 flex-col gap-4 lg:flex lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:overflow-y-auto">
+      <aside className={cn(
+        'hidden shrink-0 flex-col lg:flex lg:sticky lg:overflow-y-auto',
+        redesigned
+          ? 'top-0 h-screen w-[248px] gap-4 border-r border-border-subtle bg-surface px-2 py-4'
+          : 'w-64 gap-4 lg:top-6 lg:h-[calc(100vh-3rem)]',
+      )}>
         <Brand />
         {sidebarContent}
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col gap-5">{children}</main>
+      <main className={cn('min-w-0 flex-1', redesigned ? 'flex flex-col gap-0' : 'flex flex-col gap-5')}>
+        {mainHeader && <div className="flex min-h-[52px] shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-5">{mainHeader}</div>}
+        <div className={cn('min-w-0 flex-1', redesigned && 'px-6 py-7')}>
+          {children}
+        </div>
+      </main>
     </div>
   )
 }
