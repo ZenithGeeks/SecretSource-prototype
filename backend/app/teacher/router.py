@@ -679,7 +679,6 @@ def import_preview(
         assignments = client.list_coursework(course_id)
         materials = client.list_coursework_materials(course_id)
         announcements = client.list_announcements(course_id)
-        topics = client.list_topics(course_id)
         linked_material_count = sum(
             len(_materials(item)) for item in [*assignments, *materials, *announcements]
         )
