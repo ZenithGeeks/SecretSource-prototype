@@ -1,6 +1,7 @@
 ﻿import {
   AlertCircle,
   ArrowUpRight,
+  BookOpen,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
@@ -17,6 +18,7 @@ import { useAuth } from '../../../lib/useAuth'
 import { useSettings } from '../../../lib/settings'
 import type { MostMisusedSource, TeacherHomeAssignment, TeacherHomeSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
+import { homeRouteForAction } from '../../../lib/teacherSelectors'
 import { useTeacherGoogleConnection, useTeacherHome } from '../../../lib/useTeacher'
 import { InitialAvatar, LoadingState, StatusPill } from '../components/TeacherUi'
 
@@ -112,12 +114,13 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
       <header className="space-y-1">
         <h1 className="font-serif text-[30px] font-semibold leading-[38px] tracking-tight text-ink">Good morning, {teacherName}</h1>
         <p className="text-[13px] leading-[20px] text-ink-muted">
-          {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review Â· {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
+          {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review · {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
         </p>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2" aria-label="Quick actions">
+      <section className="grid gap-3 sm:grid-cols-3" aria-label="Quick actions">
         <QuickAction icon={FileCheck2} title="Check student essays" detail="Review submitted work and citation checks" onClick={() => openEssayCheck()} />
+        <QuickAction icon={BookOpen} title="Make reading questions" detail="Create questions from a research paper" onClick={() => onOpen(homeRouteForAction('reading-questions'))} />
         <QuickAction
           icon={CalendarClock}
           title="Due soon"
@@ -193,7 +196,7 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
                 {expanded && pageCount > 1 && (
                   <nav aria-label={`${group.courseName} submission pages`} className="flex flex-col gap-3 border-t border-border-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-[11px] text-ink-muted">
-                      Showing {first + 1}â€“{Math.min(first + REVIEWS_PER_PAGE, group.submissions.length)} of {group.submissions.length} Â· {REVIEWS_PER_PAGE} per page
+                      Showing {first + 1}–{Math.min(first + REVIEWS_PER_PAGE, group.submissions.length)} of {group.submissions.length} · {REVIEWS_PER_PAGE} per page
                     </p>
                     <div className="flex items-center gap-1">
                       <button
@@ -365,7 +368,7 @@ function ReviewRow({ submission, dueAt, onOpen }: {
   const dates = [
     dueDate ? `Due ${dueDate}` : null,
     submittedDate ? `Submitted ${submittedDate}` : null,
-  ].filter(Boolean).join(' Â· ')
+  ].filter(Boolean).join(' · ')
   const details = dates || submission.assignmentTitle || 'Submission details unavailable'
 
   return (
@@ -426,9 +429,9 @@ function ClassroomSync({
             {connected && <StatusPill label="Connected" tone="success" />}
           </div>
           <p className="mt-1 text-[12px] leading-[18px] text-ink-muted">
-            {loading ? 'Checking your Classroom connectionâ€¦'
+            {loading ? 'Checking your Classroom connection…'
               : failed ? 'Connection status could not load.'
-                : connected ? [email, lastSyncedAt ? `Last synced ${formatSyncTime(lastSyncedAt)}` : 'No sync recorded yet', syncError ? `Sync issue: ${syncError}` : ''].filter(Boolean).join(' Â· ')
+                : connected ? [email, lastSyncedAt ? `Last synced ${formatSyncTime(lastSyncedAt)}` : 'No sync recorded yet', syncError ? `Sync issue: ${syncError}` : ''].filter(Boolean).join(' · ')
                   : 'Connect an account to bring your Classroom courses into SecretSource.'}
           </p>
         </div>

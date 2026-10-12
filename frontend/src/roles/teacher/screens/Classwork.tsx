@@ -48,7 +48,7 @@ export function Classwork({ workspace, onOpenAssignment }: {
       <p className="text-[10px] text-ink-muted">Submission and grade status come from Classroom, read-only.</p>
       {preparation.isError && <p role="alert" className="text-[11px] text-refutes">{preparation.error instanceof Error ? preparation.error.message : 'Selected classwork could not be prepared.'}</p>}
       {preparation.data && <Card className="space-y-2 p-3">
-        {preparation.data.prepared.length > 0 && <p className="flex items-center gap-2 text-[11px] text-supports"><CheckCircle2 className="size-4" />{preparation.data.prepared.length} essays added to review.</p>}
+        {preparation.data.prepared.length > 0 && <p className="flex items-center gap-2 text-[11px] text-supports"><CheckCircle2 className="size-4" />{preparation.data.prepared.length} {preparation.data.prepared.length === 1 ? 'essay' : 'essays'} added to review.</p>}
         {preparation.data.skipped.map((item, index) => <p key={`skip-${item.assignmentId}-${item.submissionId ?? index}`} className="text-[10px] text-insufficient">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
         {preparation.data.failed.map((item, index) => <p key={`failed-${item.assignmentId}-${item.submissionId ?? index}`} role="alert" className="text-[10px] text-refutes">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
       </Card>}

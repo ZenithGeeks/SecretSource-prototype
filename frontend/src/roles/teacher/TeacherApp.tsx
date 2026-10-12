@@ -21,6 +21,7 @@ import { useImportTeacherClass, useRefreshTeacherClass, useTeacherGoogleConnecti
 import { teacherApi, teacherRemoteEnabled } from '../../lib/teacher'
 import { supabase } from '../../lib/supabase'
 import { AssignmentDetail } from './screens/AssignmentDetail'
+import { EssayCheckRoster } from './components/EssayCheckRoster'
 import { TeacherSidebar } from './components/TeacherSidebar'
 import { TeacherHistoryPage } from './screens/History'
 import { AddClass } from './screens/AddClass'
@@ -123,6 +124,14 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         <>
           <TeacherClassSearch onOpenClasses={() => navigate({ screen: 'classes' })} />
           <TeacherSidebar onOpen={navigate} />
+          {route.screen === 'essay-check' && (
+            <EssayCheckRoster
+              courseId={route.courseId ?? ''}
+              assignmentId={route.assignmentId ?? ''}
+              selectedStudentId={route.studentId ?? ''}
+              onSelect={(studentId) => navigate({ ...route, studentId })}
+            />
+          )}
         </>
       }
       breadcrumb={breadcrumbFor(route)}
