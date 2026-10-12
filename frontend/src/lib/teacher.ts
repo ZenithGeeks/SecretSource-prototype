@@ -34,6 +34,7 @@ export type TeacherClass = {
   subject: string
   status: 'active'
   teacherName: string
+  teacherCount?: number
   studentCount: number
   assignmentCount: number
   topicCount: number
@@ -116,6 +117,7 @@ export type TeacherHomeSubmission = TeacherSubmission & {
   courseId?: string
   courseName?: string
   assignmentTitle?: string
+  dueAt?: string | null
   initial: string
   summary: string
   reviewStatus?: 'not-checked' | 'analysis-ready'

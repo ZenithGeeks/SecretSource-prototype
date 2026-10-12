@@ -28,6 +28,8 @@ vi.mock('../src/lib/useTeacher', () => ({
       analysis: { id: null, status: 'missing', error: null },
     },
   }),
+  useTeacherAssignmentDetail: () => ({ data: undefined, isPending: false, isError: false }),
+  useTeacherWorkspace: () => ({ data: undefined, isPending: false, isError: false }),
   useTeacherGoogleConnection: () => ({ data: { connected: false, email: null, scopes: [] }, isPending: false, isError: false }),
   useAnalyzeTeacherSubmission: () => ({ mutate: mocks.analyze, isPending: mocks.analyzePending, isError: Boolean(mocks.analyzeError), error: mocks.analyzeError }),
   useUpdateProfessorReview: () => ({ mutate: mocks.updateReview, isPending: false }),
@@ -164,12 +166,7 @@ describe('Teacher essay check', () => {
     )
 
     expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
-    const breadcrumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
-    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Classes' }))
-    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'classes' })
-    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Course' }))
-    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'class-overview', courseId: 'course-1' })
-    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Essay' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Back/ }))
     expect(onBack).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'CSV' }).length).toBeGreaterThan(0)

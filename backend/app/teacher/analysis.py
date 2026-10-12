@@ -130,6 +130,17 @@ class TeacherEssayAnalysisService:
         self, owner: str, course_id: str, coursework_id: str, submission_id: str
     ) -> dict[str, Any]:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
+        course = next(
+            (item for item in self.repository.list_courses(owner) if item.course_id == course_id),
+            None,
+        )
+        assignment = next(
+            (
+                item for item in self.repository.list_coursework(owner, course_id)
+                if item.coursework_id == coursework_id and item.resource_type == "coursework"
+            ),
+            None,
+        )
         snapshot = self._analysis(submission.analysis_id)
         get_reviews = getattr(self.repository, "get_professor_reviews", None)
         saved_reviews = (
@@ -143,8 +154,8 @@ class TeacherEssayAnalysisService:
             "assignment": {
                 "assignmentId": coursework_id,
                 "courseId": course_id,
-                "course": course_id,
-                "name": coursework_id,
+                "course": course.name if course and course.name else "Class",
+                "name": assignment.title if assignment and assignment.title else "Assignment",
                 "courseWorkId": coursework_id,
             },
             "student": {

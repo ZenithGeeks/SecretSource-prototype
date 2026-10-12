@@ -90,7 +90,7 @@ describe('Teacher home and class pages', () => {
     expect(screen.getByRole('heading', { name: /Modern Writing/ })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Literary Analysis' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Open class/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Modern Writing/ }))
     expect(onOpenClass).toHaveBeenCalledWith('class-modern-writing-1a')
   })
 
@@ -201,7 +201,7 @@ describe('Teacher home and class pages', () => {
     )
 
     expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Check essays' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Check \d+ essays$/ }))
     expect(onNavigate).toHaveBeenCalledWith({ screen: 'essay-check', courseId: 'class-literary-2b', assignmentId: 'assignment-essay', studentId: 'student-anan' })
     fireEvent.click(screen.getByRole('tab', { name: 'Classwork' }))
     expect(onNavigate).toHaveBeenCalledWith({ screen: 'classwork', courseId: 'class-literary-2b' })
@@ -213,8 +213,6 @@ describe('Teacher home and class pages', () => {
       assignmentId: 'assignment-essay',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-    expect(onRefresh).toHaveBeenCalledOnce()
   })
 
   test('Classwork sends selected assignments to the Essay Check batch pipeline', async () => {
@@ -230,9 +228,9 @@ describe('Teacher home and class pages', () => {
     )
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Assignment 2: Evidence-based essay' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze selected' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Check \d+ essays$/ }))
     await waitFor(() => expect(prepare).toHaveBeenCalledWith({ courseId: MOCK_TEACHER_WORKSPACE.course.id, assignmentIds: ['assignment-essay'] }))
-    expect(await screen.findByText('1 submission sent to Essay Check.')).toBeInTheDocument()
+    expect(await screen.findByText('1 essay added to review.')).toBeInTheDocument()
     prepare.mockRestore()
 
   })
@@ -240,7 +238,7 @@ describe('Teacher home and class pages', () => {
   test('People filters the read-only roster by name', () => {
     renderWithQuery(<People workspace={MOCK_TEACHER_WORKSPACE} />)
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search students by name' }), { target: { value: 'Anan' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search people' }), { target: { value: 'Anan' } })
 
     expect(screen.getByText('Anan P.')).toBeInTheDocument()
     expect(screen.queryByText('Bee S.')).not.toBeInTheDocument()
@@ -260,16 +258,7 @@ describe('Teacher home and class pages', () => {
     )
 
     expect(await screen.findByRole('heading', { name: 'Assignment 2: Evidence-based essay' })).toBeInTheDocument()
-    const breadcrumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
-    fireEvent.click(breadcrumbs.getByRole('button', { name: 'Classes' }))
-    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'classes' })
-    fireEvent.click(breadcrumbs.getByRole('button', { name: /Literary Analysis/ }))
-    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'class-overview', courseId: 'class-literary-2b' })
-    fireEvent.click(screen.getByRole('tab', { name: 'Classwork' }))
-    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'classwork', courseId: 'class-literary-2b' })
-    fireEvent.click(screen.getByRole('tab', { name: 'People' }))
-    expect(onNavigate).toHaveBeenLastCalledWith({ screen: 'people', courseId: 'class-literary-2b' })
-    fireEvent.click(screen.getByRole('button', { name: 'Check essays' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check the evidence' }))
     expect(onOpenEssay).toHaveBeenCalledWith('student-anan')
   })
 })
@@ -288,7 +277,7 @@ describe('Teacher review and worksheet pages', () => {
     )
 
     expect(await screen.findByRole('heading', { name: 'Anan P.' })).toBeInTheDocument()
-    expect(screen.getByText(/essay-2\.docx/)).toBeInTheDocument()
+    expect(screen.getAllByText(/essay-2\.docx/).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Check essay' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Feedback to student' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument()
@@ -323,7 +312,7 @@ describe('Teacher review and worksheet pages', () => {
     const openPaper = vi.spyOn(window, 'open').mockImplementation(() => null)
     renderWithQuery(<ReadingQuestions />)
 
-    expect(await screen.findByRole('heading', { name: 'Reading questions' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^Reading questions/ })).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: 'Show in paper' })[0]!)
     expect(openPaper).toHaveBeenCalledWith(
       'https://arxiv.org/pdf/2004.12832#page=2',
@@ -406,34 +395,35 @@ describe('Teacher application routing', () => {
     expect(await screen.findByText('Showing the newest 50 entries.')).toBeInTheDocument()
   })
 
-  test('Teacher breadcrumbs navigate between Classes, Course, and Assignment', async () => {
+  test('The sidebar navigates between Classes, a course, and an assignment', async () => {
     vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: true, email: 'teacher@example.edu' })
     window.history.replaceState(null, '', '/?role=teacher&screen=classes')
     renderWithQuery(<TeacherApp />)
 
     expect(await screen.findByRole('heading', { name: 'Classes' })).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /^Open class/ })[0]!)
+    const list = screen.getByRole('region', { name: 'Class list' })
+    fireEvent.click(within(list).getByRole('button', { name: /Literary Analysis/ }))
     expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
 
-    const courseBreadcrumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
-    fireEvent.click(courseBreadcrumbs.getByRole('button', { name: 'Classes' }))
+    const main = within(screen.getByRole('navigation', { name: 'Main' }))
+    fireEvent.click(main.getByRole('button', { name: 'Classes' }))
     expect(await screen.findByRole('heading', { name: 'Classes' })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('classes')
 
-    fireEvent.click(screen.getAllByRole('button', { name: /^Open class/ })[0]!)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Class list' })).getByRole('button', { name: /Literary Analysis/ }))
     expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'Classwork' }))
-    fireEvent.click(await screen.findByRole('button', { name: /Assignment 2: Evidence-based essay/ }))
+    fireEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /Assignment 2: Evidence-based essay/ }))
     expect(await screen.findByRole('heading', { name: /Evidence-based essay/ })).toBeInTheDocument()
 
-    const assignmentBreadcrumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
-    fireEvent.click(assignmentBreadcrumbs.getByRole('button', { name: /Literary Analysis/ }))
+    const yourClasses = within(screen.getByRole('navigation', { name: 'Your classes' }))
+    fireEvent.click(yourClasses.getByRole('button', { name: /Literary Analysis/ }))
     expect(await screen.findByRole('heading', { name: /Literary Analysis/ })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('class-overview')
 
     window.history.back()
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('screen')).toBe('assignment-detail'))
     expect(await screen.findByRole('heading', { name: /Evidence-based essay/ })).toBeInTheDocument()
-    expect(new URLSearchParams(window.location.search).get('screen')).toBe('assignment-detail')
   })
 
   test('keeps the Essay Check roster and opens Settings from the profile menu', async () => {
@@ -441,7 +431,7 @@ describe('Teacher application routing', () => {
     renderWithQuery(<TeacherApp />)
 
     expect(await screen.findByRole('navigation', { name: 'Assignment students' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Anan P\./ })).toHaveAttribute('aria-current', 'page')
+    expect(within(screen.getByRole('navigation', { name: 'Assignment students' })).getByRole('button', { name: /Anan P\./ })).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Graph' })).not.toBeInTheDocument()
 
@@ -461,7 +451,7 @@ describe('Teacher application routing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Home' }))
     fireEvent.click(await screen.findByRole('button', { name: /Make reading questions/ }))
 
-    expect(await screen.findByRole('heading', { name: 'Reading questions' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^Reading questions/ })).toBeInTheDocument()
     expect(screen.queryByText('Library')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Answer key' })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('reading-questions')

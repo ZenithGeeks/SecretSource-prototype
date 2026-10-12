@@ -5,12 +5,11 @@ import { Button, Card, Empty } from '../../../components/ui'
 import { downloadText } from '../../../lib/csv'
 import { filterReadingQuestions, worksheetText } from '../../../lib/teacherSelectors'
 import type { ReadingQuestionLevel, ReadingQuestionType, TeacherReadingQuestion } from '../../../lib/teacher'
-import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import { useDeleteReadingQuestion, useRegenerateReadingQuestions, useTeacherReadingQuestions, useUpdateReadingQuestion } from '../../../lib/useTeacher'
-import { Breadcrumbs, LoadingState, StatusPill } from '../components/TeacherUi'
+import { LoadingState, StatusPill } from '../components/TeacherUi'
 import { TeacherDialog } from '../components/TeacherDialog'
 
-export function ReadingQuestions({ paperId, onNavigate }: { paperId?: string; onNavigate?: (route: TeacherRoute) => void }) {
+export function ReadingQuestions({ paperId }: { paperId?: string }) {
   const page = useTeacherReadingQuestions(paperId)
   const regenerate = useRegenerateReadingQuestions()
   const update = useUpdateReadingQuestion()
@@ -66,12 +65,12 @@ export function ReadingQuestions({ paperId, onNavigate }: { paperId?: string; on
   }
 
   return (
-    <div className="space-y-5">
-      <Breadcrumbs items={[{ label: 'Home', onClick: () => onNavigate?.({ screen: 'home' }) }, { label: 'Make reading questions' }]} />
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle pb-4">
+    <div className="mx-auto w-full max-w-[1240px] space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle pb-5">
         <div className="min-w-0">
-          <h1 className="font-serif text-[23px] font-semibold leading-7 tracking-[-0.025em] text-ink">Reading questions</h1>
-          <p className="mt-1 truncate text-[13px] text-ink-muted">{data.paper.title} ({data.paper.citation}) <span aria-hidden="true">·</span> built from {data.paper.verifiedClaims} verified claims</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Built from {data.paper.verifiedClaims} checked claims</p>
+          <h1 className="mt-1 font-serif text-[30px] font-semibold leading-9 tracking-[-0.025em] text-ink">Reading questions <span className="text-ink-muted">· {data.paper.title}</span></h1>
+          <p className="mt-1 max-w-3xl text-[13px] leading-5 text-ink-muted">{data.paper.citation}. Every answer points to a page in the paper, so grading is a page check.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button type="button" variant="ghost" onClick={() => regenerate.mutate({ paperId: data.paper.id, level, types }, { onSuccess: () => announce('Questions regenerated locally.') })} disabled={regenerate.isPending || types.length === 0}><RefreshCw className={regenerate.isPending ? 'size-4 animate-spin' : 'size-4'} />{regenerate.isPending ? 'Regenerating...' : 'Regenerate'}</Button>
@@ -82,8 +81,8 @@ export function ReadingQuestions({ paperId, onNavigate }: { paperId?: string; on
       {notice && <div role="status" className="rounded-lg bg-supports-soft px-4 py-3 text-sm text-supports">{notice}</div>}
 
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
-        <div className="flex items-center gap-2"><span className="text-[11px] font-semibold text-ink-muted">Level</span>{(['undergrad', 'graduate'] as ReadingQuestionLevel[]).map((item) => <FilterButton key={item} active={level === item} onClick={() => setLevel(item)}>{item === 'undergrad' ? 'Undergrad' : 'Graduate'}</FilterButton>)}</div>
-        <div className="flex flex-wrap items-center gap-2"><span className="text-[11px] font-semibold text-ink-muted">Type</span>{(['comprehension', 'critique', 'discussion'] as ReadingQuestionType[]).map((item) => <FilterButton key={item} active={types.includes(item)} onClick={() => setFilterType(item)}>{item[0]!.toUpperCase() + item.slice(1)}</FilterButton>)}</div>
+        <div className="flex items-center gap-2"><span className="text-[11px] font-medium text-ink-muted">Level</span><div className="flex items-center rounded-lg bg-ink p-0.5">{(['undergrad', 'graduate'] as ReadingQuestionLevel[]).map((item) => <FilterButton key={item} active={level === item} onClick={() => setLevel(item)} segmented>{item === 'undergrad' ? 'Undergraduate' : 'Graduate'}</FilterButton>)}</div></div>
+        <div className="flex flex-wrap items-center gap-2"><span className="text-[11px] font-medium text-ink-muted">Type</span>{(['comprehension', 'critique', 'discussion'] as ReadingQuestionType[]).map((item) => <FilterButton key={item} active={types.includes(item)} onClick={() => setFilterType(item)}>{item[0]!.toUpperCase() + item.slice(1)}</FilterButton>)}</div>
         <span className="ml-auto text-xs text-ink-muted">{visible.length} questions</span>
       </Card>
 
@@ -112,8 +111,8 @@ export function ReadingQuestions({ paperId, onNavigate }: { paperId?: string; on
   )
 }
 
-function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return <button type="button" aria-pressed={active} onClick={onClick} className={active ? 'rounded-md bg-accent-soft px-2.5 py-1 text-[11px] font-semibold text-accent' : 'rounded-md border border-border-subtle px-2.5 py-1 text-[11px] font-medium text-ink-muted hover:border-accent hover:text-accent'}>{children}</button>
+function FilterButton({ active, onClick, children, segmented = false }: { active: boolean; onClick: () => void; children: string; segmented?: boolean }) {
+  return <button type="button" aria-pressed={active} onClick={onClick} className={segmented ? active ? 'rounded-md bg-surface px-3 py-1.5 text-[11px] font-medium text-ink shadow-sm' : 'rounded-md px-3 py-1.5 text-[11px] font-medium text-surface/75 hover:text-surface' : active ? 'rounded-full bg-accent-soft px-3 py-1.5 text-[11px] font-medium text-accent' : 'rounded-full border border-border-subtle px-3 py-1.5 text-[11px] font-medium text-ink-muted hover:border-accent hover:text-accent'}>{children}</button>
 }
 
 function QuestionCard({ question, number, onEdit, onRemove, onShow }: { question: TeacherReadingQuestion; number: number; onEdit: () => void; onRemove: () => void; onShow: () => void }) {

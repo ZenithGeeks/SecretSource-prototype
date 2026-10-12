@@ -1,6 +1,7 @@
 import { Check, ChevronRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { LoadingScreen } from '../../../components/ui'
 import { cn } from '../../../lib/utils'
 import type { WorkspaceTab } from '../../../lib/teacherSelectors'
 
@@ -151,5 +152,5 @@ export function MetricCard({ label, value, detail, tone = 'neutral' }: {
 }
 
 export function LoadingState({ label = 'Loading...' }: { label?: string }) {
-  return <div className="flex min-h-56 items-center justify-center text-sm text-ink-muted">{label}</div>
+  return <LoadingScreen label={label} />
 }

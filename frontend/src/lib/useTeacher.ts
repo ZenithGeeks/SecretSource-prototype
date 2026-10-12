@@ -144,6 +144,7 @@ export function useAnalyzeTeacherSubmission() {
     mutationFn: (input: AnalyzeTeacherSubmissionRequest) => teacherApi.analyzeSubmission(input),
     onSuccess: (_result, input) => {
       return Promise.all([
+        queryClient.invalidateQueries({ queryKey: TEACHER_HOME_KEY }),
         queryClient.invalidateQueries({ queryKey: TEACHER_HISTORY_KEY }),
         queryClient.invalidateQueries({
           queryKey: teacherEssayCheckKey(input.courseId, input.assignmentId, input.studentId),
@@ -157,7 +158,10 @@ export function usePrepareTeacherEssayChecks() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: PrepareTeacherEssayChecksRequest) => teacherApi.prepareEssayChecks(input),
-    onSuccess: (_result, input) => queryClient.invalidateQueries({ queryKey: teacherWorkspaceKey(input.courseId) }),
+    onSuccess: (_result, input) => Promise.all([
+      queryClient.invalidateQueries({ queryKey: TEACHER_HOME_KEY }),
+      queryClient.invalidateQueries({ queryKey: teacherWorkspaceKey(input.courseId) }),
+    ]),
   })
 }
 
