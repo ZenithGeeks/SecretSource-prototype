@@ -1,6 +1,6 @@
 /**
  * The labeling page's data: the gateway calls, and the pure rules that turn what a person
- * decided into the rows saved to the team's Sheet (and tell them what is still undecided).
+ * decided into the rows saved to the team's labeling table (and tell them what is still undecided).
  *
  * Nothing here decides for the person. The AI's claims and passages are what the page shows
  * first; every claim and every passage is judged by hand, and the person saves.
@@ -44,7 +44,7 @@ export type SessionClaim = {
 
 export type Reference = { reference_id: string; file: string; label: string }
 
-/** A row as the Sheet stores it: every value a string. */
+/** A row as the labeling table stores it: every value a string. */
 export type Row = Record<string, string>
 
 export type Session = {
@@ -60,7 +60,7 @@ export type Session = {
   others: Record<string, string[]>
 }
 
-export type LabelStatus = { annotator: string; configured: boolean; sheet_url: string; share_with: string }
+export type LabelStatus = { annotator: string; configured: boolean }
 
 export type Save = {
   claims: {
@@ -113,7 +113,7 @@ export function problem(error: unknown): { title: string; hint: string } {
   if (status === 409) return { title: 'This paper is not ready', hint: 'Its analysis has not finished. Try again in a moment.' }
   if (status === 422) return { title: 'That was not accepted', hint: 'Reload the page and try again.' }
   if (status === 503)
-    return { title: 'The labeling Sheet is not set up yet', hint: 'Ask whoever runs the gateway to finish the setup.' }
+    return { title: 'Labels cannot be saved yet', hint: 'Ask whoever runs the gateway to finish the setup.' }
   return { title: 'Something went wrong', hint: 'Try again in a moment. If it keeps happening, tell the team.' }
 }
 
@@ -276,7 +276,7 @@ const sameAdded = (a: AddedPassage, b: AddedPassage) => a.reference_id === b.ref
 
 /**
  * The rows to save for one claim. A rejected claim saves only that: nobody judges its passages.
- * `saved` is the draft as last saved, so a passage added then removed is retracted in the Sheet
+ * `saved` is the draft as last saved, so a passage added then removed is retracted in the table
  * (rows are never deleted there, a later row replaces the earlier one).
  */
 export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {

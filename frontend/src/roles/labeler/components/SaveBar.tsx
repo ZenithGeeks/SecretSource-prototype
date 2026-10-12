@@ -1,4 +1,4 @@
-/** What is left on this claim, and the buttons that write it to the Sheet. */
+/** What is left on this claim, and the buttons that save it. */
 
 import { Check, Loader2 } from 'lucide-react'
 
@@ -42,7 +42,7 @@ export function SaveBar({
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => onSave(false)} disabled={saving || !dirty}>
           {saving && <Loader2 className="size-4 animate-spin" />}
-          Save to the Sheet
+          Save labels
         </Button>
         {hasNext && (
           <Button variant="ghost" onClick={() => onSave(true)} disabled={saving || !dirty}>

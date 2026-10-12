@@ -168,7 +168,7 @@ describe('the workspace', () => {
     const viewers = screen.getAllByTestId('viewer').map((v) => v.textContent)
     expect(viewers).toEqual(['paperA.pdf|We show Y improves recall.', 'refB.pdf|recall rose by 4 points'])
 
-    expect(screen.getByRole('button', { name: /^Save to the Sheet/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Save labels/ })).toBeDisabled()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     const [relevant1, , , notRelevant2] = screen.getAllByRole('radio', { name: /Relevant|Not relevant/ })
     fireEvent.click(relevant1)
@@ -176,7 +176,7 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
     expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
     await waitFor(() => expect(gateway.posts).toHaveLength(1))
     expect(gateway.posts[0]).toMatchObject({
       claims: [{ claim_id: 'paperA#0', status: 'accepted' }],
@@ -217,7 +217,7 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /Not relevant/ })[0])
     fireEvent.click(screen.getAllByRole('radio', { name: /Not relevant/ })[1])
-    fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
     await waitFor(() => expect(gateway.posts).toHaveLength(1))
     expect(gateway.posts[0]).toMatchObject({
       candidates: expect.arrayContaining([
@@ -233,7 +233,7 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0]) // moves the right pane's focus
     fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
-    fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
     await waitFor(() => expect(gateway.posts).toHaveLength(1))
     expect(gateway.posts[0]).toMatchObject({
       candidates: expect.arrayContaining([expect.objectContaining({ origin: 'human_added', reference_id: 'refB', passage: 'picked in refB.pdf' })]),

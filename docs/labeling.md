@@ -7,11 +7,10 @@ saved until someone saves it.
 
 ## One-time setup
 
-1. Create a Google service account, enable the Sheets API, download its key file.
-2. In `.env` set `LABELING_SHEET_ID` (from the Sheet's URL), `LABELING_GOOGLE_CREDENTIALS` (the key
-   file path). Anyone who signs in can label.
-3. Share the Sheet with the service account's address as an **Editor**. The page shows the address
-   under "The Sheet is not set up yet" until the settings are in.
+Labels are saved in Supabase, in the `labeling_rows` table
+(`supabase/migrations/20261012160000_labeling_rows.sql`). The gateway needs `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`, which it already has when login is on. Anyone who signs in can label.
+Until those are set the page says "Labels cannot be saved yet".
 
 ## Working a paper
 
@@ -26,9 +25,9 @@ saved until someone saves it.
 
 The 1-4 labels grade how well the reference passage backs the claim (1 no support, 2 weak, 3 clear, 4 strong). The wording is `LEVELS` in `frontend/src/lib/labeling.ts`.
 
-## What lands in the Sheet
+## What is saved
 
-Append-only; a later row for the same key replaces an earlier one when read back.
+One row per save, in `labeling_rows` (`tab` + a JSON `data` row). Append-only; a later row for the same key replaces an earlier one when read back.
 
 | tab | one row per | use |
 | --- | --- | --- |
@@ -57,5 +56,4 @@ references kept in one split, so nothing leaks between train, val and test. Add 
 The queue has a "Who labels what" panel: pick CV, NLP, SE or HPC for anyone on the team (the panel lists each domain's conferences and journal).
 A paper's owner shares it with a dropdown next to the paper ("Not shared" by default). Shared papers,
 and the papers their claims cite, open for every signed-in person under "Shared by the team", with
-the viewer's own topic first. Unsharing takes it back. Both choices are rows in the Sheet's
-`assignments` tab, appended like everything else, so the Sheet shows who set what and when.
+the viewer's own topic first. Unsharing takes it back. Both choices are `assignments` rows, appended like everything else, so the table shows who set what and when.

@@ -1,6 +1,6 @@
-/** Papers to label: the person's finished analyses, and whether the Sheet is ready to take rows. */
+/** Papers to label: the person's finished analyses, and whether the database is ready to take rows. */
 
-import { Download, ExternalLink, TriangleAlert } from 'lucide-react'
+import { Download, TriangleAlert } from 'lucide-react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
@@ -19,21 +19,15 @@ async function download() {
   URL.revokeObjectURL(link.href)
 }
 
-function Setup({ share }: { share: string }) {
+function Setup() {
   return (
     <Card className="flex flex-col gap-2 border-insufficient">
       <p className="flex items-center gap-2 font-medium text-insufficient">
-        <TriangleAlert className="size-4" /> The Sheet is not set up yet
+        <TriangleAlert className="size-4" /> Labels cannot be saved yet
       </p>
       <p className="text-sm text-ink-muted">
-        Set <code>LABELING_SHEET_ID</code> and <code>LABELING_GOOGLE_CREDENTIALS</code> (a service-account key) in the
-        gateway's <code>.env</code>, share the Sheet with that account as an editor, then reload.
-        {share && (
-          <>
-            {' '}
-            Share it with <code>{share}</code>.
-          </>
-        )}
+        Set <code>SUPABASE_URL</code> and <code>SUPABASE_SERVICE_ROLE_KEY</code> in the gateway's <code>.env</code>, run
+        the <code>labeling_rows</code> migration, then reload.
       </p>
     </Card>
   )
@@ -76,23 +70,13 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
           </p>
         </div>
         <div className="flex gap-2">
-          {status.data?.sheet_url && (
-            <a
-              href={status.data.sheet_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-            >
-              <ExternalLink className="size-4" /> Open the Sheet
-            </a>
-          )}
           <Button variant="ghost" onClick={() => void download()} disabled={!status.data?.configured}>
             <Download className="size-4" /> Download labels CSV
           </Button>
         </div>
       </header>
 
-      {!status.data?.configured && <Setup share={status.data?.share_with ?? ''} />}
+      {!status.data?.configured && <Setup />}
 
       {pool.data && <TeamTopics pool={pool.data} />}
 
