@@ -22,6 +22,7 @@ import {
   referencesOf,
   relevantPassages,
   remaining,
+  problem,
   useSaveLabels,
   workClaims,
   type Draft,
@@ -62,7 +63,7 @@ export function Workspace({ analysisId }: { analysisId: string }) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
   if (query.error || !query.data)
-    return <Empty title="Could not open this paper for labeling" hint={String(query.error ?? 'No data')} />
+    return <Empty {...problem(query.error)} />
   return <Body key={analysisId} session={query.data} />
 }
 
@@ -313,7 +314,7 @@ function Body({ session }: { session: Session }) {
                 left={left}
                 dirty={dirty}
                 saving={save.isPending}
-                error={save.error ? String(save.error.message) : null}
+                error={save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null}
                 savedRows={savedRows}
                 hasNext={claims.findIndex((c) => c.claim_id === currentId) < claims.length - 1}
                 onSave={write}

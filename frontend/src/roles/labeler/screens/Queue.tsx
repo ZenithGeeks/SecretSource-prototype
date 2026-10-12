@@ -4,7 +4,7 @@ import { Download, ExternalLink, TriangleAlert } from 'lucide-react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
-import { labelingApi, useAssignTopic, useLabelStatus, usePool } from '../../../lib/labeling'
+import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool } from '../../../lib/labeling'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { TeamTopics } from '../components/TeamTopics'
 import { TopicSelect } from '../components/TopicSelect'
@@ -46,8 +46,17 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   const assign = useAssignTopic()
 
   if (status.isLoading || analyses.isLoading) return <LoadingScreen />
-  if (status.error)
-    return <Empty title="You can't label here" hint={String(status.error.message).replace(/^\d+: /, '')} />
+  if (status.error) {
+    const { title, hint } = problem(status.error)
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <Empty title={title} hint={hint} />
+        <Button variant="ghost" onClick={() => void status.refetch()}>
+          Try again
+        </Button>
+      </div>
+    )
+  }
 
   const ready = (analyses.data ?? []).filter((a) => a.status === 'done' && a.claims.length > 0)
   const myTopic = pool.data?.people.find((p) => p.name === pool.data?.me)?.topic ?? ''
