@@ -17,6 +17,7 @@
 # Required repository secrets:
 #   GCP_SA_KEY, GCP_PROJECT          the same service-account key deploy.yml uses
 #   S2_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+#   SCOPUS_API_KEY                   the labeler's Scopus search (dev.elsevier.com)
 #   GROBID_URL, COLBERT_URL, COLPALI_URL
 #   VLLM_URL, VLLM_MODEL, VLLM_API_KEY
 #
@@ -77,6 +78,7 @@ jobs:
           VLLM_MODEL: ${{ secrets.VLLM_MODEL }}
           VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
           S2_API_KEY: ${{ secrets.S2_API_KEY }}
+          SCOPUS_API_KEY: ${{ secrets.SCOPUS_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
@@ -92,7 +94,7 @@ jobs:
           gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
             --port 8080 --memory 8Gi --allow-unauthenticated \
             --max-instances 1 --no-cpu-throttling --cpu 4 --scaling auto --min 0 \
-            --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,S2_API_KEY=$S2_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL"
+            --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,S2_API_KEY=$S2_API_KEY,SCOPUS_API_KEY=$SCOPUS_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL"
 
       - name: Print the gateway URL
         run: gcloud run services describe gateway --region "$REGION" --format 'value(status.url)'
