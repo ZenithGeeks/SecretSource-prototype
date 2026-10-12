@@ -111,7 +111,9 @@ describe('the labeler queue', () => {
 
   it('sets a teammate\'s topic from the dropdown', async () => {
     renderQueue()
-    fireEvent.change(await screen.findByLabelText('Topic for Nuttadon'), { target: { value: 'HPC' } })
+    const group = await screen.findByRole('radiogroup', { name: 'Topic for Nuttadon' })
+    expect(within(group).getByRole('radio', { name: 'No topic' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(within(group).getByRole('radio', { name: 'HPC' }))
     await waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/people', body: { name: 'Nuttadon', topic: 'HPC' } }]))
   })
 
@@ -170,5 +172,19 @@ describe('the labeler queue', () => {
     expect(await screen.findByText("You can't use the labeler")).toBeInTheDocument()
     expect(screen.queryByText(/LABELING_ALLOWED|detail/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  it('shows who has which topic on one line, and opens by itself for someone with no topic', async () => {
+    renderQueue()
+    const summary = await screen.findByText(/NLP 1 · no topic 1 · you: NLP/)
+    expect(summary.closest('details')).not.toHaveAttribute('open') // Chanya already has NLP
+  })
+
+  it('opens the team panel when the viewer has no topic yet', async () => {
+    gateway.pool.people[0].topic = ''
+    renderQueue()
+    const summary = await screen.findByText(/no topic 2/)
+    expect(summary.closest('details')).toHaveAttribute('open')
+    gateway.pool.people[0].topic = 'NLP'
   })
 })
