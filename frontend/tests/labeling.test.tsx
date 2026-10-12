@@ -162,7 +162,7 @@ describe('the workspace', () => {
     const [relevant1, , , notRelevant2] = screen.getAllByRole('radio', { name: /Relevant|Not relevant/ })
     fireEvent.click(relevant1)
     fireEvent.click(notRelevant2)
-    fireEvent.click(screen.getByRole('radio', { name: /3 · Good/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
     expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
