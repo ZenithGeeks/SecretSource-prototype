@@ -310,7 +310,7 @@ export function PageViewer({
               </IconButton>
             )}
             {onClose && (
-              <IconButton label="Close the page view" onClick={onClose}>
+              <IconButton label="Close" onClick={onClose}>
                 <X className="size-4" />
               </IconButton>
             )}
