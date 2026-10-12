@@ -4,10 +4,11 @@ The Sheet is replaced by an in-memory store and the analysis by a fixture, so th
 Google nor the gateway's heavy imports.
 """
 
+import json
 from pathlib import Path
 
 import pytest
-from app.labeling import ledger, pool, scopus
+from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
 from fastapi import FastAPI
@@ -539,3 +540,111 @@ def test_every_venue_name_is_specific_enough_to_match_only_that_venue():
     # "Supercomputing" matched a journal and "Computer Vision and Pattern Recognition" a book series
     # when checked against the live Scopus index; short names do that.
     assert all(len(venue.split()) >= 4 for venues in scopus.VENUES.values() for venue in venues)
+
+
+C0, C1 = "paperA-0123456789ab#0", "paperA-0123456789ab#1"
+REF = "refB-aaaaaaaaaaaa"
+
+
+def ndjson(client, tab):
+    reply = client.get("/labeling/export", params={"tab": tab})
+    assert reply.status_code == 200 and reply.headers["content-type"].startswith("application/x-ndjson")
+    return [json.loads(line) for line in reply.text.splitlines()]
+
+
+def test_dspy_claims_keep_what_a_person_kept_and_list_what_they_rejected(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setattr(dspy_export, "article_text", lambda paper_id: f"text of {paper_id}")
+    client.post(
+        "/labeling/sessions/a1/save",
+        json={
+            "claims": [
+                {
+                    "claim_id": C0,
+                    "origin": "extracted",
+                    "status": "edited",
+                    "claim": "x",
+                    "claim_edited": "Y improves recall by 4 points.",
+                },
+                {"claim_id": C1, "origin": "extracted", "status": "rejected", "claim": "x"},
+            ]
+        },
+    )
+    assert ndjson(client, "dspy_claims") == [
+        {
+            "paper_id": "paperA-0123456789ab",
+            "annotator": "chanya",
+            "article": "text of paperA-0123456789ab",
+            "claims": ["Y improves recall by 4 points."],
+            "rejected": ["Y is fast."],
+        }
+    ]
+
+
+def test_dspy_claims_skip_a_paper_whose_text_is_missing(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setattr(dspy_export, "article_text", lambda paper_id: "")
+    client.post(
+        "/labeling/sessions/a1/save",
+        json={"claims": [{"claim_id": C0, "origin": "extracted", "status": "accepted", "claim": "x"}]},
+    )
+    assert ndjson(client, "dspy_claims") == []
+
+
+def test_dspy_verdicts_are_the_level_with_the_passages_called_relevant(api):
+    client, _, _ = api
+    label = {
+        "claim_id": C0,
+        "reference_id": REF,
+        "evidence": 3,
+        "rationale": "two controlled runs",
+        "spans": ["recall rose by 4 points", "and held on BEIR"],
+        "confidence": "high",
+    }
+    client.post(
+        "/labeling/sessions/a1/save",
+        json={
+            "claims": [
+                {"claim_id": C0, "origin": "extracted", "status": "accepted", "claim": "x"},
+                {"claim_id": C1, "origin": "extracted", "status": "rejected", "claim": "x"},
+            ],
+            "labels": [label, {**label, "claim_id": C1}],
+        },
+    )
+    assert ndjson(client, "dspy_verdicts") == [
+        {
+            "paper_id": "paperA-0123456789ab",
+            "claim_id": C0,
+            "reference_id": REF,
+            "annotator": "chanya",
+            "claim": "Method Y improves recall.",
+            "source": "recall rose by 4 points\n\nand held on BEIR",
+            "verdict": "3",
+            "verdict_name": "Clear",
+            "rationale": "two controlled runs",
+            "confidence": "high",
+        }
+    ]
+
+
+def test_dspy_verdicts_leave_out_a_label_with_no_passage(api):
+    client, _, _ = api
+    client.post(
+        "/labeling/sessions/a1/save",
+        json={
+            "claims": [{"claim_id": C0, "origin": "extracted", "status": "accepted", "claim": "x"}],
+            "labels": [{"claim_id": C0, "reference_id": REF, "evidence": 1, "spans": []}],
+        },
+    )
+    assert ndjson(client, "dspy_verdicts") == []
+
+
+def test_article_text_reads_a_pdf_and_is_empty_when_the_pdf_is_missing(tmp_path, monkeypatch):
+    import fitz
+
+    pdf = fitz.open()
+    pdf.new_page().insert_text((72, 72), "Late interaction keeps one vector per token.")
+    pdf.save(tmp_path / "paperA.pdf")
+    monkeypatch.setattr(dspy_export, "PAPERS_DIR", tmp_path)
+    assert "one vector per token" in dspy_export.article_text("paperA")
+    assert dspy_export.article_text("not-here") == ""

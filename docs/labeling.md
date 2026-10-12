@@ -68,3 +68,27 @@ The queue has a "Who labels what" panel: pick CV, NLP, SE or HPC for anyone on t
 A paper's owner shares it with a dropdown next to the paper ("Not shared" by default). Shared papers,
 and the papers their claims cite, open for every signed-in person under "Shared by the team", with
 the viewer's own topic first. Unsharing takes it back. Both choices are `assignments` rows, appended like everything else, so the table shows who set what and when.
+
+## Examples for a DSPy program
+
+A fact-check program has two steps, and each gets its own file from `/api/labeling/export`:
+
+| `tab=` | signature | one record per | fields |
+| --- | --- | --- | --- |
+| `dspy_claims` | `article -> claims: list[str]` | paper and annotator | `article`, `claims` (kept or edited, as they should read), `rejected` (hard negatives) |
+| `dspy_verdicts` | `claim, source -> verdict` | claim, reference and annotator | `claim`, `source` (the passages called relevant), `verdict` ("1"-"4"), `verdict_name`, `rationale`, `confidence` |
+
+Both are JSONL. A paper whose PDF is not on the server has no `article`, so it is left out of
+`dspy_claims`; a label with no relevant passage has no `source`, so it is left out of
+`dspy_verdicts`. Every record keeps `paper_id`, so a split into train, validation and test can keep each paper
+whole (see below).
+
+```python
+import json, dspy
+
+rows = [json.loads(line) for line in open("dspy_verdicts.jsonl")]
+trainset = [
+    dspy.Example(claim=r["claim"], source=r["source"], verdict=r["verdict"]).with_inputs("claim", "source")
+    for r in rows
+]
+```
