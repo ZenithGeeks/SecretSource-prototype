@@ -51,3 +51,11 @@ uv run --with pandas --with scikit-learn python split_dataset.py labels.csv
 fills `split` in equal thirds, label-balanced, with a paper and every paper that shares one of its
 references kept in one split, so nothing leaks between train, val and test. Add the paper text
 (or the retrieved passages) from `paper_id` / `reference_id` when you build the `dspy.Example`s.
+
+## Topics
+
+The queue has a "Who labels what" panel: pick NLP, HPC or Software Engineering for anyone on the team.
+A paper's owner shares it with a dropdown next to the paper ("Not shared" by default). Shared papers,
+and the papers their claims cite, open for every signed-in person under "Shared by the team", with
+the viewer's own topic first. Unsharing takes it back. Both choices are rows in the Sheet's
+`assignments` tab, appended like everything else, so the Sheet shows who set what and when.

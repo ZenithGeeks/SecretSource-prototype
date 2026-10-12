@@ -6,7 +6,7 @@ Every tab starts with `ts` and `annotator`, which the server fills in: the brows
 who it is.
 """
 
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 
@@ -57,12 +57,30 @@ TABS: dict[str, list[str]] = {
     ],
 }
 
+# Who labels which topic, and which analyses are shared with the labeling team. Not in TABS: its
+# rows have no paper_id, and the labeling flow reads every tab in TABS per paper.
+ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner"]
+ALL_TABS = {**TABS, "assignments": ASSIGNMENTS}
+
 # What makes two rows "the same" for the purpose of replacing one with a later one.
 KEYS: dict[str, tuple[str, ...]] = {
     "claims": ("claim_id", "annotator"),
     "candidates": ("cand_id", "annotator"),
     "labels": ("claim_id", "reference_id", "annotator"),
+    "assignments": ("kind", "key"),  # kind: "person" (key: name) or "paper" (key: analysis id)
 }
+
+Topic = Literal["NLP", "HPC", "Software Engineering", ""]  # "" takes the topic back
+TOPICS = [t for t in get_args(Topic) if t]
+
+
+class TopicIn(BaseModel):
+    topic: Topic
+
+
+class PersonTopicIn(TopicIn):
+    name: str = Field(min_length=1, max_length=80)
+
 
 CLAIM_ID = r"^(?:[A-Za-z0-9._-]+#\d{1,4}|[A-Za-z0-9._-]+#h-[a-z0-9]{6,12})$"
 TEXT = 4000  # a Sheets cell holds 50 000 characters; nothing a person types needs 4 000

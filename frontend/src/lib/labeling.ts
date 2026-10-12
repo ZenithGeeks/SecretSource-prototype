@@ -6,7 +6,7 @@
  * first; every claim and every passage is judged by hand, and the person saves.
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { API_BASE, fetchFile, request, type Source } from './api'
 
@@ -92,7 +92,22 @@ export type Save = {
   }[]
 }
 
+export type Pool = {
+  topics: string[]
+  me: string
+  people: { name: string; topic: string }[]
+  /** Analyses their owners shared with the team, each under a topic. */
+  papers: { analysis_id: string; title: string; topic: string; claims: number }[]
+}
+
+const putJson = (path: string, body: unknown) =>
+  request<unknown>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
 export const labelingApi = {
+  pool: () => request<Pool>('/labeling/pool'),
+  setPersonTopic: (name: string, topic: string) => putJson('/labeling/people', { name, topic }),
+  setPaperTopic: (analysisId: string, topic: string) =>
+    putJson(`/labeling/papers/${encodeURIComponent(analysisId)}/topic`, { topic }),
   status: () => request<LabelStatus>('/labeling/status'),
   session: (analysisId: string) => request<Session>(`/labeling/sessions/${encodeURIComponent(analysisId)}`),
   save: (analysisId: string, body: Save) =>
@@ -105,6 +120,20 @@ export const labelingApi = {
 
 export function useLabelStatus() {
   return useQuery({ queryKey: ['labeling', 'status'], queryFn: labelingApi.status, retry: false })
+}
+
+export function usePool() {
+  return useQuery({ queryKey: ['labeling', 'pool'], queryFn: labelingApi.pool, retry: false })
+}
+
+/** Sets a person's topic (`name`) or shares one of your own analyses (`analysisId`); "" undoes it. */
+export function useAssignTopic() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (v: { topic: string; name?: string; analysisId?: string }) =>
+      v.name !== undefined ? labelingApi.setPersonTopic(v.name, v.topic) : labelingApi.setPaperTopic(v.analysisId!, v.topic),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
+  })
 }
 
 export function useLabelSession(analysisId: string | null) {

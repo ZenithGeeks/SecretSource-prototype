@@ -4,26 +4,30 @@ The Sheet is replaced by an in-memory store and the analysis by a fixture, so th
 Google nor the gateway's heavy imports.
 """
 
+from pathlib import Path
+
 import pytest
+from app.labeling import pool
 from app.labeling import router as labeling
-from app.labeling.schema import TABS, current
+from app.labeling.schema import ALL_TABS, current
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
 class MemorySheet:
     def __init__(self):
-        self.tabs = {tab: [] for tab in TABS}
+        self.tabs = {tab: [] for tab in ALL_TABS}
 
     def read(self, tab):
         return [dict(r) for r in self.tabs[tab]]
 
     def append(self, tab, rows):
-        self.tabs[tab] += [{c: str(r.get(c, "")) for c in TABS[tab]} for r in rows]
+        self.tabs[tab] += [{c: str(r.get(c, "")) for c in ALL_TABS[tab]} for r in rows]
 
 
 ANALYSIS = {
     "id": "a1",
+    "status": "done",
     "file": "data/papers/paperA-0123456789ab.pdf",
     "title": "Paper A",
     "claims": [
@@ -51,9 +55,11 @@ ANALYSIS = {
 def api(monkeypatch):
     sheet = MemorySheet()
     monkeypatch.setattr(labeling.sheet, "get_store", lambda: sheet)
+    monkeypatch.setattr(pool, "_cache", (0.0, []))
     app = FastAPI()
     app.include_router(labeling.router)
     app.dependency_overrides[labeling.owned_analysis] = lambda: ANALYSIS
+    app.dependency_overrides[labeling.mine_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.annotator] = lambda: "chanya"
     return TestClient(app), sheet, app
 
@@ -288,3 +294,57 @@ def test_export_drops_what_a_person_took_back(api):
     )
     assert len(client.get("/labeling/export?tab=labels").text.splitlines()) == 1
     assert c1 not in client.get("/labeling/export?tab=labels").text
+
+
+def test_a_person_gets_a_topic_and_it_can_be_taken_back(api):
+    client, sheet, _ = api
+    assert client.put("/labeling/people", json={"name": "chanya", "topic": "NLP"}).status_code == 200
+    state = client.get("/labeling/pool").json()
+    assert {"name": "chanya", "topic": "NLP"} in state["people"]
+    client.put("/labeling/people", json={"name": "chanya", "topic": ""})
+    assert {"name": "chanya", "topic": ""} in client.get("/labeling/pool").json()["people"]
+    assert len(sheet.tabs["assignments"]) == 2  # appended, never edited
+
+
+def test_a_topic_must_be_one_of_the_team_topics(api):
+    client, _, _ = api
+    assert client.put("/labeling/people", json={"name": "chanya", "topic": "Cooking"}).status_code == 422
+    assert client.put("/labeling/people", json={"name": "nobody-here", "topic": "NLP"}).status_code == 422
+
+
+def test_sharing_a_paper_makes_it_listed_and_its_pdfs_openable_for_the_team(api, monkeypatch):
+    from app import main
+
+    monkeypatch.setattr(main.analyses, "get", lambda i: ANALYSIS)
+    client, _, _ = api
+    assert client.get("/labeling/pool").json()["papers"] == []
+    assert client.put("/labeling/papers/a1/topic", json={"topic": "HPC"}).status_code == 200
+    papers = client.get("/labeling/pool").json()["papers"]
+    assert [(p["analysis_id"], p["topic"], p["claims"]) for p in papers] == [("a1", "HPC", 2)]
+    names = pool.pdf_names(lambda i: ANALYSIS, lambda rows: frozenset(Path(r["file"]).name for r in rows))
+    assert names == {"paperA-0123456789ab.pdf"}
+    client.put("/labeling/papers/a1/topic", json={"topic": ""})
+    assert client.get("/labeling/pool").json()["papers"] == []
+    assert pool.pdf_names(lambda i: ANALYSIS, lambda rows: frozenset({"x"})) == frozenset()
+
+
+def test_only_a_shared_analysis_opens_for_someone_else(monkeypatch):
+    from app import main
+    from app.auth import current_user
+
+    sheet = MemorySheet()
+    monkeypatch.setattr(labeling.sheet, "get_store", lambda: sheet)
+    monkeypatch.setattr(pool, "_cache", (0.0, []))
+    rows = {"a1": {**ANALYSIS, "owner": "alice", "kind": "paper"}}
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    app = FastAPI()
+    app.include_router(labeling.router)
+    app.dependency_overrides[current_user] = lambda: "bob"
+    app.dependency_overrides[labeling.annotator] = lambda: "bob"
+    client = TestClient(app)
+    assert client.get("/labeling/sessions/a1").status_code == 404
+    pool.assign("alice", "paper", "a1", "NLP", "alice")
+    assert client.get("/labeling/sessions/a1").status_code == 200
+    assert (
+        client.put("/labeling/papers/a1/topic", json={"topic": ""}).status_code == 404
+    )  # not bob's to take back
