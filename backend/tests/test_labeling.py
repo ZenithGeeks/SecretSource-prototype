@@ -7,14 +7,14 @@ Google nor the gateway's heavy imports.
 from pathlib import Path
 
 import pytest
-from app.labeling import pool
+from app.labeling import ledger, pool
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-class MemorySheet:
+class MemoryLedger:
     def __init__(self):
         self.tabs = {tab: [] for tab in ALL_TABS}
 
@@ -53,15 +53,15 @@ ANALYSIS = {
 
 @pytest.fixture
 def api(monkeypatch):
-    sheet = MemorySheet()
-    monkeypatch.setattr(labeling.sheet, "get_store", lambda: sheet)
+    db = MemoryLedger()
+    monkeypatch.setattr(ledger, "get_store", lambda: db)
     monkeypatch.setattr(pool, "_cache", (0.0, []))
     app = FastAPI()
     app.include_router(labeling.router)
     app.dependency_overrides[labeling.owned_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.mine_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.annotator] = lambda: "chanya"
-    return TestClient(app), sheet, app
+    return TestClient(app), db, app
 
 
 def passage(client, rank=1):
@@ -85,7 +85,7 @@ def test_session_lists_claims_with_ranked_candidates(api):
 
 
 def test_save_copies_retrieved_fields_from_the_analysis_not_the_request(api):
-    client, sheet, _ = api
+    client, db, _ = api
     s, cand = passage(client)
     body = {
         "candidates": [
@@ -100,7 +100,7 @@ def test_save_copies_retrieved_fields_from_the_analysis_not_the_request(api):
         ]
     }
     assert client.post("/labeling/sessions/a1/save", json=body).status_code == 200
-    row = sheet.tabs["candidates"][0]
+    row = db.tabs["candidates"][0]
     assert (row["passage"], row["reference_id"], row["rank"], row["annotator"]) == (
         "recall rose by 4 points",
         "refB-aaaaaaaaaaaa",
@@ -110,7 +110,7 @@ def test_save_copies_retrieved_fields_from_the_analysis_not_the_request(api):
 
 
 def test_save_label_and_read_it_back_as_mine_with_others_listed(api):
-    client, sheet, app = api
+    client, db, app = api
     label = {
         "claim_id": "paperA-0123456789ab#0",
         "reference_id": "refB-aaaaaaaaaaaa",
@@ -120,8 +120,8 @@ def test_save_label_and_read_it_back_as_mine_with_others_listed(api):
         "confidence": "high",
     }
     assert client.post("/labeling/sessions/a1/save", json={"labels": [label]}).json()["labels"] == 1
-    assert sheet.tabs["labels"][0]["rationale"] == "=SUM(A1)"  # stored as text, written RAW
-    assert sheet.tabs["labels"][0]["claim"] == "Method Y improves recall."
+    assert db.tabs["labels"][0]["rationale"] == "=SUM(A1)"  # kept as text, never run as a formula
+    assert db.tabs["labels"][0]["claim"] == "Method Y improves recall."
     mine = client.get("/labeling/sessions/a1").json()
     assert [r["evidence"] for r in mine["saved"]["labels"]] == ["3"]
     app.dependency_overrides[labeling.annotator] = lambda: "nuttanon"
@@ -131,12 +131,12 @@ def test_save_label_and_read_it_back_as_mine_with_others_listed(api):
 
 
 def test_a_later_save_replaces_the_earlier_one_but_keeps_both_rows(api):
-    client, sheet, _ = api
+    client, db, _ = api
     label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 2}
     client.post("/labeling/sessions/a1/save", json={"labels": [label]})
     client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "evidence": 4}]})
-    assert len(sheet.tabs["labels"]) == 2
-    assert [r["evidence"] for r in current("labels", sheet.tabs["labels"])] == ["4"]
+    assert len(db.tabs["labels"]) == 2
+    assert [r["evidence"] for r in current("labels", db.tabs["labels"])] == ["4"]
 
 
 @pytest.mark.parametrize(
@@ -189,13 +189,13 @@ def test_a_later_save_replaces_the_earlier_one_but_keeps_both_rows(api):
     ],
 )
 def test_save_refuses_what_the_analysis_does_not_contain(api, body):
-    client, sheet, _ = api
+    client, db, _ = api
     assert client.post("/labeling/sessions/a1/save", json=body).status_code in (422,)
-    assert all(not rows for rows in sheet.tabs.values())  # nothing half-written
+    assert all(not rows for rows in db.tabs.values())  # nothing half-written
 
 
 def test_misses_are_recorded(api):
-    client, sheet, _ = api
+    client, db, _ = api
     body = {
         "claims": [
             {
@@ -223,24 +223,24 @@ def test_misses_are_recorded(api):
         ],
     }
     assert client.post("/labeling/sessions/a1/save", json=body).status_code == 200
-    rows = {r["claim_id"]: r for r in sheet.tabs["claims"]}
+    rows = {r["claim_id"]: r for r in db.tabs["claims"]}
     assert (
         rows["paperA-0123456789ab#1"]["claim"] == "Y is fast."
         and rows["paperA-0123456789ab#1"]["status"] == "rejected"
     )
     assert rows["paperA-0123456789ab#h-abc123"]["origin"] == "human_added"
-    assert sheet.tabs["candidates"][0]["origin"] == "human_added"
+    assert db.tabs["candidates"][0]["origin"] == "human_added"
 
 
-def test_unconfigured_sheet_is_a_503_with_setup_message(api, monkeypatch):
+def test_unconfigured_store_is_a_503_with_setup_message(api, monkeypatch):
     client, _, _ = api
 
     def boom():
-        raise labeling.sheet.NotConfigured("set LABELING_SHEET_ID")
+        raise ledger.NotConfigured("set SUPABASE_URL")
 
-    monkeypatch.setattr(labeling.sheet, "get_store", boom)
+    monkeypatch.setattr(ledger, "get_store", boom)
     r = client.get("/labeling/sessions/a1")
-    assert r.status_code == 503 and "LABELING_SHEET_ID" in r.json()["detail"]
+    assert r.status_code == 503 and "SUPABASE_URL" in r.json()["detail"]
 
 
 def test_export_is_csv_of_current_rows(api):
@@ -297,13 +297,13 @@ def test_export_drops_what_a_person_took_back(api):
 
 
 def test_a_person_gets_a_topic_and_it_can_be_taken_back(api):
-    client, sheet, _ = api
+    client, db, _ = api
     assert client.put("/labeling/people", json={"name": "chanya", "topic": "NLP"}).status_code == 200
     state = client.get("/labeling/pool").json()
     assert {"name": "chanya", "topic": "NLP"} in state["people"]
     client.put("/labeling/people", json={"name": "chanya", "topic": ""})
     assert {"name": "chanya", "topic": ""} in client.get("/labeling/pool").json()["people"]
-    assert len(sheet.tabs["assignments"]) == 2  # appended, never edited
+    assert len(db.tabs["assignments"]) == 2  # appended, never edited
 
 
 def test_a_topic_must_be_one_of_the_team_topics(api):
@@ -332,8 +332,8 @@ def test_only_a_shared_analysis_opens_for_someone_else(monkeypatch):
     from app import main
     from app.auth import current_user
 
-    sheet = MemorySheet()
-    monkeypatch.setattr(labeling.sheet, "get_store", lambda: sheet)
+    db = MemoryLedger()
+    monkeypatch.setattr(ledger, "get_store", lambda: db)
     monkeypatch.setattr(pool, "_cache", (0.0, []))
     rows = {"a1": {**ANALYSIS, "owner": "alice", "kind": "paper"}}
     monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
@@ -348,3 +348,61 @@ def test_only_a_shared_analysis_opens_for_someone_else(monkeypatch):
     assert (
         client.put("/labeling/papers/a1/topic", json={"topic": ""}).status_code == 404
     )  # not bob's to take back
+
+
+class FakeTable:
+    """Just enough of supabase-py's query builder: insert, and select/eq/order/range."""
+
+    def __init__(self, stored):
+        self.stored, self._rows, self._range = stored, None, None
+
+    def insert(self, rows):
+        self._rows = rows
+        return self
+
+    def select(self, _):
+        self._rows = None
+        return self
+
+    def eq(self, _, tab):
+        self._tab = tab
+        return self
+
+    def order(self, _):
+        return self
+
+    def range(self, start, end):
+        self._range = (start, end)
+        return self
+
+    def execute(self):
+        if self._rows is not None:
+            self.stored += self._rows
+            return type("R", (), {"data": []})
+        mine = [{"data": r["data"]} for r in self.stored if r["tab"] == self._tab]
+        start, end = self._range
+        return type("R", (), {"data": mine[start : end + 1]})
+
+
+def test_ledger_appends_strings_and_reads_every_page(monkeypatch):
+    stored: list[dict] = []
+    from app import store
+
+    class Client:
+        def table(self, name):
+            assert name == "labeling_rows"
+            return FakeTable(stored)
+
+    monkeypatch.setattr(store, "_supabase", lambda: Client())
+    monkeypatch.setattr(ledger, "PAGE", 2)
+    db = ledger.Ledger()
+    db.append(
+        "labels", [{"claim_id": f"p#{i}", "evidence": 3, "score": None, "extra": "dropped"} for i in range(5)]
+    )
+    db.append("claims", [{"claim_id": "p#0"}])
+    assert stored[0] == {
+        "tab": "labels",
+        "data": {**dict.fromkeys(ALL_TABS["labels"], ""), "claim_id": "p#0", "evidence": "3"},
+    }
+    assert [r["claim_id"] for r in db.read("labels")] == [f"p#{i}" for i in range(5)]  # three pages of two
+    assert [r["claim_id"] for r in db.read("claims")] == ["p#0"]

@@ -1,6 +1,6 @@
 """Who labels which topic, and which analyses the team shares for labeling.
 
-Both live in the Sheet's `assignments` tab, so the team sees and can fix them there. A paper is
+Both live in the `assignments` rows of the labeling table. A paper is
 shared when its owner gives it a topic; only then can other signed-in people open it and its
 cited papers. Reads are cached for a few seconds: the page-image route asks on every request.
 """
@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from app.labeling import sheet
+from app.labeling import ledger
 from app.labeling.schema import current
 
 log = logging.getLogger(__name__)
@@ -22,14 +22,14 @@ _cache: tuple[float, list[dict]] = (0.0, [])
 
 
 def rows() -> list[dict]:
-    """The current assignment rows. Empty when the Sheet is not set up or cannot be read."""
+    """The current assignment rows. Empty when Supabase is not set up or cannot be read."""
     global _cache
     with _lock:
         if _cache[0] > time.monotonic():
             return _cache[1]
     try:
-        found = current("assignments", sheet.get_store().read("assignments"))
-    except sheet.NotConfigured:
+        found = current("assignments", ledger.get_store().read("assignments"))
+    except ledger.NotConfigured:
         found = []
     except Exception:
         log.exception("could not read the labeling assignments")
@@ -59,7 +59,7 @@ def assign(who: str, kind: str, key: str, topic: str, owner: str = "") -> None:
         "topic": topic,
         "owner": owner,
     }
-    sheet.get_store().append("assignments", [row])
+    ledger.get_store().append("assignments", [row])
     with _lock:
         _cache = (0.0, [])
 

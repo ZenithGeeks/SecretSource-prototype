@@ -1,7 +1,7 @@
 """The three tabs the labeling page writes, and the rules a saved row must follow.
 
 Rows are only ever appended. A later row for the same key replaces an earlier one when the page
-reads the tab back (`current`), so nobody overwrites anybody and the Sheet keeps its history.
+reads the tab back (`current`), so nobody overwrites anybody and the table keeps its history.
 Every tab starts with `ts` and `annotator`, which the server fills in: the browser never says
 who it is.
 """
@@ -83,7 +83,7 @@ class PersonTopicIn(TopicIn):
 
 
 CLAIM_ID = r"^(?:[A-Za-z0-9._-]+#\d{1,4}|[A-Za-z0-9._-]+#h-[a-z0-9]{6,12})$"
-TEXT = 4000  # a Sheets cell holds 50 000 characters; nothing a person types needs 4 000
+TEXT = 4000  # keeps one row small; nothing a person types needs more
 
 
 class ClaimIn(BaseModel):

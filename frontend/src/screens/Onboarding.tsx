@@ -57,7 +57,7 @@ const ROLES: { id: Role; title: string; desc: string; icon: Icon; bullets: strin
     bullets: [
       'Check each claim against its reference, side by side',
       'You decide every label; the AI only suggests',
-      'Rows save straight to the team Sheet',
+      'Labels save to the team database and export as CSV',
     ],
   },
 ]

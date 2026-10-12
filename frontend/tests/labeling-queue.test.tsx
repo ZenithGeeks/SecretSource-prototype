@@ -27,7 +27,7 @@ vi.mock('../src/lib/api', async (original) => ({
       return {}
     }
     if (path === '/labeling/status' && gateway.statusError) throw new Error(gateway.statusError)
-    if (path === '/labeling/status') return { annotator: 'Chanya', configured: true, sheet_url: '', share_with: '' }
+    if (path === '/labeling/status') return { annotator: 'Chanya', configured: true }
     if (path === '/labeling/pool') return gateway.pool
     throw new Error(`unexpected ${path}`)
   }),

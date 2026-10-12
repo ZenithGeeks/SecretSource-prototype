@@ -3,10 +3,10 @@
 A person opens one of their finished analyses. The page lists its claims, and for each claim the
 passages retrieval found in the cited papers, and the person judges every one of them: keep,
 edit or reject a claim; relevant or not for a passage; add what the system missed; give each
-(claim, reference paper) a 1-4 label. Saving appends rows to the team's Sheet. Nothing here
+(claim, reference paper) a 1-4 label. Saving appends rows to the labeling table in Supabase. Nothing here
 decides anything: the AI's output is only what the page shows first.
 
-What the browser sends is checked against the analysis, so the Sheet can be trusted as a gold
+What the browser sends is checked against the analysis, so the saved rows can be trusted as a gold
 set: a retrieved passage's rank, score and text are copied from the analysis, not from the
 request.
 """
@@ -22,9 +22,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app import auth, config
+from app import auth
 from app.auth import current_user
-from app.labeling import pool, sheet
+from app.labeling import ledger, pool
 from app.labeling.identity import annotator
 from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, TopicIn, current
 
@@ -54,11 +54,11 @@ async def owned_analysis(analysis_id: str, user: str | None = Depends(current_us
     return await asyncio.to_thread(load)
 
 
-def _store() -> sheet.Store:
+def _store() -> ledger.Store:
     try:
-        return sheet.get_store()
-    except sheet.NotConfigured as error:
-        raise HTTPException(503, f"the labeling Sheet is not set up: {error}") from error
+        return ledger.get_store()
+    except ledger.NotConfigured as error:
+        raise HTTPException(503, f"labels cannot be saved yet: {error}") from error
 
 
 def _paper_id(analysis: dict) -> str:
@@ -135,15 +135,7 @@ def _mine_and_others(rows: dict[str, list[dict]], me: str, paper_id: str) -> dic
 
 @router.get("/status")
 async def status(who: str = Depends(annotator)):
-    configured = bool(config.LABELING_SHEET_ID and config.LABELING_CREDENTIALS)
-    return {
-        "annotator": who,
-        "configured": configured,
-        "sheet_url": f"https://docs.google.com/spreadsheets/d/{config.LABELING_SHEET_ID}"
-        if configured
-        else "",
-        "share_with": sheet.service_account_email() if configured else "",
-    }
+    return {"annotator": who, "configured": auth._supabase_configured()}
 
 
 @router.get("/sessions/{analysis_id}")
