@@ -22,11 +22,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app import auth
+from app import auth, config
 from app.auth import current_user
-from app.labeling import ledger, pool
+from app.labeling import ledger, pool, scopus
 from app.labeling.identity import annotator
-from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, TopicIn, current
+from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, ScopusAddIn, TopicIn, current
 
 router = APIRouter(prefix="/labeling", tags=["labeling"])
 
@@ -135,7 +135,11 @@ def _mine_and_others(rows: dict[str, list[dict]], me: str, paper_id: str) -> dic
 
 @router.get("/status")
 async def status(who: str = Depends(annotator)):
-    return {"annotator": who, "configured": auth._supabase_configured()}
+    return {
+        "annotator": who,
+        "configured": auth._supabase_configured(),
+        "scopus": bool(config.SCOPUS_API_KEY),
+    }
 
 
 @router.get("/sessions/{analysis_id}")
@@ -166,7 +170,7 @@ def _team() -> list[str]:
 
 
 @router.get("/pool")
-async def pool_state(who: str = Depends(annotator)):
+async def pool_state(who: str = Depends(annotator), user: str | None = Depends(current_user)):
     """Topics, who has which, and the papers shared with the team."""
     from app import main
 
@@ -176,11 +180,24 @@ async def pool_state(who: str = Depends(annotator)):
         shared = []
         for analysis_id, topic in pool.pooled().items():
             row = main.analyses.get(analysis_id)
-            if row and row.get("status") == "done" and row.get("claims"):
-                title = row.get("title") or Path(row.get("file") or analysis_id).name
-                shared.append(
-                    {"analysis_id": analysis_id, "title": title, "topic": topic, "claims": len(row["claims"])}
-                )
+            if not row:
+                continue
+            status = row.get("status")
+            if status == "done" and not row.get("claims"):
+                continue  # nothing to label
+            stages = row.get("stages") or []
+            reason = next((s.get("message", "") for s in reversed(stages) if s.get("stage") == "error"), "")
+            shared.append(
+                {
+                    "analysis_id": analysis_id,
+                    "title": row.get("title") or row.get("paper") or analysis_id,
+                    "topic": topic,
+                    "claims": len(row.get("claims") or []),
+                    "status": status,
+                    "reason": reason if status == "error" else "",
+                    "mine": row.get("owner") == user,
+                }
+            )
         return {
             "topics": TOPICS,
             "me": who,
@@ -211,6 +228,49 @@ async def set_paper_topic(
         pool.assign, who, "paper", analysis["id"], body.topic, analysis.get("owner") or ""
     )
     return {"analysis_id": analysis["id"], "topic": body.topic}
+
+
+def _doi_in_pool(main, doi: str) -> str | None:
+    for analysis_id in pool.pooled():
+        row = main.analyses.get(analysis_id)
+        if row and str(row.get("paper", "")).lower() == doi.lower():
+            return analysis_id
+    return None
+
+
+@router.get("/scopus/search")
+async def scopus_search(
+    topic: str, q: str = "", since: int = 2020, page: int = 0, _who: str = Depends(annotator)
+):
+    """Open-access papers of a topic's venues, from Scopus. Each says whether it is already listed."""
+    from app import main
+
+    if topic not in TOPICS:
+        raise HTTPException(422, f"no such topic: {topic}")
+    try:
+        found = await asyncio.to_thread(scopus.search, topic, q, since, max(page, 0) * scopus.PAGE)
+    except scopus.NotConfigured as error:
+        raise HTTPException(503, f"Scopus is not set up: {error}") from error
+    except Exception as error:  # a refused key, a timeout, Scopus being down
+        raise HTTPException(502, "Scopus did not answer") from error
+    listed = {str(main.analyses.get(i, {}).get("paper", "")).lower() for i in pool.pooled()}
+    return {"results": [{**paper, "added": paper["doi"].lower() in listed} for paper in found]}
+
+
+@router.post("/scopus/add")
+async def scopus_add(
+    body: ScopusAddIn, user: str | None = Depends(current_user), who: str = Depends(annotator)
+):
+    """Analyse a paper found in Scopus and list it for the team under a topic."""
+    from app import main
+
+    _store()
+    existing = await asyncio.to_thread(_doi_in_pool, main, body.doi)
+    if existing:
+        return {"id": existing, "existing": True}
+    started = await asyncio.to_thread(main._start, body.doi, True, user)
+    await asyncio.to_thread(pool.assign, who, "paper", started["id"], body.topic, user or "")
+    return {"id": started["id"], "existing": False}
 
 
 def _stamp(who: str, paper_id: str) -> dict:

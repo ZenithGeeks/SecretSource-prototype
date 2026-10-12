@@ -1,13 +1,11 @@
-/** Papers to label: the person's finished analyses, and whether the database is ready to take rows. */
+/** Papers to label: the ones the team brought in from Scopus, and whether the database is ready. */
 
-import { Download, TriangleAlert } from 'lucide-react'
+import { Download, Loader2, TriangleAlert } from 'lucide-react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
-import { paperName } from '../../../lib/api'
-import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool } from '../../../lib/labeling'
-import { useAnalyses } from '../../../lib/useAnalysis'
+import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool, type Pool } from '../../../lib/labeling'
+import { ScopusAdd } from '../components/ScopusAdd'
 import { TeamTopics } from '../components/TeamTopics'
-import { TopicSelect } from '../components/TopicSelect'
 
 async function download() {
   const blob = await labelingApi.exportCsv('labels')
@@ -19,27 +17,59 @@ async function download() {
   URL.revokeObjectURL(link.href)
 }
 
-function Setup() {
+function Setup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card className="flex flex-col gap-2 border-insufficient">
       <p className="flex items-center gap-2 font-medium text-insufficient">
-        <TriangleAlert className="size-4" /> Labels cannot be saved yet
+        <TriangleAlert className="size-4" /> {title}
       </p>
-      <p className="text-sm text-ink-muted">
-        Set <code>SUPABASE_URL</code> and <code>SUPABASE_SERVICE_ROLE_KEY</code> in the gateway's <code>.env</code>, run
-        the <code>labeling_rows</code> migration, then reload.
-      </p>
+      <p className="text-sm text-ink-muted">{children}</p>
     </Card>
+  )
+}
+
+function PaperRow({ paper, myTopic, onOpen }: { paper: Pool['papers'][number]; myTopic: string; onOpen: (id: string) => void }) {
+  const assign = useAssignTopic()
+  const ready = paper.status === 'done'
+  return (
+    <li className="flex items-stretch gap-2">
+      <button
+        type="button"
+        disabled={!ready}
+        onClick={() => onOpen(paper.analysis_id)}
+        className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-4 py-3 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default disabled:hover:border-border-subtle"
+      >
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium text-ink">{paper.title}</span>
+          <span className="block text-xs text-ink-muted">
+            {paper.topic}
+            {paper.topic === myTopic && ' · your topic'}
+            {ready && ` · ${paper.claims} claims`}
+            {paper.status === 'running' && ' · reading the paper…'}
+          </span>
+          {paper.status === 'error' && (
+            <span role="alert" className="block text-xs text-refutes">
+              Could not be read: {paper.reason || 'no open PDF was found'}. Remove it and add another.
+            </span>
+          )}
+        </span>
+        {ready && <span className="text-sm font-medium text-accent">Label</span>}
+        {paper.status === 'running' && <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" aria-label="Reading the paper" />}
+      </button>
+      {paper.mine && (
+        <Button variant="ghost" disabled={assign.isPending} onClick={() => assign.mutate({ analysisId: paper.analysis_id, topic: '' })}>
+          Remove
+        </Button>
+      )}
+    </li>
   )
 }
 
 export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   const status = useLabelStatus()
-  const analyses = useAnalyses()
   const pool = usePool()
-  const assign = useAssignTopic()
 
-  if (status.isLoading || analyses.isLoading) return <LoadingScreen />
+  if (status.isLoading) return <LoadingScreen />
   if (status.error) {
     const { title, hint } = problem(status.error)
     return (
@@ -52,14 +82,11 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
     )
   }
 
-  const ready = (analyses.data ?? []).filter((a) => a.status === 'done' && a.claims.length > 0)
   const myTopic = pool.data?.people.find((p) => p.name === pool.data?.me)?.topic ?? ''
-  const sharedAs = new Map((pool.data?.papers ?? []).map((p) => [p.analysis_id, p.topic]))
-  // Papers of the team's other people: yours first by topic, then the rest.
-  const mine = new Set(ready.map((a) => a.id))
-  const shared = (pool.data?.papers ?? [])
-    .filter((p) => !mine.has(p.analysis_id))
-    .sort((a, b) => Number(b.topic === myTopic) - Number(a.topic === myTopic) || a.topic.localeCompare(b.topic))
+  // Papers of the viewer's own topic first, then by topic.
+  const papers = [...(pool.data?.papers ?? [])].sort(
+    (a, b) => Number(b.topic === myTopic) - Number(a.topic === myTopic) || a.topic.localeCompare(b.topic),
+  )
   return (
     <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -69,79 +96,43 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
             Signed in as {status.data?.annotator}. You judge every claim and passage; nothing is saved until you save it.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={() => void download()} disabled={!status.data?.configured}>
-            <Download className="size-4" /> Download labels CSV
-          </Button>
-        </div>
+        <Button variant="ghost" onClick={() => void download()} disabled={!status.data?.configured}>
+          <Download className="size-4" /> Download labels CSV
+        </Button>
       </header>
 
-      {!status.data?.configured && <Setup />}
+      {!status.data?.configured && (
+        <Setup title="Labels cannot be saved yet">
+          Set <code>SUPABASE_URL</code> and <code>SUPABASE_SERVICE_ROLE_KEY</code> in the gateway's <code>.env</code>, run the{' '}
+          <code>labeling_rows</code> migration, then reload.
+        </Setup>
+      )}
 
       {pool.data && <TeamTopics pool={pool.data} />}
 
-      {shared.length > 0 && (
-        <section aria-labelledby="shared-heading" className="flex flex-col gap-2">
-          <h2 id="shared-heading" className="text-sm font-semibold text-ink">
-            Shared by the team
-          </h2>
+      {pool.data &&
+        (status.data?.scopus ? (
+          <ScopusAdd pool={pool.data} myTopic={myTopic} />
+        ) : (
+          <Setup title="Scopus search is not set up yet">
+            Set <code>SCOPUS_API_KEY</code> (a key from dev.elsevier.com) in the gateway's <code>.env</code>, then reload.
+          </Setup>
+        ))}
+
+      <section aria-labelledby="papers-heading" className="flex flex-col gap-2">
+        <h2 id="papers-heading" className="text-sm font-semibold text-ink">
+          Papers to label
+        </h2>
+        {papers.length === 0 ? (
+          <Empty title="No papers yet" hint="Search Scopus above and add some. They appear here once their text has been read." />
+        ) : (
           <ul className="flex flex-col gap-2">
-            {shared.map((p) => (
-              <li key={p.analysis_id}>
-                <button
-                  type="button"
-                  onClick={() => onOpen(p.analysis_id)}
-                  className="flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-4 py-3 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-ink">{p.title}</span>
-                    <span className="block text-xs text-ink-muted">
-                      {p.topic}
-                      {p.topic === myTopic && ' · your topic'} · {p.claims} claims
-                    </span>
-                  </span>
-                  <span className="text-sm font-medium text-accent">Label</span>
-                </button>
-              </li>
+            {papers.map((paper) => (
+              <PaperRow key={paper.analysis_id} paper={paper} myTopic={myTopic} onOpen={onOpen} />
             ))}
           </ul>
-        </section>
-      )}
-
-      {ready.length === 0 ? (
-        <Empty
-          title="No analysed papers yet"
-          hint="Analyse a paper in the Researcher role first. Its claims and the passages found for them show up here."
-        />
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {ready.map((a) => (
-            <li key={a.id} className="flex items-stretch gap-2">
-              <button
-                type="button"
-                onClick={() => onOpen(a.id)}
-                className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-4 py-3 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-ink">{a.title || paperName(a.file ?? a.paper)}</span>
-                  <span className="block text-xs text-ink-muted">{a.claims.length} claims</span>
-                </span>
-                <span className="text-sm font-medium text-accent">Label</span>
-              </button>
-              {pool.data && (
-                <TopicSelect
-                  label={`Share ${a.title || paperName(a.file ?? a.paper)} with the team under a topic`}
-                  value={sharedAs.get(a.id) ?? ''}
-                  topics={pool.data.topics}
-                  empty="Not shared"
-                  disabled={assign.isPending}
-                  onChange={(topic) => assign.mutate({ analysisId: a.id, topic })}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+        )}
+      </section>
     </FadeIn>
   )
 }
