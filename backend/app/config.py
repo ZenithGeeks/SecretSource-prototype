@@ -99,6 +99,9 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 # UNPAYWALL_EMAIL lets Unpaywall answer instead. It is a contact address, not a key.
 S2_API_KEY = os.getenv("S2_API_KEY", "")
 UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "")
+# The labeling page searches Scopus (dev.elsevier.com) for papers to label. Without a key it
+# shows that the search is not set up.
+SCOPUS_API_KEY = os.getenv("SCOPUS_API_KEY", "")
 
 CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 keeps all
 

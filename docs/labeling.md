@@ -12,10 +12,21 @@ Labels are saved in Supabase, in the `labeling_rows` table
 `SUPABASE_SERVICE_ROLE_KEY`, which it already has when login is on. Anyone who signs in can label.
 Until those are set the page says "Labels cannot be saved yet".
 
+## Where the papers come from
+
+The queue lists only papers brought in on purpose, from Scopus. Under **Add papers from Scopus** pick a
+topic (CV, NLP, SE or HPC), optionally a few words, and a year; Scopus returns open-access papers of that
+topic's conferences and journals (the venue lists are `VENUES` in `backend/app/labeling/scopus.py`).
+**Add** reads the paper like any other analysis (its DOI goes to Semantic Scholar, Unpaywall and arXiv for a
+PDF) and lists it for the whole team under that topic. A paper with no reachable PDF shows why and can be
+removed. Needs `SCOPUS_API_KEY` in the gateway's `.env` (a key from https://dev.elsevier.com); without it the
+page says the search is not set up. Scopus gives metadata, not PDFs, which is why the PDF is looked for
+elsewhere.
+
 ## Working a paper
 
-1. Analyse the paper first (Researcher role). Its claims and the passages found for them are what
-   the page starts from. Only your own finished analyses show up.
+1. Add the paper from Scopus (above). Its claims and the passages found for them are what the page starts
+   from.
 2. Open it under **Papers to label**. Left: the paper at the claim's sentence. Right: the reference
    paper at the passage you picked.
 3. For each claim: **Keep**, **Edit** or **Reject** it. Judge every passage **Relevant / Not

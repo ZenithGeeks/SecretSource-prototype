@@ -60,7 +60,7 @@ export type Session = {
   others: Record<string, string[]>
 }
 
-export type LabelStatus = { annotator: string; configured: boolean }
+export type LabelStatus = { annotator: string; configured: boolean; scopus: boolean }
 
 export type Save = {
   claims: {
@@ -110,6 +110,7 @@ export function problem(error: unknown): { title: string; hint: string } {
   if (status === 403) return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
   if (status === 404)
     return { title: 'This paper is not available', hint: 'It may have been deleted, or its owner has stopped sharing it.' }
+  if (status === 502) return { title: 'Scopus did not answer', hint: 'Try again in a moment.' }
   if (status === 409) return { title: 'This paper is not ready', hint: 'Its analysis has not finished. Try again in a moment.' }
   if (status === 422) return { title: 'That was not accepted', hint: 'Reload the page and try again.' }
   if (status === 503)
@@ -117,12 +118,30 @@ export function problem(error: unknown): { title: string; hint: string } {
   return { title: 'Something went wrong', hint: 'Try again in a moment. If it keeps happening, tell the team.' }
 }
 
+export type ScopusPaper = {
+  doi: string
+  title: string
+  venue: string
+  year: string
+  first_author: string
+  cited_by: number
+  added: boolean
+}
+
 export type Pool = {
   topics: string[]
   me: string
   people: { name: string; topic: string }[]
   /** Analyses their owners shared with the team, each under a topic. */
-  papers: { analysis_id: string; title: string; topic: string; claims: number }[]
+  papers: {
+    analysis_id: string
+    title: string
+    topic: string
+    claims: number
+    status: 'running' | 'done' | 'error'
+    reason: string
+    mine: boolean
+  }[]
 }
 
 const putJson = (path: string, body: unknown) =>
@@ -130,6 +149,14 @@ const putJson = (path: string, body: unknown) =>
 
 export const labelingApi = {
   pool: () => request<Pool>('/labeling/pool'),
+  scopusSearch: (topic: string, q: string, since: number) =>
+    request<{ results: ScopusPaper[] }>(`/labeling/scopus/search?${new URLSearchParams({ topic, q, since: String(since) })}`),
+  scopusAdd: (doi: string, topic: string) =>
+    request<{ id: string; existing: boolean }>('/labeling/scopus/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doi, topic }),
+    }),
   setPersonTopic: (name: string, topic: string) => putJson('/labeling/people', { name, topic }),
   setPaperTopic: (analysisId: string, topic: string) =>
     putJson(`/labeling/papers/${encodeURIComponent(analysisId)}/topic`, { topic }),
@@ -149,6 +176,18 @@ export function useLabelStatus() {
 
 export function usePool() {
   return useQuery({ queryKey: ['labeling', 'pool'], queryFn: labelingApi.pool, retry: false })
+}
+
+export function useScopusSearch() {
+  return useMutation({ mutationFn: (v: { topic: string; q: string; since: number }) => labelingApi.scopusSearch(v.topic, v.q, v.since) })
+}
+
+export function useScopusAdd() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (v: { doi: string; topic: string }) => labelingApi.scopusAdd(v.doi, v.topic),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
+  })
 }
 
 /** Sets a person's topic (`name`) or shares one of your own analyses (`analysisId`); "" undoes it. */

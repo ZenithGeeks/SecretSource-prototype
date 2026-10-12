@@ -78,6 +78,11 @@ class TopicIn(BaseModel):
     topic: Topic
 
 
+class ScopusAddIn(BaseModel):
+    doi: str = Field(pattern=r"^10\.\d{4,9}/\S+$", max_length=200)
+    topic: Literal["CV", "NLP", "SE", "HPC"]
+
+
 class PersonTopicIn(TopicIn):
     name: str = Field(min_length=1, max_length=80)
 

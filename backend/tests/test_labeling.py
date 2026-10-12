@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-from app.labeling import dspy_export, ledger, pool
+from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
 from fastapi import FastAPI
@@ -62,6 +62,7 @@ def api(monkeypatch):
     app.dependency_overrides[labeling.owned_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.mine_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.annotator] = lambda: "chanya"
+    app.dependency_overrides[labeling.current_user] = lambda: None
     return TestClient(app), db, app
 
 
@@ -407,6 +408,132 @@ def test_ledger_appends_strings_and_reads_every_page(monkeypatch):
     }
     assert [r["claim_id"] for r in db.read("labels")] == [f"p#{i}" for i in range(5)]  # three pages of two
     assert [r["claim_id"] for r in db.read("claims")] == ["p#0"]
+
+
+SCOPUS_REPLY = {
+    "search-results": {
+        "entry": [
+            {
+                "dc:title": "A late interaction retriever",
+                "prism:doi": "10.18653/v1/2022.naacl-main.272",
+                "prism:publicationName": "NAACL 2022",
+                "prism:coverDate": "2022-07-10",
+                "dc:creator": "Santhanam K.",
+                "citedby-count": "412",
+            },
+            {"dc:title": "No DOI here", "prism:publicationName": "NAACL 2022"},
+        ]
+    }
+}
+
+
+def test_scopus_query_is_the_topics_open_access_venues_with_safe_text():
+    q = scopus.build_query("NLP", 'late "interaction" {x}', 2021)
+    assert 'SRCTITLE("Empirical Methods in Natural Language Processing")' in q
+    assert "OPENACCESS(1)" in q and "PUBYEAR > 2020" in q
+    assert 'TITLE-ABS-KEY("late interaction x")' in q  # query syntax stripped, spaces collapsed
+    assert 'SRCTITLE("Supercomputing")' not in q  # another topic's venue
+
+
+def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
+    with pytest.raises(scopus.NotConfigured):
+        scopus.search("NLP", "", 2020)
+
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    seen = {}
+
+    class Reply:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return SCOPUS_REPLY
+
+    def fake_get(url, params, headers, timeout):
+        seen.update(url=url, params=params, headers=headers)
+        return Reply()
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    found = scopus.search("NLP", "retrieval", 2020, start=15)
+    assert seen["headers"]["X-ELS-APIKey"] == "k" and seen["params"]["start"] == 15
+    assert found == [
+        {
+            "doi": "10.18653/v1/2022.naacl-main.272",
+            "title": "A late interaction retriever",
+            "venue": "NAACL 2022",
+            "year": "2022",
+            "first_author": "Santhanam K.",
+            "cited_by": 412,
+        }
+    ]
+
+
+def test_scopus_add_lists_the_paper_under_a_topic_once(api, monkeypatch):
+    from app import main
+
+    client, db, _ = api
+    rows = {}
+    started = []
+
+    def fake_start(paper, verify, owner):
+        started.append((paper, verify, owner))
+        rows["n1"] = {
+            "id": "n1",
+            "paper": paper,
+            "owner": owner,
+            "status": "running",
+            "stages": [],
+            "claims": [],
+        }
+        return {"id": "n1"}
+
+    monkeypatch.setattr(main, "_start", fake_start)
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    doi = "10.18653/v1/2022.naacl-main.272"
+    first = client.post("/labeling/scopus/add", json={"doi": doi, "topic": "NLP"})
+    assert first.json() == {"id": "n1", "existing": False}
+    assert started == [(doi, True, None)]
+    assert pool.pooled() == {"n1": "NLP"}
+    again = client.post("/labeling/scopus/add", json={"doi": doi.upper(), "topic": "CV"})
+    assert again.json() == {"id": "n1", "existing": True} and len(started) == 1
+    assert client.post("/labeling/scopus/add", json={"doi": "not a doi", "topic": "NLP"}).status_code == 422
+
+
+def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch):
+    from app import main
+
+    client, db, _ = api
+    rows = {
+        "r1": {"id": "r1", "paper": "10.1/a", "owner": "x", "status": "running", "stages": [], "claims": []},
+        "e1": {
+            "id": "e1",
+            "paper": "10.1/b",
+            "owner": None,
+            "status": "error",
+            "stages": [{"stage": "error", "message": "no open-access PDF known for DOI:10.1/b"}],
+            "claims": [],
+        },
+    }
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    pool.assign("chanya", "paper", "r1", "CV", "x")
+    pool.assign("chanya", "paper", "e1", "SE", "")
+    papers = {p["analysis_id"]: p for p in client.get("/labeling/pool").json()["papers"]}
+    assert (papers["r1"]["status"], papers["r1"]["title"], papers["r1"]["mine"]) == (
+        "running",
+        "10.1/a",
+        False,
+    )
+    assert papers["e1"]["status"] == "error" and "no open-access PDF" in papers["e1"]["reason"]
+
+
+def test_scopus_search_says_when_it_is_not_set_up(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
+    assert client.get("/labeling/scopus/search", params={"topic": "NLP"}).status_code == 503
+    assert client.get("/labeling/scopus/search", params={"topic": "Cooking"}).status_code == 422
 
 
 C0, C1 = "paperA-0123456789ab#0", "paperA-0123456789ab#1"
