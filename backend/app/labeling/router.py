@@ -24,7 +24,7 @@ from fastapi.responses import Response
 
 from app import auth
 from app.auth import current_user
-from app.labeling import ledger, pool
+from app.labeling import dspy_export, ledger, pool
 from app.labeling.identity import annotator
 from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, TopicIn, current
 
@@ -291,10 +291,21 @@ async def save(body: SaveIn, analysis: dict = Depends(owned_analysis), who: str 
 @router.get("/export")
 async def export(tab: str = "labels", _who: str = Depends(annotator)):
     """The current rows of one tab as CSV: the latest row per key, without what a person later
-    took back (a rejected claim's labels and passages, a passage they added and then removed)."""
+    took back (a rejected claim's labels and passages, a passage they added and then removed).
+    `dspy_claims` and `dspy_verdicts` give the same rows as DSPy examples (dspy_export.py), as JSONL."""
+    store = _store()
+    if tab in ("dspy_claims", "dspy_verdicts"):
+        rows = {name: await asyncio.to_thread(store.read, name) for name in TABS}
+        build = dspy_export.claims_examples if tab == "dspy_claims" else dspy_export.verdict_examples
+        found = await asyncio.to_thread(build, rows)
+        body = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in found)
+        return Response(
+            body,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": f"attachment; filename={tab}.jsonl"},
+        )
     if tab not in TABS:
         raise HTTPException(404, f"no such tab: {tab}")
-    store = _store()
     rows = current(tab, await asyncio.to_thread(store.read, tab))
     if tab != "claims":
         claims = await asyncio.to_thread(store.read, "claims")
