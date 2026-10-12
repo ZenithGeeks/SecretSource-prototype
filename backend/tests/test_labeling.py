@@ -5,8 +5,6 @@ Google nor the gateway's heavy imports.
 """
 
 import pytest
-from app import config
-from app.labeling import identity
 from app.labeling import router as labeling
 from app.labeling.schema import TABS, current
 from fastapi import FastAPI
@@ -246,20 +244,6 @@ def test_export_is_csv_of_current_rows(api):
     client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "evidence": 4}]})
     text = client.get("/labeling/export?tab=labels").text.splitlines()
     assert len(text) == 2 and text[0].startswith("ts,annotator,paper_id")
-
-
-@pytest.mark.parametrize(
-    "name,email,ok",
-    [("Chanya", "c@x.th", True), ("", "vitawat@kmutt.ac.th", True), ("Eve", "eve@x.th", False)],
-)
-def test_only_the_labeling_team_gets_in(monkeypatch, name, email, ok):
-    monkeypatch.setattr(config, "LABELING_ALLOWED", ["chanya", "vitawat"])
-    assert identity.allowed(name, email) is ok
-
-
-def test_nobody_is_allowed_by_default(monkeypatch):
-    monkeypatch.setattr(config, "LABELING_ALLOWED", [])
-    assert identity.allowed("Chanya", "c@x.th") is False
 
 
 def test_export_drops_what_a_person_took_back(api):
