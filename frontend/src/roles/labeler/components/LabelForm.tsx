@@ -31,7 +31,7 @@ export function LabelForm({
       {others.length > 0 && (
         <p className="text-xs text-ink-muted">Also labeled by {others.join(', ')}. Label it yourself, without looking.</p>
       )}
-      <div role="radiogroup" aria-labelledby={group} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div role="radiogroup" aria-labelledby={group} className="grid grid-cols-4 gap-1.5">
         <span id={group} className="sr-only">
           Support level for {title}
         </span>
@@ -41,23 +41,25 @@ export function LabelForm({
             type="button"
             role="radio"
             aria-checked={value.evidence === level}
+            aria-label={`${level} · ${name}`}
             title={hint}
             onClick={() => onChange({ ...value, evidence: level as Level })}
             className={cn(
-              'flex min-h-11 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors',
+              'flex min-h-14 flex-col items-center justify-center rounded-lg border px-1 py-1.5 transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
               value.evidence === level
                 ? 'border-accent bg-accent-soft text-ink'
                 : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
             )}
           >
-            <span className="text-sm font-semibold tabular-nums">
-              {level} · {name}
-            </span>
-            <span className="text-[11px] leading-4">{hint}</span>
+            <span className="text-base font-semibold tabular-nums">{level}</span>
+            <span className="text-xs">{name}</span>
           </button>
         ))}
       </div>
+      <p className="min-h-5 text-xs text-ink-muted" aria-live="polite">
+        {value.evidence ? LEVELS[value.evidence - 1].hint : 'Pick 1–4, or press the number key.'}
+      </p>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={why} className="text-xs font-medium text-ink">
           Why this level? (the deciding fact: sample size, control, replication…)

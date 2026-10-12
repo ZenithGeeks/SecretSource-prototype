@@ -236,6 +236,20 @@ function Body({ session }: { session: Session }) {
 
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
+  // A reference with a passage you called relevant needs a level; the others are optional.
+  const relevantRefs = refs.filter((id) => relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence)
+  const otherRefs = refs.filter((id) => !relevantRefs.includes(id))
+  const labelForm = (id: string) => (
+    <LabelForm
+      key={id}
+      title={session.references.find((r) => r.reference_id === id)?.label ?? id}
+      active={id === refId}
+      label={draft.labels[id]}
+      others={session.others[`${claim.claim_id}|${id}`] ?? []}
+      onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
+    />
+  )
+
   const panel = (
     <>
       <ClaimDecision claim={claim} draft={draft} position={position + 1} count={claims.length} onChange={patch} />
@@ -256,17 +270,15 @@ function Body({ session }: { session: Session }) {
         />
       )}
       {deciding && refs.length === 0 && <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>}
-      {deciding &&
-        refs.map((id) => (
-          <LabelForm
-            key={id}
-            title={session.references.find((r) => r.reference_id === id)?.label ?? id}
-            active={id === refId}
-            label={draft.labels[id]}
-            others={session.others[`${claim.claim_id}|${id}`] ?? []}
-            onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
-          />
-        ))}
+      {deciding && relevantRefs.map(labelForm)}
+      {deciding && otherRefs.length > 0 && (
+        <details open={otherRefs.includes(refId ?? '')} className="rounded-lg border border-border-subtle">
+          <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm text-ink-muted">
+            Other references, no relevant passage ({otherRefs.length}) · optional
+          </summary>
+          <div className="flex flex-col gap-3 p-3 pt-0">{otherRefs.map(labelForm)}</div>
+        </details>
+      )}
       {deciding && refs.length > 0 && (
         <p className="text-xs text-ink-muted">
           Press 1–4 to set the level for the reference on the right.

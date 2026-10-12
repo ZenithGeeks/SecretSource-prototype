@@ -72,7 +72,7 @@ export function PassageList({
                   {c.page != null && <span>p.{c.page}</span>}
                   {c.score != null && <span className="tabular-nums">score {c.score.toFixed(2)}</span>}
                 </span>
-                <span className="mt-1 line-clamp-4 block text-[13px] leading-5 text-ink">{c.passage}</span>
+                <span title={c.passage} className="mt-1 line-clamp-4 text-[13px] leading-5 text-ink">{c.passage}</span>
               </button>
               <div role="radiogroup" aria-label={`Passage ${c.rank} of ${labelOf(c.reference_id)}`} className="mt-2 flex gap-2">
                 {STATUS.map((s) => (
@@ -117,7 +117,7 @@ export function PassageList({
                       {labelOf(a.reference_id)}
                       {a.page != null && ` · p.${a.page}`}
                     </span>
-                    <span className="line-clamp-3 block text-[13px] leading-5 text-ink">{a.passage}</span>
+                    <span title={a.passage} className="line-clamp-3 text-[13px] leading-5 text-ink">{a.passage}</span>
                   </button>
                   <button
                     type="button"

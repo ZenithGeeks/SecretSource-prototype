@@ -263,6 +263,15 @@ describe('the workspace', () => {
     window.localStorage.removeItem('labeler.paperView')
   })
 
+  it('says what the chosen level means, once, under the picker', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByText('Pick 1–4, or press the number key.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '3 · Clear' }))
+    expect(screen.getByText('The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
+    expect(screen.queryByText('Pick 1–4, or press the number key.')).not.toBeInTheDocument()
+  })
+
   it('will not add evidence before the claim is decided, and says why', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
