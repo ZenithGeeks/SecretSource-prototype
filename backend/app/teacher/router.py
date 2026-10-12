@@ -212,15 +212,23 @@ def _course_view(course: TeacherCourse, coursework: list[TeacherCoursework] | No
         "teacherName": _name((teachers[0] or {}).get("profile")) if teachers and isinstance(teachers[0], dict) else "",
         "teacherCount": len(teachers),
         "studentCount": len(students),
-        "assignmentCount": raw.get("_preview_assignment_count", sum(item.resource_type == "coursework" for item in work)),
-        "topicCount": raw.get("_preview_topic_count", sum(item.resource_type == "topic" for item in work)),
-        "announcementCount": raw.get("_preview_announcement_count", sum(item.resource_type == "announcement" for item in work)),
-        "linkedFileCount": raw.get("_preview_linked_file_count", sum(bool(_materials(item.raw)) for item in work)),
+        "assignmentCount": sum(item.resource_type == "coursework" for item in work),
+        "topicCount": sum(item.resource_type == "topic" for item in work),
+        "announcementCount": sum(item.resource_type == "announcement" for item in work),
+        "linkedFileCount": sum(bool(_materials(item.raw)) for item in work),
         "lastSyncedAt": str(raw.get("_last_synced_at") or ""),
     }
 
 
-def _raw_course_view(raw: dict[str, Any]) -> dict[str, Any]:
+_COUNT_FIELDS = ("assignmentCount", "topicCount", "announcementCount", "linkedFileCount")
+
+
+def _raw_course_view(raw: dict[str, Any], counts: dict[str, int] | None = None) -> dict[str, Any]:
+    """View of a not-yet-imported Classroom course.
+
+    The four content counts are ``None`` unless the caller fetched the course's
+    coursework and passes them in; the list endpoint does not.
+    """
     course = TeacherCourse(
         owner="",
         course_id=str(raw.get("id") or ""),
@@ -231,7 +239,10 @@ def _raw_course_view(raw: dict[str, Any]) -> dict[str, Any]:
         course_state=raw.get("courseState"),
         raw=raw,
     )
-    return _course_view(course)
+    view = _course_view(course)
+    for field in _COUNT_FIELDS:
+        view[field] = (counts or {}).get(field)
+    return view
 
 
 def _submission_view(submission: TeacherSubmission) -> dict[str, Any]:
@@ -633,31 +644,7 @@ def importable_classes(
     service: TeacherGoogleSyncService = Depends(get_sync_service),
 ) -> list[dict[str, Any]]:
     try:
-        preview_courses = service.import_preview(owner).get("courses", [])
-        result = []
-        for raw_course in preview_courses:
-            course_id = str(raw_course.get("id") or "")
-            if not course_id:
-                continue
-            client = service.client
-            teachers = client.list_teachers(course_id)
-            students = client.list_students(course_id)
-            assignments = client.list_coursework(course_id)
-            materials = client.list_coursework_materials(course_id)
-            announcements = client.list_announcements(course_id)
-            topics = client.list_topics(course_id)
-            all_resources = [*assignments, *materials, *announcements]
-            enriched = {
-                **raw_course,
-                "teachers": teachers,
-                "students": students,
-                "_preview_assignment_count": len(assignments),
-                "_preview_topic_count": len(topics),
-                "_preview_announcement_count": len(announcements),
-                "_preview_linked_file_count": sum(len(_materials(item)) for item in all_resources),
-            }
-            result.append(_raw_course_view(enriched))
-        return result
+        return [_raw_course_view(course) for course in service.import_preview(owner).get("courses", [])]
     except Exception as error:
         raise _map_google_error(error) from error
 
@@ -679,12 +666,24 @@ def import_preview(
         assignments = client.list_coursework(course_id)
         materials = client.list_coursework_materials(course_id)
         announcements = client.list_announcements(course_id)
+        topics = client.list_topics(course_id)
         linked_material_count = sum(
             len(_materials(item)) for item in [*assignments, *materials, *announcements]
         )
         raw_course = {**raw_course, "students": students, "teachers": teachers}
+        # Same definitions as _course_view uses for imported courses:
+        # linkedFileCount is the number of items (coursework, materials,
+        # announcements, topics) that carry at least one attachment.
+        counts = {
+            "assignmentCount": len(assignments),
+            "topicCount": len(topics),
+            "announcementCount": len(announcements),
+            "linkedFileCount": sum(
+                bool(_materials(item)) for item in (*assignments, *materials, *announcements, *topics)
+            ),
+        }
         return {
-            "course": _raw_course_view(raw_course),
+            "course": _raw_course_view(raw_course, counts),
             "resources": [
                 {"key": "course", "label": "Course", "count": 1, "detail": "Course details"},
                 {"key": "classwork", "label": "Classwork", "count": len(assignments), "detail": "Assignments and student submissions"},

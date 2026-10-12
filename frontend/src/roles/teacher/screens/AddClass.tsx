@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 
 import { Button, Card, Empty, Input } from '../../../components/ui'
 import { useTeacherClassImportPreview, useTeacherClasses, useTeacherImportableClasses } from '../../../lib/useTeacher'
-import type { TeacherClass } from '../../../lib/teacher'
+import type { TeacherImportableClass } from '../../../lib/teacher'
 import { LoadingState, StatusPill } from '../components/TeacherUi'
 
 export type AddClassStep = 'connect' | 'course' | 'review'
@@ -119,7 +119,7 @@ function CourseStep({ selectedCourseId, onBack, onContinue, onSelectCourse, onRe
             {selected ? <>
               <h2 className="font-serif text-[20px] font-semibold leading-6">{selected.name} · {selected.section}</h2>
               <p className="text-[11px] text-ink-muted">{selected.teacherName} · Section {selected.section}</p>
-              <div className="space-y-2 text-[11px]"><p>{plural(selected.teacherCount ?? (selected.teacherName ? 1 : 0), 'teacher')} · {plural(selected.studentCount, 'student')}</p><p>{plural(selected.assignmentCount, 'assignment')} · {plural(selected.topicCount, 'topic')}</p><p>{plural(selected.linkedFileCount, 'material')}</p></div>
+              <div className="space-y-2 text-[11px]"><p>{plural(selected.teacherCount ?? (selected.teacherName ? 1 : 0), 'teacher')} · {plural(selected.studentCount, 'student')}</p>{selected.assignmentCount != null && selected.topicCount != null && <p>{plural(selected.assignmentCount, 'assignment')} · {plural(selected.topicCount, 'topic')}</p>}{selected.linkedFileCount != null && <p>{plural(selected.linkedFileCount, 'file-linked item')}</p>}</div>
             </> : <p className="text-[11px] text-ink-muted">Choose a class to see its import details.</p>}
           </Card>
         </div>
@@ -129,10 +129,10 @@ function CourseStep({ selectedCourseId, onBack, onContinue, onSelectCourse, onRe
   )
 }
 
-function CourseChoice({ course, selected, onSelect }: { course: TeacherClass; selected: boolean; onSelect: (id: string) => void }) {
+function CourseChoice({ course, selected, onSelect }: { course: TeacherImportableClass; selected: boolean; onSelect: (id: string) => void }) {
   return <button type="button" onClick={() => onSelect(course.id)} aria-pressed={selected} className={`flex min-h-[66px] w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${selected ? 'border-2 border-accent bg-accent-soft' : 'border-border-subtle bg-surface hover:border-accent'}`}>
     <span className={`size-4 shrink-0 rounded-full border ${selected ? 'border-accent bg-accent ring-4 ring-accent/10' : 'border-border-subtle'}`} />
-    <span className="min-w-0"><span className="block truncate text-[12px] font-semibold">{course.name} · {course.section}</span><span className="mt-1 block truncate text-[10px] text-ink-muted">Section {course.section} · {course.teacherName || 'Teacher'} · {course.studentCount} students · {course.assignmentCount} assignments</span></span>
+    <span className="min-w-0"><span className="block truncate text-[12px] font-semibold">{course.name} · {course.section}</span><span className="mt-1 block truncate text-[10px] text-ink-muted">Section {course.section} · {course.teacherName || 'Teacher'} · {course.studentCount} students{course.assignmentCount != null && ` · ${course.assignmentCount} assignments`}</span></span>
   </button>
 }
 

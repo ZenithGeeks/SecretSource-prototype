@@ -1,56 +1,53 @@
 /**
- * 09 Home (Researcher) — greeting, quick actions, conflicts, reading queue, library
- * summary, all from the user's own analyses (useResearcherHome). `onOpen` navigates to
- * another researcher screen; a conflict or a queued paper both open the analysis that cites it.
+ * 09 Home (Researcher) — date, greeting and one-line summary, the Analyze card, conflicts,
+ * reading queue and library summary, all from the user's own analyses (useResearcherHome).
+ * `onOpen` navigates to another researcher screen; a conflict or a queued paper both open the
+ * analysis that cites it, and a queued paper's Analyze puts its identifier in the Analyze input.
  */
 
-import { FileSearch, FileText, Library, Search, Waypoints } from 'lucide-react'
-import type { ComponentType } from 'react'
+import { useRef, useState } from 'react'
 
-import { Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { Card, Empty, FadeIn, LoadingScreen, VerdictBadge } from '../../../components/ui'
+import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
 import { useAuth } from '../../../lib/useAuth'
 import { useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
+import { HomeAnalyzeCard } from '../components/HomeAnalyzeCard'
 
-type Icon = ComponentType<{ className?: string }>
-
-const QUICK_ACTIONS: { title: string; hint: string; icon: Icon; to: ResearcherScreen }[] = [
-  { title: 'Analyze a paper', hint: 'DOI, arXiv ID, URL, or a PDF you upload', icon: FileSearch, to: 'history' },
-  { title: 'Map my field', hint: 'Which works back or contradict your claims', icon: Waypoints, to: 'graph' },
-  { title: 'What does the field say about…', hint: 'Ask a question, see the verdicts found so far', icon: Search, to: 'field-consensus' },
-  { title: 'Organise papers', hint: 'Group the papers you analysed into projects', icon: Library, to: 'library' },
-]
-
-/** Display order and colour for the library tally; the bar and legend both follow it. */
-const STANDINGS: { key: ClaimStanding; color: string }[] = [
-  { key: 'backed', color: 'bg-supports' },
-  { key: 'silent', color: 'bg-insufficient' },
-  { key: 'contradicted', color: 'bg-refutes' },
-  { key: 'unchecked', color: 'bg-ink-muted' },
+/** Display order for the library tally; the bar and legend both follow it. */
+const STANDINGS: { key: ClaimStanding; kind: Standing; color: string }[] = [
+  { key: 'backed', kind: 'supports', color: 'bg-supports' },
+  { key: 'silent', kind: 'insufficient', color: 'bg-insufficient' },
+  { key: 'contradicted', kind: 'refutes', color: 'bg-refutes' },
+  { key: 'unchecked', kind: 'unchecked', color: 'bg-neutral' },
 ]
 
 function TallyBar({ tally }: { tally: ClaimTally }) {
   return (
     <>
-      <div className="mt-2.5 flex h-2 w-full gap-0.5 overflow-hidden rounded">
+      <div className="flex h-2 w-full gap-[3px]" aria-hidden="true">
         {STANDINGS.map(({ key, color }) => (
-          <span key={key} className={cn('h-full rounded-sm', color)} style={{ flexGrow: tally[key] }} />
+          <span key={key} className={cn('h-full min-w-0 rounded', color)} style={{ flexGrow: tally[key] }} />
         ))}
       </div>
-      <div className="mt-2.5 flex flex-wrap gap-4">
-        {STANDINGS.map(({ key, color }) => (
-          <span key={key} className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <span className={cn('size-2 rounded-full', color)} />
-            {tally[key]} {key}
-          </span>
+      <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
+        {STANDINGS.map(({ key, kind, color }) => (
+          <li key={key} className="flex items-center gap-1.5 text-[13px] text-ink-muted">
+            <span aria-hidden="true" className={cn('size-2 rounded-full', color)} />
+            <span className="font-mono text-ink">{tally[key]}</span>
+            {verdictCountWord(kind, tally[key])}
+          </li>
         ))}
-      </div>
+      </ul>
     </>
   )
 }
+
+const CARD = 'rounded-2xl border border-border-subtle bg-surface shadow-sm'
+const CARD_TITLE = 'text-[15px] font-semibold tracking-tight text-ink'
 
 export function Home({
   onOpen,
@@ -62,6 +59,8 @@ export function Home({
   const { data: home, isError } = useResearcherHome()
   const { displayName } = useSettings()
   const { session } = useAuth()
+  const [reference, setReference] = useState('')
+  const analyzeInput = useRef<HTMLInputElement>(null)
   if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
   if (!home) return <LoadingScreen label="Loading your library…" />
 
@@ -69,62 +68,55 @@ export function Home({
   // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
   const metaName = session?.user?.user_metadata?.full_name as string | undefined
   const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
-    <FadeIn className="flex flex-col gap-5">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          {greeting(firstName)}
-        </h1>
-        <p className="text-sm text-ink-muted">{home.alert}</p>
+    <FadeIn className="mx-auto flex w-full max-w-[960px] flex-col gap-7 pt-4">
+      <header className="flex flex-col gap-2">
+        <p className="type-label text-accent">{today}</p>
+        <h1 className="type-display font-serif text-ink">{greeting(firstName)}</h1>
+        <p className="text-[15px] leading-6 text-ink-muted">{home.alert}</p>
       </header>
 
-      {/* Quick actions */}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        {QUICK_ACTIONS.map(({ title, hint, icon: Icon, to }) => (
-          <button
-            key={title}
-            type="button"
-            onClick={() => onOpen(to)}
-            className="flex flex-1 flex-col items-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent"
-          >
-            <Icon className="size-4 text-accent" />
-            <p className="text-sm font-medium text-ink">{title}</p>
-            <p className="text-xs text-ink-muted">{hint}</p>
-          </button>
-        ))}
-      </div>
+      <HomeAnalyzeCard
+        reference={reference}
+        onReferenceChange={setReference}
+        inputRef={analyzeInput}
+        onStarted={onOpenAnalysis}
+      />
 
-      {/* Conflicts + Reading queue */}
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <Card className="flex-1">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Conflicts in your papers</h2>
-            <button type="button" onClick={() => onOpen('library')} className="text-xs text-accent hover:underline">
-              see all
-            </button>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+        {/* Conflicts */}
+        <Card className={cn(CARD, 'flex-1 p-0 pt-[18px] pb-1.5')}>
+          <div className="flex items-center px-5 pb-2.5">
+            <h2 className={cn(CARD_TITLE, 'flex-1')}>Conflicts in your library</h2>
+            {home.conflicts.length > 0 && (
+              <button type="button" onClick={() => onOpen('library')} className="text-[13px] font-medium text-accent hover:underline">
+                See all {home.conflicts.length}
+              </button>
+            )}
           </div>
           {home.conflicts.length === 0 && (
-            <p className="mt-2 text-sm text-ink-muted">No claim in your papers is contradicted by its sources.</p>
+            <p className="border-t border-border-subtle px-5 py-3 text-sm text-ink-muted">
+              No claim in your papers is contradicted by its sources.
+            </p>
           )}
           <ul>
             {home.conflicts.map((c) => (
-              <li key={`${c.analysis}-${c.claimIndex}`} className="border-t border-border-subtle first:mt-2">
+              <li key={`${c.analysis}-${c.claimIndex}`} className="border-t border-border-subtle">
                 <button
                   type="button"
                   onClick={() => onOpenAnalysis(c.analysis)}
-                  className="flex w-full flex-col gap-1 py-2 text-left"
+                  className="flex w-full flex-col items-start gap-1.5 px-5 py-3 text-left hover:bg-accent-soft"
                 >
-                  <p className="text-sm text-ink">{c.claim}</p>
-                  <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                    <span className="flex gap-1">
-                      <span className="font-medium text-supports">for</span>
-                      <span className="text-ink-muted">{c.for.join(', ') || '—'}</span>
-                    </span>
-                    <span className="flex gap-1">
-                      <span className="font-medium text-refutes">against</span>
-                      <span className="text-ink-muted">{c.against.join(', ') || '—'}</span>
-                    </span>
+                  <p className="text-[15px] leading-6 text-ink">{c.claim}</p>
+                  <span className="flex flex-wrap items-center gap-2">
+                    {c.for.length > 0 && <VerdictBadge verdict="supports" text={c.for.join(', ')} />}
+                    {c.against.length > 0 ? (
+                      <VerdictBadge verdict="refutes" text={c.against.join(', ')} />
+                    ) : (
+                      <span className="text-xs text-ink-muted">No counter-evidence yet</span>
+                    )}
                   </span>
                 </button>
               </li>
@@ -132,30 +124,39 @@ export function Home({
           </ul>
         </Card>
 
-        <Card className="flex-1">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Reading queue</h2>
-            <span className="text-xs text-accent">{home.queue.length} papers</span>
+        {/* Reading queue */}
+        <Card className={cn(CARD, 'p-0 pt-[18px] pb-1.5 lg:w-[340px] lg:shrink-0')}>
+          <div className="flex items-center px-5 pb-2.5">
+            <h2 className={cn(CARD_TITLE, 'flex-1')}>Reading queue</h2>
+            <span className="text-[13px] font-medium text-ink-muted">{home.queue.length}</span>
           </div>
           {home.queue.length === 0 && (
-            <p className="mt-2 text-sm text-ink-muted">
+            <p className="border-t border-border-subtle px-5 py-3 text-sm text-ink-muted">
               Works that your papers cite more than once show up here.
             </p>
           )}
-          <ul className="mt-2.5 flex flex-col gap-2.5">
+          <ul>
             {home.queue.map((entry) => (
-              <li key={entry.paper}>
+              <li key={entry.paper} className="flex items-center gap-2.5 border-t border-border-subtle py-2.5 pl-5 pr-3.5">
                 <button
                   type="button"
                   onClick={() => onOpenAnalysis(entry.analysis)}
                   title="Open the analysis that cites it"
-                  className="flex w-full items-start gap-2 rounded-lg p-1.5 text-left hover:bg-accent-soft"
+                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
                 >
-                  <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-ink">{entry.paper}</p>
-                    <p className="text-xs text-ink-muted">{entry.note}</p>
-                  </div>
+                  <span className="max-w-full truncate text-[13px] font-medium text-ink">{entry.paper}</span>
+                  <span className="max-w-full text-xs text-ink-muted">{entry.note}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Put ${entry.paper} in the analyze box`}
+                  onClick={() => {
+                    setReference(entry.identifier)
+                    analyzeInput.current?.focus()
+                  }}
+                  className="shrink-0 rounded-[9px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] font-medium text-ink hover:bg-accent-soft"
+                >
+                  Analyze
                 </button>
               </li>
             ))}
@@ -164,19 +165,18 @@ export function Home({
       </div>
 
       {/* Library summary */}
-      <button
-        type="button"
-        onClick={() => onOpen('library')}
-        className="w-full rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Library</h2>
-          <span className="text-xs text-accent">
+      <section aria-label="Your library" className={cn(CARD, 'flex flex-col gap-3.5 p-5')}>
+        <div className="flex items-center gap-2">
+          <h2 className={cn(CARD_TITLE, 'flex-1')}>Your library</h2>
+          <span className="text-[13px] text-ink-muted">
             {home.library.papers} papers · {home.library.claims} claims · {home.library.verified} verified
           </span>
+          <button type="button" onClick={() => onOpen('library')} className="text-[13px] font-medium text-accent hover:underline">
+            Open library
+          </button>
         </div>
         <TallyBar tally={home.library.tally} />
-      </button>
+      </section>
     </FadeIn>
   )
 }

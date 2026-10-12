@@ -6,9 +6,14 @@
  * and the counts double as filters (#37).
  */
 
-import type { Citation, Claim, Unchecked, Verdict } from './api'
+import type { Analysis, Citation, Claim, Unchecked, Verdict } from './api'
 import { reasonText } from './api'
 import { csvText } from './csv'
+
+/** The name a list shows for an analysis: the uploaded file's name, else the paper id. */
+export function analysisLabel(analysis: Analysis): string {
+  return analysis.file?.split(/[\\/]/).pop() ?? analysis.paper
+}
 
 /** One claim's standing, worst first: that order is the reading order. */
 export const STANDINGS = ['refutes', 'insufficient', 'unchecked', 'supports', 'uncited'] as const
@@ -21,7 +26,28 @@ export const STANDING_LABELS: Record<Standing, string> = {
   insufficient: 'Source is silent',
   unchecked: 'Not checked',
   supports: 'Source backs it',
-  uncited: 'No source cited',
+  uncited: 'No citation',
+}
+
+/** The word that follows a count: "1 contradicts" / "4 contradict", "4 silent", "1 backs it" /
+ * "3 back it", "3 not checked". [singular, plural]. */
+const COUNT_WORDS: Record<Standing, readonly [string, string]> = {
+  refutes: ['contradicts', 'contradict'],
+  insufficient: ['silent', 'silent'],
+  supports: ['backs it', 'back it'],
+  unchecked: ['not checked', 'not checked'],
+  uncited: ['no citation', 'no citation'],
+}
+
+/** The label under a verdict count, agreeing with the number: `verdictCountWord('refutes', 1)`
+ * is "contradicts", with 4 it is "contradict". */
+export function verdictCountWord(kind: Standing, n: number): string {
+  return COUNT_WORDS[kind][n === 1 ? 0 : 1]
+}
+
+/** Number and word together: "1 contradicts", "3 back it". */
+export function verdictCountLabel(kind: Standing, n: number): string {
+  return `${n} ${verdictCountWord(kind, n)}`
 }
 
 /** What each badge does and does not mean. Shown as a legend and on hover. */

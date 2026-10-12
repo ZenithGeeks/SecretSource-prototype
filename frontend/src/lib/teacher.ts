@@ -43,6 +43,14 @@ export type TeacherClass = {
   lastSyncedAt: string
 }
 
+/** Course from the importable list: the four content counts are null (not fetched). */
+export type TeacherImportableClass = Omit<TeacherClass, 'assignmentCount' | 'topicCount' | 'announcementCount' | 'linkedFileCount'> & {
+  assignmentCount: number | null
+  topicCount: number | null
+  announcementCount: number | null
+  linkedFileCount: number | null
+}
+
 export type TeacherSubmission = {
   id: string
   assignmentId: string
@@ -95,7 +103,7 @@ export type TeacherWorkspace = {
 }
 
 export type TeacherClassImportPreview = {
-  course: TeacherClass
+  course: TeacherImportableClass
   resources: {
     key: 'course' | 'classwork' | 'people' | 'drive'
     label: string
@@ -377,7 +385,7 @@ const mockTeacherApi = {
   getHome: async (): Promise<TeacherHome> => store.getHome(),
   getHistory: async (): Promise<TeacherHistoryEntry[]> => store.getHistory(),
   getClasses: async (): Promise<TeacherClass[]> => store.getClasses(),
-  getImportableClasses: async (): Promise<TeacherClass[]> => store.getImportableClasses(),
+  getImportableClasses: async (): Promise<TeacherImportableClass[]> => store.getImportableClasses(),
   getClassImportPreview: async (courseId: string): Promise<TeacherClassImportPreview | null> =>
     store.getClassImportPreview(courseId),
   importClass: async (courseId: string): Promise<TeacherClass> => store.importClass(courseId),
@@ -435,7 +443,7 @@ export const createRemoteTeacherApi = () => ({
   getHome: () => request<TeacherHome>('/teacher/home'),
   getHistory: () => request<TeacherHistoryEntry[]>('/teacher/history'),
   getClasses: () => request<TeacherClass[]>('/teacher/classes'),
-  getImportableClasses: () => request<TeacherClass[]>('/teacher/classes/importable'),
+  getImportableClasses: () => request<TeacherImportableClass[]>('/teacher/classes/importable'),
   getClassImportPreview: (courseId: string) => request<TeacherClassImportPreview>(`/teacher/classes/importable/${encodeURIComponent(courseId)}/preview`),
   importClass: async (courseId: string) => (await request<{ course: TeacherClass }>(`/teacher/classes/${encodeURIComponent(courseId)}/import`, { method: 'POST' })).course,
   getWorkspace: (courseId: string) => request<TeacherWorkspace>(`/teacher/classes/${encodeURIComponent(courseId)}/workspace`),

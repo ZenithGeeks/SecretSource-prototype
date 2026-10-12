@@ -28,6 +28,8 @@ vi.mock('../src/lib/useTeacher', () => ({
       analysis: { id: null, status: 'missing', error: null },
     },
   }),
+  useTeacherAssignmentDetail: () => ({ data: undefined, isPending: false, isError: false }),
+  useTeacherWorkspace: () => ({ data: undefined, isPending: false, isError: false }),
   useTeacherGoogleConnection: () => ({ data: { connected: false, email: null, scopes: [] }, isPending: false, isError: false }),
   useAnalyzeTeacherSubmission: () => ({ mutate: mocks.analyze, isPending: mocks.analyzePending, isError: Boolean(mocks.analyzeError), error: mocks.analyzeError }),
   useUpdateProfessorReview: () => ({ mutate: mocks.updateReview, isPending: false }),

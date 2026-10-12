@@ -60,6 +60,8 @@ from app.config import (
     PARALLEL_SOURCES,
     PARALLEL_SOURCES_TOTAL,
 )
+from app.labeling import pool as labeling_pool
+from app.labeling.router import router as labeling_router
 from app.metrics import (
     ANALYSES_FINISHED,
     ANALYSES_STARTED,
@@ -246,6 +248,7 @@ app.add_middleware(
 )
 app.include_router(teacher_router)
 app.include_router(author_router)
+app.include_router(labeling_router)
 
 
 class AnalysisRequest(BaseModel):
@@ -670,9 +673,10 @@ FINISHED = ("done", "error")
 
 def papers_of(user: str | None) -> frozenset[str]:
     """The file names of the papers this user may open: the analysed paper of each analysis they
-    may read (visible_to), each cited paper a check read for one of them, and their Author
-    PDFs. The Author PDFs live outside `analyses`, so they are read each call, not cached."""
-    return _per_owner("papers", user, _paper_names) | author_pdfs(user)
+    may read (visible_to), each cited paper a check read for one of them, their Author
+    PDFs, and the papers shared with the labeling team. The Author PDFs live outside `analyses`, so they are read each call, not cached."""
+    shared = labeling_pool.pdf_names(analyses.get, _paper_names)
+    return _per_owner("papers", user, _paper_names) | author_pdfs(user) | shared
 
 
 def _paper_names(rows: list[dict]) -> frozenset[str]:

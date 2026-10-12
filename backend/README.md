@@ -297,7 +297,10 @@ skipped when no Redis answers at `REDIS_URL`.
 All routes return JSON unless noted. CORS allows every origin. The web app reaches these
 routes under `/api`, for example `/api/analyses`.
 
-Errors use FastAPI's shape: `{"detail": "<message>"}` with a `400` or `404` status.
+Errors use FastAPI's shape: `{"detail": "<message>"}` with a `400` or `404` status. One
+exception: a partial failure in Teacher's `grade-and-return` returns `502` with `detail` as an
+object, `{"message": "...", "partial": true}`, so a caller can tell that Classroom and the
+local record may disagree (see that route below).
 
 ### Analyses
 
@@ -570,6 +573,12 @@ evidence: {passage, pdf, page}, explanation, reason, message, resolution}`. An o
 resolution is carried over to the next check when the same key still cites the same sentence.
 `sinceLastCheck` is `{addedCitations, fixedIssues, newIssues}`.
 
+A draft check runs as an asyncio task inside the gateway, not on an RQ worker like an
+analysis. It needs the gateway to stay up until it finishes. While the client's event stream
+is open, Cloud Run keeps the instance. If the client disconnects, the gateway can scale to
+zero, and a deploy or crash also ends the task. On restart the check is marked "interrupted
+by a restart" and is not retried. Moving draft checks to RQ is tracked in #308.
+
 #### Projects and the Library
 
 | Route | Does |
@@ -709,8 +718,9 @@ The caller's already-imported classes. Each entry: `id`, `name`, `section`, `sub
 The teacher's Google Classroom courses that are not yet imported. Same per-course shape as
 `GET /classes` above, but built straight from the raw Classroom course listing without a
 roster or coursework fetch, so only `id`, `name`, `section`, `subject`, and `status` are
-meaningful: `teacherName` is always `""`, and `studentCount`, `assignmentCount`, `topicCount`,
-`announcementCount`, `linkedFileCount` are always `0`.
+meaningful: `teacherName` is always `""`, `studentCount` is `0`, and `assignmentCount`,
+`topicCount`, `announcementCount`, `linkedFileCount` are `null` (not fetched). Use the preview
+below for real counts.
 
 #### `GET /teacher/classes/importable/{course_id}/preview`
 

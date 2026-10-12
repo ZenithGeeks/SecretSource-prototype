@@ -53,7 +53,7 @@ describe('Author Check a draft', () => {
 
     const rows = within(await screen.findByRole('list', { name: 'Citations' })).getAllByRole('button')
     expect(rows).toHaveLength(3)
-    expect(rows[0]).toHaveTextContent('source contradicts')
+    expect(rows[0]).toHaveTextContent('Source contradicts')
     expect(rows[0]).toHaveTextContent('\\cite{khattab2020} · khattab2020.pdf p.7')
     expect(screen.getByText('2 supported')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /1 of 3 issues/ })).toBeInTheDocument()

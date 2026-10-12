@@ -7,7 +7,7 @@
  * Figma: "02 Running" (the panel) and "03 Results" (the finished line).
  */
 
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { Claim, Stage } from '../lib/api'
@@ -15,7 +15,6 @@ import type { Progress, StepState } from '../lib/progress'
 import { duration, summarise } from '../lib/progress'
 import { cn } from '../lib/utils'
 import { PipelineStages } from './PipelineStages'
-import { Card } from './ui'
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
@@ -30,56 +29,60 @@ function useNow(live: boolean) {
   return now
 }
 
-const DOT: Record<StepState, string> = {
-  done: 'bg-supports',
-  current: 'bg-accent-soft ring-[3px] ring-accent ring-inset',
-  todo: 'ring-2 ring-border-subtle ring-inset',
-  skipped: 'ring-2 ring-border-subtle ring-inset',
-  failed: 'bg-refutes',
+type Tile = { key: string; label: string; detail: string; state: StepState }
+
+/** The run's five steps, folded into the four the reader sees: the paper is read, then its claims
+ * are found, planning and checking are one "match citations", figures and audit one "weigh". */
+function tilesOf(progress: Progress, stages: Stage[]): Tile[] {
+  const step = (key: string) => progress.steps.find((item) => item.key === key)
+  const fold = (...keys: string[]): StepState => {
+    const states = keys.map((key) => step(key)?.state ?? 'todo')
+    if (states.includes('failed')) return 'failed'
+    if (states.includes('current')) return 'current'
+    if (states.every((state) => state === 'done' || state === 'skipped')) return 'done'
+    return states.includes('done') ? 'current' : 'todo'
+  }
+  const read = step('read')
+  const reading: StepState = stages.some((s) => s.stage === 'extracting' || s.stage === 'extracted')
+    ? 'done'
+    : read?.state ?? 'todo'
+  const claims: StepState = read?.state === 'done' ? 'done' : reading === 'done' ? (read?.state === 'failed' ? 'failed' : 'current') : 'todo'
+  const matching = fold('plan', 'check')
+  const weighing = fold('figures', 'audit')
+  const found = progress.checksTotal !== null
+    ? `${progress.checksDone} of ${progress.checksTotal} found`
+    : progress.checksDone ? `${count(progress.checksDone, 'check')} done` : ''
+  const waiting = (state: StepState) => (state === 'todo' ? 'Waiting' : '')
+  return [
+    { key: 'read', label: 'Read the paper', detail: waiting(reading), state: reading },
+    { key: 'claims', label: 'Find the claims', detail: read?.detail || waiting(claims), state: claims },
+    { key: 'match', label: 'Match citations', detail: found || waiting(matching), state: matching },
+    { key: 'weigh', label: 'Weigh the evidence', detail: waiting(weighing), state: weighing },
+  ]
 }
 
-function Steps({ progress }: { progress: Progress }) {
-  return (
-    <ol className="grid grid-cols-5 gap-2">
-      {progress.steps.map((step, index) => (
-        <li key={step.key} className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className={cn('size-3 shrink-0 rounded-full', DOT[step.state])} />
-            {index < progress.steps.length - 1 && (
-              <span className={cn('h-0.5 flex-1 rounded', step.state === 'done' ? 'bg-supports' : 'bg-border-subtle')} />
-            )}
-          </div>
-          <p
-            className={cn(
-              'mt-1.5 truncate text-xs',
-              step.state === 'current' ? 'font-semibold text-ink' : step.state === 'done' ? 'font-medium text-ink' : 'text-ink-muted',
-            )}
-          >
-            {step.label}
-          </p>
-          {step.detail && <p className="hidden truncate text-[11px] text-ink-muted sm:block">{step.detail}</p>}
-        </li>
-      ))}
-    </ol>
-  )
-}
+const HEADLINE = ['Reading the paper', 'Finding the claims', 'Matching citations to the cited papers', 'Weighing the evidence']
 
-function Counts({ progress }: { progress: Progress }) {
-  const chips = [
-    { n: progress.verdicts.supports, word: 'backed', className: 'bg-supports-soft text-supports' },
-    { n: progress.verdicts.refutes, word: 'contradicted', className: 'bg-refutes-soft text-refutes' },
-    { n: progress.verdicts.insufficient, word: 'not enough evidence', className: 'bg-insufficient-soft text-insufficient' },
-    { n: progress.failed, word: "couldn't check", className: 'bg-canvas text-ink-muted' },
-  ].filter((chip) => chip.n > 0)
-  if (!chips.length) return null
+function StageTile({ tile }: { tile: Tile }) {
+  const current = tile.state === 'current'
   return (
-    <div className="flex flex-wrap gap-2">
-      {chips.map((chip) => (
-        <span key={chip.word} className={cn('rounded-full px-2.5 py-1 text-xs font-medium', chip.className)}>
-          <span className="font-semibold tabular-nums">{chip.n}</span> {chip.word}
-        </span>
-      ))}
-    </div>
+    <li className={cn('flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-2.5', current ? 'bg-accent-soft' : 'bg-neutral-soft')}>
+      {tile.state === 'done' ? (
+        <CheckCircle2 className="size-4 shrink-0 text-supports" aria-hidden="true" />
+      ) : current ? (
+        <Loader2 className="size-4 shrink-0 animate-spin text-accent" aria-hidden="true" />
+      ) : tile.state === 'failed' ? (
+        <AlertCircle className="size-4 shrink-0 text-refutes" aria-hidden="true" />
+      ) : (
+        <Circle className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+      )}
+      <div className="min-w-0">
+        <p className={cn('truncate text-[13px] leading-[18px] font-medium', current ? 'text-accent' : tile.state === 'todo' ? 'text-ink-muted' : 'text-ink')}>
+          {tile.label}
+        </p>
+        <p className="truncate text-xs leading-4 text-ink-muted">{tile.detail}</p>
+      </div>
+    </li>
   )
 }
 
@@ -88,7 +91,7 @@ function Failures({ progress }: { progress: Progress }) {
   if (!progress.failures.length) return null
   const sources = progress.failures.reduce((sum, group) => sum + group.sources.length, 0)
   return (
-    <div className="rounded-lg bg-canvas px-3.5 py-3">
+    <div className="rounded-xl bg-neutral-soft px-3.5 py-3">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -125,7 +128,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
   const elapsed = progress.seconds !== null ? duration(progress.seconds) : ''
   const checked = progress.checksDone > 0 || progress.checksTotal !== null
 
-  // A finished run is one line; its details open on request.
+  // A finished run is one quiet line; its details open on request.
   if (!running && !details) {
     const parts = [
       count(progress.claims, 'claim'),
@@ -137,14 +140,14 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
       elapsed,
     ].filter(Boolean)
     return (
-      <Card className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
-        <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[13px] text-ink-muted">
+        <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           {progress.error ? (
             <AlertCircle className="size-4 shrink-0 text-refutes" />
           ) : (
             <CheckCircle2 className="size-4 shrink-0 text-supports" />
           )}
-          <span className={cn('font-semibold', progress.error ? 'text-refutes' : 'text-ink')}>
+          <span className={cn('font-medium', progress.error ? 'text-refutes' : 'text-ink')}>
             {progress.error ? 'Stopped' : 'Finished'}
           </span>
           {parts.map((part) => (
@@ -162,54 +165,60 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
           Details
           <ChevronRight className="size-3.5" />
         </button>
-      </Card>
+      </div>
     )
   }
 
+  const tiles = tilesOf(progress, stages)
+  const current = tiles.findIndex((tile) => tile.state === 'current' || tile.state === 'failed')
+  const done = tiles.filter((tile) => tile.state === 'done').length
+  const matchShare = progress.checksTotal ? Math.min(1, progress.checksDone / progress.checksTotal) : 0
+  const percent = Math.round(
+    ((done + (tiles[2].state === 'current' ? matchShare : 0)) / tiles.length) * 100,
+  )
+
   return (
-    <Card className="space-y-4">
-      <header className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-sm font-medium text-ink" aria-live="polite">
-          {running && <Loader2 className="size-4 animate-spin text-accent" />}
-          {running ? 'Analysing' : progress.error ? 'Stopped' : 'Finished'}
+    <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]">
+      <header className="flex items-center gap-2">
+        <p className="flex-1 text-[15px] leading-5 font-semibold" aria-live="polite">
+          {running ? HEADLINE[Math.max(0, current)] : progress.error ? 'Stopped' : 'Finished'}
         </p>
-        <div className="flex items-center gap-3 text-xs text-ink-muted">
-          {elapsed && <span>{running ? `${elapsed} so far` : `took ${elapsed}`}</span>}
-          {!running && (
-            <button type="button" onClick={() => setDetails(false)} className="font-medium text-accent hover:underline">
-              Hide details
-            </button>
-          )}
-        </div>
+        {running ? (
+          <p className="text-[13px] text-ink-muted tabular-nums">{percent}%</p>
+        ) : (
+          <button type="button" onClick={() => setDetails(false)} className="text-xs font-medium text-accent hover:underline">
+            Hide details
+          </button>
+        )}
       </header>
 
-      <Steps progress={progress} />
+      <div
+        role="progressbar"
+        aria-label="Analysis progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={running ? percent : 100}
+        className="h-1.5 w-full overflow-hidden rounded bg-neutral-soft"
+      >
+        <div className="h-full rounded-[3px] bg-accent transition-[width] duration-500" style={{ width: `${running ? percent : 100}%` }} />
+      </div>
 
-      {checked && (
-        <div className="flex items-center gap-3">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border-subtle">
-            <div
-              className="h-full rounded-full bg-accent transition-[width] duration-500"
-              style={{
-                width: progress.checksTotal
-                  ? `${Math.min(100, (progress.checksDone / progress.checksTotal) * 100)}%`
-                  : '100%',
-              }}
-            />
-          </div>
-          <span className="shrink-0 text-xs font-medium text-ink tabular-nums">
-            {progress.checksTotal !== null
-              ? `${progress.checksDone} of ${count(progress.checksTotal, 'check')}`
-              : `${count(progress.checksDone, 'check')} done`}
-          </span>
-        </div>
+      <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {tiles.map((tile) => (
+          <StageTile key={tile.key} tile={tile} />
+        ))}
+      </ol>
+
+      {running && (
+        <p className="flex items-center gap-2 text-[13px] text-ink-muted">
+          <Clock className="size-4 shrink-0" aria-hidden="true" />
+          You can leave this page. We’ll keep going and put the results under Recent analyses.
+        </p>
       )}
-
-      <Counts progress={progress} />
 
       {progress.running.length > 0 && (
         <div className="space-y-1.5">
-          <p className="text-[11px] leading-4 font-semibold tracking-wide text-ink-muted uppercase">Now checking</p>
+          <p className="type-label text-ink-muted">Now checking</p>
           <ul className="space-y-1">
             {progress.running.map((check) => (
               <li key={`${check.claim}-${check.source}`} className="flex min-w-0 items-center gap-2 text-sm">
@@ -239,6 +248,6 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
           <PipelineStages stages={stages} running={running} fold={false} />
         </div>
       )}
-    </Card>
+    </section>
   )
 }

@@ -1,10 +1,10 @@
 /** Teacher role route owner. Every destination is URL-backed so refresh keeps the current page. */
 
-import { ChevronRight, GraduationCap, Home as HomeIcon, Plus, Search } from 'lucide-react'
+import { GraduationCap, Home as HomeIcon, Plus, Search } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
-import { AppShell } from '../../components/AppShell'
+import { AppShell, ToolbarActions } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { markTeacherGoogleReturn } from '../../lib/teacherGoogleReturn'
@@ -119,12 +119,20 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       onChangeRole={onChangeRole}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsActive={settingsOpen}
-      sidebar={<TeacherSidebar onOpen={navigate} />}
-      sidebarHeader={<TeacherClassSearch onOpenClasses={() => navigate({ screen: 'classes' })} />}
-      mainHeader={<TeacherToolbar route={route} onAddClass={() => navigate({ screen: 'add-class-connect' })} onOpenClasses={() => navigate({ screen: 'classes' })} />}
-      redesigned
+      sidebar={
+        <>
+          <TeacherClassSearch onOpenClasses={() => navigate({ screen: 'classes' })} />
+          <TeacherSidebar onOpen={navigate} />
+        </>
+      }
+      breadcrumb={breadcrumbFor(route)}
       wide
     >
+      {route.screen === 'classes' && (
+        <ToolbarActions>
+          <ButtonAddClass onClick={() => navigate({ screen: 'add-class-connect' })} />
+        </ToolbarActions>
+      )}
       {route.screen === 'home' ? (
         <Home onOpen={navigate} />
       ) : route.screen === 'classes' ? (
@@ -174,35 +182,25 @@ function TeacherClassSearch({ onOpenClasses }: { onOpenClasses: () => void }) {
   )
 }
 
-function TeacherToolbar({ route, onAddClass, onOpenClasses }: { route: TeacherRoute; onAddClass: () => void; onOpenClasses: () => void }) {
-  const labels: Record<TeacherScreen, string> = {
-    home: 'Home',
-    classes: 'Classes',
-    history: 'Recently viewed',
-    'add-class-connect': 'Add class',
-    'add-class-course': 'Add class',
-    'add-class-review': 'Add class',
-    'class-overview': 'Class overview',
-    classwork: 'Classwork',
-    people: 'People',
-    'assignment-detail': 'Assignment',
-    'essay-check': 'Essay review',
-    'reading-questions': 'Reading questions',
-  }
-  const isAddClass = route.screen.startsWith('add-class-')
-  return (
-    <>
-      <nav aria-label="Page location" className="flex min-w-0 items-center gap-2 text-[11px] text-ink-muted">
-        {route.screen !== 'home' && <>
-          <button type="button" onClick={onOpenClasses} className="hover:text-accent">Classes</button>
-          <ChevronRight className="size-3 shrink-0" />
-        </>}
-        <span className="truncate text-ink">{labels[route.screen]}</span>
-      </nav>
-      {route.screen === 'classes' && <ButtonAddClass onClick={onAddClass} />}
-      {isAddClass && <span className="text-[11px] text-ink-muted">Google Classroom import</span>}
-    </>
-  )
+const SCREEN_LABELS: Record<TeacherScreen, string> = {
+  home: 'Home',
+  classes: 'Classes',
+  history: 'Recently viewed',
+  'add-class-connect': 'Add class',
+  'add-class-course': 'Add class',
+  'add-class-review': 'Add class',
+  'class-overview': 'Class overview',
+  classwork: 'Classwork',
+  people: 'People',
+  'assignment-detail': 'Assignment',
+  'essay-check': 'Essay review',
+  'reading-questions': 'Reading questions',
+}
+
+/** The toolbar trail: Classes, then the screen (Home and Recently viewed stand alone). */
+function breadcrumbFor(route: TeacherRoute): string[] {
+  const label = SCREEN_LABELS[route.screen]
+  return route.screen === 'home' || route.screen === 'history' || route.screen === 'classes' ? [label] : ['Classes', label]
 }
 
 function ButtonAddClass({ onClick }: { onClick: () => void }) {
