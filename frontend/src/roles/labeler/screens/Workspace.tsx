@@ -13,6 +13,7 @@ import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Empty, LoadingScreen } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import {
+  type AddedPassage,
   buildSave,
   draftFromSaved,
   emptyDraft,
@@ -34,6 +35,7 @@ import { ClaimNav } from '../components/ClaimNav'
 import { LabelForm } from '../components/LabelForm'
 import { PassageList, type Focus } from '../components/PassageList'
 import { SaveBar } from '../components/SaveBar'
+import { SelectionBar, type Picked } from '../components/SelectionBar'
 
 const VIEWER_HEIGHT = 'h-[60vh]'
 
@@ -81,6 +83,7 @@ function Body({ session }: { session: Session }) {
   const [focus, setFocus] = useState<Focus | null>(() => (claims[0] ? firstFocus(claims[0], session) : null))
   const [overlay, setOverlay] = useState<'paper' | 'reference' | null>(null)
   const [savedRows, setSavedRows] = useState<number | null>(null)
+  const [picked, setPicked] = useState<Picked | null>(null) // text just selected in a PDF
   const wide = useWide()
   const save = useSaveLabels(session.analysis_id)
 
@@ -89,6 +92,7 @@ function Body({ session }: { session: Session }) {
     setCurrentId(id)
     setFocus(next ? firstFocus(next, session) : null)
     setSavedRows(null)
+    setPicked(null)
     save.reset()
   }
 
@@ -165,9 +169,44 @@ function Body({ session }: { session: Session }) {
   }
   const { done, total } = progress(claims, drafts)
   const refs = referencesOf(claim, draft)
-  const viewer = (target: Target, onClose?: () => void) => (
-    <PageViewer key={target.paper} target={target} onClose={onClose} className={VIEWER_HEIGHT} keyboard={false} />
+  const viewer = (target: Target, side: Picked['side'], onClose?: () => void) => (
+    <PageViewer
+      key={target.paper}
+      target={target}
+      onClose={onClose}
+      className={VIEWER_HEIGHT}
+      keyboard={false}
+      onSelectText={(s) => setPicked({ side, ...s })}
+    />
   )
+
+  const addClaim = (text: string) => {
+    const id = `${session.paper_id}#h-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
+    const added: WorkClaim = { claim_id: id, claim: text, sentence: '', section: '', source: null, candidates: [], origin: 'human_added' }
+    setExtra((all) => [...all, added])
+    setDrafts((all) => ({ ...all, [id]: { ...emptyDraft(), status: 'accepted' } }))
+    setCurrentId(id)
+    setFocus(firstFocus(added, session))
+    setPicked(null)
+  }
+
+  // Text selected in the reference becomes evidence for this claim, the same as one typed in.
+  const addEvidence = () => {
+    if (!picked || !refId || !focus) return
+    const p: AddedPassage = { reference_id: refId, page: picked.page, passage: picked.text.slice(0, 1500) }
+    if (!draft.added.some((a) => a.reference_id === p.reference_id && a.passage === p.passage)) {
+      patch({ added: [...draft.added, p] })
+      setFocus({ file: focus.file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
+    }
+    setPicked(null)
+  }
+  const cannotAdd = !draft.status
+    ? 'Decide on the claim first: keep or edit it.'
+    : draft.status === 'rejected'
+      ? 'This claim is rejected. Keep or edit it to add evidence.'
+      : !refId
+        ? 'No reference paper is open.'
+        : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -192,21 +231,14 @@ function Body({ session }: { session: Session }) {
           drafts={drafts}
           current={currentId}
           onSelect={select}
-          onAdd={(text) => {
-            const id = `${session.paper_id}#h-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
-            const added: WorkClaim = { claim_id: id, claim: text, sentence: '', section: '', source: null, candidates: [], origin: 'human_added' }
-            setExtra((all) => [...all, added])
-            setDrafts((all) => ({ ...all, [id]: { ...emptyDraft(), status: 'accepted' } }))
-            setCurrentId(id)
-            setFocus(firstFocus(added, session))
-          }}
+          onAdd={addClaim}
         />
 
         <div className="flex min-w-0 flex-col gap-4">
           {wide ? (
             <div className="grid grid-cols-2 gap-4">
-              {viewer(left_)}
-              {right ? viewer(right) : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
+              {viewer(left_, 'paper')}
+              {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
             </div>
           ) : (
             <div className="flex gap-2">
@@ -218,8 +250,22 @@ function Body({ session }: { session: Session }) {
               </button>
             </div>
           )}
-          {!wide && overlay === 'paper' && viewer(left_, () => setOverlay(null))}
-          {!wide && overlay === 'reference' && right && viewer(right, () => setOverlay(null))}
+          {!wide && overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
+          {!wide && overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
+
+          {picked && (
+            <SelectionBar
+              picked={picked}
+              blocked={cannotAdd}
+              onEvidence={addEvidence}
+              onClaimWording={() => {
+                patch({ status: 'edited', edited: picked.text })
+                setPicked(null)
+              }}
+              onNewClaim={() => addClaim(picked.text)}
+              onClear={() => setPicked(null)}
+            />
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="flex flex-col gap-5">
