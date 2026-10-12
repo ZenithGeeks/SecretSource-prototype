@@ -34,8 +34,8 @@ export function TeamTopics({ pool }: { pool: Pool }) {
         <div className="flex flex-col gap-3 border-t border-border-subtle px-4 py-3">
           <ul className="flex flex-col divide-y divide-border-subtle">
             {pool.people.map((person) => (
-              <li key={person.name} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5 py-2">
-                <span className="min-w-0 text-sm text-ink">
+              <li key={person.name} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-2">
+                <span className="min-w-0 text-sm text-ink sm:w-64 sm:shrink-0">
                   {person.name}
                   {person.name === pool.me && <span className="text-ink-muted"> (you)</span>}
                 </span>
