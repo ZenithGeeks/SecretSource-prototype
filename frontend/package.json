@@ -10,7 +10,8 @@
     "test": "npm run test:legacy && npm run test:vitest",
     "test:legacy": "jiti tests/index.test.ts",
     "test:vitest": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:bundle": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
