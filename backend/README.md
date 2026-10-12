@@ -570,6 +570,12 @@ evidence: {passage, pdf, page}, explanation, reason, message, resolution}`. An o
 resolution is carried over to the next check when the same key still cites the same sentence.
 `sinceLastCheck` is `{addedCitations, fixedIssues, newIssues}`.
 
+A draft check runs as an asyncio task inside the gateway, not on an RQ worker like an
+analysis. It needs the gateway to stay up until it finishes. While the client's event stream
+is open, Cloud Run keeps the instance. If the client disconnects, the gateway can scale to
+zero, and a deploy or crash also ends the task. On restart the check is marked "interrupted
+by a restart" and is not retried. Moving draft checks to RQ is tracked in #308.
+
 #### Projects and the Library
 
 | Route | Does |
