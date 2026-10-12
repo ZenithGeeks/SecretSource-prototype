@@ -1,18 +1,24 @@
 /** Papers to label: the ones the team brought in from Scopus, and whether the database is ready. */
 
 import { Download, Loader2, TriangleAlert } from 'lucide-react'
+import { useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool, type Pool } from '../../../lib/labeling'
 import { ScopusAdd } from '../components/ScopusAdd'
 import { TeamTopics } from '../components/TeamTopics'
 
-async function download() {
-  const blob = await labelingApi.exportCsv('labels')
-  const link = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(blob),
-    download: 'evidence_labels.csv',
-  })
+type Export = Parameters<typeof labelingApi.exportFile>[0]
+
+const DOWNLOADS: { tab: Export; file: string; label: string }[] = [
+  { tab: 'labels', file: 'evidence_labels.csv', label: 'Download labels CSV' },
+  { tab: 'dspy_claims', file: 'dspy_claims.jsonl', label: 'Download DSPy claims (JSONL)' },
+  { tab: 'dspy_verdicts', file: 'dspy_verdicts.jsonl', label: 'Download DSPy verdicts (JSONL)' },
+]
+
+async function download(tab: Export, file: string) {
+  const blob = await labelingApi.exportFile(tab)
+  const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: file })
   link.click()
   URL.revokeObjectURL(link.href)
 }
@@ -68,6 +74,8 @@ function PaperRow({ paper, myTopic, onOpen }: { paper: Pool['papers'][number]; m
 export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   const status = useLabelStatus()
   const pool = usePool()
+  const [downloading, setDownloading] = useState<Export | null>(null)
+  const [downloadError, setDownloadError] = useState<unknown>(null)
 
   if (status.isLoading) return <LoadingScreen />
   if (status.error) {
@@ -96,10 +104,32 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
             Signed in as {status.data?.annotator}. You judge every claim and passage; nothing is saved until you save it.
           </p>
         </div>
-        <Button variant="ghost" onClick={() => void download()} disabled={!status.data?.configured}>
-          <Download className="size-4" /> Download labels CSV
-        </Button>
+        <div className="flex flex-wrap items-center gap-1">
+          {DOWNLOADS.map(({ tab, file, label }) => (
+            <Button
+              key={tab}
+              variant="ghost"
+              disabled={!status.data?.configured || downloading !== null}
+              onClick={() => {
+                setDownloading(tab)
+                setDownloadError(null)
+                download(tab, file)
+                  .catch(setDownloadError)
+                  .finally(() => setDownloading(null))
+              }}
+            >
+              {downloading === tab ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              {label}
+            </Button>
+          ))}
+        </div>
       </header>
+
+      {downloadError !== null && (
+        <p role="alert" className="text-sm text-refutes">
+          {problem(downloadError).title}. {problem(downloadError).hint}
+        </p>
+      )}
 
       {!status.data?.configured && (
         <Setup title="Labels cannot be saved yet">

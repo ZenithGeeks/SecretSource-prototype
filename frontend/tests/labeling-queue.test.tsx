@@ -7,6 +7,8 @@ const gateway = vi.hoisted(() => ({
   posts: [] as { path: string; body: unknown }[],
   statusError: '',
   scopus: true,
+  downloadFails: false,
+  fetched: [] as string[],
   searches: [] as string[],
   pool: {
     topics: ['CV', 'NLP', 'SE', 'HPC'],
@@ -49,7 +51,11 @@ vi.mock('../src/lib/api', async (original) => ({
     }
     throw new Error(`unexpected ${path}`)
   }),
-  fetchFile: vi.fn(),
+  fetchFile: vi.fn(async (url: string) => {
+    if (gateway.downloadFails) throw new Error(`500: ${url}`)
+    gateway.fetched.push(url)
+    return new Blob(['x'])
+  }),
 }))
 
 import { Queue } from '../src/roles/labeler/screens/Queue'
@@ -72,6 +78,8 @@ describe('the labeler queue', () => {
     gateway.searches.length = 0
     gateway.statusError = ''
     gateway.scopus = true
+    gateway.downloadFails = false
+    gateway.fetched.length = 0
     onOpen.mockClear()
   })
 
@@ -120,6 +128,33 @@ describe('the labeler queue', () => {
     fireEvent.click(within(results).getByRole('button', { name: 'Add A late interaction retriever' }))
     await waitFor(() => expect(gateway.posts).toEqual([{ path: '/labeling/scopus/add', body: { doi: '10.1/a', topic: 'CV' } }]))
     expect(await within(results).findByRole('button', { name: 'Add A late interaction retriever' })).toHaveTextContent('Added')
+  })
+
+  it('downloads the labels CSV and the two DSPy example files', async () => {
+    const saved: string[] = []
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download)
+    })
+    renderQueue()
+    for (const name of ['Download labels CSV', 'Download DSPy claims (JSONL)', 'Download DSPy verdicts (JSONL)']) {
+      const button = await screen.findByRole('button', { name })
+      await waitFor(() => expect(button).toBeEnabled())
+      fireEvent.click(button)
+      await waitFor(() => expect(saved).toHaveLength(saved.length > 0 ? saved.length : 1))
+      await waitFor(() => expect(button).toBeEnabled())
+    }
+    expect(gateway.fetched.map((u) => u.split('tab=')[1])).toEqual(['labels', 'dspy_claims', 'dspy_verdicts'])
+    expect(saved).toEqual(['evidence_labels.csv', 'dspy_claims.jsonl', 'dspy_verdicts.jsonl'])
+  })
+
+  it('says so, in plain words, when a download fails', async () => {
+    gateway.downloadFails = true
+    renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Download DSPy claims (JSONL)' }))
+    expect(await screen.findByText(/Something went wrong\./)).toBeInTheDocument()
+    expect(screen.queryByText(/500:/)).not.toBeInTheDocument()
   })
 
   it('says Scopus search is not set up when the gateway has no key', async () => {

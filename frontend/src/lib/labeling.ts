@@ -167,7 +167,9 @@ export const labelingApi = {
       `/labeling/sessions/${encodeURIComponent(analysisId)}/save`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     ),
-  exportCsv: (tab: 'labels' | 'claims' | 'candidates') => fetchFile(`${API_BASE}/api/labeling/export?tab=${tab}`),
+  /** The labels as CSV, or as the two sets of DSPy examples (JSONL). */
+  exportFile: (tab: 'labels' | 'claims' | 'candidates' | 'dspy_claims' | 'dspy_verdicts') =>
+    fetchFile(`${API_BASE}/api/labeling/export?tab=${tab}`),
 }
 
 export function useLabelStatus() {
