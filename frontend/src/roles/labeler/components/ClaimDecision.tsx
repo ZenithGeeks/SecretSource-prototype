@@ -14,10 +14,14 @@ const CHOICES: { status: ClaimStatus; label: string; hint: string }[] = [
 export function ClaimDecision({
   claim,
   draft,
+  position,
+  count,
   onChange,
 }: {
   claim: WorkClaim
   draft: Draft
+  position: number
+  count: number
   onChange: (patch: Partial<Draft>) => void
 }) {
   const name = useId()
@@ -25,7 +29,8 @@ export function ClaimDecision({
   return (
     <section aria-labelledby={`${name}-title`} className="flex flex-col gap-3">
       <h3 id={`${name}-title`} className="font-serif text-base font-semibold text-ink">
-        Claim
+        Claim {position} of {count}
+        {claim.origin === 'human_added' && <span className="text-sm font-normal text-accent"> · added</span>}
       </h3>
       <p className={cn('text-[15px] leading-6 text-ink', draft.status === 'rejected' && 'line-through opacity-70')}>
         {claim.claim}

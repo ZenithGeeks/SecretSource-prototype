@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Empty, LoadingScreen } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
   buildSave,
@@ -39,6 +40,16 @@ import { SaveBar } from '../components/SaveBar'
 import { SelectionBar, type Picked } from '../components/SelectionBar'
 
 const VIEWER_HEIGHT = 'h-[60vh]'
+
+const VIEW_KEY = 'labeler.paperView'
+type PaperView = 'both' | 'reference'
+const storedView = (): PaperView => {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === 'reference' ? 'reference' : 'both'
+  } catch {
+    return 'both'
+  }
+}
 
 function useWide() {
   const query = '(min-width: 1280px)'
@@ -85,6 +96,15 @@ function Body({ session }: { session: Session }) {
   const [overlay, setOverlay] = useState<'paper' | 'reference' | null>(null)
   const [savedRows, setSavedRows] = useState<number | null>(null)
   const [picked, setPicked] = useState<Picked | null>(null) // text just selected in a PDF
+  const [paperView, setPaperView] = useState<PaperView>(storedView)
+  const choosePaperView = (view: PaperView) => {
+    setPaperView(view)
+    try {
+      window.localStorage.setItem(VIEW_KEY, view)
+    } catch {
+      // the choice just is not remembered
+    }
+  }
   const wide = useWide()
   const save = useSaveLabels(session.analysis_id)
 
@@ -175,7 +195,7 @@ function Body({ session }: { session: Session }) {
       key={target.paper}
       target={target}
       onClose={onClose}
-      className={VIEWER_HEIGHT}
+      className={wide ? 'h-full min-h-0' : VIEWER_HEIGHT}
       keyboard={false}
       onSelectText={(s) => setPicked({ side, file: target.paper, ...s })}
     />
@@ -210,119 +230,151 @@ function Body({ session }: { session: Session }) {
         ? 'That paper is not one of this analysis\'s references.'
         : null
 
+  const position = claims.findIndex((c) => c.claim_id === currentId)
+  const deciding = Boolean(draft.status) && draft.status !== 'rejected'
+
+  // Everything done to one claim, in the order it is done. Wide screens keep it beside the
+  // papers, scrolling by itself, so the papers never move while you work.
+  const panel = (
+    <>
+      <ClaimDecision claim={claim} draft={draft} position={position + 1} count={claims.length} onChange={patch} />
+      {deciding && (
+        <PassageList
+          claim={claim}
+          draft={draft}
+          references={session.references}
+          focus={focus}
+          onFocus={setFocus}
+          onJudge={(id, status) => patch({ cands: { ...draft.cands, [id]: status } })}
+          onAdd={(p) => {
+            patch({ added: [...draft.added, p] })
+            const file = session.references.find((r) => r.reference_id === p.reference_id)?.file ?? ''
+            setFocus({ file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
+          }}
+          onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
+        />
+      )}
+      {deciding && refs.length === 0 && <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>}
+      {deciding &&
+        refs.map((id) => (
+          <LabelForm
+            key={id}
+            title={session.references.find((r) => r.reference_id === id)?.label ?? id}
+            active={id === refId}
+            label={draft.labels[id]}
+            others={session.others[`${claim.claim_id}|${id}`] ?? []}
+            onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
+          />
+        ))}
+      {deciding && refs.length > 0 && (
+        <p className="text-xs text-ink-muted">
+          Press 1–4 to set the level for the reference on the right.
+          {relevantPassages(claim, draft, refId ?? '').length === 0 && refId ? ' Mark one of its passages relevant first.' : ''}
+        </p>
+      )}
+    </>
+  )
+
+  const saveBar = (className?: string) => (
+    <SaveBar
+      left={left}
+      dirty={dirty}
+      saving={save.isPending}
+      error={save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null}
+      savedRows={savedRows}
+      hasNext={position < claims.length - 1}
+      onSave={write}
+      className={className}
+    />
+  )
+
+  const selection = picked && (
+    <SelectionBar
+      picked={picked}
+      blocked={cannotAdd}
+      onEvidence={addEvidence}
+      onClaimWording={() => {
+        patch({ status: 'edited', edited: picked.text })
+        setPicked(null)
+      }}
+      onNewClaim={() => addClaim(picked.text)}
+      onClear={() => setPicked(null)}
+    />
+  )
+
+  const both = paperView === 'both'
+  const viewToggle = (
+    <div role="group" aria-label="Which papers to show" className="flex rounded-lg border border-border-subtle p-0.5">
+      {(['both', 'reference'] as const).map((view) => (
+        <button
+          key={view}
+          type="button"
+          aria-pressed={paperView === view}
+          onClick={() => choosePaperView(view)}
+          className={cn(
+            'min-h-9 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+            paperView === view ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          {view === 'both' ? 'Both papers' : 'Reference only'}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem)]')}>
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         <div className="min-w-0">
           <h1 className="truncate font-serif text-xl font-semibold text-ink">{session.title}</h1>
           <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
         </div>
-        <div className="w-full max-w-xs">
-          <p className="mb-1 text-xs text-ink-muted tabular-nums">
-            {done} of {total} claims finished
-          </p>
-          <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
-            <div className="h-full bg-supports transition-[width] duration-200" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+        <div className="flex items-center gap-4">
+          {wide && viewToggle}
+          <div className="w-44">
+            <p className="mb-1 text-xs text-ink-muted tabular-nums">
+              {done} of {total} claims finished
+            </p>
+            <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
+              <div className="h-full bg-supports transition-[width] duration-200" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)]">
-        <ClaimNav
-          claims={claims}
-          drafts={drafts}
-          current={currentId}
-          onSelect={select}
-          onAdd={addClaim}
-        />
+      <ClaimNav claims={claims} drafts={drafts} current={currentId} onSelect={select} onAdd={addClaim} />
 
-        <div className="flex min-w-0 flex-col gap-4">
-          {wide ? (
-            <div className="grid grid-cols-2 gap-4">
-              {viewer(left_, 'paper')}
+      {wide ? (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_27rem] gap-4">
+          <div className="flex min-h-0 min-w-0 flex-col gap-3">
+            {selection}
+            <div className={cn('grid min-h-0 flex-1 gap-3', both ? 'grid-cols-2' : 'grid-cols-1')}>
+              {both && viewer(left_, 'paper')}
               {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
             </div>
-          ) : (
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setOverlay('paper')} className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-ink hover:border-accent">
-                Read the claim in the paper
-              </button>
-              <button type="button" disabled={!right} onClick={() => setOverlay('reference')} className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-ink hover:border-accent disabled:opacity-50">
-                Read the reference
-              </button>
-            </div>
-          )}
-          {!wide && overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
-          {!wide && overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
-
-          {picked && (
-            <SelectionBar
-              picked={picked}
-              blocked={cannotAdd}
-              onEvidence={addEvidence}
-              onClaimWording={() => {
-                patch({ status: 'edited', edited: picked.text })
-                setPicked(null)
-              }}
-              onNewClaim={() => addClaim(picked.text)}
-              onClear={() => setPicked(null)}
-            />
-          )}
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="flex flex-col gap-5">
-              <ClaimDecision claim={claim} draft={draft} onChange={patch} />
-              {draft.status && draft.status !== 'rejected' && (
-                <PassageList
-                  claim={claim}
-                  draft={draft}
-                  references={session.references}
-                  focus={focus}
-                  onFocus={setFocus}
-                  onJudge={(id, status) => patch({ cands: { ...draft.cands, [id]: status } })}
-                  onAdd={(p) => {
-                    patch({ added: [...draft.added, p] })
-                    const file = session.references.find((r) => r.reference_id === p.reference_id)?.file ?? ''
-                    setFocus({ file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
-                  }}
-                  onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
-                />
-              )}
-            </div>
-            <div className="flex flex-col gap-3">
-              {draft.status && draft.status !== 'rejected' && refs.length === 0 && (
-                <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>
-              )}
-              {draft.status && draft.status !== 'rejected' &&
-                refs.map((id) => (
-                  <LabelForm
-                    key={id}
-                    title={session.references.find((r) => r.reference_id === id)?.label ?? id}
-                    active={id === refId}
-                    label={draft.labels[id]}
-                    others={session.others[`${claim.claim_id}|${id}`] ?? []}
-                    onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
-                  />
-                ))}
-              {draft.status && draft.status !== 'rejected' && refs.length > 0 && (
-                <p className="text-xs text-ink-muted">
-                  Press 1–4 to set the level for the reference on the right.
-                  {relevantPassages(claim, draft, refId ?? '').length === 0 && refId ? ' Mark one of its passages relevant first.' : ''}
-                </p>
-              )}
-              <SaveBar
-                left={left}
-                dirty={dirty}
-                saving={save.isPending}
-                error={save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null}
-                savedRows={savedRows}
-                hasNext={claims.findIndex((c) => c.claim_id === currentId) < claims.length - 1}
-                onSave={write}
-              />
-            </div>
           </div>
+          <aside aria-label="Label this claim" className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
+            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
+            <div className="border-t border-border-subtle p-3">{saveBar('border-0 p-0')}</div>
+          </aside>
         </div>
-      </div>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setOverlay('paper')} className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-ink hover:border-accent">
+              Read the claim in the paper
+            </button>
+            <button type="button" disabled={!right} onClick={() => setOverlay('reference')} className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-ink hover:border-accent disabled:opacity-50">
+              Read the reference
+            </button>
+          </div>
+          {overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
+          {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
+          {selection}
+          <div className="flex flex-col gap-5">{panel}</div>
+          {saveBar()}
+        </div>
+      )}
     </div>
   )
 }
