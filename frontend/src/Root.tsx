@@ -13,6 +13,7 @@ import App from './App'
 import { authEnabled, supabase } from './lib/supabase'
 import { consumeTeacherGoogleReturn } from './lib/teacherGoogleReturn'
 import { useAuth } from './lib/useAuth'
+import { LabelerApp } from './roles/labeler/LabelerApp'
 import { ResearcherApp } from './roles/researcher/ResearcherApp'
 import { TeacherApp } from './roles/teacher/TeacherApp'
 import { AuthorApp } from './roles/author/AuthorApp'
@@ -31,7 +32,8 @@ function initialScreen(): Screen {
     return 'teacher'
   }
   const role = new URLSearchParams(window.location.search).get('role')
-  if (role === 'researcher' || role === 'writer' || role === 'teacher' || role === 'app') return role
+  if (role === 'researcher' || role === 'writer' || role === 'teacher' || role === 'labeler' || role === 'app')
+    return role
   return 'onboarding'
 }
 
@@ -84,6 +86,8 @@ export function Root() {
       return <AuthorApp onChangeRole={() => setScreen('onboarding')} />
     case 'teacher':
       return <TeacherApp onChangeRole={() => setScreen('onboarding')} />
+    case 'labeler':
+      return <LabelerApp onChangeRole={() => setScreen('onboarding')} />
     case 'app':
       return <App />
   }
