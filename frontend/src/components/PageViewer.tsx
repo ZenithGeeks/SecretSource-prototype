@@ -164,6 +164,7 @@ export function PageViewer({
   references = {},
   className,
   keyboard = true,
+  onSelectText,
 }: {
   target: Target
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
@@ -172,6 +173,8 @@ export function PageViewer({
   className?: string
   /** Escape and the arrow keys act on this viewer. Off when two are on screen at once. */
   keyboard?: boolean
+  /** Called when the reader selects text in a page: the text, whitespace squeezed, and its page. */
+  onSelectText?: (selection: { text: string; page: number | null }) => void
   /** Citation markers of this paper. Only passed when the viewer shows the analysed paper. */
   markers?: CitationMarker[]
   references?: Record<string, Citation>
@@ -191,6 +194,16 @@ export function PageViewer({
   const scroller = useRef<HTMLDivElement>(null)
   const pageNodes = useRef(new Map<number, HTMLDivElement>())
   const pageInView = useRef(page) // for effects that must not re-run on every scroll
+
+  const reportSelection = () => {
+    const selection = window.getSelection()
+    const node = selection?.anchorNode
+    if (!onSelectText || !selection || selection.isCollapsed || !node || !scroller.current?.contains(node)) return
+    const text = selection.toString().replace(/\s+/g, ' ').trim()
+    if (!text) return
+    const element = node instanceof Element ? node : node.parentElement
+    onSelectText({ text, page: Number(element?.closest('[data-page]')?.getAttribute('data-page')) || null })
+  }
 
   const pageWidth = Math.min(Math.max(0, panelWidth - 2 * PAGE_GAP) * zoom, MAX_PAGE_WIDTH)
   // Sharp on high-density screens, but capped: a 3x zoom on a 4K screen would otherwise ask
@@ -385,6 +398,9 @@ export function PageViewer({
           </div>
           <div
             ref={scroller}
+            onMouseUp={reportSelection}
+            onKeyUp={reportSelection}
+            onTouchEnd={reportSelection}
             className="h-full overflow-auto"
             style={{ paddingTop: TOOLBAR_HEIGHT }}
           >
