@@ -240,6 +240,29 @@ describe('the workspace', () => {
     })
   })
 
+  it('jumps between claims from the numbered strip, which says where each one stands', async () => {
+    await open()
+    expect(screen.getByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
+    const first = screen.getByRole('button', { name: /^Claim 1, not started/ })
+    expect(first).toHaveAttribute('aria-current', 'true')
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByRole('button', { name: /^Claim 1, in progress/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 2, not started/ }))
+    expect(screen.getByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
+  })
+
+  it('shows the reference alone, wide, and remembers the choice', async () => {
+    window.localStorage.removeItem('labeler.paperView')
+    await open()
+    expect(screen.getAllByTestId('viewer')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Reference only' }))
+    expect(screen.getAllByTestId('viewer').map((v) => v.textContent)).toEqual(['refB.pdf|recall rose by 4 points'])
+    expect(window.localStorage.getItem('labeler.paperView')).toBe('reference')
+    fireEvent.click(screen.getByRole('button', { name: 'Both papers' }))
+    expect(screen.getAllByTestId('viewer')).toHaveLength(2)
+    window.localStorage.removeItem('labeler.paperView')
+  })
+
   it('will not add evidence before the claim is decided, and says why', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))

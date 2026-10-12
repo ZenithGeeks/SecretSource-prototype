@@ -3,6 +3,7 @@
 import { Check, Loader2 } from 'lucide-react'
 
 import { Button } from '../../../components/ui'
+import { cn } from '../../../lib/utils'
 
 export function SaveBar({
   left,
@@ -12,6 +13,7 @@ export function SaveBar({
   savedRows,
   hasNext,
   onSave,
+  className,
 }: {
   left: string[]
   dirty: boolean
@@ -20,9 +22,10 @@ export function SaveBar({
   savedRows: number | null
   hasNext: boolean
   onSave: (next: boolean) => void
+  className?: string
 }) {
   return (
-    <div className="sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3">
+    <div className={cn('sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3', className)}>
       {left.length > 0 ? (
         <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
           {left.map((item) => (

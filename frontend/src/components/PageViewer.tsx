@@ -496,7 +496,7 @@ export function PageViewer({
               Original PDF
             </a>
           )}
-          {pdf.failed && <p className="p-4 text-sm text-ink-muted">This paper could not be opened.</p>}
+          {pdf.failed && <p className="p-4 text-sm text-ink-muted">This paper could not be opened. Its PDF may not be on the server yet: upload it again from Analyses.</p>}
           </div>
         </div>
       </aside>
