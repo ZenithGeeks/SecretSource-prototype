@@ -54,7 +54,7 @@ references kept in one split, so nothing leaks between train, val and test. Add 
 
 ## Topics
 
-The queue has a "Who labels what" panel: pick NLP, HPC or Software Engineering for anyone on the team.
+The queue has a "Who labels what" panel: pick CV, NLP, SE or HPC for anyone on the team (the panel lists each domain's conferences and journal).
 A paper's owner shares it with a dropdown next to the paper ("Not shared" by default). Shared papers,
 and the papers their claims cite, open for every signed-in person under "Shared by the team", with
 the viewer's own topic first. Unsharing takes it back. Both choices are rows in the Sheet's

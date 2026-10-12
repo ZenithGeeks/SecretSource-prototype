@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const gateway = vi.hoisted(() => ({
   puts: [] as { path: string; body: unknown }[],
   pool: {
-    topics: ['NLP', 'HPC', 'Software Engineering'],
+    topics: ['CV', 'NLP', 'SE', 'HPC'],
     me: 'Chanya',
     people: [
       { name: 'Chanya', topic: 'NLP' },
@@ -71,10 +71,10 @@ describe('topics in the queue', () => {
 
   it('shares one of your own papers under a topic', async () => {
     renderQueue()
-    fireEvent.change(await screen.findByLabelText(/Share My paper with the team/), { target: { value: 'Software Engineering' } })
+    fireEvent.change(await screen.findByLabelText(/Share My paper with the team/), { target: { value: 'SE' } })
     await waitFor(() =>
       expect(gateway.puts).toEqual([
-        { path: '/labeling/papers/mine/topic', body: { topic: 'Software Engineering' } },
+        { path: '/labeling/papers/mine/topic', body: { topic: 'SE' } },
       ]),
     )
   })

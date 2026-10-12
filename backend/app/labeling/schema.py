@@ -70,7 +70,7 @@ KEYS: dict[str, tuple[str, ...]] = {
     "assignments": ("kind", "key"),  # kind: "person" (key: name) or "paper" (key: analysis id)
 }
 
-Topic = Literal["NLP", "HPC", "Software Engineering", ""]  # "" takes the topic back
+Topic = Literal["CV", "NLP", "SE", "HPC", ""]  # "" takes the topic back
 TOPICS = [t for t in get_args(Topic) if t]
 
 

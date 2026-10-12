@@ -1,5 +1,7 @@
 /** A topic dropdown: the native select, so keyboard and screen readers work as they should. */
 
+import { TOPIC_INFO } from '../../../lib/labeling'
+
 export function TopicSelect({
   label,
   value,
@@ -26,7 +28,7 @@ export function TopicSelect({
       <option value="">{empty}</option>
       {topics.map((t) => (
         <option key={t} value={t}>
-          {t}
+          {TOPIC_INFO[t] ? `${t} · ${TOPIC_INFO[t].name}` : t}
         </option>
       ))}
     </select>

@@ -92,6 +92,14 @@ export type Save = {
   }[]
 }
 
+/** What each topic stands for, and where its papers are published: the team's domains. */
+export const TOPIC_INFO: Record<string, { name: string; venues: string; journal: string }> = {
+  CV: { name: 'Computer Vision', venues: 'CVPR · ICCV · ECCV', journal: 'IEEE TPAMI' },
+  NLP: { name: 'Natural Language Processing', venues: 'ACL · EMNLP · NAACL', journal: 'TACL' },
+  SE: { name: 'Software Engineering', venues: 'ICSE · FSE · ASE', journal: 'IEEE TSE' },
+  HPC: { name: 'High-Performance Computing', venues: 'SC · IPDPS · HPDC', journal: 'IEEE TPDS' },
+}
+
 export type Pool = {
   topics: string[]
   me: string
