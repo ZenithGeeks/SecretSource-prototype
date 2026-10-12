@@ -71,9 +71,13 @@ class TeacherEssayAnalysisService:
         self._now = now or (lambda: datetime.now(UTC))
 
     def start(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str, *, verify: bool = True
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str, *, verify: bool = True,
+        force: bool = False,
     ) -> dict[str, Any]:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
+        snapshot = self._analysis(submission.analysis_id) if submission.analysis_id else {}
+        if snapshot.get("status") == "running" and not force:
+            return {"id": submission.analysis_id, "status": "running", "submission_id": submission_id}
         attachments = select_supported_attachments(submission.attachments)
         if len(attachments) != 1:
             raise ValueError("submission must contain exactly one PDF or Google Doc attachment")
@@ -83,13 +87,21 @@ class TeacherEssayAnalysisService:
             raise ValueError("submission has no supported Drive attachment")
         metadata = self.client.get_drive_metadata(file_id) if hasattr(self.client, "get_drive_metadata") else attachment
         file_version = str(metadata.get("version") or metadata.get("modifiedTime") or metadata.get("md5Checksum") or "")
+        submission_file_changed = bool(submission.analysis_id) and (
+            (bool(submission.analysis_file_id) and submission.analysis_file_id != file_id)
+            or (
+                bool(submission.analysis_file_version)
+                and bool(file_version)
+                and submission.analysis_file_version != file_version
+            )
+        )
         if (
-            submission.analysis_id
+            not force
+            and submission.analysis_id
             and submission.analysis_file_id == file_id
             and submission.analysis_file_version == file_version
         ):
-            snapshot = self._analysis(submission.analysis_id)
-            if snapshot.get("status") in {"running", "done"}:
+            if snapshot.get("status") == "done":
                 return {"id": submission.analysis_id, "status": snapshot["status"], "submission_id": submission_id}
         content = (
             self.client.export_google_doc_as_pdf(file_id)
@@ -102,7 +114,13 @@ class TeacherEssayAnalysisService:
         if not analysis_id:
             raise ValueError("analysis pipeline did not return an id")
         if submission.analysis_id and hasattr(self.repository, "reset_submission_review"):
-            self.repository.reset_submission_review(owner, course_id, coursework_id, submission_id)
+            self.repository.reset_submission_review(
+                owner,
+                course_id,
+                coursework_id,
+                submission_id,
+                preserve_sent_history=not submission_file_changed,
+            )
         self.repository.link_submission_analysis(
             owner, course_id, coursework_id, submission_id, analysis_id, file_id=file_id, file_version=file_version
         )
@@ -161,12 +179,12 @@ class TeacherEssayAnalysisService:
 
     def save_feedback(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str,
-        feedback_text: str, citation_ids: list[str] | tuple[str, ...],
+        feedback_text: str, citation_ids: list[str] | tuple[str, ...], sharing_options: dict[str, Any] | None = None,
     ) -> TeacherFeedback:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
         feedback = TeacherFeedback(
             owner, course_id, coursework_id, submission_id, submission.student_id,
-            feedback_text, "draft", None, tuple(citation_ids),
+            feedback_text, "draft", None, tuple(citation_ids), sharing_options or {},
         )
         self.repository.save_feedback(feedback)
         return feedback
@@ -195,7 +213,7 @@ class TeacherEssayAnalysisService:
         )
         sent = TeacherFeedback(
             owner, course_id, coursework_id, submission_id, submission.student_id,
-            feedback.feedback_text, "sent", self._now(), feedback.citation_ids,
+            feedback.feedback_text, "sent", self._now(), feedback.citation_ids, feedback.sharing_options,
         )
         self.repository.save_feedback(sent)
         return sent
@@ -294,4 +312,5 @@ class TeacherEssayAnalysisService:
             "preview": feedback.feedback_text if feedback is not None else "",
             "citedPages": [locations[citation_id] for citation_id in citation_ids if locations.get(citation_id)],
             "citationIds": citation_ids,
+            "sharingOptions": (feedback.sharing_options if feedback is not None else {}) or {},
         }

@@ -1,6 +1,6 @@
 /** The first ten seconds: how this paper's citations came out, and a way to narrow to one kind. */
 
-import { Copy, Download, FileText } from 'lucide-react'
+import { Copy, Download, FileText, MessageSquarePlus } from 'lucide-react'
 import { useState } from 'react'
 
 import { STANDING_LABELS, STANDING_MEANINGS, STANDINGS, toCsv, toMarkdown } from '../lib/claims'
@@ -27,7 +27,9 @@ export function ResultsSummary({
   filter,
   onFilter,
   paper,
+  paperLabel,
   onOpenPaper,
+  onTeacherFeedback,
   teacherMode = false,
 }: {
   claims: Claim[]
@@ -36,9 +38,13 @@ export function ResultsSummary({
   filter: Standing | null
   onFilter: (standing: Standing | null) => void
   paper?: string
+  /** Optional Teacher label that adds the submitter to the document name. */
+  paperLabel?: string
   /** Opens the paper in the page viewer beside the claims; without it the button links to the file. */
   onOpenPaper?: () => void
-  /** Student-facing feedback has a dedicated export; do not offer researcher paper exports. */
+  /** Jumps to the student feedback composer in the Teacher review. */
+  onTeacherFeedback?: () => void
+  /** Teacher's Essay Check uses the PDF, Copy All, and CSV analysis toolbar. */
   teacherMode?: boolean
 }) {
   const [copied, setCopied] = useState(false)
@@ -58,7 +64,7 @@ export function ResultsSummary({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium" title={paper}>
-            {paper ?? 'This paper'}
+            {paperLabel ?? paper ?? 'This paper'}
           </p>
           <p className="text-xs text-ink-muted" aria-live="polite">
             {standings.length} claims
@@ -67,10 +73,16 @@ export function ResultsSummary({
         </div>
 
         <div className="flex items-center gap-2">
-          {!teacherMode && paper && onOpenPaper && (
+          {paper && onOpenPaper && (
             <Button variant="ghost" onClick={onOpenPaper} title="Read the paper here, page by page">
               <FileText className="size-4" />
-              The PDF
+              {teacherMode ? 'PDF' : 'The PDF'}
+            </Button>
+          )}
+          {teacherMode && onTeacherFeedback && (
+            <Button className="bg-accent-soft text-ink hover:bg-accent-soft" variant="ghost" onClick={onTeacherFeedback} title="Write feedback for the student">
+              <MessageSquarePlus className="size-4" />
+              Feedback
             </Button>
           )}
           {!teacherMode && pdf.url && (
@@ -84,10 +96,10 @@ export function ResultsSummary({
               The PDF
             </a>
           )}
-          {!teacherMode && <>
+          <>
             <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">
               <Copy className="size-4" />
-              {copied ? 'Copied' : 'Copy'}
+              {copied ? 'Copied' : teacherMode ? 'Copy all' : 'Copy'}
             </Button>
             <Button
               variant="ghost"
@@ -97,7 +109,7 @@ export function ResultsSummary({
               <Download className="size-4" />
               CSV
             </Button>
-          </>}
+          </>
         </div>
       </div>
 

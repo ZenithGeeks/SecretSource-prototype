@@ -2,7 +2,7 @@ apiVersion: 1
 
 # Fires when the host's root disk or Docker's disk is over 80% full for 10 minutes.
 # Docker lives on its own volume on ss-core (/var/lib/docker), so both are watched.
-# With no SMTP settings (GF_SMTP_*), the alert shows in Grafana > Alerting but is not emailed.
+# Sent to Discord through the policy in ops.yml (GRAFANA_DISCORD_WEBHOOK_URL).
 groups:
   - orgId: 1
     name: host

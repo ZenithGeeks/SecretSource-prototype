@@ -1,13 +1,14 @@
 /** TanStack Query hooks that keep teacher screens independent of the mock data source. */
 
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   READING_QUESTIONS_KEY,
   TEACHER_CLASSES_KEY,
   TEACHER_HOME_KEY,
+  TEACHER_HISTORY_KEY,
   teacherApi,
-  teacherRemoteEnabled,
   teacherAssignmentKey,
   teacherClassImportKey,
   teacherCourseWorkKey,
@@ -28,8 +29,15 @@ export function useTeacherHome() {
   return useQuery({ queryKey: TEACHER_HOME_KEY, queryFn: teacherApi.getHome })
 }
 
-export function useTeacherClasses() {
-  return useQuery({ queryKey: TEACHER_CLASSES_KEY, queryFn: teacherApi.getClasses })
+export function useTeacherHistory() {
+  return useQuery({
+    queryKey: TEACHER_HISTORY_KEY,
+    queryFn: teacherApi.getHistory,
+  })
+}
+
+export function useTeacherClasses(enabled = true) {
+  return useQuery({ queryKey: TEACHER_CLASSES_KEY, queryFn: teacherApi.getClasses, enabled })
 }
 
 export function useTeacherImportableClasses() {
@@ -72,19 +80,46 @@ export function useTeacherAssignmentDetail(courseId: string, assignmentId: strin
 }
 
 export function useTeacherEssayCheck(courseId: string, assignmentId: string, studentId: string) {
-  return useQuery<EssayCheck | null>({
+  const queryClient = useQueryClient()
+  const query = useQuery<EssayCheck | null>({
     queryKey: teacherEssayCheckKey(courseId, assignmentId, studentId),
     queryFn: () => teacherApi.getEssayCheck(assignmentId, studentId, courseId),
     enabled: Boolean(courseId && assignmentId && studentId),
     refetchInterval: (query) => query.state.data?.analysis?.status === 'running' ? 2000 : false,
+  })
+  useEffect(() => {
+    if (query.data?.analysis?.status === 'done') {
+      void queryClient.invalidateQueries({ queryKey: TEACHER_HISTORY_KEY })
+    }
+  }, [query.data?.analysis?.id, query.data?.analysis?.status, queryClient])
+  return query
+}
+
+export function useRefreshTeacherClass() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (courseId: string) => teacherApi.refreshClass(courseId),
+    onSuccess: (workspace, courseId) => {
+      if (workspace) queryClient.setQueryData(teacherWorkspaceKey(courseId), workspace)
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['teacher', 'assignment', courseId] }),
+        queryClient.invalidateQueries({ queryKey: ['teacher', 'essay-check', courseId] }),
+      ])
+    },
   })
 }
 
 export function useTeacherGoogleConnection() {
   return useQuery({
     queryKey: ['teacher', 'google-connection'],
-    queryFn: teacherApi.getGoogleConnection,
-    enabled: teacherRemoteEnabled,
+    queryFn: ({ signal }) => {
+      const timeout = AbortSignal.timeout(10_000)
+      const requestSignal = typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([signal, timeout])
+        : timeout
+      return teacherApi.getGoogleConnection(requestSignal)
+    },
+    retry: false,
   })
 }
 
@@ -96,7 +131,10 @@ export function useUpdateProfessorReview() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: UpdateProfessorReviewRequest) => teacherApi.updateProfessorReview(input),
-    onSuccess: (essay, input) => updateEssayCache(queryClient, essay, input.courseId ?? essay.assignment.courseId),
+    onSuccess: (essay, input) => {
+      updateEssayCache(queryClient, essay, input.courseId ?? essay.assignment.courseId)
+      return queryClient.invalidateQueries({ queryKey: TEACHER_HISTORY_KEY })
+    },
   })
 }
 
@@ -105,9 +143,12 @@ export function useAnalyzeTeacherSubmission() {
   return useMutation({
     mutationFn: (input: AnalyzeTeacherSubmissionRequest) => teacherApi.analyzeSubmission(input),
     onSuccess: (_result, input) => {
-      void queryClient.invalidateQueries({
-        queryKey: teacherEssayCheckKey(input.courseId, input.assignmentId, input.studentId),
-      })
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: TEACHER_HISTORY_KEY }),
+        queryClient.invalidateQueries({
+          queryKey: teacherEssayCheckKey(input.courseId, input.assignmentId, input.studentId),
+        }),
+      ])
     },
   })
 }
@@ -123,14 +164,21 @@ export function usePrepareTeacherEssayChecks() {
 export function useSaveTeacherFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[] }) =>
+    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: import('./teacherFeedbackExport').FeedbackSharingByCitation }) =>
       teacherApi.saveFeedback(input),
-    onSuccess: (essay, input) => updateEssayCache(queryClient, essay, input.courseId),
+    onSuccess: (essay, input) => {
+      updateEssayCache(queryClient, essay, input.courseId)
+      return queryClient.invalidateQueries({ queryKey: TEACHER_HISTORY_KEY })
+    },
   })
 }
 
 export function useSendTeacherFeedback() {
-  return useMutation({ mutationFn: teacherApi.sendFeedback })
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: teacherApi.sendFeedback,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: TEACHER_HISTORY_KEY }),
+  })
 }
 
 export function useResetMockTeacherData() {

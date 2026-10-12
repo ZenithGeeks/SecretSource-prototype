@@ -6,6 +6,7 @@ run_analysis_job's own except (timeout, worker crash) is caught by an on-failure
 
 import asyncio
 import copy
+import json
 import time
 
 import pytest
@@ -34,7 +35,7 @@ def test_start_records_one_queued_stage_enqueues_it_and_stores_it(monkeypatch):
     saved = []
     monkeypatch.setattr(
         main, "enqueue_analysis",
-        lambda analysis_id, paper, verify, owner, stages: calls.append((analysis_id, stages)),
+        lambda analysis_id, paper, verify, owner, stages, started=None: calls.append((analysis_id, stages)),
     )
     monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(copy.deepcopy(analysis)))
 
@@ -69,6 +70,63 @@ def test_start_returns_503_and_leaves_nothing_behind_when_enqueue_fails(monkeypa
     assert response.status_code == 503
     assert main.analyses == {}
     assert main.streams == {}
+
+
+class _Channel:
+    def __init__(self):
+        self.published = []
+
+    def publish(self, channel, message):
+        self.published.append((channel, message))
+
+
+def test_a_queued_analysis_is_visible_on_every_gateway_instance(monkeypatch):
+    """Instance A takes the upload; instance B (its own memory) serves the next request. B only
+    hears of runs through Redis snapshots, so A has to send one while the job is still queued,
+    not leave it to the worker, which may not start the job for minutes (#259)."""
+    channel = _Channel()
+    monkeypatch.setattr(main, "redis_connection", lambda: channel)
+    monkeypatch.setattr(main, "enqueue_analysis", lambda *args: None)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    client = TestClient(main.app)
+
+    analysis_id = client.post("/analyses", json={"paper": "paper.pdf"}).json()["id"]
+
+    # Instance B: started before the upload, so nothing of this run in its memory.
+    main.analyses.clear()
+    main.streams.clear()
+    assert client.get(f"/analyses/{analysis_id}").status_code == 404
+    for name, message in channel.published:
+        assert name == f"analysis:{analysis_id}"
+        main._apply_snapshot(json.loads(message))
+
+    response = client.get(f"/analyses/{analysis_id}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert [stage["stage"] for stage in response.json()["stages"]] == ["queued"]
+    assert analysis_id in [analysis["id"] for analysis in client.get("/analyses").json()]
+
+
+def test_a_late_queued_snapshot_does_not_undo_the_workers_progress(monkeypatch):
+    """Redis may deliver the worker's first snapshot before the gateway's queued one."""
+    channel = _Channel()
+    monkeypatch.setattr(main, "redis_connection", lambda: channel)
+    monkeypatch.setattr(main, "enqueue_analysis", lambda *args: None)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+
+    async def scenario():
+        return main._start("paper.pdf", True, None)["id"]
+
+    analysis_id = asyncio.run(scenario())
+    queued = json.loads(channel.published[0][1])
+    main.analyses.clear()
+    main.streams.clear()
+
+    extracting = {"stage": "extracting", "message": "reading paper.pdf", "at": time.time()}
+    main._apply_snapshot({**queued, "stages": queued["stages"] + [extracting]})
+    main._apply_snapshot(queued)
+
+    assert [stage["stage"] for stage in main.analyses[analysis_id]["stages"]] == ["queued", "extracting"]
 
 
 # --- run_analysis_job carries the queued stage through, and owns ANALYSES_RUNNING ---
@@ -172,6 +230,38 @@ def test_delete_succeeds_when_the_queued_job_is_cancelled(monkeypatch):
 
     assert response.status_code == 200
     assert "r1" not in main.analyses
+
+
+def test_delete_publishes_a_tombstone_for_the_other_instances(monkeypatch):
+    main.analyses["r3"] = {"id": "r3", "paper": "p.pdf", "status": "running", "owner": None,
+                            "stages": [], "claims": []}
+    channel = _Channel()
+    monkeypatch.setattr(main, "redis_connection", lambda: channel)
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: True)
+    monkeypatch.setattr(main.store, "delete", lambda analysis_id: True)
+
+    assert TestClient(main.app).delete("/analyses/r3").status_code == 200
+
+    assert [(name, json.loads(message)) for name, message in channel.published] == [
+        ("analysis:r3", {"id": "r3", "deleted": True})
+    ]
+
+
+def test_a_tombstone_removes_the_row_and_a_late_snapshot_does_not_bring_it_back():
+    """Instance B deleted the queued analysis; instance A, which took the upload, must drop it."""
+    row = {"id": "t1", "paper": "p.pdf", "status": "running", "owner": None,
+           "stages": [{"stage": "queued", "at": 1.0}], "claims": []}
+    main._apply_snapshot(row)
+    stream = main.streams["t1"]
+
+    main._apply_snapshot({"id": "t1", "deleted": True})
+
+    assert "t1" not in main.analyses
+    assert "t1" in main._deleted
+    assert "t1" not in main.streams
+    assert [stream.get_nowait(), stream.get_nowait()] == [{"stage": "queued", "at": 1.0}, None]
+    main._apply_snapshot({**row, "stages": row["stages"] + [{"stage": "extracting", "at": 2.0}]})
+    assert "t1" not in main.analyses
 
 
 def test_delete_refuses_when_the_job_already_started(monkeypatch):

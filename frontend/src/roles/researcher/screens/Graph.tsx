@@ -27,6 +27,7 @@ import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } f
 import { useSettings } from '../../../lib/settings'
 import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
+import { fitReadable } from '../../../lib/graphFit'
 import { cn } from '../../../lib/utils'
 
 let _colaReady = false
@@ -296,16 +297,6 @@ function writePosCache(key: string, positions: PosMap): void {
   }
 }
 
-/** Fit the whole graph, but never so far out that it reads tiny: below 0.9 the labels blur, so
- * clamp to 0.9 and centre and let the user pan or press Fit. */
-function fitReadable(cy: cytoscape.Core): void {
-  cy.resize()
-  cy.fit(undefined, 40)
-  if (cy.zoom() < 0.9) {
-    cy.zoom({ level: 0.9, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
-  }
-}
-
 function InsightTile({ insight }: { insight: Insight }) {
   const { count, label, icon: Icon, tone } = insight
   return (
@@ -554,7 +545,10 @@ function PapersDetail({ graph, edge }: { graph: KnowledgeGraph; edge: PaperEdge 
   )
 }
 
-function GraphCanvas() {
+/** What a role shows in place of an empty canvas; a role that passes none gets the canvas. */
+export type GraphEmptyMessage = { title: string; hint: string }
+
+function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
   const { data: graph, isError } = useKnowledgeGraph()
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
@@ -715,6 +709,7 @@ function GraphCanvas() {
 
   if (isError) return <Empty title="The graph could not load" hint="Refresh the page to try again." />
   if (!graph) return <LoadingScreen label="Loading the graph…" />
+  if (emptyMessage && graph.nodes.length === 0) return <Empty title={emptyMessage.title} hint={emptyMessage.hint} />
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =
@@ -871,7 +866,7 @@ function GraphCanvas() {
               // Pan (zoom stays whatever fitReadable set) so the latest upload is what's centred
               // on open, not wherever the whole-graph bounding box happened to land it.
               const focusLatest = () => {
-                if (!latestPaperId) return
+                if (cy.destroyed() || !latestPaperId) return
                 const node = cy.$id(latestPaperId)
                 if (node.nonempty()) cy.center(node)
               }
@@ -879,6 +874,8 @@ function GraphCanvas() {
               // timer that can fire while nodes are still bunched. It re-runs only when the element
               // set changes (e.g. switching Claims/Papers), which re-runs the layout.
               cy.on('layoutstop', () => {
+                // Cola is async: this can fire after navigating away destroyed the graph.
+                if (cy.destroyed()) return
                 fitReadable(cy)
                 focusLatest()
                 // Save the settled positions so the next visit replays them instantly with `preset`
@@ -933,13 +930,17 @@ function GraphCanvas() {
 /** The Graph tab. It hosts two views behind one toggle: the knowledge graph (GraphCanvas,
  * unchanged) and Field Consensus, which asks one claim across the whole library. Field consensus
  * used to be its own screen — it now lives here, so the graph and the cross-paper question share
- * one place. `initialTab` lets the router open straight to Consensus from an older link. */
+ * one place. `initialTab` lets the router open straight to Consensus from an older link.
+ * `emptyMessage` is what a role with nothing analysed yet sees instead of a bare canvas (the
+ * Author passes one; the Researcher keeps the canvas). */
 export function Graph({
   onOpenAnalysis,
   initialTab = 'graph',
+  emptyMessage,
 }: {
   onOpenAnalysis: (id: string) => void
   initialTab?: 'graph' | 'consensus'
+  emptyMessage?: GraphEmptyMessage
 }) {
   const [tab, setTab] = useState<'graph' | 'consensus'>(initialTab)
   return (
@@ -960,7 +961,7 @@ export function Graph({
           </button>
         ))}
       </div>
-      {tab === 'graph' ? <GraphCanvas /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
+      {tab === 'graph' ? <GraphCanvas emptyMessage={emptyMessage} /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
     </div>
   )
 }

@@ -202,7 +202,7 @@ _last: dict | None = None
 def report(max_age: float = CACHE_SECONDS) -> dict:
     """The last check if it is newer than max_age seconds, otherwise a new one."""
     global _last
-    if _last is None or time.time() - _last["checked_at"] > max_age:
+    if _last is None or time.time() - _last["checked_at"] >= max_age:
         _last = check()
     return _last
 

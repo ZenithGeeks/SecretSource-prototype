@@ -18,6 +18,7 @@ import { authEnabled } from '../lib/supabase'
 import { useAuth, signOut } from '../lib/useAuth'
 import { cn } from '../lib/utils'
 import { Brand } from './Brand'
+import { RoleChip } from './RoleChip'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -216,10 +217,7 @@ export function AppShell<K extends string>({
 
       <div className="mt-auto flex flex-col gap-3 px-3">
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
-            <RoleIcon className="size-4" />
-            {role}
-          </span>
+          <RoleChip role={role} icon={RoleIcon} />
           <button type="button" onClick={onChangeRole} className="py-2 text-xs text-accent hover:underline">
             change
           </button>

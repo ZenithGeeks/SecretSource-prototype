@@ -1,0 +1,351 @@
+apiVersion: 1
+
+# Operations alerts for the RQ worker, Redis Cloud and the Cloud Run services, sent to Discord.
+# The webhook comes from GRAFANA_DISCORD_WEBHOOK_URL in ss-core's .env (docker-compose.yml passes
+# it to Grafana). The disk alert in disk.yml goes through the same policy.
+contactPoints:
+  - orgId: 1
+    name: discord
+    receivers:
+      - uid: discord-ops
+        type: discord
+        settings:
+          url: ${GRAFANA_DISCORD_WEBHOOK_URL}
+          use_discord_username: false
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: discord
+    group_by: ["alertname"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+
+groups:
+  - orgId: 1
+    name: queue
+    folder: Operations
+    interval: 1m
+    rules:
+      - uid: ops-worker-down
+        title: RQ worker is down
+        condition: C
+        for: 5m
+        # No target at all is as bad as a failing one.
+        noDataState: Alerting
+        execErrState: Error
+        labels: {severity: critical}
+        annotations:
+          summary: Prometheus cannot scrape the RQ worker, so no analysis is being processed.
+          description: >-
+            On ss-core: sudo docker ps (is secretsource-worker-worker-1 up?) and
+            sudo docker logs --tail 100 secretsource-worker-worker-1. Restart with
+            docker compose up -d --no-deps worker in /var/lib/docker/secretsource-worker.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model: {refId: A, expr: 'min(up{job="worker"})', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: lt, params: [1]}}]
+
+      - uid: ops-redis-unreachable
+        title: Redis is unreachable
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: critical}
+        annotations:
+          summary: The worker cannot read the queue from Redis Cloud. New analyses cannot be queued or run.
+          description: >-
+            Check the Redis Cloud database (free tier limits, password change) and the worker's REDIS_URL.
+            The gateway's /health also reports Redis.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model: {refId: A, expr: 'max(rq_up)', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: lt, params: [1]}}]
+
+      - uid: ops-queue-stuck
+        title: A queued analysis has waited over 45 minutes
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "The oldest queued job has waited {{ humanizeDuration $values.B.Value }}."
+          description: >-
+            One worker runs one analysis at a time (10-25 minutes each), so a wait this long means the
+            worker is stuck or the queue is backed up. Check the Operations dashboard's Queue row and
+            the worker logs.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model: {refId: A, expr: 'max(rq_oldest_queued_job_age_seconds)', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [2700]}}]
+
+      - uid: ops-job-too-long
+        title: An analysis has run over 40 minutes
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "A job has been running for {{ humanizeDuration $values.B.Value }}."
+          description: >-
+            JOB_TIMEOUT is 30 minutes (backend/app/queue.py), so RQ should have stopped it. The worker may
+            be hung on a service call (GROBID, ColBERT, the LLM). Check the worker logs; restarting the
+            worker marks the run as interrupted.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model: {refId: A, expr: 'max(rq_longest_running_job_seconds)', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [2400]}}]
+
+      - uid: ops-job-failed
+        title: An analysis failed
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ humanize $values.B.Value }} analysis job(s) failed in the last 15 minutes."
+          description: >-
+            Counts pipeline errors (analyses_finished_total, status error) and jobs RQ moved to its failed
+            registry. The Operations dashboard's "Each run" table and the Analyses dashboard show the error
+            message.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: >-
+                (sum(increase(analyses_finished_total{status="error"}[15m])) or vector(0))
+                + (sum(clamp_min(delta(rq_jobs{state="failed"}[15m]), 0)) or vector(0))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [0.5]}}]
+
+  - orgId: 1
+    name: cloud-run
+    folder: Operations
+    interval: 5m
+    rules:
+      - uid: ops-gpu-billed
+        title: ColPali GPU billed for most of the last hour
+        condition: C
+        for: 30m
+        # ColPali at zero instances reports no billed time, so no data.
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: critical}
+        annotations:
+          summary: "ColPali averaged {{ humanize $values.D.Value }} instances over the last hour (~$1.71/h each)."
+          description: >-
+            Run PROJECT=gcp-edu-471706 ./deploy/gpu-guard.sh check. If it says PINNED, set it back:
+            gcloud run services update colpali --region asia-southeast1 --scaling=auto --min=0.
+            Otherwise something keeps calling it: group its request log by user agent and IP.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 3600, to: 0}
+            datasourceUid: gcp-cloud-monitoring
+            model:
+              refId: A
+              queryType: timeSeriesList
+              timeSeriesList:
+                projectName: gcp-edu-471706
+                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=", colpali]
+                perSeriesAligner: ALIGN_SUM
+                alignmentPeriod: "3600s"
+                crossSeriesReducer: REDUCE_SUM
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          # Billed seconds in the window over the window length: the average number of instances.
+          # billable_instance_time sums every revision's real seconds once; averaging instance_count
+          # per revision and adding the averages counted a deploy's two revisions twice.
+          - refId: D
+            datasourceUid: __expr__
+            model: {refId: D, type: math, expression: "$B / 3600"}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: D
+              conditions: [{evaluator: {type: gt, params: [0.83]}}]
+
+      - uid: ops-service-scaled-out
+        title: A Cloud Run service runs more instances than usual
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ index $labels "resource.label.service_name" }} averaged {{ humanize $values.D.Value }} instances over the last hour.'
+          description: >-
+            colbert and grobid normally run 1 instance each. The gateway is capped at 1 and has its own rule (ops-gateway-never-idle).
+            More instances cost more for every hour they run. Check the Operations dashboard's
+            Cost row and the service's request rate.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 3600, to: 0}
+            datasourceUid: gcp-cloud-monitoring
+            model:
+              refId: A
+              queryType: timeSeriesList
+              timeSeriesList:
+                projectName: gcp-edu-471706
+                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=~", "colbert|grobid"]
+                perSeriesAligner: ALIGN_SUM
+                alignmentPeriod: "3600s"
+                crossSeriesReducer: REDUCE_SUM
+                groupBys: [resource.label.service_name]
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          # Billed seconds in the window over the window length: the average number of instances.
+          # billable_instance_time sums every revision's real seconds once; averaging instance_count
+          # per revision and adding the averages counted a deploy's two revisions twice.
+          - refId: D
+            datasourceUid: __expr__
+            model: {refId: D, type: math, expression: "$B / 3600"}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: D
+              conditions: [{evaluator: {type: gt, params: [1.5]}}]
+
+      - uid: ops-service-5xx
+        title: A Cloud Run service is returning 5xx errors
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ index $labels "resource.label.service_name" }} returned {{ humanize $values.B.Value }} 5xx responses in 15 minutes.'
+          description: >-
+            Read the service's Cloud Run logs for the failing requests:
+            gcloud logging read 'resource.labels.service_name="<service>" AND httpRequest.status>=500' --limit 20.
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: gcp-cloud-monitoring
+            model:
+              refId: A
+              queryType: timeSeriesList
+              timeSeriesList:
+                projectName: gcp-edu-471706
+                filters: [metric.type, "=", run.googleapis.com/request_count, AND, metric.label.response_code_class, "=", 5xx]
+                perSeriesAligner: ALIGN_DELTA
+                alignmentPeriod: "900s"
+                crossSeriesReducer: REDUCE_SUM
+                groupBys: [resource.label.service_name]
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: sum}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [5]}}]
+      - uid: ops-gateway-never-idle
+        title: The gateway has not scaled to zero in 6 hours
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: {severity: warning}
+        annotations:
+          summary: 'The gateway averaged {{ humanize $values.D.Value }} instances over the last 6 hours.'
+          description: >-
+            The gateway scales to zero when idle (#345); an always-on instance costs about $9 a day.
+            Something keeps it awake: group its request log by user agent and path, or check whether
+            its scaling was pinned again (PROJECT=gcp-edu-471706 ./deploy/gpu-guard.sh check).
+        data:
+          - refId: A
+            relativeTimeRange: {from: 21600, to: 0}
+            datasourceUid: gcp-cloud-monitoring
+            model:
+              refId: A
+              queryType: timeSeriesList
+              timeSeriesList:
+                projectName: gcp-edu-471706
+                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=", gateway]
+                perSeriesAligner: ALIGN_SUM
+                alignmentPeriod: "21600s"
+                crossSeriesReducer: REDUCE_SUM
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          # Billed seconds in the window over the window length: the average number of instances.
+          # billable_instance_time sums every revision's real seconds once; averaging instance_count
+          # per revision and adding the averages counted a deploy's two revisions twice.
+          - refId: D
+            datasourceUid: __expr__
+            model: {refId: D, type: math, expression: "$B / 21600"}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: D
+              conditions: [{evaluator: {type: gt, params: [0.9]}}]

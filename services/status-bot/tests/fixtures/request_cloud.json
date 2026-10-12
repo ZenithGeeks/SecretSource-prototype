@@ -1,0 +1,31 @@
+{
+  "from": "now-24h",
+  "to": "now",
+  "queries": [
+    {
+      "refId": "instances",
+      "datasource": {
+        "type": "stackdriver",
+        "uid": "gcp-cloud-monitoring"
+      },
+      "queryType": "timeSeriesList",
+      "intervalMs": 300000,
+      "maxDataPoints": 300,
+      "timeSeriesList": {
+        "projectName": "gcp-edu-471706",
+        "filters": [
+          "metric.type",
+          "=",
+          "run.googleapis.com/container/instance_count"
+        ],
+        "perSeriesAligner": "ALIGN_MEAN",
+        "alignmentPeriod": "300s",
+        "crossSeriesReducer": "REDUCE_SUM",
+        "groupBys": [
+          "resource.label.service_name",
+          "metric.label.state"
+        ]
+      }
+    }
+  ]
+}

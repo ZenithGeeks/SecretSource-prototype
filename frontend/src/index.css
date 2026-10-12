@@ -1,5 +1,21 @@
 @import 'tailwindcss';
 
+/* Figma's Teacher screens use Geist for interface copy and Fraunces for display headings.
+   Keep these overrides role-scoped so the other role frontends retain their own typography. */
+.teacher-app {
+  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+.teacher-app .font-sans {
+  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+.teacher-app .font-serif {
+  font-family: 'Fraunces', Georgia, serif;
+  font-optical-sizing: auto;
+  font-variation-settings: 'SOFT' 0, 'WONK' 1;
+}
+
 /* One palette. @theme defines the light values; the dark ones override the same custom
    properties, which is what the generated utilities read. (@theme itself only works at the
    top level — nesting it in a media query silently produces nothing.) */
@@ -21,6 +37,13 @@
   --color-refutes-soft: oklch(0.95 0.045 29);
   --color-insufficient: oklch(0.52 0.1 80); /* #8a6414 */
   --color-insufficient-soft: oklch(0.95 0.05 80);
+
+  /* LaTeX source colours in the Author editor (CodeMirror's default light palette, which is
+     what the Figma frame shows): commands, braces, math, comments. */
+  --color-code-command: oklch(0.45 0.13 150); /* #117700 */
+  --color-code-brace: oklch(0.66 0.04 105); /* #999977 */
+  --color-code-math: oklch(0.33 0.17 275); /* #221199 */
+  --color-code-comment: oklch(0.55 0.14 60); /* #aa5500 */
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
@@ -45,6 +68,11 @@
     --color-refutes-soft: oklch(0.28 0.06 29);
     --color-insufficient: oklch(0.82 0.11 80);
     --color-insufficient-soft: oklch(0.3 0.05 80);
+
+    --color-code-command: oklch(0.8 0.13 150);
+    --color-code-brace: oklch(0.72 0.03 105);
+    --color-code-math: oklch(0.8 0.1 275);
+    --color-code-comment: oklch(0.78 0.12 60);
   }
 }
 
@@ -64,6 +92,11 @@
   --color-refutes-soft: oklch(0.28 0.06 29);
   --color-insufficient: oklch(0.82 0.11 80);
   --color-insufficient-soft: oklch(0.3 0.05 80);
+
+  --color-code-command: oklch(0.8 0.13 150);
+  --color-code-brace: oklch(0.72 0.03 105);
+  --color-code-math: oklch(0.8 0.1 275);
+  --color-code-comment: oklch(0.78 0.12 60);
 }
 
 :root[data-theme='light'] {

@@ -186,10 +186,12 @@ class TeacherFeedback:
     status: str
     sent_at: datetime | None
     citation_ids: tuple[str, ...] = ()
+    sharing_options: dict[str, Any] | None = None
 
     def to_row(self) -> dict[str, Any]:
         return {
             **self.__dict__,
             "sent_at": _timestamp(self.sent_at),
             "citation_ids": list(self.citation_ids),
+            "sharing_options": self.sharing_options or {},
         }

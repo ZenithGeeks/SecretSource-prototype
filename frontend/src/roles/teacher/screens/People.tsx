@@ -1,10 +1,10 @@
-import { Search, ShieldCheck, UserRound } from 'lucide-react'
+import { Search, ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { Card, Empty, Input } from '../../../components/ui'
 import type { TeacherRosterMember, TeacherWorkspace } from '../../../lib/teacher'
 import { filterTeacherPeople } from '../../../lib/teacherSelectors'
-import { InitialAvatar, PageHeading, StatusPill } from '../components/TeacherUi'
+import { InitialAvatar } from '../components/TeacherUi'
 
 export function People({ workspace }: { workspace: TeacherWorkspace }) {
   const [query, setQuery] = useState('')
@@ -13,22 +13,34 @@ export function People({ workspace }: { workspace: TeacherWorkspace }) {
   const remaining = Math.max(0, workspace.course.studentCount - studentCount)
 
   return (
-    <div className="space-y-6">
-      <PageHeading title="People" description="The roster is shown as read-only data from this local class view." />
-      <Card className="p-0">
-        <div className="flex flex-col gap-3 border-b border-border-subtle p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="font-serif text-xl font-semibold">Class roster</h2><p className="mt-1 text-sm text-ink-muted">{workspace.course.studentCount} people in {workspace.course.name} · {workspace.course.section}</p></div>
-          <label className="relative block w-full sm:max-w-xs"><span className="sr-only">Search people</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people" className="pl-9" /></label>
-        </div>
-        {people.length === 0 ? <div className="p-5"><Empty title="No matching people" hint="Try another name or role." /></div> : <div className="divide-y divide-border-subtle">
-          {people.map((person) => <PersonRow key={person.id} person={person} />)}
-          {remaining > 0 && <div className="flex items-center gap-3 px-5 py-4 text-sm text-ink-muted"><span className="flex size-9 items-center justify-center rounded-full bg-canvas text-xs font-semibold">+{remaining}</span><span>{remaining} more students from Classroom</span></div>}
-        </div>}
-      </Card>
+    <div className="space-y-3">
+      <label className="relative block w-full sm:max-w-[586px]">
+        <span className="sr-only">Search students by name</span>
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+        <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search students by name" className="h-[42px] rounded-lg pl-9 text-[12px]" />
+      </label>
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_248px]">
+        <Card className="min-h-[439px] overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-border-subtle px-3 py-3">
+            <h2 className="text-[13px] font-semibold">Roster</h2><span className="text-[9px] text-ink-muted">Role · from Classroom</span>
+          </div>
+          {people.length === 0 ? <div className="p-4"><Empty title="No matching people" hint="Try another name." /></div> : <div className="divide-y divide-transparent">
+            {people.map((person) => <PersonRow key={person.id} person={person} />)}
+            {remaining > 0 && <div className="flex items-center gap-2.5 px-3 py-2.5"><span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-accent-soft text-[9px] text-accent">+</span><span><span className="block text-[10px] font-medium">View remaining {remaining} students</span><span className="block text-[9px] text-ink-muted">{workspace.course.studentCount} student records in Classroom</span></span><span className="ml-auto text-[9px] text-ink-muted">Student</span></div>}
+          </div>}
+        </Card>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="flex gap-3 bg-accent-soft/35"><ShieldCheck className="mt-0.5 size-5 shrink-0 text-accent" /><div><h2 className="font-serif text-lg font-semibold">People from Classroom</h2><p className="mt-1 text-sm leading-6 text-ink-muted">Roster names and course ownership are read-only in this frontend prototype.</p></div></Card>
-        <Card className="flex gap-3"><UserRound className="mt-0.5 size-5 shrink-0 text-ink-muted" /><div><h2 className="font-serif text-lg font-semibold">Account visibility</h2><p className="mt-1 text-sm leading-6 text-ink-muted">Student visibility preferences can be changed in Settings. No roster updates are sent externally.</p></div></Card>
+        <div className="space-y-3">
+          <Card className="space-y-2 p-3">
+            <h2 className="text-[13px] font-semibold">People from Classroom</h2>
+            <p className="text-[10px] font-medium">{workspace.people.filter((person) => person.role === 'Teacher').length} teacher · {workspace.course.studentCount} students</p>
+            <p className="text-[9px] leading-[14px] text-ink-muted">Names and roles update when the class is refreshed.</p>
+          </Card>
+          <Card className="space-y-2 p-3">
+            <div className="flex items-center gap-2"><ShieldCheck className="size-3.5 text-accent" /><h2 className="text-[13px] font-semibold">Account visibility</h2></div>
+            <p className="text-[9px] leading-[14px] text-ink-muted">Only roster fields returned to this connected account are shown. Contact details appear only when Classroom provides them.</p>
+          </Card>
+        </div>
       </div>
     </div>
   )
@@ -36,10 +48,10 @@ export function People({ workspace }: { workspace: TeacherWorkspace }) {
 
 function PersonRow({ person }: { person: TeacherRosterMember }) {
   return (
-    <div className="flex items-center gap-3 px-5 py-4">
-      <InitialAvatar initials={person.initials} />
-      <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{person.name}</p><p className="mt-0.5 text-xs text-ink-muted">{person.role}{person.isCourseOwner ? ' · Course owner' : ''}</p></div>
-      <StatusPill label={person.role === 'Teacher' ? 'Teacher' : 'Student'} tone={person.role === 'Teacher' ? 'accent' : 'neutral'} />
+    <div className="flex min-h-[38px] items-center gap-2.5 px-3 py-1.5">
+      <InitialAvatar initials={person.initials} className="size-[22px] text-[8px]" />
+      <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium">{person.name}</p><p className="text-[8px] text-ink-muted">{person.isCourseOwner ? 'Course owner' : person.role}</p></div>
+      <span className="w-16 text-[9px] text-ink-muted">{person.role}</span>
     </div>
   )
 }

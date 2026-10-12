@@ -38,23 +38,24 @@ describe('teacher presentation of the shared analysis workflow', () => {
 
     const claim = screen.getByText('The source supports this statement.')
     const originalPdf = screen.getByTestId('shared-page-viewer')
-    expect(originalPdf).toHaveTextContent('The paper')
+    expect(originalPdf).toHaveTextContent('Claim 1 in this paper')
     fireEvent.click(screen.getByRole('button', { name: /The source supports this statement/ }))
     const pdf = screen.getByTestId('shared-page-viewer')
     expect(pdf).toHaveAttribute('data-page', '4')
     expect(pdf).toHaveAttribute('data-verdict', 'supports')
     expect(pdf).toHaveTextContent('Claim 1 in the submission')
     expect(pdf.compareDocumentPosition(claim) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'CSV' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Professor result' })).toBeInTheDocument()
   })
 
-  it('keeps researcher copy and CSV controls out of the teacher analysis header', () => {
+  it('shows the Figma PDF, Copy All, and CSV toolbar for Teacher analysis', () => {
     render(<AnalysisView id="analysis-7" presentation="teacher" openPaperOnLoad />)
 
-    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'CSV' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
   })
 })

@@ -98,8 +98,11 @@ if [ "$VISION" = "1" ]; then
         --max-instances 1 --concurrency 4 --timeout 600
         --startup-probe "tcpSocket.port=8894,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1")
     if [ "$COLPALI_GPU" = "1" ]; then
+        # Manual scaling or a service-level minimum set in the Console overrides the
+        # revision's min 0 and survives a plain redeploy, billing the GPU all day.
+        # deploy/gpu-guard.sh also resets it every hour.
         colpali_flags+=(--gpu 1 --gpu-type "$GPU_TYPE" --no-gpu-zonal-redundancy
-            --cpu 8 --memory 32Gi --no-cpu-throttling)
+            --cpu 8 --memory 32Gi --no-cpu-throttling --scaling auto --min 0)
     else
         colpali_flags+=(--cpu 4 --memory 16Gi)
     fi
@@ -138,7 +141,7 @@ vllm_args_joined=$(
 gcloud run deploy vllm --image vllm/vllm-openai:v0.26.0 --region "$REGION" --quiet \
     --port 8000 --gpu 1 --gpu-type "$GPU_TYPE" --no-gpu-zonal-redundancy \
     --cpu "$GPU_CPU" --memory "$GPU_MEM" --no-cpu-throttling \
-    --max-instances 1 --min-instances "$MIN_INSTANCES" --concurrency 8 --timeout 900 \
+    --max-instances 1 --min-instances "$MIN_INSTANCES" --scaling auto --concurrency 8 --timeout 900 \
     --allow-unauthenticated \
     --startup-probe "tcpSocket.port=8000,failureThreshold=1800,periodSeconds=1,timeoutSeconds=1" \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
@@ -150,12 +153,19 @@ MODEL_ENV="VLLM_URL=$(url_of vllm)/v1,VLLM_MODEL=$VLLM_SERVED_NAME,VLLM_API_KEY=
 
 # --- gateway and UI -----------------------------------------------------------
 
+# Run history goes to Supabase when its keys are exported (deploy-gateway.yml always sets
+# them); without them the gateway falls back to SQLite on the container's disk.
+SUPABASE_ENV=""
+if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+    SUPABASE_ENV=",SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY"
+fi
+
 build_and_push gateway ./backend
 deploy gateway --port 8080 --memory 8Gi --allow-unauthenticated \
     --max-instances 1 --no-cpu-throttling --cpu 4 \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
     --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
-    --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV"
+    --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV$SUPABASE_ENV"
 
 build_and_push web ./frontend
 # 127.0.0.11 is Docker's DNS and does not exist here; nginx is pointed at the metadata
@@ -172,5 +182,7 @@ echo "ColBERT MCP: $(url_of colbert)/mcp"
 echo "Model:       $VLLM_HF_MODEL served as '$VLLM_SERVED_NAME' on a $GPU_TYPE"
 echo "             VLLM_API_KEY=$VLLM_API_KEY   (export it to keep the same key next deploy)"
 echo
-echo "Run history is SQLite on the container's disk and resets when an instance recycles."
-echo "Point ANALYSES_DB at Cloud SQL before anyone relies on it."
+if [ -z "$SUPABASE_ENV" ]; then
+    echo "Run history is SQLite on the container's disk and resets when an instance recycles."
+    echo "Export SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and deploy again to keep it in Supabase."
+fi

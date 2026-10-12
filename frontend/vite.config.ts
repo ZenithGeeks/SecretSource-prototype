@@ -68,6 +68,13 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     envDir: rootDir,
+    resolve: {
+      alias: {
+        // latex.js lists only its JS in `exports`, so its stylesheet (and the KaTeX fonts it
+        // references, which Vite then bundles) is reached through the package directory.
+        'latex.js/dist': fileURLToPath(new URL('./node_modules/latex.js/dist', import.meta.url)),
+      },
+    },
     server: {
       proxy: {
         '/api': {

@@ -1,0 +1,78 @@
+{
+  "from": "now-5m",
+  "to": "now",
+  "queries": [
+    {
+      "refId": "worker_up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "expr": "max(up{job=\"worker\"})",
+      "instant": true,
+      "range": false,
+      "intervalMs": 15000,
+      "maxDataPoints": 1
+    },
+    {
+      "refId": "redis_up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "expr": "max(rq_up)",
+      "instant": true,
+      "range": false,
+      "intervalMs": 15000,
+      "maxDataPoints": 1
+    },
+    {
+      "refId": "jobs",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "expr": "sum by (state) (rq_jobs)",
+      "instant": true,
+      "range": false,
+      "intervalMs": 15000,
+      "maxDataPoints": 1
+    },
+    {
+      "refId": "workers",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "expr": "sum(rq_workers)",
+      "instant": true,
+      "range": false,
+      "intervalMs": 15000,
+      "maxDataPoints": 1
+    },
+    {
+      "refId": "oldest_queued_s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "expr": "max(rq_oldest_queued_job_age_seconds)",
+      "instant": true,
+      "range": false,
+      "intervalMs": 15000,
+      "maxDataPoints": 1
+    },
+    {
+      "refId": "longest_running_s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "expr": "max(rq_longest_running_job_seconds)",
+      "instant": true,
+      "range": false,
+      "intervalMs": 15000,
+      "maxDataPoints": 1
+    }
+  ]
+}

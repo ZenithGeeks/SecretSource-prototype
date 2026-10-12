@@ -1,10 +1,10 @@
-import { Mail, Send, ShieldCheck } from 'lucide-react'
+import { Mail, RefreshCw, Send, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from '../../../components/ui'
 import { TeacherDialog } from '../components/TeacherDialog'
 
-export function FeedbackDialog({ open, studentName, recipientEmail, senderEmail, deliveryReady, deliveryIssue, preview, onClose, onSend }: {
+export function FeedbackDialog({ open, studentName, recipientEmail, senderEmail, deliveryReady, deliveryIssue, preview, onClose, onSend, onRefreshClassroom, onReconnectGoogle, refreshingClassroom = false, refreshClassroomError }: {
   open: boolean
   studentName: string
   recipientEmail: string | null | undefined
@@ -14,6 +14,10 @@ export function FeedbackDialog({ open, studentName, recipientEmail, senderEmail,
   preview: string
   onClose: () => void
   onSend: () => Promise<void>
+  onRefreshClassroom?: () => void
+  onReconnectGoogle?: () => void
+  refreshingClassroom?: boolean
+  refreshClassroomError?: string
 }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
@@ -44,6 +48,15 @@ export function FeedbackDialog({ open, studentName, recipientEmail, senderEmail,
           ? <span>Email will be sent from <strong className="font-semibold text-ink">{senderEmail}</strong> to <strong className="font-semibold text-ink">{recipientEmail}</strong> through the connected Gmail account.</span>
           : <span>{deliveryIssue} No email will be sent until this is resolved.</span>}
       </div>
+      {!deliveryReady && !recipientEmail && onRefreshClassroom && <div className="mt-3">
+        <Button type="button" variant="ghost" onClick={onRefreshClassroom} disabled={refreshingClassroom}>
+          <RefreshCw className={refreshingClassroom ? 'size-4 animate-spin' : 'size-4'} />{refreshingClassroom ? 'Syncing Classroom…' : 'Sync Classroom now'}
+        </Button>
+      </div>}
+      {!deliveryReady && onReconnectGoogle && <div className="mt-3">
+        <Button type="button" variant="ghost" onClick={onReconnectGoogle}>Reconnect Google for student email access</Button>
+      </div>}
+      {refreshClassroomError && <p role="alert" className="mt-2 text-sm text-refutes">Classroom could not be synced: {refreshClassroomError}</p>}
       {error && <p role="alert" className="mt-4 text-sm text-refutes">{error}</p>}
       <div className="mt-6 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close} disabled={sending}>Keep editing</Button><Button type="button" onClick={() => void send()} disabled={sending || !deliveryReady}><Send className="size-4" />{sending ? 'Sending...' : 'Send email'}</Button></div>
     </TeacherDialog>

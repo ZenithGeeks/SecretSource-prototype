@@ -1,0 +1,20 @@
+[
+  {
+    "annotations": {"summary": "synthetic"},
+    "labels": {"alertname": "WorkerDown", "severity": "critical"},
+    "status": {"state": "active", "silencedBy": [], "inhibitedBy": []},
+    "fingerprint": "aaaa"
+  },
+  {
+    "annotations": {},
+    "labels": {"alertname": "WorkerDown", "severity": "critical", "instance": "b"},
+    "status": {"state": "active", "silencedBy": [], "inhibitedBy": []},
+    "fingerprint": "bbbb"
+  },
+  {
+    "annotations": {},
+    "labels": {"alertname": "QueueBacklog"},
+    "status": {"state": "active", "silencedBy": [], "inhibitedBy": []},
+    "fingerprint": "cccc"
+  }
+]

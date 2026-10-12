@@ -13,11 +13,12 @@ GET  /papers/{name}/pages/{n}.png?dpi=110   -> that page rendered
 GET  /papers/{name}/find?q=...&page=N       -> where that text sits, as boxes
 GET  /user/preferences                      -> the signed-in user's stored settings patch
 PATCH /user/preferences  {"patch": {...}}   -> merges and returns the settings patch
-DELETE /user/data        -> deletes every analysis (and researcher project) the user owns
+DELETE /user/data?scope=all|researcher|author -> deletes what the user owns in that role (default: both)
 POST /user/avatar        multipart image -> {"url"}
 DELETE /user/avatar
 GET  /user/avatar/me     -> the avatar image
 POST /verify            {"claim", "source"} -> one verdict, outside any analysis
+/author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 GET  /health
 
 Analyses live in memory while they run. They are also written to SQLite (app/store.py)
@@ -47,7 +48,10 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from app import dependencies, researcher, store
+from app.analysis_table import AnalysisTable
 from app.auth import current_user
+from app.author.router import DRAFT_CHECK, author_pdfs
+from app.author.router import router as author_router
 from app.config import (
     AVATARS_DIR,
     PAPERS_DIR,
@@ -65,6 +69,7 @@ from app.metrics import (
     CLAIM_CHECKS_FAILED,
     CLAIM_VERDICTS,
 )
+from app.ownership import require_owner
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
@@ -91,7 +96,7 @@ DEFAULT_DPI, MAX_DPI = 110, 300
 # The request only sends a number, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
 
-analyses: dict[str, dict] = {}
+analyses = AnalysisTable()
 streams: dict[str, asyncio.Queue] = {}
 _deleted: set[str] = set()
 
@@ -139,6 +144,14 @@ def _apply_snapshot(snapshot: dict) -> None:
     replaces analyses[id], so it never mutates a dict another part of the process still holds.
     """
     analysis_id = snapshot["id"]
+    if snapshot.get("deleted"):
+        # Another instance deleted it: drop our copy and end any stream still open on it.
+        _deleted.add(analysis_id)
+        analyses.pop(analysis_id, None)
+        queue = streams.pop(analysis_id, None)
+        if queue is not None:
+            queue.put_nowait(None)
+        return
     if analysis_id in _deleted:
         return
     local = analyses.get(analysis_id)
@@ -233,12 +246,18 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 app.include_router(teacher_router)
+app.include_router(author_router)
 app.include_router(labeling_router)
 
 
 class AnalysisRequest(BaseModel):
     paper: str
     verify: bool = True
+
+
+class CheckRequest(BaseModel):
+    claim: str
+    source: str  # a DOI, arXiv id, or title — not the author-year label the UI shows (#204)
 
 
 _unsaved: set[str] = set()  # analyses changed since their last save started
@@ -424,6 +443,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
+        analysis["completed"] = datetime.now(timezone.utc).isoformat()
         await _publish(analysis_id, "done")
         _detach(_index_self(analysis_id, analysis["title"]))
     except Exception as error:
@@ -449,13 +469,14 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     an RQ worker."""
     analysis_id = uuid.uuid4().hex[:12]
     analysis = _new_analysis(analysis_id, paper, owner)
+    analysis["started"] = datetime.now(timezone.utc).isoformat()
     queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
     analysis["stages"].append(queued)
     analyses[analysis_id] = analysis
     streams[analysis_id] = asyncio.Queue()
     streams[analysis_id].put_nowait(queued)
     try:
-        enqueue_analysis(analysis_id, paper, verify, owner, [queued])
+        enqueue_analysis(analysis_id, paper, verify, owner, [queued], analysis["started"])
     except Exception:
         analyses.pop(analysis_id, None)
         streams.pop(analysis_id, None)
@@ -465,6 +486,14 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     # Stored now so a gateway restart before a worker picks the job up still finds it (else it
     # 404s, and the web app's event stream stops retrying). The worker's saves supersede this.
     _save_soon(analysis_id)
+    # Cloud Run can run several gateway instances, each with its own `analyses`. The others only
+    # learn of a run from a snapshot on Redis, and the worker sends its first one when it starts
+    # the job. Until then (minutes, while a worker is busy with another run) they answered 404 for
+    # this analysis (#259). Best-effort, like _publish: a later snapshot catches them up.
+    try:
+        redis_connection().publish(f"analysis:{analysis_id}", json.dumps(analysis, default=str))
+    except Exception as error:
+        logger.warning("publishing queued analysis %s to Redis failed: %s", analysis_id, error)
     return {"id": analysis_id}
 
 
@@ -472,25 +501,48 @@ def visible_to(user: str | None) -> list[dict]:
     """The analyses this exact user may read, oldest first: their own when signed in, or the
     ones with no owner when signed out (current_user() only ever returns None then). Every
     analysis is private to its owner; nothing here is shared across users."""
-    return [analysis for analysis in analyses.values() if analysis.get("owner") == user]
+    return analyses.owned_by(user)
 
 
-def _owned(analysis_id: str, user: str | None) -> dict:
-    """The analysis, if this exact user owns it (visible_to). Missing, or owned by someone
-    else, is a 404, not a 403, so an id does not tell anyone that it exists."""
-    analysis = analyses.get(analysis_id)
-    if analysis is None or analysis not in visible_to(user):
-        raise HTTPException(404, "no such analysis")
-    return analysis
+# What papers_of and the knowledge graph built for each owner, and the state of that owner's
+# analyses they were built from. A page image request runs papers_of each time, and the graph
+# rebuilds from every claim, so both are reused until one of the owner's rows changes.
+_derived: dict[tuple[str, str | None], tuple[tuple, object]] = {}
 
 
-def _mine(analysis_id: str, user: str | None) -> dict:
-    """The analysis, only if this exact user created it. Same test as visible_to(); kept as
-    its own function since deleting one's own analysis is a distinct action from reading it."""
-    analysis = analyses.get(analysis_id)
-    if analysis is None or analysis.get("owner") != user:
-        raise HTTPException(404, "no such analysis")
-    return analysis
+def _rows_state(rows: list[dict]) -> tuple:
+    """Changes whenever a row does. A worker snapshot replaces the row (a new object); in place,
+    the gateway only adds stages, ends a run (status), or records where the paper is indexed
+    after it is done (_index_self), and the graph reads that last one."""
+    return tuple(
+        (row["id"], id(row), row.get("status"), len(row.get("stages") or ()), "indexed_in" in row)
+        for row in rows
+    )
+
+
+def _per_owner(name: str, user: str | None, build):
+    rows = visible_to(user)
+    state = _rows_state(rows)
+    cached = _derived.get((name, user))
+    if cached is not None and cached[0] == state:
+        return cached[1]
+    value = build(rows)
+    _derived[(name, user)] = (state, value)
+    return value
+
+
+def _owned(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
+    """The analysis, if this exact user owns it (visible_to) and it is a `kind` row. Missing,
+    owned by someone else, or another kind (a check's id on an analysis route) is a 404, not
+    a 403, so an id does not tell anyone that it exists. The rule itself lives in
+    app/ownership.py, shared with the Author role's rows."""
+    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
+
+
+def _mine(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
+    """The analysis, only if this exact user created it. Same test as _owned(); kept as its
+    own function since deleting one's own analysis is a distinct action from reading it."""
+    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
 
 
 @app.post("/analyses")
@@ -529,9 +581,15 @@ async def upload_analysis(
 
 @app.get("/analyses")
 async def list_analyses(user: str | None = Depends(current_user)):
-    # The list leaves out what only one analysis's own view needs.
+    # The list leaves out what only one analysis's own view needs. Rows with no "kind" are
+    # older paper analyses; rows of kind "check" are single-claim checks saved before their
+    # routes were removed (#333), and stay out of the list.
     left_out = ("stages", "references", "markers", "outline")
-    return [{k: v for k, v in a.items() if k not in left_out} for a in reversed(visible_to(user))]
+    return [
+        {k: v for k, v in a.items() if k not in left_out}
+        for a in reversed(visible_to(user))
+        if a.get("kind", "paper") == "paper"
+    ]
 
 
 @app.get("/analyses/{analysis_id}")
@@ -548,6 +606,42 @@ async def _delete_one(analysis_id: str) -> None:
     streams.pop(analysis_id, None)
     await _saved(analysis_id)
     await asyncio.to_thread(store.delete, analysis_id)
+    # Tell the other instances, which may hold this row from the queued snapshot (#331). The
+    # tombstone carries only the id. Best-effort, like _publish.
+    try:
+        tombstone = json.dumps({"id": analysis_id, "deleted": True})
+        await asyncio.to_thread(redis_connection().publish, f"analysis:{analysis_id}", tombstone)
+    except Exception as error:
+        logger.warning("publishing the delete of analysis %s to Redis failed: %s", analysis_id, error)
+
+
+# A stage can take minutes with nothing to send. A comment line keeps proxies from closing
+# the idle stream; the web app skips events that carry no data.
+HEARTBEAT_SECONDS = 15
+
+
+async def _event_stream(item_id: str):
+    """Server-sent events: the stages already recorded, then each new one as it happens.
+    Shared by analyses and Author draft checks — both keep their stages on the same `analyses`
+    dict and publish to the same `streams` queue, so both get the keep-alive."""
+    replayed = list(analyses[item_id]["stages"])
+    for event in replayed:
+        yield f"data: {json.dumps(event)}\n\n"
+    if analyses[item_id]["status"] != "running":
+        return
+    # the queue still holds everything replayed above, in the same order
+    while True:
+        try:
+            event = await asyncio.wait_for(streams[item_id].get(), HEARTBEAT_SECONDS)
+        except TimeoutError:
+            yield ": keep-alive\n\n"
+            continue
+        if event is None:
+            return
+        if replayed:
+            replayed.pop(0)
+            continue
+        yield f"data: {json.dumps(event)}\n\n"
 
 
 @app.delete("/analyses/{analysis_id}")
@@ -561,53 +655,36 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
     return {"deleted": analysis_id}
 
 
-# A stage can take minutes with nothing to send. A comment line keeps proxies from closing
-# the idle stream; the web app skips events that carry no data.
-HEARTBEAT_SECONDS = 15
-
-
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
-    """Server-sent events: the stages already recorded, then each new one as it happens.
-    The web app reads this with fetch(), so its token travels in the Authorization header."""
+    """The web app reads this with fetch(), so its token travels in the Authorization header."""
     _owned(analysis_id, user)
+    return StreamingResponse(_event_stream(analysis_id), media_type="text/event-stream")
 
-    async def stream():
-        replayed = list(analyses[analysis_id]["stages"])
-        for event in replayed:
-            yield f"data: {json.dumps(event)}\n\n"
-        if analyses[analysis_id]["status"] != "running":
-            return
-        # the queue still holds everything replayed above, in the same order
-        while True:
-            try:
-                event = await asyncio.wait_for(streams[analysis_id].get(), HEARTBEAT_SECONDS)
-            except TimeoutError:
-                yield ": keep-alive\n\n"
-                continue
-            if event is None:
-                return
-            if replayed:
-                replayed.pop(0)
-                continue
-            yield f"data: {json.dumps(event)}\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+# The statuses an analysis or an Author draft check ends in; anything else means its task is
+# still writing.
+FINISHED = ("done", "error")
 
 
 # --- the paper itself, so the UI can show the page a claim or a passage came from ---
 
 
-def papers_of(user: str | None) -> set[str]:
+def papers_of(user: str | None) -> frozenset[str]:
     """The file names of the papers this user may open: the analysed paper of each analysis they
-    may read (visible_to), and each cited paper a check read for one of them."""
+    may read (visible_to), each cited paper a check read for one of them, and their Author
+    PDFs. The Author PDFs live outside `analyses`, so they are read each call, not cached."""
+    return _per_owner("papers", user, _paper_names) | author_pdfs(user)
+
+
+def _paper_names(rows: list[dict]) -> frozenset[str]:
     names = set()
-    for analysis in visible_to(user):
+    for analysis in rows:
         if analysis.get("file"):
             names.add(Path(analysis["file"]).name)
         for claim in analysis.get("claims", []):
             names.update(Path(v["source"]).name for v in claim.get("verdicts", []) if v.get("source"))
-    return names
+    return frozenset(names)
 
 
 def _paper(name: str, user: str | None) -> Path:
@@ -763,7 +840,7 @@ async def field_consensus(request: ConsensusRequest, user: str | None = Depends(
 
 @app.get("/researcher/graph")
 async def knowledge_graph(user: str | None = Depends(current_user)):
-    return await asyncio.to_thread(researcher.graph, visible_to(user))
+    return await asyncio.to_thread(_per_owner, "graph", user, researcher.graph)
 
 
 # --- account settings, shared by every role (Settings modal) ---
@@ -804,18 +881,36 @@ async def patch_preferences(request: PreferencesPatch, user: str | None = Depend
     return await asyncio.to_thread(_merge_preferences, user, request.patch)
 
 
-@app.delete("/user/data")
-async def delete_all_data(user: str | None = Depends(current_user)):
-    """Every analysis (and researcher project) this user owns — Settings → Your data →
-    Delete all. The confirm dialog is the UI's job; this call is unconditional.
+DELETE_SCOPES = ("all", "researcher", "author")
 
-    An analysis still running is skipped and counted in `skipped`: its worker keeps saving it,
-    so a deleted row would come back on the next restart (same reason as delete_analysis)."""
-    mine = visible_to(user)
+
+@app.delete("/user/data")
+async def delete_all_data(scope: str = "all", user: str | None = Depends(current_user)):
+    """Settings → Your data → Delete all. `scope` says whose data: `researcher` is the paper
+    analyses and researcher projects, `author` the draft checks and the Author role's projects,
+    drafts and saved sources, `all` (the default) both. Each role's Settings tab sends its own
+    scope, so a Researcher clearing papers keeps their Author drafts and the other way round
+    (PR #291 review). The confirm dialog is the UI's job; this call is unconditional.
+
+    An analysis still running is skipped and counted in `skipped`: a paper analysis's worker
+    keeps saving it, so a deleted row would come back on the next restart (same reason as
+    delete_analysis), and a draft check's in-process task keeps indexing `analyses`/`streams`,
+    so popping them here would make its next `_publish` raise after this call answered 200."""
+    if scope not in DELETE_SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(DELETE_SCOPES)}")
+    researcher = scope in ("all", "researcher")
+    author = scope in ("all", "author")
+    mine = [
+        analysis for analysis in visible_to(user)
+        if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
+    ]
     ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
-    await asyncio.to_thread(store.delete_projects, user)
+    if researcher:
+        await asyncio.to_thread(store.delete_projects, user)
+    if author:
+        await asyncio.to_thread(store.delete_author_rows, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 

@@ -22,7 +22,7 @@ import { useResetMockTeacherData, useTeacherClasses, useTeacherWorkspace } from 
 import { classResultsCsv } from '../lib/teacherSelectors'
 import { useSetSetting, useSetTeacherPreference } from '../lib/useAccountSettings'
 import { useAuth } from '../lib/useAuth'
-import { useClaims, useDrafts, useWriterActions } from '../lib/useWriter'
+import { authorApi } from '../lib/author'
 import { Avatar, Row, Section, Select, Toggle } from './settings'
 
 function Notice({ text }: { text: string }) {
@@ -367,7 +367,7 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
     if (!window.confirm('Delete all uploaded papers? This removes the files and every check made on them. This cannot be undone.')) return
     setBusy(true)
     try {
-      const { deleted, skipped } = await accountApi.deleteAllData()
+      const { deleted, skipped } = await accountApi.deleteAllData('researcher')
       await queryClient.invalidateQueries({ queryKey: ['researcher'] })
       await queryClient.invalidateQueries({ queryKey: ['analyses'] })
       setNotice(
@@ -416,28 +416,38 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
   )
 }
 
-function WriterYourData({ isPreview }: { isPreview: boolean }) {
-  const drafts = useDrafts()
-  const claims = useClaims()
-  const actions = useWriterActions()
+function AuthorYourData({ isPreview }: { isPreview: boolean }) {
+  const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
-  const exportLibrary = () => {
-    downloadText(
-      'secretsource-library.json',
-      JSON.stringify({ drafts: drafts.data ?? [], claims: claims.data ?? [] }, null, 2),
-      'application/json',
-    )
-    setNotice('Library exported.')
-  }
-
-  const deleteAll = () => {
-    if (!window.confirm('Delete all drafts? This removes every draft and check made on them. This cannot be undone.')) return
+  const exportLibrary = async () => {
     setBusy(true)
     try {
-      actions.deleteAll()
-      setNotice('Every draft was deleted.')
+      const data = await authorApi.exportData()
+      downloadText('secretsource-author.json', JSON.stringify(data, null, 2), 'application/json')
+      setNotice('Drafts, projects, sources and checks exported.')
+    } catch {
+      setNotice('Export failed — try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteAll = async () => {
+    if (!window.confirm('Delete all drafts? This removes every draft, project, saved source and check made on them. This cannot be undone.')) return
+    setBusy(true)
+    try {
+      const { skipped } = await accountApi.deleteAllData('author')
+      await queryClient.invalidateQueries({ queryKey: ['author'] })
+      await queryClient.invalidateQueries({ queryKey: ['analyses'] })
+      setNotice(
+        skipped > 0
+          ? `Every draft was deleted. ${skipped} check${skipped === 1 ? '' : 's'} still running ${skipped === 1 ? 'was' : 'were'} kept; delete again once ${skipped === 1 ? 'it finishes' : 'they finish'}.`
+          : 'Every draft was deleted.',
+      )
+    } catch {
+      setNotice('Delete failed — your drafts are still there. Try again.')
     } finally {
       setBusy(false)
     }
@@ -446,11 +456,11 @@ function WriterYourData({ isPreview }: { isPreview: boolean }) {
   return (
     <Section title="Your data">
       {notice && <Notice text={notice} />}
-      <Row label="Export your library" hint="Drafts and claims as a JSON file.">
+      <Row label="Export your library" hint="Drafts, projects, saved sources and checks as a JSON file.">
         <button
           type="button"
-          disabled={!drafts.data || !claims.data}
-          onClick={exportLibrary}
+          disabled={busy}
+          onClick={() => void exportLibrary()}
           className="rounded-lg px-4 py-2 text-sm font-medium text-ink-muted hover:bg-accent-soft disabled:opacity-50"
         >
           Export
@@ -460,14 +470,14 @@ function WriterYourData({ isPreview }: { isPreview: boolean }) {
         label="Delete all drafts"
         hint={
           isPreview
-            ? 'Removes every draft and check made on them. Switch to Author to delete.'
-            : 'Removes every draft and check made on them. This cannot be undone.'
+            ? 'Removes every draft, project, saved source and check made on them. Switch to Author to delete.'
+            : 'Removes every draft, project, saved source and check made on them. This cannot be undone.'
         }
       >
         <button
           type="button"
           disabled={busy || isPreview}
-          onClick={deleteAll}
+          onClick={() => void deleteAll()}
           className="text-sm font-medium text-refutes hover:underline disabled:opacity-50"
         >
           Delete all
@@ -532,7 +542,7 @@ function TeacherYourData({ isPreview }: { isPreview: boolean }) {
 
 export function YourDataSection({ role, isPreview }: { role: Role; isPreview: boolean }) {
   if (role === 'researcher') return <ResearcherYourData isPreview={isPreview} />
-  if (role === 'writer') return <WriterYourData isPreview={isPreview} />
+  if (role === 'writer') return <AuthorYourData isPreview={isPreview} />
   return <TeacherYourData isPreview={isPreview} />
 }
 
