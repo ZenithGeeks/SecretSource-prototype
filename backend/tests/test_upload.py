@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 def uploads(monkeypatch, tmp_path):
     monkeypatch.delenv("SUPABASE_URL", raising=False)  # login off: no token needed
     monkeypatch.setattr(main, "PAPERS_DIR", tmp_path)
-    started = []
+    enqueued = []
     monkeypatch.setattr(
         main, "enqueue_analysis",
-        lambda analysis_id, paper, verify, owner, stages, started_at=None: started.append(paper),
+        lambda analysis_id, paper, verify, owner, stages, started=None: enqueued.append(paper),
     )
     main.analyses.clear()
     main.streams.clear()
@@ -22,7 +22,7 @@ def uploads(monkeypatch, tmp_path):
 
     def upload(name: str, content: bytes) -> str:
         assert client.post("/analyses/upload", files={"file": (name, content)}).status_code == 200
-        return started[-1]
+        return enqueued[-1]
 
     return upload
 

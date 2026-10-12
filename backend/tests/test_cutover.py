@@ -232,6 +232,38 @@ def test_delete_succeeds_when_the_queued_job_is_cancelled(monkeypatch):
     assert "r1" not in main.analyses
 
 
+def test_delete_publishes_a_tombstone_for_the_other_instances(monkeypatch):
+    main.analyses["r3"] = {"id": "r3", "paper": "p.pdf", "status": "running", "owner": None,
+                            "stages": [], "claims": []}
+    channel = _Channel()
+    monkeypatch.setattr(main, "redis_connection", lambda: channel)
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: True)
+    monkeypatch.setattr(main.store, "delete", lambda analysis_id: True)
+
+    assert TestClient(main.app).delete("/analyses/r3").status_code == 200
+
+    assert [(name, json.loads(message)) for name, message in channel.published] == [
+        ("analysis:r3", {"id": "r3", "deleted": True})
+    ]
+
+
+def test_a_tombstone_removes_the_row_and_a_late_snapshot_does_not_bring_it_back():
+    """Instance B deleted the queued analysis; instance A, which took the upload, must drop it."""
+    row = {"id": "t1", "paper": "p.pdf", "status": "running", "owner": None,
+           "stages": [{"stage": "queued", "at": 1.0}], "claims": []}
+    main._apply_snapshot(row)
+    stream = main.streams["t1"]
+
+    main._apply_snapshot({"id": "t1", "deleted": True})
+
+    assert "t1" not in main.analyses
+    assert "t1" in main._deleted
+    assert "t1" not in main.streams
+    assert [stream.get_nowait(), stream.get_nowait()] == [{"stage": "queued", "at": 1.0}, None]
+    main._apply_snapshot({**row, "stages": row["stages"] + [{"stage": "extracting", "at": 2.0}]})
+    assert "t1" not in main.analyses
+
+
 def test_delete_refuses_when_the_job_already_started(monkeypatch):
     main.analyses["r2"] = {"id": "r2", "paper": "p.pdf", "status": "running", "owner": None,
                             "stages": [], "claims": []}

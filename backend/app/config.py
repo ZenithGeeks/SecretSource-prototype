@@ -178,3 +178,13 @@ def validate_teacher_google_settings() -> None:
 
 
 validate_teacher_google_settings()
+
+# The labeling page (app/labeling/) writes its rows to this Google Sheet. The service account
+# must be shared on the sheet as an editor. Without both settings the page shows setup steps.
+LABELING_SHEET_ID = os.getenv("LABELING_SHEET_ID", "").strip()
+LABELING_CREDENTIALS = (
+    os.getenv("LABELING_GOOGLE_CREDENTIALS") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or ""
+).strip()
+# Who may label, as e-mails or full names, comma separated. The labeling page writes to the
+# team's shared Sheet, and anyone can sign up, so with login on an empty list lets nobody in.
+LABELING_ALLOWED = [n.strip().lower() for n in os.getenv("LABELING_ALLOWED", "").split(",") if n.strip()]
