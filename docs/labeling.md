@@ -24,7 +24,7 @@ saved until someone saves it.
    reference you called relevant a 1-4 level and the reason (`1`-`4` keys label the reference on
    the right). **Save** writes that claim's rows; **Ctrl/⌘+S** works too.
 
-The 1-4 wording is `LEVELS` in `frontend/src/lib/labeling.ts`. Change it to the team's rubric.
+The 1-4 labels grade how well the reference passage backs the claim (1 no support, 2 weak, 3 clear, 4 strong). The wording is `LEVELS` in `frontend/src/lib/labeling.ts`.
 
 ## What lands in the Sheet
 
