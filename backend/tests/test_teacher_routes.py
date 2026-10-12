@@ -440,3 +440,66 @@ def test_grade_and_return_reports_partial_failure_after_grade_patch(teacher_clie
     )
     assert response.status_code == 502
     assert response.json()["detail"]["partial"] is True
+
+
+class _ImportClient:
+    def list_students(self, course_id):
+        return [{"userId": "s1"}, {"userId": "s2"}]
+
+    def list_teachers(self, course_id):
+        return [{"userId": "t1", "profile": {"name": {"fullName": "Ada"}}}]
+
+    def list_coursework(self, course_id):
+        link = {"link": {"url": "https://example.test/a", "title": "A"}}
+        return [{"id": "w1", "materials": [link]}, {"id": "w2"}]
+
+    def list_coursework_materials(self, course_id):
+        return [{"id": "m1", "materials": [{"link": {"url": "https://example.test/b"}}]}]
+
+    def list_announcements(self, course_id):
+        return [{"id": "n1", "text": "hi"}]
+
+    def list_topics(self, course_id):
+        return [{"topicId": "t1", "name": "Unit 1"}]
+
+
+class _ImportService:
+    client = _ImportClient()
+
+    def import_preview(self, owner):
+        return {"courses": [{"id": "course-9", "name": "Biology", "section": "B"}]}
+
+
+@pytest.fixture
+def import_client():
+    from app import main
+    from app.teacher import router as teacher_router_module
+
+    main.app.dependency_overrides[teacher_router_module.require_teacher_user] = lambda: "teacher-a"
+    main.app.dependency_overrides[teacher_router_module.get_sync_service] = lambda: _ImportService()
+    yield TestClient(main.app)
+    main.app.dependency_overrides.clear()
+
+
+COUNT_FIELDS = ("assignmentCount", "topicCount", "announcementCount", "linkedFileCount")
+
+
+def test_import_preview_returns_real_classroom_counts(import_client):
+    response = import_client.get("/teacher/classes/importable/course-9/preview")
+
+    assert response.status_code == 200
+    course = response.json()["course"]
+    assert course["assignmentCount"] == 2
+    assert course["topicCount"] == 1
+    assert course["announcementCount"] == 1
+    assert course["linkedFileCount"] == 2
+    assert course["studentCount"] == 2
+
+
+def test_importable_list_does_not_pretend_to_know_counts(import_client):
+    response = import_client.get("/teacher/classes/importable")
+
+    assert response.status_code == 200
+    [course] = response.json()
+    assert course["name"] == "Biology"
+    assert all(course[field] is None for field in COUNT_FIELDS)

@@ -219,7 +219,15 @@ def _course_view(course: TeacherCourse, coursework: list[TeacherCoursework] | No
     }
 
 
-def _raw_course_view(raw: dict[str, Any]) -> dict[str, Any]:
+_COUNT_FIELDS = ("assignmentCount", "topicCount", "announcementCount", "linkedFileCount")
+
+
+def _raw_course_view(raw: dict[str, Any], counts: dict[str, int] | None = None) -> dict[str, Any]:
+    """View of a not-yet-imported Classroom course.
+
+    The four content counts are ``None`` unless the caller fetched the course's
+    coursework and passes them in; the list endpoint does not.
+    """
     course = TeacherCourse(
         owner="",
         course_id=str(raw.get("id") or ""),
@@ -230,7 +238,10 @@ def _raw_course_view(raw: dict[str, Any]) -> dict[str, Any]:
         course_state=raw.get("courseState"),
         raw=raw,
     )
-    return _course_view(course)
+    view = _course_view(course)
+    for field in _COUNT_FIELDS:
+        view[field] = (counts or {}).get(field)
+    return view
 
 
 def _submission_view(submission: TeacherSubmission) -> dict[str, Any]:
@@ -647,8 +658,19 @@ def import_preview(
         announcements = client.list_announcements(course_id)
         topics = client.list_topics(course_id)
         raw_course = {**raw_course, "students": students, "teachers": teachers}
+        # Same definitions as _course_view uses for imported courses:
+        # linkedFileCount is the number of items (coursework, materials,
+        # announcements, topics) that carry at least one attachment.
+        counts = {
+            "assignmentCount": len(assignments),
+            "topicCount": len(topics),
+            "announcementCount": len(announcements),
+            "linkedFileCount": sum(
+                bool(_materials(item)) for item in (*assignments, *materials, *announcements, *topics)
+            ),
+        }
         return {
-            "course": _raw_course_view(raw_course),
+            "course": _raw_course_view(raw_course, counts),
             "resources": [
                 {"key": "course", "label": "Course", "count": 1, "detail": "Course details"},
                 {"key": "classwork", "label": "Classwork", "count": len(assignments), "detail": "Assignments and student submissions"},

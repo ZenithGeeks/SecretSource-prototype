@@ -117,6 +117,39 @@ def test_papers_of_sees_an_author_pdf_added_after_it_was_cached(gateway, monkeyp
     assert gateway.papers_of("a") == {"one.pdf", "draft-source.pdf"}
 
 
+def _draft_check(analysis_id, owner, pdf):
+    return {**_row(analysis_id, owner), "kind": "draft-check", "citations": [{"evidence": {"pdf": pdf}}]}
+
+
+@pytest.fixture
+def real_author_pdfs(gateway, monkeypatch):
+    from app.author import router
+
+    monkeypatch.setattr(router.store, "load_author_rows", lambda table, owner: [])
+    return router.author_pdfs
+
+
+def test_author_pdfs_lists_the_users_own_draft_check_pdf(gateway, real_author_pdfs):
+    gateway.analyses["d1"] = _draft_check("d1", "a", "papers/mine.pdf")
+    assert real_author_pdfs("a") == {"mine.pdf"}
+
+
+def test_author_pdfs_leaves_out_another_users_draft_check_pdf(gateway, real_author_pdfs):
+    gateway.analyses["d1"] = _draft_check("d1", "b", "papers/theirs.pdf")
+    gateway.analyses["d2"] = _draft_check("d2", "a", "papers/mine.pdf")
+    assert real_author_pdfs("a") == {"mine.pdf"}
+
+
+def test_author_pdfs_does_not_scan_every_users_analyses(gateway, real_author_pdfs, monkeypatch):
+    gateway.analyses["d1"] = _draft_check("d1", "a", "papers/mine.pdf")
+
+    def scan():
+        raise AssertionError("author_pdfs scanned every user's analyses")
+
+    monkeypatch.setattr(gateway.analyses, "values", scan)
+    assert real_author_pdfs("a") == {"mine.pdf"}
+
+
 def test_the_graph_is_rebuilt_when_a_paper_is_indexed_after_it_finished(gateway, monkeypatch):
     builds = []
     monkeypatch.setattr(

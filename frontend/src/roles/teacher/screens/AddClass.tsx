@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 
 import { Button, Card, Empty, Input } from '../../../components/ui'
 import { useTeacherClassImportPreview, useTeacherImportableClasses } from '../../../lib/useTeacher'
-import type { TeacherClass } from '../../../lib/teacher'
+import type { TeacherImportableClass } from '../../../lib/teacher'
 import { Breadcrumbs, LoadingState, StatusPill } from '../components/TeacherUi'
 
 export type AddClassStep = 'connect' | 'course' | 'review'
@@ -103,8 +103,8 @@ function CourseStep({ selectedCourseId, onContinue, onSelectCourse }: {
               <p className="mt-1 text-[9px] text-ink-muted">{selected.teacherName} · Section {selected.section}</p>
               <div className="my-2 border-t border-border-subtle" />
               <p className="text-[9px]">1 teacher · {selected.studentCount} students</p>
-              <p className="mt-2 text-[9px]">{selected.assignmentCount} classwork items · {selected.topicCount} topics</p>
-              <p className="mt-2 text-[9px]">{selected.announcementCount} announcements · linked Drive files</p>
+              {selected.assignmentCount != null && <p className="mt-2 text-[9px]">{selected.assignmentCount} classwork items · {selected.topicCount} topics</p>}
+              {selected.announcementCount != null && <p className="mt-2 text-[9px]">{selected.announcementCount} announcements · {selected.linkedFileCount} with linked files</p>}
               <StatusPill label="Read only" tone="accent" />
             </> : <p className="text-[10px] text-ink-muted">Select a course to review its details.</p>}
           </Card>
@@ -115,12 +115,12 @@ function CourseStep({ selectedCourseId, onContinue, onSelectCourse }: {
   )
 }
 
-function CourseChoice({ course, selected, onSelect }: { course: TeacherClass; selected: boolean; onSelect: (id: string) => void }) {
+function CourseChoice({ course, selected, onSelect }: { course: TeacherImportableClass; selected: boolean; onSelect: (id: string) => void }) {
   return (
     <button type="button" onClick={() => onSelect(course.id)} aria-pressed={selected} className={`min-h-[130px] w-full rounded-[11px] border px-3 py-3 text-left transition-colors ${selected ? 'border-2 border-accent bg-accent-soft' : 'border-border-subtle bg-surface hover:border-accent'}`}>
       <div className="flex items-center gap-3">{selected && <span className="size-1.5 rounded-full bg-accent" />}<h2 className="truncate text-[14px] font-semibold">{course.name} · {course.section}</h2>{selected && <span className="ml-auto text-[9px] text-accent">SELECTED</span>}</div>
       <p className="mt-2 text-[9px] text-ink-muted">Section {course.section} · Taught by {course.teacherName}</p>
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[9px] text-ink-muted"><span>{course.studentCount} people</span><span>{course.assignmentCount} classwork items</span><span>Updated today</span></div>
+      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[9px] text-ink-muted"><span>{course.studentCount} people</span>{course.assignmentCount != null && <span>{course.assignmentCount} classwork items</span>}<span>Updated today</span></div>
       <p className="mt-2 text-[8px] text-ink-muted">Course details and work are retrieved from Classroom.</p>
     </button>
   )
@@ -139,7 +139,7 @@ function ReviewStep({ courseId, onBack, onImport }: { courseId: string; onBack: 
       <StepBar active={2} />
       <Card className="flex min-h-[66px] items-center gap-3 px-4 py-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent"><BookOpen className="size-5" /></span>
-        <span className="min-w-0 flex-1"><span className="block truncate font-serif text-[16px] font-semibold">{course.name} · {course.section}</span><span className="block text-[9px] text-ink-muted">{course.subject} · {course.studentCount} students · {course.teacherName}</span></span>
+        <span className="min-w-0 flex-1"><span className="block truncate font-serif text-[16px] font-semibold">{course.name} · {course.section}</span><span className="block text-[9px] text-ink-muted">{course.subject} · {course.studentCount} students · {course.teacherName}</span><span className="block text-[9px] text-ink-muted">{course.assignmentCount} classwork items · {course.topicCount} topics · {course.announcementCount} announcements · {course.linkedFileCount} with linked files</span></span>
         <StatusPill label="Google Classroom" tone="accent" />
       </Card>
       <div className="grid gap-3 sm:grid-cols-2">

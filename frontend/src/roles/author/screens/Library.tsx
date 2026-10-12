@@ -5,7 +5,7 @@
  * Opening a card shows the project detail (597:4404); `?project=` deep-links it.
  */
 
-import { AlertCircle, ArrowRight, Bookmark, FileText, Upload } from 'lucide-react'
+import { AlertCircle, ArrowRight, Bookmark, FileText, Trash2, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
@@ -322,6 +322,17 @@ export function Library({
                   >
                     Copy BibTeX
                   </TextLink>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${source.title}`}
+                    onClick={() => {
+                      if (!window.confirm(`Delete ${source.title} from your saved sources? This cannot be undone.`)) return
+                      void actions.deleteSource(source.id).catch((error) => setToast(`Could not delete: ${errorMessage(error)}`))
+                    }}
+                    className="shrink-0 rounded text-ink-muted hover:text-refutes"
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  </button>
                 </li>
               ))}
             </ul>
