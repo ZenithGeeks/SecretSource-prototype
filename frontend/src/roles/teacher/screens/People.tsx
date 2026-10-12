@@ -1,57 +1,53 @@
-import { Search, ShieldCheck } from 'lucide-react'
+import { Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { Card, Empty, Input } from '../../../components/ui'
-import type { TeacherRosterMember, TeacherWorkspace } from '../../../lib/teacher'
-import { filterTeacherPeople } from '../../../lib/teacherSelectors'
+import type { TeacherWorkspace } from '../../../lib/teacher'
 import { InitialAvatar } from '../components/TeacherUi'
 
 export function People({ workspace }: { workspace: TeacherWorkspace }) {
   const [query, setQuery] = useState('')
-  const people = useMemo(() => filterTeacherPeople(workspace.people, query), [workspace.people, query])
-  const studentCount = workspace.people.filter((person) => person.role === 'Student').length
-  const remaining = Math.max(0, workspace.course.studentCount - studentCount)
+  const [showAll, setShowAll] = useState(false)
+  const emailsByStudent = new Map(workspace.submissions.filter((submission) => submission.studentEmail).map((submission) => [submission.studentId, submission.studentEmail!]))
+  const teachers = workspace.people.filter((person) => person.role === 'Teacher').map((person) => ({ ...person, email: undefined as string | undefined }))
+  const students = workspace.people.filter((person) => person.role === 'Student').map((person) => ({ ...person, email: emailsByStudent.get(person.id) }))
+  const normalized = query.trim().toLocaleLowerCase()
+  const filteredTeachers = useMemo(() => teachers.filter((person) => matches(person, normalized)), [teachers, normalized])
+  const filteredStudents = useMemo(() => students.filter((person) => matches(person, normalized)), [students, normalized])
+  const shownStudents = showAll || normalized ? filteredStudents : filteredStudents.slice(0, 5)
 
   return (
-    <div className="space-y-3">
-      <label className="relative block w-full sm:max-w-[586px]">
-        <span className="sr-only">Search students by name</span>
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
-        <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search students by name" className="h-[42px] rounded-lg pl-9 text-[12px]" />
-      </label>
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_248px]">
-        <Card className="min-h-[439px] overflow-hidden p-0">
-          <div className="flex items-center justify-between border-b border-border-subtle px-3 py-3">
-            <h2 className="text-[13px] font-semibold">Roster</h2><span className="text-[9px] text-ink-muted">Role · from Classroom</span>
-          </div>
-          {people.length === 0 ? <div className="p-4"><Empty title="No matching people" hint="Try another name." /></div> : <div className="divide-y divide-transparent">
-            {people.map((person) => <PersonRow key={person.id} person={person} />)}
-            {remaining > 0 && <div className="flex items-center gap-2.5 px-3 py-2.5"><span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-accent-soft text-[9px] text-accent">+</span><span><span className="block text-[10px] font-medium">View remaining {remaining} students</span><span className="block text-[9px] text-ink-muted">{workspace.course.studentCount} student records in Classroom</span></span><span className="ml-auto text-[9px] text-ink-muted">Student</span></div>}
-          </div>}
-        </Card>
+    <div className="mx-auto w-full max-w-[960px] space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div><p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Class roster</p><h2 className="mt-1 font-serif text-[28px] font-semibold leading-9">People</h2><p className="mt-1 text-[12px] text-ink-muted">{workspace.people.length} people in {workspace.course.name}.</p></div>
+        <label className="relative block w-full sm:max-w-[280px]"><span className="sr-only">Search people</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people" className="h-10 rounded-lg pl-9 text-[12px]" /></label>
+      </header>
 
-        <div className="space-y-3">
-          <Card className="space-y-2 p-3">
-            <h2 className="text-[13px] font-semibold">People from Classroom</h2>
-            <p className="text-[10px] font-medium">{workspace.people.filter((person) => person.role === 'Teacher').length} teacher · {workspace.course.studentCount} students</p>
-            <p className="text-[9px] leading-[14px] text-ink-muted">Names and roles update when the class is refreshed.</p>
-          </Card>
-          <Card className="space-y-2 p-3">
-            <div className="flex items-center gap-2"><ShieldCheck className="size-3.5 text-accent" /><h2 className="text-[13px] font-semibold">Account visibility</h2></div>
-            <p className="text-[9px] leading-[14px] text-ink-muted">Only roster fields returned to this connected account are shown. Contact details appear only when Classroom provides them.</p>
-          </Card>
-        </div>
-      </div>
+      <Card className="overflow-hidden p-0">
+        <RosterSection title="Teachers" count={filteredTeachers.length} people={filteredTeachers} empty="No teachers match this search." />
+        <div className="border-t border-border-subtle" />
+        <RosterSection title="Students" count={filteredStudents.length} people={shownStudents} empty="No students match this search." />
+        {!normalized && filteredStudents.length > 5 && <button type="button" onClick={() => setShowAll((value) => !value)} className="w-full border-t border-border-subtle px-5 py-3 text-left text-[11px] font-medium text-accent hover:bg-canvas">{showAll ? 'Show fewer students' : `Show all ${filteredStudents.length} students`}</button>}
+      </Card>
+
+      <div className="flex items-center gap-2 rounded-lg bg-accent-soft/55 px-4 py-3 text-[11px] text-ink-muted"><Users className="size-4 shrink-0 text-accent" />Roster details are synced from Google Classroom and are read-only in SecretSource.</div>
     </div>
   )
 }
 
-function PersonRow({ person }: { person: TeacherRosterMember }) {
-  return (
-    <div className="flex min-h-[38px] items-center gap-2.5 px-3 py-1.5">
-      <InitialAvatar initials={person.initials} className="size-[22px] text-[8px]" />
-      <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium">{person.name}</p><p className="text-[8px] text-ink-muted">{person.isCourseOwner ? 'Course owner' : person.role}</p></div>
-      <span className="w-16 text-[9px] text-ink-muted">{person.role}</span>
-    </div>
-  )
+type RosterPerson = { id: string; name: string; initials: string; role: string; email?: string }
+
+function RosterSection({ title, count, people, empty }: { title: string; count: number; people: RosterPerson[]; empty: string }) {
+  return <section aria-label={title}>
+    <div className="flex items-center justify-between px-5 py-3"><h3 className="text-[12px] font-semibold">{title}</h3><span className="text-[10px] text-ink-muted">{count}</span></div>
+    {people.length ? <div className="divide-y divide-border-subtle">{people.map((person) => <div key={person.id} className="flex min-h-[64px] items-center gap-3 px-5 py-2.5">
+      <InitialAvatar initials={person.initials} className="size-9 text-[11px]" />
+      <div className="min-w-0 flex-1"><p className="truncate text-[12px] font-medium">{person.name}</p>{person.email && <p className="mt-0.5 truncate text-[10px] text-ink-muted">{person.email}</p>}</div>
+      <span className="text-[10px] text-ink-muted">{person.role}</span>
+    </div>)}</div> : <div className="px-5 pb-4"><Empty title={empty} hint="Try a different name or email." /></div>}
+  </section>
+}
+
+function matches(person: RosterPerson, query: string) {
+  return !query || `${person.name} ${person.email ?? ''} ${person.role}`.toLocaleLowerCase().includes(query)
 }

@@ -511,8 +511,8 @@ export const MOCK_TEACHER_HOME: TeacherHome = {
     ],
   },
   mostMisusedSource: {
-    title: 'Khattab & Zaharia (2020)',
-    detail: '7 essays cite it for the 6-10x index reduction, which is a ColBERTv2 (2022) result.',
+    title: 'Ioffe & Szegedy 2015',
+    detail: '6 students cite it for a drop in covariate shift. The paper never measures one.',
   },
 }
 
