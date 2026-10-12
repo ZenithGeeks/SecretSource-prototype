@@ -100,6 +100,23 @@ export const TOPIC_INFO: Record<string, { name: string; venues: string; journal:
   HPC: { name: 'High-Performance Computing', venues: 'SC · IPDPS · HPDC', journal: 'IEEE TPDS' },
 }
 
+/**
+ * What to tell a person when a labeling call fails. The gateway's own text ("403: {"detail": ...}",
+ * setting names) is for logs, not for them: they get a sentence and what to do next.
+ */
+export function problem(error: unknown): { title: string; hint: string } {
+  const status = Number(/^(\d{3}):/.exec(error instanceof Error ? error.message : '')?.[1])
+  if (status === 401) return { title: 'Please sign in again', hint: 'Your session has ended.' }
+  if (status === 403) return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
+  if (status === 404)
+    return { title: 'This paper is not available', hint: 'It may have been deleted, or its owner has stopped sharing it.' }
+  if (status === 409) return { title: 'This paper is not ready', hint: 'Its analysis has not finished. Try again in a moment.' }
+  if (status === 422) return { title: 'That was not accepted', hint: 'Reload the page and try again.' }
+  if (status === 503)
+    return { title: 'The labeling Sheet is not set up yet', hint: 'Ask whoever runs the gateway to finish the setup.' }
+  return { title: 'Something went wrong', hint: 'Try again in a moment. If it keeps happening, tell the team.' }
+}
+
 export type Pool = {
   topics: string[]
   me: string
