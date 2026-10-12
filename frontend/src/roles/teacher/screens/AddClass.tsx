@@ -104,7 +104,7 @@ function CourseStep({ selectedCourseId, onContinue, onSelectCourse }: {
               <div className="my-2 border-t border-border-subtle" />
               <p className="text-[9px]">1 teacher · {selected.studentCount} students</p>
               {selected.assignmentCount != null && <p className="mt-2 text-[9px]">{selected.assignmentCount} classwork items · {selected.topicCount} topics</p>}
-              {selected.announcementCount != null && <p className="mt-2 text-[9px]">{selected.announcementCount} announcements · linked Drive files</p>}
+              {selected.announcementCount != null && <p className="mt-2 text-[9px]">{selected.announcementCount} announcements · {selected.linkedFileCount} with linked files</p>}
               <StatusPill label="Read only" tone="accent" />
             </> : <p className="text-[10px] text-ink-muted">Select a course to review its details.</p>}
           </Card>
@@ -139,7 +139,7 @@ function ReviewStep({ courseId, onBack, onImport }: { courseId: string; onBack: 
       <StepBar active={2} />
       <Card className="flex min-h-[66px] items-center gap-3 px-4 py-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent"><BookOpen className="size-5" /></span>
-        <span className="min-w-0 flex-1"><span className="block truncate font-serif text-[16px] font-semibold">{course.name} · {course.section}</span><span className="block text-[9px] text-ink-muted">{course.subject} · {course.studentCount} students · {course.teacherName}</span></span>
+        <span className="min-w-0 flex-1"><span className="block truncate font-serif text-[16px] font-semibold">{course.name} · {course.section}</span><span className="block text-[9px] text-ink-muted">{course.subject} · {course.studentCount} students · {course.teacherName}</span><span className="block text-[9px] text-ink-muted">{course.assignmentCount} classwork items · {course.topicCount} topics · {course.announcementCount} announcements · {course.linkedFileCount} with linked files</span></span>
         <StatusPill label="Google Classroom" tone="accent" />
       </Card>
       <div className="grid gap-3 sm:grid-cols-2">
