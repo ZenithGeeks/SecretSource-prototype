@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   puts: [] as { path: string; body: unknown }[],
+  statusError: '',
   pool: {
     topics: ['CV', 'NLP', 'SE', 'HPC'],
     me: 'Chanya',
@@ -25,6 +26,7 @@ vi.mock('../src/lib/api', async (original) => ({
       gateway.puts.push({ path, body: JSON.parse(String(init.body)) })
       return {}
     }
+    if (path === '/labeling/status' && gateway.statusError) throw new Error(gateway.statusError)
     if (path === '/labeling/status') return { annotator: 'Chanya', configured: true, sheet_url: '', share_with: '' }
     if (path === '/labeling/pool') return gateway.pool
     throw new Error(`unexpected ${path}`)
@@ -51,6 +53,7 @@ function renderQueue() {
 describe('topics in the queue', () => {
   beforeEach(() => {
     gateway.puts.length = 0
+    gateway.statusError = ''
   })
 
   it('lists shared papers with the viewer\'s own topic first', async () => {
@@ -77,5 +80,13 @@ describe('topics in the queue', () => {
         { path: '/labeling/papers/mine/topic', body: { topic: 'SE' } },
       ]),
     )
+  })
+
+  it('tells a person what went wrong in plain words, never the gateway\'s own text', async () => {
+    gateway.statusError = '403: {"detail":"this account is not on the labeling team (LABELING_ALLOWED)"}'
+    renderQueue()
+    expect(await screen.findByText("You can't use the labeler")).toBeInTheDocument()
+    expect(screen.queryByText(/LABELING_ALLOWED|detail/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 })

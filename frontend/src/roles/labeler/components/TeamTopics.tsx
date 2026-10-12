@@ -1,7 +1,7 @@
 /** Who labels which topic. Anyone on the team can set anyone's, so the lead can hand out work. */
 
 import { Card } from '../../../components/ui'
-import { TOPIC_INFO, useAssignTopic, type Pool } from '../../../lib/labeling'
+import { problem, TOPIC_INFO, useAssignTopic, type Pool } from '../../../lib/labeling'
 import { TopicSelect } from './TopicSelect'
 
 export function TeamTopics({ pool }: { pool: Pool }) {
@@ -37,7 +37,11 @@ export function TeamTopics({ pool }: { pool: Pool }) {
           </li>
         ))}
       </ul>
-      {assign.isError && <p role="alert" className="text-xs text-refutes">{assign.error.message}</p>}
+      {assign.isError && (
+        <p role="alert" className="text-xs text-refutes">
+          {problem(assign.error).title}. {problem(assign.error).hint}
+        </p>
+      )}
     </Card>
   )
 }
