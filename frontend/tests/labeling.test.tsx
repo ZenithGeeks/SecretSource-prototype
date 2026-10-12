@@ -44,8 +44,19 @@ vi.mock('../src/lib/api', async (original) => ({
   api: { findInPaper: vi.fn(async () => ({ page: null, boxes: [] })) },
 }))
 vi.mock('../src/components/PageViewer', () => ({
-  PageViewer: ({ target }: { target: { paper: string; quote?: string } }) => (
-    <div data-testid="viewer">{target.paper}|{target.quote}</div>
+  PageViewer: ({
+    target,
+    onSelectText,
+  }: {
+    target: { paper: string; quote?: string }
+    onSelectText?: (s: { text: string; page: number | null }) => void
+  }) => (
+    <div>
+      <div data-testid="viewer">{target.paper}|{target.quote}</div>
+      <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
+        select in {target.paper}
+      </button>
+    </div>
   ),
 }))
 
@@ -185,5 +196,66 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     fireEvent.keyDown(window, { key: '4' })
     expect(screen.getByRole('radio', { name: /4 · Strong/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  const open = async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Workspace analysisId="a1" />
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+  }
+
+  it('adds text selected in the reference as evidence, with its page', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    expect(screen.getByRole('region', { name: 'Selected text' })).toHaveTextContent('picked in refB.pdf')
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.queryByRole('region', { name: 'Selected text' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /Not relevant/ })[0])
+    fireEvent.click(screen.getAllByRole('radio', { name: /Not relevant/ })[1])
+    fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0]).toMatchObject({
+      candidates: expect.arrayContaining([
+        { claim_id: 'paperA#0', reference_id: 'refB', cand_id: '', origin: 'human_added', status: 'relevant', page: 4, passage: 'picked in refB.pdf' },
+      ]),
+      labels: [{ reference_id: 'refB', evidence: 3, spans: ['picked in refB.pdf'] }],
+    })
+  })
+
+  it('files selected text under the paper it was selected in, even if the right pane moved on', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0]) // moves the right pane's focus
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0]).toMatchObject({
+      candidates: expect.arrayContaining([expect.objectContaining({ origin: 'human_added', reference_id: 'refB', passage: 'picked in refB.pdf' })]),
+    })
+  })
+
+  it('will not add evidence before the claim is decided, and says why', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    expect(screen.getByRole('button', { name: 'Add as evidence' })).toBeDisabled()
+    expect(screen.getByText('Decide on the claim first: keep or edit it.')).toBeInTheDocument()
+  })
+
+  it('uses text selected in the paper as the claim wording, or as a new claim', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: "Use as this claim's wording" }))
+    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByDisplayValue('picked in paperA.pdf')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as a new claim' }))
+    expect(screen.getByText(/· added/)).toBeInTheDocument()
   })
 })
