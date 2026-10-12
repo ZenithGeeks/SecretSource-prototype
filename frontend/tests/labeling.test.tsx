@@ -240,6 +240,23 @@ describe('the workspace', () => {
     })
   })
 
+  it('hides the claim list for wider papers, remembers it, and steps between claims', async () => {
+    window.localStorage.removeItem('labeler.claimsHidden')
+    await open()
+    expect(screen.getByRole('navigation', { name: /claims/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Wider papers' }))
+    expect(screen.queryByRole('navigation', { name: /claims/i })).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('labeler.claimsHidden')).toBe('1')
+    expect(screen.getByText('Claim 1 of 2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Previous claim' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Next claim' }))
+    expect(screen.getByText('Claim 2 of 2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next claim' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Show claims' }))
+    expect(screen.getByRole('navigation', { name: /claims/i })).toBeInTheDocument()
+    window.localStorage.removeItem('labeler.claimsHidden')
+  })
+
   it('will not add evidence before the claim is decided, and says why', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))

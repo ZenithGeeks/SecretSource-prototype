@@ -7,10 +7,11 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
-import { Empty, LoadingScreen } from '../../../components/ui'
+import { Button, Empty, LoadingScreen } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import {
   type AddedPassage,
@@ -38,7 +39,17 @@ import { PassageList, type Focus } from '../components/PassageList'
 import { SaveBar } from '../components/SaveBar'
 import { SelectionBar, type Picked } from '../components/SelectionBar'
 
-const VIEWER_HEIGHT = 'h-[60vh]'
+// The two papers are what is read for long stretches, so they fill the screen under the header.
+const VIEWER_HEIGHT = 'h-[calc(100dvh-7rem)] min-h-[32rem]'
+
+const NAV_KEY = 'labeler.claimsHidden'
+const storedHidden = () => {
+  try {
+    return window.localStorage.getItem(NAV_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 function useWide() {
   const query = '(min-width: 1280px)'
@@ -85,6 +96,7 @@ function Body({ session }: { session: Session }) {
   const [overlay, setOverlay] = useState<'paper' | 'reference' | null>(null)
   const [savedRows, setSavedRows] = useState<number | null>(null)
   const [picked, setPicked] = useState<Picked | null>(null) // text just selected in a PDF
+  const [claimsHidden, setClaimsHidden] = useState(storedHidden) // more room for the papers
   const wide = useWide()
   const save = useSaveLabels(session.analysis_id)
 
@@ -169,6 +181,7 @@ function Body({ session }: { session: Session }) {
     error: found.isError ? 'Could not look up where this passage is.' : undefined,
   }
   const { done, total } = progress(claims, drafts)
+  const position = claims.findIndex((c) => c.claim_id === currentId)
   const refs = referencesOf(claim, draft)
   const viewer = (target: Target, side: Picked['side'], onClose?: () => void) => (
     <PageViewer
@@ -217,6 +230,36 @@ function Body({ session }: { session: Session }) {
           <h1 className="truncate font-serif text-xl font-semibold text-ink">{session.title}</h1>
           <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            aria-pressed={claimsHidden}
+            onClick={() => {
+              setClaimsHidden(!claimsHidden)
+              try {
+                window.localStorage.setItem(NAV_KEY, claimsHidden ? '0' : '1')
+              } catch {
+                // the choice just is not remembered
+              }
+            }}
+          >
+            {claimsHidden ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            {claimsHidden ? 'Show claims' : 'Wider papers'}
+          </Button>
+          {claimsHidden && (
+            <div className="flex items-center gap-1" role="group" aria-label="Move between claims">
+              <Button variant="ghost" aria-label="Previous claim" disabled={position <= 0} onClick={() => select(claims[position - 1].claim_id)}>
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="text-xs text-ink-muted tabular-nums">
+                Claim {position + 1} of {claims.length}
+              </span>
+              <Button variant="ghost" aria-label="Next claim" disabled={position >= claims.length - 1} onClick={() => select(claims[position + 1].claim_id)}>
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          )}
+        </div>
         <div className="w-full max-w-xs">
           <p className="mb-1 text-xs text-ink-muted tabular-nums">
             {done} of {total} claims finished
@@ -227,7 +270,8 @@ function Body({ session }: { session: Session }) {
         </div>
       </header>
 
-      <div className="grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)]">
+      <div className={claimsHidden ? 'grid gap-4' : 'grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)]'}>
+        {!claimsHidden && (
         <ClaimNav
           claims={claims}
           drafts={drafts}
@@ -235,6 +279,7 @@ function Body({ session }: { session: Session }) {
           onSelect={select}
           onAdd={addClaim}
         />
+        )}
 
         <div className="flex min-w-0 flex-col gap-4">
           {wide ? (
