@@ -432,7 +432,7 @@ def test_scopus_query_is_the_topics_open_access_venues_with_safe_text():
     assert 'SRCTITLE("Empirical Methods in Natural Language Processing")' in q
     assert "OPENACCESS(1)" in q and "PUBYEAR > 2020" in q
     assert 'TITLE-ABS-KEY("late interaction x")' in q  # query syntax stripped, spaces collapsed
-    assert 'SRCTITLE("Supercomputing")' not in q  # another topic's venue
+    assert 'SRCTITLE("High-Performance Parallel and Distributed Computing")' not in q  # another topic's venue
 
 
 def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
@@ -534,6 +534,12 @@ def test_scopus_search_says_when_it_is_not_set_up(api, monkeypatch):
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
     assert client.get("/labeling/scopus/search", params={"topic": "NLP"}).status_code == 503
     assert client.get("/labeling/scopus/search", params={"topic": "Cooking"}).status_code == 422
+
+
+def test_every_venue_name_is_specific_enough_to_match_only_that_venue():
+    # "Supercomputing" matched a journal and "Computer Vision and Pattern Recognition" a book series
+    # when checked against the live Scopus index; short names do that.
+    assert all(len(venue.split()) >= 4 for venues in scopus.VENUES.values() for venue in venues)
 
 
 C0, C1 = "paperA-0123456789ab#0", "paperA-0123456789ab#1"
