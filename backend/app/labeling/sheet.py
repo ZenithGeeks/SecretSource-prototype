@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app import config
-from app.labeling.schema import TABS
+from app.labeling.schema import ALL_TABS
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -60,7 +60,7 @@ class GoogleSheet:
                 return
             meta = api.get(spreadsheetId=self.sheet_id, fields="sheets.properties.title").execute()
             have = {s["properties"]["title"] for s in meta.get("sheets", [])}
-            missing = [tab for tab in TABS if tab not in have]
+            missing = [tab for tab in ALL_TABS if tab not in have]
             if missing:
                 api.batchUpdate(
                     spreadsheetId=self.sheet_id,
@@ -71,7 +71,7 @@ class GoogleSheet:
                     spreadsheetId=self.sheet_id,
                     range=f"{tab}!A1",
                     valueInputOption="RAW",
-                    body={"values": [TABS[tab]]},
+                    body={"values": [ALL_TABS[tab]]},
                 ).execute()
             self._ready = True
 
@@ -94,7 +94,7 @@ class GoogleSheet:
             range=f"{tab}!A1",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
-            body={"values": [[row.get(column, "") for column in TABS[tab]] for row in rows]},
+            body={"values": [[row.get(column, "") for column in ALL_TABS[tab]] for row in rows]},
         ).execute()
 
 

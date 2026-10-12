@@ -22,20 +22,36 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app import config
+from app import auth, config
 from app.auth import current_user
-from app.labeling import sheet
+from app.labeling import pool, sheet
 from app.labeling.identity import annotator
-from app.labeling.schema import TABS, SaveIn, current
+from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, TopicIn, current
 
 router = APIRouter(prefix="/labeling", tags=["labeling"])
 
 
-async def owned_analysis(analysis_id: str, user: str | None = Depends(current_user)) -> dict:
+async def mine_analysis(analysis_id: str, user: str | None = Depends(current_user)) -> dict:
     """The caller's own analysis. Imported late: main imports this router."""
     from app import main
 
     return await asyncio.to_thread(main._owned, analysis_id, user)
+
+
+async def owned_analysis(analysis_id: str, user: str | None = Depends(current_user)) -> dict:
+    """The caller's own analysis, or one its owner shared with the labeling team."""
+    from app import main
+
+    def load() -> dict:
+        try:
+            return main._owned(analysis_id, user)
+        except HTTPException:
+            row = main.analyses.get(analysis_id)
+            if row and row.get("kind", "paper") == "paper" and analysis_id in pool.pooled():
+                return row
+            raise
+
+    return await asyncio.to_thread(load)
 
 
 def _store() -> sheet.Store:
@@ -136,6 +152,73 @@ async def session(analysis: dict = Depends(owned_analysis), who: str = Depends(a
     built = build_session(analysis)
     rows = {tab: await asyncio.to_thread(store.read, tab) for tab in TABS}
     return {**built, "annotator": who, **_mine_and_others(rows, who, built["paper_id"])}
+
+
+def _team() -> list[str]:
+    """Everyone with an account, by the name their rows are written under."""
+    if not auth._supabase_configured():
+        return []
+    from app import store
+
+    try:
+        users = store._supabase().auth.admin.list_users()
+    except Exception:  # the list is a convenience; the page still works without it
+        return []
+    names = set()
+    for user in users:
+        meta = getattr(user, "user_metadata", None) or {}
+        name = str(meta.get("full_name") or "").strip() or str(user.email or "").split("@")[0]
+        if name:
+            names.add(name)
+    return sorted(names)
+
+
+@router.get("/pool")
+async def pool_state(who: str = Depends(annotator)):
+    """Topics, who has which, and the papers shared with the team."""
+    from app import main
+
+    def build() -> dict:
+        topics = pool.people()
+        names = sorted({*_team(), *topics, who})
+        shared = []
+        for analysis_id, topic in pool.pooled().items():
+            row = main.analyses.get(analysis_id)
+            if row and row.get("status") == "done" and row.get("claims"):
+                title = row.get("title") or Path(row.get("file") or analysis_id).name
+                shared.append(
+                    {"analysis_id": analysis_id, "title": title, "topic": topic, "claims": len(row["claims"])}
+                )
+        return {
+            "topics": TOPICS,
+            "me": who,
+            "people": [{"name": n, "topic": topics.get(n, "")} for n in names],
+            "papers": shared,
+        }
+
+    return await asyncio.to_thread(build)
+
+
+@router.put("/people")
+async def set_person_topic(body: PersonTopicIn, who: str = Depends(annotator)):
+    if body.name != who and body.name not in await asyncio.to_thread(_team):
+        raise HTTPException(422, f"{body.name} is not on the team")
+    _store()
+    await asyncio.to_thread(pool.assign, who, "person", body.name, body.topic)
+    return {"name": body.name, "topic": body.topic}
+
+
+@router.put("/papers/{analysis_id}/topic")
+async def set_paper_topic(
+    body: TopicIn, analysis: dict = Depends(mine_analysis), who: str = Depends(annotator)
+):
+    """Share one of your own analyses with the team under a topic, or take it back with ""."""
+    _paper_id(analysis)
+    _store()
+    await asyncio.to_thread(
+        pool.assign, who, "paper", analysis["id"], body.topic, analysis.get("owner") or ""
+    )
+    return {"analysis_id": analysis["id"], "topic": body.topic}
 
 
 def _stamp(who: str, paper_id: str) -> dict:
