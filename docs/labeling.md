@@ -9,7 +9,7 @@ saved until someone saves it.
 
 1. Create a Google service account, enable the Sheets API, download its key file.
 2. In `.env` set `LABELING_SHEET_ID` (from the Sheet's URL), `LABELING_GOOGLE_CREDENTIALS` (the key
-   file path) and `LABELING_ALLOWED` (the four members' e-mails or full names).
+   file path). Anyone who signs in can label.
 3. Share the Sheet with the service account's address as an **Editor**. The page shows the address
    under "The Sheet is not set up yet" until the settings are in.
 
