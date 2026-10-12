@@ -13,14 +13,17 @@ from app import config
 URL = "https://api.elsevier.com/content/search/scopus"
 PAGE = 15  # the standard Scopus key allows at most 25 records per request
 
-# The team's domains and where each one publishes. SRCTITLE matches the words of a source title,
-# so these are the names Scopus indexes the venues under: edit them if a venue is missing.
+# The team's domains and where each one publishes. SRCTITLE matches the words of a source title, so
+# these are chosen from what Scopus really returns (checked against the live index, 2026-10): a name
+# too short pulls in the wrong venue ("Supercomputing" is a journal, "Computer Vision and Pattern
+# Recognition" is also a Springer book series). ECCV is left out: Scopus files it under a generic book
+# series, so it cannot be searched by name. Scopus flags few CVPR papers as open access, so CV is
+# mostly TPAMI and ICCV. Edit the lists if a venue is missing.
 VENUES: dict[str, list[str]] = {
     "CV": [
-        "Computer Vision and Pattern Recognition",
-        "International Conference on Computer Vision",
-        "European Conference on Computer Vision",
-        "Pattern Analysis and Machine Intelligence",
+        "Conference on Computer Vision and Pattern Recognition",
+        "IEEE International Conference on Computer Vision",
+        "IEEE Transactions on Pattern Analysis and Machine Intelligence",
     ],
     "NLP": [
         "Annual Meeting of the Association for Computational Linguistics",
@@ -31,14 +34,14 @@ VENUES: dict[str, list[str]] = {
     "SE": [
         "International Conference on Software Engineering",
         "Foundations of Software Engineering",
-        "Automated Software Engineering",
-        "Transactions on Software Engineering",
+        "International Conference on Automated Software Engineering",
+        "IEEE Transactions on Software Engineering",
     ],
     "HPC": [
-        "Supercomputing",
+        "High Performance Computing, Networking, Storage and Analysis",
         "International Parallel and Distributed Processing Symposium",
         "High-Performance Parallel and Distributed Computing",
-        "Transactions on Parallel and Distributed Systems",
+        "IEEE Transactions on Parallel and Distributed Systems",
     ],
 }
 
