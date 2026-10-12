@@ -17,10 +17,10 @@ export type CandidateStatus = 'relevant' | 'rejected'
 
 /** What each level of the 1-4 label means. The team's rubric: edit the words here. */
 export const LEVELS: { level: Level; name: string; hint: string }[] = [
-  { level: 1, name: 'None', hint: 'The reference does not say this, or only speculates.' },
-  { level: 2, name: 'Weak', hint: 'Related, but small, uncontrolled or indirect evidence.' },
-  { level: 3, name: 'Good', hint: 'Controlled comparison or replicated result that backs the claim.' },
-  { level: 4, name: 'Strong', hint: 'Direct, reproduced or pooled evidence (meta-analysis, many studies).' },
+  { level: 1, name: 'No support', hint: 'The passage does not back the claim, or says something else.' },
+  { level: 2, name: 'Weak', hint: 'Related, but indirect, vague or only partly backs the claim.' },
+  { level: 3, name: 'Clear', hint: 'The passage backs the claim, with a gap in scope or detail.' },
+  { level: 4, name: 'Strong', hint: 'The passage states the claim directly and fully.' },
 ]
 
 export type Candidate = {
