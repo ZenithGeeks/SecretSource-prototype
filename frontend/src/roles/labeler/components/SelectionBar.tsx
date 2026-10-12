@@ -4,7 +4,8 @@ import { Quote, X } from 'lucide-react'
 
 import { Button } from '../../../components/ui'
 
-export type Picked = { side: 'paper' | 'reference'; text: string; page: number | null }
+/** `file`: the PDF it was selected in, so it is not attributed to whatever is on screen later. */
+export type Picked = { side: 'paper' | 'reference'; file: string; text: string; page: number | null }
 
 const SHOWN = 240
 

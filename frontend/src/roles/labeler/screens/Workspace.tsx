@@ -176,7 +176,7 @@ function Body({ session }: { session: Session }) {
       onClose={onClose}
       className={VIEWER_HEIGHT}
       keyboard={false}
-      onSelectText={(s) => setPicked({ side, ...s })}
+      onSelectText={(s) => setPicked({ side, file: target.paper, ...s })}
     />
   )
 
@@ -192,11 +192,12 @@ function Body({ session }: { session: Session }) {
 
   // Text selected in the reference becomes evidence for this claim, the same as one typed in.
   const addEvidence = () => {
-    if (!picked || !refId || !focus) return
-    const p: AddedPassage = { reference_id: refId, page: picked.page, passage: picked.text.slice(0, 1500) }
+    const referenceId = session.references.find((r) => r.file === picked?.file)?.reference_id
+    if (!picked || !referenceId) return
+    const p: AddedPassage = { reference_id: referenceId, page: picked.page, passage: picked.text.slice(0, 1500) }
     if (!draft.added.some((a) => a.reference_id === p.reference_id && a.passage === p.passage)) {
       patch({ added: [...draft.added, p] })
-      setFocus({ file: focus.file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
+      setFocus({ file: picked.file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
     }
     setPicked(null)
   }
@@ -204,8 +205,8 @@ function Body({ session }: { session: Session }) {
     ? 'Decide on the claim first: keep or edit it.'
     : draft.status === 'rejected'
       ? 'This claim is rejected. Keep or edit it to add evidence.'
-      : !refId
-        ? 'No reference paper is open.'
+      : !session.references.some((r) => r.file === picked?.file)
+        ? 'That paper is not one of this analysis\'s references.'
         : null
 
   return (

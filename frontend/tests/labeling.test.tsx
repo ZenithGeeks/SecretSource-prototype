@@ -227,6 +227,19 @@ describe('the workspace', () => {
     })
   })
 
+  it('files selected text under the paper it was selected in, even if the right pane moved on', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0]) // moves the right pane's focus
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save to the Sheet/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0]).toMatchObject({
+      candidates: expect.arrayContaining([expect.objectContaining({ origin: 'human_added', reference_id: 'refB', passage: 'picked in refB.pdf' })]),
+    })
+  })
+
   it('will not add evidence before the claim is decided, and says why', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
