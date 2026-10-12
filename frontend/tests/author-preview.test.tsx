@@ -146,7 +146,7 @@ describe('PreviewPane', () => {
 
     fireEvent.click(page().querySelector('.ss-cite[data-verdict="refutes"]')!)
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('source contradicts')
+    expect(dialog).toHaveTextContent('Source contradicts')
     expect(dialog).toHaveTextContent('[1] Khattab & Zaharia, 2020')
     expect(dialog).toHaveTextContent('1 of 3 issues')
     expect(screen.queryByRole('button', { name: /Find a replacement/ })).not.toBeInTheDocument()

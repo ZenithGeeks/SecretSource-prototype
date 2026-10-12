@@ -1,186 +1,67 @@
 /**
- * 10 Field consensus (Researcher) — ask the library one claim, see how every paper answers.
+ * Ask the field (Researcher) — ask the library one claim, see how every paper answers.
  * Data comes from useFieldConsensus: the claims in the user's analysed papers that match the
- * question, with the verdicts and quotes already found. The input drives the query on "Ask library".
+ * question, with the verdicts and quotes already found. The input drives the query on "Ask".
+ * Figma: Ask the field. The question box stays on screen while a new question loads, so a slow
+ * answer never wipes what the reader typed (#226).
  */
 
-import { Bookmark, Copy, Download, Search, Sparkles } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Empty, FadeIn, Input, LoadingScreen, VerdictBadge } from '../../../components/ui'
-import { csvText, downloadText } from '../../../lib/csv'
-import type { FieldConsensus as ConsensusData } from '../../../lib/researcher'
+import { Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { useFieldConsensus } from '../../../lib/useResearcher'
-
-/** The stats, note, verdict table and export actions — everything that needs a loaded answer.
- * Split out so the question form above it can stay on screen while a new question is loading:
- * the query's `data` goes back to undefined on every question change, and returning null for
- * the whole screen in that case used to wipe the form along with the results (#226). */
-function ConsensusResults({
-  consensus,
-  saved,
-  setSaved,
-  copied,
-  setCopied,
-  onOpenAnalysis,
-}: {
-  consensus: ConsensusData
-  saved: boolean
-  setSaved: (saved: boolean) => void
-  copied: boolean
-  setCopied: (copied: boolean) => void
-  onOpenAnalysis: (id: string) => void
-}) {
-  const copyParagraph = async () => {
-    const text =
-      consensus.note +
-      '\n\n' +
-      consensus.rows
-        .map((r) => `${r.paper} (${r.cite}) — ${r.verdict}: “${r.quote}”`)
-        .join('\n')
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const downloadCsv = () => {
-    const rows = [
-      ['Paper', 'Cite', 'Verdict', 'Quote'],
-      ...consensus.rows.map((r) => [r.paper, r.cite, r.verdict, r.quote]),
-    ]
-    downloadText('field-consensus.csv', csvText(rows), 'text/csv;charset=utf-8')
-  }
-
-  const stats = [
-    { value: String(consensus.supports), label: 'papers support', className: 'text-supports' },
-    { value: String(consensus.refutes), label: 'papers contradict', className: 'text-refutes' },
-    { value: String(consensus.silent), label: 'are silent', className: 'text-insufficient' },
-    { value: consensus.span, label: 'span', className: 'text-ink' },
-  ]
-
-  return (
-    <>
-      {/* Summary stats */}
-      <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row">
-        {stats.map((s) => (
-          <div key={s.label} className="flex-1 rounded-xl border border-border-subtle bg-surface px-4 py-3">
-            <p className={`font-serif text-2xl font-semibold tracking-tight ${s.className}`}>{s.value}</p>
-            <p className="text-xs text-ink-muted">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Consensus note */}
-      <div className="flex items-start gap-2 rounded-xl bg-accent-soft px-4 py-3">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-accent" />
-        <p className="text-[13px] text-ink">{consensus.note}</p>
-      </div>
-
-      {/* Verdict table */}
-      <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
-        <div className="hidden gap-4 px-5 py-3 text-xs font-medium text-ink-muted sm:flex">
-          <span className="w-56 shrink-0">Paper</span>
-          <span className="w-36 shrink-0">Verdict</span>
-          <span className="flex-1">Deciding passage</span>
-        </div>
-        {consensus.rows.map((row) => (
-          <div
-            key={`${row.analysis}-${row.claimIndex}-${row.paper}-${row.verdict}`}
-            className="flex flex-col gap-2 border-t border-border-subtle px-4 py-3 sm:flex-row sm:gap-4 sm:px-5"
-          >
-            <div className="sm:w-56 sm:shrink-0">
-              <p className="text-sm font-medium text-ink">{row.paper}</p>
-              <p className="text-xs text-ink-muted">{row.cite}</p>
-            </div>
-            <div className="sm:w-36 sm:shrink-0">
-              <VerdictBadge verdict={row.verdict} />
-            </div>
-            <div className="min-w-0 flex-1">
-              {row.quote && <p className="font-serif text-[13px] italic text-ink-muted">“{row.quote}”</p>}
-              <p className="mt-1 text-xs text-ink-muted">On the claim: {row.claim}</p>
-              <button
-                type="button"
-                onClick={() => onOpenAnalysis(row.analysis)}
-                className="text-xs font-medium text-accent hover:underline"
-              >
-                open the analysis
-              </button>
-            </div>
-          </div>
-        ))}
-        {consensus.unlisted > 0 && (
-          <div className="border-t border-border-subtle px-5 py-3 text-xs text-ink-muted">
-            {consensus.unlisted} more verdicts match. Ask a narrower question to see them.
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => setSaved(true)}>
-          <Bookmark className="size-4" />
-          {saved ? 'Saved ✓' : 'Save this question'}
-        </Button>
-        <Button variant="ghost" onClick={copyParagraph}>
-          <Copy className="size-4" />
-          {copied ? 'Copied ✓' : 'Copy as related-work paragraph'}
-        </Button>
-        <Button variant="ghost" onClick={downloadCsv}>
-          <Download className="size-4" />
-          CSV
-        </Button>
-      </div>
-    </>
-  )
-}
+import { FieldCountTiles, FieldVerdictTable } from '../components/FieldResults'
 
 export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
-  const [saved, setSaved] = useState(false)
-  const [copied, setCopied] = useState(false)
   const { data: consensus, isError, isPending } = useFieldConsensus(question)
 
   return (
-    <>
+    <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pt-4 pb-12">
       <header className="flex flex-col gap-2">
-        <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">
-          What does the field say about…
-        </h1>
-        <form
-          className="flex flex-col gap-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setQuestion(draft)
-          }}
-        >
-          <Input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="e.g. does late interaction generalize out of domain?"
-            className="max-w-2xl"
-          />
-          <Button type="submit" className="shrink-0">
-            <Search className="size-4" />
-            Ask library
-          </Button>
-        </form>
+        <p className="type-label text-accent">Across your library</p>
+        <h1 className="type-display tracking-[-0.01em] text-ink">What does your library say?</h1>
       </header>
+
+      <form
+        className="flex items-center gap-2.5 rounded-xl border-[1.5px] border-accent bg-surface py-1.5 pr-1.5 pl-3.5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          setQuestion(draft)
+        }}
+      >
+        <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="e.g. does late interaction generalize out of domain?"
+          aria-label="Your question"
+          className="min-w-0 flex-1 bg-transparent text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted"
+        />
+        <button
+          type="submit"
+          className="shrink-0 rounded-[9px] bg-accent px-3 py-[7px] text-[13px] leading-[18px] font-medium text-white hover:opacity-90"
+        >
+          Ask
+        </button>
+      </form>
 
       {isPending && <LoadingScreen label="Checking your library…" />}
       {isError && <Empty title="That question could not be checked" hint="Refresh the page and try again." />}
       {consensus && (
-        <FadeIn className="flex flex-col gap-4">
-          <ConsensusResults
-            consensus={consensus}
-            saved={saved}
-            setSaved={setSaved}
-            copied={copied}
-            setCopied={setCopied}
-            onOpenAnalysis={onOpenAnalysis}
-          />
+        <FadeIn className="flex flex-col gap-6">
+          {consensus.rows.length === 0 ? (
+            consensus.note && <p className="text-[15px] text-ink-muted">{consensus.note}</p>
+          ) : (
+            <>
+              <FieldCountTiles consensus={consensus} />
+              <FieldVerdictTable consensus={consensus} onOpenAnalysis={onOpenAnalysis} />
+            </>
+          )}
         </FadeIn>
       )}
-    </>
+    </div>
   )
 }

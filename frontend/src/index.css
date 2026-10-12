@@ -2,18 +2,49 @@
 
 /* Figma's Teacher screens use Geist for interface copy and Fraunces for display headings.
    Keep these overrides role-scoped so the other role frontends retain their own typography. */
-.teacher-app {
-  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+.teacher-app,
+.researcher-app {
+  font-family: var(--font-ui);
 }
 
-.teacher-app .font-sans {
-  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+.teacher-app .font-sans,
+.researcher-app .font-sans {
+  font-family: var(--font-ui);
 }
 
-.teacher-app .font-serif {
-  font-family: 'Fraunces', Georgia, serif;
+.teacher-app .font-serif,
+.researcher-app .font-serif {
+  font-family: var(--font-display);
   font-optical-sizing: auto;
   font-variation-settings: 'SOFT' 0, 'WONK' 1;
+}
+
+/* Researcher type scale (Figma notes). Display: Fraunces SemiBold 36/45. Title: Geist
+   SemiBold 20/25. Label: Geist SemiBold 11, uppercase, +4% tracking. Paper text uses
+   `font-paper` (Crimson Pro). Quoted evidence is Fraunces Italic: `font-serif italic`. */
+.type-display {
+  font-family: var(--font-display);
+  font-size: 36px;
+  line-height: 45px;
+  font-weight: 600;
+  font-optical-sizing: auto;
+  font-variation-settings: 'SOFT' 0, 'WONK' 1;
+}
+
+.type-title {
+  font-family: var(--font-ui);
+  font-size: 20px;
+  line-height: 25px;
+  font-weight: 600;
+}
+
+.type-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* One palette. @theme defines the light values; the dark ones override the same custom
@@ -37,6 +68,9 @@
   --color-refutes-soft: oklch(0.95 0.045 29);
   --color-insufficient: oklch(0.52 0.1 80); /* #8a6414 */
   --color-insufficient-soft: oklch(0.95 0.05 80);
+  /* "Not checked" / "No citation": an absence of an answer, so neither red, amber nor green. */
+  --color-neutral: oklch(0.55 0.01 320);
+  --color-neutral-soft: oklch(0.93 0.006 85);
 
   /* LaTeX source colours in the Author editor (CodeMirror's default light palette, which is
      what the Figma frame shows): commands, braces, math, comments. */
@@ -46,6 +80,11 @@
   --color-code-comment: oklch(0.55 0.14 60); /* #aa5500 */
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Geist/Fraunces/Crimson Pro get their own tokens: --font-sans is left alone so the Author
+     role keeps its fonts. Researcher/Teacher roots map .font-sans/.font-serif onto these. */
+  --font-ui: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-paper: 'Crimson Pro', Georgia, serif;
 }
 
 /* Dark values live in one place, applied two ways: automatically when the OS is dark AND no
@@ -68,6 +107,8 @@
     --color-refutes-soft: oklch(0.28 0.06 29);
     --color-insufficient: oklch(0.82 0.11 80);
     --color-insufficient-soft: oklch(0.3 0.05 80);
+    --color-neutral: oklch(0.72 0.012 322);
+    --color-neutral-soft: oklch(0.3 0.01 320);
 
     --color-code-command: oklch(0.8 0.13 150);
     --color-code-brace: oklch(0.72 0.03 105);
@@ -92,6 +133,8 @@
   --color-refutes-soft: oklch(0.28 0.06 29);
   --color-insufficient: oklch(0.82 0.11 80);
   --color-insufficient-soft: oklch(0.3 0.05 80);
+  --color-neutral: oklch(0.72 0.012 322);
+  --color-neutral-soft: oklch(0.3 0.01 320);
 
   --color-code-command: oklch(0.8 0.13 150);
   --color-code-brace: oklch(0.72 0.03 105);
