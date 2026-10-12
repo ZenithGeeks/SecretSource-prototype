@@ -56,6 +56,7 @@ from app.config import (
     PARALLEL_SOURCES,
     PARALLEL_SOURCES_TOTAL,
 )
+from app.labeling.router import router as labeling_router
 from app.metrics import (
     ANALYSES_FINISHED,
     ANALYSES_STARTED,
@@ -232,6 +233,7 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 app.include_router(teacher_router)
+app.include_router(labeling_router)
 
 
 class AnalysisRequest(BaseModel):

@@ -4,14 +4,14 @@
  * owners will fill in.
  */
 
-import { CheckCircle2, GraduationCap, Microscope, Pen } from 'lucide-react'
+import { CheckCircle2, ClipboardCheck, GraduationCap, Microscope, Pen } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useState } from 'react'
 
 import { Brand } from '../components/Brand'
 import { cn } from '../lib/utils'
 
-export type Role = 'researcher' | 'writer' | 'teacher'
+export type Role = 'researcher' | 'writer' | 'teacher' | 'labeler'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -47,6 +47,17 @@ const ROLES: { id: Role; title: string; desc: string; icon: Icon; bullets: strin
       'Verify sources in student essays',
       'Reading questions from any paper',
       'Class library, shared with students',
+    ],
+  },
+  {
+    id: 'labeler',
+    title: 'Labeler',
+    desc: 'Build the labeled dataset the optimizer and evaluation use.',
+    icon: ClipboardCheck,
+    bullets: [
+      'Check each claim against its reference, side by side',
+      'You decide every label; the AI only suggests',
+      'Rows save straight to the team Sheet',
     ],
   },
 ]

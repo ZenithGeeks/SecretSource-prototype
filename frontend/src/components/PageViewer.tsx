@@ -160,9 +160,16 @@ export function PageViewer({
   onClose,
   markers = [],
   references = {},
+  className,
+  keyboard = true,
 }: {
   target: Target
-  onClose: () => void
+  /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
+  onClose?: () => void
+  /** Height of the side panel, instead of the full-height default. */
+  className?: string
+  /** Escape and the arrow keys act on this viewer. Off when two are on screen at once. */
+  keyboard?: boolean
   /** Citation markers of this paper. Only passed when the viewer shows the analysed paper. */
   markers?: CitationMarker[]
   references?: Record<string, Citation>
@@ -245,19 +252,20 @@ export function PageViewer({
   // Escape closes an open reference first, then the full-window view, then the viewer.
   // Arrows page, unless the reader is typing somewhere.
   useEffect(() => {
+    if (!keyboard) return
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.key === 'Escape') {
         if (opened) setOpened(null)
         else if (expanded && !narrow) setExpanded(false)
-        else onClose()
+        else onClose?.()
       }
       if (event.key === 'ArrowLeft') scrollToPage(Math.max(1, page - 1))
       if (event.key === 'ArrowRight') scrollToPage(Math.min(pageCount || page, page + 1))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, opened, expanded, narrow, page, pageCount, scrollToPage])
+  }, [keyboard, onClose, opened, expanded, narrow, page, pageCount, scrollToPage])
 
   const zoomIndex = ZOOMS.indexOf(zoom)
   const openMarker = opened && opened.target === target ? opened.marker : null
@@ -278,7 +286,7 @@ export function PageViewer({
           'flex flex-col gap-3 overflow-hidden border-border-subtle bg-surface',
           narrow
             ? 'fixed inset-0 z-50 p-3'
-            : cn('rounded-xl border p-4', fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : 'h-[calc(100vh-3rem)]'),
+            : cn('rounded-xl border p-4', fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : (className ?? 'h-[calc(100vh-3rem)]')),
         )}
       >
         <header className="flex items-start justify-between gap-3">
@@ -299,9 +307,11 @@ export function PageViewer({
                 {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
               </IconButton>
             )}
-            <IconButton label="Close the page view" onClick={onClose}>
-              <X className="size-4" />
-            </IconButton>
+            {onClose && (
+              <IconButton label="Close the page view" onClick={onClose}>
+                <X className="size-4" />
+              </IconButton>
+            )}
           </div>
         </header>
 

@@ -1,0 +1,62 @@
+/** What is left on this claim, and the buttons that write it to the Sheet. */
+
+import { Check, Loader2 } from 'lucide-react'
+
+import { Button } from '../../../components/ui'
+
+export function SaveBar({
+  left,
+  dirty,
+  saving,
+  error,
+  savedRows,
+  hasNext,
+  onSave,
+}: {
+  left: string[]
+  dirty: boolean
+  saving: boolean
+  error: string | null
+  savedRows: number | null
+  hasNext: boolean
+  onSave: (next: boolean) => void
+}) {
+  return (
+    <div className="sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3">
+      {left.length > 0 ? (
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+          {left.map((item) => (
+            <li key={item}>• {item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="flex items-center gap-1.5 text-xs text-supports">
+          <Check className="size-4" /> Every decision for this claim is made.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="rounded-lg bg-refutes-soft px-3 py-2 text-sm text-refutes">
+          Not saved: {error}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={() => onSave(false)} disabled={saving || !dirty}>
+          {saving && <Loader2 className="size-4 animate-spin" />}
+          Save to the Sheet
+        </Button>
+        {hasNext && (
+          <Button variant="ghost" onClick={() => onSave(true)} disabled={saving || !dirty}>
+            Save and next claim
+          </Button>
+        )}
+        <span aria-live="polite" className="text-xs text-ink-muted">
+          {dirty
+            ? 'Unsaved changes · Ctrl/⌘+S saves'
+            : savedRows != null
+              ? `Saved ${savedRows} row${savedRows === 1 ? '' : 's'}`
+              : 'Nothing changed'}
+        </span>
+      </div>
+    </div>
+  )
+}
