@@ -46,16 +46,19 @@ jobs:
       # CUDA build. NumPy <2.4 because this runner (ss-core) has no SSE4.2 and NumPy 2.4+
       # refuses to import there (app/native.py). The image apt-installs libGL for opencv; this
       # host has no libGL, so opencv-python is swapped for the headless build of the same
-      # version, which is the same cv2 without the GUI libraries. A fresh venv each run:
+      # version, which is the same cv2 without the GUI libraries (skipped when only the headless
+      # build was resolved). A fresh venv each run:
       # checkout cleans the workspace, and the runner's own Python stays as it was.
       - name: Install
         run: |
           python -m venv .venv
           .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           .venv/bin/pip install -r requirements-dev.txt "numpy<2.4"
-          version=$(.venv/bin/python -c "import importlib.metadata as m; print(m.version('opencv-python'))")
-          .venv/bin/pip uninstall -y opencv-python
-          .venv/bin/pip install "opencv-python-headless==$version"
+          if .venv/bin/pip show opencv-python >/dev/null 2>&1; then
+            version=$(.venv/bin/python -c "import importlib.metadata as m; print(m.version('opencv-python'))")
+            .venv/bin/pip uninstall -y opencv-python
+            .venv/bin/pip install "opencv-python-headless==$version"
+          fi
       # Unit tests only: tests/conftest.py replaces Redis. REDIS_URL points at a closed port, so
       # the real-Redis tests skip and never publish test analyses to production Redis, which
       # runs on this same machine.
