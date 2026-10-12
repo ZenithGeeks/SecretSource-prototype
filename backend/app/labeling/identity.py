@@ -1,7 +1,7 @@
 """Who is labeling: the name written to every row's `annotator` column.
 
 It comes from the Supabase account behind the token, never from the request body, so nobody can
-label as somebody else. With login on, only the people in LABELING_ALLOWED get in.
+label as somebody else. Anyone signed in may label.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import time
 
 from fastapi import HTTPException, Request
 
-from app import auth, config
+from app import auth
 
 CACHE_SECONDS = 300
 LOCAL = "local"  # login is off: one shared space, as everywhere else in the gateway
@@ -40,11 +40,6 @@ def _profile(token: str) -> tuple[str, str]:
     return profile
 
 
-def allowed(name: str, email: str) -> bool:
-    wanted = {name.lower(), email.lower(), email.split("@")[0].lower()} - {""}
-    return bool(wanted & set(config.LABELING_ALLOWED))
-
-
 async def annotator(request: Request) -> str:
     """FastAPI dependency: the labeler's name, or 401/403."""
     if not auth._supabase_configured():
@@ -53,6 +48,4 @@ async def annotator(request: Request) -> str:
     if not token:
         raise HTTPException(401, "sign in to use SecretSource")
     name, email = await asyncio.to_thread(_profile, token)
-    if not allowed(name, email):
-        raise HTTPException(403, "this account is not on the labeling team (LABELING_ALLOWED)")
     return name or email.split("@")[0]
