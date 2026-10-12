@@ -1,17 +1,24 @@
 /**
- * The role shell every signed-in screen renders inside: brand + nav in a sidebar, the
- * active role chip at the bottom, content in main. Role-agnostic — each role passes its
- * own nav items and chip, so researcher/writer/teacher share one layout.
+ * The role shell every signed-in screen renders inside: a solid sidebar (brand, nav, a slot
+ * for the role's own list, profile footer) and, beside it, a translucent sticky toolbar over
+ * the scrolling content. Role-agnostic — each role passes its own nav items, so
+ * researcher/writer/teacher share one layout.
  *
- * `sidebar` goes under the nav (the researcher's past analyses on History); `wide` lets
- * the shell grow for a screen that shows a PDF page beside its content.
+ * `sidebar` goes under the nav (the researcher's recent analyses); `wide` lets the shell grow
+ * for a screen that shows a PDF page beside its content.
  *
- * Figma: NavItem (default/active) and RoleChip from the Components page.
+ * Toolbar: pass `breadcrumb` (["Analyses", "group-norm-2018.pdf"], the last item is the
+ * current page) to show it, and fill its right side from any screen with
+ * `<ToolbarActions>...</ToolbarActions>`, which portals into the shell's toolbar. Without a
+ * `breadcrumb` there is no toolbar and ToolbarActions renders nothing.
+ *
+ * Figma: R/Sidebar (Redesign 2026) for the sidebar, the Results screen for the toolbar.
  */
 
-import { LogOut, Menu, Settings as SettingsIcon, X } from 'lucide-react'
+import { ChevronRight, LogOut, Menu, Settings as SettingsIcon, X } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useSettings } from '../lib/settings'
 import { authEnabled } from '../lib/supabase'
@@ -24,17 +31,40 @@ type Icon = ComponentType<{ className?: string }>
 
 export type NavEntry<K extends string = string> = { key: K; label: string; icon: Icon }
 
-/** Avatar initials from the display name ("Alex S." → "AS"). */
+/** Where ToolbarActions portals to: the toolbar's right side, or null when there is no toolbar. */
+const ToolbarSlot = createContext<HTMLElement | null>(null)
+
+/** Screen actions for the shell toolbar's right side ("Open PDF", "Export"). Render it
+ * anywhere inside the shell's children; it appears in the toolbar and unmounts with the screen. */
+export function ToolbarActions({ children }: { children: ReactNode }) {
+  const slot = useContext(ToolbarSlot)
+  return slot ? createPortal(children, slot) : null
+}
+
+/** Avatar initials from the display name ("Alex S." -> "AS"). */
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '?'
   return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
-/** The profile button + upward menu at the sidebar bottom: identity, Settings (when the role
- * passes onOpenSettings), and Sign out (only when auth is on — with no Supabase configured
- * signOut is a no-op). `active` highlights the button while its Settings screen is showing. */
-function ProfileMenu({ onOpenSettings, active }: { onOpenSettings?: () => void; active?: boolean }) {
+/** The profile footer: avatar, name, role and a settings gear. The row opens an upward menu
+ * (identity, role change, Settings when the role passes onOpenSettings, Sign out only when auth
+ * is on — with no Supabase configured signOut is a no-op). The gear opens Settings directly.
+ * `active` highlights the row while its Settings screen is showing. */
+function ProfileMenu({
+  role,
+  roleIcon,
+  onChangeRole,
+  onOpenSettings,
+  active,
+}: {
+  role: string
+  roleIcon: Icon
+  onChangeRole?: () => void
+  onOpenSettings?: () => void
+  active?: boolean
+}) {
   const { displayName } = useSettings()
   const { session } = useAuth()
   // Prefer the signed-in identity: full_name is set on sign-up (Auth.tsx) and by Google. The
@@ -69,39 +99,59 @@ function ProfileMenu({ onOpenSettings, active }: { onOpenSettings?: () => void; 
     }
   }, [open])
 
+  const lit = open || active
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
+      <div
         className={cn(
-          'flex w-full items-center gap-2.5 rounded-lg border px-2 py-2 text-left transition-colors',
-          open || active
-            ? 'border-accent bg-accent-soft'
-            : 'border-border-subtle hover:border-accent',
+          'flex items-center gap-1 rounded-[10px] transition-colors',
+          lit ? 'bg-accent-soft' : 'hover:bg-accent-soft/60',
         )}
       >
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
-          {initials(name)}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{name}</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] border p-2 text-left',
+            lit ? 'border-accent' : 'border-transparent',
+          )}
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border-subtle bg-accent-soft text-[13px] font-semibold text-accent">
+            {initials(name).slice(0, 1)}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[13px] leading-[18px] font-medium text-ink">{name}</span>
+            <span className="truncate text-xs leading-4 text-ink-muted">{role}</span>
+          </span>
+        </button>
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Settings"
+            className="mr-1 flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
+          >
+            <SettingsIcon className="size-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
       {/* Rendered after the button so Tab reaches Settings/Sign out; bottom-full keeps it above. */}
       {open && (
         <div
           role="menu"
           className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-xl border border-border-subtle bg-surface p-1.5 shadow-xl"
         >
-          <div className="flex items-center gap-2.5 px-2 py-2">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
-              {initials(name)}
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-[13px] font-semibold text-ink">{name}</p>
-              <p className="truncate text-[11px] text-ink-muted">{email}</p>
-            </div>
+          <div className="min-w-0 px-2 py-2">
+            <p className="truncate text-[13px] font-semibold text-ink">{name}</p>
+            <p className="truncate text-[11px] text-ink-muted">{email}</p>
+          </div>
+          <div className="flex items-center gap-2 px-2 pb-2">
+            <RoleChip role={role} icon={roleIcon} />
+            <button type="button" onClick={onChangeRole} className="py-1 text-xs text-accent hover:underline">
+              change
+            </button>
           </div>
           <div className="my-1 h-px bg-border-subtle" />
           {onOpenSettings && (
@@ -138,6 +188,27 @@ function ProfileMenu({ onOpenSettings, active }: { onOpenSettings?: () => void; 
   )
 }
 
+/** "Analyses > group-norm-2018.pdf": the last item is the current page. */
+function Breadcrumb({ items }: { items: string[] }) {
+  return (
+    <nav aria-label="Breadcrumb" className="min-w-0">
+      <ol className="flex items-center gap-2 text-[13px] text-ink-muted">
+        {items.map((item, i) => {
+          const last = i === items.length - 1
+          return (
+            <li key={`${i}-${item}`} className="flex min-w-0 items-center gap-2">
+              {i > 0 && <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />}
+              <span aria-current={last ? 'page' : undefined} className={cn('truncate', last && 'font-medium text-ink')}>
+                {item}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
+  )
+}
+
 export function AppShell<K extends string>({
   nav,
   active,
@@ -149,6 +220,7 @@ export function AppShell<K extends string>({
   settingsActive = false,
   showProfileMenu = true,
   sidebar,
+  breadcrumb,
   wide = false,
   children,
 }: {
@@ -164,12 +236,15 @@ export function AppShell<K extends string>({
   settingsActive?: boolean
   showProfileMenu?: boolean
   sidebar?: ReactNode
+  /** Shows the sticky toolbar with this trail on its left (last item = current page). */
+  breadcrumb?: string[]
   wide?: boolean
   children: ReactNode
 }) {
   // Below the lg breakpoint the sidebar would leave a phone almost no room, so it moves into
   // a drawer opened from a top bar.
   const [menuOpen, setMenuOpen] = useState(false)
+  const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -185,7 +260,7 @@ export function AppShell<K extends string>({
 
   const sidebarContent = (
     <>
-      <nav className="flex flex-col gap-0.5">
+      <nav aria-label="Main" className="flex flex-col gap-0.5">
         {nav.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -193,13 +268,11 @@ export function AppShell<K extends string>({
             onClick={() => navigate(key)}
             aria-current={active === key ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-medium lg:py-2',
-              active === key
-                ? 'bg-accent-soft text-ink'
-                : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
+              'flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[13px] leading-[18px] font-medium lg:py-[7px]',
+              active === key ? 'bg-accent-soft text-accent' : 'text-ink hover:bg-accent-soft/60',
             )}
           >
-            <Icon className="size-4" />
+            <Icon className={cn('size-4', active !== key && 'text-ink-muted')} />
             {label}
           </button>
         ))}
@@ -215,34 +288,29 @@ export function AppShell<K extends string>({
         {sidebar}
       </div>
 
-      <div className="mt-auto flex flex-col gap-3 px-3">
-        <div className="flex items-center gap-2">
-          <RoleChip role={role} icon={RoleIcon} />
-          <button type="button" onClick={onChangeRole} className="py-2 text-xs text-accent hover:underline">
-            change
-          </button>
-        </div>
-        {showProfileMenu && (
+      {showProfileMenu && (
+        <div className="mt-auto">
           <ProfileMenu
+            role={role}
+            roleIcon={RoleIcon}
+            onChangeRole={onChangeRole}
             active={settingsActive}
-            onOpenSettings={onOpenSettings && (() => {
-              setMenuOpen(false)
-              onOpenSettings()
-            })}
+            onOpenSettings={
+              onOpenSettings &&
+              (() => {
+                setMenuOpen(false)
+                onOpenSettings()
+              })
+            }
           />
-        )}
-      </div>
+        </div>
+      )}
     </>
   )
 
   return (
-    <div
-      className={cn(
-        'mx-auto flex min-h-screen flex-col gap-4 px-4 pb-6 transition-[max-width] duration-200 sm:px-6 lg:flex-row lg:gap-8 lg:pt-6',
-        wide ? 'max-w-[110rem]' : 'max-w-6xl',
-      )}
-    >
-      <header className="sticky top-0 z-30 -mx-4 flex items-center justify-between border-b border-border-subtle bg-canvas/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:hidden">
+    <div className="flex min-h-screen flex-col lg:flex-row">
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
         <Brand compact />
         <button
           type="button"
@@ -275,14 +343,35 @@ export function AppShell<K extends string>({
         </div>
       )}
 
-      {/* Sticky + viewport-height so the profile block stays pinned to the bottom of the screen,
-          not the bottom of a long page (top-6 matches the container's lg:pt-6). */}
-      <aside className="hidden w-64 shrink-0 flex-col gap-4 lg:flex lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:overflow-y-auto">
-        <Brand />
+      {/* Solid (not translucent) and viewport-tall, so the profile footer stays pinned to the
+          bottom of the screen, not the bottom of a long page. */}
+      <aside className="hidden w-[248px] shrink-0 flex-col gap-[18px] overflow-y-auto border-r border-border-subtle bg-surface px-3 pt-[18px] pb-3.5 lg:sticky lg:top-0 lg:flex lg:h-screen">
+        <div className="px-2">
+          <Brand compact />
+        </div>
         {sidebarContent}
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col gap-5">{children}</main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {breadcrumb && (
+          // Translucent so the content scrolls under it, blurred. Under the phone top bar it
+          // sticks just below it (the bar is 3.75rem tall).
+          <div className="sticky top-[3.75rem] z-20 flex min-h-[52px] items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8">
+            <Breadcrumb items={breadcrumb} />
+            <div ref={setActionsEl} className="flex shrink-0 items-center gap-1" />
+          </div>
+        )}
+        <ToolbarSlot.Provider value={breadcrumb ? actionsEl : null}>
+          <main
+            className={cn(
+              'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
+              wide ? 'max-w-[110rem]' : 'max-w-6xl',
+            )}
+          >
+            {children}
+          </main>
+        </ToolbarSlot.Provider>
+      </div>
     </div>
   )
 }

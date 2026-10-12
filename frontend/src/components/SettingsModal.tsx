@@ -1,14 +1,16 @@
 /**
- * The Settings modal shared by every role (Figma 22: 880×804 over a scrim). Left aside is a
- * Search box, the "Settings" tab group, and a "Roles" group; the right pane shows only the
- * active tab. Modal state only — no route, no `?tab=` deep link (#: settings-rebuild-prompt).
+ * The Settings modal shared by every role (Figma "Settings", 900x620 over a scrim). Left aside
+ * is a Search box and the section list grouped General / Role / the viewed role's own sections,
+ * then a "Preview a role" group; the right pane shows only the active section, with a footer
+ * saying changes save as you go (there is no Save button: every control writes on change).
+ * Modal state only — no route, no `?tab=` deep link (#: settings-rebuild-prompt).
  *
- * The "Roles" group previews another role's tabs without changing the signed-in role: picking
+ * The role group previews another role's tabs without changing the signed-in role: picking
  * Researcher here just swaps which tab set is shown, the same way `viewingRole` does. Only the
  * Switch role button (inside Role and home) changes the real role, via `onSwitchRole`.
  */
 
-import { X } from 'lucide-react'
+import { CircleCheck, Search, X } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -16,8 +18,19 @@ import type { Role } from '../screens/Onboarding'
 import { usePreferencesSync } from '../lib/useAccountSettings'
 import { cn } from '../lib/utils'
 import { getSettingsTabs, ROLE_NAV } from './settingsTabs'
+import type { SettingsTabDef } from './settingsTabs'
 
 type Icon = ComponentType<{ className?: string }>
+
+const GROUP_ORDER: SettingsTabDef['group'][] = ['general', 'role', 'viewing']
+
+function GroupLabel({ children }: { children: string }) {
+  return (
+    <p role="presentation" className="px-2.5 pb-1.5 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted">
+      {children}
+    </p>
+  )
+}
 
 function NavButton({
   label,
@@ -27,7 +40,7 @@ function NavButton({
   buttonRef,
 }: {
   label: string
-  icon: Icon
+  icon?: Icon
   active: boolean
   onClick: () => void
   buttonRef?: (node: HTMLButtonElement | null) => void
@@ -41,12 +54,12 @@ function NavButton({
       tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium outline-none',
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-[18px] outline-none',
         'focus-visible:ring-2 focus-visible:ring-accent',
-        active ? 'bg-accent-soft text-ink' : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
+        active ? 'bg-accent-soft font-semibold text-accent' : 'font-medium text-ink hover:bg-accent-soft',
       )}
     >
-      <Icon className="size-4" />
+      {Icon && <Icon className="size-4" />}
       {label}
     </button>
   )
@@ -132,6 +145,8 @@ export function SettingsModal({
   // A search that filters the active tab out of the nav should stop showing its (now
   // unreachable) content too, not silently leave stale settings on screen.
   const activeVisible = active && visibleTabs.some((t) => t.id === active.id)
+  const viewingLabel = ROLE_NAV.find((r) => r.id === viewingRole)?.label ?? ''
+  const groupLabel = (g: SettingsTabDef['group']) => (g === 'general' ? 'General' : g === 'role' ? 'Role' : viewingLabel)
 
   // Previewing a role re-anchors to its Account tab and drops the search: the query was
   // typed against the old role's labels (or matched only the role itself), so keeping it
@@ -166,7 +181,7 @@ export function SettingsModal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center sm:p-6" role="presentation">
+    <div className="fixed inset-0 z-50 flex items-start justify-center sm:items-center sm:p-6" role="presentation">
       <div className="absolute inset-0 bg-ink/70" onClick={onClose} />
       <div
         ref={dialogRef}
@@ -174,37 +189,48 @@ export function SettingsModal({
         aria-modal="true"
         aria-label="Settings"
         tabIndex={-1}
-        className="relative flex h-full w-full flex-col overflow-hidden border border-border-subtle bg-surface shadow-2xl outline-none sm:h-[804px] sm:max-w-[880px] sm:flex-row sm:rounded-2xl"
+        className="relative flex h-full w-full flex-col overflow-hidden border border-border-subtle bg-surface shadow-[0_24px_60px_-12px_rgba(0,0,0,0.22)] outline-none sm:h-[620px] sm:max-h-full sm:max-w-[900px] sm:flex-row sm:rounded-[20px]"
       >
-        <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border-subtle bg-canvas px-3 py-4 sm:h-full sm:max-h-none sm:w-[212px] sm:border-b-0 sm:border-r">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search"
-            aria-label="Search settings"
-            className="mb-3 h-9 w-full rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none placeholder:text-ink-muted focus-visible:border-accent"
-          />
+        <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border-subtle bg-canvas px-3 py-4 sm:h-full sm:max-h-none sm:w-[240px] sm:border-b-0 sm:border-r">
+          <div className="relative">
+            <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              className="h-9 w-full rounded-[9px] border border-border-subtle bg-surface pl-8 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-muted focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            />
+          </div>
           {visibleTabs.length > 0 && (
-            <>
-              <p className="px-3 pb-1 text-[11px] font-medium tracking-wide text-ink-muted">Settings</p>
-              <div role="tablist" aria-label="Settings sections" className="flex flex-col gap-0.5">
-                {visibleTabs.map((tab, i) => (
-                  <div key={tab.id} onKeyDown={(e) => onTabKeyDown(e, visibleTabs.map((t) => t.id), i, setActiveTab)}>
-                    <NavButton
-                      label={tab.label}
-                      icon={tab.icon}
-                      active={tab.id === active?.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      buttonRef={bindRef(tab.id)}
-                    />
+            <div role="tablist" aria-label="Settings sections" className="flex flex-col gap-0.5">
+              {GROUP_ORDER.map((group) => {
+                const inGroup = visibleTabs.filter((t) => t.group === group)
+                if (inGroup.length === 0) return null
+                return (
+                  <div key={group} role="presentation" className="flex flex-col gap-0.5">
+                    <GroupLabel>{groupLabel(group)}</GroupLabel>
+                    {inGroup.map((tab) => {
+                      const i = visibleTabs.indexOf(tab)
+                      return (
+                        <div key={tab.id} onKeyDown={(e) => onTabKeyDown(e, visibleTabs.map((t) => t.id), i, setActiveTab)}>
+                          <NavButton
+                            label={tab.label}
+                            active={tab.id === active?.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            buttonRef={bindRef(tab.id)}
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
-            </>
+                )
+              })}
+            </div>
           )}
           {visibleRoles.length > 0 && (
             <>
-              <p className="mt-4 px-3 pb-1 text-[11px] font-medium tracking-wide text-ink-muted">Roles</p>
+              <GroupLabel>Preview a role</GroupLabel>
               <div role="tablist" aria-label="Roles" className="flex flex-col gap-0.5">
                 {visibleRoles.map((role, i) => (
                   <div
@@ -227,25 +253,24 @@ export function SettingsModal({
           )}
         </aside>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3 sm:px-8">
-          <header className="flex items-start justify-between gap-4 pb-2 pt-3">
-            <div>
-              <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Settings</h1>
-              <p className="text-sm text-ink-muted">
-                Changes apply to new checks. Nothing already checked is re-run.
-              </p>
-            </div>
-          </header>
-          {activeVisible ? active.content : <p className="text-sm text-ink-muted">No settings match "{search}".</p>}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-5 sm:px-7">
+            <h1 className="sr-only">Settings</h1>
+            {activeVisible ? active.content : <p className="text-sm text-ink-muted">No settings match "{search}".</p>}
+          </div>
+          <p className="flex shrink-0 items-center gap-1.5 px-4 py-4 text-xs leading-4 text-ink-muted sm:px-7">
+            <CircleCheck aria-hidden className="size-4 shrink-0 text-supports" />
+            Changes save as you go. They apply to new checks; nothing already checked is re-run.
+          </p>
         </div>
 
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close settings"
-          className="absolute right-4 top-4 flex size-7 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-ink"
+          aria-label="Close"
+          className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-[9px] text-ink-muted outline-none hover:bg-accent-soft hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
         >
-          <X className="size-4" />
+          <X aria-hidden className="size-4" />
         </button>
       </div>
     </div>

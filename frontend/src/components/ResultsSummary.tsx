@@ -1,14 +1,28 @@
-/** The first ten seconds: how this paper's citations came out, and a way to narrow to one kind. */
+/**
+ * The first ten seconds: how this paper's citations came out, and a way to narrow to one kind.
+ * The researcher gets a headline, a verdict bar and four count tiles (Figma "Results"); the
+ * Teacher's Essay Check keeps its own toolbar of buttons.
+ */
 
 import { Copy, Download, FileText, MessageSquarePlus } from 'lucide-react'
 import { useState } from 'react'
 
-import { STANDING_LABELS, STANDING_MEANINGS, STANDINGS, toCsv, toMarkdown } from '../lib/claims'
+import {
+  STANDING_LABELS,
+  STANDING_MEANINGS,
+  STANDINGS,
+  toCsv,
+  toMarkdown,
+  verdictCountLabel,
+  verdictCountWord,
+} from '../lib/claims'
 import type { Standing, Standings } from '../lib/claims'
 import { API_BASE, type Claim } from '../lib/api'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
 import { downloadText } from '../lib/csv'
+import { ToolbarActions } from './AppShell'
+import { ExportMenu, TOOLBAR_BUTTON } from './ExportMenu'
 import { Button } from './ui'
 
 /** Muted for the two standings that are not a verdict, so a colour always means an answer. */
@@ -31,6 +45,7 @@ export function ResultsSummary({
   onOpenPaper,
   onTeacherFeedback,
   teacherMode = false,
+  actionsInToolbar = false,
 }: {
   claims: Claim[]
   standings: Standings
@@ -46,12 +61,179 @@ export function ResultsSummary({
   onTeacherFeedback?: () => void
   /** Teacher's Essay Check uses the PDF, Copy All, and CSV analysis toolbar. */
   teacherMode?: boolean
+  /** Put "Open PDF" and "Export" in the shell's toolbar; without a toolbar they sit above the summary. */
+  actionsInToolbar?: boolean
 }) {
-  const [copied, setCopied] = useState(false)
-  // Only fetched when there is no page viewer to open it in; the link needs the user's token.
-  const pdf = useAuthorizedUrl(
-    paper && !onOpenPaper && !teacherMode ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined,
+  if (!teacherMode) {
+    return (
+      <ResearcherSummary
+        claims={claims}
+        standings={standings}
+        counts={counts}
+        filter={filter}
+        onFilter={onFilter}
+        paper={paper}
+        onOpenPaper={onOpenPaper}
+        actionsInToolbar={actionsInToolbar}
+      />
+    )
+  }
+  return (
+    <TeacherSummary
+      claims={claims}
+      standings={standings}
+      counts={counts}
+      filter={filter}
+      onFilter={onFilter}
+      paper={paper}
+      paperLabel={paperLabel}
+      onOpenPaper={onOpenPaper}
+      onTeacherFeedback={onTeacherFeedback}
+    />
   )
+}
+
+type SummaryProps = {
+  claims: Claim[]
+  standings: Standings
+  counts: Record<Standing, number>
+  filter: Standing | null
+  onFilter: (standing: Standing | null) => void
+  paper?: string
+  onOpenPaper?: () => void
+}
+
+/** The sentence over the bar: the one finding a reader came for. */
+function headline(counts: Record<Standing, number>) {
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
+  if (counts.refutes) {
+    return `${counts.refutes} ${plural(counts.refutes, 'citation contradicts what the paper says it shows', 'citations contradict what the paper says they show')}`
+  }
+  if (counts.insufficient) {
+    return `${counts.insufficient} ${plural(counts.insufficient, 'cited work does', 'cited works do')} not settle what the paper says`
+  }
+  if (counts.unchecked) {
+    return `${counts.unchecked} ${plural(counts.unchecked, 'claim', 'claims')} could not be checked`
+  }
+  return 'Every checked citation says what the paper says it does'
+}
+
+const BAR_STYLES: Record<Standing, string> = {
+  refutes: 'bg-refutes',
+  insufficient: 'bg-insufficient',
+  supports: 'bg-supports',
+  unchecked: 'bg-neutral',
+  uncited: 'bg-neutral',
+}
+
+/** The four kinds the design counts; "no citation" joins them only when the paper has such a claim. */
+const TILES: Standing[] = ['refutes', 'insufficient', 'supports', 'unchecked']
+
+function ResearcherSummary({
+  claims,
+  counts,
+  filter,
+  onFilter,
+  paper,
+  onOpenPaper,
+  actionsInToolbar,
+}: SummaryProps & { actionsInToolbar: boolean }) {
+  // Only fetched when there is no page viewer to open it in; the link needs the user's token.
+  const pdf = useAuthorizedUrl(paper && !onOpenPaper ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined)
+  const kinds = counts.uncited ? [...TILES, 'uncited' as const] : TILES
+
+  const actions = (
+    <>
+      {paper && onOpenPaper && (
+        <button type="button" onClick={onOpenPaper} title="Read the paper here, page by page" className={TOOLBAR_BUTTON}>
+          <FileText className="size-4" aria-hidden="true" />
+          Open PDF
+        </button>
+      )}
+      {pdf.url && (
+        <a href={pdf.url} target="_blank" rel="noreferrer" className={TOOLBAR_BUTTON}>
+          <FileText className="size-4" aria-hidden="true" />
+          Open PDF
+        </a>
+      )}
+      <ExportMenu claims={claims} paper={paper} />
+    </>
+  )
+
+  return (
+    <>
+      {actionsInToolbar ? (
+        <ToolbarActions>{actions}</ToolbarActions>
+      ) : (
+        <div className="flex items-center justify-end gap-1">{actions}</div>
+      )}
+      <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]">
+        <p className="text-[15px] leading-5 font-semibold tracking-[-0.004em]" aria-live="polite">
+          {headline(counts)}
+        </p>
+
+        <div
+          role="img"
+          aria-label={kinds.filter((kind) => counts[kind] > 0).map((kind) => verdictCountLabel(kind, counts[kind])).join(', ')}
+          className="flex gap-[3px]"
+        >
+          {STANDINGS.filter((kind) => counts[kind] > 0).map((kind) => (
+            <span
+              key={kind}
+              style={{ flexGrow: counts[kind] }}
+              className={cn('h-2 min-w-1 flex-1 basis-0 rounded', BAR_STYLES[kind])}
+            />
+          ))}
+        </div>
+
+        {/* Each count is the filter for its own kind. None starts selected, so every claim shows. */}
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          {kinds.map((kind) => {
+            const active = filter === kind
+            return (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => onFilter(active ? null : kind)}
+                aria-pressed={active}
+                aria-label={verdictCountLabel(kind, counts[kind])}
+                disabled={counts[kind] === 0}
+                title={STANDING_MEANINGS[kind]}
+                className={cn(
+                  'flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-3 text-left transition-colors',
+                  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                  'disabled:cursor-default disabled:opacity-60',
+                  active ? 'bg-accent-soft ring-2 ring-accent' : 'bg-neutral-soft enabled:hover:bg-accent-soft',
+                )}
+              >
+                <span aria-hidden="true" className={cn('text-[26px] leading-8 font-semibold tracking-[-0.018em] tabular-nums', COUNT_STYLES[kind])}>
+                  {counts[kind]}
+                </span>
+                <span aria-hidden="true" className="text-xs leading-4 font-medium text-ink-muted">
+                  {verdictCountWord(kind, counts[kind])}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+    </>
+  )
+}
+
+function TeacherSummary({
+  claims,
+  standings,
+  counts,
+  filter,
+  onFilter,
+  paper,
+  paperLabel,
+  onOpenPaper,
+  onTeacherFeedback,
+}: SummaryProps & { paperLabel?: string; onTeacherFeedback?: () => void }) {
+  const teacherMode = true
+  const [copied, setCopied] = useState(false)
 
   async function copyMarkdown() {
     await navigator.clipboard.writeText(toMarkdown(claims, paper))
@@ -84,17 +266,6 @@ export function ResultsSummary({
               <MessageSquarePlus className="size-4" />
               Feedback
             </Button>
-          )}
-          {!teacherMode && pdf.url && (
-            <a
-              href={pdf.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-            >
-              <FileText className="size-4" />
-              The PDF
-            </a>
           )}
           <>
             <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">

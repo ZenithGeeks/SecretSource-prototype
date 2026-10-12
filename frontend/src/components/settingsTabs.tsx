@@ -19,7 +19,7 @@ import {
 
 type Icon = ComponentType<{ className?: string }>
 
-export type SettingsTabDef = { id: string; label: string; icon: Icon; content: ReactNode }
+export type SettingsTabDef = { id: string; label: string; icon: Icon; content: ReactNode; group: 'general' | 'role' | 'viewing' }
 
 export const ROLE_NAV: { id: Role; label: string; icon: Icon }[] = [
   { id: 'writer', label: 'Author', icon: Pen },
@@ -33,23 +33,27 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
   // user: every section whose controls save for real gets this and disables itself.
   const isPreview = viewingRole !== currentRole
 
+  // Order is the sidebar's visual order (General, Role, then the viewed role's own group), so
+  // arrow-key travel follows what the eye sees.
   const tabs: SettingsTabDef[] = [
-    { id: 'account', label: 'Account', icon: UserRound, content: <AccountSection /> },
-    {
-      id: 'role',
-      label: 'Role and home',
-      icon: UserCog,
-      content: <RoleSection roleLabel={current.label} roleIcon={current.icon} onSwitchRole={onSwitchRole} />,
-    },
-    { id: 'checking', label: 'Checking', icon: CircleCheck, content: <CheckingSection /> },
-    { id: 'notifications', label: 'Notifications', icon: Bell, content: <NotificationsSection /> },
-    { id: 'appearance', label: 'Appearance', icon: Sparkles, content: <AppearanceSection /> },
+    { id: 'account', label: 'Account', icon: UserRound, content: <AccountSection />, group: 'general' },
+    { id: 'appearance', label: 'Appearance', icon: Sparkles, content: <AppearanceSection />, group: 'general' },
+    { id: 'notifications', label: 'Notifications', icon: Bell, content: <NotificationsSection />, group: 'general' },
     {
       id: 'data',
       label: 'Your data',
       icon: Download,
       content: <YourDataSection role={viewingRole} isPreview={isPreview} />,
+      group: 'general',
     },
+    {
+      id: 'role',
+      label: 'Role and home',
+      icon: UserCog,
+      content: <RoleSection roleLabel={current.label} roleIcon={current.icon} onSwitchRole={onSwitchRole} />,
+      group: 'role',
+    },
+    { id: 'checking', label: 'Checking', icon: CircleCheck, content: <CheckingSection />, group: 'viewing' },
   ]
 
   if (viewingRole === 'researcher') {
@@ -58,6 +62,7 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
       label: 'Field map',
       icon: Waypoints,
       content: <FieldMapSection isPreview={isPreview} />,
+      group: 'viewing',
     })
   }
   if (viewingRole === 'teacher') {
@@ -66,6 +71,7 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
       label: 'Class and marking',
       icon: Users2,
       content: <ClassMarkingSection isPreview={isPreview} />,
+      group: 'viewing',
     })
   }
 
