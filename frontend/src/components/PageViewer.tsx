@@ -165,6 +165,7 @@ export function PageViewer({
   className,
   keyboard = true,
   onSelectText,
+  compactQuote = false,
 }: {
   target: Target
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
@@ -173,6 +174,8 @@ export function PageViewer({
   className?: string
   /** Escape and the arrow keys act on this viewer. Off when two are on screen at once. */
   keyboard?: boolean
+  /** Quoted passage as two lines (full text on hover), so the page gets the height. */
+  compactQuote?: boolean
   /** Called when the reader selects text in a page: the text, whitespace squeezed, and its page. */
   onSelectText?: (selection: { text: string; page: number | null }) => void
   /** Citation markers of this paper. Only passed when the viewer shows the analysed paper. */
@@ -331,9 +334,22 @@ export function PageViewer({
         </header>
 
         {target.quote && (
-          <div className="max-h-32 shrink-0 space-y-1.5 overflow-y-auto rounded-xl bg-neutral-soft px-3.5 py-3">
+          <div
+            className={cn(
+              'shrink-0 rounded-xl bg-neutral-soft px-3.5',
+              compactQuote ? 'space-y-0.5 py-2' : 'max-h-32 space-y-1.5 overflow-y-auto py-3',
+            )}
+          >
             <h3 className="type-label text-ink-muted">Quoted passage · page {page}</h3>
-            <blockquote className="font-serif text-[15px] leading-[23px] italic text-ink">“{target.quote}”</blockquote>
+            <blockquote
+              title={compactQuote ? target.quote : undefined}
+              className={cn(
+                'font-serif italic text-ink',
+                compactQuote ? 'line-clamp-2 text-[13px] leading-5' : 'text-[15px] leading-[23px]',
+              )}
+            >
+              “{target.quote}”
+            </blockquote>
           </div>
         )}
 

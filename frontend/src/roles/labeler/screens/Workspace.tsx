@@ -197,6 +197,7 @@ function Body({ session }: { session: Session }) {
       onClose={onClose}
       className={wide ? 'h-full min-h-0' : VIEWER_HEIGHT}
       keyboard={false}
+      compactQuote={wide}
       onSelectText={(s) => setPicked({ side, file: target.paper, ...s })}
     />
   )
