@@ -297,7 +297,10 @@ skipped when no Redis answers at `REDIS_URL`.
 All routes return JSON unless noted. CORS allows every origin. The web app reaches these
 routes under `/api`, for example `/api/analyses`.
 
-Errors use FastAPI's shape: `{"detail": "<message>"}` with a `400` or `404` status.
+Errors use FastAPI's shape: `{"detail": "<message>"}` with a `400` or `404` status. One
+exception: a partial failure in Teacher's `grade-and-return` returns `502` with `detail` as an
+object, `{"message": "...", "partial": true}`, so a caller can tell that Classroom and the
+local record may disagree (see that route below).
 
 ### Analyses
 
