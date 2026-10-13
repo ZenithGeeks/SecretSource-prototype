@@ -3,7 +3,9 @@
 Rows are only ever appended. A later row for the same key replaces an earlier one when the page
 reads the tab back (`current`), so nobody overwrites anybody and the table keeps its history.
 Every tab starts with `ts` and `annotator`, which the server fills in: the browser never says
-who it is.
+who it is. `annotator` is the person's name as it was when the row was written, for people to
+read; `annotator_id` is their account, which is what tells one person's rows from another's, so
+renaming an account or two people sharing a name changes nothing.
 """
 
 from typing import Literal, get_args
@@ -15,6 +17,7 @@ TABS: dict[str, list[str]] = {
     "claims": [
         "ts",
         "annotator",
+        "annotator_id",
         "paper_id",
         "claim_id",
         "origin",
@@ -29,6 +32,7 @@ TABS: dict[str, list[str]] = {
     "candidates": [
         "ts",
         "annotator",
+        "annotator_id",
         "paper_id",
         "claim_id",
         "reference_id",
@@ -46,6 +50,7 @@ TABS: dict[str, list[str]] = {
     "labels": [
         "ts",
         "annotator",
+        "annotator_id",
         "paper_id",
         "claim_id",
         "reference_id",
@@ -64,9 +69,9 @@ ALL_TABS = {**TABS, "assignments": ASSIGNMENTS}
 
 # What makes two rows "the same" for the purpose of replacing one with a later one.
 KEYS: dict[str, tuple[str, ...]] = {
-    "claims": ("claim_id", "annotator"),
-    "candidates": ("cand_id", "annotator"),
-    "labels": ("claim_id", "reference_id", "annotator"),
+    "claims": ("claim_id", "annotator_id"),
+    "candidates": ("cand_id", "annotator_id"),
+    "labels": ("claim_id", "reference_id", "annotator_id"),
     "assignments": ("kind", "key"),  # kind: "person" (key: name) or "paper" (key: analysis id)
 }
 

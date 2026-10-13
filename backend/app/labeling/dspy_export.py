@@ -36,29 +36,32 @@ def claims_examples(
     article_of = article_of or article_text
     grouped: dict[tuple[str, str], dict] = {}
     for row in current("claims", rows["claims"]):
-        group = grouped.setdefault((row["paper_id"], row["annotator"]), {"claims": [], "rejected": []})
+        group = grouped.setdefault(
+            (row["paper_id"], row["annotator_id"]), {"annotator": "", "claims": [], "rejected": []}
+        )
+        group["annotator"] = row["annotator"]
         edited = row["status"] == "edited" and row["claim_edited"]
         text = row["claim_edited"] if edited else row["claim"]
         group["rejected" if row["status"] == "rejected" else "claims"].append(text)
     texts: dict[str, str] = {}
     examples = []
-    for (paper_id, annotator), group in grouped.items():
+    for (paper_id, account), group in grouped.items():
         article = texts.setdefault(paper_id, article_of(paper_id))
         if article:
-            examples.append({"paper_id": paper_id, "annotator": annotator, "article": article, **group})
+            examples.append({"paper_id": paper_id, "annotator_id": account, "article": article, **group})
     return examples
 
 
 def verdict_examples(rows: dict[str, list[dict]]) -> list[dict]:
     """`verify` examples. A label with no passage called relevant has no source text, so it is left out."""
     rejected = {
-        (row["claim_id"], row["annotator"])
+        (row["claim_id"], row["annotator_id"])
         for row in current("claims", rows["claims"])
         if row["status"] == "rejected"
     }
     examples = []
     for row in current("labels", rows["labels"]):
-        if (row["claim_id"], row["annotator"]) in rejected or row["evidence"] not in {"1", "2", "3", "4"}:
+        if (row["claim_id"], row["annotator_id"]) in rejected or row["evidence"] not in {"1", "2", "3", "4"}:
             continue
         try:
             spans = [s for s in json.loads(row["spans"] or "[]") if s]
@@ -73,6 +76,7 @@ def verdict_examples(rows: dict[str, list[dict]]) -> list[dict]:
                 "claim_id": row["claim_id"],
                 "reference_id": row["reference_id"],
                 "annotator": row["annotator"],
+                "annotator_id": row["annotator_id"],
                 "claim": row["claim"],
                 "source": "\n\n".join(spans),
                 "verdict": str(level),
