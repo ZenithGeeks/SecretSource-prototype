@@ -274,34 +274,25 @@ describe('the workspace', () => {
     expect(await screen.findByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
   })
 
-  it('saves the claim being left when its changes are unsaved, then moves on', async () => {
+  it('keeps an unsaved claim as a draft when moving to another, and writes nothing', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
     fireEvent.click(screen.getByRole('button', { name: /^Claim 2, not started/ }))
     expect(await screen.findByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
-    expect(gateway.posts).toHaveLength(1)
-    expect(gateway.posts[0]).toMatchObject({
-      claims: [{ claim_id: 'paperA#0', status: 'accepted' }],
-      candidates: [{ cand_id: 'c1', status: 'relevant' }],
-    })
-    // Claim 1 is recorded as saved, so it is not flagged and leaving it again saves nothing.
-    expect(screen.getByRole('button', { name: /^Claim 1, in progress: / })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Claim 1, in progress: / }))
+    expect(gateway.posts).toHaveLength(0)
+    // Claim 1 stays flagged, and its decisions are still there when it is opened again.
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ }))
     expect(await screen.findByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Claim 2, not started/ }))
-    expect(await screen.findByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
-    expect(gateway.posts).toHaveLength(1)
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('stays on the claim and says why when the save before leaving fails', async () => {
+  it('does not type the shortcut letter into the edit box that E opens', async () => {
     await open()
-    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
-    gateway.failSaves = true
-    fireEvent.click(screen.getByRole('button', { name: /^Claim 2, not started/ }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Not saved')
-    expect(screen.getByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ })).toBeInTheDocument()
+    const typed = fireEvent.keyDown(window, { key: 'e' }) // false when the default was prevented
+    expect(typed).toBe(false)
+    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('does not count a finished claim as finished until it is saved', async () => {

@@ -143,7 +143,7 @@ describe('the labeler queue', () => {
       expect(action(/^HPC paper/)).toBe('Label')
       expect(action(/^NLP paper/)).toBe('Continue')
       expect(action(/^Finished paper/)).toBe('Review')
-      expect(within(list).getByText(/^Done/)).toBeInTheDocument()
+      expect(within(list).getByText('All 4 claims judged by you')).toBeInTheDocument()
     } finally {
       gateway.pool.papers.pop()
     }

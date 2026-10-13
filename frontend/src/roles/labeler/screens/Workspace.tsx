@@ -124,21 +124,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     save.reset()
   }
 
-  // Moving to another claim saves the one being left, if it has a decision and unsaved changes.
-  // The save records the left claim's own draft as saved; if it fails, the person stays and sees why.
+  // Moving to another claim keeps the draft of the one being left: it stays marked unsaved until
+  // it is saved, and nothing is written that the person did not save.
   const select = (id: string) => {
     if (id === currentId || save.isPending) return
-    if (claim && draft.status && dirty) {
-      const leaving = claim
-      const leavingDraft = structuredClone(draft)
-      save.mutate(buildSave(leaving, leavingDraft, saved[leaving.claim_id]), {
-        onSuccess: () => {
-          setSaved((all) => ({ ...all, [leaving.claim_id]: leavingDraft }))
-          go(id)
-        },
-      })
-      return
-    }
     go(id)
   }
 
@@ -201,6 +190,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         if (to) select(to.claim_id)
       }
 
+      // A handled letter must not also be typed: E opens the edit box, which takes the focus.
+      if (['k', 'e', 'x', 'r', 'n', '1', '2', '3', '4'].includes(key)) event.preventDefault()
       if (key === 'k') patch({ status: 'accepted' })
       else if (key === 'e') patch({ status: 'edited' })
       else if (key === 'x') patch({ status: 'rejected' })

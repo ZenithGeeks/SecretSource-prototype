@@ -48,8 +48,9 @@ One row per save, in `labeling_rows` (`tab` + a JSON `data` row). Append-only; a
 | `labels` | (claim, reference paper) with `evidence` 1-4, `rationale`, `spans`, `confidence` | GEPA train / val / test |
 
 Opening a paper reads only that paper's rows. Each paper in the queue shows how many of its claims you have
-judged, a progress bar, "Done" once all are judged (the button then says Review; it says Continue part-way and
-Label before you start), and who else has labeled it. Papers you have not finished list before finished ones
+judged (a claim you added by hand is not counted), a progress bar, and who else has labeled it. The button says
+Label before you start, Continue part-way and Review once every claim has your decision; a claim with a decision
+can still have passages or a level left, which the workspace shows. Papers you have not finished list before finished ones
 within a topic. Removing a paper from the team's list asks first; saved labels are kept.
 
 Two people can label the same pair: the page tells the second person it was already labeled. Keep a

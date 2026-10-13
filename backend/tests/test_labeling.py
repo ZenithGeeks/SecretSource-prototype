@@ -591,6 +591,8 @@ def test_pool_shows_how_far_each_person_is_through_a_paper(api, monkeypatch):
     # A later row for the same claim replaces the earlier one, so it is still one claim judged.
     db.append("claims", [_claim("chanya", "paperA-0123456789ab#0", status="edited")])
     db.append("claims", [_claim("somchai", "paperB-bbbbbbbbbbbb#0", paper="paperB-bbbbbbbbbbbb")])
+    # A claim added by hand is not one of the paper's extracted claims, so it is not counted.
+    db.append("claims", [{**_claim("chanya", "paperA-0123456789ab#h-1"), "origin": "human_added"}])
     db.reads.clear()
     papers = {p["analysis_id"]: p for p in client.get("/labeling/pool").json()["papers"]}
     assert (papers["a1"]["judged"], papers["a1"]["labelers"]) == (1, ["chanya", "somchai"])

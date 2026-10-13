@@ -191,10 +191,13 @@ async def pool_state(who: str = Depends(annotator), user: str | None = Depends(c
     def build() -> dict:
         topics = pool.people()
         names = sorted({*_team(), *topics, who})
-        by_paper: dict[str, dict[str, int]] = {}  # paper_id -> annotator -> claims judged
+        # paper_id -> annotator -> extracted claims judged. A claim someone added by hand makes them
+        # a labeler of the paper but is not one of the claims the paper is counted in.
+        by_paper: dict[str, dict[str, int]] = {}
         for r in _claim_rows():
-            counts = by_paper.setdefault(r["paper_id"], {})
-            counts[r["annotator"]] = counts.get(r["annotator"], 0) + 1
+            counts = by_paper.setdefault(r.get("paper_id", ""), {})
+            who_judged = r.get("annotator", "")
+            counts[who_judged] = counts.get(who_judged, 0) + (r.get("origin") != "human_added")
         shared = []
         for analysis_id, topic in pool.pooled().items():
             row = main.analyses.get(analysis_id)

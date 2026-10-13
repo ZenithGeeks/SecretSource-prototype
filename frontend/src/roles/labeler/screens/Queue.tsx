@@ -64,8 +64,11 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             <span className="mt-1.5 block max-w-xs">
               <span className="flex items-center gap-1.5 text-sm text-ink-muted tabular-nums">
                 {finished && <Check className="size-4 shrink-0 text-supports" aria-hidden="true" />}
-                {finished && <span className="font-medium text-supports">Done</span>}
-                {paper.judged} of {paper.claims} claims judged by you
+                {finished ? (
+                  <span className="font-medium text-supports">All {paper.claims} claims judged by you</span>
+                ) : (
+                  `${paper.judged} of ${paper.claims} claims judged by you`
+                )}
               </span>
               <span
                 role="progressbar"
