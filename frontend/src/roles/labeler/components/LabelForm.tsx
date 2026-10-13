@@ -29,7 +29,7 @@ export function LabelForm({
     >
       <legend className="px-1 text-sm font-medium text-ink">How well does {title} support the claim?</legend>
       {others.length > 0 && (
-        <p className="text-xs text-ink-muted">Also labeled by {others.join(', ')}. Label it yourself, without looking.</p>
+        <p className="text-sm text-ink-muted">Also labeled by {others.join(', ')}. Label it yourself, without looking.</p>
       )}
       <div role="radiogroup" aria-labelledby={group} className="grid grid-cols-4 gap-1.5">
         <span id={group} className="sr-only">
@@ -57,11 +57,24 @@ export function LabelForm({
           </button>
         ))}
       </div>
-      <p className="min-h-5 text-xs text-ink-muted" aria-live="polite">
-        {value.evidence ? LEVELS[value.evidence - 1].hint : 'Pick 1–4, or press the number key.'}
+      <ul aria-label="What each level means" className="flex flex-col gap-1 text-sm leading-5 text-ink-muted">
+        {LEVELS.map(({ level, name, hint }) => (
+          <li
+            key={level}
+            aria-current={value.evidence === level ? 'true' : undefined}
+            className={cn(value.evidence === level && 'font-medium text-ink')}
+          >
+            <span className="tabular-nums">{level}</span> {name} — {hint}
+          </li>
+        ))}
+      </ul>
+      <p className="sr-only" aria-live="polite">
+        {value.evidence
+          ? `Level ${value.evidence}, ${LEVELS[value.evidence - 1].name}: ${LEVELS[value.evidence - 1].hint}`
+          : 'Pick 1–4, or press the number key.'}
       </p>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={why} className="text-xs font-medium text-ink">
+        <label htmlFor={why} className="text-sm font-medium text-ink">
           Why this level? (the deciding fact: sample size, control, replication…)
         </label>
         <textarea
@@ -74,7 +87,7 @@ export function LabelForm({
         />
       </div>
       <div className="flex items-center gap-2">
-        <label htmlFor={sure} className="text-xs font-medium text-ink">
+        <label htmlFor={sure} className="text-sm font-medium text-ink">
           How sure are you?
         </label>
         <select

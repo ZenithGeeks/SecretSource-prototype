@@ -16,6 +16,7 @@ import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
   buildSave,
+  displayOrder,
   draftFromSaved,
   emptyDraft,
   emptyLabel,
@@ -23,16 +24,18 @@ import {
   referencesOf,
   relevantPassages,
   remaining,
+  sameDraft,
   problem,
   useSaveLabels,
   workClaims,
+  type Candidate,
   type Draft,
   type Level,
   type Session,
   type WorkClaim,
   useLabelSession,
 } from '../../../lib/labeling'
-import { ClaimDecision } from '../components/ClaimDecision'
+import { ClaimDecision, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
 import { LabelForm } from '../components/LabelForm'
 import { PassageList, type Focus } from '../components/PassageList'
@@ -43,12 +46,16 @@ const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
 type PaperView = 'both' | 'reference'
+/** Below this width two PDFs side by side are too narrow to read, so the reference alone is the default. */
+const BOTH_PAPERS_MIN_WIDTH = 1700
 const storedView = (): PaperView => {
   try {
-    return window.localStorage.getItem(VIEW_KEY) === 'reference' ? 'reference' : 'both'
+    const stored = window.localStorage.getItem(VIEW_KEY)
+    if (stored === 'reference' || stored === 'both') return stored
   } catch {
-    return 'both'
+    // no stored choice: go by the width
   }
+  return window.innerWidth < BOTH_PAPERS_MIN_WIDTH ? 'reference' : 'both'
 }
 
 function useWide() {
@@ -70,15 +77,15 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
 }
 
-export function Workspace({ analysisId }: { analysisId: string }) {
+export function Workspace({ analysisId, onDirtyChange }: { analysisId: string; onDirtyChange?: (unsaved: boolean) => void }) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
   if (query.error || !query.data)
     return <Empty {...problem(query.error)} />
-  return <Body key={analysisId} session={query.data} />
+  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} />
 }
 
-function Body({ session }: { session: Session }) {
+function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (unsaved: boolean) => void }) {
   const base = useMemo(() => workClaims(session), [session])
   const [extra, setExtra] = useState<WorkClaim[]>([])
   const claims = useMemo(
@@ -108,7 +115,7 @@ function Body({ session }: { session: Session }) {
   const wide = useWide()
   const save = useSaveLabels(session.analysis_id)
 
-  const select = (id: string) => {
+  const go = (id: string) => {
     const next = claims.find((c) => c.claim_id === id)
     setCurrentId(id)
     setFocus(next ? firstFocus(next, session) : null)
@@ -117,11 +124,31 @@ function Body({ session }: { session: Session }) {
     save.reset()
   }
 
+  // Moving to another claim saves the one being left, if it has a decision and unsaved changes.
+  // The save records the left claim's own draft as saved; if it fails, the person stays and sees why.
+  const select = (id: string) => {
+    if (id === currentId || save.isPending) return
+    if (claim && draft.status && dirty) {
+      const leaving = claim
+      const leavingDraft = structuredClone(draft)
+      save.mutate(buildSave(leaving, leavingDraft, saved[leaving.claim_id]), {
+        onSuccess: () => {
+          setSaved((all) => ({ ...all, [leaving.claim_id]: leavingDraft }))
+          go(id)
+        },
+      })
+      return
+    }
+    go(id)
+  }
+
   const patch = (change: Partial<Draft>) =>
     setDrafts((all) => ({ ...all, [currentId]: { ...(all[currentId] ?? emptyDraft()), ...change } }))
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved[currentId] ?? emptyDraft())
-  const left = claim ? remaining(claim, draft) : []
+  const dirty = !sameDraft(draft, saved[currentId])
+  const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
+  const position = claims.findIndex((c) => c.claim_id === currentId)
+  const left = claim ? remaining(claim, draft, session.references) : []
 
   const write = (next: boolean) => {
     if (!claim) return
@@ -131,12 +158,25 @@ function Body({ session }: { session: Session }) {
         setSaved((all) => ({ ...all, [claim.claim_id]: structuredClone(draft) }))
         setSavedRows(rows.claims + rows.candidates + rows.labels)
         const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
-        if (next && claims[index + 1]) select(claims[index + 1].claim_id)
+        if (next && claims[index + 1]) go(claims[index + 1].claim_id)
       },
     })
   }
 
-  // Keys: Ctrl/⌘+S saves; 1-4 label the reference shown on the right.
+  // Tell the app whether leaving would lose work; leaving the workspace clears it.
+  useEffect(() => {
+    onDirtyChange?.(anyDirty)
+  }, [anyDirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
+
+  const deciding = Boolean(draft.status) && draft.status !== 'rejected'
+  const ordered = claim ? displayOrder(claim) : []
+  const focusPassage = (c: Candidate) =>
+    setFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })
+
+  // Keys: Ctrl/⌘+S saves; K/E/X decide the claim; R/N judge the focused passage; J/U (or the
+  // up and down arrows) move between passages; [ ] (or Shift+left/right) between claims;
+  // 1-4 label the reference shown on the right, once it has a relevant passage.
   const refId = claim && focus ? session.references.find((r) => r.file === focus.file)?.reference_id : undefined
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -146,10 +186,39 @@ function Body({ session }: { session: Session }) {
         return
       }
       const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
-      if (typing || event.ctrlKey || event.metaKey || event.altKey || !claim || !refId) return
-      if (['1', '2', '3', '4'].includes(event.key) && draft.status && draft.status !== 'rejected') {
+      if (typing || event.ctrlKey || event.metaKey || event.altKey || !claim) return
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
+      const stepPassage = (delta: 1 | -1) => {
+        if (!deciding || !ordered.length) return
+        event.preventDefault()
+        const at = ordered.findIndex((c) => c.cand_id === focus?.key)
+        const to = at < 0 ? (delta > 0 ? 0 : ordered.length - 1) : Math.min(ordered.length - 1, Math.max(0, at + delta))
+        focusPassage(ordered[to])
+      }
+      const stepClaim = (delta: 1 | -1) => {
+        event.preventDefault()
+        const to = claims[position + delta]
+        if (to) select(to.claim_id)
+      }
+
+      if (key === 'k') patch({ status: 'accepted' })
+      else if (key === 'e') patch({ status: 'edited' })
+      else if (key === 'x') patch({ status: 'rejected' })
+      else if (key === 'r' || key === 'n') {
+        const current = ordered.find((c) => c.cand_id === focus?.key)
+        if (!deciding || !current) return
+        const cands = { ...draft.cands, [current.cand_id]: key === 'r' ? ('relevant' as const) : ('rejected' as const) }
+        patch({ cands })
+        const at = ordered.indexOf(current)
+        const next = [...ordered.slice(at + 1), ...ordered.slice(0, at)].find((c) => !cands[c.cand_id])
+        if (next) focusPassage(next)
+      } else if (key === 'j' || key === 'ArrowDown') stepPassage(1)
+      else if (key === 'u' || key === 'ArrowUp') stepPassage(-1)
+      else if (key === ']' || (key === 'ArrowRight' && event.shiftKey)) stepClaim(1)
+      else if (key === '[' || (key === 'ArrowLeft' && event.shiftKey)) stepClaim(-1)
+      else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
-        patch({ labels: { ...draft.labels, [refId]: { ...label, evidence: Number(event.key) as Level } } })
+        patch({ labels: { ...draft.labels, [refId]: { ...label, evidence: Number(key) as Level } } })
       }
     }
     window.addEventListener('keydown', onKey)
@@ -157,11 +226,11 @@ function Body({ session }: { session: Session }) {
   })
 
   useEffect(() => {
-    if (!Object.keys(drafts).some((id) => JSON.stringify(drafts[id]) !== JSON.stringify(saved[id] ?? emptyDraft()))) return
+    if (!anyDirty) return
     const warn = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [drafts, saved])
+  }, [anyDirty])
 
   const found = useQuery({
     queryKey: ['find', focus?.file, focus?.passage, focus?.page],
@@ -188,7 +257,7 @@ function Body({ session }: { session: Session }) {
     page: focus.page ?? 1,
     error: found.isError ? 'Could not look up where this passage is.' : undefined,
   }
-  const { done, total } = progress(claims, drafts)
+  const { done, total } = progress(claims, drafts, session.references, saved)
   const refs = referencesOf(claim, draft)
   const viewer = (target: Target, side: Picked['side'], onClose?: () => void) => (
     <PageViewer
@@ -198,6 +267,7 @@ function Body({ session }: { session: Session }) {
       className={wide ? 'h-full min-h-0' : VIEWER_HEIGHT}
       keyboard={false}
       compactQuote={wide}
+      zoomKey={`labeler.zoom.${side}`}
       onSelectText={(s) => setPicked({ side, file: target.paper, ...s })}
     />
   )
@@ -231,23 +301,42 @@ function Body({ session }: { session: Session }) {
         ? 'That paper is not one of this analysis\'s references.'
         : null
 
-  const position = claims.findIndex((c) => c.claim_id === currentId)
-  const deciding = Boolean(draft.status) && draft.status !== 'rejected'
-
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
   // A reference with a passage you called relevant needs a level; the others are optional.
-  const relevantRefs = refs.filter((id) => relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence)
-  const otherRefs = refs.filter((id) => !relevantRefs.includes(id))
-  const labelForm = (id: string) => (
-    <LabelForm
-      key={id}
-      title={session.references.find((r) => r.reference_id === id)?.label ?? id}
-      active={id === refId}
-      label={draft.labels[id]}
-      others={session.others[`${claim.claim_id}|${id}`] ?? []}
-      onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
-    />
+  const grade = (id: string) =>
+    relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence ? (
+      <LabelForm
+        title={session.references.find((r) => r.reference_id === id)?.label ?? id}
+        active={id === refId}
+        label={draft.labels[id]}
+        others={session.others[`${claim.claim_id}|${id}`] ?? []}
+        onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
+      />
+    ) : (
+      <p className="text-sm text-ink-muted">Mark a passage relevant to grade this reference</p>
+    )
+
+  const legend = (
+    <p aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+      {[
+        ['K', 'keep'],
+        ['E', 'edit'],
+        ['X', 'reject'],
+        ['R', 'relevant'],
+        ['N', 'not relevant'],
+        ['J', 'next passage'],
+        ['U', 'previous passage'],
+        [']', 'next claim'],
+        ['[', 'previous claim'],
+        ['1–4', 'level'],
+        ['Ctrl/⌘+S', 'save'],
+      ].map(([keys, what]) => (
+        <span key={keys} className="flex items-center gap-1">
+          <Kbd hidden={false}>{keys}</Kbd> {what}
+        </span>
+      ))}
+    </p>
   )
 
   const panel = (
@@ -267,24 +356,11 @@ function Body({ session }: { session: Session }) {
             setFocus({ file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
           }}
           onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
+          grade={grade}
         />
       )}
       {deciding && refs.length === 0 && <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>}
-      {deciding && relevantRefs.map(labelForm)}
-      {deciding && otherRefs.length > 0 && (
-        <details open={otherRefs.includes(refId ?? '')} className="rounded-lg border border-border-subtle">
-          <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm text-ink-muted">
-            Other references, no relevant passage ({otherRefs.length}) · optional
-          </summary>
-          <div className="flex flex-col gap-3 p-3 pt-0">{otherRefs.map(labelForm)}</div>
-        </details>
-      )}
-      {deciding && refs.length > 0 && (
-        <p className="text-xs text-ink-muted">
-          Press 1–4 to set the level for the reference on the right.
-          {relevantPassages(claim, draft, refId ?? '').length === 0 && refId ? ' Mark one of its passages relevant first.' : ''}
-        </p>
-      )}
+      {!wide && legend}
     </>
   )
 
@@ -325,7 +401,7 @@ function Body({ session }: { session: Session }) {
           aria-pressed={paperView === view}
           onClick={() => choosePaperView(view)}
           className={cn(
-            'min-h-9 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+            'min-h-11 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
             paperView === view ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
           )}
         >
@@ -355,7 +431,7 @@ function Body({ session }: { session: Session }) {
         </div>
       </header>
 
-      <ClaimNav claims={claims} drafts={drafts} current={currentId} onSelect={select} onAdd={addClaim} />
+      <ClaimNav claims={claims} drafts={drafts} saved={saved} references={session.references} current={currentId} onSelect={select} onAdd={addClaim} />
 
       {wide ? (
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_27rem] gap-4">
@@ -368,7 +444,10 @@ function Body({ session }: { session: Session }) {
           </div>
           <aside aria-label="Label this claim" className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
-            <div className="border-t border-border-subtle p-3">{saveBar('border-0 p-0')}</div>
+            <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
+              {legend}
+              {saveBar('border-0 p-0')}
+            </div>
           </aside>
         </div>
       ) : (

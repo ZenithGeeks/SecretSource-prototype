@@ -27,13 +27,13 @@ export function SaveBar({
   return (
     <div className={cn('sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3', className)}>
       {left.length > 0 ? (
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-muted">
           {left.map((item) => (
             <li key={item}>• {item}</li>
           ))}
         </ul>
       ) : (
-        <p className="flex items-center gap-1.5 text-xs text-supports">
+        <p className="flex items-center gap-1.5 text-sm text-supports">
           <Check className="size-4" /> Every decision for this claim is made.
         </p>
       )}

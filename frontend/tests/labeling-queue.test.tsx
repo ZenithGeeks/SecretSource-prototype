@@ -18,10 +18,10 @@ const gateway = vi.hoisted(() => ({
       { name: 'Nuttadon', topic: '' },
     ],
     papers: [
-      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, status: 'done', reason: '', mine: false },
-      { analysis_id: 'x2', title: 'NLP paper', topic: 'NLP', claims: 5, status: 'done', reason: '', mine: true },
-      { analysis_id: 'x3', title: '10.1/new', topic: 'NLP', claims: 0, status: 'running', reason: '', mine: true },
-      { analysis_id: 'x4', title: '10.1/closed', topic: 'SE', claims: 0, status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
+      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, labelers: [], status: 'done', reason: '', mine: false },
+      { analysis_id: 'x2', title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
+      { analysis_id: 'x3', title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, labelers: [], status: 'running', reason: '', mine: true },
+      { analysis_id: 'x4', title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
     ],
   },
 }))
@@ -81,6 +81,7 @@ describe('the labeler queue', () => {
     gateway.downloadFails = false
     gateway.fetched.length = 0
     onOpen.mockClear()
+    vi.restoreAllMocks()
   })
 
   it('lists only the papers brought in for labeling, the viewer\'s own topic first', async () => {
@@ -105,8 +106,59 @@ describe('the labeler queue', () => {
     const list = await screen.findByRole('region', { name: 'Papers to label' })
     const removes = within(list).getAllByRole('button', { name: 'Remove' })
     expect(removes).toHaveLength(3) // x2, x3, x4 are mine; x1 is someone else's
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     fireEvent.click(removes[0])
+    expect(confirm).toHaveBeenCalledWith("Remove this paper from the team's list? Labels already saved are kept.")
     await waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/papers/x2/topic', body: { topic: '' } }]))
+  })
+
+  it('does nothing when the person declines to remove a paper', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderQueue()
+    const list = await screen.findByRole('region', { name: 'Papers to label' })
+    fireEvent.click(within(list).getAllByRole('button', { name: 'Remove' })[0])
+    expect(confirm).toHaveBeenCalledOnce()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(gateway.puts).toEqual([])
+  })
+
+  it('shows how far the viewer is through each paper and who else labeled it', async () => {
+    renderQueue()
+    const list = await screen.findByRole('region', { name: 'Papers to label' })
+    expect(within(list).getByText('2 of 5 claims judged by you')).toBeInTheDocument()
+    expect(within(list).getByText('0 of 3 claims judged by you')).toBeInTheDocument()
+    const bar = within(list).getByRole('progressbar', { name: /NLP paper/ })
+    expect(bar).toHaveAttribute('aria-valuenow', '2')
+    expect(bar).toHaveAttribute('aria-valuemax', '5')
+    expect(within(list).getByText('Also labeled by Somchai')).toBeInTheDocument() // not Chanya: that is the viewer
+    expect(within(list).getAllByText(/Also labeled by/)).toHaveLength(1)
+  })
+
+  it('says Label, Continue or Review depending on how much is judged', async () => {
+    gateway.pool.papers.push({ analysis_id: 'x5', title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
+    try {
+      renderQueue()
+      const list = await screen.findByRole('region', { name: 'Papers to label' })
+      const action = (name: RegExp) => within(within(list).getByRole('button', { name })).getByText(/^(Label|Continue|Review)$/).textContent
+      expect(action(/^HPC paper/)).toBe('Label')
+      expect(action(/^NLP paper/)).toBe('Continue')
+      expect(action(/^Finished paper/)).toBe('Review')
+      expect(within(list).getByText(/^Done/)).toBeInTheDocument()
+    } finally {
+      gateway.pool.papers.pop()
+    }
+  })
+
+  it('puts papers the viewer has not finished before finished ones of the same topic', async () => {
+    gateway.pool.papers.unshift({ analysis_id: 'x6', title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
+    try {
+      renderQueue()
+      const list = await screen.findByRole('region', { name: 'Papers to label' })
+      const titles = within(list).getAllByText(/paper$|^10\.1\//).map((el) => el.textContent)
+      expect(titles).toEqual(['NLP paper', '10.1/new', 'Done NLP paper', 'HPC paper', '10.1/closed'])
+    } finally {
+      gateway.pool.papers.shift()
+    }
   })
 
   it('sets a teammate\'s topic from the dropdown', async () => {

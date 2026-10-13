@@ -18,9 +18,11 @@ from fastapi.testclient import TestClient
 class MemoryLedger:
     def __init__(self):
         self.tabs = {tab: [] for tab in ALL_TABS}
+        self.reads: list[tuple[str, str | None]] = []
 
-    def read(self, tab):
-        return [dict(r) for r in self.tabs[tab]]
+    def read(self, tab, paper_id=None):
+        self.reads.append((tab, paper_id))
+        return [dict(r) for r in self.tabs[tab] if paper_id is None or r.get("paper_id") == paper_id]
 
     def append(self, tab, rows):
         self.tabs[tab] += [{c: str(r.get(c, "")) for c in ALL_TABS[tab]} for r in rows]
@@ -84,6 +86,18 @@ def test_session_lists_claims_with_ranked_candidates(api):
     assert s["references"] == [
         {"reference_id": "refB-aaaaaaaaaaaa", "file": "refB-aaaaaaaaaaaa.pdf", "label": "Ref B"}
     ]
+
+
+def test_session_asks_the_store_only_for_that_papers_rows(api):
+    client, db, _ = api
+    db.append("claims", [_claim("chanya", "paperA-0123456789ab#0")])
+    db.append("claims", [_claim("chanya", "other-paper#0", paper="other-paper")])
+    db.reads.clear()
+    s = client.get("/labeling/sessions/a1").json()
+    assert sorted(db.reads) == sorted(
+        (tab, "paperA-0123456789ab") for tab in ("claims", "candidates", "labels")
+    )
+    assert [r["claim_id"] for r in s["saved"]["claims"]] == ["paperA-0123456789ab#0"]
 
 
 def test_save_copies_retrieved_fields_from_the_analysis_not_the_request(api):
@@ -357,6 +371,7 @@ class FakeTable:
 
     def __init__(self, stored):
         self.stored, self._rows, self._range = stored, None, None
+        self.filters: dict[str, str] = {}
 
     def insert(self, rows):
         self._rows = rows
@@ -366,8 +381,11 @@ class FakeTable:
         self._rows = None
         return self
 
-    def eq(self, _, tab):
-        self._tab = tab
+    def eq(self, column, value):
+        if column == "tab":
+            self._tab = value
+        else:
+            self.filters[column] = value
         return self
 
     def order(self, _):
@@ -381,7 +399,12 @@ class FakeTable:
         if self._rows is not None:
             self.stored += self._rows
             return type("R", (), {"data": []})
-        mine = [{"data": r["data"]} for r in self.stored if r["tab"] == self._tab]
+        mine = [
+            {"data": r["data"]}
+            for r in self.stored
+            if r["tab"] == self._tab
+            and all(r["data"].get(c.removeprefix("data->>")) == v for c, v in self.filters.items())
+        ]
         start, end = self._range
         return type("R", (), {"data": mine[start : end + 1]})
 
@@ -408,6 +431,22 @@ def test_ledger_appends_strings_and_reads_every_page(monkeypatch):
     }
     assert [r["claim_id"] for r in db.read("labels")] == [f"p#{i}" for i in range(5)]  # three pages of two
     assert [r["claim_id"] for r in db.read("claims")] == ["p#0"]
+
+
+def test_ledger_read_can_ask_for_one_paper_only(monkeypatch):
+    stored: list[dict] = []
+    from app import store
+
+    class Client:
+        def table(self, name):
+            return FakeTable(stored)
+
+    monkeypatch.setattr(store, "_supabase", lambda: Client())
+    monkeypatch.setattr(ledger, "PAGE", 2)
+    db = ledger.Ledger()
+    db.append("claims", [{"paper_id": f"p{i % 2}", "claim_id": f"p{i % 2}#{i}"} for i in range(6)])
+    assert [r["claim_id"] for r in db.read("claims", "p1")] == ["p1#1", "p1#3", "p1#5"]
+    assert len(db.read("claims")) == 6
 
 
 SCOPUS_REPLY = {
@@ -527,6 +566,62 @@ def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch
         False,
     )
     assert papers["e1"]["status"] == "error" and "no open-access PDF" in papers["e1"]["reason"]
+
+
+def _claim(who, claim_id, paper="paperA-0123456789ab", status="accepted"):
+    return {"annotator": who, "paper_id": paper, "claim_id": claim_id, "status": status}
+
+
+def test_pool_shows_how_far_each_person_is_through_a_paper(api, monkeypatch):
+    from app import main
+
+    client, db, _ = api
+    rows = {
+        "a1": ANALYSIS,
+        "a2": {**ANALYSIS, "id": "a2", "file": "data/papers/paperB-bbbbbbbbbbbb.pdf"},
+        "a3": {"id": "a3", "paper": "10.1/c", "status": "running", "stages": [], "claims": []},
+    }
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    for key in rows:
+        pool.assign("chanya", "paper", key, "CV", "")
+    db.append(
+        "claims", [_claim("chanya", "paperA-0123456789ab#0"), _claim("somchai", "paperA-0123456789ab#0")]
+    )
+    db.append("claims", [_claim("somchai", "paperA-0123456789ab#1", status="rejected")])
+    # A later row for the same claim replaces the earlier one, so it is still one claim judged.
+    db.append("claims", [_claim("chanya", "paperA-0123456789ab#0", status="edited")])
+    db.append("claims", [_claim("somchai", "paperB-bbbbbbbbbbbb#0", paper="paperB-bbbbbbbbbbbb")])
+    db.reads.clear()
+    papers = {p["analysis_id"]: p for p in client.get("/labeling/pool").json()["papers"]}
+    assert (papers["a1"]["judged"], papers["a1"]["labelers"]) == (1, ["chanya", "somchai"])
+    assert (papers["a2"]["judged"], papers["a2"]["labelers"]) == (0, ["somchai"])  # only others have judged
+    assert (papers["a3"]["judged"], papers["a3"]["labelers"]) == (0, [])  # no file yet
+    assert [t for t, _ in db.reads].count("claims") == 1  # one read for the whole list
+
+
+def test_pool_still_answers_with_no_progress_when_the_rows_cannot_be_read(api, monkeypatch):
+    from app import main
+
+    client, db, _ = api
+    monkeypatch.setattr(main.analyses, "get", lambda i: ANALYSIS if i == "a1" else None)
+    pool.assign("chanya", "paper", "a1", "CV", "")
+    db.append("claims", [_claim("chanya", "paperA-0123456789ab#0")])
+
+    def unconfigured():
+        raise ledger.NotConfigured("no supabase")
+
+    monkeypatch.setattr(labeling.ledger, "get_store", unconfigured)
+    monkeypatch.setattr(pool, "_cache", (float("inf"), [{"kind": "paper", "key": "a1", "topic": "CV"}]))
+    paper = client.get("/labeling/pool").json()["papers"][0]
+    assert (paper["claims"], paper["judged"], paper["labelers"]) == (2, 0, [])
+
+    class Broken(MemoryLedger):
+        def read(self, tab, paper_id=None):
+            raise RuntimeError("database down")
+
+    monkeypatch.setattr(labeling.ledger, "get_store", lambda: Broken())
+    paper = client.get("/labeling/pool").json()["papers"][0]
+    assert (paper["judged"], paper["labelers"]) == (0, [])
 
 
 def test_scopus_search_says_when_it_is_not_set_up(api, monkeypatch):

@@ -5,11 +5,23 @@ import { useId } from 'react'
 import type { ClaimStatus, Draft, WorkClaim } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 
-const CHOICES: { status: ClaimStatus; label: string; hint: string }[] = [
-  { status: 'accepted', label: 'Keep', hint: 'A real claim, worded right' },
-  { status: 'edited', label: 'Edit', hint: 'A real claim, reword it' },
-  { status: 'rejected', label: 'Reject', hint: 'Not a claim of this paper' },
+const CHOICES: { status: ClaimStatus; label: string; hint: string; key: string }[] = [
+  { status: 'accepted', label: 'Keep', hint: 'A real claim, worded right', key: 'K' },
+  { status: 'edited', label: 'Edit', hint: 'A real claim, reword it', key: 'E' },
+  { status: 'rejected', label: 'Reject', hint: 'Not a claim of this paper', key: 'X' },
 ]
+
+/** A key cap. Hidden from screen readers by default: the button carries `aria-keyshortcuts`. */
+export function Kbd({ children, hidden = true }: { children: string; hidden?: boolean }) {
+  return (
+    <kbd
+      aria-hidden={hidden || undefined}
+      className="rounded border border-border-subtle bg-canvas px-1 font-mono text-[11px] leading-4 text-ink-muted"
+    >
+      {children}
+    </kbd>
+  )
+}
 
 export function ClaimDecision({
   claim,
@@ -42,12 +54,13 @@ export function ClaimDecision({
       )}
 
       <div role="radiogroup" aria-label="Decision on this claim" className="grid grid-cols-3 gap-2">
-        {CHOICES.map(({ status, label, hint }) => (
+        {CHOICES.map(({ status, label, hint, key }) => (
           <button
             key={status}
             type="button"
             role="radio"
             aria-checked={draft.status === status}
+            aria-keyshortcuts={key}
             onClick={() => onChange({ status })}
             className={cn(
               'flex min-h-11 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors',
@@ -59,7 +72,10 @@ export function ClaimDecision({
                 : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
             )}
           >
-            <span className="text-sm font-medium">{label}</span>
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              {label}
+              <Kbd>{key}</Kbd>
+            </span>
             <span className="text-xs">{hint}</span>
           </button>
         ))}
@@ -67,7 +83,7 @@ export function ClaimDecision({
 
       {draft.status === 'edited' && (
         <div className="flex flex-col gap-1.5">
-          <label htmlFor={edit} className="text-xs font-medium text-ink">
+          <label htmlFor={edit} className="text-sm font-medium text-ink">
             The claim, as it should read
           </label>
           <textarea
@@ -76,6 +92,7 @@ export function ClaimDecision({
             onChange={(event) => onChange({ edited: event.target.value })}
             rows={3}
             maxLength={4000}
+            autoFocus
             className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-accent"
           />
         </div>
