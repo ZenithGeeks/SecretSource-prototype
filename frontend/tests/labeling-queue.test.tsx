@@ -125,8 +125,8 @@ describe('the labeler queue', () => {
   it('shows how far the viewer is through each paper and who else labeled it', async () => {
     renderQueue()
     const list = await screen.findByRole('region', { name: 'Papers to label' })
-    expect(within(list).getByText('2 of 5 claims judged by you')).toBeInTheDocument()
-    expect(within(list).getByText('0 of 3 claims judged by you')).toBeInTheDocument()
+    expect(within(list).getByText('2 of 5 claims decided by you')).toBeInTheDocument()
+    expect(within(list).getByText('0 of 3 claims decided by you')).toBeInTheDocument()
     const bar = within(list).getByRole('progressbar', { name: /NLP paper/ })
     expect(bar).toHaveAttribute('aria-valuenow', '2')
     expect(bar).toHaveAttribute('aria-valuemax', '5')
@@ -143,7 +143,7 @@ describe('the labeler queue', () => {
       expect(action(/^HPC paper/)).toBe('Label')
       expect(action(/^NLP paper/)).toBe('Continue')
       expect(action(/^Finished paper/)).toBe('Review')
-      expect(within(list).getByText('All 4 claims judged by you')).toBeInTheDocument()
+      expect(within(list).getByText('All 4 claims decided by you')).toBeInTheDocument()
     } finally {
       gateway.pool.papers.pop()
     }
