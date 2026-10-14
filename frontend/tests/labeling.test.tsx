@@ -161,8 +161,7 @@ describe('the workspace', () => {
   beforeEach(() => {
     gateway.posts.length = 0
     gateway.failSaves = false
-    window.localStorage.removeItem('labeler.paperView')
-    window.innerWidth = 1800
+    window.localStorage.setItem('labeler.paperView', 'both')
     window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   })
 
@@ -174,7 +173,7 @@ describe('the workspace', () => {
     )
     expect(await screen.findByRole('radiogroup', { name: 'Decision on this claim' })).toBeInTheDocument()
     const viewers = screen.getAllByTestId('viewer').map((v) => v.textContent)
-    expect(viewers).toEqual(['paperA.pdf|We show Y improves recall.', 'refB.pdf|recall rose by 4 points'])
+    expect(viewers).toEqual(['refB.pdf|recall rose by 4 points', 'paperA.pdf|We show Y improves recall.'])
 
     expect(screen.getByRole('button', { name: /^Save labels/ })).toBeDisabled()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
@@ -314,7 +313,7 @@ describe('the workspace', () => {
 
   it('judges the focused passage with R and N, moves on to the next unjudged one, and decides the claim with K, E, X', async () => {
     await open()
-    const shown = () => screen.getAllByTestId('viewer')[1].textContent
+    const shown = () => screen.getAllByTestId('viewer')[0].textContent
     fireEvent.keyDown(window, { key: 'k' })
     expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
     expect(shown()).toBe('refB.pdf|recall rose by 4 points')
@@ -384,21 +383,13 @@ describe('the workspace', () => {
     expect(second).toHaveClass('line-clamp-3')
   })
 
-  it('starts with the reference alone on a narrow screen, unless a choice was stored', async () => {
-    window.innerWidth = 1400
-    await open()
-    expect(screen.getAllByTestId('viewer')).toHaveLength(1)
-  })
-
-  it('lets a stored choice win over the width', async () => {
-    window.innerWidth = 1400
-    window.localStorage.setItem('labeler.paperView', 'both')
-    await open()
-    expect(screen.getAllByTestId('viewer')).toHaveLength(2)
-  })
-
-  it('shows the reference alone, wide, and remembers the choice', async () => {
+  it('starts with the reference alone when no choice is stored, at any width', async () => {
     window.localStorage.removeItem('labeler.paperView')
+    await open()
+    expect(screen.getAllByTestId('viewer').map((v) => v.textContent)).toEqual(['refB.pdf|recall rose by 4 points'])
+  })
+
+  it('shows the reference alone, and remembers the choice', async () => {
     await open()
     expect(screen.getAllByTestId('viewer')).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: 'Reference only' }))

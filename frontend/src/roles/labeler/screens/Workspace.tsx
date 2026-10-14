@@ -46,17 +46,17 @@ const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
 type PaperView = 'both' | 'reference'
-/** Below this width two PDFs side by side are too narrow to read: the reference alone is the
- * default, and "Both papers" stacks them instead, so each keeps the full width. */
-const BOTH_PAPERS_MIN_WIDTH = 1700
+/** "Both papers" stacks the two PDFs rather than putting them side by side. A two-column paper
+ * needs a page about 800px wide to read, and the page content stops at 110rem, so two columns
+ * never get more than ~650px each (at 1920, ~450px: text about 5px high). */
 const storedView = (): PaperView => {
   try {
     const stored = window.localStorage.getItem(VIEW_KEY)
     if (stored === 'reference' || stored === 'both') return stored
   } catch {
-    // no stored choice: go by the width
+    // no stored choice: the reference alone, the paper that gets judged
   }
-  return window.innerWidth < BOTH_PAPERS_MIN_WIDTH ? 'reference' : 'both'
+  return 'reference'
 }
 
 function useMinWidth(px: number) {
@@ -114,9 +114,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     }
   }
   const wide = useMinWidth(1280)
-  // Too narrow for two columns: the reference, which is what gets judged, goes on top.
-  const sideBySide = useMinWidth(BOTH_PAPERS_MIN_WIDTH)
-  const stacked = paperView === 'both' && !sideBySide
+  const both = paperView === 'both'
   const save = useSaveLabels(session.analysis_id)
 
   const go = (id: string) => {
@@ -264,7 +262,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
       key={target.paper}
       target={target}
       onClose={onClose}
-      className={!wide ? VIEWER_HEIGHT : stacked ? 'h-[75vh] shrink-0' : 'h-full min-h-0'}
+      className={!wide ? VIEWER_HEIGHT : both ? 'h-[75vh] shrink-0' : 'h-full min-h-0'}
       keyboard={false}
       compactQuote={wide}
       zoomKey={`labeler.zoom.${side}`}
@@ -391,7 +389,6 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
-  const both = paperView === 'both'
   const viewToggle = (
     <div role="group" aria-label="Which papers to show" className="flex rounded-lg border border-border-subtle p-0.5">
       {(['both', 'reference'] as const).map((view) => (
@@ -437,10 +434,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_27rem] gap-4">
           <div className="flex min-h-0 min-w-0 flex-col gap-3">
             {selection}
-            <div className={cn('min-h-0 flex-1 gap-3', stacked ? 'flex flex-col overflow-y-auto' : 'grid', !stacked && (both ? 'grid-cols-2' : 'grid-cols-1'))}>
-              {both && !stacked && viewer(left_, 'paper')}
+            {/* The reference, the paper being judged, on top; the claim's paper below it. */}
+            <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : 'grid')}>
               {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
-              {stacked && viewer(left_, 'paper')}
+              {both && viewer(left_, 'paper')}
             </div>
           </div>
           <aside aria-label="Label this claim" className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
