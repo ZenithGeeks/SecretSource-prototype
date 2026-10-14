@@ -101,6 +101,8 @@ describe('what is left to decide', () => {
     expect(remaining(claim, judged({ status: 'edited', cands: { c1: 'rejected', c2: 'rejected' } }), refs)).toEqual([
       'Write the edited claim',
     ])
+    const unchanged = judged({ status: 'edited', edited: claim.claim, cands: { c1: 'rejected', c2: 'rejected' } })
+    expect(remaining(claim, unchanged, refs)).toEqual(['Write the edited claim'])
   })
 })
 
@@ -293,6 +295,7 @@ describe('the workspace', () => {
     const typed = fireEvent.keyDown(window, { key: 'e' }) // false when the default was prevented
     expect(typed).toBe(false)
     expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByLabelText('The claim, as it should read')).toHaveValue('Method Y improves recall.')
   })
 
   it('does not count a finished claim as finished until it is saved', async () => {

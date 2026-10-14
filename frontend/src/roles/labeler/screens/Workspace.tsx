@@ -131,8 +131,13 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     go(id)
   }
 
+  // Edit starts from the extracted wording, so a small fix is not a full retype.
   const patch = (change: Partial<Draft>) =>
-    setDrafts((all) => ({ ...all, [currentId]: { ...(all[currentId] ?? emptyDraft()), ...change } }))
+    setDrafts((all) => {
+      const before = all[currentId] ?? emptyDraft()
+      const start = change.status === 'edited' && !before.edited && claim ? { edited: claim.claim } : {}
+      return { ...all, [currentId]: { ...before, ...start, ...change } }
+    })
 
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
