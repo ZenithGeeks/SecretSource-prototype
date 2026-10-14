@@ -65,9 +65,9 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
               <span className="flex items-center gap-1.5 text-sm text-ink-muted tabular-nums">
                 {finished && <Check className="size-4 shrink-0 text-supports" aria-hidden="true" />}
                 {finished ? (
-                  <span className="font-medium text-supports">All {paper.claims} claims judged by you</span>
+                  <span className="font-medium text-supports">All {paper.claims} claims decided by you</span>
                 ) : (
-                  `${paper.judged} of ${paper.claims} claims judged by you`
+                  `${paper.judged} of ${paper.claims} claims decided by you`
                 )}
               </span>
               <span
@@ -75,7 +75,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
                 aria-valuemin={0}
                 aria-valuemax={paper.claims}
                 aria-valuenow={Math.min(paper.judged, paper.claims)}
-                aria-label={`Claims you judged in ${paper.title}`}
+                aria-label={`Claims you decided in ${paper.title}`}
                 className="mt-1 block h-1.5 overflow-hidden rounded bg-border-subtle"
               >
                 <span

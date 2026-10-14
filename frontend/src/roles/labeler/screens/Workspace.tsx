@@ -46,7 +46,8 @@ const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
 type PaperView = 'both' | 'reference'
-/** Below this width two PDFs side by side are too narrow to read, so the reference alone is the default. */
+/** Below this width two PDFs side by side are too narrow to read: the reference alone is the
+ * default, and "Both papers" stacks them instead, so each keeps the full width. */
 const BOTH_PAPERS_MIN_WIDTH = 1700
 const storedView = (): PaperView => {
   try {
@@ -58,16 +59,16 @@ const storedView = (): PaperView => {
   return window.innerWidth < BOTH_PAPERS_MIN_WIDTH ? 'reference' : 'both'
 }
 
-function useWide() {
-  const query = '(min-width: 1280px)'
-  const [wide, setWide] = useState(() => window.matchMedia(query).matches)
+function useMinWidth(px: number) {
+  const query = `(min-width: ${px}px)`
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
   useEffect(() => {
     const media = window.matchMedia(query)
-    const onChange = () => setWide(media.matches)
+    const onChange = () => setMatches(media.matches)
     media.addEventListener('change', onChange)
     return () => media.removeEventListener('change', onChange)
-  }, [])
-  return wide
+  }, [query])
+  return matches
 }
 
 const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
@@ -112,7 +113,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
       // the choice just is not remembered
     }
   }
-  const wide = useWide()
+  const wide = useMinWidth(1280)
+  // Too narrow for two columns: the reference, which is what gets judged, goes on top.
+  const sideBySide = useMinWidth(BOTH_PAPERS_MIN_WIDTH)
+  const stacked = paperView === 'both' && !sideBySide
   const save = useSaveLabels(session.analysis_id)
 
   const go = (id: string) => {
@@ -131,8 +135,13 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     go(id)
   }
 
+  // Edit starts from the extracted wording, so a small fix is not a full retype.
   const patch = (change: Partial<Draft>) =>
-    setDrafts((all) => ({ ...all, [currentId]: { ...(all[currentId] ?? emptyDraft()), ...change } }))
+    setDrafts((all) => {
+      const before = all[currentId] ?? emptyDraft()
+      const start = change.status === 'edited' && !before.edited && claim ? { edited: claim.claim } : {}
+      return { ...all, [currentId]: { ...before, ...start, ...change } }
+    })
 
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
@@ -255,7 +264,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
       key={target.paper}
       target={target}
       onClose={onClose}
-      className={wide ? 'h-full min-h-0' : VIEWER_HEIGHT}
+      className={!wide ? VIEWER_HEIGHT : stacked ? 'h-[75vh] shrink-0' : 'h-full min-h-0'}
       keyboard={false}
       compactQuote={wide}
       zoomKey={`labeler.zoom.${side}`}
@@ -428,9 +437,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_27rem] gap-4">
           <div className="flex min-h-0 min-w-0 flex-col gap-3">
             {selection}
-            <div className={cn('grid min-h-0 flex-1 gap-3', both ? 'grid-cols-2' : 'grid-cols-1')}>
-              {both && viewer(left_, 'paper')}
+            <div className={cn('min-h-0 flex-1 gap-3', stacked ? 'flex flex-col overflow-y-auto' : 'grid', !stacked && (both ? 'grid-cols-2' : 'grid-cols-1'))}>
+              {both && !stacked && viewer(left_, 'paper')}
               {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
+              {stacked && viewer(left_, 'paper')}
             </div>
           </div>
           <aside aria-label="Label this claim" className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">

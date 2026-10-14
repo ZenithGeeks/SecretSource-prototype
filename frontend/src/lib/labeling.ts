@@ -319,7 +319,8 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
   if (!draft.status) return ['Decide on the claim: keep, edit or reject it']
   if (draft.status === 'rejected') return []
   const left: string[] = []
-  if (draft.status === 'edited' && !draft.edited.trim()) left.push('Write the edited claim')
+  if (draft.status === 'edited' && (!draft.edited.trim() || draft.edited.trim() === claim.claim.trim()))
+    left.push('Write the edited claim')
   const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
   if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
   for (const id of referencesOf(claim, draft)) {
