@@ -43,7 +43,8 @@ export type Target = {
   section?: string // the analysed paper's section this points into, for the table of contents
 }
 
-const ZOOMS = [1, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
+const ZOOMS = [1, 1.25, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
+const COMPACT_TOOLBAR_BELOW = 420 // px of panel; narrower than this the full toolbar does not fit
 const PAGE_GAP = 16 // px between pages, and around them
 const TOOLBAR_HEIGHT = 48 // px; the translucent toolbar floats over the top of the scrolling page
 const RENDERED_AROUND = 2 // pages drawn on each side of the one in view; the rest are placeholders
@@ -153,6 +154,17 @@ function useNarrowScreen() {
   }, [])
   return narrow
 }
+/** The zoom kept under `key`, when it is still one of the steps. */
+function storedZoom(key: string | undefined) {
+  if (!key) return 1
+  try {
+    const zoom = Number(window.localStorage.getItem(key))
+    return ZOOMS.includes(zoom) ? zoom : 1
+  } catch {
+    return 1
+  }
+}
+
 function targetPage(target: Target) {
   return target.source?.page ?? target.page ?? 1
 }
@@ -166,6 +178,7 @@ export function PageViewer({
   keyboard = true,
   onSelectText,
   compactQuote = false,
+  zoomKey,
 }: {
   target: Target
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
@@ -176,6 +189,8 @@ export function PageViewer({
   keyboard?: boolean
   /** Quoted passage as two lines (full text on hover), so the page gets the height. */
   compactQuote?: boolean
+  /** Remember the zoom under this localStorage key, so it survives opening another paper. */
+  zoomKey?: string
   /** Called when the reader selects text in a page: the text, whitespace squeezed, and its page. */
   onSelectText?: (selection: { text: string; page: number | null }) => void
   /** Citation markers of this paper. Only passed when the viewer shows the analysed paper. */
@@ -186,7 +201,16 @@ export function PageViewer({
   const [pageRatio, setPageRatio] = useState(1.294) // height / width; US Letter until page 1 says
   const [failed, setFailed] = useState(false)
   const [page, setPage] = useState(targetPage(target))
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoomState] = useState(() => storedZoom(zoomKey))
+  const setZoom = (next: number) => {
+    setZoomState(next)
+    if (!zoomKey) return
+    try {
+      window.localStorage.setItem(zoomKey, String(next))
+    } catch {
+      // the zoom just is not remembered
+    }
+  }
   const [expanded, setExpanded] = useState(false)
   // Below xl there is no column beside the claims, so the viewer would open under all of them.
   // It opens over the whole screen instead.
@@ -286,6 +310,7 @@ export function PageViewer({
   }, [keyboard, onClose, opened, expanded, narrow, page, pageCount, scrollToPage])
 
   const zoomIndex = ZOOMS.indexOf(zoom)
+  const compactToolbar = panelWidth > 0 && panelWidth < COMPACT_TOOLBAR_BELOW
   const openMarker = opened && opened.target === target ? opened.marker : null
   const highlightPage = target.source ? target.source.page : null
   // The gateway serves a paper only with the user's token, so pdf.js and the links below
@@ -369,9 +394,15 @@ export function PageViewer({
             <IconButton label="Previous page" onClick={() => scrollToPage(Math.max(1, page - 1))} disabled={page <= 1}>
               <ChevronLeft className="size-4" />
             </IconButton>
-            <span className="min-w-24 text-center font-mono text-[13px] whitespace-nowrap text-ink-muted tabular-nums" aria-live="polite">
-              Page {page}
-              {pageCount ? ` of ${pageCount}` : ''}
+            <span
+              className={cn(
+                'text-center font-mono text-[13px] whitespace-nowrap text-ink-muted tabular-nums',
+                compactToolbar ? 'min-w-12' : 'min-w-24',
+              )}
+              aria-live="polite"
+            >
+              {compactToolbar ? page : `Page ${page}`}
+              {pageCount ? (compactToolbar ? `/${pageCount}` : ` of ${pageCount}`) : ''}
             </span>
             <IconButton
               label="Next page"
@@ -396,9 +427,11 @@ export function PageViewer({
             >
               <ZoomIn className="size-4" />
             </IconButton>
-            <IconButton label="Fit to view" onClick={() => setZoom(1)} disabled={zoom === 1}>
-              <Scan className="size-4" />
-            </IconButton>
+            {!compactToolbar && (
+              <IconButton label="Fit to view" onClick={() => setZoom(1)} disabled={zoom === 1}>
+                <Scan className="size-4" />
+              </IconButton>
+            )}
             {pdf.url && (
               <a
                 href={pdf.url}

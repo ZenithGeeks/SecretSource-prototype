@@ -19,7 +19,7 @@ class NotConfigured(Exception):
 
 
 class Store(Protocol):
-    def read(self, tab: str) -> list[dict]: ...
+    def read(self, tab: str, paper_id: str | None = None) -> list[dict]: ...
 
     def append(self, tab: str, rows: list[dict]) -> None: ...
 
@@ -30,18 +30,14 @@ class Ledger:
 
         return store._supabase().table(TABLE)
 
-    def read(self, tab: str) -> list[dict]:
+    def read(self, tab: str, paper_id: str | None = None) -> list[dict]:
+        """Every row of a tab, or only those of one paper (an indexed filter on the JSON field)."""
         found: list[dict] = []
         while True:
-            page = (
-                self._table()
-                .select("data")
-                .eq("tab", tab)
-                .order("id")
-                .range(len(found), len(found) + PAGE - 1)
-                .execute()
-                .data
-            )
+            query = self._table().select("data").eq("tab", tab)
+            if paper_id is not None:
+                query = query.eq("data->>paper_id", paper_id)
+            page = query.order("id").range(len(found), len(found) + PAGE - 1).execute().data
             found += [row["data"] for row in page]
             if len(page) < PAGE:
                 return found

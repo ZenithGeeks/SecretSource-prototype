@@ -138,6 +138,10 @@ export type Pool = {
     title: string
     topic: string
     claims: number
+    /** How many of its claims the signed-in person has judged. */
+    judged: number
+    /** Everyone who has judged any of its claims, the signed-in person included. */
+    labelers: string[]
     status: 'running' | 'done' | 'error'
     reason: string
     mine: boolean
@@ -297,21 +301,38 @@ export function relevantPassages(claim: WorkClaim, draft: Draft, referenceId: st
   ]
 }
 
+/**
+ * The retrieved passages in the order the page shows them: grouped by reference paper (in the
+ * order retrieval first met each one), and by rank within a paper.
+ */
+export function displayOrder(claim: WorkClaim): Candidate[] {
+  const papers = [...new Set(claim.candidates.map((c) => c.reference_id))]
+  return papers.flatMap((id) => claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank))
+}
+
+/** True when a draft is what was last saved (nothing saved yet reads as an empty draft). */
+export const sameDraft = (draft: Draft, saved: Draft | undefined) =>
+  JSON.stringify(draft) === JSON.stringify(saved ?? emptyDraft())
+
 /** What is still undecided, in words. Empty means the claim is finished. */
-export function remaining(claim: WorkClaim, draft: Draft): string[] {
+export function remaining(claim: WorkClaim, draft: Draft, references: Reference[]): string[] {
   if (!draft.status) return ['Decide on the claim: keep, edit or reject it']
   if (draft.status === 'rejected') return []
   const left: string[] = []
-  if (draft.status === 'edited' && !draft.edited.trim()) left.push('Write the edited claim')
+  if (draft.status === 'edited' && (!draft.edited.trim() || draft.edited.trim() === claim.claim.trim()))
+    left.push('Write the edited claim')
   const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
   if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
   for (const id of referencesOf(claim, draft)) {
-    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push(`Label ${id}`)
+    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) {
+      left.push(`Give ${references.find((r) => r.reference_id === id)?.label ?? id} a level`)
+    }
   }
   return left
 }
 
-export const isDone = (claim: WorkClaim, draft: Draft) => remaining(claim, draft).length === 0
+export const isDone = (claim: WorkClaim, draft: Draft, references: Reference[]) =>
+  remaining(claim, draft, references).length === 0
 
 const sameAdded = (a: AddedPassage, b: AddedPassage) => a.reference_id === b.reference_id && a.passage === b.passage
 
@@ -386,8 +407,16 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
   return save
 }
 
-/** Claims finished, for the progress bar. */
-export function progress(claims: WorkClaim[], drafts: Record<string, Draft>) {
-  const done = claims.filter((c) => isDone(c, drafts[c.claim_id] ?? emptyDraft())).length
+/** Claims finished and saved, for the progress bar: an unsaved draft is not finished yet. */
+export function progress(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  references: Reference[],
+  saved: Record<string, Draft>,
+) {
+  const done = claims.filter((c) => {
+    const draft = drafts[c.claim_id] ?? emptyDraft()
+    return isDone(c, draft, references) && sameDraft(draft, saved[c.claim_id])
+  }).length
   return { done, total: claims.length }
 }

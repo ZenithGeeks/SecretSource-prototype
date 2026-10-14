@@ -1,6 +1,6 @@
 /** Papers to label: the ones the team brought in from Scopus, and whether the database is ready. */
 
-import { Download, Loader2, TriangleAlert } from 'lucide-react'
+import { Check, Download, Loader2, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
@@ -34,9 +34,16 @@ function Setup({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-function PaperRow({ paper, myTopic, onOpen }: { paper: Pool['papers'][number]; myTopic: string; onOpen: (id: string) => void }) {
+type Paper = Pool['papers'][number]
+
+const isFinished = (paper: Paper) => paper.status === 'done' && paper.claims > 0 && paper.judged >= paper.claims
+
+function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; myTopic: string; onOpen: (id: string) => void }) {
   const assign = useAssignTopic()
   const ready = paper.status === 'done'
+  const finished = isFinished(paper)
+  const others = paper.labelers.filter((name) => name !== me)
+  const action = finished ? 'Review' : paper.judged > 0 ? 'Continue' : 'Label'
   return (
     <li className="flex items-stretch gap-2">
       <button
@@ -47,23 +54,56 @@ function PaperRow({ paper, myTopic, onOpen }: { paper: Pool['papers'][number]; m
       >
         <span className="min-w-0">
           <span className="block truncate text-sm font-medium text-ink">{paper.title}</span>
-          <span className="block text-xs text-ink-muted">
+          <span className="block text-sm text-ink-muted">
             {paper.topic}
             {paper.topic === myTopic && ' · your topic'}
             {ready && ` · ${paper.claims} claims`}
             {paper.status === 'running' && ' · reading the paper…'}
           </span>
+          {ready && paper.claims > 0 && (
+            <span className="mt-1.5 block max-w-xs">
+              <span className="flex items-center gap-1.5 text-sm text-ink-muted tabular-nums">
+                {finished && <Check className="size-4 shrink-0 text-supports" aria-hidden="true" />}
+                {finished ? (
+                  <span className="font-medium text-supports">All {paper.claims} claims decided by you</span>
+                ) : (
+                  `${paper.judged} of ${paper.claims} claims decided by you`
+                )}
+              </span>
+              <span
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={paper.claims}
+                aria-valuenow={Math.min(paper.judged, paper.claims)}
+                aria-label={`Claims you decided in ${paper.title}`}
+                className="mt-1 block h-1.5 overflow-hidden rounded bg-border-subtle"
+              >
+                <span
+                  className="block h-full bg-supports transition-[width] duration-200"
+                  style={{ width: `${Math.min(100, (paper.judged / paper.claims) * 100)}%` }}
+                />
+              </span>
+            </span>
+          )}
+          {ready && others.length > 0 && <span className="block text-sm text-ink-muted">Also labeled by {others.join(', ')}</span>}
           {paper.status === 'error' && (
-            <span role="alert" className="block text-xs text-refutes">
+            <span role="alert" className="block text-sm text-refutes">
               Could not be read: {paper.reason || 'no open PDF was found'}. Remove it and add another.
             </span>
           )}
         </span>
-        {ready && <span className="text-sm font-medium text-accent">Label</span>}
+        {ready && <span className="text-sm font-medium text-accent">{action}</span>}
         {paper.status === 'running' && <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" aria-label="Reading the paper" />}
       </button>
       {paper.mine && (
-        <Button variant="ghost" disabled={assign.isPending} onClick={() => assign.mutate({ analysisId: paper.analysis_id, topic: '' })}>
+        <Button
+          variant="ghost"
+          disabled={assign.isPending}
+          onClick={() => {
+            if (!window.confirm("Remove this paper from the team's list? Labels already saved are kept.")) return
+            assign.mutate({ analysisId: paper.analysis_id, topic: '' })
+          }}
+        >
           Remove
         </Button>
       )}
@@ -91,9 +131,12 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   }
 
   const myTopic = pool.data?.people.find((p) => p.name === pool.data?.me)?.topic ?? ''
-  // Papers of the viewer's own topic first, then by topic.
+  // Papers of the viewer's own topic first, then by topic; within a topic, unfinished before finished.
   const papers = [...(pool.data?.papers ?? [])].sort(
-    (a, b) => Number(b.topic === myTopic) - Number(a.topic === myTopic) || a.topic.localeCompare(b.topic),
+    (a, b) =>
+      Number(b.topic === myTopic) - Number(a.topic === myTopic) ||
+      a.topic.localeCompare(b.topic) ||
+      Number(isFinished(a)) - Number(isFinished(b)),
   )
   return (
     <FadeIn className="flex flex-col gap-5">
@@ -158,7 +201,7 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
         ) : (
           <ul className="flex flex-col gap-2">
             {papers.map((paper) => (
-              <PaperRow key={paper.analysis_id} paper={paper} myTopic={myTopic} onOpen={onOpen} />
+              <PaperRow key={paper.analysis_id} paper={paper} me={pool.data?.me ?? ''} myTopic={myTopic} onOpen={onOpen} />
             ))}
           </ul>
         )}

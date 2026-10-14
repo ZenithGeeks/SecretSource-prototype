@@ -15,6 +15,11 @@ const NAV: NavEntry<'papers'>[] = [{ key: 'papers', label: 'Papers to label', ic
 
 export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [analysis, setAnalysis] = useState<string | null>(() => new URLSearchParams(window.location.search).get('analysis'))
+  const [unsaved, setUnsaved] = useState(false) // the open workspace holds drafts that are not saved
+  const leave = (go: () => void) => () => {
+    if (unsaved && !window.confirm('You have unsaved labels. Leave without saving?')) return
+    go()
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -28,13 +33,13 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
     <AppShell
       nav={NAV}
       active="papers"
-      onNavigate={() => setAnalysis(null)}
+      onNavigate={leave(() => setAnalysis(null))}
       role="Labeler"
       roleIcon={ClipboardCheck}
-      onChangeRole={onChangeRole}
+      onChangeRole={onChangeRole && leave(onChangeRole)}
       wide
     >
-      {analysis ? <Workspace analysisId={analysis} /> : <Queue onOpen={setAnalysis} />}
+      {analysis ? <Workspace analysisId={analysis} onDirtyChange={setUnsaved} /> : <Queue onOpen={setAnalysis} />}
     </AppShell>
   )
 }

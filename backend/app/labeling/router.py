@@ -16,6 +16,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling.identity import annotator
 from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, ScopusAddIn, TopicIn, current
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/labeling", tags=["labeling"])
 
 
@@ -146,8 +148,20 @@ async def status(who: str = Depends(annotator)):
 async def session(analysis: dict = Depends(owned_analysis), who: str = Depends(annotator)):
     store = _store()
     built = build_session(analysis)
-    rows = {tab: await asyncio.to_thread(store.read, tab) for tab in TABS}
+    paper_id = built["paper_id"]
+    rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in TABS}
     return {**built, "annotator": who, **_mine_and_others(rows, who, built["paper_id"])}
+
+
+def _claim_rows() -> list[dict]:
+    """The current `claims` rows of everyone. Empty when Supabase is not set up or cannot be read."""
+    try:
+        return current("claims", ledger.get_store().read("claims"))
+    except ledger.NotConfigured:
+        return []
+    except Exception:  # progress is a convenience; the paper list still works without it
+        log.exception("could not read the claims for the paper list")
+        return []
 
 
 def _team() -> list[str]:
@@ -177,6 +191,13 @@ async def pool_state(who: str = Depends(annotator), user: str | None = Depends(c
     def build() -> dict:
         topics = pool.people()
         names = sorted({*_team(), *topics, who})
+        # paper_id -> annotator -> extracted claims judged. A claim someone added by hand makes them
+        # a labeler of the paper but is not one of the claims the paper is counted in.
+        by_paper: dict[str, dict[str, int]] = {}
+        for r in _claim_rows():
+            counts = by_paper.setdefault(r.get("paper_id", ""), {})
+            who_judged = r.get("annotator", "")
+            counts[who_judged] = counts.get(who_judged, 0) + (r.get("origin") != "human_added")
         shared = []
         for analysis_id, topic in pool.pooled().items():
             row = main.analyses.get(analysis_id)
@@ -187,12 +208,15 @@ async def pool_state(who: str = Depends(annotator), user: str | None = Depends(c
                 continue  # nothing to label
             stages = row.get("stages") or []
             reason = next((s.get("message", "") for s in reversed(stages) if s.get("stage") == "error"), "")
+            counts = by_paper.get(Path(row["file"]).stem, {}) if row.get("file") else {}
             shared.append(
                 {
                     "analysis_id": analysis_id,
                     "title": row.get("title") or row.get("paper") or analysis_id,
                     "topic": topic,
                     "claims": len(row.get("claims") or []),
+                    "judged": counts.get(who, 0),
+                    "labelers": sorted(counts),
                     "status": status,
                     "reason": reason if status == "error" else "",
                     "mine": row.get("owner") == user,

@@ -8,7 +8,8 @@ saved until someone saves it.
 ## One-time setup
 
 Labels are saved in Supabase, in the `labeling_rows` table
-(`supabase/migrations/20261012160000_labeling_rows.sql`). The gateway needs `SUPABASE_URL` and
+(`supabase/migrations/20261012160000_labeling_rows.sql`, plus `20261013120000_labeling_rows_paper_index.sql`,
+an index so one paper's rows are read without scanning the whole tab). The gateway needs `SUPABASE_URL` and
 `SUPABASE_SERVICE_ROLE_KEY`, which it already has when login is on. Anyone who signs in can label.
 Until those are set the page says "Labels cannot be saved yet".
 
@@ -45,6 +46,12 @@ One row per save, in `labeling_rows` (`tab` + a JSON `data` row). Append-only; a
 | `claims` | claim judged (`extracted` / `human_added`; `accepted` / `edited` / `rejected`) | claim-extraction precision and recall |
 | `candidates` | passage judged (`retrieved` / `human_added`; `relevant` / `rejected`), with its RAG rank and score | retrieval recall and precision |
 | `labels` | (claim, reference paper) with `evidence` 1-4, `rationale`, `spans`, `confidence` | GEPA train / val / test |
+
+Opening a paper reads only that paper's rows. Each paper in the queue shows how many of its claims you have
+decided (keep, edit or reject; a claim you added by hand is not counted), a progress bar, and who else has labeled it. The button says
+Label before you start, Continue part-way and Review once every claim has your decision; a claim with a decision
+can still have passages or a level left, which the workspace shows: its bar counts a claim as finished only when the passages and levels are done too. Papers you have not finished list before finished ones
+within a topic. Removing a paper from the team's list asks first; saved labels are kept.
 
 Two people can label the same pair: the page tells the second person it was already labeled. Keep a
 double-labeled subset in the test split and measure agreement (weighted kappa) before trusting it.
