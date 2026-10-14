@@ -146,6 +146,29 @@ def test_save_label_and_read_it_back_as_mine_with_others_listed(api):
     assert other["others"] == {"paperA-0123456789ab#0|refB-aaaaaaaaaaaa": ["chanya"]}
 
 
+def test_rows_belong_to_the_account_not_to_the_name(api):
+    client, db, app = api
+    claim = {"claim_id": "paperA-0123456789ab#0", "origin": "extracted", "status": "accepted", "claim": "x"}
+
+    def saved():
+        return [r["status"] for r in client.get("/labeling/sessions/a1").json()["saved"]["claims"]]
+
+    app.dependency_overrides[labeling.current_user] = lambda: "account-1"
+    client.post("/labeling/sessions/a1/save", json={"claims": [claim]})
+    row = db.tabs["claims"][0]
+    assert (row["annotator"], row["annotator_id"]) == ("chanya", "account-1")
+    # The same account under a new name still has its rows.
+    app.dependency_overrides[labeling.annotator] = lambda: "chanya k."
+    assert saved() == ["accepted"]
+    # Another account with the very same name has none, and its save does not replace the first one's.
+    app.dependency_overrides[labeling.current_user] = lambda: "account-2"
+    assert saved() == []
+    client.post("/labeling/sessions/a1/save", json={"claims": [{**claim, "status": "rejected"}]})
+    assert saved() == ["rejected"]
+    app.dependency_overrides[labeling.current_user] = lambda: "account-1"
+    assert saved() == ["accepted"]
+
+
 def test_a_later_save_replaces_the_earlier_one_but_keeps_both_rows(api):
     client, db, _ = api
     label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 2}
@@ -265,7 +288,7 @@ def test_export_is_csv_of_current_rows(api):
     client.post("/labeling/sessions/a1/save", json={"labels": [label]})
     client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "evidence": 4}]})
     text = client.get("/labeling/export?tab=labels").text.splitlines()
-    assert len(text) == 2 and text[0].startswith("ts,annotator,paper_id")
+    assert len(text) == 2 and text[0].startswith("ts,annotator,annotator_id,paper_id")
 
 
 def test_export_drops_what_a_person_took_back(api):
@@ -569,7 +592,13 @@ def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch
 
 
 def _claim(who, claim_id, paper="paperA-0123456789ab", status="accepted"):
-    return {"annotator": who, "paper_id": paper, "claim_id": claim_id, "status": status}
+    return {
+        "annotator": who,
+        "annotator_id": who,
+        "paper_id": paper,
+        "claim_id": claim_id,
+        "status": status,
+    }
 
 
 def test_pool_shows_how_far_each_person_is_through_a_paper(api, monkeypatch):
@@ -670,8 +699,9 @@ def test_dspy_claims_keep_what_a_person_kept_and_list_what_they_rejected(api, mo
     assert ndjson(client, "dspy_claims") == [
         {
             "paper_id": "paperA-0123456789ab",
-            "annotator": "chanya",
+            "annotator_id": "chanya",
             "article": "text of paperA-0123456789ab",
+            "annotator": "chanya",
             "claims": ["Y improves recall by 4 points."],
             "rejected": ["Y is fast."],
         }
@@ -714,6 +744,7 @@ def test_dspy_verdicts_are_the_level_with_the_passages_called_relevant(api):
             "claim_id": C0,
             "reference_id": REF,
             "annotator": "chanya",
+            "annotator_id": "chanya",
             "claim": "Method Y improves recall.",
             "source": "recall rose by 4 points\n\nand held on BEIR",
             "verdict": "3",

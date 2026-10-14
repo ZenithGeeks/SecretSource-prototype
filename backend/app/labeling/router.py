@@ -122,15 +122,21 @@ def build_session(analysis: dict) -> dict:
     }
 
 
+async def labeler_id(who: str = Depends(annotator), user: str | None = Depends(current_user)) -> str:
+    """The account a person's rows are kept under. With login off there is one shared space, so
+    it is the shared name."""
+    return user or who
+
+
 def _mine_and_others(rows: dict[str, list[dict]], me: str, paper_id: str) -> dict:
-    """What `me` already saved for this paper, and who else labeled which pair."""
+    """What the account `me` already saved for this paper, and who else labeled which pair."""
     mine = {
-        tab: [r for r in current(tab, rows[tab]) if r["paper_id"] == paper_id and r["annotator"] == me]
+        tab: [r for r in current(tab, rows[tab]) if r["paper_id"] == paper_id and r["annotator_id"] == me]
         for tab in TABS
     }
     others: dict[str, list[str]] = {}
     for row in current("labels", rows["labels"]):
-        if row["paper_id"] == paper_id and row["annotator"] != me:
+        if row["paper_id"] == paper_id and row["annotator_id"] != me:
             others.setdefault(f"{row['claim_id']}|{row['reference_id']}", []).append(row["annotator"])
     return {"saved": mine, "others": others}
 
@@ -145,12 +151,14 @@ async def status(who: str = Depends(annotator)):
 
 
 @router.get("/sessions/{analysis_id}")
-async def session(analysis: dict = Depends(owned_analysis), who: str = Depends(annotator)):
+async def session(
+    analysis: dict = Depends(owned_analysis), who: str = Depends(annotator), me: str = Depends(labeler_id)
+):
     store = _store()
     built = build_session(analysis)
     paper_id = built["paper_id"]
     rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in TABS}
-    return {**built, "annotator": who, **_mine_and_others(rows, who, built["paper_id"])}
+    return {**built, "annotator": who, **_mine_and_others(rows, me, built["paper_id"])}
 
 
 def _claim_rows() -> list[dict]:
@@ -184,20 +192,27 @@ def _team() -> list[str]:
 
 
 @router.get("/pool")
-async def pool_state(who: str = Depends(annotator), user: str | None = Depends(current_user)):
+async def pool_state(
+    who: str = Depends(annotator),
+    user: str | None = Depends(current_user),
+    me: str = Depends(labeler_id),
+):
     """Topics, who has which, and the papers shared with the team."""
     from app import main
 
     def build() -> dict:
         topics = pool.people()
         names = sorted({*_team(), *topics, who})
-        # paper_id -> annotator -> extracted claims judged. A claim someone added by hand makes them
+        # paper_id -> account -> extracted claims judged. A claim someone added by hand makes them
         # a labeler of the paper but is not one of the claims the paper is counted in.
         by_paper: dict[str, dict[str, int]] = {}
+        name_of = {me: who}  # account -> the name on its latest row; the viewer by their name now
         for r in _claim_rows():
             counts = by_paper.setdefault(r.get("paper_id", ""), {})
-            who_judged = r.get("annotator", "")
-            counts[who_judged] = counts.get(who_judged, 0) + (r.get("origin") != "human_added")
+            account = r.get("annotator_id", "")
+            counts[account] = counts.get(account, 0) + (r.get("origin") != "human_added")
+            if account != me:
+                name_of[account] = r.get("annotator", "")
         shared = []
         for analysis_id, topic in pool.pooled().items():
             row = main.analyses.get(analysis_id)
@@ -215,8 +230,8 @@ async def pool_state(who: str = Depends(annotator), user: str | None = Depends(c
                     "title": row.get("title") or row.get("paper") or analysis_id,
                     "topic": topic,
                     "claims": len(row.get("claims") or []),
-                    "judged": counts.get(who, 0),
-                    "labelers": sorted(counts),
+                    "judged": counts.get(me, 0),
+                    "labelers": sorted({name_of[account] for account in counts}),
                     "status": status,
                     "reason": reason if status == "error" else "",
                     "mine": row.get("owner") == user,
@@ -297,22 +312,28 @@ async def scopus_add(
     return {"id": started["id"], "existing": False}
 
 
-def _stamp(who: str, paper_id: str) -> dict:
+def _stamp(who: str, account: str, paper_id: str) -> dict:
     return {
         "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "annotator": who,
+        "annotator_id": account,
         "paper_id": paper_id,
     }
 
 
 @router.post("/sessions/{analysis_id}/save")
-async def save(body: SaveIn, analysis: dict = Depends(owned_analysis), who: str = Depends(annotator)):
+async def save(
+    body: SaveIn,
+    analysis: dict = Depends(owned_analysis),
+    who: str = Depends(annotator),
+    me: str = Depends(labeler_id),
+):
     built = build_session(analysis)
     paper_id = built["paper_id"]
     extracted = {c["claim_id"]: c for c in built["claims"]}
     retrieved = {cand["cand_id"]: (c["claim_id"], cand) for c in built["claims"] for cand in c["candidates"]}
     references = {r["reference_id"] for r in built["references"]}
-    stamp = _stamp(who, paper_id)
+    stamp = _stamp(who, me, paper_id)
 
     def claim_known(claim_id: str, origin: str) -> bool:
         # A hand-added claim only has to belong to this paper; an extracted one must exist.
@@ -394,9 +415,9 @@ async def export(tab: str = "labels", _who: str = Depends(annotator)):
     if tab != "claims":
         claims = await asyncio.to_thread(store.read, "claims")
         rejected = {
-            (r["claim_id"], r["annotator"]) for r in current("claims", claims) if r["status"] == "rejected"
+            (r["claim_id"], r["annotator_id"]) for r in current("claims", claims) if r["status"] == "rejected"
         }
-        rows = [r for r in rows if (r["claim_id"], r["annotator"]) not in rejected]
+        rows = [r for r in rows if (r["claim_id"], r["annotator_id"]) not in rejected]
     if tab == "candidates":
         rows = [r for r in rows if not (r["origin"] == "human_added" and r["status"] == "rejected")]
     out = io.StringIO()

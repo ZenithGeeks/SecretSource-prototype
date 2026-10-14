@@ -41,6 +41,10 @@ The 1-4 labels grade how well the reference passage backs the claim (1 no suppor
 
 One row per save, in `labeling_rows` (`tab` + a JSON `data` row). Append-only; a later row for the same key replaces an earlier one when read back.
 
+Every row carries `annotator` (the person's name when it was written, for reading) and `annotator_id` (their
+account). Rows belong to the account: renaming yourself keeps your labels, and two people with the same name
+stay apart. Topics in "Who labels what" are still kept by name.
+
 | tab | one row per | use |
 | --- | --- | --- |
 | `claims` | claim judged (`extracted` / `human_added`; `accepted` / `edited` / `rejected`) | claim-extraction precision and recall |
