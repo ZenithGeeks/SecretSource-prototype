@@ -68,8 +68,8 @@ function boxStyle(box: Box, width: number, height: number) {
 }
 
 /** pdf.js draws a PDF's links as empty boxes over the text; give each one a name to read out. */
-function nameLinks(page: HTMLElement | undefined) {
-  for (const link of page?.querySelectorAll<HTMLAnchorElement>('.annotationLayer a:not([aria-label])') ?? []) {
+function nameLinks(viewer: HTMLElement) {
+  for (const link of viewer.querySelectorAll<HTMLAnchorElement>('.annotationLayer a:not([aria-label])')) {
     const href = link.getAttribute('href') ?? ''
     const inPaper = !href || href.startsWith('#')
     link.setAttribute('aria-label', link.title || (inPaper ? 'Go to a place in this paper' : `Open ${href}`))
@@ -256,6 +256,16 @@ export function PageViewer({
     if (!node) return
     const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width))
     observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  // Name the PDF's links as pdf.js adds them. react-pdf's onRenderAnnotationLayerSuccess fires
+  // before pdf.js has drawn them, so it cannot be used for this.
+  useEffect(() => {
+    const node = scroller.current
+    if (!node) return
+    const observer = new MutationObserver(() => nameLinks(node))
+    observer.observe(node, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
 
@@ -523,9 +533,7 @@ export function PageViewer({
                           width={pageWidth}
                           devicePixelRatio={pixelRatio}
                           renderTextLayer
-                          renderAnnotationLayer
-                          onRenderAnnotationLayerSuccess={() => nameLinks(pageNodes.current.get(number))}
-                          loading={<div style={{ height: pageWidth * pageRatio }} />}
+                          renderAnnotationLayer                          loading={<div style={{ height: pageWidth * pageRatio }} />}
                         />
                       )}
                       {number === highlightPage &&

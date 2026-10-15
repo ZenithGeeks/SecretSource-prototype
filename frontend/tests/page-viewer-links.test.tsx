@@ -1,7 +1,7 @@
 /** PageViewer: the PDF's own links, drawn by pdf.js as empty boxes, get names a screen reader reads. */
 
 import { render, screen, waitFor } from '@testing-library/react'
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { PageViewer } from '../src/components/PageViewer'
@@ -14,17 +14,17 @@ vi.mock('react-pdf', () => ({
     }, [onLoadSuccess])
     return <div>{children}</div>
   },
-  Page: ({ onRenderAnnotationLayerSuccess }: { onRenderAnnotationLayerSuccess?: () => void }) => {
+  // pdf.js adds the links to the layer some time after react-pdf reports the layer as rendered.
+  Page: () => {
+    const layer = useRef<HTMLDivElement>(null)
     useEffect(() => {
-      onRenderAnnotationLayerSuccess?.()
-    }, [onRenderAnnotationLayerSuccess])
-    return (
-      <div className="annotationLayer">
-        <a href="#page=9" title="Peters et al." />
-        <a href="https://cloud.google.com/tpu/" />
-        <a href="#" />
-      </div>
-    )
+      const timer = setTimeout(() => {
+        layer.current!.innerHTML =
+          '<a href="#page=9" title="Peters et al."></a><a href="https://cloud.google.com/tpu/"></a><a href="#"></a>'
+      }, 10)
+      return () => clearTimeout(timer)
+    }, [])
+    return <div ref={layer} className="annotationLayer" />
   },
   pdfjs: { GlobalWorkerOptions: {}, version: '0' },
 }))
