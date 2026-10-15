@@ -70,6 +70,7 @@ export function Onboarding({
   onSkip: () => void
 }) {
   const [selected, setSelected] = useState<Role>('researcher')
+  const selectedRole = ROLES.find((r) => r.id === selected) ?? ROLES[0]
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-8 p-6">
@@ -129,7 +130,7 @@ export function Onboarding({
           onClick={() => onContinue(selected)}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
         >
-          Continue as {selected}
+          Continue as {selectedRole.title}
         </button>
         <button
           type="button"
