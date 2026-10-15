@@ -25,6 +25,7 @@ def fake_projects(monkeypatch):
     monkeypatch.setattr(
         main.store, "load_projects", lambda owner: [p for p in saved.values() if p.get("owner") == owner]
     )
+    monkeypatch.setattr(main.store, "delete_project", lambda project_id: saved.pop(project_id, None))
     return saved
 
 
@@ -192,3 +193,33 @@ def test_projects_and_their_library_are_private_to_the_owner(client, fake_projec
         f"/researcher/projects/{project_id}/papers", json={"analysis_id": "a1"}, headers=ada
     )
     assert response.status_code == 200
+
+
+def test_renaming_a_project_is_owner_only(client, fake_projects):
+    ada = {"Authorization": "Bearer token-ada"}
+    bo = {"Authorization": "Bearer token-bo"}
+    project_id = client.post("/researcher/projects", json={"name": "Original"}, headers=ada).json()["id"]
+    url = f"/researcher/projects/{project_id}"
+
+    assert client.patch(url, json={"name": "Bo's rename"}, headers=bo).status_code == 404
+
+    renamed = client.patch(url, json={"name": "Renamed"}, headers=ada)
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Renamed"
+    assert client.patch(url, json={"name": "  "}, headers=ada).status_code == 400
+
+
+def test_deleting_a_project_is_owner_only_and_keeps_its_papers(client, fake_projects):
+    ada = {"Authorization": "Bearer token-ada"}
+    bo = {"Authorization": "Bearer token-bo"}
+    project_id = client.post("/researcher/projects", json={"name": "Temp"}, headers=ada).json()["id"]
+    client.post(f"/researcher/projects/{project_id}/papers", json={"analysis_id": "a1"}, headers=ada)
+
+    assert client.delete(f"/researcher/projects/{project_id}", headers=bo).status_code == 404
+
+    assert client.delete(f"/researcher/projects/{project_id}", headers=ada).status_code == 200
+    assert project_id not in [p["id"] for p in client.get("/researcher/projects", headers=ada).json()]
+    # The paper itself is untouched — still one of ada's own analyses.
+    assert client.get("/analyses/a1", headers=ada).status_code == 200
+    # Deleting an id that no longer exists is also a 404, not a crash.
+    assert client.delete(f"/researcher/projects/{project_id}", headers=ada).status_code == 404

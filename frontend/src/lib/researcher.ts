@@ -156,8 +156,8 @@ export type KnowledgeGraph = {
   paperEdges: PaperEdge[] // paper ↔ paper (papers view)
 }
 
-const json = (body: unknown): RequestInit => ({
-  method: 'POST',
+const json = (body: unknown, method = 'POST'): RequestInit => ({
+  method,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 })
@@ -179,6 +179,12 @@ export const researcherApi = {
 
   addToProject: (projectId: string, analysisId: string) =>
     request<Project>(`/researcher/projects/${encodeURIComponent(projectId)}/papers`, json({ analysis_id: analysisId })),
+
+  renameProject: (projectId: string, name: string) =>
+    request<Project>(`/researcher/projects/${encodeURIComponent(projectId)}`, json({ name }, 'PATCH')),
+
+  deleteProject: (projectId: string) =>
+    request<{ deleted: string }>(`/researcher/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
 }
 
 /** "Updated today", "Updated 3 days ago", from a project's ISO time. */

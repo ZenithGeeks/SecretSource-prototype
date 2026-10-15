@@ -266,6 +266,17 @@ def load_projects(owner: str | None) -> list[dict]:
     return [json.loads(row["data"]) for row in rows]
 
 
+def delete_project(project_id: str) -> None:
+    """One project, by id. The caller checks ownership first (main.py's _project()), so this
+    never takes an owner — same split as analyses' _delete_one() vs. delete_projects() below."""
+    if _use_supabase():
+        _supabase().table("projects").delete().eq("id", project_id).execute()
+        return
+    with _sqlite() as database:
+        database.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        database.commit()
+
+
 def delete_projects(owner: str | None) -> None:
     """Every project of one owner, for account-level "delete all" (#194's fix elsewhere reuses
     this for researcher; writer/teacher have no projects, so this is a no-op for them)."""
