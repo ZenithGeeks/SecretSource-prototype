@@ -39,6 +39,7 @@ if (typeof Worker !== 'undefined') pdfjs.GlobalWorkerOptions.workerPort = new Wo
 export type Target = {
   paper: string // file name, e.g. "colbertv2.pdf"
   label: string // what the reader clicked, shown above the page
+  detail?: string // a second line before the file name, e.g. the authors and year
   quote?: string // the text being pointed at, if there is one to show
   source: Source | null // null when it could not be located: the page shows unmarked
   verdict?: Verdict['verdict'] // colors a located passage by the result it represents
@@ -358,8 +359,9 @@ export function PageViewer({
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}
-            <h2 className="truncate text-sm font-medium">{target.label}</h2>
+            <h2 title={target.label} className="truncate text-sm font-medium">{target.label}</h2>
             <p className="truncate text-xs text-ink-muted">
+              {target.detail && `${target.detail} · `}
               {target.paper}
               {/* Only when there was a passage to find: opening the paper itself has none. */}
               {!target.error && !target.source && target.quote && ' · exact place not found, showing the page'}

@@ -110,8 +110,8 @@ def analysis_keys(analysis: dict) -> set[str]:
     return keys
 
 
-def _cited_work(claim: dict, verdict: dict) -> dict:
-    """The citation a verdict answers for, matched by what it was looked up by."""
+def find_citation(claim: dict, verdict: dict) -> dict | None:
+    """The claim's citation a verdict answers for, matched by what it was looked up by."""
     for citation in claim.get("citations", []):
         if verdict.get("cited") in (
             citation.get("doi"),
@@ -120,6 +120,13 @@ def _cited_work(claim: dict, verdict: dict) -> dict:
             citation.get("url"),
         ):
             return citation
+    return None
+
+
+def _cited_work(claim: dict, verdict: dict) -> dict:
+    """The citation a verdict answers for, or a stand-in named after its PDF."""
+    if citation := find_citation(claim, verdict):
+        return citation
     name = re.sub(r"\.pdf$", "", verdict.get("source", ""), flags=re.I)
     return {"title": name, "authors": [], "year": "", "doi": "", "arxiv": "", "url": ""}
 

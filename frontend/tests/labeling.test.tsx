@@ -23,7 +23,7 @@ const gateway = vi.hoisted(() => ({
       },
       { claim_id: 'paperA#1', claim: 'Y is fast.', sentence: '', section: '', source: null, candidates: [] },
     ],
-    references: [{ reference_id: 'refB', file: 'refB.pdf', label: 'Ref B' }],
+    references: [{ reference_id: 'refB', file: 'refB.pdf', label: 'Ref B', ref: 'b4', authors: ['Ana Silva', 'Bo Lee'], year: '2021' }],
     saved: { claims: [], candidates: [], labels: [] },
     others: {},
   },
@@ -50,11 +50,12 @@ vi.mock('../src/components/PageViewer', () => ({
     target,
     onSelectText,
   }: {
-    target: { paper: string; quote?: string }
+    target: { paper: string; quote?: string; label: string; detail?: string }
     onSelectText?: (s: { text: string; page: number | null }) => void
   }) => (
     <div>
       <div data-testid="viewer">{target.paper}|{target.quote}</div>
+      <p data-testid="viewer-heading">{target.label}{target.detail && ` / ${target.detail}`}</p>
       <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
         select in {target.paper}
       </button>
@@ -64,6 +65,7 @@ vi.mock('../src/components/PageViewer', () => ({
 
 import {
   buildSave,
+  byline,
   draftFromSaved,
   emptyDraft,
   isDone,
@@ -395,9 +397,17 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reference only' }))
     expect(screen.getAllByTestId('viewer').map((v) => v.textContent)).toEqual(['refB.pdf|recall rose by 4 points'])
     expect(window.localStorage.getItem('labeler.paperView')).toBe('reference')
-    fireEvent.click(screen.getByRole('button', { name: 'Both papers' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reference + this paper' }))
     expect(screen.getAllByTestId('viewer')).toHaveLength(2)
     window.localStorage.removeItem('labeler.paperView')
+  })
+
+  it('names each paper: the reference by its marker, title and authors, then this paper', async () => {
+    await open()
+    expect(screen.getAllByTestId('viewer-heading').map((h) => h.textContent)).toEqual([
+      'Reference [b4]: Ref B / Silva, Lee · 2021',
+      'This paper, where the claim is made',
+    ])
   })
 
   it('lists what every level means under the picker, with the chosen one marked', async () => {
@@ -413,11 +423,20 @@ describe('the workspace', () => {
     expect(screen.getByText('Level 3, Clear: The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
   })
 
-  it('will not add evidence before the claim is decided, and says why', async () => {
+  it('keeps an undecided claim when evidence is added to it', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('region', { name: 'Selected text' })).not.toBeInTheDocument()
+  })
+
+  it('will not add evidence to a rejected claim, and says why', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     expect(screen.getByRole('button', { name: 'Add as evidence' })).toBeDisabled()
-    expect(screen.getByText('Decide on the claim first: keep or edit it.')).toBeInTheDocument()
+    expect(screen.getByText('This claim is rejected. Keep or edit it to add evidence.')).toBeInTheDocument()
     // The note is a full-width line; without wrap it squeezes the quote to 0px in the row layout.
     expect(screen.getByRole('region', { name: 'Selected text' })).toHaveClass('sm:flex-row', 'sm:flex-wrap')
   })
@@ -432,5 +451,25 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add as a new claim' }))
     expect(screen.getByText(/· added/)).toBeInTheDocument()
+  })
+})
+
+describe('byline', () => {
+  const reference = (authors: string[], year: string) => ({ reference_id: 'r', file: 'r.pdf', label: 'R', ref: '', authors, year })
+
+  it('names up to two authors by surname, then et al.', () => {
+    expect(byline(reference(['Rodrigo Nogueira', 'Kyunghyun Cho'], '2019'))).toBe('Nogueira, Cho · 2019')
+    expect(byline(reference(['Vladimir Karpukhin', 'Barlas Oguz', 'Sewon Min'], '2020'))).toBe('Karpukhin et al. · 2020')
+  })
+
+  it('leaves out what the citation list did not have', () => {
+    expect(byline(reference([], '2019'))).toBe('2019')
+    expect(byline(reference([], ''))).toBe('')
+  })
+})
+
+describe('byline from an older gateway', () => {
+  it('is empty when the reference has no authors or year', () => {
+    expect(byline({ reference_id: 'r', file: 'r.pdf', label: '1901.04085' })).toBe('')
   })
 })
