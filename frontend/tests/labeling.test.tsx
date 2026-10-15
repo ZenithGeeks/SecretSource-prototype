@@ -418,6 +418,8 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     expect(screen.getByRole('button', { name: 'Add as evidence' })).toBeDisabled()
     expect(screen.getByText('Decide on the claim first: keep or edit it.')).toBeInTheDocument()
+    // The note is a full-width line; without wrap it squeezes the quote to 0px in the row layout.
+    expect(screen.getByRole('region', { name: 'Selected text' })).toHaveClass('sm:flex-row', 'sm:flex-wrap')
   })
 
   it('uses text selected in the paper as the claim wording, or as a new claim', async () => {

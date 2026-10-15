@@ -31,7 +31,7 @@ export function SelectionBar({
     <div
       role="region"
       aria-label="Selected text"
-      className="flex flex-col gap-2 rounded-xl border border-accent bg-accent-soft p-3 sm:flex-row sm:items-center"
+      className="flex flex-col gap-2 rounded-xl border border-accent bg-accent-soft p-3 sm:flex-row sm:flex-wrap sm:items-center"
     >
       <p className="flex min-w-0 flex-1 gap-2 text-sm text-ink">
         <Quote className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
