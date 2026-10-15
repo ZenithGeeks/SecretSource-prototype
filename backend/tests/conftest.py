@@ -1,5 +1,5 @@
 import pytest
-from app import main, queue
+from app import main, queue, tracing
 
 
 class _NullRedis:
@@ -21,3 +21,10 @@ def no_real_redis(request, monkeypatch):
     monkeypatch.setattr(main, "redis_connection", _NullRedis)
     monkeypatch.setattr(queue, "redis_connection", _NullRedis)
     monkeypatch.setattr(queue, "_queue", None)
+
+
+@pytest.fixture(autouse=True)
+def no_tracing(monkeypatch):
+    """Unit tests never send traces, even when .env sets PHOENIX_COLLECTOR_ENDPOINT for local runs.
+    test_tracing.py sets its own endpoint and a fake exporter."""
+    monkeypatch.setattr(tracing, "PHOENIX_COLLECTOR_ENDPOINT", "")

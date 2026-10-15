@@ -14,6 +14,7 @@ import prometheus_client
 from app.native import prepare_and_check
 from app.queue import QUEUE_NAME, AnalysisWorker, redis_connection
 from app.rq_metrics import RQCollector
+from app.tracing import setup_tracing
 from rq.serializers import JSONSerializer
 
 if __name__ == "__main__":
@@ -30,4 +31,5 @@ if __name__ == "__main__":
     prometheus_client.start_http_server(int(os.getenv("WORKER_METRICS_PORT", "9101")))
     # Queue depth, ages and worker count, read from Redis on each scrape. Only here, not in the gateway.
     prometheus_client.REGISTRY.register(RQCollector())
+    setup_tracing()
     AnalysisWorker([QUEUE_NAME], connection=redis_connection(), serializer=JSONSerializer).work()

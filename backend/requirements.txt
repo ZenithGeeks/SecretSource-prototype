@@ -17,3 +17,7 @@ py-spy>=0.3  # attach to the running gateway (pid 1) for live profiling: py-spy 
 prometheus-client>=0.20  # /metrics endpoint (app/metrics.py), scraped by deploy/monitoring/prometheus.yml
 redis>=5  # the queue's backing store (app/queue.py); also used directly for cross-process SSE
 rq>=1.16  # POST /analyses enqueues here instead of an in-process asyncio.Task; worker.py runs the jobs
+arize-phoenix-otel>=0.17  # LLM traces to Phoenix (app/tracing.py), only used when PHOENIX_COLLECTOR_ENDPOINT is set
+openinference-instrumentation-dspy>=0.1.48
+openinference-instrumentation-google-adk>=1.0
+opentelemetry-instrumentation-threading  # carries a trace into ThreadPoolExecutor threads
