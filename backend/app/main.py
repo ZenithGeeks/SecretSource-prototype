@@ -84,6 +84,7 @@ from app.pipeline.verify import (
 )
 from app.queue import cancel_if_queued, enqueue_analysis, job_is_alive, pubsub_client, redis_connection
 from app.teacher.router import router as teacher_router
+from app.tracing import setup_tracing
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
@@ -217,6 +218,7 @@ async def _subscribe_forever() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_tracing()
     restore()
     # Log where each dependency is and whether it answers, without holding up startup.
     app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))

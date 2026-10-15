@@ -75,6 +75,11 @@ GROBID_URL = os.getenv("GROBID_URL") or "http://localhost:8070"
 # worker running a job in a separate process (main.py's Redis Pub/Sub subscriber).
 REDIS_URL = os.getenv("REDIS_URL") or "redis://localhost:6379/0"
 
+# LLM tracing (app/tracing.py). Unset means no tracing. Compose runs Phoenix under
+# --profile tracing at http://phoenix:6006. Phoenix Cloud also wants PHOENIX_API_KEY.
+PHOENIX_COLLECTOR_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT") or ""
+PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME") or "secretsource"
+
 # How calls to the services above prove who they are.
 # `google-id-token` adds a Google identity token to every *.run.app URL.
 # `none` sends nothing, which compose needs.

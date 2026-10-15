@@ -15,6 +15,7 @@ covers how to run the backend, how it is organised, and the HTTP API.
 - [Folder layout](#folder-layout)
 - [Profiling](#profiling)
 - [Monitoring](#monitoring)
+- [Tracing](#tracing)
 - [Deploy](#deploy)
 - [Tests](#tests)
 - [HTTP API](#http-api)
@@ -88,6 +89,9 @@ default".
 | `COLBERT_URL` | `http://localhost:8893` | ColBERT text search service |
 | `COLPALI_URL` | `http://localhost:8894` | ColPali figure and page search; skipped when down |
 | `REDIS_URL` | `redis://localhost:6379/0` | the analysis job queue (`app/queue.py`), and how a worker's progress reaches the gateway |
+| `PHOENIX_COLLECTOR_ENDPOINT` | empty (off) | Arize Phoenix to send LLM traces to, see [Tracing](#tracing) |
+| `PHOENIX_PROJECT_NAME` | `secretsource` | the Phoenix project the traces go in |
+| `PHOENIX_API_KEY` | empty | only for Phoenix Cloud |
 | `WORKER_METRICS_PORT` | `9101` | host runs of `worker.py` only: the port its Prometheus metrics are served on (under compose it is always 9101) |
 | `SERVICE_AUTH` | `none` | `google-id-token` adds an identity token for private Cloud Run services |
 | `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
@@ -259,6 +263,30 @@ hand. See [deploy/monitoring/README.md](../deploy/monitoring/README.md) for what
 shows. This exists because ss-core, back when it had 2GB RAM and 1 vCPU, once OOM-crashed with nothing showing
 memory climbing beforehand, and because until now nothing said whether analyses were actually
 succeeding.
+
+## Tracing
+
+[Arize Phoenix](https://arize.com/docs/phoenix) shows each LLM call the backend makes: the
+prompt, the answer, the tokens and the time, grouped into the DSPy module or the ADK agent run
+that made it. Metrics say how many calls failed or how slow they were; a trace says which
+prompt it was and what the model answered. `app/tracing.py` turns it on in the gateway (chat
+agents) and in each worker (the analysis pipeline) when `PHOENIX_COLLECTOR_ENDPOINT` is set.
+
+```bash
+docker compose --profile tracing up -d phoenix
+# in .env: PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006   (host run: http://localhost:6006)
+docker compose up -d gateway worker
+```
+
+Then open http://localhost:6006. Traces are kept in the `phoenix-data` volume.
+
+- Spans are sent over HTTP to `{endpoint}/v1/traces` from a background thread, so a call never
+  waits on Phoenix, and a Phoenix that is down only loses traces.
+- Traces hold paper text, prompts and answers, and the Phoenix UI has no login. Keep
+  `BIND_ADDRESS` private, and do not point a production gateway at a Phoenix outside our
+  project without agreeing on that first.
+- A worker puts each analysis in one trace, named `analysis` with its `analysis.id`, so every
+  extraction and judge call of that run sits under it. Chat agent runs are one trace per turn.
 
 ## Deploy
 

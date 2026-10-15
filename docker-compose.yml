@@ -148,6 +148,10 @@ services:
       TEACHER_GOOGLE_SCOPES: ${TEACHER_GOOGLE_SCOPES:-}
       # A Postgres URL keeps the chat agents' sessions after a restart (app/sessions.py).
       SESSION_DB_URL: ${SESSION_DB_URL:-${DIRECT_URL:-}}
+      # LLM traces (app/tracing.py). Empty: off. http://phoenix:6006 with --profile tracing.
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-}
+      PHOENIX_API_KEY: ${PHOENIX_API_KEY:-} # only for Phoenix Cloud
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-secretsource}
     volumes:
       # Override with an absolute path when the compose project directory is a CI checkout
       # that gets wiped/reset between deploys (see .github/workflows/deploy-backend.yml):
@@ -275,6 +279,22 @@ services:
       - gateway
     restart: unless-stopped
 
+  # Arize Phoenix: every LLM call the gateway and the workers make, with prompt, answer, tokens
+  # and time. The UI and the trace endpoint share :6006. Opt-in, and the gateway only sends
+  # traces when PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006 is set in .env:
+  #   docker compose --profile tracing up -d phoenix
+  # Traces hold paper text and prompts, and the UI has no login: keep BIND_ADDRESS private.
+  phoenix:
+    profiles: [tracing]
+    image: arizephoenix/phoenix:version-20.22.0
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:6006:6006"
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data # its SQLite database
+    volumes:
+      - phoenix-data:/mnt/data
+    restart: unless-stopped
+
   # ss-core (2 GB RAM, 1 vCPU) OOM-crashed with no warning: a container ate memory until the
   # kernel started killing processes and the box stopped answering SSH and the gateway alike.
   # Nothing showed memory climbing beforehand — this profile adds that visibility. Opt-in, since
@@ -374,3 +394,4 @@ volumes:
   hf-cache:
   grafana-data:
   redis-data:
+  phoenix-data:

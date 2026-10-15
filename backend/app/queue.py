@@ -13,6 +13,8 @@ import time
 
 import redis
 import redis.asyncio
+from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
+from opentelemetry import trace
 from rq import Queue, SimpleWorker, Worker
 from rq.job import Callback, Job, JobStatus
 from rq.serializers import JSONSerializer
@@ -24,6 +26,8 @@ QUEUE_NAME = "analyses"
 JOB_TIMEOUT = 60 * 30  # RQ's own default (180s) suits quick jobs; an analysis can run minutes.
 
 logger = logging.getLogger(__name__)
+# A no-op until app/tracing.py registers Phoenix in this process.
+tracer = trace.get_tracer(__name__)
 
 _connection: redis.Redis | None = None
 _queue: Queue | None = None
@@ -84,8 +88,16 @@ def run_analysis_job(
 
             ANALYSES_RUNNING.inc()
             try:
-                # _run_queued directly: RQ already did the queueing.
-                await main._run_queued(analysis_id, analysis, paper, verify)
+                # One trace per analysis: asyncio.to_thread copies this span's context into the
+                # pipeline's threads, so its DSPy calls show up under it in Phoenix.
+                attributes = {
+                    SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
+                    SpanAttributes.INPUT_VALUE: paper,
+                    "analysis.id": analysis_id,
+                }
+                with tracer.start_as_current_span("analysis", attributes=attributes):
+                    # _run_queued directly: RQ already did the queueing.
+                    await main._run_queued(analysis_id, analysis, paper, verify)
             finally:
                 ANALYSES_RUNNING.dec()
 
