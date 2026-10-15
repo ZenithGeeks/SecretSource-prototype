@@ -84,7 +84,42 @@ def test_session_lists_claims_with_ranked_candidates(api):
         "recall rose by 4 points",
     )
     assert s["references"] == [
-        {"reference_id": "refB-aaaaaaaaaaaa", "file": "refB-aaaaaaaaaaaa.pdf", "label": "Ref B"}
+        {
+            "reference_id": "refB-aaaaaaaaaaaa",
+            "file": "refB-aaaaaaaaaaaa.pdf",
+            "label": "Ref B",
+            "ref": "",
+            "authors": [],
+            "year": "",
+        }
+    ]
+
+
+def test_a_reference_is_named_by_its_title_when_the_citation_list_has_it():
+    citation = {
+        "ref": "b47",
+        "title": "Passage Re-ranking with BERT",
+        "authors": ["Rodrigo Nogueira", "Kyunghyun Cho"],
+        "year": "2019",
+        "arxiv": "1901.04085",
+        "doi": "",
+        "url": "",
+    }
+    claim = {
+        "claim": "BERT re-ranks passages well.",
+        "citations": [citation],
+        "verdicts": [{"source": "data/papers/1901.04085.pdf", "cited": "1901.04085", "evidence": []}],
+    }
+    session = labeling.build_session({**ANALYSIS, "claims": [claim]})
+    assert session["references"] == [
+        {
+            "reference_id": "1901.04085",
+            "file": "1901.04085.pdf",
+            "label": "Passage Re-ranking with BERT",
+            "ref": "b47",
+            "authors": ["Rodrigo Nogueira", "Kyunghyun Cho"],
+            "year": "2019",
+        }
     ]
 
 

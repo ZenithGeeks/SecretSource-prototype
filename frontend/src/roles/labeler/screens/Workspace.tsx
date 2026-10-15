@@ -1,5 +1,6 @@
 /**
- * The labeling workspace: the paper and a reference paper side by side, one claim at a time.
+ * The labeling workspace: one claim at a time, with the reference it cites and, on request, the
+ * paper that makes it.
  *
  * Everything is decided by the person here. The page only shows what the system found (claims,
  * passages) and writes what the person decides. A claim is saved on its own, so a half-labeled
@@ -16,6 +17,7 @@ import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
   buildSave,
+  byline,
   displayOrder,
   draftFromSaved,
   emptyDraft,
@@ -46,7 +48,7 @@ const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
 type PaperView = 'both' | 'reference'
-/** "Both papers" stacks the two PDFs rather than putting them side by side. A two-column paper
+/** "Reference + this paper" stacks the two PDFs rather than putting them side by side. A two-column paper
  * needs a page about 800px wide to read, and the page content stops at 110rem, so two columns
  * never get more than ~650px each (at 1920, ~450px: text about 5px high). */
 const storedView = (): PaperView => {
@@ -172,7 +174,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   // Keys: Ctrl/⌘+S saves; K/E/X decide the claim; R/N judge the focused passage; J/U (or the
   // up and down arrows) move between passages; [ ] (or Shift+left/right) between claims;
-  // 1-4 label the reference shown on the right, once it has a relevant passage.
+  // 1-4 label the reference in view, once it has a relevant passage.
   const refId = claim && focus ? session.references.find((r) => r.file === focus.file)?.reference_id : undefined
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -242,14 +244,17 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const left_: Target = {
     paper: session.paper_file,
-    label: 'Claim in this paper',
+    label: 'This paper, where the claim is made',
     quote: claim.sentence || claim.claim,
     source: claim.source,
     page: claim.source?.page ?? 1,
   }
+  const shown = focus && session.references.find((r) => r.file === focus.file)
   const right: Target | null = focus && {
     paper: focus.file,
-    label: session.references.find((r) => r.file === focus.file)?.label ?? 'Reference paper',
+    // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
+    label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
+    detail: shown ? byline(shown) : undefined,
     quote: focus.passage || undefined,
     source: found.data && found.data.page ? found.data : null,
     page: focus.page ?? 1,
@@ -402,7 +407,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
             paperView === view ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
           )}
         >
-          {view === 'both' ? 'Both papers' : 'Reference only'}
+          {view === 'both' ? 'Reference + this paper' : 'Reference only'}
         </button>
       ))}
     </div>
@@ -452,7 +457,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         <div className="flex min-w-0 flex-col gap-4">
           <div className="flex gap-2">
             <button type="button" onClick={() => setOverlay('paper')} className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-ink hover:border-accent">
-              Read the claim in the paper
+              Read the claim in this paper
             </button>
             <button type="button" disabled={!right} onClick={() => setOverlay('reference')} className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface px-3 text-sm font-medium text-ink hover:border-accent disabled:opacity-50">
               Read the reference
