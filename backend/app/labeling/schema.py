@@ -133,8 +133,14 @@ class SaveIn(BaseModel):
 
 
 def current(tab: str, rows: list[dict]) -> list[dict]:
-    """The latest row for each key, in the order each key first appeared."""
+    """The latest row for each key, in the order each key first appeared.
+
+    A row saved before rows carried `annotator_id` gets its `annotator` name as the id, which is
+    what the id was when login was off.
+    """
     latest: dict[tuple, dict] = {}
     for row in rows:
+        if "annotator_id" in KEYS[tab] and not row.get("annotator_id"):
+            row = {**row, "annotator_id": row.get("annotator", "")}
         latest[tuple(row.get(k, "") for k in KEYS[tab])] = row
     return list(latest.values())

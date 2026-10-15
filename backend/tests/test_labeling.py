@@ -169,6 +169,25 @@ def test_rows_belong_to_the_account_not_to_the_name(api):
     assert saved() == ["accepted"]
 
 
+def test_a_row_saved_before_annotator_id_counts_as_the_name_that_saved_it(api):
+    client, db, _ = api
+    old = {c: "" for c in ALL_TABS["claims"] if c != "annotator_id"}
+    row = {
+        **old,
+        "paper_id": "paperA-0123456789ab",
+        "claim_id": "paperA-0123456789ab#0",
+        "origin": "extracted",
+    }
+    db.tabs["claims"] += [
+        {**row, "annotator": "chanya", "status": "accepted", "claim": "x"},
+        {**row, "annotator": "nuttanon", "status": "rejected", "claim": "x"},
+    ]
+    saved = client.get("/labeling/sessions/a1").json()["saved"]["claims"]
+    assert [r["status"] for r in saved] == ["accepted"]
+    assert client.get("/labeling/export?tab=claims").status_code == 200
+    assert client.get("/labeling/export?tab=labels").status_code == 200
+
+
 def test_a_later_save_replaces_the_earlier_one_but_keeps_both_rows(api):
     client, db, _ = api
     label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 2}
