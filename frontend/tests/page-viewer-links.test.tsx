@@ -15,7 +15,9 @@ vi.mock('react-pdf', () => ({
     return <div>{children}</div>
   },
   Page: ({ onRenderAnnotationLayerSuccess }: { onRenderAnnotationLayerSuccess?: () => void }) => {
-    useEffect(() => onRenderAnnotationLayerSuccess?.(), [onRenderAnnotationLayerSuccess])
+    useEffect(() => {
+      onRenderAnnotationLayerSuccess?.()
+    }, [onRenderAnnotationLayerSuccess])
     return (
       <div className="annotationLayer">
         <a href="#page=9" title="Peters et al." />
