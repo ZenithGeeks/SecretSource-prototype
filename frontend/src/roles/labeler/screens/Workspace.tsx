@@ -316,7 +316,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     )
 
   const legend = (
-    <p aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+    // Shortcuts need a keyboard, so a touch screen does not list them.
+    <p aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
       {[
         ['K', 'keep'],
         ['E', 'edit'],
@@ -412,7 +413,9 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem)]')}>
       <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         <div className="min-w-0">
-          <h1 className="truncate font-serif text-xl font-semibold text-ink">{session.title}</h1>
+          <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">
+            {session.title}
+          </h1>
           <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
         </div>
         <div className="flex items-center gap-4">
