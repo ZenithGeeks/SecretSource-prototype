@@ -458,3 +458,9 @@ describe('byline', () => {
     expect(byline(reference([], ''))).toBe('')
   })
 })
+
+describe('byline from an older gateway', () => {
+  it('is empty when the reference has no authors or year', () => {
+    expect(byline({ reference_id: 'r', file: 'r.pdf', label: '1901.04085' })).toBe('')
+  })
+})
