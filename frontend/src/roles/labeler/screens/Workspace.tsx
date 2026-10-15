@@ -281,19 +281,19 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   }
 
   // Text selected in the reference becomes evidence for this claim, the same as one typed in.
+  // Adding evidence to an undecided claim keeps it: evidence only belongs to a claim you keep.
   const addEvidence = () => {
     const referenceId = session.references.find((r) => r.file === picked?.file)?.reference_id
     if (!picked || !referenceId) return
     const p: AddedPassage = { reference_id: referenceId, page: picked.page, passage: picked.text.slice(0, 1500) }
     if (!draft.added.some((a) => a.reference_id === p.reference_id && a.passage === p.passage)) {
-      patch({ added: [...draft.added, p] })
+      patch({ added: [...draft.added, p], ...(draft.status ? {} : { status: 'accepted' as const }) })
       setFocus({ file: picked.file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
     }
     setPicked(null)
   }
-  const cannotAdd = !draft.status
-    ? 'Decide on the claim first: keep or edit it.'
-    : draft.status === 'rejected'
+  const cannotAdd =
+    draft.status === 'rejected'
       ? 'This claim is rejected. Keep or edit it to add evidence.'
       : !session.references.some((r) => r.file === picked?.file)
         ? 'That paper is not one of this analysis\'s references.'
