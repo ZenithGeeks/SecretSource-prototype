@@ -317,7 +317,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const legend = (
     // Shortcuts need a keyboard, so a touch screen does not list them.
-    <p aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
+    <ul aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
       {[
         ['K', 'keep'],
         ['E', 'edit'],
@@ -331,11 +331,11 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         ['1–4', 'level'],
         ['Ctrl/⌘+S', 'save'],
       ].map(([keys, what]) => (
-        <span key={keys} className="flex items-center gap-1">
+        <li key={keys} className="flex items-center gap-1">
           <Kbd hidden={false}>{keys}</Kbd> {what}
-        </span>
+        </li>
       ))}
-    </p>
+    </ul>
   )
 
   const panel = (

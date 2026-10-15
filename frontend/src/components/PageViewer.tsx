@@ -66,6 +66,15 @@ function boxStyle(box: Box, width: number, height: number) {
   }
 }
 
+/** pdf.js draws a PDF's links as empty boxes over the text; give each one a name to read out. */
+function nameLinks(page: HTMLElement | undefined) {
+  for (const link of page?.querySelectorAll<HTMLAnchorElement>('.annotationLayer a:not([aria-label])') ?? []) {
+    const href = link.getAttribute('href') ?? ''
+    const inPaper = !href || href.startsWith('#')
+    link.setAttribute('aria-label', link.title || (inPaper ? 'Go to a place in this paper' : `Open ${href}`))
+  }
+}
+
 const VERDICT_HIGHLIGHT = {
   supports: 'bg-supports/20 ring-supports/70',
   refutes: 'bg-refutes/20 ring-refutes/70',
@@ -337,7 +346,8 @@ export function PageViewer({
       >
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{target.label}</p>
+            {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}
+            <h2 className="truncate text-sm font-medium">{target.label}</h2>
             <p className="truncate text-xs text-ink-muted">
               {target.paper}
               {/* Only when there was a passage to find: opening the paper itself has none. */}
@@ -513,6 +523,7 @@ export function PageViewer({
                           devicePixelRatio={pixelRatio}
                           renderTextLayer
                           renderAnnotationLayer
+                          onRenderAnnotationLayerSuccess={() => nameLinks(pageNodes.current.get(number))}
                           loading={<div style={{ height: pageWidth * pageRatio }} />}
                         />
                       )}
