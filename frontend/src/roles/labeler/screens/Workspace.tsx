@@ -425,7 +425,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
               {done} of {total} claims finished
             </p>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
-              <div className="h-full bg-supports transition-[width] duration-200" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+              <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
           </div>
         </div>
