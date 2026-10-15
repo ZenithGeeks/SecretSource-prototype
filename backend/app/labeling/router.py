@@ -28,6 +28,7 @@ from app.auth import current_user
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling.identity import annotator
 from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, ScopusAddIn, TopicIn, current
+from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/labeling", tags=["labeling"])
@@ -86,9 +87,20 @@ def build_session(analysis: dict) -> dict:
                 continue
             file = Path(verdict["source"]).name
             reference_id = Path(file).stem
+            citation = find_citation(claim, verdict) or {}
             references.setdefault(
                 reference_id,
-                {"reference_id": reference_id, "file": file, "label": verdict.get("cited") or file},
+                {
+                    "reference_id": reference_id,
+                    "file": file,
+                    # The title, so a labeler knows which paper this is; the arXiv id or DOI it
+                    # was looked up by only when the citation list had no title for it.
+                    "label": citation.get("title") or verdict.get("cited") or file,
+                    # GROBID's id for the citation: the "[b47]" in the claim's sentence.
+                    "ref": citation.get("ref", ""),
+                    "authors": citation.get("authors", []),
+                    "year": citation.get("year", ""),
+                },
             )
             for rank, hit in enumerate(verdict.get("evidence") or [], 1):
                 candidates.append(

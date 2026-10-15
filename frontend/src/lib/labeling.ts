@@ -42,7 +42,16 @@ export type SessionClaim = {
   candidates: Candidate[]
 }
 
-export type Reference = { reference_id: string; file: string; label: string }
+/** A cited paper. `label` is its title, or the arXiv id or DOI when the citation list had none;
+ * `ref` is the "b47" the claim's sentence shows in brackets, empty when unknown. */
+export type Reference = { reference_id: string; file: string; label: string; ref: string; authors: string[]; year: string }
+
+/** "Nogueira, Cho · 2019", "Karpukhin et al. · 2020": who wrote a reference, by surname. */
+export function byline(reference: Reference): string {
+  const surnames = reference.authors.map((name) => name.trim().split(/\s+/).at(-1) ?? '').filter(Boolean)
+  const who = surnames.length > 2 ? `${surnames[0]} et al.` : surnames.join(', ')
+  return [who, reference.year].filter(Boolean).join(' · ')
+}
 
 /** A row as the labeling table stores it: every value a string. */
 export type Row = Record<string, string>

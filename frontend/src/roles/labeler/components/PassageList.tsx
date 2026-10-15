@@ -258,7 +258,9 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
         setOpen(false)
       }}
     >
-      <p className="text-sm text-ink-muted">Copy the text from the reference paper on the right.</p>
+      <p className="text-sm text-ink-muted">
+        Paste a passage from the reference here, or select it in the reference's PDF and choose Add as evidence.
+      </p>
       <div className="flex gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <label htmlFor={ids.ref} className="text-sm font-medium text-ink">
