@@ -7,19 +7,23 @@
  * shared-file edit a role needs. `Skip` (or `?role=app`) opens the existing analysis app.
  */
 
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 
-import App from './App'
+import { LoadingScreen } from './components/ui'
 import { authEnabled, supabase } from './lib/supabase'
 import { consumeTeacherGoogleReturn } from './lib/teacherGoogleReturn'
 import { useAuth } from './lib/useAuth'
-import { LabelerApp } from './roles/labeler/LabelerApp'
-import { ResearcherApp } from './roles/researcher/ResearcherApp'
-import { TeacherApp } from './roles/teacher/TeacherApp'
-import { AuthorApp } from './roles/author/AuthorApp'
 import { Auth } from './screens/auth/Auth'
 import type { Role } from './screens/Onboarding'
 import { Onboarding } from './screens/Onboarding'
+
+// Each role's screens load when that role opens, so a labeler does not download the
+// researcher's graph or the author's editor.
+const App = lazy(() => import('./App'))
+const LabelerApp = lazy(() => import('./roles/labeler/LabelerApp').then((m) => ({ default: m.LabelerApp })))
+const ResearcherApp = lazy(() => import('./roles/researcher/ResearcherApp').then((m) => ({ default: m.ResearcherApp })))
+const TeacherApp = lazy(() => import('./roles/teacher/TeacherApp').then((m) => ({ default: m.TeacherApp })))
+const AuthorApp = lazy(() => import('./roles/author/AuthorApp').then((m) => ({ default: m.AuthorApp })))
 
 type Screen = 'onboarding' | Role | 'app'
 
@@ -77,17 +81,20 @@ export function Root() {
   if (authEnabled && loading) return null
   if (authEnabled && !session) return <Auth />
 
+  if (screen === 'onboarding') return <Onboarding onContinue={setScreen} onSkip={() => setScreen('app')} />
+  return <Suspense fallback={<LoadingScreen />}>{roleScreen(screen, () => setScreen('onboarding'))}</Suspense>
+}
+
+function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => void) {
   switch (screen) {
-    case 'onboarding':
-      return <Onboarding onContinue={setScreen} onSkip={() => setScreen('app')} />
     case 'researcher':
-      return <ResearcherApp onChangeRole={() => setScreen('onboarding')} />
+      return <ResearcherApp onChangeRole={onChangeRole} />
     case 'writer':
-      return <AuthorApp onChangeRole={() => setScreen('onboarding')} />
+      return <AuthorApp onChangeRole={onChangeRole} />
     case 'teacher':
-      return <TeacherApp onChangeRole={() => setScreen('onboarding')} />
+      return <TeacherApp onChangeRole={onChangeRole} />
     case 'labeler':
-      return <LabelerApp onChangeRole={() => setScreen('onboarding')} />
+      return <LabelerApp onChangeRole={onChangeRole} />
     case 'app':
       return <App />
   }

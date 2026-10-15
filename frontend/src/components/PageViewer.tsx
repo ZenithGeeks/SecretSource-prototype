@@ -31,6 +31,9 @@ import { cn } from '../lib/utils'
 import { Button } from './ui'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
+// One worker for every PDF on the page. With only workerSrc, pdf.js starts a worker (about 1 MB
+// of code) per document, and the labeler shows two documents at once.
+if (typeof Worker !== 'undefined') pdfjs.GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: 'module' })
 
 export type Target = {
   paper: string // file name, e.g. "colbertv2.pdf"
