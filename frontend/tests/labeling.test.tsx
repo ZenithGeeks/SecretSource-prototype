@@ -413,11 +413,20 @@ describe('the workspace', () => {
     expect(screen.getByText('Level 3, Clear: The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
   })
 
-  it('will not add evidence before the claim is decided, and says why', async () => {
+  it('keeps an undecided claim when evidence is added to it', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('region', { name: 'Selected text' })).not.toBeInTheDocument()
+  })
+
+  it('will not add evidence to a rejected claim, and says why', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     expect(screen.getByRole('button', { name: 'Add as evidence' })).toBeDisabled()
-    expect(screen.getByText('Decide on the claim first: keep or edit it.')).toBeInTheDocument()
+    expect(screen.getByText('This claim is rejected. Keep or edit it to add evidence.')).toBeInTheDocument()
     // The note is a full-width line; without wrap it squeezes the quote to 0px in the row layout.
     expect(screen.getByRole('region', { name: 'Selected text' })).toHaveClass('sm:flex-row', 'sm:flex-wrap')
   })
