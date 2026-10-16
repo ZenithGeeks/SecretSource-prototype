@@ -28,6 +28,7 @@ from encoder import CHECKPOINT
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 from store import Store
 
@@ -59,9 +60,28 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def search_media(query: str, k: int = 5, source: str | None = None) -> dict:
-    """Search indexed figures and pages by how they look. Returns labeled hits with captions."""
+    """Find figures and pages in the indexed papers that look like a match for a query.
+
+    It compares the query with the image of each figure or page, not with extracted
+    text, so it can find charts, tables and diagrams that a text search misses.
+
+    Args:
+        query: What to look for, for example "bar chart of accuracy per dataset".
+        k: How many hits to return. Values above 50 are cut to 50.
+        source: The file name of one indexed paper, for example "2112.01488.pdf", to
+            search only that paper. Leave it out to search every indexed paper.
+
+    Returns:
+        {"model": the ColPali checkpoint, "topk": [hit, ...]}, best first. Each hit has
+        rank (1 is the best), score, page (1 is the first page), kind ("figure" for a
+        cropped figure, "page" for a whole page), label (for example "Figure 3"),
+        caption, image (the crop's path on this service, empty for a whole page),
+        title and source (the paper's file name). score is the ColPali MaxSim score:
+        higher is a closer match. It has no fixed range, so compare scores only within
+        one answer.
+    """
     return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
