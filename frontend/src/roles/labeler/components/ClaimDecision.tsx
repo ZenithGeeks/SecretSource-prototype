@@ -1,6 +1,6 @@
 /** The first decision for a claim: is it a real claim of the paper? Keep it, fix it, or reject it. */
 
-import { useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 
 import type { ClaimStatus, Draft, WorkClaim } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
@@ -38,6 +38,15 @@ export function ClaimDecision({
 }) {
   const name = useId()
   const edit = useId()
+  const box = useRef<HTMLTextAreaElement>(null)
+  // Focus the box when Edit is chosen, not when a claim already being edited is opened again:
+  // focus there would make the next shortcut key type into the claim.
+  const seen = useRef({ claim: claim.claim_id, status: draft.status })
+  useEffect(() => {
+    const before = seen.current
+    seen.current = { claim: claim.claim_id, status: draft.status }
+    if (draft.status === 'edited' && before.claim === claim.claim_id && before.status !== 'edited') box.current?.focus()
+  }, [claim.claim_id, draft.status])
   return (
     <section aria-labelledby={`${name}-title`} className="flex flex-col gap-3">
       <h3 id={`${name}-title`} className="font-serif text-base font-semibold text-ink">
@@ -88,11 +97,11 @@ export function ClaimDecision({
           </label>
           <textarea
             id={edit}
+            ref={box}
             value={draft.edited}
             onChange={(event) => onChange({ edited: event.target.value })}
             rows={3}
             maxLength={4000}
-            autoFocus
             className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-accent"
           />
         </div>

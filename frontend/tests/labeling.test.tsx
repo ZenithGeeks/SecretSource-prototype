@@ -336,6 +336,19 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /Reject/ })).toHaveAttribute('aria-checked', 'true')
   })
 
+  it('focuses the edit box when Edit is chosen, not when coming back to a claim being edited', async () => {
+    await open()
+    fireEvent.keyDown(window, { key: 'e' })
+    expect(screen.getByLabelText('The claim, as it should read')).toHaveFocus()
+    ;(document.activeElement as HTMLElement).blur()
+    fireEvent.keyDown(window, { key: ']' })
+    expect(await screen.findByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: '[' })
+    expect(await screen.findByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
+    // Otherwise the next K or ] would be typed into the claim instead of acting as a shortcut.
+    expect(screen.getByLabelText('The claim, as it should read')).not.toHaveFocus()
+  })
+
   it('ignores the shortcut keys while typing in a field', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Edit/ }))
