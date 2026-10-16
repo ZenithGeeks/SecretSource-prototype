@@ -237,6 +237,22 @@ def test_plain_text_unwraps_two_levels_of_formatting():
     assert logic.plain_text(r"A \emph{clear} claim.") == "A clear claim."
 
 
+def test_a_cite_on_an_item_or_paragraph_line_keeps_the_words_before_it():
+    """The sentence used to start at the \\cite when its line began with a command (#437)."""
+    tex = (
+        "\\paragraph{Training:} We used the AdamW optimizer \\cite{adamw} with weight decay.\n"
+        "\\begin{itemize}\n"
+        "    \\item He initialization \\cite{he2015}: designed for ReLU.\n"
+        "\\end{itemize}\n"
+    )
+    cites = logic.find_cites([{"name": "main.tex", "kind": "tex", "content": tex}])
+
+    assert [c["claim"] for c in cites] == [
+        "We used the AdamW optimizer with weight decay.",
+        "He initialization: designed for ReLU.",
+    ]
+
+
 def test_a_bib_year_or_first_author_that_disagrees_with_the_index_is_reported():
     fields = {"year": "2021", "author": "Khattab, Omar and Zaharia, Matei"}
 

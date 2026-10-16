@@ -23,6 +23,7 @@ NEEDS_WORK = ("refutes", "insufficient")
 CITE = re.compile(r"\\(?:cite|citep|citet|parencite|textcite|autocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)\}")
 SECTION = re.compile(r"\\(?:chapter|section|subsection|subsubsection)\*?\{([^}]*)\}")
 SENTENCE_END = re.compile(r"[.!?][\"'”’)}]?(?=\s|$)")
+LEADING_COMMAND = re.compile(r"^\s*(?:\\item\b|\\(?:sub)?paragraph\*?\{[^}]*\})\s*")
 
 
 def content_hash(files: list[dict]) -> str:
@@ -334,11 +335,11 @@ def _sentence_around(content: str, start: int, end: int) -> str:
         cut = m.end()
     blank = before.rfind("\n\n")
     cut = max(cut, blank + 2 if blank >= 0 else 0)
-    # a heading or command line above belongs to no sentence
-    head = before[cut:]
-    lines = head.split("\n")
-    kept: list[str] = []
-    for line in reversed(lines):
+    # A heading or command line above belongs to no sentence. The \cite's own line is prose
+    # even when it starts with \item or \paragraph{...}: only that command is dropped (#437).
+    *above, own = before[cut:].split("\n")
+    kept = [LEADING_COMMAND.sub("", own)]
+    for line in reversed(above):
         if line.strip().startswith("\\") or line.strip().startswith("%"):
             break
         kept.insert(0, line)
