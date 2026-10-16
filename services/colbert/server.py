@@ -58,8 +58,8 @@ def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
         text (the whole passage), title, source (the paper's file name), page (1 is
         the first page), and start and end (character offsets of the passage in that
         page's text). score is the ColBERT MaxSim score: higher is a closer match. It
-        has no fixed range and grows with the length of the query, so compare scores
-        only within one answer.
+        is a sum over the query's 32 tokens (padding included) and has no fixed range,
+        so compare scores only within one answer.
     """
     return {"topk": store().search(query, min(k, 100), source)}
 
