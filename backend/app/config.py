@@ -122,7 +122,13 @@ PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECK
 # How many Docling PDF conversions run at once in this process. Each one holds about 2 GB of
 # layout and table models while it runs, which killed Cloud Run gateway instances at 4Gi and 8Gi.
 DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
-# How long a cited paper's checks wait for its figures to be indexed. Empty: until they are, so
+# Whether a check also indexes the cited paper's figures in ColPali and gives the judge the
+# captions it finds. Off by default: on the 192 production claim/source pairs, verdicts with
+# and without it differed no more than two runs of the same setting did (#446), and it kept
+# an L4 GPU awake for about $0.75 of the $1.11 an analysis cost. ColBERT already indexes the
+# caption text with the rest of each page.
+VISUAL_EVIDENCE = _env_flag("VISUAL_EVIDENCE")
+# With VISUAL_EVIDENCE on: how long a cited paper's checks wait for its figures. Empty: until they are, so
 # every verdict can use the figure captions. A number of seconds is a fast mode: after that the
 # check is judged on the text alone, and a later run of the paper gets the figures. On the same
 # 15 checks, 0 took 85 s instead of 264 s, and one verdict out of 15 came out wrong (#163).
