@@ -413,7 +413,7 @@ def _year(year: str) -> str:
 
 
 INDEX_NAMES = {"semantic-scholar": "Semantic Scholar", "arxiv": "arXiv", "unpaywall": "Unpaywall"}
-FOUND_WITHOUT_COPY = {"no-open-access"}  # an index knew the work; it just has no free PDF
+FOUND_WITHOUT_COPY = {"no-open-access", "withdrawn"}  # an index knew the work; it has no free PDF
 NOT_FOUND = {"unresolvable", "web-source"}  # no index knew the work
 
 

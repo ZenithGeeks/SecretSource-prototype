@@ -63,12 +63,17 @@ class WebSource(ValueError):
     """A blog post, a spec, or a vendor page: a real citation, but not a paper."""
 
 
+class Withdrawn(ValueError):
+    """The authors withdrew the arXiv paper, so its latest version has no PDF."""
+
+
 REASONS = {
     Unresolvable: "unresolvable",
     NoOpenAccessCopy: "no-open-access",
     NotDownloadable: "not-downloadable",
     LookupUnavailable: "lookup-unavailable",
     WebSource: "web-source",
+    Withdrawn: "withdrawn",
 }
 # A service that would not answer may answer later. Every other reason is an answer about the
 # work itself, so asking again gets the same answer.
@@ -139,6 +144,9 @@ DOI_PATTERN = re.compile(r"(10\.\d{4,9}/\S+)")
 ARXIV_LOCATION = re.compile(
     r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})|10\.48550/arxiv\.(\d{4}\.\d{4,5})", re.IGNORECASE
 )
+# arXiv's abstract page says this for a withdrawn paper. Its API does not say it anywhere: the
+# entry of 2305.13664 has the comment "requires revision".
+ARXIV_WITHDRAWN = re.compile(r"This paper has been withdrawn by ([^<]+)<")
 
 
 def _headers() -> dict:
@@ -490,10 +498,28 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
             failure = failure or error
     for key in _cache_keys(identifier, found):
         store.forget_source(key)
+    # A withdrawn paper's PDF link answers 404. The author needs to know it was withdrawn.
+    if (arxiv := found.ids.get("ArXiv")) and (withdrawn_by := _withdrawn_by(arxiv)):
+        raise Withdrawn(
+            f"arXiv {arxiv} was withdrawn by {withdrawn_by}; cite a published version or another source"
+        ) from failure
     if isinstance(failure, requests.RequestException):
         # Kept as the cause, so a timeout still reads as retryable.
         raise NotDownloadable(str(failure)) from failure
     raise failure
+
+
+def _withdrawn_by(arxiv_id: str) -> str:
+    """Who withdrew this arXiv paper, from its abstract page, or "" when it was not withdrawn
+    or the page could not be read. Asked only after every download link failed."""
+    import requests
+
+    try:
+        page = requests.get(f"https://arxiv.org/abs/{arxiv_id}", headers=USER_AGENT, timeout=30)
+    except requests.RequestException:
+        return ""
+    found = ARXIV_WITHDRAWN.search(page.text) if page.ok else None
+    return found.group(1).strip() if found else ""
 
 
 def lookup_key(citation: dict) -> str:
