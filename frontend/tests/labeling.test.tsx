@@ -29,11 +29,20 @@ const gateway = vi.hoisted(() => ({
   },
   posts: [] as unknown[],
   failSaves: false,
+  // The live search for a claim added by hand: what it returns, and what it was asked.
+  searched: [] as unknown[],
+  found: [] as unknown[],
+  failSearch: false,
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
   ...(await original<typeof import('../src/lib/api')>()),
   request: vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/candidates')) {
+      gateway.searched.push(JSON.parse(String(init?.body)))
+      if (gateway.failSearch) throw new Error('502: retrieval did not answer')
+      return { candidates: gateway.found }
+    }
     if (init?.method === 'POST') {
       if (gateway.failSaves) throw new Error('503: not set up')
       gateway.posts.push(JSON.parse(String(init.body)))
@@ -166,6 +175,9 @@ describe('the workspace', () => {
   beforeEach(() => {
     gateway.posts.length = 0
     gateway.failSaves = false
+    gateway.searched.length = 0
+    gateway.found = []
+    gateway.failSearch = false
     window.localStorage.setItem('labeler.paperView', 'both')
     window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   })
@@ -499,6 +511,51 @@ describe('the workspace', () => {
     expect(screen.getByText(/· added/)).toBeInTheDocument()
     expect(screen.getByText('paperA.pdf: no box')).toBeInTheDocument()
   })
+
+  const addTypedClaim = (text: string) => {
+    fireEvent.click(screen.getByRole('button', { name: /Add a missed claim/ }))
+    fireEvent.change(screen.getByLabelText('A claim extraction missed'), { target: { value: text } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
+  }
+  const foundForAdded = {
+    cand_id: 'h1',
+    reference_id: 'refB',
+    reference_file: 'refB.pdf',
+    rank: 1,
+    score: 7.5,
+    page: 3,
+    passage: 'Y doubles recall on Z',
+  }
+
+  it('searches the references for a claim added by hand, and saves the passages judged', async () => {
+    gateway.found = [foundForAdded]
+    await open()
+    addTypedClaim('Y doubles recall')
+
+    expect(await screen.findByText(/Y doubles recall on Z/)).toBeInTheDocument()
+    expect(gateway.searched).toEqual([{ claim_id: expect.stringMatching(/^paperA#h-/), claim: 'Y doubles recall' }])
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0]).toMatchObject({
+      candidates: [
+        { cand_id: 'h1', origin: 'retrieved_added', status: 'relevant', rank: 1, score: 7.5, page: 3, passage: 'Y doubles recall on Z' },
+      ],
+    })
+  })
+
+  it('says when the search for an added claim fails, and searches again on request', async () => {
+    gateway.failSearch = true
+    await open()
+    addTypedClaim('Y doubles recall')
+
+    expect(await screen.findByText(/Retrieval did not answer/)).toBeInTheDocument()
+    gateway.failSearch = false
+    gateway.found = [foundForAdded]
+    fireEvent.click(screen.getByRole('button', { name: 'Search again' }))
+    expect(await screen.findByText(/Y doubles recall on Z/)).toBeInTheDocument()
+    expect(screen.queryByText(/Retrieval did not answer/)).not.toBeInTheDocument()
+  })
 })
 
 describe('claims added by hand earlier', () => {
@@ -513,6 +570,22 @@ describe('claims added by hand earlier', () => {
     }).filter((c) => c.origin === 'human_added')
     expect(added).toMatchObject({ claim: 'X beats Y', sentence: 'X beats Y on Z.', page: 6, source: null })
     expect(buildSave(added, judged({ status: 'accepted' })).claims[0]).toMatchObject({ sentence: 'X beats Y on Z.', page: 6 })
+  })
+
+  it('keep the passages the search found for them that were judged, with the judgment', () => {
+    const saved = {
+      claims: [{ claim_id: 'paperA#h-abc123', origin: 'human_added', claim: 'X beats Y', sentence: '', page: '', section: '' }],
+      candidates: [
+        { claim_id: 'paperA#h-abc123', reference_id: 'refB', cand_id: 'h1', origin: 'retrieved_added', status: 'rejected', rank: '2', score: '3.5', page: '8', passage: 'X ties Y' },
+      ],
+      labels: [],
+    }
+    const [added] = workClaims({ ...gateway.session, saved }).filter((c) => c.origin === 'human_added')
+    expect(added.candidates).toEqual([
+      { cand_id: 'h1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 2, score: 3.5, page: 8, passage: 'X ties Y' },
+    ])
+    expect(draftFromSaved(added, saved).cands).toEqual({ h1: 'rejected' })
+    expect(draftFromSaved(added, saved).added).toEqual([])
   })
 })
 

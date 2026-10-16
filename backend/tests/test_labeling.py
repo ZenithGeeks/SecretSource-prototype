@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import requests
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
@@ -825,3 +826,92 @@ def test_article_text_reads_a_pdf_and_is_empty_when_the_pdf_is_missing(tmp_path,
     monkeypatch.setattr(dspy_export, "PAPERS_DIR", tmp_path)
     assert "one vector per token" in dspy_export.article_text("paperA")
     assert dspy_export.article_text("not-here") == ""
+
+
+HAND_ADDED = "paperA-0123456789ab#h-abc12345"
+
+
+def test_a_hand_added_claim_gets_passages_from_each_reference(api, monkeypatch):
+    client, _, _ = api
+    searched = []
+
+    def evidence_from(claim, source_name):
+        searched.append((claim, source_name))
+        return [
+            {"text": "Y doubles recall", "page": 3, "score": 7.5},
+            {"text": "on Z", "page": 4, "score": 2.0},
+        ]
+
+    monkeypatch.setattr(labeling.verify, "evidence_from", evidence_from)
+    found = client.post(
+        "/labeling/sessions/a1/candidates", json={"claim_id": HAND_ADDED, "claim": "Y doubles recall"}
+    )
+
+    assert found.status_code == 200
+    assert searched == [("Y doubles recall", "refB-aaaaaaaaaaaa.pdf")]
+    first, second = found.json()["candidates"]
+    assert first == {
+        "cand_id": labeling._candidate_id(HAND_ADDED, "refB-aaaaaaaaaaaa", 1, "Y doubles recall"),
+        "reference_id": "refB-aaaaaaaaaaaa",
+        "reference_file": "refB-aaaaaaaaaaaa.pdf",
+        "rank": 1,
+        "score": 7.5,
+        "page": 3,
+        "passage": "Y doubles recall",
+    }
+    assert second["rank"] == 2
+
+
+def test_only_hand_added_claims_are_searched_live(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setattr(labeling.verify, "evidence_from", lambda claim, source_name: [])
+    extracted = client.post(
+        "/labeling/sessions/a1/candidates", json={"claim_id": "paperA-0123456789ab#0", "claim": "x"}
+    )
+    other_paper = client.post(
+        "/labeling/sessions/a1/candidates", json={"claim_id": "paperB#h-abc12345", "claim": "x"}
+    )
+    assert extracted.status_code == 422 and other_paper.status_code == 422
+
+
+def test_a_retrieval_outage_is_a_502_not_a_crash(api, monkeypatch):
+    client, _, _ = api
+
+    def down(claim, source_name):
+        raise requests.ConnectionError("colbert is waking up")
+
+    monkeypatch.setattr(labeling.verify, "evidence_from", down)
+    found = client.post("/labeling/sessions/a1/candidates", json={"claim_id": HAND_ADDED, "claim": "x"})
+    assert found.status_code == 502
+    assert found.json()["detail"] == "retrieval did not answer"
+
+
+def test_save_keeps_a_passage_found_for_a_hand_added_claim(api):
+    client, db, _ = api
+    passage = {
+        "claim_id": HAND_ADDED,
+        "reference_id": "refB-aaaaaaaaaaaa",
+        "origin": "retrieved_added",
+        "status": "relevant",
+        "rank": 1,
+        "score": 7.5,
+        "page": 3,
+        "passage": "Y doubles recall",
+    }
+    claim = {
+        "claim_id": HAND_ADDED,
+        "origin": "human_added",
+        "status": "accepted",
+        "claim": "Y doubles recall",
+    }
+    saved = client.post("/labeling/sessions/a1/save", json={"claims": [claim], "candidates": [passage]})
+
+    assert saved.status_code == 200
+    [row] = db.tabs["candidates"]
+    assert row["origin"] == "retrieved_added" and row["rank"] == "1" and row["page"] == "3"
+    assert row["cand_id"] == labeling._candidate_id(HAND_ADDED, "refB-aaaaaaaaaaaa", 1, "Y doubles recall")
+
+    on_extracted = {**passage, "claim_id": "paperA-0123456789ab#0"}
+    unknown_paper = {**passage, "reference_id": "refZ"}
+    for bad in (on_extracted, unknown_paper):
+        assert client.post("/labeling/sessions/a1/save", json={"candidates": [bad]}).status_code == 422

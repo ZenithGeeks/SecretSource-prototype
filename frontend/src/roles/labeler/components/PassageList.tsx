@@ -5,7 +5,7 @@
  * focused one is shown in full. Below, a form to add a passage retrieval missed.
  */
 
-import { Plus, X } from 'lucide-react'
+import { Loader2, Plus, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Button, Input } from '../../../components/ui'
@@ -158,6 +158,8 @@ export function PassageList({
   onAdd,
   onRemove,
   grade,
+  search,
+  onSearchAgain,
 }: {
   claim: WorkClaim
   draft: Draft
@@ -169,6 +171,9 @@ export function PassageList({
   onRemove: (passage: AddedPassage) => void
   /** What goes under one reference's passages: its level form, or a note that it needs a relevant passage. */
   grade: (referenceId: string) => ReactNode
+  /** The live search for a claim added by hand, while it runs or after it failed. */
+  search?: 'searching' | 'failed'
+  onSearchAgain?: () => void
 }) {
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
@@ -177,7 +182,21 @@ export function PassageList({
       <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
         Passages retrieval found
       </h3>
-      {claim.candidates.length === 0 && (
+      {search === 'searching' && (
+        <p role="status" className="flex items-center gap-2 text-sm text-ink-muted">
+          <Loader2 className="size-4 animate-spin" />
+          Searching the reference papers for this claim…
+        </p>
+      )}
+      {search === 'failed' && (
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-refutes">
+          Retrieval did not answer, so only passages you add are listed.
+          <Button type="button" variant="ghost" onClick={onSearchAgain}>
+            Search again
+          </Button>
+        </p>
+      )}
+      {!search && claim.candidates.length === 0 && (
         <p className="text-sm text-ink-muted">Retrieval found nothing for this claim. Add what supports it below.</p>
       )}
       {referencesOf(claim, draft).map((id) => {

@@ -20,6 +20,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
@@ -27,7 +28,17 @@ from app import auth, config
 from app.auth import current_user
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling.identity import annotator
-from app.labeling.schema import TABS, TOPICS, PersonTopicIn, SaveIn, ScopusAddIn, TopicIn, current
+from app.labeling.schema import (
+    TABS,
+    TOPICS,
+    AddedClaimIn,
+    PersonTopicIn,
+    SaveIn,
+    ScopusAddIn,
+    TopicIn,
+    current,
+)
+from app.pipeline import verify
 from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
@@ -74,6 +85,22 @@ def _candidate_id(claim_id: str, reference_id: str, rank: int, passage: str) -> 
     return hashlib.sha1(f"{claim_id}|{reference_id}|{rank}|{passage[:120]}".encode()).hexdigest()[:10]
 
 
+def _candidates(claim_id: str, reference_id: str, file: str, hits: list[dict]) -> list[dict]:
+    """Retrieved passages as the labeling page shows them, ranked from 1 in the order given."""
+    return [
+        {
+            "cand_id": _candidate_id(claim_id, reference_id, rank, hit.get("text", "")),
+            "reference_id": reference_id,
+            "reference_file": file,
+            "rank": rank,
+            "score": hit.get("score"),
+            "page": hit.get("page"),
+            "passage": hit.get("text", ""),
+        }
+        for rank, hit in enumerate(hits, 1)
+    ]
+
+
 def build_session(analysis: dict) -> dict:
     """The claims of an analysis, each with the passages retrieval found for it."""
     paper_id = _paper_id(analysis)
@@ -102,18 +129,7 @@ def build_session(analysis: dict) -> dict:
                     "year": citation.get("year", ""),
                 },
             )
-            for rank, hit in enumerate(verdict.get("evidence") or [], 1):
-                candidates.append(
-                    {
-                        "cand_id": _candidate_id(claim_id, reference_id, rank, hit.get("text", "")),
-                        "reference_id": reference_id,
-                        "reference_file": file,
-                        "rank": rank,
-                        "score": hit.get("score"),
-                        "page": hit.get("page"),
-                        "passage": hit.get("text", ""),
-                    }
-                )
+            candidates += _candidates(claim_id, reference_id, file, verdict.get("evidence") or [])
         claims.append(
             {
                 "claim_id": claim_id,
@@ -171,6 +187,35 @@ async def session(
     paper_id = built["paper_id"]
     rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in TABS}
     return {**built, "annotator": who, **_mine_and_others(rows, me, built["paper_id"])}
+
+
+@router.post("/sessions/{analysis_id}/candidates")
+async def added_claim_candidates(
+    body: AddedClaimIn, analysis: dict = Depends(owned_analysis), _who: str = Depends(annotator)
+):
+    """Passages retrieval finds in each reference paper for a claim added by hand (#404).
+
+    The same search the analysis ran for its own claims, so the labeler has passages to judge
+    instead of reading every reference for them. The references are already in the ColBERT
+    index from the analysis, and are searched at the same time.
+    """
+    built = build_session(analysis)
+    if not body.claim_id.startswith(f"{built['paper_id']}#h-"):
+        raise HTTPException(422, f"{body.claim_id} is not a claim added by hand to this paper")
+    references = built["references"]
+    try:
+        found = await asyncio.gather(
+            *(asyncio.to_thread(verify.evidence_from, body.claim, r["file"]) for r in references)
+        )
+    except requests.RequestException as error:  # ColBERT down, or still waking up past the timeout
+        raise HTTPException(502, "retrieval did not answer") from error
+    return {
+        "candidates": [
+            cand
+            for reference, hits in zip(references, found, strict=True)
+            for cand in _candidates(body.claim_id, reference["reference_id"], reference["file"], hits)
+        ]
+    }
 
 
 def _claim_rows() -> list[dict]:
@@ -381,6 +426,12 @@ async def save(
                 page=hit["page"],
                 passage=hit["passage"],
             )
+        elif item.origin == "retrieved_added":
+            # Found live for a hand-added claim, so not in the analysis to check against. The
+            # id is rebuilt here from what is stored, as the candidates route built it.
+            if "#h-" not in item.claim_id or item.reference_id not in references:
+                raise HTTPException(422, f"unknown passage for {item.claim_id}")
+            row["cand_id"] = _candidate_id(item.claim_id, item.reference_id, item.rank or 0, item.passage)
         else:
             if item.reference_id not in references:
                 raise HTTPException(422, f"{item.reference_id} is not a paper this analysis read")

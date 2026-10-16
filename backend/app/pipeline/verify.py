@@ -25,7 +25,7 @@ LABELS = ("supports", "refutes", "insufficient")
 _judge = None  # built on first use: needs dspy and a running LM
 
 
-def _evidence(claim: str, source_name: str) -> list[dict]:
+def evidence_from(claim: str, source_name: str) -> list[dict]:
     """Passages from one indexed paper, most relevant first, each keeping page and span."""
     passages = [
         passage for passage in retrieval.colbert_search(claim, k=10, source=source_name)
@@ -260,7 +260,7 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
         # Figures still being indexed are left out rather than waited for (#163).
         with ThreadPoolExecutor(max_workers=1) as pool:
             visual_search = pool.submit(_visual, claim, source) if _figures_ready(source) else None
-            evidence = _evidence(claim, source.name)
+            evidence = evidence_from(claim, source.name)
             pages, page_model = visual_search.result() if visual_search else ([], "")
         passages = [item["text"] for item in evidence]  # the judge reads text, not where it came from
         # A caption is evidence like any other line.
