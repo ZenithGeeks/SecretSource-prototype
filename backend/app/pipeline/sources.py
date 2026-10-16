@@ -296,9 +296,16 @@ def _resolve(identifier: str) -> Resolution:
         )
 
     found = _lookup(identifier)
+    _remember(identifier, found)
+    return found
+
+
+def _remember(identifier: str, found: Resolution) -> None:
+    """Cache where the work was found, under every key _resolve reads it by."""
+    from app import store
+
     for known in _cache_keys(identifier, found):
         store.remember_source(known, {**found._asdict(), "fetched_at": time.time()})
-    return found
 
 
 def _cache_keys(identifier: str, found: Resolution) -> set[str]:
@@ -335,6 +342,8 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     ACM, MIT Press and IEEE refuse a script there with a 403 or an HTML page, even when the same
     paper is free on arXiv (#408). When both fail, the first link's error is the one reported,
     and the cached location is dropped, so the next attempt looks the work up again (#414).
+    When the arXiv copy worked, the cache keeps that link instead. A later run then finds the
+    PDF on disk and still knows it is the preprint (#424).
     """
     import requests
 
@@ -351,11 +360,15 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     failure: ValueError | None = None
     for url in urls:
         try:
-            return _download(url, name), found._replace(url=url)
+            path = _download(url, name)
         except requests.RequestException as error:
             failure = failure or NotDownloadable(str(error))
         except (WebSource, NotDownloadable) as error:
             failure = failure or error
+        else:
+            if url != found.url:
+                _remember(identifier, found._replace(url=url))
+            return path, found._replace(url=url)
     for key in _cache_keys(identifier, found):
         store.forget_source(key)
     raise failure
@@ -398,6 +411,22 @@ def known_title(identifier: str) -> str:
     from app import store
 
     return (store.recall_source(_normalised(identifier.strip())) or {}).get("title", "")
+
+
+def known_version(identifier: str) -> dict:
+    """Whether the PDF of this work came from arXiv, read back from the cache. Costs no request.
+    Empty for a work never looked up, for example an uploaded file."""
+    from app import store
+
+    return preprint_of((store.recall_source(_normalised(identifier.strip())) or {}).get("url", ""))
+
+
+def preprint_of(url: str) -> dict:
+    """{"source_version": "preprint", "arxiv": id} for a link to an arXiv PDF, else {}.
+    A preprint's wording or numbers can differ from the published paper."""
+    if "arxiv.org/" in url.lower() and (found := ARXIV_PATTERN.search(url)):
+        return {"source_version": "preprint", "arxiv": found.group(0)}
+    return {}
 
 
 def local_pdf(paper: str) -> str:

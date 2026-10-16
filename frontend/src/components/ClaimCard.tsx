@@ -6,7 +6,7 @@ import { useState } from 'react'
 
 import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
-import { citationLink, citationNumber, reference } from '../lib/citations'
+import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
 import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
@@ -321,6 +321,14 @@ function PageChips({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Ta
   )
 }
 
+/** Says the verdict was read from the cited work's arXiv copy, whose text can differ from the
+ * published paper (#424). Nothing for a verdict read from the publisher's PDF. */
+function PreprintNote({ verdict }: { verdict: Verdict }) {
+  if (verdict.source_version !== 'preprint') return null
+  const note = preprintNote(verdict.arxiv).replace(/^./, (c) => c.toUpperCase())
+  return <p className="text-xs text-ink-muted">{note}. Its wording or numbers can differ from the published paper.</p>
+}
+
 /** What a source answered, for a cited work that is not the claim's main evidence: the deciding
  * quote first, then the working behind it. */
 function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
@@ -345,6 +353,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
       <div className="space-y-1.5">
         <Label>{WHY_LABELS[verdict.verdict]}</Label>
         <p className="text-sm text-ink-muted">{verdict.reasoning}</p>
+        <PreprintNote verdict={verdict} />
       </div>
 
       <FigureCrops verdict={verdict} />
@@ -584,6 +593,7 @@ export function ClaimCard({
             <p className="type-label">{WHY_LABELS[primary.verdict]}</p>
           </div>
           <p className="text-[15px] leading-6 text-ink-muted">{primary.reasoning}</p>
+          <PreprintNote verdict={primary} />
         </div>
       )}
 

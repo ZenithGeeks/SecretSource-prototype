@@ -63,7 +63,7 @@ def citation_outcome(result: dict) -> dict:
         }
     evidence = result.get("evidence") or []
     first = evidence[0] if evidence else {}
-    return {
+    outcome = {
         "verdict": result.get("verdict", "insufficient"),
         "explanation": result.get("reasoning", ""),
         "evidence": {
@@ -73,3 +73,8 @@ def citation_outcome(result: dict) -> dict:
         },
         "indexedIn": result.get("indexed_in") or {},
     }
+    # Only a check against an arXiv copy has these: its text can differ from the published paper.
+    if result.get("source_version"):
+        outcome["sourceVersion"] = result["source_version"]
+        outcome["arxiv"] = result.get("arxiv", "")
+    return outcome

@@ -445,6 +445,34 @@ def test_resolving_a_citation_is_kept_and_an_override_survives_a_recheck(client,
     assert client.get(f"/author/checks/{check_id}/compare", headers=ADA).status_code == 404
 
 
+def test_a_citation_checked_against_a_preprint_says_so_until_a_new_verdict_replaces_it(client, monkeypatch):
+    def verify(claim, source):
+        return {
+            "status": "ok",
+            "claim": claim,
+            "source": f"{source}.pdf",
+            "verdict": "refutes",
+            "quote": "q",
+            "reasoning": "because",
+            "evidence": [],
+            "source_version": "preprint",
+            "arxiv": "2507.11408",
+        }
+
+    monkeypatch.setattr(main, "verify_claim", verify)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+    citations = client.get(f"/author/checks/{check_id}", headers=ADA).json()["citations"]
+    checked = next(c for c in citations if c["verdict"] == "refutes")
+    assert checked["sourceVersion"] == "preprint" and checked["arxiv"] == "2507.11408"
+
+    swapped = client.patch(
+        f"/author/checks/{check_id}/citations/{checked['id']}", headers=ADA, json={"verdict": "supports"}
+    ).json()
+    replaced = next(c for c in swapped["citations"] if c["id"] == checked["id"])
+    assert "sourceVersion" not in replaced and "arxiv" not in replaced
+
+
 def test_a_crash_in_the_pipeline_is_an_honest_unavailable(client, monkeypatch):
     def boom(claim, source):
         raise RuntimeError("colbert unreachable")
