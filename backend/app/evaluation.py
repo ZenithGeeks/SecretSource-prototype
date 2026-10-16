@@ -57,20 +57,23 @@ def judge_scores(gold: list[bool], predicted: list[bool]) -> dict[str, float]:
     """Accuracy, balanced accuracy, macro-F1 and Cohen's kappa of `predicted` against `gold`.
 
     Balanced accuracy is reported because "not supported" is likely most of the labels, and a
-    judge that always says so would look good on plain accuracy.
+    judge that always says so would look good on plain accuracy. As in scikit-learn, it averages
+    the recall of the classes that appear in `gold` only.
     """
+    if not gold:
+        return {"pairs": 0}
     counts = Counter(zip(gold, predicted, strict=True))
     tp, tn = counts[(True, True)], counts[(False, False)]
     fp, fn = counts[(False, True)], counts[(True, False)]
     total = tp + tn + fp + fn
-    recall_true = _ratio(tp, tp + fn)
-    recall_false = _ratio(tn, tn + fp)
+    recalls = [tp / (tp + fn)] if tp + fn else []
+    recalls += [tn / (tn + fp)] if tn + fp else []
     f1_true = _ratio(2 * tp, 2 * tp + fp + fn)
     f1_false = _ratio(2 * tn, 2 * tn + fn + fp)
     return {
         "pairs": total,
-        "accuracy": _ratio(tp + tn, total),
-        "balanced_accuracy": (recall_true + recall_false) / 2,
+        "accuracy": (tp + tn) / total,
+        "balanced_accuracy": sum(recalls) / len(recalls),
         "macro_f1": (f1_true + f1_false) / 2,
         "kappa": cohen_kappa([int(g) for g in gold], [int(p) for p in predicted], levels=2),
         "true_positive": tp,

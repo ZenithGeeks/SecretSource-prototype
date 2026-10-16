@@ -34,6 +34,15 @@ def test_a_judge_that_always_says_not_supported_scores_half_on_balanced_accuracy
     assert scores["balanced_accuracy"] == pytest.approx(0.5)
 
 
+def test_balanced_accuracy_counts_only_the_classes_in_gold():
+    # scikit-learn gives 1.0 here: no supported pair exists, so its recall is not averaged in
+    assert evaluation.judge_scores([False, False], [False, False])["balanced_accuracy"] == 1.0
+
+
+def test_no_pairs_gives_an_empty_report():
+    assert evaluation.judge_scores([], []) == {"pairs": 0}
+
+
 def test_quadratic_weighted_kappa_matches_scikit_learn():
     a = [1, 2, 3, 3, 0, 2, 1]
     b = [1, 3, 3, 2, 0, 2, 2]
