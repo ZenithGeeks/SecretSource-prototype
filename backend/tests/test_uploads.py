@@ -82,6 +82,11 @@ def test_without_a_bucket_the_pdf_goes_through_the_gateway(client, monkeypatch):
     assert ask(client.http).json() == {"url": None}
 
 
+def test_without_an_allowed_page_the_pdf_goes_through_the_gateway(client, monkeypatch):
+    monkeypatch.setattr(uploads, "UPLOAD_ORIGINS", set())
+    assert ask(client.http).json() == {"url": None}
+
+
 @pytest.mark.parametrize("size", [0, uploads.MAX_UPLOAD_BYTES + 1])
 def test_an_empty_pdf_or_one_over_100_mb_gets_no_url(client, size):
     assert ask(client.http, size=size).status_code == 422

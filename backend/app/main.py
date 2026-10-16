@@ -594,9 +594,10 @@ class UploadRequest(BaseModel):
 
 @app.post("/uploads")
 async def new_upload(body: UploadRequest, request: Request, user: str | None = Depends(current_user)):
-    """A URL to PUT one PDF straight to the papers bucket (#266), or {"url": null} where there is
-    no bucket, and the PDF goes through POST /analyses/upload instead."""
-    if not PAPERS_BUCKET:
+    """A URL to PUT one PDF straight to the papers bucket (#266), or {"url": null} where direct
+    uploads are not set up (no bucket, or no page allowed to use it), and the PDF goes through
+    POST /analyses/upload instead."""
+    if not (PAPERS_BUCKET and uploads.UPLOAD_ORIGINS):
         return {"url": None}
     origin = request.headers.get("origin", "")
     try:
