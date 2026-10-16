@@ -11,6 +11,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 from app.clients.service_auth import auth_headers, signs
@@ -47,14 +48,25 @@ def _signed(url: str) -> str:
     return "google-id-token" if signs(url) else "none"
 
 
-def _get(url: str, headers: dict) -> tuple[bool, str, object]:
-    """GET url. Returns whether it answered 2xx, a short description, and the JSON body if any."""
+class Answer(NamedTuple):
+    """What one GET found: whether it answered 2xx, a short description, and the JSON body."""
+
+    ok: bool
+    detail: str
+    body: object = None
+    timed_out: bool = False  # connected, but no answer within TIMEOUT
+
+
+def _get(url: str, headers: dict) -> Answer:
+    """GET url and describe the answer, or the reason there was none."""
     import requests
 
     try:
         response = requests.get(url, headers=headers, timeout=TIMEOUT)
+    except requests.ReadTimeout:
+        return Answer(False, f"no answer in {TIMEOUT} s", timed_out=True)
     except Exception as error:  # the reason, not a traceback: this goes in a log line and JSON
-        return False, f"{type(error).__name__}: {str(error)[:200]}", None
+        return Answer(False, f"{type(error).__name__}: {str(error)[:200]}")
     try:
         body = response.json()
     except ValueError:
@@ -64,12 +76,12 @@ def _get(url: str, headers: dict) -> tuple[bool, str, object]:
         # Why it refused, in the service's words: a bare 500 does not say "billing is disabled".
         # Cloud Run's error pages are HTML, so the tags go first.
         detail += f": {' '.join(re.sub(r'<[^>]*>', ' ', response.text).split())[:160]}"
-    return response.ok, detail, body
+    return Answer(response.ok, detail, body)
 
 
 def _llm() -> dict:
     headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY != "EMPTY" else {}
-    ok, detail, body = _get(f"{VLLM_URL.rstrip('/')}/models", headers)
+    ok, detail, body, _ = _get(f"{VLLM_URL.rstrip('/')}/models", headers)
     if ok:
         models = [model.get("id") for model in (body or {}).get("data", []) if isinstance(model, dict)]
         if VLLM_MODEL not in models:
@@ -98,7 +110,14 @@ def _service(name: str, url: str, path: str, required: bool) -> dict:
             "ok": False,
             "detail": f"no identity token: {type(error).__name__}: {str(error)[:200]}",
         }
-    ok, detail, _ = _get(target, headers)
+    answer = _get(target, headers)
+    ok, detail = answer.ok, answer.detail
+    # A signed URL is a Cloud Run service, and GROBID and ColBERT there scale to zero. A cold
+    # start takes longer than TIMEOUT, and this GET is what starts it, so no answer yet means
+    # starting, not down. A refusal or a wrong URL still fails at once.
+    if answer.timed_out and signs(url):
+        ok = None
+        detail = f"starting: no answer in {TIMEOUT} s, and it scales to zero; ask again in a minute"
     return {
         "name": name,
         "url": _shown(url),
@@ -121,7 +140,7 @@ def _supabase() -> dict:
             "ok": None,
             "detail": f"not set: analyses are stored in SQLite at {ANALYSES_DB}, and login is off",
         }
-    ok, detail, _ = _get(f"{url.rstrip('/')}/auth/v1/health", {"apikey": key})
+    ok, detail, _, _ = _get(f"{url.rstrip('/')}/auth/v1/health", {"apikey": key})
     return {
         "name": "supabase",
         "url": _shown(url),
@@ -175,7 +194,8 @@ def _not_probed(name: str, url: str) -> dict:
 
 
 def check() -> dict:
-    """Ask every dependency at once. `degraded` is true when a required one did not answer."""
+    """Ask every dependency at once. `degraded` is true when a required one failed. One that
+    is still starting (`ok` None) does not count."""
     checks = (
         _llm,
         lambda: _service("grobid", GROBID_URL, "/api/isalive", required=True),
@@ -189,7 +209,7 @@ def check() -> dict:
     with ThreadPoolExecutor(max_workers=len(checks)) as pool:
         dependencies = list(pool.map(lambda run: run(), checks))
     return {
-        "degraded": any(d["required"] and not d["ok"] for d in dependencies),
+        "degraded": any(d["required"] and d["ok"] is False for d in dependencies),
         "service_auth": SERVICE_AUTH,
         "checked_at": time.time(),
         "dependencies": dependencies,
@@ -211,7 +231,7 @@ def log_report() -> dict:
     """Check every dependency and log one line each, so a wrong setting is in the startup log."""
     result = report(max_age=0)
     for d in result["dependencies"]:
-        state = "not set" if d["ok"] is None else "ok" if d["ok"] else "UNREACHABLE"
+        state = "ok" if d["ok"] else "UNREACHABLE" if d["ok"] is False else "-"
         level = logging.WARNING if d["ok"] is False and d["required"] else logging.INFO
         log.log(
             level, "%-8s %-11s %s (auth: %s) %s", d["name"], state, d["url"] or "-", d["auth"], d["detail"]
