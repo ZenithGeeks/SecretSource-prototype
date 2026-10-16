@@ -1,5 +1,5 @@
-"""add_paper and POST /api/add index only files inside PAPERS_DIR, and refuse every other
-path with the same message, so a caller cannot learn which files exist."""
+"""POST /api/add indexes only files inside PAPERS_DIR, and refuses every other path with the
+same message, so a caller cannot learn which files exist."""
 
 import pytest
 
@@ -21,18 +21,6 @@ def outside_paths(papers):
         str(papers / ".." / "secret.pdf"),
         str(papers / "missing.pdf"),
     ]
-
-
-def test_add_paper_indexes_a_paper_in_papers_dir(mcp, papers):
-    answer = mcp.call_tool("add_paper", {"path": str(papers / "colbertv2.pdf")})
-
-    assert answer == {"status": "ok", "added": 12, "papers": 1}
-
-
-def test_add_paper_refuses_other_paths_with_one_message(mcp, papers, server):
-    answers = [mcp.call_tool("add_paper", {"path": path}) for path in outside_paths(papers)]
-
-    assert answers == [{"status": "error", "message": server.PATH_REFUSED}] * len(answers)
 
 
 def test_api_add_indexes_a_paper_in_papers_dir(client, papers):

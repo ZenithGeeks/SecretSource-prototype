@@ -87,26 +87,8 @@ def snippet(text: str, chars: int) -> str:
     return text[: breaks[-1]] if breaks and breaks[-1] > 0 else text[:chars]
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=False))
-def add_paper(path: str) -> dict:
-    """Index a PDF so search_passages can find its passages.
-
-    Adding the same file again replaces its passages. If the file has not changed,
-    nothing is encoded again.
-
-    Args:
-        path: Where the PDF is on the ColBERT service's own disk. It must be a file
-            inside the papers folder (PAPERS_DIR), for example
-            "data/papers/2112.01488.pdf". Its file name becomes the paper's source.
-
-    Returns:
-        {"status": "ok", "added": passages in this paper, "papers": papers in the
-        index}, or {"status": "error", "message": ...} if the paper was not indexed.
-    """
-    paper = paper_path(path)
-    if paper is None:
-        return {"status": "error", "message": PATH_REFUSED}
-    return {"status": "ok", "added": store().add_pdf(paper), "papers": len(store())}
+# No MCP tool adds a paper: an MCP client cannot hand this service a file on its own disk.
+# Papers are indexed over HTTP, by POST /api/upload (SCRUM-164).
 
 
 def paper_path(path: str) -> Path | None:
