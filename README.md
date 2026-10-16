@@ -229,8 +229,9 @@ Most of the spend is services that run with no traffic:
 
 - ColPali's GPU ran all day twice by mistake: 28 to 29 Sep (polling, fixed in #328) and 3 to 5
   Oct (manual scaling set in the Console). Together about $175.
-- Since 2 Oct, ColBERT keeps one instance on (`minScale: 1`) and GROBID uses manual scaling.
-  They cost $4.51 a day, about $135 a month, with no analyses at all.
+- From 2 to 16 Oct, ColBERT kept one instance on (`minScale: 1`) and GROBID used manual
+  scaling. That cost $4.51 a day with no analyses at all. Both went back to automatic scaling
+  on 16 Oct.
 
 Where an analysis spends its time, per cited paper:
 
@@ -245,15 +246,17 @@ A check waits for its paper's figures, because figure captions can change a verd
 Docling runs one paper at a time (`DOCLING_PARALLEL=1`), so cited papers wait in a line. An
 analysis of 12 to 17 cited papers took 5 to 24 minutes.
 
-What would cut cost or time, at about 30 analyses a month:
+What would cut cost or time per analysis:
 
-| Change | Saves per month | Trade-off |
+| Change | Saves | Trade-off |
 | --- | --- | --- |
-| GROBID back to automatic scaling | about $81 | the first parse after idle waits for a cold start |
-| ColBERT min instances from 1 to 0 | about $54 | the first upload after idle waits for a cold start |
-| Read figures only for claims that name a figure or table | about $22, and most of the Docling wait | figures changed 1 verdict in 15 (#163); needs an eval first |
-| Gateway from 4 vCPU / 8 GiB to 1 vCPU / 2 GiB | about $6 | check its memory use first |
-| `DOCLING_PARALLEL` from 1 to 2 on the worker | $0 | uses more worker memory (about 2 GB per Docling run) |
+| Index figure captions as text in ColBERT and leave ColPali off the default path | about $0.75 of the $1.11, and most of the Docling wait | captions changed 1 verdict in 15 (#163); the judge reads captions as text, but this needs an eval first |
+| Remember which cited papers are already indexed, across analyses | ColBERT upload time for 30% of cited papers (79 of 262 were seen before) | none; today the list lives in memory and the worker starts a new process for each job |
+| Gateway from 4 vCPU / 8 GiB to 1 vCPU / 2 GiB | about $0.20 | check its memory use first |
+
+Tried and dropped: running more Docling at once. On 10 cited PDFs with 4 CPUs, like the
+worker, `DOCLING_PARALLEL=1` took 377 s, `2` took 490 s and `3` took 421 s. One Docling run
+already uses every CPU, so more runs only compete for them.
 
 ## API
 
