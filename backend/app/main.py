@@ -593,7 +593,7 @@ class UploadRequest(BaseModel):
 
 
 @app.post("/uploads")
-async def start_upload(body: UploadRequest, request: Request, user: str | None = Depends(current_user)):
+async def new_upload(body: UploadRequest, request: Request, user: str | None = Depends(current_user)):
     """A URL to PUT one PDF straight to the papers bucket (#266), or {"url": null} where there is
     no bucket, and the PDF goes through POST /analyses/upload instead."""
     if not PAPERS_BUCKET:
@@ -601,29 +601,27 @@ async def start_upload(body: UploadRequest, request: Request, user: str | None =
     origin = request.headers.get("origin", "")
     try:
         return await asyncio.to_thread(uploads.start_upload, body.filename, body.size, origin, user)
-    except uploads.UploadUnavailable as error:
-        logger.warning("upload session refused: %s", error)
+    except PermissionError as error:
+        raise HTTPException(403, str(error)) from None
+    except uploads.UploadRefused as error:
+        logger.warning("upload refused: %s", error)
         raise HTTPException(503, "storage would not take the upload, try again shortly") from None
 
 
 class UploadedPaper(BaseModel):
-    object: str
+    object_name: str
     verify: bool = True
 
 
 @app.post("/analyses/from-upload")
-async def analyse_upload(body: UploadedPaper, user: str | None = Depends(current_user)):
-    """Start an analysis of a PDF the caller uploaded with a URL from POST /uploads."""
-    if not await asyncio.to_thread(uploads.is_owner, body.object, user):
-        raise HTTPException(404, "no such upload")
-    path = PAPERS_DIR / body.object
+async def analyse_uploaded_paper(body: UploadedPaper, user: str | None = Depends(current_user)):
+    """Start an analysis of a PDF the caller uploaded with a URL from POST /uploads, once."""
     try:
-        with open(path, "rb") as pdf:  # the bucket is mounted here, so the PUT's object is too
-            head = pdf.read(5)
-    except FileNotFoundError:
-        raise HTTPException(404, "the upload has not reached storage") from None
-    if head != b"%PDF-":
-        raise HTTPException(400, "the uploaded file is not a PDF")
+        path = await asyncio.to_thread(uploads.claim, body.object_name, user, PAPERS_DIR)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from None
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
     return _start(path.as_posix(), body.verify, user)
 
 

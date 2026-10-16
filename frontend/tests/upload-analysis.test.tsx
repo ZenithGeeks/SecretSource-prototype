@@ -39,7 +39,7 @@ test('with a bucket, the PDF is PUT to the signed URL and the analysis starts fr
   expect(put[0]).toBe(ticket.url)
   expect(put[1]).toMatchObject({ method: 'PUT', headers: ticket.headers, body: pdf })
   expect(started[0]).toMatch(/\/api\/analyses\/from-upload$/)
-  expect(JSON.parse(started[1]!.body as string)).toEqual({ object: ticket.object, verify: false })
+  expect(JSON.parse(started[1]!.body as string)).toEqual({ object_name: ticket.object, verify: false })
 })
 
 test('without a bucket, the PDF goes through the gateway as a form upload', async () => {

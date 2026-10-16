@@ -219,8 +219,8 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
   return response
 }
 
-/** Where to PUT a PDF for a direct upload, from POST /uploads. `url` is null when the gateway
- * has no papers bucket. */
+/** Where to PUT a PDF for a direct upload, from POST /uploads: an upload session URL, which
+ * needs no credentials. `url` is null when the gateway has no papers bucket. */
 type UploadTicket = { url: null } | { url: string; object: string; headers: Record<string, string> }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -247,8 +247,9 @@ export const api = {
     }),
 
   /** Upload a PDF and start its analysis. Where the gateway has a papers bucket, the PDF goes
-   * straight to Cloud Storage with a signed URL: the web proxy refuses a body over 4.5 MB
-   * (#266). Elsewhere, local compose for example, it goes through the gateway as before. */
+   * straight to Cloud Storage through an upload session the gateway starts: the web proxy
+   * refuses a body over 4.5 MB (#266). Elsewhere, local compose for example, it goes through
+   * the gateway as before. */
   uploadAnalysis: async (file: File, verify: boolean) => {
     const ticket = await request<UploadTicket>('/uploads', {
       method: 'POST',
@@ -265,7 +266,7 @@ export const api = {
     return request<{ id: string }>('/analyses/from-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ object: ticket.object, verify }),
+      body: JSON.stringify({ object_name: ticket.object, verify }),
     })
   },
 
