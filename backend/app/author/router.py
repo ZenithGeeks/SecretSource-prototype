@@ -503,7 +503,12 @@ async def _run_draft_check(check_id: str, user: str | None):
                 claim = logic.cited_text(citation["sentence"], citation["key"])
                 try:
                     result = await asyncio.to_thread(
-                        verify_cached, claim, identifier, gateway.verify_claim, entry["fields"]
+                        verify_cached,
+                        claim,
+                        identifier,
+                        gateway.verify_claim,
+                        entry["fields"],
+                        by_title=logic.lacks_locator(entry) and not pdfs.get(entry["key"]),
                     )
                 except Exception as error:  # a crash in the pipeline is an honest "unavailable"
                     result = {"status": "error", "reason": "failed", "message": str(error)}
