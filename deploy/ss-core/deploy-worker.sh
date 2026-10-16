@@ -67,15 +67,23 @@ for ((minute = 0; minute < WAIT_MINUTES; minute++)); do
 done
 worker_is_idle || fail "the worker was busy for ${WAIT_MINUTES} min; $short is built but not running, run again later"
 
-# Tag what the running container uses, not :latest: the build above already moved :latest.
-rollback="pre-$short"
-docker tag "$(docker inspect --format '{{.Image}}' "$CONTAINER")" "$IMAGE:$rollback"
+# :deployed names the image the worker last started on. :latest cannot serve as the rollback: the
+# build above already moved it. Nor can the container's image ID: once :latest moves, that image
+# has no name, and Docker refuses to tag it ("No such image").
+rollback=""
+if docker image inspect "$IMAGE:deployed" >/dev/null 2>&1; then
+  rollback="pre-$short"
+  docker tag "$IMAGE:deployed" "$IMAGE:$rollback"
+else
+  say "no $IMAGE:deployed yet, so this deploy has no image to roll back to"
+fi
 started=$(date -u +%FT%TZ)
 (cd "$WORKER_DIR" && docker compose up -d --no-deps --no-build worker)
 
 # The worker logs this line once its start-up check (backend/app/native.py) has passed.
 for _ in $(seq 24); do
   if docker logs --since "$started" "$CONTAINER" 2>&1 | grep -q "Listening on analyses"; then
+    docker tag "$IMAGE:latest" "$IMAGE:deployed"
     echo "$short deployed $started by deploy-worker" > "$WORKER_DIR/REVISION"
     say "$short is running"
     exit 0
@@ -83,8 +91,10 @@ for _ in $(seq 24); do
   sleep 5
 done
 
-say "$short did not start within 2 min; rolling back to $IMAGE:$rollback" >&2
+say "$short did not start within 2 min" >&2
 docker logs --since "$started" "$CONTAINER" 2>&1 | tail -20 >&2
+[[ -n $rollback ]] || fail "no rollback image; roll back by hand from a pre-* tag (deploy/ss-core/README.md)"
+say "rolling back to $IMAGE:$rollback" >&2
 docker tag "$IMAGE:$rollback" "$IMAGE:latest"
 (cd "$WORKER_DIR" && docker compose up -d --no-deps --no-build worker)
 exit 1

@@ -22,10 +22,11 @@ A PR job can therefore at most redeploy main. It cannot deploy its own code.
 1. Unpacks the commit into the worker directory and builds the image. The code is copied
    into the image at build time, so the running worker is not affected yet.
 2. Waits up to 45 minutes for the worker to have no job.
-3. Tags the image the container runs as `secretsource-worker-worker:pre-<sha>`, then
-   restarts the worker on the new image.
-4. Writes `REVISION` once the worker logs `Listening on analyses`. If it does not within
-   2 minutes, it puts the previous image back and fails.
+3. Copies `secretsource-worker-worker:deployed`, the image the worker last started on, to
+   `:pre-<sha>`, then restarts the worker on the new image. The first deploy has no
+   `:deployed` yet and says so.
+4. Once the worker logs `Listening on analyses`, tags the new image `:deployed` and writes
+   `REVISION`. If it does not start within 2 minutes, it puts `:pre-<sha>` back and fails.
 
 To deploy by hand: run the workflow from the Actions tab (Run workflow, branch main), or on
 the host run `sudo /usr/local/bin/deploy-worker <sha>`.
