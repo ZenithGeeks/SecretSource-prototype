@@ -235,7 +235,8 @@ def _normalised(title: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", " ", title.lower()).strip()
 
 
-def _matches(wanted: str, found: str) -> bool:
+def titles_match(wanted: str, found: str) -> bool:
+    """Whether two titles are the same up to case, punctuation and a typo or two."""
     from difflib import SequenceMatcher
 
     return SequenceMatcher(None, _normalised(wanted), _normalised(found)).ratio() >= TITLE_MATCH
@@ -256,7 +257,7 @@ def _arxiv_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     others = []
     for entry in ET.fromstring(response.text).iter(f"{ATOM}entry"):
         found = " ".join((entry.findtext(f"{ATOM}title") or "").split())
-        if not _matches(title, found):
+        if not titles_match(title, found):
             continue
         published = re.match(r"\d{4}", entry.findtext(f"{ATOM}published") or "")
         year = int(published.group(0)) if published else None
@@ -276,7 +277,7 @@ def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution
     found = _semantic_scholar("/search", {"query": title, "fields": S2_FIELDS, "limit": 5})
     others = []
     for paper in found.get("data") or []:
-        if not _matches(title, paper.get("title", "")):
+        if not titles_match(title, paper.get("title", "")):
             continue
         if not fits(paper.get("year"), _s2_first_author(paper)):
             others.append(_described(paper["title"], paper.get("year"), _s2_first_author(paper)))

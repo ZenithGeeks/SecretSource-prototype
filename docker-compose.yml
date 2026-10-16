@@ -128,6 +128,7 @@ services:
       ANALYSES_DB: /app/data/db/analyses.db
       S2_API_KEY: ${S2_API_KEY:-} # without one, Semantic Scholar 429s most lookups
       UNPAYWALL_EMAIL: ${UNPAYWALL_EMAIL:-}
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-} # without one, OpenAlex shares a tiny per-IP budget
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
       PARALLEL_SOURCES: ${PARALLEL_SOURCES:-3} # cited papers downloaded and indexed at the same time
       PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims judged at the same time

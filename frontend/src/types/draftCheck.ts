@@ -87,12 +87,14 @@ export type Citation = {
   message?: string
   resolution?: Resolution
   audit?: AuditFinding[]
-  /** From looking the bib entry's DOI up in Crossref and OpenAlex (#421). "no": no index
-   * knows it, so the reference may be made up. "unknown": an index could not be reached.
-   * Missing when the entry has no DOI. */
+  /** From looking the bib entry's DOI up in Crossref and OpenAlex (#421), or, for an entry
+   * with no DOI and no link, its title and first author in those and arXiv and Semantic
+   * Scholar (#439). "no": no index knows it, so the reference may be made up. "unknown": an
+   * index could not be reached. Missing when the entry was not looked up. */
   exists?: 'yes' | 'no' | 'unknown'
-  index?: string // the index that knew the DOI: "Crossref" or "OpenAlex"
-  mismatches?: string[] // where the .bib entry disagrees with that index's record
+  index?: string // the index that knew the work, for example "Crossref"
+  mismatches?: string[] // where the .bib entry disagrees with that index's record (DOI only)
+  lookedUpBy?: 'title' // missing for a DOI lookup
 }
 
 export type ParseWarningType = 'missing-key' | 'duplicate-key' | 'unused-entry' | 'no-doi-url'
