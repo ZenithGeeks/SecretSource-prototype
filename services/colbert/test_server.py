@@ -11,7 +11,7 @@ def test_tools_list_names_each_tool_and_its_parameters(mcp):
 
     assert sorted(tools) == ["add_paper", "search_passages"]
     search = tools["search_passages"]["inputSchema"]
-    assert list(search["properties"]) == ["query", "k", "source"]
+    assert list(search["properties"]) == ["query", "k", "source", "snippet_chars"]
     assert search["required"] == ["query"]
     add = tools["add_paper"]["inputSchema"]
     assert list(add["properties"]) == ["path"]
