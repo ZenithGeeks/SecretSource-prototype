@@ -6,15 +6,17 @@ dspy.ColBERTv2 expects) and MCP under /mcp. Run with `python server.py`
 """
 
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from store import Store
 
 PORT = int(os.getenv("COLBERT_PORT", "8893"))
@@ -43,7 +45,12 @@ mcp = FastMCP(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
-def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
+def search_passages(
+    query: str,
+    k: int = 10,
+    source: str | None = None,
+    snippet_chars: Annotated[int | None, Field(ge=1)] = None,
+) -> dict:
     """Find passages in the indexed papers that match a query, best match first.
 
     Use it to read what a paper says in its own words, for example to check a claim
@@ -54,16 +61,30 @@ def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
         k: How many passages to return. Values above 100 are cut to 100.
         source: The file name of one indexed paper, for example "2112.01488.pdf", to
             search only that paper. Leave it out to search every indexed paper.
+        snippet_chars: Cut each passage's text to at most this many characters, at the
+            end of a word, to save tokens. Leave it out to get whole passages.
 
     Returns:
         {"topk": [hit, ...]}, best first. Each hit has rank (1 is the best), score,
-        text (the whole passage), title, source (the paper's file name), page (1 is
-        the first page), and start and end (character offsets of the passage in that
-        page's text). score is the ColBERT MaxSim score: higher is a closer match. It
-        is a sum over the query's 32 tokens (padding included) and has no fixed range,
-        so compare scores only within one answer.
+        text (the passage, cut to snippet_chars if set), title, source (the paper's file
+        name), page (1 is the first page), and start and end (character offsets of the
+        whole passage in that page's text). score is the ColBERT MaxSim score: higher is
+        a closer match. It is a sum over the query's 32 tokens (padding included) and has
+        no fixed range, so compare scores only within one answer.
     """
-    return {"topk": store().search(query, min(k, 100), source)}
+    hits = store().search(query, min(k, 100), source)
+    if snippet_chars is not None:
+        hits = [{**hit, "text": snippet(hit["text"], snippet_chars)} for hit in hits]
+    return {"topk": hits}
+
+
+def snippet(text: str, chars: int) -> str:
+    """Cut text to at most `chars` characters, at the end of a word."""
+    if len(text) <= chars:
+        return text
+    # One character past the limit, so a word that ends exactly at the limit is kept.
+    breaks = [m.start() for m in re.finditer(r"\s", text[: chars + 1])]
+    return text[: breaks[-1]] if breaks and breaks[-1] > 0 else text[:chars]
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=False))
