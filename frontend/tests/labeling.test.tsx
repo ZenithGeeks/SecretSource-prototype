@@ -50,11 +50,12 @@ vi.mock('../src/components/PageViewer', () => ({
     target,
     onSelectText,
   }: {
-    target: { paper: string; quote?: string; label: string; detail?: string }
+    target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null }
     onSelectText?: (s: { text: string; page: number | null }) => void
   }) => (
     <div>
       <div data-testid="viewer">{target.paper}|{target.quote}</div>
+      <p data-testid="viewer-box">{target.paper}: {target.source ? `boxed on page ${target.source.page}` : 'no box'}</p>
       <p data-testid="viewer-heading">{target.label}{target.detail && ` / ${target.detail}`}</p>
       <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
         select in {target.paper}
@@ -70,9 +71,11 @@ import {
   emptyDraft,
   isDone,
   remaining,
+  workClaims,
   type Draft,
   type WorkClaim,
 } from '../src/lib/labeling'
+import { api } from '../src/lib/api'
 import { Workspace } from '../src/roles/labeler/screens/Workspace'
 
 const claim: WorkClaim = { ...gateway.session.claims[0], origin: 'extracted' }
@@ -464,6 +467,52 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add as a new claim' }))
     expect(screen.getByText(/· added/)).toBeInTheDocument()
+  })
+
+  it('boxes a claim added from the paper on its page, and saves its sentence and page', async () => {
+    vi.mocked(api.findInPaper).mockImplementation(async (paper, q) =>
+      paper === 'paperA.pdf' && q === 'picked in paperA.pdf'
+        ? { page: 4, boxes: [{ x0: 10, y0: 20, x1: 300, y1: 32 }], page_width: 612, page_height: 792 }
+        : { page: null, boxes: [] },
+    )
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as a new claim' }))
+
+    expect(await screen.findByText('paperA.pdf: boxed on page 4')).toBeInTheDocument()
+    expect(api.findInPaper).toHaveBeenCalledWith('paperA.pdf', 'picked in paperA.pdf', 4)
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0]).toMatchObject({
+      claims: [{ origin: 'human_added', claim: 'picked in paperA.pdf', sentence: 'picked in paperA.pdf', page: 4 }],
+    })
+  })
+
+  it('adds a typed claim that is not in the paper without a box', async () => {
+    vi.mocked(api.findInPaper).mockResolvedValue({ page: null, boxes: [] })
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /Add a missed claim/ }))
+    fireEvent.change(screen.getByLabelText('A claim extraction missed'), { target: { value: 'A claim nobody wrote' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
+
+    await waitFor(() => expect(api.findInPaper).toHaveBeenCalledWith('paperA.pdf', 'A claim nobody wrote', undefined))
+    expect(screen.getByText(/· added/)).toBeInTheDocument()
+    expect(screen.getByText('paperA.pdf: no box')).toBeInTheDocument()
+  })
+})
+
+describe('claims added by hand earlier', () => {
+  it('come back with the sentence and page they were saved with, so they can be boxed again', () => {
+    const [added] = workClaims({
+      ...gateway.session,
+      saved: {
+        claims: [{ claim_id: 'paperA#h-abc123', origin: 'human_added', claim: 'X beats Y', sentence: 'X beats Y on Z.', page: '6', section: '' }],
+        candidates: [],
+        labels: [],
+      },
+    }).filter((c) => c.origin === 'human_added')
+    expect(added).toMatchObject({ claim: 'X beats Y', sentence: 'X beats Y on Z.', page: 6, source: null })
+    expect(buildSave(added, judged({ status: 'accepted' })).claims[0]).toMatchObject({ sentence: 'X beats Y on Z.', page: 6 })
   })
 })
 

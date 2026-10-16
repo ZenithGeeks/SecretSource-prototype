@@ -248,8 +248,10 @@ export type Draft = {
   labels: Record<string, LabelDraft> // by reference_id
 }
 
-/** A claim of the paper as extracted, or one the person added because extraction missed it. */
-export type WorkClaim = SessionClaim & { origin: 'extracted' | 'human_added' }
+/** A claim of the paper as extracted, or one the person added because extraction missed it.
+ * `page` is where a hand-added claim was selected in the paper; an extracted claim keeps its
+ * page in `source`. */
+export type WorkClaim = SessionClaim & { origin: 'extracted' | 'human_added'; page?: number | null }
 
 export const emptyDraft = (): Draft => ({ status: null, edited: '', cands: {}, added: [], labels: {} })
 export const emptyLabel = (): LabelDraft => ({ evidence: null, rationale: '', confidence: 'medium' })
@@ -263,11 +265,12 @@ export function workClaims(session: Session): WorkClaim[] {
     .map((row) => ({
       claim_id: row.claim_id,
       claim: row.claim,
-      sentence: '',
+      sentence: row.sentence ?? '',
       section: row.section ?? '',
       source: null,
       candidates: [],
       origin: 'human_added' as const,
+      page: numberOrNull(row.page),
     }))
   return [...extracted, ...added]
 }
@@ -362,7 +365,7 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
     claim: claim.claim,
     claim_edited: draft.status === 'edited' ? draft.edited.trim() : '',
     sentence: claim.sentence,
-    page: claim.source?.page ?? null,
+    page: claim.source?.page ?? claim.page ?? null,
     section: claim.section,
   })
   if (draft.status === 'rejected') return save
