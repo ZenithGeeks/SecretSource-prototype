@@ -14,6 +14,7 @@
 - [Run the retrieval services on your own GPU](#run-the-retrieval-services-on-your-own-gpu)
 - [Everyday use](#everyday-use)
 - [Troubleshooting](#troubleshooting)
+- [Cost and speed](#cost-and-speed)
 - [API](#api)
 - [Roadmap](#roadmap)
 - [For maintainers](#for-maintainers)
@@ -41,8 +42,8 @@ heavy retrieval services are shared and already run in the cloud:
 | GROBID (`grobid`) | reads a PDF's reference list and full text | shared cloud service |
 | LLM | extracts claims and writes verdicts (any OpenAI-compatible endpoint) | shared endpoint |
 
-ColBERT and ColPali store one vector file per paper in a GCS bucket rather than a database — a
-claim check only ever searches one cited paper's ~150 passages, which plain torch scores in
+ColBERT and ColPali store one vector file per paper in a GCS bucket, not in a database. A
+claim check searches only one cited paper, about 150 passages, and plain torch scores those in
 milliseconds.
 
 The cloud services only accept requests with a Google identity token. The gateway adds the
@@ -104,14 +105,13 @@ Author draft check (sample data):
    - `CLAIM_LIMIT`: the most claims to check per paper. Default `20`. `0` means all.
    - `PARALLEL_SOURCES`: how many cited papers are prepared at the same time. Default `3`.
    - `PARALLEL_CHECKS`: how many claims are judged at the same time. Default `3`.
-   - `PARALLEL_SOURCES_TOTAL`, `PARALLEL_CHECKS_TOTAL`: the same two limits, but per worker
-     process. Default: the per-run values. Each worker applies its own limit, so more workers
-     put more load on the retrieval services and the LLM.
+   - `PARALLEL_SOURCES_TOTAL`, `PARALLEL_CHECKS_TOTAL`: the same two limits for a whole worker
+     process. Default: the per-run values. Each worker has its own limit, so more workers put
+     more load on the retrieval services and the LLM.
 
-   Teacher Google Classroom is optional. Keep `TEACHER_GOOGLE_ENABLED=false` and
-   `VITE_TEACHER_BACKEND=mock` for the existing local teacher experience. For Google Cloud OAuth
-   setup, required scopes, callback registration, encryption-key generation, and the opt-in
-   remote adapter, see [Teacher Google Classroom setup](backend/README.md#teacher-google-classroom).
+   Google Classroom for teachers is optional. Keep `TEACHER_GOOGLE_ENABLED=false` and
+   `VITE_TEACHER_BACKEND=mock` to use the local teacher pages with sample data. To connect
+   Google Classroom, see [Teacher Google Classroom setup](backend/README.md#teacher-google-classroom).
 
 4. **Add the credentials file:** save the file from the team lead as
    `backend/secrets/service-auth.json`. Git ignores this folder, and Docker never copies it
@@ -165,11 +165,12 @@ NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 
 No LLM endpoint? `docker compose --profile gpu up -d --build` also runs vLLM on your GPU.
 
-The gateway reads each paper's figures and tables with Docling, on the CPU by default. To run
-Docling on the same GPU, rebuild the gateway with the GPU override:
+The worker reads each paper's figures and tables with Docling, on the CPU by default. This is
+the slowest step of an analysis (see [Cost and speed](#cost-and-speed)). To run Docling on the
+same GPU, rebuild the worker and the gateway with the GPU override:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build gateway
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build worker gateway
 ```
 
 To keep using it, set `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` in `.env` (use `;`
@@ -206,6 +207,54 @@ while it runs. Past analyses are in History.
 | An analysis stays `queued` and never moves | no worker is running. Check the `worker` entry in `/health`, then `docker compose up -d worker` |
 | 503 when starting an analysis | Redis is unreachable. Check the `redis` entry in `/health` and that `REDIS_URL` in `.env` is correct |
 
+## Cost and speed
+
+Measured on 2026-10-16 for the production project, 26 Sep to 16 Oct. Cloud Run cost is
+billable instance time from Cloud Monitoring times the asia-southeast1 list price, without
+the free tier.
+
+| | |
+| --- | --- |
+| Cloud Run spend | $353 |
+| Analyses started | 30 (17 finished) |
+| Spend per analysis, everything included | $11.78 |
+| Cost of one more analysis | about $1.11 |
+
+One analysis costs about $1.11: the ColPali GPU stays awake for it ($0.75), the gateway
+($0.30), and ColBERT indexes about 12 cited papers ($0.05). The LLM and the worker cost the
+project nothing per analysis, because the LLM is a shared endpoint and the worker runs on
+university machines.
+
+Most of the spend is services that run with no traffic:
+
+- ColPali's GPU ran all day twice by mistake: 28 to 29 Sep (polling, fixed in #328) and 3 to 5
+  Oct (manual scaling set in the Console). Together about $175.
+- Since 2 Oct, ColBERT keeps one instance on (`minScale: 1`) and GROBID uses manual scaling.
+  They cost $4.51 a day, about $135 a month, with no analyses at all.
+
+Where an analysis spends its time, per cited paper:
+
+| Step | Time | Runs on |
+| --- | --- | --- |
+| Find and download the PDF | 0.3 to 6 s | worker |
+| Index it in ColBERT | 7 to 48 s | Cloud Run `colbert` |
+| Read its figures with Docling | 40 to 140 s, one paper at a time | worker CPU |
+| Judge one claim | 1 to 7 s | LLM |
+
+A check waits for its paper's figures, because figure captions can change a verdict (#163).
+Docling runs one paper at a time (`DOCLING_PARALLEL=1`), so cited papers wait in a line. An
+analysis of 12 to 17 cited papers took 5 to 24 minutes.
+
+What would cut cost or time, at about 30 analyses a month:
+
+| Change | Saves per month | Trade-off |
+| --- | --- | --- |
+| GROBID back to automatic scaling | about $81 | the first parse after idle waits for a cold start |
+| ColBERT min instances from 1 to 0 | about $54 | the first upload after idle waits for a cold start |
+| Read figures only for claims that name a figure or table | about $22, and most of the Docling wait | figures changed 1 verdict in 15 (#163); needs an eval first |
+| Gateway from 4 vCPU / 8 GiB to 1 vCPU / 2 GiB | about $6 | check its memory use first |
+| `DOCLING_PARALLEL` from 1 to 2 on the worker | $0 | uses more worker memory (about 2 GB per Docling run) |
+
 ## API
 
 Interactive docs: http://localhost:8080/docs. The short version:
@@ -225,7 +274,7 @@ GET  /health
 - [x] Ready-made .env templates and a dependency report in /health (SCRUM-163)
 - [ ] Papers and figures in cloud storage, so nothing lives on one machine (SCRUM-164)
 - [ ] Public web, gateway and MCP entry points (SCRUM-166)
-- [ ] Analyses that survive cloud restarts (SCRUM-167)
+- [x] Analyses that survive cloud restarts: a Redis queue and a separate worker (SCRUM-167)
 
 ## For maintainers
 
@@ -236,13 +285,14 @@ system.
 <summary>How it works</summary>
 
 ```
-frontend (React)  ──► gateway (FastAPI)
-                         │
-                         ├─ GROBID          reference + fulltext parsing
-                         ├─ Docling         PDF → text, figure crops (a library inside the gateway)
-                         ├─ vLLM            claim extraction + verdicts (any OpenAI-compatible server)
-                         ├─ colbert service text retrieval  ─┐
-                         └─ colpali service visual retrieval ─┴─► GCS bucket (safetensors, MaxSim in torch)
+frontend (React)  ──► gateway (FastAPI)  ──► Redis queue  ──► worker
+
+worker (one analysis at a time)
+   ├─ GROBID          reference + fulltext parsing
+   ├─ Docling         PDF → text, figure crops (a library inside the worker)
+   ├─ vLLM            claim extraction + verdicts (any OpenAI-compatible server)
+   ├─ colbert service text retrieval  ─┐
+   └─ colpali service visual retrieval ─┴─► GCS bucket (safetensors, MaxSim in torch)
 
 paper.pdf
    └─ extract_claims_with_citations   claim + the references it cites (GROBID + LLM)
@@ -283,12 +333,15 @@ default, override with `VECTOR_BUCKET`) that the script creates and grants the C
 service account access to. For the vLLM part (quota, start-up time, cost), read
 [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
 
-In production, the gateway instead deploys through `.github/workflows/deploy-gateway.yml`, which
-runs on every push to `main` that touches `backend/**` and refuses to deploy if the `REDIS_URL`
-repository secret is empty. The web app runs on Vercel, which proxies `/api/*` to the gateway.
-Redis runs on Redis Cloud, and the worker runs by itself on a separate machine, as the compose
-service `worker`, not on Cloud Run. See "Deploying this" in
-[ARCHITECTURE.md](ARCHITECTURE.md#services).
+Production works a bit differently:
+
+- The gateway deploys through `.github/workflows/deploy-gateway.yml` on every push to `main`
+  that changes `backend/**`. The workflow stops if the `REDIS_URL` repository secret is empty.
+- The web app runs on Vercel, which sends `/api/*` to the gateway.
+- Redis runs on Redis Cloud.
+- The worker runs on its own machine as the compose service `worker`, not on Cloud Run.
+
+See "Deploying this" in [ARCHITECTURE.md](ARCHITECTURE.md#services).
 </details>
 
 <details>
@@ -317,8 +370,8 @@ settings in the repo-root `.env`. Use `localhost`, not container names.
 
 The frontend dev server is the exception: Vite only reads `.env` files inside `frontend/`, never
 the repo root. For sign-in to work under `npm run dev`, copy `frontend/.env.example` to
-`frontend/.env` and fill in `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (same values as the
-root `.env`) — otherwise the app runs open, with no login screen and no Sign out.
+`frontend/.env` and fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the same values as
+the root `.env`). Without them the app runs open, with no login screen and no Sign out.
 
 ```sh
 # gateway (from backend/)
