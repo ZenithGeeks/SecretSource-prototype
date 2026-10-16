@@ -27,6 +27,7 @@ from app.auth import current_user
 from app.author import logic
 from app.author.verify import citation_outcome, verify_cached
 from app.config import PARALLEL_CHECKS
+from app.metrics import AUDIT_FINDINGS
 from app.ownership import require_owner
 
 # The browser uses /api/author; Vite/nginx remove /api before forwarding to FastAPI.
@@ -504,6 +505,7 @@ async def _run_draft_check(check_id: str, user: str | None):
                 except Exception as error:  # a crash in the pipeline is an honest "unavailable"
                     result = {"status": "error", "reason": "failed", "message": str(error)}
             citation.update(citation_outcome(result))
+            AUDIT_FINDINGS.inc(len(citation.get("audit", [])))
             await gateway._publish(
                 check_id,
                 "checked",
@@ -675,6 +677,7 @@ async def update_citation(
         citation["verdict"] = request.verdict
         citation.pop("reason", None)
         citation.pop("message", None)
+        citation.pop("audit", None)  # the findings were about the old verdict's quote
     if request.evidence is not None:
         citation["evidence"] = request.evidence
     if request.explanation is not None:

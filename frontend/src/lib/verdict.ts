@@ -89,10 +89,11 @@ export function isOpenIssue(citation: Pick<Citation, 'verdict' | 'resolution'>):
   return VERDICTS[citation.verdict].needsWork && !citation.resolution
 }
 
-/** A verdict the check is not sure of: the source was silent on the sentence, or the judge
- * answered without a passage to point at. */
-export function isLowConfidence(c: Pick<Citation, 'verdict' | 'evidence'>): boolean {
-  if (c.verdict === 'insufficient') return true
+/** A verdict the check is not sure of: the source was silent on the sentence, the judge
+ * answered without a passage to point at, or the gateway's audit flagged it (a quote that is
+ * not in the source passages). */
+export function isLowConfidence(c: Pick<Citation, 'verdict' | 'evidence' | 'audit'>): boolean {
+  if (c.verdict === 'insufficient' || c.audit?.length) return true
   return (c.verdict === 'supports' || c.verdict === 'refutes') && !c.evidence?.passage
 }
 

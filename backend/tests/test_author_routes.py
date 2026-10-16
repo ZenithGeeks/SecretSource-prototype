@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import pytest
 from app import auth, main
 from app.author import router as author
+from app.metrics import AUDIT_FINDINGS
 from fastapi.testclient import TestClient
 
 TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
@@ -458,6 +459,39 @@ def test_a_crash_in_the_pipeline_is_an_honest_unavailable(client, monkeypatch):
     assert {c["verdict"] for c in resolvable} == {"unavailable"}
     assert all(c["message"] == "colbert unreachable" for c in resolvable)
     assert not any("quote" in c for c in resolvable)
+
+
+def audit_findings() -> float:
+    """AUDIT_FINDINGS's current value, via the public collect() API."""
+    return next(s.value for s in AUDIT_FINDINGS.collect()[0].samples if s.name.endswith("_total"))
+
+
+def test_a_quote_missing_from_the_passages_is_flagged_on_its_citation(client, monkeypatch):
+    """The judge's quote is checked against the passages it was given, the way an analysis's
+    audit checks it. The verdict stays as the judge gave it."""
+    passage = "late interaction scores every query token against every document token with maxsim"
+
+    def verify(claim, source):
+        quote = passage if "MaxSim" in claim else "a sentence the paper never wrote"
+        return {
+            "status": "ok",
+            "verdict": "supports",
+            "quote": quote,
+            "reasoning": "because",
+            "evidence": [{"text": passage, "page": 2}],
+        }
+
+    monkeypatch.setattr(main, "verify_claim", verify)
+    findings_before = audit_findings()
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+
+    check = client.get(f"/author/checks/{check_id}", headers=ADA).json()
+    by_line = {c["line"]: c for c in check["citations"]}
+    assert by_line[2]["verdict"] == "supports" and "audit" not in by_line[2]
+    assert by_line[3]["verdict"] == "supports"
+    assert [finding["check"] for finding in by_line[3]["audit"]] == ["quote-not-in-evidence"]
+    assert audit_findings() == findings_before + 2  # lines 3 and 4
 
 
 def test_an_uploaded_source_pdf_is_used_instead_of_a_lookup(client, monkeypatch):
