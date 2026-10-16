@@ -83,6 +83,10 @@ def reason_for(error: BaseException) -> str:
 ARXIV_PATTERN = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")
 ARXIV_VERSION = re.compile(r"v\d+$")
 DOI_PATTERN = re.compile(r"(10\.\d{4,9}/\S+)")
+# An arXiv copy in an Unpaywall location: arxiv.org/pdf/<id>, arxiv.org/abs/<id>, or arXiv's DOI.
+ARXIV_LOCATION = re.compile(
+    r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})|10\.48550/arxiv\.(\d{4}\.\d{4,5})", re.IGNORECASE
+)
 
 
 def _headers() -> dict:
@@ -223,7 +227,14 @@ def _unpaywall_pdf(doi: str) -> Resolution:
     pdf = location.get("url_for_pdf") or location.get("url")
     if not pdf:
         raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}")
-    return Resolution(pdf, work.get("title") or "", "unpaywall", {"DOI": doi})
+    # The best location is often the publisher's PDF, which refuses a script (#408). An arXiv
+    # copy among the other locations goes into `ids`, so _fetch can fall back to it.
+    ids = {"DOI": doi}
+    for other in work.get("oa_locations") or []:
+        if found := ARXIV_LOCATION.search(f"{other.get('url_for_pdf') or ''} {other.get('url') or ''}"):
+            ids["ArXiv"] = found.group(1) or found.group(2)
+            break
+    return Resolution(pdf, work.get("title") or "", "unpaywall", ids)
 
 
 def _first_answer(resolvers, argument: str) -> Resolution:
