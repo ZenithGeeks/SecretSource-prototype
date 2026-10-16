@@ -84,6 +84,10 @@ def citation_outcome(result: dict) -> dict:
         },
         "indexedIn": result.get("indexed_in") or {},
     }
+    # Only a check against an arXiv copy has these: its text can differ from the published paper.
+    if result.get("source_version"):
+        outcome["sourceVersion"] = result["source_version"]
+        outcome["arxiv"] = result.get("arxiv", "")
     findings = check_verdict(result)
     if findings:
         outcome["audit"] = findings

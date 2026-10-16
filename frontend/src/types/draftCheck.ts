@@ -79,6 +79,9 @@ export type Citation = {
   sourceRef?: SourceRef
   evidence?: Evidence
   explanation?: string // the "Why:" line
+  /** Set when the check read the source's arXiv copy, not the publisher's PDF (#424). */
+  sourceVersion?: 'preprint'
+  arxiv?: string // that copy's arXiv id, e.g. "2507.11408"
   /** Why the source could not be read (unavailable) or the key could not resolve (unchecked). */
   reason?: string
   message?: string

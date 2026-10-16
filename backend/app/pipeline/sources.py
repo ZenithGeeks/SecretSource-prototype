@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import urlparse
 
 from app.config import PAPERS_DIR, S2_API_KEY, UNPAYWALL_EMAIL
 
@@ -340,11 +341,22 @@ def _download(pdf_url: str, name: str) -> Path:
             raise WebSource(f"a web page, not a paper: {pdf_url}")
         raise NotDownloadable(f"not a PDF: {pdf_url}")
     # Written aside, then renamed, as save_upload does: another worker that finds this name
-    # never reads half a file.
-    partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
-    partial.write_bytes(response.content)
-    os.replace(partial, path)
+    # never reads half a file. The link goes next to the PDF first, so a PDF on disk always
+    # says where it came from (#424).
+    _write_whole(_link_file(path), pdf_url.encode())
+    _write_whole(path, response.content)
     return path
+
+
+def _write_whole(path: Path, content: bytes) -> None:
+    partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
+    partial.write_bytes(content)
+    os.replace(partial, path)
+
+
+def _link_file(pdf: Path) -> Path:
+    """Where _download keeps the link a PDF was downloaded from."""
+    return pdf.with_name(f"{pdf.name}.url")
 
 
 def _fetch(identifier: str) -> tuple[Path, Resolution]:
@@ -418,6 +430,29 @@ def known_title(identifier: str) -> str:
     from app import store
 
     return (store.recall_source(_normalised(identifier.strip())) or {}).get("title", "")
+
+
+def version_of(pdf: Path) -> dict:
+    """Whether this PDF file was downloaded from arXiv, read from the link saved beside it.
+
+    Decided by the file, not by the shared cache: another draft's lookup can change the cached
+    link without changing the file on this disk. Empty for an upload, or for a PDF downloaded
+    before links were saved.
+    """
+    try:
+        url = _link_file(pdf).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return preprint_of(url)
+
+
+def preprint_of(url: str) -> dict:
+    """{"source_version": "preprint", "arxiv": id} for a link to an arXiv PDF, else {}.
+    A preprint's wording or numbers can differ from the published paper."""
+    host = urlparse(url).hostname or ""
+    if (host == "arxiv.org" or host.endswith(".arxiv.org")) and (found := ARXIV_PATTERN.search(url)):
+        return {"source_version": "preprint", "arxiv": found.group(0)}
+    return {}
 
 
 def local_pdf(paper: str) -> str:

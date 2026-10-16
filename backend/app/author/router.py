@@ -686,6 +686,9 @@ async def update_citation(
         citation["verdict"] = request.verdict
         citation.pop("reason", None)
         citation.pop("message", None)
+        # Which copy of the old source was read says nothing about the new verdict (#424).
+        citation.pop("sourceVersion", None)
+        citation.pop("arxiv", None)
         citation.pop("audit", None)  # the findings were about the old verdict's quote
     if request.evidence is not None:
         citation["evidence"] = request.evidence
