@@ -14,6 +14,7 @@ from collections.abc import Callable
 from app import store
 from app.config import VLLM_MODEL
 from app.metrics import CLAIM_CHECKS_FAILED, CLAIM_VERDICTS
+from app.pipeline.audit import check_verdict
 from app.pipeline.verify import unchecked_reason
 
 
@@ -54,7 +55,11 @@ def _count(result: dict, citation: dict) -> None:
 
 def citation_outcome(result: dict) -> dict:
     """The fields a draft-check citation takes from a verification result: the verdict and
-    the passage it rests on, or why the source could not be read."""
+    the passage it rests on, or why the source could not be read.
+
+    `audit` lists what app.pipeline.audit found wrong with the verdict, such as a quote that
+    is not in the passages. The verdict is kept as the judge gave it.
+    """
     if result.get("status") != "ok":
         return {
             "verdict": "unavailable",
@@ -77,4 +82,7 @@ def citation_outcome(result: dict) -> dict:
     if result.get("source_version"):
         outcome["sourceVersion"] = result["source_version"]
         outcome["arxiv"] = result.get("arxiv", "")
+    findings = check_verdict(result)
+    if findings:
+        outcome["audit"] = findings
     return outcome

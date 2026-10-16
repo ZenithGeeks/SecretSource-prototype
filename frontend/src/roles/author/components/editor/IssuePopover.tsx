@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../../components/ui'
 import type { Citation } from '../../../../types/draftCheck'
 import { sourceLabel } from '../../labels'
-import { CitationBadge } from '../Verdicts'
+import { AuditNote, CitationBadge } from '../Verdicts'
 
 export type PopoverAnchor = { top: number; left: number; width: number; height: number }
 
@@ -90,6 +90,7 @@ export function IssuePopover({
           “{citation.evidence.passage}”{citation.evidence.page ? ` — p.${citation.evidence.page}` : ''}
         </blockquote>
       )}
+      <AuditNote findings={citation.audit} className="text-xs" />
       {citation.verdict === 'unavailable' && citation.message && <p className="text-xs text-ink-muted">{citation.message}</p>}
       {citation.resolution ? (
         <p className="text-xs text-ink-muted">

@@ -65,6 +65,9 @@ REASONS = {
     LookupUnavailable: "lookup-unavailable",
     WebSource: "web-source",
 }
+# A service that would not answer may answer later. Every other reason is an answer about the
+# work itself, so asking again gets the same answer.
+RETRYABLE = {"lookup-unavailable"}
 
 
 class Resolution(NamedTuple):
@@ -82,6 +85,22 @@ class Resolution(NamedTuple):
 def reason_for(error: BaseException) -> str:
     """The kind of failure, so the UI can tell a missing source from our own error."""
     return next((code for kind, code in REASONS.items() if isinstance(error, kind)), "failed")
+
+
+def is_retryable(error: BaseException) -> bool:
+    """Whether asking again later can help: a lookup service that would not answer, or a
+    network timeout or dropped connection, also when it is the cause of `error`."""
+    import requests
+
+    network = (requests.Timeout, requests.ConnectionError, TimeoutError, ConnectionError)
+    timed_out = any(isinstance(each, network) for each in (error, error.__cause__))
+    return reason_for(error) in RETRYABLE or timed_out
+
+
+def tool_error(error: BaseException) -> dict:
+    """The error a tool returns: what failed, the reason code, and whether to retry."""
+    return {"status": "error", "message": str(error), "reason": reason_for(error),
+            "retryable": is_retryable(error)}
 
 
 ARXIV_PATTERN = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")
@@ -360,16 +379,17 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     urls = [found.url]
     if (arxiv := found.ids.get("ArXiv")) and "arxiv.org" not in found.url:
         urls.append(f"https://arxiv.org/pdf/{arxiv}")
-    failure: ValueError | None = None
+    failure: Exception | None = None
     for url in urls:
         try:
             return _download(url, name), found._replace(url=url)
-        except requests.RequestException as error:
-            failure = failure or NotDownloadable(str(error))
-        except (WebSource, NotDownloadable) as error:
+        except (requests.RequestException, WebSource, NotDownloadable) as error:
             failure = failure or error
     for key in _cache_keys(identifier, found):
         store.forget_source(key)
+    if isinstance(failure, requests.RequestException):
+        # Kept as the cause, so a timeout still reads as retryable.
+        raise NotDownloadable(str(failure)) from failure
     raise failure
 
 
@@ -449,10 +469,14 @@ def fetch_source(identifier: str) -> dict:
     Args:
         identifier: a DOI (for example "10.18653/v1/2022.naacl-main.272"), an arXiv ID
             (for example "2112.01488"), a PMID, or a direct URL to a paper.
+
+    Returns:
+        {"status": "ok", "path", "url", "title", "index", "ids"}, or {"status": "error",
+        "message", "reason", "retryable"}. Retry only when `retryable` is true.
     """
     try:
         path, found = _fetch(identifier)
         return {"status": "ok", "path": path.as_posix(), "url": found.url, "title": found.title,
                 "index": found.index, "ids": found.ids}
     except Exception as error:
-        return {"status": "error", "message": str(error), "reason": reason_for(error)}
+        return tool_error(error)
