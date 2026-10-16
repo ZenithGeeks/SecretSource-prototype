@@ -293,3 +293,10 @@ def test_bib_doi_undoes_dblp_escapes_and_a_doi_prefix():
 )
 def test_latex_accents_particles_and_suffixes_are_not_mismatches(bib_author, index_author):
     assert logic.metadata_mismatches({"author": bib_author}, None, index_author, "Crossref") == []
+
+
+def test_cited_text_marks_where_the_key_is_cited():
+    sentence = r"We use AdamW~\cite{adamw} with weight decay 0.1 in PyTorch~\citep{torch, jax}."
+
+    assert logic.cited_text(sentence, "adamw") == "We use AdamW [cited] with weight decay 0.1 in PyTorch."
+    assert logic.cited_text(sentence, "jax") == "We use AdamW with weight decay 0.1 in PyTorch [cited]."

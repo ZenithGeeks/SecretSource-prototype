@@ -210,12 +210,13 @@ def test_a_draft_check_verifies_every_cite_and_persists_per_version(client, monk
         "open": 2,
     }
     assert [s["stage"] for s in check["stages"]][0] == "planned" and check["stages"][-1]["stage"] == "done"
-    # the pipeline was called once per resolvable citation, with the plain claim
+    # the pipeline was called once per resolvable citation, with the plain claim and the
+    # citation's place marked
     assert sorted(calls) == sorted(
         [
-            ("Late interaction scores with MaxSim.", "10.1145/3397271.3401075"),
-            ("ColBERTv2 reduces index size by 6–10×.", "10.1145/3397271.3401075"),
-            ("MS MARCO has 8.8M passages.", "MS MARCO"),
+            ("Late interaction scores with MaxSim [cited].", "10.1145/3397271.3401075"),
+            ("ColBERTv2 reduces index size by 6–10× [cited].", "10.1145/3397271.3401075"),
+            ("MS MARCO has 8.8M passages [cited].", "MS MARCO"),
         ]
     )
     # the same pair is read from the cache the second time

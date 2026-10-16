@@ -355,6 +355,18 @@ def _sentence_around(content: str, start: int, end: int) -> str:
     return re.sub(r"\s+", " ", (head + content[start:end] + after[:stop]).strip())
 
 
+def cited_text(sentence: str, key: str) -> str:
+    """The sentence in plain words with "[cited]" where `key` is cited, so the judge can tell
+    which words the citation is for: "We use AdamW [cited] with weight decay 0.1." (#437).
+    The judge picks its citation-aware prompt by this mark (app.pipeline.verify.CITED_MARK)."""
+
+    def mark(cite: re.Match) -> str:
+        keys = [k.strip() for k in cite.group(1).split(",")]
+        return " [cited]" if key in keys else cite.group(0)
+
+    return plain_text(CITE.sub(mark, sentence))
+
+
 def plain_text(latex: str) -> str:
     """A sentence in plain words: citations, comments and formatting commands removed, so
     the pipeline judges the claim and not the markup."""
