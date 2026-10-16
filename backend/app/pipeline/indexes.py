@@ -6,6 +6,7 @@ in their faster "polite" queues.
 """
 
 from dataclasses import asdict, dataclass
+from urllib.parse import quote
 
 from app import store
 from app.config import UNPAYWALL_EMAIL
@@ -13,6 +14,9 @@ from app.pipeline.sources import USER_AGENT
 
 CROSSREF_URL = "https://api.crossref.org/works"
 OPENALEX_URL = "https://api.openalex.org/works"
+# Short: the lookups run one after another at the end of a draft check, and a slow index
+# only makes the answer "unknown".
+TIMEOUT = 5
 
 
 @dataclass(frozen=True)
@@ -67,18 +71,21 @@ def _get(url: str) -> dict | None:
 
     params = {"mailto": UNPAYWALL_EMAIL} if UNPAYWALL_EMAIL else {}
     try:
-        response = requests.get(url, params=params, headers=USER_AGENT, timeout=30)
+        response = requests.get(url, params=params, headers=USER_AGENT, timeout=TIMEOUT)
     except requests.RequestException as error:
         raise _IndexError(f"{url}: {error}") from error
     if response.status_code == 404:
         return None
     if not response.ok:
         raise _IndexError(f"{url}: HTTP {response.status_code}")
-    return response.json()
+    try:
+        return response.json()
+    except ValueError as error:
+        raise _IndexError(f"{url}: not JSON") from error
 
 
 def _crossref(doi: str) -> IndexRecord | None:
-    work = _get(f"{CROSSREF_URL}/{doi}")
+    work = _get(f"{CROSSREF_URL}/{quote(doi, safe='/')}")
     if work is None:
         return None
     work = work.get("message") or {}
@@ -93,7 +100,7 @@ def _crossref(doi: str) -> IndexRecord | None:
 
 
 def _openalex(doi: str) -> IndexRecord | None:
-    work = _get(f"{OPENALEX_URL}/doi:{doi}")
+    work = _get(f"{OPENALEX_URL}/doi:{quote(doi, safe='/')}")
     if work is None:
         return None
     authors = work.get("authorships") or [{}]

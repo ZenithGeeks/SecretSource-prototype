@@ -36,7 +36,11 @@ function rowNote(c: Citation): string {
   const key = `\\cite{${c.key}}`
   if (c.resolution?.kind === 'replaced') return `${key} · replaced ${c.resolution.previousKey}`
   if (c.resolution?.kind === 'overridden') return `${key} · kept, with a note`
-  if (c.exists === 'no') return `${key} · DOI not in Crossref or OpenAlex: check that it exists`
+  // A source that was read exists, so then the DOI is what is likely wrong (#421).
+  if (c.exists === 'no') {
+    const read = c.verdict !== 'unavailable' && c.verdict !== 'unchecked'
+    return `${key} · DOI not in Crossref or OpenAlex: ${read ? 'check the DOI' : 'check that it exists'}`
+  }
   if (c.verdict === 'unavailable') return `${key} · ${c.message || 'source PDF unavailable'}`
   if (c.verdict === 'unchecked') return `${key} · ${c.reason === 'missing-key' ? 'no bib entry' : 'not checked yet'}`
   // A passage can be quoted with no page known (the verdict's own quote, no located evidence).

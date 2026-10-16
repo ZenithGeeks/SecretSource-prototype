@@ -9,6 +9,7 @@ The key includes the judge model, like the pipeline's own judge cache, so a mode
 never reads another model's verdict.
 """
 
+import logging
 from collections.abc import Callable
 
 from app import store
@@ -19,6 +20,7 @@ from app.pipeline.indexes import IndexUnavailable, find_doi
 from app.pipeline.verify import unchecked_reason
 
 INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
+log = logging.getLogger(__name__)
 
 
 def verify_cached(
@@ -101,8 +103,27 @@ def reference_check(fields: dict) -> dict:
         record = find_doi(doi)
     except IndexUnavailable:
         return {"exists": "unknown"}
+    except Exception:  # a store error or a bad answer must not fail the whole draft check
+        log.exception("index lookup of %s failed", doi)
+        return {"exists": "unknown"}
     if record is None:
         return {"exists": "no"}
     index = INDEX_NAMES[record.index]
     mismatches = logic.metadata_mismatches(fields, record.year, record.first_author, index)
     return {"exists": "yes", "index": index, "mismatches": mismatches}
+
+
+def reference_checks(entries: dict[str, dict]) -> dict[str, dict]:
+    """reference_check for each cited bib entry, by bib key, one entry at a time.
+
+    Once an index cannot be reached, the entries after it are "unknown" without asking, so an
+    outage costs a check one timeout, not one per citation.
+    """
+    results: dict[str, dict] = {}
+    reachable = True
+    for key, fields in entries.items():
+        if not logic.bib_doi(fields):
+            continue
+        results[key] = reference_check(fields) if reachable else {"exists": "unknown"}
+        reachable = results[key]["exists"] != "unknown"
+    return results

@@ -5,6 +5,7 @@ DOI or URL, an entry no draft cites, a \\cite whose key is missing, and a \\cite
 still being typed.
 """
 
+import pytest
 from app.author import logic
 
 RELATED_WORK = r"""% Chapter 2 — related work
@@ -257,3 +258,22 @@ def test_a_year_one_off_accents_and_missing_fields_are_not_mismatches():
 def test_bib_doi_drops_a_doi_org_prefix():
     assert logic.bib_doi({"doi": " https://doi.org/10.1162/tacl.a.729 "}) == "10.1162/tacl.a.729"
     assert logic.bib_doi({"title": "no doi"}) == ""
+
+
+def test_bib_doi_undoes_dblp_escapes_and_a_doi_prefix():
+    assert logic.bib_doi({"doi": r"10.1007/978-3-030-58452-8\_13"}) == "10.1007/978-3-030-58452-8_13"
+    assert logic.bib_doi({"doi": "doi:10.1162/tacl.a.729"}) == "10.1162/tacl.a.729"
+
+
+@pytest.mark.parametrize(
+    ("bib_author", "index_author"),
+    [
+        (r"Haji{\v{c}}, Jan", "Hajič"),
+        (r"Paul Erd{\H{o}}s", "Erdős"),
+        (r"{\O}vrelid, Lilja", "Øvrelid"),
+        ("Jan van den Berg", "van den Berg"),
+        ("John Smith Jr.", "Smith"),
+    ],
+)
+def test_latex_accents_particles_and_suffixes_are_not_mismatches(bib_author, index_author):
+    assert logic.metadata_mismatches({"author": bib_author}, None, index_author, "Crossref") == []
