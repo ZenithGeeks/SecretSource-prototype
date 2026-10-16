@@ -18,7 +18,7 @@ import { referenceNote } from '../../../lib/referenceCheck'
 import type { Citation } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
-import { CitationBadge } from './Verdicts'
+import { AuditNote, CitationBadge } from './Verdicts'
 
 export function EvidencePanel({
   citation,
@@ -140,6 +140,8 @@ export function EvidencePanel({
               )}
             </div>
           </div>
+
+          <AuditNote findings={citation.audit} className="text-[13px]" />
 
           {citation.explanation && (
             <p className="text-[13px] text-ink-muted">

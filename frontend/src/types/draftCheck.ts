@@ -49,6 +49,13 @@ export type Evidence = {
   page: number | null
 }
 
+/** Something the gateway's audit (backend/app/pipeline/audit.py) found wrong with a verdict,
+ * such as a quote that is not in the passages the check read. The verdict is kept as given. */
+export type AuditFinding = {
+  check: 'quote-not-in-evidence' | 'decided-without-quote' | 'unknown-verdict' | (string & {})
+  detail: string
+}
+
 /** What the author did about an issue. A resolved issue stays in the list but is not open. */
 export type Resolution = {
   kind: 'replaced' | 'overridden'
@@ -76,6 +83,7 @@ export type Citation = {
   reason?: string
   message?: string
   resolution?: Resolution
+  audit?: AuditFinding[]
   /** From looking the bib entry's DOI up in Crossref and OpenAlex (#421). "no": no index
    * knows it, so the reference may be made up. "unknown": an index could not be reached.
    * Missing when the entry has no DOI. */

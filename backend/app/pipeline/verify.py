@@ -221,6 +221,10 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
         claim: the claim to check. For example "ColBERT reduces index size by 10x".
         source_pdf_path: the cited paper. A local PDF path, or a DOI, arXiv ID, PMID,
             or URL to download. For example "data/papers/colbertv2.pdf" or "2112.01488".
+
+    Returns:
+        {"status": "ok", "verdict", "quote", "reasoning", "evidence", ...}, or {"status":
+        "error", "message", "reason", "retryable"}. Retry only when `retryable` is true.
     """
     # One check on its own has nothing else to do while the figures are read, so it waits for
     # them and can show a matching figure.
@@ -233,8 +237,8 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
 def prepare_source(source_pdf_path: str, wait_for_figures: bool = False) -> dict:
     """Get a cited paper ready: download it if needed and index it once.
 
-    Returns {"status": "ok", "path": ...} or an error with a reason. Safe to call many
-    times for the same paper: the work is done only once. Returns once the text is indexed;
+    Returns {"status": "ok", "path": ...} or an error with a reason and `retryable`. Safe to
+    call many times for the same paper: the work is done only once. Returns once the text is indexed;
     the figures follow in the background unless `wait_for_figures` is set.
     """
     try:
@@ -245,9 +249,9 @@ def prepare_source(source_pdf_path: str, wait_for_figures: bool = False) -> dict
             return failure
         return {"status": "ok", "path": source.as_posix()}
     except Exception as error:
-        from app.pipeline.sources import reason_for
+        from app.pipeline.sources import tool_error
 
-        return {"status": "error", "message": str(error), "reason": reason_for(error)}
+        return tool_error(error)
 
 
 def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
@@ -278,9 +282,8 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
                 **_judge(claim, passages), "evidence": evidence, "pages": pages,
                 "page_model": page_model, "indexed_in": indexed_in}
     except Exception as error:
-        from app.pipeline.sources import reason_for
+        from app.pipeline.sources import tool_error
 
         # Why it failed, not only that it did: the reader must tell "the source does not
         # support this" from "we could not read the source".
-        return {"status": "error", "message": str(error), "reason": reason_for(error),
-                "claim": claim, "source": source_pdf_path}
+        return {**tool_error(error), "claim": claim, "source": source_pdf_path}

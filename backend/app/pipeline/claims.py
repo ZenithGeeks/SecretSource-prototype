@@ -19,7 +19,7 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import local_pdf
+from app.pipeline.sources import local_pdf, tool_error
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -324,6 +324,10 @@ def extract_claims(pdf_path: str) -> dict:
     Args:
         pdf_path: a local PDF path, or a DOI, arXiv ID, PMID, or URL to download,
             for example "data/papers/colbertv2.pdf" or "2112.01488".
+
+    Returns:
+        {"status": "ok", "file", "claims", "windows"}, or {"status": "error", "message",
+        "reason", "retryable"}. Retry only when `retryable` is true.
     """
     global _claim_extractor
     try:
@@ -340,7 +344,7 @@ def extract_claims(pdf_path: str) -> dict:
                 claims.setdefault(_normalised_claim(claim), claim)
         return {"status": "ok", "file": pdf_path, "claims": list(claims.values()), "windows": len(windows)}
     except Exception as error:
-        return {"status": "error", "message": str(error)}
+        return tool_error(error)
 
 
 GROBID_ATTEMPTS = 2
@@ -559,6 +563,10 @@ def extract_citations(pdf_path: str) -> dict:
     Args:
         pdf_path: a local PDF path, or a DOI, arXiv ID, PMID, or URL to download,
             for example "data/papers/colbertv2.pdf" or "2112.01488".
+
+    Returns:
+        {"status": "ok", "file", "count", "dropped", "citations"}, or {"status": "error",
+        "message", "reason", "retryable"}. Retry only when `retryable` is true.
     """
     try:
         pdf_path = local_pdf(pdf_path)
@@ -572,7 +580,7 @@ def extract_citations(pdf_path: str) -> dict:
             "citations": citations,
         }
     except Exception as error:
-        return {"status": "error", "message": str(error)}
+        return tool_error(error)
 
 
 # --- Claims linked to the references they cite ----------------------------------
@@ -1053,6 +1061,10 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
     Args:
         pdf_path: a local PDF path, or a DOI, arXiv ID, PMID, or URL to download,
             for example "data/papers/colbertv2.pdf" or "2112.01488".
+
+    Returns:
+        {"status": "ok", "file", "title", "claims", "outline", ...}, or {"status": "error",
+        "message", "reason", "retryable"}. Retry only when `retryable` is true.
     """
     global _cited_claim_extractor
     given = pdf_path
@@ -1100,4 +1112,4 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
             "markers": markers,
         }
     except Exception as error:
-        return {"status": "error", "message": str(error)}
+        return tool_error(error)
