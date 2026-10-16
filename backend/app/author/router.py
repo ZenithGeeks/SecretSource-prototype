@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from app import store
 from app.auth import current_user
 from app.author import logic
-from app.author.verify import citation_outcome, verify_cached
+from app.author.verify import citation_outcome, reference_checks, verify_cached
 from app.config import PARALLEL_CHECKS
 from app.metrics import AUDIT_FINDINGS
 from app.ownership import require_owner
@@ -516,6 +516,11 @@ async def _run_draft_check(check_id: str, user: str | None):
             )
 
         await asyncio.gather(*(check_one(i + 1, c) for i, c in enumerate(citations)))
+        # Each cited entry's DOI is looked up once, after the verdicts (#421).
+        cited = {c["key"]: by_key[c["key"]]["fields"] for c in citations if c["key"] in by_key}
+        references = await asyncio.to_thread(reference_checks, cited)
+        for citation in citations:
+            citation.update(references.get(citation["key"], {}))
         run["status"] = "done"
         run["finishedAt"] = logic.now_iso()
         run["summary"] = logic.summarize(citations)
@@ -670,6 +675,10 @@ async def update_citation(
         if request.resolution is None:
             citation.pop("resolution", None)
     if request.key:
+        if request.key != citation["key"]:
+            # The index lookup was of the old key's DOI (#421).
+            for field in ("exists", "index", "mismatches"):
+                citation.pop(field, None)
         citation["key"] = request.key
     if request.sourceRef is not None:
         citation["sourceRef"] = request.sourceRef

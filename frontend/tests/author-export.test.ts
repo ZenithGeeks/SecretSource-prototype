@@ -87,6 +87,17 @@ test('annotationFor explains an unavailable source and a missing key', () => {
   )
 })
 
+test('annotationFor says when no index knows the cited DOI, or the bib entry disagrees with it', () => {
+  assert.equal(
+    annotationFor({ ...contradicted, verdict: 'unavailable', evidence: undefined, explanation: undefined, message: 'no free copy published', exists: 'no' }),
+    '% SecretSource: Not checked — \\cite{khattab2020}: The source could not be read: no free copy published. Neither Crossref nor OpenAlex knows this DOI, so the reference may not exist. Check the DOI and that the paper is real.',
+  )
+  assert.match(
+    annotationFor({ ...contradicted, exists: 'yes', index: 'Crossref', mismatches: ['year: the .bib says 2021, Crossref says 2023'] }),
+    / The .bib entry disagrees with Crossref: year: the .bib says 2021, Crossref says 2023\.$/,
+  )
+})
+
 test('buildProjectZip holds every project file with its current text', () => {
   const zip = buildProjectZip(draft)
   assert.equal(zip.type, 'application/zip')

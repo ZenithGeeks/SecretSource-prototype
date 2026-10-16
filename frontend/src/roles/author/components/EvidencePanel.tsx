@@ -14,6 +14,7 @@ import { useRef, useState } from 'react'
 import type { Target } from '../../../components/PageViewer'
 import { Button, Card, Empty } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { referenceNote } from '../../../lib/referenceCheck'
 import type { Citation } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
@@ -145,6 +146,12 @@ export function EvidencePanel({
           {citation.explanation && (
             <p className="text-[13px] text-ink-muted">
               <span className="font-medium text-ink">Why:</span> {citation.explanation}
+            </p>
+          )}
+
+          {referenceNote(citation) && (
+            <p role="note" className="text-[13px] text-ink-muted">
+              <span className="font-medium text-ink">Reference:</span> {referenceNote(citation)}
             </p>
           )}
 

@@ -10,6 +10,7 @@ import { strToU8, zipSync } from 'fflate'
 
 import { parseBib, serializeBib, type BibEntry } from './bibtex'
 import { findCites } from './latexProject'
+import { referenceNote } from './referenceCheck'
 import { VERDICTS, isOpenIssue } from './verdict'
 import type { Citation, Draft, ProjectFile } from '../types/draftCheck'
 
@@ -48,7 +49,9 @@ export function annotationFor(citation: Citation): string {
         ? 'No entry in the bibliography.'
         : 'Not checked yet.')
   const where = citation.evidence?.page ? ` (${citation.evidence.pdf} p.${citation.evidence.page})` : ''
-  return `% SecretSource: ${verdict}${where} — \\cite{${citation.key}}: ${detail.replace(/\s+/g, ' ')}`
+  const note = referenceNote(citation)
+  const text = note ? `${detail} ${note}` : detail
+  return `% SecretSource: ${verdict}${where} — \\cite{${citation.key}}: ${text.replace(/\s+/g, ' ')}`
 }
 
 /** `file` with a `% SecretSource:` line above every line that holds an open issue. Lines

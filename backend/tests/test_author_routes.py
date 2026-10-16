@@ -53,6 +53,8 @@ def client(monkeypatch, tmp_path):
     # The route hands the run to _spawn; the tests run the coroutine themselves under
     # asyncio.run (as test_checks.py does), so nothing races the TestClient's loop.
     monkeypatch.setattr(author, "_spawn", lambda coroutine: coroutine.close())
+    # The index lookup for cited DOIs (#421) goes to Crossref; these tests stay offline.
+    monkeypatch.setattr(author, "reference_checks", lambda entries: {})
     main.analyses.clear()
     main.streams.clear()
     yield TestClient(main.app)
@@ -724,3 +726,34 @@ def test_delete_all_refuses_an_unknown_scope(client):
     response = client.delete("/user/data?scope=teacher", headers=ADA)
     assert response.status_code == 400
     assert "scope must be one of all, researcher, author" in response.text
+
+
+def test_a_draft_check_says_which_cited_dois_no_index_knows(client, monkeypatch):
+    # #421: the bib entry with a DOI is looked up in the indexes; the one without is not.
+    stub_verify(monkeypatch, fail_for=("10.1145/3397271.3401075",))
+    looked_up = []
+
+    def reference_checks(entries):
+        looked_up.extend(entries)
+        return {key: {"exists": "no"} for key, fields in entries.items() if fields.get("doi")}
+
+    monkeypatch.setattr(author, "reference_checks", reference_checks)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+
+    check = client.get(f"/author/checks/{check_id}", headers=ADA).json()
+    by_key = {(c["key"], c["line"]): c for c in check["citations"]}
+    assert by_key[("khattab2020", 2)]["verdict"] == "unavailable"
+    assert by_key[("khattab2020", 2)]["exists"] == "no"
+    assert "exists" not in by_key[("nguyen2016", 4)]
+    assert "exists" not in by_key[("ghost2020", 5)]  # no bib entry, so nothing to look up
+    assert sorted(looked_up) == ["khattab2020", "nguyen2016"]  # each cited entry once
+
+    # "Replace with" another key: the lookup was of the old entry's DOI, so it goes.
+    replaced = client.patch(
+        f"/author/checks/{check_id}/citations/{by_key[('khattab2020', 2)]['id']}",
+        headers=ADA,
+        json={"key": "nguyen2016", "verdict": "supports"},
+    ).json()
+    citation = next(c for c in replaced["citations"] if c["id"] == by_key[("khattab2020", 2)]["id"])
+    assert "exists" not in citation
