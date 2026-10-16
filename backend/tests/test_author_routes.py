@@ -17,7 +17,9 @@ from datetime import datetime, timedelta
 import pytest
 from app import auth, main
 from app.author import router as author
+from app.author import verify as author_verify
 from app.metrics import AUDIT_FINDINGS
+from app.pipeline import sources
 from fastapi.testclient import TestClient
 
 TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
@@ -55,6 +57,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(author, "_spawn", lambda coroutine: coroutine.close())
     # The index lookup for cited DOIs (#421) goes to Crossref; these tests stay offline.
     monkeypatch.setattr(author, "reference_checks", lambda entries: {})
+    # A title-only entry is looked up by title first (#436); these tests check it by its title.
+    monkeypatch.setattr(author_verify, "find_cited_work", lambda title, fields: title)
     main.analyses.clear()
     main.streams.clear()
     yield TestClient(main.app)
@@ -475,6 +479,23 @@ def test_a_citation_checked_against_a_preprint_says_so_until_a_new_verdict_repla
     ).json()
     replaced = next(c for c in swapped["citations"] if c["id"] == checked["id"])
     assert "sourceVersion" not in replaced and "arxiv" not in replaced
+
+
+def test_a_title_only_entry_whose_title_names_another_work_is_unavailable(client, monkeypatch):
+    calls = stub_verify(monkeypatch)
+
+    def only_others(title, fields):
+        raise sources.Unresolvable(f"arXiv has only other works titled '{title}': MS MARCO (2023)")
+
+    monkeypatch.setattr(author_verify, "find_cited_work", only_others)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+
+    citations = client.get(f"/author/checks/{check_id}", headers=ADA).json()["citations"]
+    ms_marco = next(c for c in citations if c["key"] == "nguyen2016")
+    assert ms_marco["verdict"] == "unavailable" and ms_marco["reason"] == "unresolvable"
+    assert "MS MARCO (2023)" in ms_marco["message"]
+    assert "MS MARCO" not in {source for _, source in calls}
 
 
 def test_a_crash_in_the_pipeline_is_an_honest_unavailable(client, monkeypatch):

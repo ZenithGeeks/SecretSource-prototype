@@ -18,6 +18,7 @@ from app.config import VLLM_MODEL
 from app.metrics import CLAIM_CHECKS_FAILED, CLAIM_VERDICTS
 from app.pipeline.audit import check_verdict
 from app.pipeline.indexes import IndexUnavailable, find_doi
+from app.pipeline.sources import find_by_title, tool_error
 from app.pipeline.verify import unchecked_reason
 
 INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
@@ -25,12 +26,32 @@ log = logging.getLogger(__name__)
 
 
 def verify_cached(
-    claim: str, source: str, run: Callable[[str, str], dict], citation: dict | None = None
+    claim: str,
+    source: str,
+    run: Callable[[str, str], dict],
+    citation: dict | None = None,
+    by_title: bool = False,
 ) -> dict:
-    """`run(claim, source)` is app.pipeline.verify.verify_claim, passed in rather than
-    imported so the gateway's own binding (which its tests monkeypatch) is what runs.
-    `citation` is the cited work as the caller knows it (its `url`, if any), for the reason
-    a failure is counted under."""
+    """Judge `claim` against `source`, or read the verdict back from the cache.
+
+    Args:
+        claim: the cited sentence, as the judge reads it.
+        source: what to check against: a DOI, arXiv id, URL or local PDF, or with `by_title`
+            the title of a bib entry that has none of these.
+        run: app.pipeline.verify.verify_claim, passed in rather than imported so the
+            gateway's own binding (which its tests monkeypatch) is what runs.
+        citation: the bib entry's fields, for the reason a failure is counted under and,
+            with `by_title`, the year and first author the found work must match.
+        by_title: look the work up by title first, with find_cited_work. A refused lookup
+            is counted and returned like any other failure.
+    """
+    if by_title:
+        try:
+            source = find_cited_work(source, citation or {})
+        except (ValueError, OSError) as error:  # what a lookup raises; see sources.REASONS
+            result = tool_error(error)
+            _count(result, citation or {})
+            return result
     key = store.cache_key("author-verify", VLLM_MODEL, claim.strip(), source.strip())
     cached = store.recall_cache(key)
     if cached is not None:
@@ -45,6 +66,22 @@ def verify_cached(
             store.remember_cache(key, result)
     _count(result, citation or {})
     return result
+
+
+def find_cited_work(title: str, fields: dict) -> str:
+    """What to check a title-only bib entry against: the work with that title whose year and
+    first author agree with the entry (#436). A same-titled work from another year or by other
+    authors is skipped, and when only such works exist the lookup raises Unresolvable.
+
+    An arXiv copy is named by its link; any other work by its DOI, so the check can still fall
+    back to an arXiv copy and record the index that knows it.
+    """
+    found = find_by_title(
+        title, lambda year, author: not logic.metadata_mismatches(fields, year, author, "the index")
+    )
+    if "arxiv.org" in found.url:
+        return found.url
+    return found.ids.get("DOI") or found.url
 
 
 def _count(result: dict, citation: dict) -> None:

@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -20,7 +21,7 @@ ARXIV_API = "http://export.arxiv.org/api/query"  # no key needed
 ATOM = "{http://www.w3.org/2005/Atom}"
 SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper"
 UNPAYWALL_URL = "https://api.unpaywall.org/v2"
-S2_FIELDS = "title,year,externalIds,openAccessPdf"
+S2_FIELDS = "title,year,authors,externalIds,openAccessPdf"
 TITLE_MATCH = 0.9  # a wrong paper is worse than no paper
 # A 429 is retried until RETRY_BUDGET seconds have passed, waiting these seconds between tries;
 # the last wait repeats. On 2026-09-14 Semantic Scholar refused 70 to 80% of calls with a key,
@@ -40,6 +41,10 @@ USER_AGENT = {"User-Agent": "SecretSource/0.1 (academic claim verification; seni
 
 class Unresolvable(ValueError):
     """We do not know how to follow this, usually a bare title."""
+
+
+class OnlyOtherWorks(Unresolvable):
+    """Works with this title exist, but none from the cited year and first author (#436)."""
 
 
 class NoOpenAccessCopy(ValueError):
@@ -80,6 +85,30 @@ class Resolution(NamedTuple):
     title: str = ""
     index: str = ""  # "" when the identifier was used as-is, for example a bare URL
     ids: dict = {}  # never changed after creation; one shared empty default is safe
+    year: int | None = None
+    first_author: str = ""  # as the index writes it, for example "Ian J. Goodfellow"
+
+
+# Whether a work found by its title is the one cited, from its year and first author. Two works
+# can share a title: "Deep learning" is a 2016 book and a 2018 arXiv paper (#436).
+Fits = Callable[[int | None, str], bool]
+
+
+def _any_work(year: int | None, first_author: str) -> bool:
+    """Take the first work with the title, as a lookup with nothing else to go on does."""
+    return True
+
+
+def _from_row(row: dict) -> Resolution:
+    """A Resolution from a cached row. Older rows have no index, ids, year or first author."""
+    return Resolution(
+        row["url"],
+        row["title"],
+        row.get("index", ""),
+        row.get("ids") or {},
+        row.get("year"),
+        row.get("first_author", ""),
+    )
 
 
 def reason_for(error: BaseException) -> str:
@@ -182,12 +211,20 @@ def _pdf_of(paper: dict, described_as: str) -> Resolution:
     title = paper.get("title", "")
     ids = paper.get("externalIds") or {}
     pdf = (paper.get("openAccessPdf") or {}).get("url")
+    year, first_author = paper.get("year"), _s2_first_author(paper)
     if pdf:
-        return Resolution(pdf, title, "semantic-scholar", ids)
+        return Resolution(pdf, title, "semantic-scholar", ids, year, first_author)
     arxiv = ids.get("ArXiv")
     if arxiv:
-        return Resolution(f"https://arxiv.org/pdf/{arxiv}", title, "semantic-scholar", ids)
+        url = f"https://arxiv.org/pdf/{arxiv}"
+        return Resolution(url, title, "semantic-scholar", ids, year, first_author)
     raise NoOpenAccessCopy(f"no open-access PDF known for {described_as}")
+
+
+def _s2_first_author(paper: dict) -> str:
+    """The first author's name in a Semantic Scholar record, or "" when it lists none."""
+    authors = paper.get("authors") or [{}]
+    return authors[0].get("name") or ""
 
 
 def _semantic_scholar_pdf(paper_id: str) -> Resolution:
@@ -204,7 +241,7 @@ def _matches(wanted: str, found: str) -> bool:
     return SequenceMatcher(None, _normalised(wanted), _normalised(found)).ratio() >= TITLE_MATCH
 
 
-def _arxiv_by_title(title: str) -> Resolution:
+def _arxiv_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     import xml.etree.ElementTree as ET
 
     import requests
@@ -216,22 +253,43 @@ def _arxiv_by_title(title: str) -> Resolution:
         timeout=60,
     )
     response.raise_for_status()
+    others = []
     for entry in ET.fromstring(response.text).iter(f"{ATOM}entry"):
         found = " ".join((entry.findtext(f"{ATOM}title") or "").split())
-        if _matches(title, found):
-            arxiv_id = ARXIV_VERSION.sub("", (entry.findtext(f"{ATOM}id") or "").rsplit("/", 1)[-1])
-            return Resolution(
-                f"https://arxiv.org/pdf/{arxiv_id}", found, "arxiv", {"ArXiv": arxiv_id}
-            )
+        if not _matches(title, found):
+            continue
+        published = re.match(r"\d{4}", entry.findtext(f"{ATOM}published") or "")
+        year = int(published.group(0)) if published else None
+        first_author = (entry.findtext(f"{ATOM}author/{ATOM}name") or "").strip()
+        if not fits(year, first_author):
+            others.append(_described(found, year, first_author))
+            continue
+        arxiv_id = ARXIV_VERSION.sub("", (entry.findtext(f"{ATOM}id") or "").rsplit("/", 1)[-1])
+        url = f"https://arxiv.org/pdf/{arxiv_id}"
+        return Resolution(url, found, "arxiv", {"ArXiv": arxiv_id}, year, first_author)
+    if others:
+        raise OnlyOtherWorks(f"arXiv has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"arXiv knows no paper by that title: {title}")
 
 
-def _semantic_scholar_by_title(title: str) -> Resolution:
+def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     found = _semantic_scholar("/search", {"query": title, "fields": S2_FIELDS, "limit": 5})
+    others = []
     for paper in found.get("data") or []:
-        if _matches(title, paper.get("title", "")):
-            return _pdf_of(paper, f"'{title}'")
+        if not _matches(title, paper.get("title", "")):
+            continue
+        if not fits(paper.get("year"), _s2_first_author(paper)):
+            others.append(_described(paper["title"], paper.get("year"), _s2_first_author(paper)))
+            continue
+        return _pdf_of(paper, f"'{title}'")
+    if others:
+        raise OnlyOtherWorks(f"Semantic Scholar has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"no paper found matching the title: {title}")
+
+
+def _described(title: str, year: int | None, first_author: str) -> str:
+    """ "Deep Learning (2018, Nicholas G. Polson)", for a message about a work that was skipped."""
+    return f"{title} ({', '.join(str(part) for part in (year, first_author) if part)})"
 
 
 def _unpaywall_pdf(doi: str) -> Resolution:
@@ -275,6 +333,52 @@ def _by_title(title: str) -> Resolution:
     return _first_answer((_arxiv_by_title, _semantic_scholar_by_title), title)
 
 
+def find_by_title(title: str, fits: Fits) -> Resolution:
+    """A work by its title, the first one whose year and first author `fits` accepts.
+
+    Cached under the title like _resolve. A cached work is used only when it carries a year or
+    an author that `fits` accepts; rows saved before they had either are looked up again.
+
+    Raises:
+        OnlyOtherWorks: an index knows the title, but only works that do not fit (#436).
+        ValueError: what a title lookup raises otherwise, for example Unresolvable.
+    """
+    from app import store
+
+    key = _normalised(title)
+    cached = store.recall_source(key)
+    if cached and time.time() - cached.get("fetched_at", time.time()) < SOURCE_MAX_AGE:
+        work = _from_row(cached)
+        # A row with neither would pass any `fits`, and older rows hold the wrong
+        # "deep learning" this ticket is about.
+        if (work.year or work.first_author) and fits(work.year, work.first_author):
+            return work
+
+    failures: list[Exception] = []
+    for resolver in (_arxiv_by_title, _semantic_scholar_by_title):
+        try:
+            found = resolver(title, fits)
+            break
+        except (ValueError, OSError) as error:  # what _first_answer catches too
+            failures.append(error)
+    else:
+        raise _reported(failures)
+
+    for known in _cache_keys(title, found):
+        store.remember_source(known, {**found._asdict(), "fetched_at": time.time()})
+    return found
+
+
+def _reported(failures: list[Exception]) -> Exception:
+    """The failure to report when no index had the work: the last one, except that a work arXiv
+    skipped wins over Semantic Scholar's plain "no paper found". The skipped work is what the
+    author needs to see. A rate limit or a paywall still wins, since it says more."""
+    skipped = next((error for error in failures if isinstance(error, OnlyOtherWorks)), None)
+    if skipped and type(failures[-1]) is Unresolvable:
+        return skipped
+    return failures[-1]
+
+
 def _by_doi(doi: str) -> Resolution:
     return _first_answer((lambda found: _semantic_scholar_pdf(f"DOI:{found}"), _unpaywall_pdf), doi)
 
@@ -311,9 +415,7 @@ def _resolve(identifier: str) -> Resolution:
     key = _normalised(identifier)
     cached = store.recall_source(key)
     if cached and time.time() - cached.get("fetched_at", time.time()) < SOURCE_MAX_AGE:
-        return Resolution(  # older rows have no index
-            cached["url"], cached["title"], cached.get("index", ""), cached.get("ids") or {}
-        )
+        return _from_row(cached)
 
     found = _lookup(identifier)
     for known in _cache_keys(identifier, found):
