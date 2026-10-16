@@ -41,19 +41,20 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app import dependencies, researcher, store
+from app import dependencies, researcher, store, uploads
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
 from app.author.router import DRAFT_CHECK, author_pdfs
 from app.author.router import router as author_router
 from app.config import (
     AVATARS_DIR,
+    PAPERS_BUCKET,
     PAPERS_DIR,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
@@ -584,6 +585,46 @@ async def upload_analysis(
 ):
     path = save_upload(await file.read(), file.filename)
     return _start(path.as_posix(), verify, user)
+
+
+class UploadRequest(BaseModel):
+    filename: str
+    size: int = Field(gt=0, le=uploads.MAX_UPLOAD_BYTES)
+
+
+@app.post("/uploads")
+async def start_upload(body: UploadRequest, request: Request, user: str | None = Depends(current_user)):
+    """A URL to PUT one PDF straight to the papers bucket (#266), or {"url": null} where there is
+    no bucket, and the PDF goes through POST /analyses/upload instead."""
+    if not PAPERS_BUCKET:
+        return {"url": None}
+    origin = request.headers.get("origin", "")
+    try:
+        return await asyncio.to_thread(uploads.start_upload, body.filename, body.size, origin, user)
+    except uploads.UploadUnavailable as error:
+        logger.warning("upload session refused: %s", error)
+        raise HTTPException(503, "storage would not take the upload, try again shortly") from None
+
+
+class UploadedPaper(BaseModel):
+    object: str
+    verify: bool = True
+
+
+@app.post("/analyses/from-upload")
+async def analyse_upload(body: UploadedPaper, user: str | None = Depends(current_user)):
+    """Start an analysis of a PDF the caller uploaded with a URL from POST /uploads."""
+    if not await asyncio.to_thread(uploads.is_owner, body.object, user):
+        raise HTTPException(404, "no such upload")
+    path = PAPERS_DIR / body.object
+    try:
+        with open(path, "rb") as pdf:  # the bucket is mounted here, so the PUT's object is too
+            head = pdf.read(5)
+    except FileNotFoundError:
+        raise HTTPException(404, "the upload has not reached storage") from None
+    if head != b"%PDF-":
+        raise HTTPException(400, "the uploaded file is not a PDF")
+    return _start(path.as_posix(), body.verify, user)
 
 
 @app.get("/analyses")
