@@ -1,13 +1,19 @@
-# Docling in the gateway on your NVIDIA GPU. Without this file the gateway uses CPU-only torch,
-# which is what Cloud Run and machines without a GPU need. Use it on top of docker-compose.yml:
+# Docling on your NVIDIA GPU, in the worker (which runs every analysis) and the gateway. Without
+# this file both use CPU-only torch, which is what Cloud Run and machines without a GPU need. Use
+# it on top of docker-compose.yml:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build gateway
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build worker gateway
 #
 # or once in .env: COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml (on Windows, separate
 # the two with ";"). The CUDA build of torch makes the image several GB bigger, and Docling takes
 # about 1 to 2 GB of GPU memory next to ColBERT and ColPali.
 services:
   gateway:
+    build:
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu130
+    gpus: all
+  worker:
     build:
       args:
         TORCH_INDEX: https://download.pytorch.org/whl/cu130
