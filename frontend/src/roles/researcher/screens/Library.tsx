@@ -6,8 +6,8 @@
  */
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { Check, ChevronRight, MoreVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { ToolbarActions } from '../../../components/AppShell'
 import { Button, Empty, FadeIn, Input, LoadingScreen } from '../../../components/ui'
@@ -56,24 +56,220 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
   )
 }
 
-function ProjectCard({ project, onOpen }: { project: Project; onOpen: (id: string) => void }) {
+/** The open "⋯" menu on a project card: Rename (switches the card into inline-edit) and
+ * Delete project (hands off to the confirm dialog). Not shown for Unsorted — it is a synthetic
+ * bucket, not a real project. Same click-outside/Escape pattern as ExportMenu. */
+function ProjectMenu({
+  onRename,
+  onDelete,
+}: {
+  onRename: () => void
+  onDelete: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const away = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('mousedown', away)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [open])
+
+  return (
+    <div ref={root} className="pointer-events-auto relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Project actions"
+        className="flex size-7 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
+      >
+        <MoreVertical className="size-4" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-[0_8px_12px_rgba(31,20,36,0.08),0_1px_1px_rgba(31,20,36,0.04)]"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              onRename()
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-ink hover:bg-accent-soft"
+          >
+            <Pencil className="size-4" />
+            Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              onDelete()
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-refutes hover:bg-refutes-soft"
+          >
+            <Trash2 className="size-4" />
+            Delete project
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProjectCard({
+  project,
+  onOpen,
+  onRename,
+  onRequestDelete,
+}: {
+  project: Project
+  onOpen: (id: string) => void
+  onRename: (id: string, name: string) => Promise<unknown>
+  onRequestDelete: (project: Project) => void
+}) {
   const meta = project.unsorted
     ? `${count(project.papers, 'paper')} · not in a project yet`
     : `${count(project.papers, 'paper')} · ${count(project.claims, 'claim')}`
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(project.name)
+  const [saving, setSaving] = useState(false)
+
+  const cancelRename = () => {
+    setRenaming(false)
+    setDraft(project.name)
+  }
+  const submitRename = async () => {
+    const name = draft.trim()
+    if (!name || name === project.name) return cancelRename()
+    setSaving(true)
+    try {
+      await onRename(project.id, name)
+      setRenaming(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(project.id)}
-      className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
-    >
-      <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
-      <p className="text-[13px] text-ink-muted">{meta}</p>
-      <TallyBar tally={project.tally} />
-      <div className="mt-1 flex items-center justify-between">
-        <span className="text-xs text-ink-muted">{updatedText(project)}</span>
-        <ChevronRight className="size-4 text-accent" />
+    <div className="relative flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent">
+      {/* The whole card opens the project; it sits under the real content (next, pointer-events-
+          none) so the menu and the rename field above it can still take their own clicks. */}
+      <button type="button" onClick={() => onOpen(project.id)} aria-label={`Open ${project.name}`} className="absolute inset-0 rounded-xl" />
+
+      <div className="pointer-events-none flex flex-col gap-3">
+        {renaming ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitRename()
+            }}
+            className="pointer-events-auto flex items-center gap-1.5"
+          >
+            <input
+              autoFocus
+              value={draft}
+              disabled={saving}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => event.key === 'Escape' && cancelRename()}
+              className="w-full min-w-0 flex-1 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink outline-none disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={saving}
+              aria-label="Save name"
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50"
+            >
+              <Check className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={cancelRename}
+              disabled={saving}
+              aria-label="Cancel renaming"
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft"
+            >
+              <X className="size-4" />
+            </button>
+          </form>
+        ) : (
+          <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
+        )}
+        <p className="text-[13px] text-ink-muted">{meta}</p>
+        <TallyBar tally={project.tally} />
+        <div className="mt-1 flex items-center justify-between">
+          <span className="text-xs text-ink-muted">{updatedText(project)}</span>
+          <ChevronRight className="size-4 text-accent" />
+        </div>
       </div>
-    </button>
+
+      {!project.unsorted && !renaming && (
+        <div className="absolute right-3 top-3">
+          <ProjectMenu onRename={() => setRenaming(true)} onDelete={() => onRequestDelete(project)} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** "Delete project?" (Figma: Library — Delete project (confirm)). Only the project is removed;
+ * its papers fall back to Unsorted, the same way an unfiled paper always has. */
+function DeleteProjectDialog({
+  project,
+  onCancel,
+  onConfirm,
+}: {
+  project: Project
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const [deleting, setDeleting] = useState(false)
+  return (
+    <div role="dialog" aria-modal="true" onKeyDown={(e) => e.key === 'Escape' && !deleting && onCancel()} className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={() => !deleting && onCancel()} />
+      <motion.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
+        <h2 className="font-serif text-lg font-semibold text-ink">Delete "{project.name}"?</h2>
+        <p className="mt-2 text-sm leading-5 text-ink-muted">
+          Its {count(project.papers, 'paper')} move back to Unsorted — nothing is deleted, the project just stops
+          grouping them. This can't be undone.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="ghost" className="border border-border-subtle" disabled={deleting} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            className="bg-refutes hover:opacity-90"
+            disabled={deleting}
+            onClick={async () => {
+              setDeleting(true)
+              try {
+                await onConfirm()
+              } finally {
+                setDeleting(false)
+              }
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Delete project'}
+          </Button>
+        </div>
+      </motion.div>
+    </div>
   )
 }
 
@@ -98,6 +294,8 @@ function ProjectsLanding({
 }) {
   const papers = projects.reduce((sum, p) => sum + p.papers, 0)
   const claims = projects.reduce((sum, p) => sum + p.claims, 0)
+  const { renameProject, deleteProject } = useResearcherActions()
+  const [deleting, setDeleting] = useState<Project | null>(null)
   return (
     <>
       <ToolbarActions>
@@ -119,7 +317,7 @@ function ProjectsLanding({
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((p) => (
-          <ProjectCard key={p.id} project={p} onOpen={onOpen} />
+          <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
         ))}
         <button
           type="button"
@@ -130,6 +328,19 @@ function ProjectsLanding({
           <span className="text-xs text-ink-muted">Start a new group of papers</span>
         </button>
       </div>
+
+      <AnimatePresence>
+        {deleting && (
+          <DeleteProjectDialog
+            project={deleting}
+            onCancel={() => setDeleting(null)}
+            onConfirm={async () => {
+              await deleteProject(deleting.id)
+              setDeleting(null)
+            }}
+          />
+        )}
+      </AnimatePresence>
     </>
   )
 }

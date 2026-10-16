@@ -19,6 +19,15 @@ export function useResearcherActions() {
       await researcherApi.addToProject(projectId, analysisId)
       await qc.invalidateQueries({ queryKey: ['researcher'] })
     },
+    renameProject: async (projectId: string, name: string) => {
+      await researcherApi.renameProject(projectId, name)
+      await qc.invalidateQueries({ queryKey: ['researcher'] })
+    },
+    /** Delete the project itself; its papers are not touched and fall back to Unsorted. */
+    deleteProject: async (projectId: string) => {
+      await researcherApi.deleteProject(projectId)
+      await qc.invalidateQueries({ queryKey: ['researcher'] })
+    },
   }
 }
 

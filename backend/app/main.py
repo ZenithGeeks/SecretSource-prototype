@@ -777,6 +777,10 @@ class ProjectPaperRequest(BaseModel):
     analysis_id: str
 
 
+class ProjectRenameRequest(BaseModel):
+    name: str
+
+
 class ConsensusRequest(BaseModel):
     question: str
 
@@ -809,6 +813,32 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
                "description": request.description.strip(), "analyses": [], "created": now, "updated": now}
     await asyncio.to_thread(store.save_project, project)
     return researcher.projects([project], [])[0]
+
+
+@app.patch("/researcher/projects/{project_id}")
+async def rename_project(
+    project_id: str, request: ProjectRenameRequest, user: str | None = Depends(current_user)
+):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(400, "a project needs a name")
+    stored = await asyncio.to_thread(store.load_projects, user)
+    project = _project(project_id, stored)
+    project["name"] = name
+    project["updated"] = datetime.now(timezone.utc).isoformat()
+    await asyncio.to_thread(store.save_project, project)
+    projected = await asyncio.to_thread(researcher.projects, [project], visible_to(user))
+    return projected[0]
+
+
+@app.delete("/researcher/projects/{project_id}")
+async def delete_project(project_id: str, user: str | None = Depends(current_user)):
+    """Deletes the project only — its papers are not touched. A paper with no project left is
+    Unsorted again, the same way it was before anyone filed it (researcher.py's _unsorted())."""
+    stored = await asyncio.to_thread(store.load_projects, user)
+    _project(project_id, stored)
+    await asyncio.to_thread(store.delete_project, project_id)
+    return {"deleted": project_id}
 
 
 @app.get("/researcher/projects/{project_id}/library")
