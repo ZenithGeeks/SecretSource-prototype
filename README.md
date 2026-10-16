@@ -38,7 +38,7 @@ heavy retrieval services are shared and already run in the cloud:
 | Service | What it does | Where |
 | --- | --- | --- |
 | ColBERT (`colbert`) | finds text passages in the cited papers | shared cloud service |
-| ColPali (`colpali`) | finds matching figures and pages | shared cloud service (GPU; first request after idle takes about a minute) |
+| ColPali (`colpali`) | finds matching figures and pages; checks use it only with `VISUAL_EVIDENCE=true` | shared cloud service (GPU; first request after idle takes about a minute) |
 | GROBID (`grobid`) | reads a PDF's reference list and full text | shared cloud service |
 | LLM | extracts claims and writes verdicts (any OpenAI-compatible endpoint) | shared endpoint |
 
@@ -202,7 +202,7 @@ while it runs. Past analyses are in History.
 | 503 from the cloud services | the services sleep when nobody uses them. The first request wakes them (ColBERT: a few seconds, ColPali: about a minute). If it does not stop, tell the team lead |
 | "The LM returned an empty or null response." | check `VLLM_URL` ends in `/v1` and `VLLM_MODEL` is an id the endpoint lists |
 | Most citations show as unresolved / Semantic Scholar 429 | set `S2_API_KEY` |
-| No figure or page hints | ColPali is still starting. The check still works, just without figure hints |
+| No figure or page hints | checks leave ColPali out unless `VISUAL_EVIDENCE=true`. With it on, ColPali may still be starting; the check works without figure hints |
 | Port 5173 or 8080 already in use | another copy is running. Run `docker compose down` in that folder first |
 | An analysis stays `queued` and never moves | no worker is running. Check the `worker` entry in `/health`, then `docker compose up -d worker` |
 | 503 when starting an analysis | Redis is unreachable. Check the `redis` entry in `/health` and that `REDIS_URL` in `.env` is correct |
@@ -242,15 +242,27 @@ Where an analysis spends its time, per cited paper:
 | Read its figures with Docling | 40 to 140 s, one paper at a time | worker CPU |
 | Judge one claim | 1 to 7 s | LLM |
 
-A check waits for its paper's figures, because figure captions can change a verdict (#163).
-Docling runs one paper at a time (`DOCLING_PARALLEL=1`), so cited papers wait in a line. An
-analysis of 12 to 17 cited papers took 5 to 24 minutes.
+Until 16 Oct a check waited for its paper's figures, and Docling runs one paper at a time
+(`DOCLING_PARALLEL=1`), so cited papers waited in a line. An analysis of 12 to 17 cited papers
+took 5 to 24 minutes.
+
+Since #446, checks leave ColPali out (`VISUAL_EVIDENCE=false`), so no cited paper goes through
+Docling and the GPU stays asleep. On the 192 claim/source pairs of finished production analyses,
+three runs each:
+
+| Verdicts that differ | All 191 pairs | 85 pairs that had a figure caption |
+| --- | --- | --- |
+| Two runs with ColPali off | 12 to 14 | 7 to 9 |
+| Two runs with ColPali on | 8 to 16 | 5 to 8 |
+| One run off, one run on | 13 to 20 | 4 to 11 |
+
+ColBERT already indexes each caption with the rest of its page. Set `VISUAL_EVIDENCE=true` to
+use ColPali again.
 
 What would cut cost or time per analysis:
 
 | Change | Saves | Trade-off |
 | --- | --- | --- |
-| Leave ColPali off the default path (#446) | about $0.75 of the $1.11, and the Docling wait on cited papers | ColBERT already indexes caption text with the rest of the page; #163 found figures changed 1 verdict in 15, so #446 measures it again first |
 | Gateway from 4 vCPU / 8 GiB to 1 vCPU / 2 GiB | about $0.20 | check its memory use first |
 
 Tried and dropped: running more Docling at once. On 10 cited PDFs with 4 CPUs, like the

@@ -46,8 +46,9 @@ alone.
 | Cost per analysis, Cloud Run only | about $1.11 (Cloud Run spend on 15 and 16 Oct 2026 divided by the analyses those days; README "Cost and speed") | must fall to $0.50 |
 | LLM tokens per analysis | each analysis record has `llm_tokens` from SCRUM-326 on, keyed like `judge_prompt` | must not grow without a reason in the PR |
 
-The README section "Cost and speed" lists the changes that would close the gap. The largest
-is the ColPali GPU, about $0.75 of the $1.11.
+The largest part was the ColPali GPU, about $0.75 of the $1.11. Since #446 checks leave it out
+by default; measure again with the report a week after that deploy. The README section "Cost
+and speed" lists what else would close the gap.
 
 ## Exceptions
 

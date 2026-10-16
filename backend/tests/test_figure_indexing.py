@@ -1,4 +1,5 @@
-"""A check waits for its cited paper's figures, or FIGURE_WAIT seconds at most when it is set (#163).
+"""With VISUAL_EVIDENCE on, a check waits for its cited paper's figures, or FIGURE_WAIT seconds
+at most (#163).
 
 Indexing figures means Docling reading the whole PDF, up to 150 s per paper. The text index is
 what a verdict needs. No services: ColBERT, ColPali, the lookup and the judge are fakes, and
@@ -68,6 +69,7 @@ def services(monkeypatch):
     monkeypatch.setattr(verify, "_visual_indexing", {}, raising=False)
     monkeypatch.setattr(verify, "_figures_due", {}, raising=False)
     monkeypatch.setattr(verify, "FIGURE_WAIT", 0.0, raising=False)  # fast mode; tests that wait set their own
+    monkeypatch.setattr(verify, "VISUAL_EVIDENCE", True)  # what these tests are about; off is tested last
     monkeypatch.setattr(verify, "_locks", {})
     yield types.SimpleNamespace(calls=calls, release=release, text_results=text_results)
     release.set()  # never leave a pool thread blocked
@@ -160,3 +162,15 @@ def test_a_single_verify_claim_waits_for_the_figures(services):
     threading.Timer(0.2, services.release.set).start()
     verdict = verify.verify_claim("ColBERT reduces the index 10x", "2112.01488")
     assert [page["label"] for page in verdict["pages"]] == ["Figure 2"]
+
+
+def test_with_visual_evidence_off_no_figures_are_indexed_or_searched(services, monkeypatch):
+    """The default since #446: ColPali is never called and nothing waits for figures."""
+    monkeypatch.setattr(verify, "VISUAL_EVIDENCE", False)
+
+    verdict = verify.verify_claim("ColBERT reduces the index 10x", "2112.01488")
+
+    assert verdict["verdict"] == "supports" and verdict["pages"] == []
+    assert services.calls["index_figures"] == 0
+    assert services.calls["colpali_search"] == 0
+    assert services.calls["add_paper"] == 1

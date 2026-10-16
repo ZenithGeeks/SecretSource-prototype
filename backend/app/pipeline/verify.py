@@ -13,7 +13,7 @@ from pathlib import Path
 
 from app import store
 from app.clients import retrieval
-from app.config import FIGURE_WAIT, PARALLEL_SOURCES, VLLM_MODEL
+from app.config import FIGURE_WAIT, PARALLEL_SOURCES, VISUAL_EVIDENCE, VLLM_MODEL
 from app.metrics import record_llm_usage
 
 logger = logging.getLogger(__name__)
@@ -77,9 +77,10 @@ def _index_once(source: Path, wait_for_figures: bool = False) -> dict | None:
     checks indexed the same paper at once, one could search in the middle and find nothing.
     The lock makes the second check wait.
 
-    The figures go into ColPali in the background, started at the same time as the text. By
-    default this waits for them too, because a figure caption can decide a verdict: without
-    them, one verdict in 15 went from supports to refutes (#163). With FIGURE_WAIT set to a
+    With VISUAL_EVIDENCE on (off by default, #446), the figures go into ColPali in the
+    background, started at the same time as the text. By default this waits for them too,
+    because a figure caption can decide a verdict: without them, one verdict in 15 went from
+    supports to refutes (#163). With FIGURE_WAIT set to a
     number, it waits at most that many seconds after they started, then returns without them,
     and check_prepared searches the figures only once they are indexed. `wait_for_figures`
     always waits, for a single check that has nothing else to do.
@@ -91,7 +92,9 @@ def _index_once(source: Path, wait_for_figures: bool = False) -> dict | None:
     failure = None
     with _lock_for(source.name):
         figures = _visual_indexing.get(source.name)
-        if figures is None:
+        # With VISUAL_EVIDENCE off nothing is submitted, so _figures_ready stays false and
+        # check_prepared never searches ColPali.
+        if figures is None and VISUAL_EVIDENCE:
             figures = _visual_pool.submit(_index_visually_if_available, source)
             _visual_indexing[source.name] = figures
             if FIGURE_WAIT is not None:
@@ -102,7 +105,7 @@ def _index_once(source: Path, wait_for_figures: bool = False) -> dict | None:
                 failure = indexed  # not remembered: the next check should try again
             else:
                 _indexed.add(source.name)
-    if failure is None:
+    if failure is None and figures is not None:
         # A number counts from when the figures started, so a later check of the same paper, or
         # a slow text index, does not add another full wait.
         due = _figures_due.get(source.name)
