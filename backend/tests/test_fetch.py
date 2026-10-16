@@ -17,6 +17,14 @@ def refused(url: str) -> requests.HTTPError:
     return requests.HTTPError(f"403 Client Error: Forbidden for url: {url}")
 
 
+@pytest.fixture(autouse=True)
+def local_store(monkeypatch, tmp_path):
+    """A failed fetch drops its cached rows (#414). Keep that in a temp SQLite file: config.py
+    loads the repo's .env, and with SUPABASE_URL set it would delete shared rows."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "analyses.db"))
+
+
 @pytest.fixture
 def lookup(monkeypatch):
     """Make the lookup answer with `found`, and the download fail for the URLs in `refuses`."""
