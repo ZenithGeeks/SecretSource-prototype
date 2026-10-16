@@ -49,6 +49,13 @@ export type Evidence = {
   page: number | null
 }
 
+/** Something the gateway's audit (backend/app/pipeline/audit.py) found wrong with a verdict,
+ * such as a quote that is not in the passages the check read. The verdict is kept as given. */
+export type AuditFinding = {
+  check: 'quote-not-in-evidence' | 'decided-without-quote' | 'unknown-verdict' | (string & {})
+  detail: string
+}
+
 /** What the author did about an issue. A resolved issue stays in the list but is not open. */
 export type Resolution = {
   kind: 'replaced' | 'overridden'
@@ -72,10 +79,20 @@ export type Citation = {
   sourceRef?: SourceRef
   evidence?: Evidence
   explanation?: string // the "Why:" line
+  /** Set when the check read the source's arXiv copy, not the publisher's PDF (#424). */
+  sourceVersion?: 'preprint'
+  arxiv?: string // that copy's arXiv id, e.g. "2507.11408"
   /** Why the source could not be read (unavailable) or the key could not resolve (unchecked). */
   reason?: string
   message?: string
   resolution?: Resolution
+  audit?: AuditFinding[]
+  /** From looking the bib entry's DOI up in Crossref and OpenAlex (#421). "no": no index
+   * knows it, so the reference may be made up. "unknown": an index could not be reached.
+   * Missing when the entry has no DOI. */
+  exists?: 'yes' | 'no' | 'unknown'
+  index?: string // the index that knew the DOI: "Crossref" or "OpenAlex"
+  mismatches?: string[] // where the .bib entry disagrees with that index's record
 }
 
 export type ParseWarningType = 'missing-key' | 'duplicate-key' | 'unused-entry' | 'no-doi-url'

@@ -14,10 +14,11 @@ import { useRef, useState } from 'react'
 import type { Target } from '../../../components/PageViewer'
 import { Button, Card, Empty } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { referenceNote } from '../../../lib/referenceCheck'
 import type { Citation } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
-import { CitationBadge } from './Verdicts'
+import { AuditNote, CitationBadge } from './Verdicts'
 
 export function EvidencePanel({
   citation,
@@ -140,9 +141,17 @@ export function EvidencePanel({
             </div>
           </div>
 
+          <AuditNote findings={citation.audit} className="text-[13px]" />
+
           {citation.explanation && (
             <p className="text-[13px] text-ink-muted">
               <span className="font-medium text-ink">Why:</span> {citation.explanation}
+            </p>
+          )}
+
+          {referenceNote(citation) && (
+            <p role="note" className="text-[13px] text-ink-muted">
+              <span className="font-medium text-ink">Reference:</span> {referenceNote(citation)}
             </p>
           )}
 

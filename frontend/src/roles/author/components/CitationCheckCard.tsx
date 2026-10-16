@@ -5,6 +5,7 @@ import { Fragment, useState } from 'react'
 
 import { Card, Empty } from '../../../components/ui'
 import { checkedLabel } from '../../../lib/author'
+import { preprintNote } from '../../../lib/citations'
 import { cn } from '../../../lib/utils'
 import { isLowConfidence, isOpenIssue } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
@@ -36,14 +37,21 @@ function rowNote(c: Citation): string {
   const key = `\\cite{${c.key}}`
   if (c.resolution?.kind === 'replaced') return `${key} · replaced ${c.resolution.previousKey}`
   if (c.resolution?.kind === 'overridden') return `${key} · kept, with a note`
+  // A source that was read exists, so then the DOI is what is likely wrong (#421).
+  if (c.exists === 'no') {
+    const read = c.verdict !== 'unavailable' && c.verdict !== 'unchecked'
+    return `${key} · DOI not in Crossref or OpenAlex: ${read ? 'check the DOI' : 'check that it exists'}`
+  }
   if (c.verdict === 'unavailable') return `${key} · ${c.message || 'source PDF unavailable'}`
   if (c.verdict === 'unchecked') return `${key} · ${c.reason === 'missing-key' ? 'no bib entry' : 'not checked yet'}`
   // A passage can be quoted with no page known (the verdict's own quote, no located evidence).
+  // A preprint's text can differ from the published paper, so the row says which one was read (#424).
+  const preprint = c.sourceVersion === 'preprint' ? ` · ${preprintNote(c.arxiv)}` : ''
   if (c.evidence?.passage) {
     const where = [c.evidence.pdf, c.evidence.page ? `p.${c.evidence.page}` : ''].filter(Boolean).join(' ')
-    return `${key} · ${where || 'passage quoted'}`
+    return `${key} · ${where || 'passage quoted'}${preprint}`
   }
-  return `${key} · no passage quoted`
+  return `${key} · no passage quoted${preprint}`
 }
 
 function CitationRow({ citation, selected, onSelect }: { citation: Citation; selected: boolean; onSelect: () => void }) {

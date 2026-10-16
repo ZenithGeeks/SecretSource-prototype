@@ -69,7 +69,9 @@ def colbert_add(path: str) -> dict:
             f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=900
         )
     if not response.ok:
-        return {"status": "error", "message": _detail(response), "reason": "indexing-failed"}
+        # The service answered; only a timeout or a dropped connection is worth a retry.
+        return {"status": "error", "message": _detail(response), "reason": "indexing-failed",
+                "retryable": False}
     return {"status": "ok", **response.json()}
 
 

@@ -13,6 +13,7 @@ entry, or no check yet). The same five words are the frontend's `Verdict` union.
 
 import hashlib
 import re
+import unicodedata
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -157,8 +158,8 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
     if pdfs and pdfs.get(entry["key"]):
         return pdfs[entry["key"]]
     f = entry["fields"]
-    if f.get("doi"):
-        return re.sub(r"^https?://(dx\.)?doi\.org/", "", f["doi"].strip())
+    if doi := bib_doi(f):
+        return doi
     eprint = f.get("eprint") or f.get("arxiv")
     if eprint and re.search(r"\d{4}\.\d{4,5}", eprint):
         return re.search(r"\d{4}\.\d{4,5}(v\d+)?", eprint).group(0)
@@ -168,13 +169,48 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
     return title or None
 
 
-def short_authors(author: str) -> str:
-    """ "Khattab & Zaharia", "Santhanam et al." from a BibTeX author field."""
-    names = [n.strip() for n in re.split(r"\s+and\s+", author, flags=re.I) if n.strip()]
+def bib_doi(fields: dict) -> str:
+    """The entry's DOI without a doi.org or doi: prefix and without LaTeX escapes, or "".
+
+    DBLP writes "10.1007/978-3-030-58452-8\\_13"; the indexes know it without the backslash.
+    """
+    doi = re.sub(r"^(https?://(dx\.)?doi\.org/|doi:\s*)", "", (fields.get("doi") or "").strip(), flags=re.I)
+    return re.sub(r"\\([_&%#$])", r"\1", doi).replace("{", "").replace("}", "")
+
+
+NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+# An accent written as a LaTeX command, \v{c}, {\H{o}}, \"u or \'e, keeps only its letter.
+LATEX_ACCENT = re.compile(r"\\(?:[a-zA-Z](?=\{)|[`'^\"~=.])\s*\{?(\\?[A-Za-z])\}?")
+LATEX_LETTERS = {"o": "o", "O": "O", "l": "l", "L": "L", "ss": "ss", "ae": "ae", "i": "i", "j": "j"}
+
+
+def bib_surnames(author: str) -> list[str]:
+    """The surnames in a BibTeX author field, in order. "Khattab, Omar and Zaharia, Matei" and
+    "Omar Khattab and Matei Zaharia" both give ["Khattab", "Zaharia"]; "Haji{\\v{c}}" gives
+    "Hajic", and "John Smith Jr." gives "Smith"."""
+    names = [n.strip() for n in re.split(r"\s+and\s+", _latex_letters(author), flags=re.I) if n.strip()]
     surnames = []
     for name in names:
-        surname = name.split(",")[0] if "," in name else name.split()[-1]
-        surnames.append(re.sub(r"[{}\\'\"`^~]", "", surname))
+        if "," in name:
+            surname = name.split(",")[0]
+        else:
+            words = [w for w in name.split() if w.strip(".").lower() not in NAME_SUFFIXES] or [name]
+            surname = words[-1]
+        surnames.append(re.sub(r"[{}\\'\"`^~]", "", surname).strip())
+    return surnames
+
+
+def _latex_letters(text: str) -> str:
+    """Text with LaTeX accent and letter commands replaced by plain letters."""
+    text = LATEX_ACCENT.sub(r"\1", text)
+    return re.sub(
+        r"\\(ss|ae|[oOlLij])(?![A-Za-z])\s*", lambda m: LATEX_LETTERS[m.group(1)], text
+    )
+
+
+def short_authors(author: str) -> str:
+    """ "Khattab & Zaharia", "Santhanam et al." from a BibTeX author field."""
+    surnames = bib_surnames(author)
     if not surnames:
         return ""
     if len(surnames) == 1:
@@ -182,6 +218,35 @@ def short_authors(author: str) -> str:
     if len(surnames) == 2:
         return f"{surnames[0]} & {surnames[1]}"
     return f"{surnames[0]} et al."
+
+
+def metadata_mismatches(fields: dict, year: int | None, first_author: str, index: str) -> list[str]:
+    """Where a bib entry disagrees with the index record of its DOI, in words for the author:
+    ["year: the .bib says 2021, Crossref says 2022"]. A field missing on either side is not a
+    mismatch, and a year one off is not either: preprint and proceedings years often differ by one.
+    """
+    found = []
+    bib_year = re.search(r"\d{4}", fields.get("year", "") or "")
+    if bib_year and year and abs(int(bib_year.group(0)) - year) > 1:
+        found.append(f"year: the .bib says {bib_year.group(0)}, {index} says {year}")
+    bib_first = (bib_surnames(fields.get("author", "")) or [""])[0]
+    if bib_first and first_author and _last_word(bib_first) != _last_word(first_author):
+        found.append(f"first author: the .bib says {bib_first}, {index} says {first_author}")
+    return found
+
+
+# Letters that NFKD does not split into a base letter and an accent.
+UNSPLIT_LETTERS = str.maketrans(
+    {"ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ß": "ss", "æ": "ae", "œ": "oe", "ı": "i"}
+)
+
+
+def _last_word(name: str) -> str:
+    """A surname's last word without case, accents or punctuation, to compare two spellings:
+    "van den Berg" and "Berg" match, as do "Müller" and "muller", and "Øvrelid" and "Ovrelid"."""
+    words = name.translate(UNSPLIT_LETTERS).split() or [""]
+    decomposed = unicodedata.normalize("NFKD", words[-1])
+    return re.sub(r"[^a-z]", "", decomposed.encode("ascii", "ignore").decode().lower())
 
 
 def source_ref(entry: dict, pdfs: dict[str, str] | None = None) -> dict:

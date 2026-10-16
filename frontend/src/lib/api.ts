@@ -33,6 +33,9 @@ export type Verdict = {
     image?: string
   }[]
   page_model?: string // the checkpoint that matched them, e.g. vidore/colqwen2-v1.0
+  /** Set when the PDF read was the arXiv copy, not the publisher's (#424). */
+  source_version?: 'preprint'
+  arxiv?: string // that copy's arXiv id, e.g. "2507.11408"
 }
 
 /** Where a sentence sits in the PDF. Boxes are top-left origin, in PDF points. */

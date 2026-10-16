@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import pytest
 from app import auth, main
 from app.author import router as author
+from app.metrics import AUDIT_FINDINGS
 from fastapi.testclient import TestClient
 
 TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
@@ -52,6 +53,8 @@ def client(monkeypatch, tmp_path):
     # The route hands the run to _spawn; the tests run the coroutine themselves under
     # asyncio.run (as test_checks.py does), so nothing races the TestClient's loop.
     monkeypatch.setattr(author, "_spawn", lambda coroutine: coroutine.close())
+    # The index lookup for cited DOIs (#421) goes to Crossref; these tests stay offline.
+    monkeypatch.setattr(author, "reference_checks", lambda entries: {})
     main.analyses.clear()
     main.streams.clear()
     yield TestClient(main.app)
@@ -445,6 +448,34 @@ def test_resolving_a_citation_is_kept_and_an_override_survives_a_recheck(client,
     assert client.get(f"/author/checks/{check_id}/compare", headers=ADA).status_code == 404
 
 
+def test_a_citation_checked_against_a_preprint_says_so_until_a_new_verdict_replaces_it(client, monkeypatch):
+    def verify(claim, source):
+        return {
+            "status": "ok",
+            "claim": claim,
+            "source": f"{source}.pdf",
+            "verdict": "refutes",
+            "quote": "q",
+            "reasoning": "because",
+            "evidence": [],
+            "source_version": "preprint",
+            "arxiv": "2507.11408",
+        }
+
+    monkeypatch.setattr(main, "verify_claim", verify)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+    citations = client.get(f"/author/checks/{check_id}", headers=ADA).json()["citations"]
+    checked = next(c for c in citations if c["verdict"] == "refutes")
+    assert checked["sourceVersion"] == "preprint" and checked["arxiv"] == "2507.11408"
+
+    swapped = client.patch(
+        f"/author/checks/{check_id}/citations/{checked['id']}", headers=ADA, json={"verdict": "supports"}
+    ).json()
+    replaced = next(c for c in swapped["citations"] if c["id"] == checked["id"])
+    assert "sourceVersion" not in replaced and "arxiv" not in replaced
+
+
 def test_a_crash_in_the_pipeline_is_an_honest_unavailable(client, monkeypatch):
     def boom(claim, source):
         raise RuntimeError("colbert unreachable")
@@ -458,6 +489,39 @@ def test_a_crash_in_the_pipeline_is_an_honest_unavailable(client, monkeypatch):
     assert {c["verdict"] for c in resolvable} == {"unavailable"}
     assert all(c["message"] == "colbert unreachable" for c in resolvable)
     assert not any("quote" in c for c in resolvable)
+
+
+def audit_findings() -> float:
+    """AUDIT_FINDINGS's current value, via the public collect() API."""
+    return next(s.value for s in AUDIT_FINDINGS.collect()[0].samples if s.name.endswith("_total"))
+
+
+def test_a_quote_missing_from_the_passages_is_flagged_on_its_citation(client, monkeypatch):
+    """The judge's quote is checked against the passages it was given, the way an analysis's
+    audit checks it. The verdict stays as the judge gave it."""
+    passage = "late interaction scores every query token against every document token with maxsim"
+
+    def verify(claim, source):
+        quote = passage if "MaxSim" in claim else "a sentence the paper never wrote"
+        return {
+            "status": "ok",
+            "verdict": "supports",
+            "quote": quote,
+            "reasoning": "because",
+            "evidence": [{"text": passage, "page": 2}],
+        }
+
+    monkeypatch.setattr(main, "verify_claim", verify)
+    findings_before = audit_findings()
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+
+    check = client.get(f"/author/checks/{check_id}", headers=ADA).json()
+    by_line = {c["line"]: c for c in check["citations"]}
+    assert by_line[2]["verdict"] == "supports" and "audit" not in by_line[2]
+    assert by_line[3]["verdict"] == "supports"
+    assert [finding["check"] for finding in by_line[3]["audit"]] == ["quote-not-in-evidence"]
+    assert audit_findings() == findings_before + 2  # lines 3 and 4
 
 
 def test_an_uploaded_source_pdf_is_used_instead_of_a_lookup(client, monkeypatch):
@@ -690,3 +754,34 @@ def test_delete_all_refuses_an_unknown_scope(client):
     response = client.delete("/user/data?scope=teacher", headers=ADA)
     assert response.status_code == 400
     assert "scope must be one of all, researcher, author" in response.text
+
+
+def test_a_draft_check_says_which_cited_dois_no_index_knows(client, monkeypatch):
+    # #421: the bib entry with a DOI is looked up in the indexes; the one without is not.
+    stub_verify(monkeypatch, fail_for=("10.1145/3397271.3401075",))
+    looked_up = []
+
+    def reference_checks(entries):
+        looked_up.extend(entries)
+        return {key: {"exists": "no"} for key, fields in entries.items() if fields.get("doi")}
+
+    monkeypatch.setattr(author, "reference_checks", reference_checks)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+
+    check = client.get(f"/author/checks/{check_id}", headers=ADA).json()
+    by_key = {(c["key"], c["line"]): c for c in check["citations"]}
+    assert by_key[("khattab2020", 2)]["verdict"] == "unavailable"
+    assert by_key[("khattab2020", 2)]["exists"] == "no"
+    assert "exists" not in by_key[("nguyen2016", 4)]
+    assert "exists" not in by_key[("ghost2020", 5)]  # no bib entry, so nothing to look up
+    assert sorted(looked_up) == ["khattab2020", "nguyen2016"]  # each cited entry once
+
+    # "Replace with" another key: the lookup was of the old entry's DOI, so it goes.
+    replaced = client.patch(
+        f"/author/checks/{check_id}/citations/{by_key[('khattab2020', 2)]['id']}",
+        headers=ADA,
+        json={"key": "nguyen2016", "verdict": "supports"},
+    ).json()
+    citation = next(c for c in replaced["citations"] if c["id"] == by_key[("khattab2020", 2)]["id"])
+    assert "exists" not in citation

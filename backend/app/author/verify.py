@@ -9,12 +9,19 @@ The key includes the judge model, like the pipeline's own judge cache, so a mode
 never reads another model's verdict.
 """
 
+import logging
 from collections.abc import Callable
 
 from app import store
+from app.author import logic
 from app.config import VLLM_MODEL
 from app.metrics import CLAIM_CHECKS_FAILED, CLAIM_VERDICTS
+from app.pipeline.audit import check_verdict
+from app.pipeline.indexes import IndexUnavailable, find_doi
 from app.pipeline.verify import unchecked_reason
+
+INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
+log = logging.getLogger(__name__)
 
 
 def verify_cached(
@@ -54,7 +61,11 @@ def _count(result: dict, citation: dict) -> None:
 
 def citation_outcome(result: dict) -> dict:
     """The fields a draft-check citation takes from a verification result: the verdict and
-    the passage it rests on, or why the source could not be read."""
+    the passage it rests on, or why the source could not be read.
+
+    `audit` lists what app.pipeline.audit found wrong with the verdict, such as a quote that
+    is not in the passages. The verdict is kept as the judge gave it.
+    """
     if result.get("status") != "ok":
         return {
             "verdict": "unavailable",
@@ -63,7 +74,7 @@ def citation_outcome(result: dict) -> dict:
         }
     evidence = result.get("evidence") or []
     first = evidence[0] if evidence else {}
-    return {
+    outcome = {
         "verdict": result.get("verdict", "insufficient"),
         "explanation": result.get("reasoning", ""),
         "evidence": {
@@ -73,3 +84,59 @@ def citation_outcome(result: dict) -> dict:
         },
         "indexedIn": result.get("indexed_in") or {},
     }
+    # Only a check against an arXiv copy has these: its text can differ from the published paper.
+    if result.get("source_version"):
+        outcome["sourceVersion"] = result["source_version"]
+        outcome["arxiv"] = result.get("arxiv", "")
+    findings = check_verdict(result)
+    if findings:
+        outcome["audit"] = findings
+    return outcome
+
+
+def reference_check(fields: dict) -> dict:
+    """Whether a cited DOI names a real work, and where the bib entry disagrees with it (#421).
+
+    An unreadable source alone cannot tell a paywalled paper from a made-up one, so a draft
+    check asks the indexes for every cited DOI.
+
+    Args:
+        fields: the bib entry's fields, as `logic.parse_bib` gives them.
+
+    Returns:
+        The fields a draft-check citation adds. `exists` is "yes", "no" (no index knows the
+        DOI, so the reference may be made up) or "unknown" (an index could not be reached).
+        With "yes", `index` names the index and `mismatches` lists the year or first author
+        the bib entry gets wrong. Empty for an entry with no DOI.
+    """
+    doi = logic.bib_doi(fields)
+    if not doi:
+        return {}
+    try:
+        record = find_doi(doi)
+    except IndexUnavailable:
+        return {"exists": "unknown"}
+    except Exception:  # a store error or a bad answer must not fail the whole draft check
+        log.exception("index lookup of %s failed", doi)
+        return {"exists": "unknown"}
+    if record is None:
+        return {"exists": "no"}
+    index = INDEX_NAMES[record.index]
+    mismatches = logic.metadata_mismatches(fields, record.year, record.first_author, index)
+    return {"exists": "yes", "index": index, "mismatches": mismatches}
+
+
+def reference_checks(entries: dict[str, dict]) -> dict[str, dict]:
+    """reference_check for each cited bib entry, by bib key, one entry at a time.
+
+    Once an index cannot be reached, the entries after it are "unknown" without asking, so an
+    outage costs a check one timeout, not one per citation.
+    """
+    results: dict[str, dict] = {}
+    reachable = True
+    for key, fields in entries.items():
+        if not logic.bib_doi(fields):
+            continue
+        results[key] = reference_check(fields) if reachable else {"exists": "unknown"}
+        reachable = results[key]["exists"] != "unknown"
+    return results

@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import urlparse
 
 from app.config import PAPERS_DIR, S2_API_KEY, UNPAYWALL_EMAIL
 
@@ -64,6 +65,9 @@ REASONS = {
     LookupUnavailable: "lookup-unavailable",
     WebSource: "web-source",
 }
+# A service that would not answer may answer later. Every other reason is an answer about the
+# work itself, so asking again gets the same answer.
+RETRYABLE = {"lookup-unavailable"}
 
 
 class Resolution(NamedTuple):
@@ -81,6 +85,22 @@ class Resolution(NamedTuple):
 def reason_for(error: BaseException) -> str:
     """The kind of failure, so the UI can tell a missing source from our own error."""
     return next((code for kind, code in REASONS.items() if isinstance(error, kind)), "failed")
+
+
+def is_retryable(error: BaseException) -> bool:
+    """Whether asking again later can help: a lookup service that would not answer, or a
+    network timeout or dropped connection, also when it is the cause of `error`."""
+    import requests
+
+    network = (requests.Timeout, requests.ConnectionError, TimeoutError, ConnectionError)
+    timed_out = any(isinstance(each, network) for each in (error, error.__cause__))
+    return reason_for(error) in RETRYABLE or timed_out
+
+
+def tool_error(error: BaseException) -> dict:
+    """The error a tool returns: what failed, the reason code, and whether to retry."""
+    return {"status": "error", "message": str(error), "reason": reason_for(error),
+            "retryable": is_retryable(error)}
 
 
 ARXIV_PATTERN = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")
@@ -321,11 +341,22 @@ def _download(pdf_url: str, name: str) -> Path:
             raise WebSource(f"a web page, not a paper: {pdf_url}")
         raise NotDownloadable(f"not a PDF: {pdf_url}")
     # Written aside, then renamed, as save_upload does: another worker that finds this name
-    # never reads half a file.
-    partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
-    partial.write_bytes(response.content)
-    os.replace(partial, path)
+    # never reads half a file. The link goes next to the PDF first, so a PDF on disk always
+    # says where it came from (#424).
+    _write_whole(_link_file(path), pdf_url.encode())
+    _write_whole(path, response.content)
     return path
+
+
+def _write_whole(path: Path, content: bytes) -> None:
+    partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
+    partial.write_bytes(content)
+    os.replace(partial, path)
+
+
+def _link_file(pdf: Path) -> Path:
+    """Where _download keeps the link a PDF was downloaded from."""
+    return pdf.with_name(f"{pdf.name}.url")
 
 
 def _fetch(identifier: str) -> tuple[Path, Resolution]:
@@ -348,16 +379,17 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     urls = [found.url]
     if (arxiv := found.ids.get("ArXiv")) and "arxiv.org" not in found.url:
         urls.append(f"https://arxiv.org/pdf/{arxiv}")
-    failure: ValueError | None = None
+    failure: Exception | None = None
     for url in urls:
         try:
             return _download(url, name), found._replace(url=url)
-        except requests.RequestException as error:
-            failure = failure or NotDownloadable(str(error))
-        except (WebSource, NotDownloadable) as error:
+        except (requests.RequestException, WebSource, NotDownloadable) as error:
             failure = failure or error
     for key in _cache_keys(identifier, found):
         store.forget_source(key)
+    if isinstance(failure, requests.RequestException):
+        # Kept as the cause, so a timeout still reads as retryable.
+        raise NotDownloadable(str(failure)) from failure
     raise failure
 
 
@@ -400,6 +432,29 @@ def known_title(identifier: str) -> str:
     return (store.recall_source(_normalised(identifier.strip())) or {}).get("title", "")
 
 
+def version_of(pdf: Path) -> dict:
+    """Whether this PDF file was downloaded from arXiv, read from the link saved beside it.
+
+    Decided by the file, not by the shared cache: another draft's lookup can change the cached
+    link without changing the file on this disk. Empty for an upload, or for a PDF downloaded
+    before links were saved.
+    """
+    try:
+        url = _link_file(pdf).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return preprint_of(url)
+
+
+def preprint_of(url: str) -> dict:
+    """{"source_version": "preprint", "arxiv": id} for a link to an arXiv PDF, else {}.
+    A preprint's wording or numbers can differ from the published paper."""
+    host = urlparse(url).hostname or ""
+    if (host == "arxiv.org" or host.endswith(".arxiv.org")) and (found := ARXIV_PATTERN.search(url)):
+        return {"source_version": "preprint", "arxiv": found.group(0)}
+    return {}
+
+
 def local_pdf(paper: str) -> str:
     """Any paper reference -> a local PDF path. Downloads it first if needed."""
     if Path(paper).is_file():
@@ -414,10 +469,14 @@ def fetch_source(identifier: str) -> dict:
     Args:
         identifier: a DOI (for example "10.18653/v1/2022.naacl-main.272"), an arXiv ID
             (for example "2112.01488"), a PMID, or a direct URL to a paper.
+
+    Returns:
+        {"status": "ok", "path", "url", "title", "index", "ids"}, or {"status": "error",
+        "message", "reason", "retryable"}. Retry only when `retryable` is true.
     """
     try:
         path, found = _fetch(identifier)
         return {"status": "ok", "path": path.as_posix(), "url": found.url, "title": found.title,
                 "index": found.index, "ids": found.ids}
     except Exception as error:
-        return {"status": "error", "message": str(error), "reason": reason_for(error)}
+        return tool_error(error)

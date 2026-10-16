@@ -23,3 +23,9 @@ export function citationLink({ doi, arxiv, url }: Citation) {
   if (arxiv) return `https://arxiv.org/abs/${arxiv}`
   return url || ''
 }
+
+/** "checked against the arXiv preprint 2507.11408". A preprint's wording or numbers can
+ * differ from the published paper, so a verdict read from one says so (#424). */
+export function preprintNote(arxiv?: string) {
+  return `checked against the arXiv preprint${arxiv ? ` ${arxiv}` : ''}`
+}
