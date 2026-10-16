@@ -20,6 +20,8 @@ from store import Store
 PORT = int(os.getenv("COLBERT_PORT", "8893"))
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))  # where uploads land before indexing
 PDF_UPLOAD = File(...)
+# One answer for every refused path, so a caller cannot learn which files exist on this machine.
+PATH_REFUSED = "path must name a file inside PAPERS_DIR"
 
 _store: Store | None = None
 
@@ -72,16 +74,28 @@ def add_paper(path: str) -> dict:
     nothing is encoded again.
 
     Args:
-        path: Where the PDF is on the ColBERT service's own disk, for example
+        path: Where the PDF is on the ColBERT service's own disk. It must be a file
+            inside the papers folder (PAPERS_DIR), for example
             "data/papers/2112.01488.pdf". Its file name becomes the paper's source.
 
     Returns:
         {"status": "ok", "added": passages in this paper, "papers": papers in the
         index}, or {"status": "error", "message": ...} if the paper was not indexed.
     """
-    if not Path(path).is_file():
-        return {"status": "error", "message": f"no such file: {path}"}
-    return {"status": "ok", "added": store().add_pdf(path), "papers": len(store())}
+    paper = paper_path(path)
+    if paper is None:
+        return {"status": "error", "message": PATH_REFUSED}
+    return {"status": "ok", "added": store().add_pdf(paper), "papers": len(store())}
+
+
+def paper_path(path: str) -> Path | None:
+    """Return the resolved path if it is a file inside PAPERS_DIR, else None.
+
+    resolve() follows `..` and symlinks first, so neither can point outside the folder."""
+    resolved = Path(path).resolve()
+    if resolved.is_relative_to(PAPERS_DIR.resolve()) and resolved.is_file():
+        return resolved
+    return None
 
 
 @asynccontextmanager
@@ -123,9 +137,10 @@ def search_post(body: SearchBody):
 
 @app.post("/api/add")
 def add(body: AddBody):
-    if not Path(body.path).is_file():
-        raise HTTPException(404, f"no such file: {body.path}")
-    return {"added": store().add_pdf(body.path), "papers": len(store())}
+    paper = paper_path(body.path)
+    if paper is None:
+        raise HTTPException(400, PATH_REFUSED)
+    return {"added": store().add_pdf(paper), "papers": len(store())}
 
 
 def receive(upload: UploadFile, folder: Path) -> Path:
