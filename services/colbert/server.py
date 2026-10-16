@@ -13,6 +13,7 @@ import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 from store import Store
 
@@ -39,15 +40,45 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
-    """Search the indexed papers. Returns the top-k passages with page and span for each."""
+    """Find passages in the indexed papers that match a query, best match first.
+
+    Use it to read what a paper says in its own words, for example to check a claim
+    against the paper it cites. Each passage is about 120 words from one page.
+
+    Args:
+        query: What to look for: a few words, a question or a sentence from a claim.
+        k: How many passages to return. Values above 100 are cut to 100.
+        source: The file name of one indexed paper, for example "2112.01488.pdf", to
+            search only that paper. Leave it out to search every indexed paper.
+
+    Returns:
+        {"topk": [hit, ...]}, best first. Each hit has rank (1 is the best), score,
+        text (the whole passage), title, source (the paper's file name), page (1 is
+        the first page), and start and end (character offsets of the passage in that
+        page's text). score is the ColBERT MaxSim score: higher is a closer match. It
+        has no fixed range and grows with the length of the query, so compare scores
+        only within one answer.
+    """
     return {"topk": store().search(query, min(k, 100), source)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=False))
 def add_paper(path: str) -> dict:
-    """Index a PDF so search_passages can find its passages. Re-adding replaces them."""
+    """Index a PDF so search_passages can find its passages.
+
+    Adding the same file again replaces its passages. If the file has not changed,
+    nothing is encoded again.
+
+    Args:
+        path: Where the PDF is on the ColBERT service's own disk, for example
+            "data/papers/2112.01488.pdf". Its file name becomes the paper's source.
+
+    Returns:
+        {"status": "ok", "added": passages in this paper, "papers": papers in the
+        index}, or {"status": "error", "message": ...} if the paper was not indexed.
+    """
     if not Path(path).is_file():
         return {"status": "error", "message": f"no such file: {path}"}
     return {"status": "ok", "added": store().add_pdf(path), "papers": len(store())}
