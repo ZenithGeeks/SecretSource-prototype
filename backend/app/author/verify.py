@@ -17,11 +17,12 @@ from app.author import logic
 from app.config import VLLM_MODEL
 from app.metrics import CLAIM_CHECKS_FAILED, CLAIM_VERDICTS
 from app.pipeline.audit import check_verdict
-from app.pipeline.indexes import IndexUnavailable, find_doi
-from app.pipeline.sources import find_by_title, tool_error
+from app.pipeline.indexes import IndexUnavailable, find_doi, find_title
+from app.pipeline.sources import Fits, NoOpenAccessCopy, Unresolvable, find_by_title, tool_error
 from app.pipeline.verify import unchecked_reason
 
 INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
+SOURCE_NAMES = {"arxiv": "arXiv", "semantic-scholar": "Semantic Scholar"}
 log = logging.getLogger(__name__)
 
 
@@ -95,9 +96,7 @@ def find_cited_work(title: str, fields: dict) -> str:
     An arXiv copy is named by its link; any other work by its DOI, so the check can still fall
     back to an arXiv copy and record the index that knows it.
     """
-    found = find_by_title(
-        title, lambda year, author: not logic.metadata_mismatches(fields, year, author, "the index")
-    )
+    found = find_by_title(title, _fits(fields))
     if "arxiv.org" in found.url:
         return found.url
     return found.ids.get("DOI") or found.url
@@ -150,36 +149,111 @@ def citation_outcome(result: dict) -> dict:
     return outcome
 
 
+def _fits(fields: dict) -> Fits:
+    """Whether a work's year and first author agree with the bib entry, by the rules of
+    logic.metadata_mismatches: a year one off still agrees, and so does a missing field."""
+    return lambda year, author: not logic.metadata_mismatches(fields, year, author, "the index")
+
+
 def reference_check(fields: dict) -> dict:
-    """Whether a cited DOI names a real work, and where the bib entry disagrees with it (#421).
+    """Whether a cited work is real, and where the bib entry disagrees with it.
 
     An unreadable source alone cannot tell a paywalled paper from a made-up one, so a draft
-    check asks the indexes for every cited DOI.
+    check asks the indexes for every cited DOI (#421), and for the title and first author of
+    an entry with no DOI (#439).
 
     Args:
         fields: the bib entry's fields, as `logic.parse_bib` gives them.
 
     Returns:
         The fields a draft-check citation adds. `exists` is "yes", "no" (no index knows the
-        DOI, so the reference may be made up) or "unknown" (an index could not be reached).
-        With "yes", `index` names the index and `mismatches` lists the year or first author
-        the bib entry gets wrong. Empty for an entry with no DOI.
+        work, so the reference may be made up) or "unknown" (an index could not be reached).
+        With "yes", `index` names the index and, for a DOI, `mismatches` lists the year or
+        first author the bib entry gets wrong. A title lookup adds `lookedUpBy: "title"`; a
+        result without it is a DOI lookup, as in checks saved before #439. Empty for an entry
+        looked up by neither (see _lookup_kind).
     """
-    doi = logic.bib_doi(fields)
-    if not doi:
+    kind = _lookup_kind(fields)
+    if not kind:
         return {}
+    check = _doi_check if kind == "doi" else _title_check
     try:
-        record = find_doi(doi)
+        return check(fields)
     except IndexUnavailable:
-        return {"exists": "unknown"}
+        return _unknown(kind)
     except Exception:  # a store error or a bad answer must not fail the whole draft check
-        log.exception("index lookup of %s failed", doi)
-        return {"exists": "unknown"}
+        log.exception("index lookup of %s failed", logic.bib_doi(fields) or logic.bib_title(fields))
+        return _unknown(kind)
+
+
+def _lookup_kind(fields: dict) -> str:
+    """How reference_check looks an entry up: "doi", "title", or "" when it does not."""
+    if logic.bib_doi(fields):
+        return "doi"
+    # An entry with a link is often a blog post, a spec or a dataset page. No index lists
+    # those, and "may not exist" would be wrong about them. A title search needs the first
+    # author: by title alone, the cited paper is often not among the hits.
+    has_link = fields.get("url") or fields.get("howpublished")
+    if logic.bib_title(fields) and _first_surname(fields) and not has_link:
+        return "title"
+    return ""
+
+
+def _unknown(kind: str) -> dict:
+    """reference_check's answer when an index could not be reached."""
+    return {"exists": "unknown", **({"lookedUpBy": "title"} if kind == "title" else {})}
+
+
+def _doi_check(fields: dict) -> dict:
+    """Whether Crossref or OpenAlex knows the entry's DOI, and what the entry gets wrong."""
+    record = find_doi(logic.bib_doi(fields))
     if record is None:
         return {"exists": "no"}
     index = INDEX_NAMES[record.index]
     mismatches = logic.metadata_mismatches(fields, record.year, record.first_author, index)
     return {"exists": "yes", "index": index, "mismatches": mismatches}
+
+
+def _title_check(fields: dict) -> dict:
+    """Whether Crossref, OpenAlex, arXiv or Semantic Scholar lists a work with the entry's
+    title and first author. No year mismatch is reported (see _same_first_author).
+
+    Raises:
+        IndexUnavailable: an index could not be reached and none of the others listed it.
+    """
+    title, fits = logic.bib_title(fields), _same_first_author(fields)
+    found = {"exists": "yes", "lookedUpBy": "title"}
+    unavailable: IndexUnavailable | None = None
+    try:
+        if record := find_title(title, _first_surname(fields), fits):
+            return {**found, "index": INDEX_NAMES[record.index]}
+    except IndexUnavailable as error:  # arXiv or Semantic Scholar may still list it
+        unavailable = error
+    # Crossref and OpenAlex miss many arXiv-only papers and reports, such as LoRA and GPT-2.
+    # find_by_title is the lookup a check uses to download a title-only source, so for an
+    # entry the draft check just read it answers from its cache.
+    try:
+        work = find_by_title(title, fits)
+    except NoOpenAccessCopy:  # Semantic Scholar knows the work, but has no free PDF of it
+        return {**found, "index": "Semantic Scholar"}
+    except Unresolvable as error:  # neither arXiv nor Semantic Scholar has the title
+        if unavailable:
+            raise unavailable from error
+        return {"exists": "no", "lookedUpBy": "title"}
+    except (ValueError, OSError) as error:  # a rate limit or a network error
+        raise IndexUnavailable(str(error)) from error
+    return {**found, "index": SOURCE_NAMES[work.index]}
+
+
+def _same_first_author(fields: dict) -> Fits:
+    """Whether a work's first author is the entry's. The year is not compared (a None year
+    is never a mismatch): both Crossref and OpenAlex date "Attention Is All You Need" 2025,
+    and OpenAlex dates the GAN paper 2024."""
+    return lambda year, author: not logic.metadata_mismatches(fields, None, author, "the index")
+
+
+def _first_surname(fields: dict) -> str:
+    return (logic.bib_surnames(fields.get("author", "")) or [""])[0]
 
 
 def reference_checks(entries: dict[str, dict]) -> dict[str, dict]:
@@ -191,8 +265,8 @@ def reference_checks(entries: dict[str, dict]) -> dict[str, dict]:
     results: dict[str, dict] = {}
     reachable = True
     for key, fields in entries.items():
-        if not logic.bib_doi(fields):
+        if not (kind := _lookup_kind(fields)):
             continue
-        results[key] = reference_check(fields) if reachable else {"exists": "unknown"}
+        results[key] = reference_check(fields) if reachable else _unknown(kind)
         reachable = results[key]["exists"] != "unknown"
     return results

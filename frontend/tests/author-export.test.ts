@@ -98,6 +98,15 @@ test('annotationFor says when no index knows the cited DOI, or the bib entry dis
   )
 })
 
+test('annotationFor says when no index lists a cited title (#439)', () => {
+  assert.match(
+    annotationFor({ ...contradicted, exists: 'no', lookedUpBy: 'title' }),
+    / No index \(Crossref, OpenAlex, arXiv or Semantic Scholar\) lists a work with this title and first author, so the reference may not exist\./,
+  )
+  assert.match(annotationFor({ ...contradicted, exists: 'unknown', lookedUpBy: 'title' }), /whether this work exists\.$/)
+  assert.doesNotMatch(annotationFor({ ...contradicted, exists: 'yes', index: 'arXiv', lookedUpBy: 'title' }), /index|exist/)
+})
+
 test('buildProjectZip holds every project file with its current text', () => {
   const zip = buildProjectZip(draft)
   assert.equal(zip.type, 'application/zip')
