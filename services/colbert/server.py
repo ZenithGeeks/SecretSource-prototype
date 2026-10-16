@@ -8,12 +8,13 @@ dspy.ColBERTv2 expects) and MCP under /mcp. Run with `python server.py`
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from store import Store
 
 PORT = int(os.getenv("COLBERT_PORT", "8893"))
@@ -40,9 +41,30 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def search_passages(query: str, k: int = 10, source: str | None = None) -> dict:
-    """Search the indexed papers. Returns the top-k passages with page and span for each."""
-    return {"topk": store().search(query, min(k, 100), source)}
+def search_passages(
+    query: str,
+    k: int = 10,
+    source: str | None = None,
+    snippet_chars: Annotated[int | None, Field(ge=1)] = None,
+) -> dict:
+    """Search the indexed papers. Returns the top-k passages with page and span for each.
+
+    Set snippet_chars to cut each passage's text to at most that many characters, at the
+    end of a word. start and end still give the whole passage's span. Leave it out to get
+    whole passages."""
+    hits = store().search(query, min(k, 100), source)
+    if snippet_chars is not None:
+        hits = [{**hit, "text": snippet(hit["text"], snippet_chars)} for hit in hits]
+    return {"topk": hits}
+
+
+def snippet(text: str, chars: int) -> str:
+    """Cut text to at most `chars` characters, at the end of a word."""
+    if len(text) <= chars:
+        return text
+    # One character past the limit, so a word that ends exactly at the limit is kept.
+    end = text.rfind(" ", 0, chars + 1)
+    return text[:end] if end > 0 else text[:chars]
 
 
 @mcp.tool()
