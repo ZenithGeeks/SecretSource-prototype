@@ -80,3 +80,69 @@ def test_a_working_link_is_used_and_arxiv_is_not_asked(lookup):
 
     assert sources._fetch("10.18653/v1/2022.naacl-main.272")[1].url == pdf
     assert tried == [pdf]
+
+
+# Unpaywall's answer for 10.1162/tacl.a.782 on 2026-10-16, cut to the fields used: the best
+# location is the publisher's PDF link, which answers a script with 403, and the work is also on
+# arXiv. Semantic Scholar does not know this DOI, so Unpaywall is the only lookup that answers.
+UNPAYWALL_TACL_782 = {
+    "title": "A TACL paper",
+    "best_oa_location": {
+        "host_type": "publisher",
+        "url_for_pdf": "https://direct.mit.edu/tacl/article-pdf/doi/10.1162/TACL.a.782/2624576",
+    },
+    "oa_locations": [
+        {
+            "host_type": "publisher",
+            "url_for_pdf": "https://direct.mit.edu/tacl/article-pdf/doi/10.1162/TACL.a.782/2624576",
+        },
+        {"host_type": "repository", "url_for_pdf": "https://arxiv.org/pdf/2509.22047"},
+        {"host_type": "repository", "url": "https://doi.org/10.48550/arxiv.2509.22047"},
+    ],
+}
+
+
+class UnpaywallAnswer:
+    status_code = 200
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+    def raise_for_status(self):
+        pass
+
+
+def test_unpaywall_keeps_the_arxiv_copy_it_lists(monkeypatch):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "team@example.org")
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: UnpaywallAnswer(UNPAYWALL_TACL_782))
+
+    found = sources._unpaywall_pdf("10.1162/tacl.a.782")
+
+    assert found.url == "https://direct.mit.edu/tacl/article-pdf/doi/10.1162/TACL.a.782/2624576"
+    assert found.ids == {"DOI": "10.1162/tacl.a.782", "ArXiv": "2509.22047"}
+
+
+def test_a_doi_only_unpaywall_knows_is_fetched_from_its_arxiv_copy(monkeypatch, lookup):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "team@example.org")
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: UnpaywallAnswer(UNPAYWALL_TACL_782))
+    found = sources._unpaywall_pdf("10.1162/tacl.a.782")
+    publisher = found.url
+    tried = lookup(found, {publisher: refused(publisher)})
+
+    assert sources._fetch("10.1162/tacl.a.782")[1].url == "https://arxiv.org/pdf/2509.22047"
+    assert tried == [publisher, "https://arxiv.org/pdf/2509.22047"]
+
+
+def test_unpaywall_without_an_arxiv_copy_records_only_the_doi(monkeypatch):
+    publisher_only = {
+        "title": "An ACM paper",
+        "best_oa_location": {"host_type": "publisher", "url": "https://doi.org/10.1145/3829641.3829780"},
+        "oa_locations": [{"host_type": "publisher", "url": "https://doi.org/10.1145/3829641.3829780"}],
+    }
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "team@example.org")
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: UnpaywallAnswer(publisher_only))
+
+    assert sources._unpaywall_pdf("10.1145/3829641.3829780").ids == {"DOI": "10.1145/3829641.3829780"}
