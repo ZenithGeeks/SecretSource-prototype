@@ -21,6 +21,7 @@ from .chart import render_chart
 from .grafana import (
     CLOUD_REQUEST,
     COST30_REQUEST,
+    COST30_TIMEOUT_S,
     JOBS_REQUEST,
     QUEUE_REQUEST,
     GrafanaClient,
@@ -126,9 +127,10 @@ class StatusService:
             g.query(CLOUD_REQUEST),
             g.query(JOBS_REQUEST),
             g.alerts(),
-            g.query(COST30_REQUEST),
+            g.query(COST30_REQUEST, timeout_s=COST30_TIMEOUT_S),
             return_exceptions=True,
         )
+        _log_dropped(raw)
         results = [None if isinstance(x, BaseException) else x for x in raw]
         for x in raw:
             if isinstance(x, BaseException) and not isinstance(x, GrafanaError):
@@ -145,6 +147,16 @@ class StatusService:
         embed = build_embed(report)
         embed.set_image(url=f"attachment://{IMAGE_NAME}")
         return embed, png
+
+
+def _log_dropped(raw: list[Any]) -> None:
+    """Log each query whose part of /status will show "no data", and why. The reply itself
+    still says ok, so without this a failed query leaves no trace."""
+    for name, result in zip(("queue", "cloud", "jobs", "alerts", "cost30"), raw, strict=True):
+        if isinstance(result, GrafanaError):
+            log.warning("%s query failed, shown as no data: %s", name, result)
+        for ref_id, error in getattr(result, "errors", {}).items():
+            log.warning("%s query: %s failed, shown as no data: %s", name, ref_id, error[:300])
 
 
 async def handle_status(interaction: Any, service: StatusService) -> None:

@@ -5,8 +5,10 @@ from status_bot.bot import StatusService, handle_status, load_config
 from status_bot.grafana import (
     CLOUD_REQUEST,
     COST30_REQUEST,
+    COST30_TIMEOUT_S,
     JOBS_REQUEST,
     QUEUE_REQUEST,
+    TIMEOUT_S,
     GrafanaError,
     parse_response,
 )
@@ -15,9 +17,11 @@ from .conftest import load
 
 
 class FakeGrafana:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, failing=()):
         self.calls = []
+        self.timeouts = {}
         self.fail = fail
+        self.failing = failing  # requests that time out, by id()
         self.responses = {
             id(QUEUE_REQUEST): (QUEUE_REQUEST, "response_queue.json"),
             id(CLOUD_REQUEST): (CLOUD_REQUEST, "response_cloud.json"),
@@ -25,10 +29,11 @@ class FakeGrafana:
             id(COST30_REQUEST): (COST30_REQUEST, "response_cost30.json"),
         }
 
-    async def query(self, body):
+    async def query(self, body, timeout_s=TIMEOUT_S):
         self.calls.append("query")
-        if self.fail:
-            raise GrafanaError("down")
+        self.timeouts[id(body)] = timeout_s
+        if self.fail or id(body) in self.failing:
+            raise GrafanaError("TimeoutError talking to Grafana")
         req, name = self.responses[id(body)]
         return parse_response(req, load(name))
 
@@ -86,6 +91,24 @@ async def test_second_call_within_30s_uses_cache():
     now[0] += 2  # 31 s after the first fetch
     await handle_status(FakeInteraction([]), svc)
     assert len(g.calls) == 10
+
+
+async def test_the_30_day_query_waits_longer_than_the_others():
+    g = FakeGrafana()
+    await handle_status(FakeInteraction([]), StatusService(g))
+    assert g.timeouts[id(COST30_REQUEST)] == COST30_TIMEOUT_S > TIMEOUT_S
+    assert g.timeouts[id(CLOUD_REQUEST)] == TIMEOUT_S
+
+
+async def test_a_dropped_query_is_logged_and_the_rest_still_sent(caplog):
+    ix = FakeInteraction([])
+    g = FakeGrafana(failing={id(COST30_REQUEST)})
+
+    await handle_status(ix, StatusService(g))
+
+    ((_, kw),) = ix.sent
+    assert kw["file"].fp.read(4) == b"\x89PNG"
+    assert "cost30 query failed, shown as no data: TimeoutError talking to Grafana" in caplog.text
 
 
 async def test_grafana_unreachable_sends_short_message():

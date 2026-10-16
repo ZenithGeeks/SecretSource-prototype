@@ -9,6 +9,10 @@ from typing import Any
 import aiohttp
 
 TIMEOUT_S = 10
+# The 30-day cost query asks Cloud Monitoring for 30 days of hourly points. It usually
+# takes 0.5 to 5 s, but on 2026-10-16 it took over 10 s twice and the chart lost its
+# daily panel. /status defers its reply, so waiting longer costs only the user's wait.
+COST30_TIMEOUT_S = 30
 
 # Request bodies for POST /api/ds/query, verified against the real Grafana on
 # 2026-10-05. tests/fixtures/request_*.json hold the same bodies; a test keeps
@@ -299,8 +303,9 @@ class GrafanaClient:
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             raise GrafanaError(f"{type(exc).__name__} talking to Grafana") from exc
 
-    async def query(self, body: dict[str, Any]) -> Parsed:
-        status, data = await self._request("POST", "/api/ds/query", json=body)
+    async def query(self, body: dict[str, Any], timeout_s: float = TIMEOUT_S) -> Parsed:
+        timeout = aiohttp.ClientTimeout(total=timeout_s)
+        status, data = await self._request("POST", "/api/ds/query", json=body, timeout=timeout)
         # Grafana can answer 4xx/5xx and still carry per-refId errors.
         if not isinstance(data, dict) or "results" not in data:
             raise GrafanaError(f"HTTP {status} from /api/ds/query")
