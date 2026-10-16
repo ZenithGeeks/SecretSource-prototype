@@ -102,6 +102,18 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   const [currentId, setCurrentId] = useState(claims[0]?.claim_id ?? '')
   const claim = claims.find((c) => c.claim_id === currentId)
   const draft = (claim && drafts[claim.claim_id]) || emptyDraft()
+  // A claim added by hand has no position in the paper. Look its text up the way a reference
+  // passage is looked up, so it is boxed on its page like an extracted claim (#403). Text that
+  // is not in the paper (a claim typed in) finds nothing and simply gets no box.
+  const placed = useQuery({
+    queryKey: ['find', session.paper_file, claim?.sentence || claim?.claim, claim?.page],
+    queryFn: () =>
+      api.findInPaper(session.paper_file, (claim!.sentence || claim!.claim).slice(0, 300), claim!.page ?? undefined),
+    enabled: claim?.origin === 'human_added' && !claim.source,
+    staleTime: Infinity,
+    retry: false,
+  })
+  const claimSource = claim?.source ?? (placed.data?.page ? placed.data : null)
   const [focus, setFocus] = useState<Focus | null>(() => (claims[0] ? firstFocus(claims[0], session) : null))
   const [overlay, setOverlay] = useState<'paper' | 'reference' | null>(null)
   const [savedRows, setSavedRows] = useState<number | null>(null)
@@ -150,7 +162,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const write = (next: boolean) => {
     if (!claim) return
-    const body = buildSave(claim, draft, saved[claim.claim_id])
+    const body = buildSave({ ...claim, source: claimSource }, draft, saved[claim.claim_id])
     save.mutate(body, {
       onSuccess: (rows) => {
         setSaved((all) => ({ ...all, [claim.claim_id]: structuredClone(draft) }))
@@ -246,8 +258,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     paper: session.paper_file,
     label: 'This paper, where the claim is made',
     quote: claim.sentence || claim.claim,
-    source: claim.source,
-    page: claim.source?.page ?? 1,
+    source: claimSource,
+    page: claimSource?.page ?? claim.page ?? 1,
   }
   const shown = focus && session.references.find((r) => r.file === focus.file)
   const right: Target | null = focus && {
@@ -275,9 +287,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
-  const addClaim = (text: string) => {
+  // `where` is set when the claim was selected in the paper: that text is its sentence.
+  const addClaim = (text: string, where: { sentence: string; page: number | null } = { sentence: '', page: null }) => {
     const id = `${session.paper_id}#h-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
-    const added: WorkClaim = { claim_id: id, claim: text, sentence: '', section: '', source: null, candidates: [], origin: 'human_added' }
+    const added: WorkClaim = { claim_id: id, claim: text, section: '', source: null, candidates: [], origin: 'human_added', ...where }
     setExtra((all) => [...all, added])
     setDrafts((all) => ({ ...all, [id]: { ...emptyDraft(), status: 'accepted' } }))
     setCurrentId(id)
@@ -390,7 +403,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         patch({ status: 'edited', edited: picked.text })
         setPicked(null)
       }}
-      onNewClaim={() => addClaim(picked.text)}
+      onNewClaim={() => addClaim(picked.text, { sentence: picked.text, page: picked.page })}
       onClear={() => setPicked(null)}
     />
   )
