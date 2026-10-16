@@ -299,6 +299,19 @@ The worker that drains the queue is not part of that deploy. It runs on `ss-core
 compose service `worker` in the compose project `secretsource-worker`, kept up and scaled by
 hand.
 
+The gateway and the worker must see the same `data/papers`: the gateway saves uploads there and
+serves pages and figures from it, and the worker reads the PDFs and writes the figures. Both mount
+the Cloud Storage bucket `gcp-edu-471706-papers`:
+
+- Cloud Run: a `cloud-storage` volume mounted at `/app/data/papers` (`deploy/cloudrun.sh` adds it;
+  `gcloud run deploy` in `deploy-gateway.yml` keeps it).
+- ss-core: `gcsfuse` mounts the bucket at `PAPERS_HOST_DIR` (`/var/lib/docker/app-data/papers`)
+  from `/etc/fstab`, with the service-account key in `backend/secrets/service-auth.json` and
+  `allow_other,implicit_dirs`. A systemd drop-in (`RequiresMountsFor=`) starts Docker only after
+  the mount, so the worker never binds the empty folder underneath.
+
+Without the shared folder, every uploaded PDF ends with "no paper found matching the title".
+
 ## Tests
 
 The tests need `google-adk` and `pymupdf`, so run them inside the gateway image. Mount the
