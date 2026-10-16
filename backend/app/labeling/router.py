@@ -319,7 +319,8 @@ async def scopus_add(
     existing = await asyncio.to_thread(_doi_in_pool, main, body.doi)
     if existing:
         return {"id": existing, "existing": True}
-    started = await asyncio.to_thread(main._start, body.doi, True, user)
+    # On the event loop, as POST /analyses does: _start schedules its save with create_task (#397).
+    started = main._start(body.doi, True, user)
     await asyncio.to_thread(pool.assign, who, "paper", started["id"], body.topic, user or "")
     return {"id": started["id"], "existing": False}
 

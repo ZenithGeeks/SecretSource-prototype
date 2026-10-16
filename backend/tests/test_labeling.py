@@ -6,6 +6,7 @@ Google nor the gateway's heavy imports.
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from app.labeling import dspy_export, ledger, pool, scopus
@@ -572,30 +573,24 @@ def test_scopus_add_lists_the_paper_under_a_topic_once(api, monkeypatch):
     from app import main
 
     client, db, _ = api
-    rows = {}
     started = []
 
-    def fake_start(paper, verify, owner):
-        started.append((paper, verify, owner))
-        rows["n1"] = {
-            "id": "n1",
-            "paper": paper,
-            "owner": owner,
-            "status": "running",
-            "stages": [],
-            "claims": [],
-        }
-        return {"id": "n1"}
+    # The real _start runs, so a call it cannot make from this route fails the test (#397).
+    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None):
+        started.append((analysis_id, paper, verify, owner))
 
-    monkeypatch.setattr(main, "_start", fake_start)
-    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    monkeypatch.setattr(main, "enqueue_analysis", fake_enqueue)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: SimpleNamespace(publish=lambda *a: 0))
     doi = "10.18653/v1/2022.naacl-main.272"
     first = client.post("/labeling/scopus/add", json={"doi": doi, "topic": "NLP"})
-    assert first.json() == {"id": "n1", "existing": False}
-    assert started == [(doi, True, None)]
-    assert pool.pooled() == {"n1": "NLP"}
+    assert first.status_code == 200
+    analysis_id = first.json()["id"]
+    assert first.json() == {"id": analysis_id, "existing": False}
+    assert started == [(analysis_id, doi, True, None)]
+    assert pool.pooled() == {analysis_id: "NLP"}
     again = client.post("/labeling/scopus/add", json={"doi": doi.upper(), "topic": "CV"})
-    assert again.json() == {"id": "n1", "existing": True} and len(started) == 1
+    assert again.json() == {"id": analysis_id, "existing": True} and len(started) == 1
     assert client.post("/labeling/scopus/add", json={"doi": "not a doi", "topic": "NLP"}).status_code == 422
 
 
