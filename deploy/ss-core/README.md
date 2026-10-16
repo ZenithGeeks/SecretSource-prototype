@@ -20,7 +20,9 @@ A PR job can therefore at most redeploy main. It cannot deploy its own code.
 ## What a deploy does
 
 1. Unpacks the commit into the worker directory and builds the image. The code is copied
-   into the image at build time, so the running worker is not affected yet.
+   into the image at build time, so the running worker is not affected yet. If
+   `services/status-bot/` changed since the last deploy, it also rebuilds and restarts the
+   Discord status bot here. A bot that fails to deploy is reported, and the worker deploy goes on.
 2. Waits up to 45 minutes for the worker to have no job.
 3. Copies `secretsource-worker-worker:deployed`, the image the worker last started on, to
    `:pre-<sha>`, then restarts the worker on the new image. The first deploy has no
