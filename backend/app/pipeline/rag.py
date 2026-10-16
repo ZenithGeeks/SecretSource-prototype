@@ -3,6 +3,7 @@
 ADK builds each tool's schema from the type hints and docstring."""
 
 from app.clients.retrieval import colbert_add, colbert_search
+from app.pipeline.sources import tool_error
 
 _rag = None  # lazy: needs dspy, a running LM and the ColBERT service
 
@@ -45,6 +46,10 @@ def answer_from_docs(question: str) -> dict:
 
     Args:
         question: a question about the indexed documents, like "How does ColBERTv2 compress its index?".
+
+    Returns:
+        {"status": "ok", "answer", "sources"}, or {"status": "error", "message", "reason",
+        "retryable"}. Retry only when `retryable` is true.
     """
     global _rag
     try:
@@ -53,7 +58,7 @@ def answer_from_docs(question: str) -> dict:
         prediction = _rag(question=question)
         return {"status": "ok", "answer": prediction.answer, "sources": prediction.context}
     except Exception as error:
-        return {"status": "error", "message": str(error)}
+        return tool_error(error)
 
 
 def add_paper(pdf_path: str) -> dict:
@@ -61,8 +66,12 @@ def add_paper(pdf_path: str) -> dict:
 
     Args:
         pdf_path: path to a PDF file, for example "data/papers/colbertv2.pdf".
+
+    Returns:
+        The index service's answer, or {"status": "error", "message", "reason", "retryable"}.
+        Retry only when `retryable` is true.
     """
     try:
         return colbert_add(pdf_path)
     except Exception as error:
-        return {"status": "error", "message": str(error), "reason": "indexing-failed"}
+        return {**tool_error(error), "reason": "indexing-failed"}
