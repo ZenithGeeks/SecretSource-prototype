@@ -304,14 +304,31 @@ def _download(pdf_url: str, name: str) -> Path:
 
 
 def _fetch(identifier: str) -> tuple[Path, Resolution]:
+    """Download the work's PDF from where the lookup found it, or else from its arXiv copy.
+
+    Semantic Scholar's open-access link is often the publisher's landing page (doi.org), and
+    ACM, MIT Press and IEEE refuse a script there with a 403 or an HTML page, even when the same
+    paper is free on arXiv (#408). When both fail, the first link's error is the one reported.
+    """
     import requests
 
     try:
         found = _resolve(identifier)
-        name = re.sub(r"[^A-Za-z0-9._-]+", "-", identifier.strip()).strip("-")[:80]
-        return _download(found.url, name), found
     except requests.RequestException as error:
         raise NotDownloadable(str(error)) from error
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", identifier.strip()).strip("-")[:80]
+    urls = [found.url]
+    if (arxiv := found.ids.get("ArXiv")) and "arxiv.org" not in found.url:
+        urls.append(f"https://arxiv.org/pdf/{arxiv}")
+    failure: ValueError | None = None
+    for url in urls:
+        try:
+            return _download(url, name), found._replace(url=url)
+        except requests.RequestException as error:
+            failure = failure or NotDownloadable(str(error))
+        except (WebSource, NotDownloadable) as error:
+            failure = failure or error
+    raise failure
 
 
 def lookup_key(citation: dict) -> str:
