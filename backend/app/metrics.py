@@ -7,6 +7,9 @@ Kept in one module, imported wherever a pipeline step needs to record something,
 name is defined exactly once.
 """
 
+import threading
+from contextvars import ContextVar
+
 from prometheus_client import Counter, Gauge, Histogram
 
 # --- Analysis lifecycle: success rate, duration, queueing (backend/app/main.py) ---
@@ -47,13 +50,33 @@ LLM_CALLS = Counter("llm_calls_total", "LLM calls made", ["phase"])  # extract |
 LLM_TOKENS = Counter("llm_tokens_total", "LLM tokens used", ["phase", "kind"])  # kind: prompt | completion
 
 
+# The running analysis's own token counts, keyed "<phase>_<kind>" (for example "judge_prompt"),
+# so its saved record says what its LLM calls cost (CONSTRAINTS.md). main._run_queued sets it to
+# analysis["llm_tokens"]. asyncio.to_thread copies the context, and the copy points at the same
+# dict, so calls made in worker threads add to it; the lock stops two threads losing an addition.
+current_analysis_tokens: ContextVar[dict[str, int] | None] = ContextVar(
+    "current_analysis_tokens", default=None
+)
+_tokens_lock = threading.Lock()
+
+
 def record_llm_usage(phase: str, tracker) -> None:
-    """Fold a dspy.track_usage() tracker's totals into the counters above. One call is one LM in
-    this codebase (app/llm.py), but this sums every entry regardless, so a future multi-model
-    change here does not also need a change at each call site."""
+    """Add one LLM call's tokens to the Prometheus counters and to the running analysis.
+
+    Args:
+        phase: which step made the call, "extract" or "judge".
+        tracker: the dspy.track_usage() tracker that was open around the call. Every model
+            entry in it is summed.
+    """
     LLM_CALLS.labels(phase=phase).inc()
+    analysis_tokens = current_analysis_tokens.get()
     for usage in tracker.get_total_tokens().values():
-        if usage.get("prompt_tokens"):
-            LLM_TOKENS.labels(phase=phase, kind="prompt").inc(usage["prompt_tokens"])
-        if usage.get("completion_tokens"):
-            LLM_TOKENS.labels(phase=phase, kind="completion").inc(usage["completion_tokens"])
+        for kind in ("prompt", "completion"):
+            count = usage.get(f"{kind}_tokens")
+            if not count:
+                continue
+            LLM_TOKENS.labels(phase=phase, kind=kind).inc(count)
+            if analysis_tokens is not None:
+                key = f"{phase}_{kind}"
+                with _tokens_lock:
+                    analysis_tokens[key] = analysis_tokens.get(key, 0) + count

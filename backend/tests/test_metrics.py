@@ -16,6 +16,9 @@ from app.metrics import (
     AUDIT_FINDINGS,
     CLAIM_CHECKS_FAILED,
     CLAIM_VERDICTS,
+    LLM_TOKENS,
+    current_analysis_tokens,
+    record_llm_usage,
 )
 from app.queue import run_analysis_job
 
@@ -86,6 +89,49 @@ def test_a_successful_run_records_lifecycle_verdict_and_audit_metrics(stub_pipel
     assert _value(CLAIM_VERDICTS, verdict="supports") == before_verdicts + 1
     assert _value(AUDIT_FINDINGS) == before_audit + 2  # the two stubbed findings
     assert _histogram_count(ANALYSIS_DURATION_SECONDS) == before_duration_n + 1
+
+
+class _Tracker:
+    """Stands in for dspy.track_usage(): one LM entry with these token counts."""
+
+    def __init__(self, prompt: int, completion: int):
+        self._usage = {"lm": {"prompt_tokens": prompt, "completion_tokens": completion}}
+
+    def get_total_tokens(self):
+        return self._usage
+
+
+def test_an_analysis_records_the_tokens_of_its_own_llm_calls(stub_pipeline, monkeypatch):
+    def extract(paper):
+        record_llm_usage("extract", _Tracker(2000, 700))
+        return {"status": "ok", "file": f"{paper}.pdf", "title": "T",
+                "claims": [{"claim": "c1", "citations": [{"key": "s1"}, {"key": "s2"}]}]}
+
+    def check(claim, source, path):
+        record_llm_usage("judge", _Tracker(1000, 100))
+        return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+
+    saved = {}
+    monkeypatch.setattr(main, "extract_claims_with_citations", extract)
+    monkeypatch.setattr(main, "check_prepared", check)
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.update(analysis))
+
+    _run_to_completion("job-metrics-tokens", "paper-tokens")
+
+    # Extraction and both checks run in worker threads; all of them add to this run's tokens.
+    assert saved["llm_tokens"] == {
+        "extract_prompt": 2000, "extract_completion": 700,
+        "judge_prompt": 2000, "judge_completion": 200,
+    }
+
+
+def test_an_llm_call_outside_an_analysis_counts_only_in_prometheus():
+    before = _value(LLM_TOKENS, phase="judge", kind="prompt")
+
+    record_llm_usage("judge", _Tracker(5, 5))
+
+    assert _value(LLM_TOKENS, phase="judge", kind="prompt") == before + 5
+    assert current_analysis_tokens.get() is None
 
 
 def test_a_failed_check_is_counted_by_reason_not_as_a_verdict(stub_pipeline, monkeypatch):

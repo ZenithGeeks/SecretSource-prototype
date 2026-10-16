@@ -69,6 +69,7 @@ from app.metrics import (
     AUDIT_FINDINGS,
     CLAIM_CHECKS_FAILED,
     CLAIM_VERDICTS,
+    current_analysis_tokens,
 )
 from app.ownership import require_owner
 from app.pipeline.audit import audit
@@ -352,6 +353,9 @@ async def _index_self(analysis_id: str, title: str) -> None:
 
 async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
     started_at = time.monotonic()
+    # Filled by every LLM call this run makes, so the saved record says what it cost.
+    analysis["llm_tokens"] = {}
+    current_analysis_tokens.set(analysis["llm_tokens"])
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
         extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
