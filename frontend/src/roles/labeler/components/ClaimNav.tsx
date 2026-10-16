@@ -49,8 +49,9 @@ export function ClaimNav({
 
   return (
     <nav aria-label="Claims of this paper" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <ol ref={strip} className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-1">
+      {/* On a phone the add button gets its own row, so the strip shows seven chips, not three. */}
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+        <ol ref={strip} className="flex w-full min-w-0 flex-1 gap-1.5 overflow-x-auto py-1">
           {claims.map((claim, index) => {
             const draft = drafts[claim.claim_id] ?? emptyDraft()
             const text = draft.status === 'edited' && draft.edited ? draft.edited : claim.claim
@@ -66,7 +67,7 @@ export function ClaimNav({
                   aria-label={`Claim ${index + 1}, ${stateWord(finished, draft)}${unsaved ? ', unsaved' : ''}: ${text}`}
                   title={text}
                   className={cn(
-                    'flex h-10 min-w-10 items-center justify-center gap-1 rounded-lg border px-2 text-sm tabular-nums transition-colors',
+                    'flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border px-2 text-sm tabular-nums transition-colors',
                     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                     here
                       ? 'border-accent bg-accent-soft font-semibold text-ink'

@@ -28,7 +28,7 @@ export function TeamTopics({ pool }: { pool: Pool }) {
             {unassigned > 0 && `${counts.length ? ' · ' : ''}no topic ${unassigned}`}
             {mine && ` · you: ${mine}`}
           </span>
-          <ChevronDown className={cn('size-4 shrink-0 text-ink-muted transition-transform', open && 'rotate-180')} aria-hidden />
+          <ChevronDown className={cn('size-4 shrink-0 text-ink-muted transition-transform motion-reduce:transition-none', open && 'rotate-180')} aria-hidden />
         </summary>
 
         <div className="flex flex-col gap-3 border-t border-border-subtle px-4 py-3">

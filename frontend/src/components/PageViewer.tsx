@@ -31,6 +31,16 @@ import { cn } from '../lib/utils'
 import { Button } from './ui'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
+// One worker for every PDF on the page. With only workerSrc, pdf.js starts a worker (about 1 MB
+// of code) per document, and the labeler shows two documents at once. It is passed to each
+// Document as `worker`, not set as GlobalWorkerOptions.workerPort: with workerPort every loading
+// task owns the same cached worker, so closing one PDF destroys it under a PDF still loading.
+// pdf.js never destroys a worker it was given. Tests run in jsdom, which has no Worker, so there
+// pdf.js keeps the per-document default.
+const DOCUMENT_OPTIONS =
+  typeof Worker === 'undefined'
+    ? undefined
+    : { worker: pdfjs.PDFWorker.create({ port: new Worker(workerUrl, { type: 'module' }) }) }
 
 export type Target = {
   paper: string // file name, e.g. "colbertv2.pdf"
@@ -61,6 +71,15 @@ function boxStyle(box: Box, width: number, height: number) {
     top: `${(box.y0 / height) * 100}%`,
     width: `${((box.x1 - box.x0) / width) * 100}%`,
     height: `${((box.y1 - box.y0) / height) * 100}%`,
+  }
+}
+
+/** pdf.js draws a PDF's links as empty boxes over the text; give each one a name to read out. */
+function nameLinks(viewer: HTMLElement) {
+  for (const link of viewer.querySelectorAll<HTMLAnchorElement>('.annotationLayer a:not([aria-label])')) {
+    const href = link.getAttribute('href') ?? ''
+    const inPaper = !href || href.startsWith('#')
+    link.setAttribute('aria-label', link.title || (inPaper ? 'Go to a place in this paper' : `Open ${href}`))
   }
 }
 
@@ -247,6 +266,16 @@ export function PageViewer({
     return () => observer.disconnect()
   }, [])
 
+  // Name the PDF's links as pdf.js adds them. react-pdf's onRenderAnnotationLayerSuccess fires
+  // before pdf.js has drawn them, so it cannot be used for this.
+  useEffect(() => {
+    const node = scroller.current
+    if (!node) return
+    const observer = new MutationObserver(() => nameLinks(node))
+    observer.observe(node, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
+
   /** Scroll so page `number` is in view; with a box, so that box is. */
   const scrollToPage = useCallback((number: number, box?: Box, size?: Source) => {
     const node = pageNodes.current.get(number)
@@ -335,7 +364,8 @@ export function PageViewer({
       >
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p title={target.label} className="truncate text-sm font-medium">{target.label}</p>
+            {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}
+            <h2 title={target.label} className="truncate text-sm font-medium">{target.label}</h2>
             <p className="truncate text-xs text-ink-muted">
               {target.detail && `${target.detail} · `}
               {target.paper}
@@ -464,6 +494,7 @@ export function PageViewer({
           {panelWidth > 0 && pdf.url && (
             <Document
               file={pdf.url}
+              options={DOCUMENT_OPTIONS}
               externalLinkTarget="_blank"
               onLoadSuccess={async (pdf) => {
                 const first = await pdf.getPage(1)

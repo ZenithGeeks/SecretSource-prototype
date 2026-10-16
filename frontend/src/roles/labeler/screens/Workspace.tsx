@@ -321,7 +321,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     )
 
   const legend = (
-    <p aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+    // Shortcuts need a keyboard, so a touch screen does not list them.
+    <ul aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
       {[
         ['K', 'keep'],
         ['E', 'edit'],
@@ -335,11 +336,11 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         ['1–4', 'level'],
         ['Ctrl/⌘+S', 'save'],
       ].map(([keys, what]) => (
-        <span key={keys} className="flex items-center gap-1">
+        <li key={keys} className="flex items-center gap-1">
           <Kbd hidden={false}>{keys}</Kbd> {what}
-        </span>
+        </li>
       ))}
-    </p>
+    </ul>
   )
 
   const panel = (
@@ -417,7 +418,9 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem)]')}>
       <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         <div className="min-w-0">
-          <h1 className="truncate font-serif text-xl font-semibold text-ink">{session.title}</h1>
+          <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">
+            {session.title}
+          </h1>
           <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
         </div>
         <div className="flex items-center gap-4">
@@ -427,7 +430,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
               {done} of {total} claims finished
             </p>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
-              <div className="h-full bg-supports transition-[width] duration-200" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+              <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
           </div>
         </div>

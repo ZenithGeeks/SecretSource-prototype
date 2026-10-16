@@ -79,7 +79,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
                 className="mt-1 block h-1.5 overflow-hidden rounded bg-border-subtle"
               >
                 <span
-                  className="block h-full bg-supports transition-[width] duration-200"
+                  className="block h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none"
                   style={{ width: `${Math.min(100, (paper.judged / paper.claims) * 100)}%` }}
                 />
               </span>
