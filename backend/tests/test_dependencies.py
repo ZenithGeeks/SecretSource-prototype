@@ -23,6 +23,10 @@ class Response:
         return self._body
 
 
+class ReadTimeout(OSError):
+    """Stands in for requests.ReadTimeout: connected, but no answer in time."""
+
+
 @pytest.fixture
 def services(monkeypatch):
     """Every dependency answers, until a test changes `answers` (URL prefix -> Response or error)."""
@@ -44,7 +48,7 @@ def services(monkeypatch):
             raise answer
         return answer
 
-    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=get))
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=get, ReadTimeout=ReadTimeout))
     monkeypatch.setattr(dependencies, "VLLM_URL", "https://llm.example/v1")
     monkeypatch.setattr(dependencies, "VLLM_MODEL", "qwen")
     monkeypatch.setattr(dependencies, "VLLM_API_KEY", "sk-secret")
@@ -94,6 +98,28 @@ def test_an_llm_that_does_not_serve_the_model_is_not_ok(services, monkeypatch):
     assert result["degraded"]
     assert llm["ok"] is False
     assert "qwen-typo" in llm["detail"]
+
+
+def test_a_cloud_run_service_still_starting_is_not_degraded(services, monkeypatch):
+    # GROBID and ColBERT on Cloud Run scale to zero, and the first GET wakes them.
+    services.answers["http://colbert:8893/health"] = ReadTimeout("read timed out")
+    monkeypatch.setattr(dependencies, "signs", lambda url: True)
+
+    result = dependencies.check()
+
+    colbert = by_name(result)["colbert"]
+    assert colbert["ok"] is None
+    assert colbert["detail"].startswith("starting: no answer in 5 s")
+    assert not result["degraded"]
+
+
+def test_a_local_service_that_times_out_is_unreachable(services):
+    services.answers["http://colbert:8893/health"] = ReadTimeout("read timed out")
+
+    result = dependencies.check()
+
+    assert by_name(result)["colbert"]["ok"] is False
+    assert result["degraded"]
 
 
 def test_a_refusal_says_why_in_the_services_words(services):
