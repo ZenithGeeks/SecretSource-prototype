@@ -166,8 +166,12 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
         return re.search(r"\d{4}\.\d{4,5}(v\d+)?", eprint).group(0)
     if f.get("url"):
         return f["url"].strip()
-    title = re.sub(r"[{}]", "", f.get("title", "")).strip()
-    return title or None
+    return bib_title(f) or None
+
+
+def bib_title(fields: dict) -> str:
+    """The entry's title without BibTeX braces, or ""."""
+    return re.sub(r"[{}]", "", fields.get("title", "")).strip()
 
 
 def bib_doi(fields: dict) -> str:

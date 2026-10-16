@@ -25,6 +25,10 @@ INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
 log = logging.getLogger(__name__)
 
 
+# A bib URL that gives these is a landing page or a dead link, not the paper (#438).
+UNREADABLE_LINK = {"web-source", "not-downloadable"}
+
+
 def verify_cached(
     claim: str,
     source: str,
@@ -44,27 +48,42 @@ def verify_cached(
             with `by_title`, the year and first author the found work must match.
         by_title: look the work up by title first, with find_cited_work. A refused lookup
             is counted and returned like any other failure.
+
+    A URL that turns out to be a web page or a dead link is followed by a lookup of the
+    entry's title. When that finds nothing either, the URL's own failure is returned.
     """
+    citation = citation or {}
     if by_title:
         try:
-            source = find_cited_work(source, citation or {})
+            source = find_cited_work(source, citation)
         except (ValueError, OSError) as error:  # what a lookup raises; see sources.REASONS
             result = tool_error(error)
-            _count(result, citation or {})
+            _count(result, citation)
             return result
+    result = _judged(claim, source, run)
+    title = logic.bib_title(citation)
+    if source.startswith("http") and result.get("reason") in UNREADABLE_LINK and title:
+        try:
+            result = _judged(claim, find_cited_work(title, citation), run)
+        except (ValueError, OSError):
+            pass  # "a web page, not a paper" tells the author more than "no paper by that title"
+    _count(result, citation)
+    return result
+
+
+def _judged(claim: str, source: str, run: Callable[[str, str], dict]) -> dict:
+    """run(claim, source), or its verdict from the cache. Failures are not remembered."""
     key = store.cache_key("author-verify", VLLM_MODEL, claim.strip(), source.strip())
     cached = store.recall_cache(key)
     if cached is not None:
-        result = {**cached, "cached": True}
-    else:
-        try:
-            result = run(claim, source)
-        except Exception:
-            CLAIM_CHECKS_FAILED.labels(reason="failed").inc()
-            raise
-        if result.get("status") == "ok":
-            store.remember_cache(key, result)
-    _count(result, citation or {})
+        return {**cached, "cached": True}
+    try:
+        result = run(claim, source)
+    except Exception:
+        CLAIM_CHECKS_FAILED.labels(reason="failed").inc()
+        raise
+    if result.get("status") == "ok":
+        store.remember_cache(key, result)
     return result
 
 
