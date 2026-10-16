@@ -31,6 +31,9 @@ RETRY_BUDGET = 120.0
 # Send three together and two get a 429, one gets an answer. The analysis graph
 # checks several cited sources in parallel, so every lookup waits its turn in _s2_get.
 S2_MIN_INTERVAL = 1.2
+# How long a cached location is trusted before the work is looked up again. Open copies move
+# rarely; the bound keeps a link that went bad from staying forever (#414).
+SOURCE_MAX_AGE = 30 * 24 * 3600
 USER_AGENT = {"User-Agent": "SecretSource/0.1 (academic claim verification; senior project)"}
 
 
@@ -275,21 +278,32 @@ def _lookup(identifier: str) -> Resolution:
 
 def _resolve(identifier: str) -> Resolution:
     """_lookup, cached. One run checks several claims against the same work. The result
-    is kept under both the query and the returned title."""
+    is kept under both the query and the returned title, with the time it was found.
+
+    A row older than SOURCE_MAX_AGE is looked up again. A row saved before rows carried a
+    time is still used: expiring them all at once would send every cited work back to
+    Semantic Scholar, which refuses many calls even with a key. _fetch drops a row whose
+    link fails, so a bad old row goes the first time it is used.
+    """
     from app import store
 
     identifier = identifier.strip()
     key = _normalised(identifier)
     cached = store.recall_source(key)
-    if cached:  # older rows have no index
-        return Resolution(
+    if cached and time.time() - cached.get("fetched_at", time.time()) < SOURCE_MAX_AGE:
+        return Resolution(  # older rows have no index
             cached["url"], cached["title"], cached.get("index", ""), cached.get("ids") or {}
         )
 
     found = _lookup(identifier)
-    for known in {key, _normalised(found.title)} - {""}:
-        store.remember_source(known, found._asdict())
+    for known in _cache_keys(identifier, found):
+        store.remember_source(known, {**found._asdict(), "fetched_at": time.time()})
     return found
+
+
+def _cache_keys(identifier: str, found: Resolution) -> set[str]:
+    """The keys _resolve keeps a work under: the query, and the title the lookup returned."""
+    return {_normalised(identifier.strip()), _normalised(found.title)} - {""}
 
 
 def _download(pdf_url: str, name: str) -> Path:
@@ -319,9 +333,12 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
 
     Semantic Scholar's open-access link is often the publisher's landing page (doi.org), and
     ACM, MIT Press and IEEE refuse a script there with a 403 or an HTML page, even when the same
-    paper is free on arXiv (#408). When both fail, the first link's error is the one reported.
+    paper is free on arXiv (#408). When both fail, the first link's error is the one reported,
+    and the cached location is dropped, so the next attempt looks the work up again (#414).
     """
     import requests
+
+    from app import store
 
     try:
         found = _resolve(identifier)
@@ -339,6 +356,8 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
             failure = failure or NotDownloadable(str(error))
         except (WebSource, NotDownloadable) as error:
             failure = failure or error
+    for key in _cache_keys(identifier, found):
+        store.forget_source(key)
     raise failure
 
 

@@ -205,6 +205,16 @@ def recall_source(key: str) -> dict | None:
     return json.loads(row["data"]) if row else None
 
 
+def forget_source(key: str) -> None:
+    """Drop a cited work's cached location, so the next run looks it up again."""
+    if _use_supabase():
+        _supabase().table("sources").delete().eq("key", key).execute()
+        return
+    with _sqlite() as database:
+        database.execute("DELETE FROM sources WHERE key = ?", (key,))
+        database.commit()
+
+
 def cache_key(*parts: str) -> str:
     """One deterministic key from several strings (a namespace, the model id, the input), so a
     changed model or GROBID endpoint never reads another combination's cached answer."""
