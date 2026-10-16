@@ -1,0 +1,34 @@
+# Deploys the RQ worker on ss-core on every push to main that touches backend/ (#412).
+#
+# Analyses run in that worker, not in the Cloud Run gateway, so deploy-gateway alone leaves a
+# pipeline fix out of every analysis. ss-core is behind the CPE VPN, so this runs on the
+# self-hosted runner there, as user ghrunner. That user has no Docker access, on purpose: the
+# runner also runs every PR's CI jobs. It may run one root-owned script through sudo, and the
+# script gets only the SHA from here. It fetches main itself and refuses a commit not on main.
+# See deploy/ss-core/README.md. No checkout: nothing from this job's workspace is deployed.
+#
+# Self-hosted, so it uses no GitHub-hosted minutes. It can wait up to 45 minutes for a running
+# analysis to finish, and CI jobs queue behind it on the one runner while it does.
+name: deploy-worker
+
+on:
+  push:
+    branches: [main]
+    # The same paths as deploy-gateway: tests and docs are not in the image.
+    paths: ["backend/**", "!backend/tests/**", "!backend/**/*.md", "!backend/pytest.ini", "!backend/requirements-dev.txt"]
+  workflow_dispatch:
+
+# One deploy at a time, and never cancelled halfway: a cancelled run could stop between the
+# build and the restart. The script also takes a lock.
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: [self-hosted, ci]
+    timeout-minutes: 75
+    steps:
+      - name: Deploy this commit to the worker
+        # -n: fail at once if the sudoers line is missing, instead of waiting for a password.
+        run: sudo -n /usr/local/bin/deploy-worker "$GITHUB_SHA"
