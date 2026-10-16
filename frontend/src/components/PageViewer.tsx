@@ -32,9 +32,15 @@ import { Button } from './ui'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 // One worker for every PDF on the page. With only workerSrc, pdf.js starts a worker (about 1 MB
-// of code) per document, and the labeler shows two documents at once. Tests run in jsdom, which
-// has no Worker, so there pdf.js keeps the per-document default.
-if (typeof Worker !== 'undefined') pdfjs.GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: 'module' })
+// of code) per document, and the labeler shows two documents at once. It is passed to each
+// Document as `worker`, not set as GlobalWorkerOptions.workerPort: with workerPort every loading
+// task owns the same cached worker, so closing one PDF destroys it under a PDF still loading.
+// pdf.js never destroys a worker it was given. Tests run in jsdom, which has no Worker, so there
+// pdf.js keeps the per-document default.
+const DOCUMENT_OPTIONS =
+  typeof Worker === 'undefined'
+    ? undefined
+    : { worker: pdfjs.PDFWorker.create({ port: new Worker(workerUrl, { type: 'module' }) }) }
 
 export type Target = {
   paper: string // file name, e.g. "colbertv2.pdf"
@@ -488,6 +494,7 @@ export function PageViewer({
           {panelWidth > 0 && pdf.url && (
             <Document
               file={pdf.url}
+              options={DOCUMENT_OPTIONS}
               externalLinkTarget="_blank"
               onLoadSuccess={async (pdf) => {
                 const first = await pdf.getPage(1)
@@ -535,7 +542,8 @@ export function PageViewer({
                           width={pageWidth}
                           devicePixelRatio={pixelRatio}
                           renderTextLayer
-                          renderAnnotationLayer                          loading={<div style={{ height: pageWidth * pageRatio }} />}
+                          renderAnnotationLayer
+                          loading={<div style={{ height: pageWidth * pageRatio }} />}
                         />
                       )}
                       {number === highlightPage &&
