@@ -25,11 +25,14 @@ test('isOpenIssue: refutes and insufficient are open until resolved; the rest ne
   assert.equal(isOpenIssue({ verdict: 'refutes', resolution: { kind: 'overridden', at } }), false)
 })
 
-test('isLowConfidence: silent, or a verdict with no passage to point at', () => {
+test('isLowConfidence: silent, a verdict with no passage, or one the audit flagged', () => {
   assert.equal(isLowConfidence({ verdict: 'insufficient' }), true)
   assert.equal(isLowConfidence({ verdict: 'refutes', evidence: { passage: '', pdf: 'a.pdf', page: 1 } }), true)
   assert.equal(isLowConfidence({ verdict: 'supports', evidence: { passage: 'it says so', pdf: 'a.pdf', page: 1 } }), false)
   assert.equal(isLowConfidence({ verdict: 'unavailable' }), false)
+  const passage = { passage: 'a sentence the paper never wrote', pdf: 'a.pdf', page: 1 }
+  const audit = [{ check: 'quote-not-in-evidence', detail: 'quote is not in the passages' }]
+  assert.equal(isLowConfidence({ verdict: 'supports', evidence: passage, audit }), true)
 })
 
 test('summarize counts each verdict once and statusLabel says it in the drafts list words', () => {

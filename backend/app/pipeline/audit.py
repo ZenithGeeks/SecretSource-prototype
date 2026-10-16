@@ -57,6 +57,30 @@ def _grounded(quote: str, verdict: dict) -> bool:
     )
 
 
+def check_verdict(verdict: dict) -> list[dict]:
+    """The findings on one verdict alone: its label, and whether its quote is in its evidence.
+
+    Each finding has a `check` and a `detail`. A draft check runs this on every citation;
+    audit() runs it on every verdict of an analysis.
+    """
+    label, quote = verdict.get("verdict"), verdict.get("quote", "")
+    findings = []
+    if label not in LABELS:
+        findings.append(
+            {"check": "unknown-verdict", "detail": f"verdict {label!r} is not one of {sorted(LABELS)}"}
+        )
+    if label in ("supports", "refutes") and not quote.strip():
+        findings.append({"check": "decided-without-quote", "detail": f"{label} with no quote to stand on"})
+    elif quote.strip() and not _grounded(quote, verdict):
+        findings.append(
+            {
+                "check": "quote-not-in-evidence",
+                "detail": f"quote is not in the passages the judge was given: {quote[:120]!r}",
+            }
+        )
+    return findings
+
+
 def audit(analysis: dict) -> list[dict]:
     """Every way this analysis disagrees with itself. No ordering: the caller shows them
     all. An empty list is the usual result."""
@@ -88,22 +112,7 @@ def audit(analysis: dict) -> list[dict]:
                 )
 
         for verdict in verdicts:
-            label, quote = verdict.get("verdict"), verdict.get("quote", "")
             source = verdict.get("cited")
-            if label not in LABELS:
-                findings.append(
-                    {"check": "unknown-verdict", "claim": index, "source": source,
-                     "detail": f"verdict {label!r} is not one of {sorted(LABELS)}"}
-                )
-            if label in ("supports", "refutes") and not quote.strip():
-                findings.append(
-                    {"check": "decided-without-quote", "claim": index, "source": source,
-                     "detail": f"{label} with no quote to stand on"}
-                )
-            elif quote.strip() and not _grounded(quote, verdict):
-                findings.append(
-                    {"check": "quote-not-in-evidence", "claim": index, "source": source,
-                     "detail": f"quote is not in the passages the judge was given: {quote[:120]!r}"}
-                )
+            findings += [{"claim": index, "source": source, **found} for found in check_verdict(verdict)]
 
     return findings

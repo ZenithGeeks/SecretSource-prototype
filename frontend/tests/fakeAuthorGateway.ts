@@ -17,7 +17,7 @@ type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'run
 type StoredProject = { id: string; name: string; bib: { name: string; content: string } | null; pdfs: Record<string, string>; created: string; updated: string }
 type StoredCheck = Omit<CheckRun, 'summary' | 'sinceLastCheck' | 'previousVersion' | 'previousId' | 'unchanged'> & { citations: Citation[]; contentHash: string }
 
-export type VerdictRule = (key: string, claim: string) => { verdict: Verdict; passage?: string; page?: number; explanation?: string; message?: string; reason?: string }
+export type VerdictRule = (key: string, claim: string) => { verdict: Verdict; passage?: string; page?: number; explanation?: string; message?: string; reason?: string; audit?: Citation['audit'] }
 
 export type FakeGateway = {
   drafts: Map<string, StoredDraft>
@@ -215,7 +215,7 @@ export function runCheck(gateway: FakeGateway, draftId: string): StoredCheck {
         const ref = { key: c.key, title: (entry.fields.title ?? '').replace(/[{}]/g, ''), authors: shortAuthors(entry.fields.author ?? ''), year: Number(entry.fields.year) || null, venue: entry.fields.booktitle ?? entry.fields.journal ?? '', doi: entry.fields.doi ?? '', url: entry.fields.url ?? '' }
         const result = gateway.verdictFor(c.key, claim)
         if (result.verdict === 'unavailable') return { ...base, sourceRef: ref, verdict: 'unavailable', reason: result.reason ?? 'failed', message: result.message ?? 'checking it failed' }
-        return { ...base, sourceRef: ref, verdict: result.verdict, explanation: result.explanation, evidence: { passage: result.passage ?? '', pdf: `${c.key}.pdf`, page: result.page ?? null } }
+        return { ...base, sourceRef: ref, verdict: result.verdict, explanation: result.explanation, evidence: { passage: result.passage ?? '', pdf: `${c.key}.pdf`, page: result.page ?? null }, ...(result.audit ? { audit: result.audit } : {}) }
       }),
     )
   const started = new Date(Date.now() + seq).toISOString()
