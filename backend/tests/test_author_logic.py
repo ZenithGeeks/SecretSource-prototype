@@ -234,3 +234,26 @@ def test_plain_text_unwraps_two_levels_of_formatting():
     innermost {...}, so nested formatting needs the second."""
     assert logic.plain_text(r"We show \textbf{\emph{strong}} gains.") == "We show strong gains."
     assert logic.plain_text(r"A \emph{clear} claim.") == "A clear claim."
+
+
+def test_a_bib_year_or_first_author_that_disagrees_with_the_index_is_reported():
+    fields = {"year": "2021", "author": "Khattab, Omar and Zaharia, Matei"}
+
+    assert logic.metadata_mismatches(fields, 2023, "Santhanam", "Crossref") == [
+        "year: the .bib says 2021, Crossref says 2023",
+        "first author: the .bib says Khattab, Crossref says Santhanam",
+    ]
+
+
+def test_a_year_one_off_accents_and_missing_fields_are_not_mismatches():
+    # A preprint's year and its proceedings' year often differ by one.
+    assert (
+        logic.metadata_mismatches({"year": "2019", "author": 'M{\\"u}ller, Jan'}, 2020, "Müller", "Crossref")
+        == []
+    )
+    assert logic.metadata_mismatches({"author": "Jan Muller"}, None, "", "OpenAlex") == []
+
+
+def test_bib_doi_drops_a_doi_org_prefix():
+    assert logic.bib_doi({"doi": " https://doi.org/10.1162/tacl.a.729 "}) == "10.1162/tacl.a.729"
+    assert logic.bib_doi({"title": "no doi"}) == ""

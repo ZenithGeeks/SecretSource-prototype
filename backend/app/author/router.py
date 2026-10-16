@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from app import store
 from app.auth import current_user
 from app.author import logic
-from app.author.verify import citation_outcome, verify_cached
+from app.author.verify import citation_outcome, reference_check, verify_cached
 from app.config import PARALLEL_CHECKS
 from app.ownership import require_owner
 
@@ -504,6 +504,10 @@ async def _run_draft_check(check_id: str, user: str | None):
                 except Exception as error:  # a crash in the pipeline is an honest "unavailable"
                     result = {"status": "error", "reason": "failed", "message": str(error)}
             citation.update(citation_outcome(result))
+            # Under `limit` alone: an index lookup is not a model call, so it takes no
+            # gateway-wide check slot.
+            async with limit:
+                citation.update(await asyncio.to_thread(reference_check, entry["fields"]))
             await gateway._publish(
                 check_id,
                 "checked",

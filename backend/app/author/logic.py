@@ -13,6 +13,7 @@ entry, or no check yet). The same five words are the frontend's `Verdict` union.
 
 import hashlib
 import re
+import unicodedata
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -157,8 +158,8 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
     if pdfs and pdfs.get(entry["key"]):
         return pdfs[entry["key"]]
     f = entry["fields"]
-    if f.get("doi"):
-        return re.sub(r"^https?://(dx\.)?doi\.org/", "", f["doi"].strip())
+    if doi := bib_doi(f):
+        return doi
     eprint = f.get("eprint") or f.get("arxiv")
     if eprint and re.search(r"\d{4}\.\d{4,5}", eprint):
         return re.search(r"\d{4}\.\d{4,5}(v\d+)?", eprint).group(0)
@@ -168,13 +169,25 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
     return title or None
 
 
-def short_authors(author: str) -> str:
-    """ "Khattab & Zaharia", "Santhanam et al." from a BibTeX author field."""
+def bib_doi(fields: dict) -> str:
+    """The entry's DOI without a doi.org prefix, or "" when it has none."""
+    return re.sub(r"^https?://(dx\.)?doi\.org/", "", (fields.get("doi") or "").strip())
+
+
+def bib_surnames(author: str) -> list[str]:
+    """The surnames in a BibTeX author field, in order. "Khattab, Omar and Zaharia, Matei" and
+    "Omar Khattab and Matei Zaharia" both give ["Khattab", "Zaharia"]."""
     names = [n.strip() for n in re.split(r"\s+and\s+", author, flags=re.I) if n.strip()]
     surnames = []
     for name in names:
         surname = name.split(",")[0] if "," in name else name.split()[-1]
         surnames.append(re.sub(r"[{}\\'\"`^~]", "", surname))
+    return surnames
+
+
+def short_authors(author: str) -> str:
+    """ "Khattab & Zaharia", "Santhanam et al." from a BibTeX author field."""
+    surnames = bib_surnames(author)
     if not surnames:
         return ""
     if len(surnames) == 1:
@@ -182,6 +195,27 @@ def short_authors(author: str) -> str:
     if len(surnames) == 2:
         return f"{surnames[0]} & {surnames[1]}"
     return f"{surnames[0]} et al."
+
+
+def metadata_mismatches(fields: dict, year: int | None, first_author: str, index: str) -> list[str]:
+    """Where a bib entry disagrees with the index record of its DOI, in words for the author:
+    ["year: the .bib says 2021, Crossref says 2022"]. A field missing on either side is not a
+    mismatch, and a year one off is not either: preprint and proceedings years often differ by one.
+    """
+    found = []
+    bib_year = re.search(r"\d{4}", fields.get("year", "") or "")
+    if bib_year and year and abs(int(bib_year.group(0)) - year) > 1:
+        found.append(f"year: the .bib says {bib_year.group(0)}, {index} says {year}")
+    bib_first = (bib_surnames(fields.get("author", "")) or [""])[0]
+    if bib_first and first_author and _plain(bib_first) != _plain(first_author):
+        found.append(f"first author: the .bib says {bib_first}, {index} says {first_author}")
+    return found
+
+
+def _plain(name: str) -> str:
+    """A name compared without case, accents or punctuation: "Müller" and "muller" match."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    return re.sub(r"[^a-z]", "", decomposed.encode("ascii", "ignore").decode().lower())
 
 
 def source_ref(entry: dict, pdfs: dict[str, str] | None = None) -> dict:

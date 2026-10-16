@@ -12,9 +12,13 @@ never reads another model's verdict.
 from collections.abc import Callable
 
 from app import store
+from app.author import logic
 from app.config import VLLM_MODEL
 from app.metrics import CLAIM_CHECKS_FAILED, CLAIM_VERDICTS
+from app.pipeline.indexes import IndexUnavailable, find_doi
 from app.pipeline.verify import unchecked_reason
+
+INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
 
 
 def verify_cached(
@@ -73,3 +77,32 @@ def citation_outcome(result: dict) -> dict:
         },
         "indexedIn": result.get("indexed_in") or {},
     }
+
+
+def reference_check(fields: dict) -> dict:
+    """Whether a cited DOI names a real work, and where the bib entry disagrees with it (#421).
+
+    An unreadable source alone cannot tell a paywalled paper from a made-up one, so a draft
+    check asks the indexes for every cited DOI.
+
+    Args:
+        fields: the bib entry's fields, as `logic.parse_bib` gives them.
+
+    Returns:
+        The fields a draft-check citation adds. `exists` is "yes", "no" (no index knows the
+        DOI, so the reference may be made up) or "unknown" (an index could not be reached).
+        With "yes", `index` names the index and `mismatches` lists the year or first author
+        the bib entry gets wrong. Empty for an entry with no DOI.
+    """
+    doi = logic.bib_doi(fields)
+    if not doi:
+        return {}
+    try:
+        record = find_doi(doi)
+    except IndexUnavailable:
+        return {"exists": "unknown"}
+    if record is None:
+        return {"exists": "no"}
+    index = INDEX_NAMES[record.index]
+    mismatches = logic.metadata_mismatches(fields, record.year, record.first_author, index)
+    return {"exists": "yes", "index": index, "mismatches": mismatches}
