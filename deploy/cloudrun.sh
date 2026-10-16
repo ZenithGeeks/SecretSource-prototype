@@ -161,8 +161,9 @@ if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
 fi
 
 build_and_push gateway ./backend
-deploy gateway --port 8080 --memory 8Gi --allow-unauthenticated \
-    --max-instances 1 --no-cpu-throttling --cpu 4 \
+# 1 vCPU / 4Gi: see deploy-gateway.yml. With VISUAL_EVIDENCE on, use --memory 8Gi --cpu 2.
+deploy gateway --port 8080 --memory 4Gi --allow-unauthenticated \
+    --max-instances 1 --no-cpu-throttling --cpu 1 \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
     --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
     --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV$SUPABASE_ENV"
