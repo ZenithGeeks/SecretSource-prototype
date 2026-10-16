@@ -3,6 +3,7 @@
 health answer remembered for HEALTH_TTL seconds."""
 
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -113,3 +114,59 @@ def test_a_400_is_sent_only_once():
         server.shutdown()
     assert response.status_code == 400
     assert len(seen) == 1
+
+
+def _pdf_with_image(path):
+    """A one-page PDF with a line of text and a 400x400 noise image."""
+    import os
+
+    import pymupdf
+
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "Late interaction scores every query token.")
+    noise = pymupdf.Pixmap(pymupdf.csRGB, 400, 400, os.urandom(400 * 400 * 3), False)
+    page.insert_image(pymupdf.Rect(72, 100, 472, 500), pixmap=noise)
+    document.save(path)
+    return path
+
+
+def _uploaded(monkeypatch):
+    """Replace the session's POST, keeping each upload's file name and bytes."""
+    sent = []
+
+    def post(url, files, **kwargs):
+        name, handle, _ = files["file"]
+        sent.append((name, handle.read()))
+        return types.SimpleNamespace(ok=True, json=lambda: {"added": 1, "papers": 1})
+
+    monkeypatch.setattr(retrieval, "auth_headers", lambda url: {})
+    monkeypatch.setattr(retrieval._session, "post", post)
+    return sent
+
+
+def test_a_pdf_under_the_limit_is_uploaded_as_it_is(monkeypatch, tmp_path):
+    sent = _uploaded(monkeypatch)
+    pdf = _pdf_with_image(tmp_path / "2112.01488.pdf")
+
+    assert retrieval.colbert_add(str(pdf))["status"] == "ok"
+
+    assert sent == [("2112.01488.pdf", pdf.read_bytes())]
+
+
+def test_a_pdf_over_the_limit_is_uploaded_without_its_images(monkeypatch, tmp_path):
+    import pymupdf
+
+    sent = _uploaded(monkeypatch)
+    pdf = _pdf_with_image(tmp_path / "2312.02139.pdf")
+    monkeypatch.setattr(retrieval, "UPLOAD_LIMIT_BYTES", pdf.stat().st_size - 1)
+
+    assert retrieval.colbert_add(str(pdf))["status"] == "ok"
+
+    ((name, content),) = sent
+    assert name == "2312.02139.pdf"  # the passages keep their source name
+    assert len(content) < pdf.stat().st_size / 10
+    with pymupdf.open(stream=content) as copy, pymupdf.open(pdf) as original:
+        assert copy[0].get_text() == original[0].get_text()
+        # delete_image leaves a 1x1 blank in each image's place
+        assert {image[2:4] for image in copy[0].get_images(full=True)} == {(1, 1)}
