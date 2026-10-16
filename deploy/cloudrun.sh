@@ -76,6 +76,13 @@ HF_BUCKET="${HF_BUCKET:-$PROJECT-hf-cache}"
 gcloud storage buckets describe "gs://$HF_BUCKET" >/dev/null 2>&1 ||
     gcloud storage buckets create "gs://$HF_BUCKET" --location "$REGION"
 
+# --- the papers bucket: the gateway and the RQ worker (on another machine) share data/papers --
+
+PAPERS_BUCKET="${PAPERS_BUCKET:-$PROJECT-papers}"
+gcloud storage buckets describe "gs://$PAPERS_BUCKET" >/dev/null 2>&1 ||
+    gcloud storage buckets create "gs://$PAPERS_BUCKET" --location "$REGION" \
+        --uniform-bucket-level-access --public-access-prevention
+
 # --- stateless services -------------------------------------------------------
 
 gcloud run deploy grobid --image lfoppiano/grobid:0.8.2 --region "$REGION" \
@@ -165,6 +172,8 @@ deploy gateway --port 8080 --memory 8Gi --allow-unauthenticated \
     --max-instances 1 --no-cpu-throttling --cpu 4 \
     --add-volume "name=hf,type=cloud-storage,bucket=$HF_BUCKET" \
     --add-volume-mount "volume=hf,mount-path=/root/.cache/huggingface" \
+    --add-volume "name=papers,type=cloud-storage,bucket=$PAPERS_BUCKET" \
+    --add-volume-mount "volume=papers,mount-path=/app/data/papers" \
     --set-env-vars "DOCLING_PARALLEL=2,SERVICE_AUTH=google-id-token,GROBID_URL=$(url_of grobid),COLBERT_URL=$(url_of colbert)$COLPALI_ENV,$MODEL_ENV$SUPABASE_ENV"
 
 build_and_push web ./frontend
