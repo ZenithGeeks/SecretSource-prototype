@@ -254,7 +254,7 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
     """Judge a claim against a paper that prepare_source already made ready."""
     global _judge
     try:
-        from app.pipeline.sources import known_index, known_version
+        from app.pipeline.sources import known_index, version_of
 
         # Text search (ColBERT) and visual search (ColPali) are independent, so run both at once.
         # Figures still being indexed are left out rather than waited for (#163).
@@ -266,7 +266,7 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
         # A caption is evidence like any other line.
         passages += _captions(pages)
         indexed_in = known_index(source_pdf_path)
-        version = known_version(source_pdf_path)  # {} unless the PDF came from arXiv (#424)
+        version = version_of(source)  # {} unless the PDF came from arXiv (#424)
         if not passages:
             return {"status": "ok", "claim": claim, "source": source.name,
                     "verdict": "insufficient", "quote": "", "reasoning": "no passages retrieved",

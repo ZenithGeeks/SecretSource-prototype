@@ -57,7 +57,7 @@ def services(monkeypatch):
     monkeypatch.setitem(sys.modules, "app.pipeline.rag", types.SimpleNamespace(add_paper=add_paper))
     monkeypatch.setattr(sources, "local_pdf", lambda identifier: PAPER.as_posix())
     monkeypatch.setattr(sources, "known_index", lambda identifier: {"index": "", "ids": {}})
-    monkeypatch.setattr(sources, "known_version", lambda identifier: {})
+    monkeypatch.setattr(sources, "version_of", lambda pdf: {})
     monkeypatch.setattr(verify.retrieval, "colbert_search", lambda claim, k, source=None: [PASSAGE])
     monkeypatch.setattr(verify.retrieval, "colpali_available", lambda: True)
     monkeypatch.setattr(verify.retrieval, "colpali_search", colpali_search)

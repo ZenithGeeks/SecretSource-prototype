@@ -4,8 +4,6 @@ A preprint's wording or numbers can differ from the published version. The looku
 download, the search and the judge are fakes, so these tests make no network calls.
 """
 
-from pathlib import Path
-
 import pytest
 import requests
 from app.author.verify import citation_outcome
@@ -32,21 +30,35 @@ def local_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def publisher(monkeypatch):
-    """The lookup finds the publisher's link and an arXiv id; `refuses` is whether that link fails."""
+def publisher(monkeypatch, tmp_path):
+    """The lookup finds the publisher's link and an arXiv id; `refuses` is whether that link fails.
+
+    The real _download runs, into a temp papers folder, with requests.get faked."""
+    monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path / "papers")
 
     def install(refuses: bool):
         found = sources.Resolution(LANDING, "KisMATH", "semantic-scholar", {"ArXiv": "2507.11408"})
         monkeypatch.setattr(sources, "_lookup", lambda identifier: found)
 
-        def download(url: str, name: str) -> Path:
+        def get(url, **kwargs):
             if refuses and url == LANDING:
-                raise requests.HTTPError(f"403 Client Error: Forbidden for url: {url}")
-            return Path(f"/papers/{name}.pdf")
+                return FakeResponse(403, b"")
+            return FakeResponse(200, b"%PDF-1.7 KisMATH")
 
-        monkeypatch.setattr(sources, "_download", download)
+        monkeypatch.setattr(requests, "get", get)
 
     return install
+
+
+class FakeResponse:
+    def __init__(self, status: int, content: bytes):
+        self.status_code = status
+        self.content = content
+        self.headers = {"Content-Type": "application/pdf"}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error: Forbidden")
 
 
 @pytest.fixture
@@ -57,9 +69,9 @@ def judge(monkeypatch):
     monkeypatch.setattr(verify, "_judge", lambda claim, passages: verdict)
 
 
-def check(claim: str = "KisMATH improves math reasoning") -> dict:
-    path, _ = sources._fetch(DOI)
-    return verify.check_prepared(claim, DOI, path)
+def check(identifier: str = DOI, claim: str = "KisMATH improves math reasoning") -> dict:
+    path, _ = sources._fetch(identifier)
+    return verify.check_prepared(claim, identifier, path)
 
 
 def test_a_verdict_from_the_arxiv_copy_is_marked_as_a_preprint(publisher, judge):
@@ -85,9 +97,22 @@ def test_a_second_run_still_knows_it_read_the_preprint(publisher, judge, monkeyp
     publisher(refuses=True)
     check()
     # The PDF is on disk now, so the next run downloads nothing, from either link.
-    monkeypatch.setattr(sources, "_download", lambda url, name: Path(f"/papers/{name}.pdf"))
+    monkeypatch.setattr(requests, "get", lambda url, **kwargs: pytest.fail(f"downloaded {url}"))
 
     assert check()["source_version"] == "preprint"
+
+
+def test_the_mark_follows_the_file_and_not_the_shared_cache(publisher, judge, monkeypatch):
+    # One draft cites the work by title and gets the publisher PDF.
+    publisher(refuses=False)
+    check("KisMATH")
+    # Another draft, on another disk, cites it by DOI and caches the arXiv link for the title.
+    from app import store
+
+    cached = sources._resolve("KisMATH")._replace(url=ARXIV)._asdict()
+    store.remember_source(sources._normalised("KisMATH"), cached)
+
+    assert "source_version" not in check("KisMATH")
 
 
 def test_the_author_citation_carries_the_preprint():
