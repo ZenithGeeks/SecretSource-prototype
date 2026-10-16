@@ -7,7 +7,7 @@
  * paper is never lost and two people can work on different papers at once.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
@@ -22,6 +22,7 @@ import {
   draftFromSaved,
   emptyDraft,
   emptyLabel,
+  labelingApi,
   progress,
   referencesOf,
   relevantPassages,
@@ -88,10 +89,42 @@ export function Workspace({ analysisId, onDirtyChange }: { analysisId: string; o
   return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} />
 }
 
+/** Search the references for each claim added by hand, and add what is found to its passages (#404).
+ *
+ * The analysis retrieved passages only for the claims it extracted. A hand-added claim is
+ * searched when it is opened, once per claim and text. A search for a claim not in view is
+ * disabled but still returns what it found before. Passages judged and saved earlier stay in the
+ * list even when a new search ranks them out. */
+function useAddedClaimSearch(analysisId: string, listed: WorkClaim[], currentId: string) {
+  const handAdded = listed.filter((c) => c.origin === 'human_added')
+  const searches = useQueries({
+    queries: handAdded.map((c) => ({
+      queryKey: ['labeling', 'candidates', analysisId, c.claim_id, c.claim],
+      queryFn: () => labelingApi.candidates(analysisId, c.claim_id, c.claim),
+      enabled: c.claim_id === currentId,
+      staleTime: Infinity,
+      retry: false,
+    })),
+  })
+  const searchOf = new Map(handAdded.map((c, i) => [c.claim_id, searches[i]]))
+  const claims = listed.map((c) => {
+    const found = searchOf.get(c.claim_id)?.data?.candidates
+    if (!found) return c
+    const known = new Set(c.candidates.map((cand) => cand.cand_id))
+    return { ...c, candidates: [...c.candidates, ...found.filter((cand) => !known.has(cand.cand_id))] }
+  })
+  const current = searchOf.get(currentId)
+  let search: 'searching' | 'failed' | undefined
+  if (current?.isFetching) search = 'searching'
+  else if (current?.isError) search = 'failed'
+  return { claims, search, searchAgain: () => void current?.refetch() }
+}
+
+
 function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (unsaved: boolean) => void }) {
   const base = useMemo(() => workClaims(session), [session])
   const [extra, setExtra] = useState<WorkClaim[]>([])
-  const claims = useMemo(
+  const listed = useMemo(
     () => [...base, ...extra.filter((e) => !base.some((b) => b.claim_id === e.claim_id))],
     [base, extra],
   )
@@ -99,7 +132,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     Object.fromEntries(base.map((c) => [c.claim_id, draftFromSaved(c, session.saved)])),
   )
   const [saved, setSaved] = useState(drafts) // each claim as last written, to know what changed
-  const [currentId, setCurrentId] = useState(claims[0]?.claim_id ?? '')
+  const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
+  const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
   const draft = (claim && drafts[claim.claim_id]) || emptyDraft()
   // A claim added by hand has no position in the paper. Look its text up the way a reference
@@ -373,6 +407,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
             setFocus({ file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
           }}
           onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
+          search={search}
+          onSearchAgain={searchAgain}
           grade={grade}
         />
       )}

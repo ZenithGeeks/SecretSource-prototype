@@ -88,8 +88,11 @@ export type Save = {
     claim_id: string
     reference_id: string
     cand_id: string
-    origin: 'retrieved' | 'human_added'
+    /** retrieved_added: found by the live search for a claim added by hand. */
+    origin: 'retrieved' | 'retrieved_added' | 'human_added'
     status: CandidateStatus
+    rank?: number
+    score?: number | null
     page: number | null
     passage: string
   }[]
@@ -182,6 +185,13 @@ export const labelingApi = {
       `/labeling/sessions/${encodeURIComponent(analysisId)}/save`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     ),
+  /** Search every reference paper for a claim added by hand, as the analysis did for its own. */
+  candidates: (analysisId: string, claimId: string, claim: string) =>
+    request<{ candidates: Candidate[] }>(`/labeling/sessions/${encodeURIComponent(analysisId)}/candidates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claim_id: claimId, claim }),
+    }),
   /** The labels as CSV, or as the two sets of DSPy examples (JSONL). */
   exportFile: (tab: 'labels' | 'claims' | 'candidates' | 'dspy_claims' | 'dspy_verdicts') =>
     fetchFile(`${API_BASE}/api/labeling/export?tab=${tab}`),
@@ -256,10 +266,26 @@ export type WorkClaim = SessionClaim & { origin: 'extracted' | 'human_added'; pa
 export const emptyDraft = (): Draft => ({ status: null, edited: '', cands: {}, added: [], labels: {} })
 export const emptyLabel = (): LabelDraft => ({ evidence: null, rationale: '', confidence: 'medium' })
 
-/** The claims to work through: the extracted ones, then the ones this person added earlier. */
+const numberOrNull = (value: string | undefined) => (value && !Number.isNaN(Number(value)) ? Number(value) : null)
+
+/** The claims to work through: the extracted ones, then the ones this person added earlier.
+ * An added claim keeps the passages the live search found for it that were judged and saved. */
 export function workClaims(session: Session): WorkClaim[] {
   const extracted = session.claims.map((c) => ({ ...c, origin: 'extracted' as const }))
   const known = new Set(session.claims.map((c) => c.claim_id))
+  const fileOf = (id: string) => session.references.find((r) => r.reference_id === id)?.file ?? ''
+  const searched = (claimId: string): Candidate[] =>
+    session.saved.candidates
+      .filter((row) => row.claim_id === claimId && row.origin === 'retrieved_added')
+      .map((row) => ({
+        cand_id: row.cand_id,
+        reference_id: row.reference_id,
+        reference_file: fileOf(row.reference_id),
+        rank: Number(row.rank) || 0,
+        score: numberOrNull(row.score),
+        page: numberOrNull(row.page),
+        passage: row.passage,
+      }))
   const added = session.saved.claims
     .filter((row) => row.origin === 'human_added' && !known.has(row.claim_id))
     .map((row) => ({
@@ -268,14 +294,12 @@ export function workClaims(session: Session): WorkClaim[] {
       sentence: row.sentence ?? '',
       section: row.section ?? '',
       source: null,
-      candidates: [],
+      candidates: searched(row.claim_id),
       origin: 'human_added' as const,
       page: numberOrNull(row.page),
     }))
   return [...extracted, ...added]
 }
-
-const numberOrNull = (value: string | undefined) => (value && !Number.isNaN(Number(value)) ? Number(value) : null)
 
 /** What this person already saved for a claim, as a draft to carry on from. */
 export function draftFromSaved(claim: WorkClaim, saved: Session['saved']): Draft {
@@ -286,7 +310,7 @@ export function draftFromSaved(claim: WorkClaim, saved: Session['saved']): Draft
     draft.edited = row.claim_edited ?? ''
   }
   for (const r of saved.candidates.filter((r) => r.claim_id === claim.claim_id)) {
-    if (r.origin === 'retrieved') draft.cands[r.cand_id] = r.status as CandidateStatus
+    if (r.origin === 'retrieved' || r.origin === 'retrieved_added') draft.cands[r.cand_id] = r.status as CandidateStatus
     else if (r.status === 'relevant')
       draft.added.push({ reference_id: r.reference_id, page: numberOrNull(r.page), passage: r.passage })
   }
@@ -372,7 +396,9 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
 
   for (const c of claim.candidates) {
     const status = draft.cands[c.cand_id]
-    if (status) {
+    if (!status) continue
+    if (claim.origin === 'extracted') {
+      // The server copies rank, page and text from the analysis, so the id is enough.
       save.candidates.push({
         claim_id: claim.claim_id,
         reference_id: c.reference_id,
@@ -381,6 +407,19 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
         status,
         page: null,
         passage: '',
+      })
+    } else {
+      // Found by the live search, which the server has no record of: send what was shown.
+      save.candidates.push({
+        claim_id: claim.claim_id,
+        reference_id: c.reference_id,
+        cand_id: c.cand_id,
+        origin: 'retrieved_added',
+        status,
+        rank: c.rank,
+        score: c.score,
+        page: c.page,
+        passage: c.passage,
       })
     }
   }

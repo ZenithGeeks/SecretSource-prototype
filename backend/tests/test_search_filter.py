@@ -1,4 +1,4 @@
-"""_evidence and _visual pass the cited paper's name to the retrieval services as `source`,
+"""evidence_from and _visual pass the cited paper's name to the retrieval services as `source`,
 so each service scores only that one paper's vector file. They also keep the client-side
 source check as a guard: a ColBERT/ColPali service that has not been redeployed yet ignores
 the unknown field and returns global results, and those must still be dropped.
@@ -32,7 +32,7 @@ def test_evidence_passes_source_and_still_drops_other_sources(monkeypatch):
 
     monkeypatch.setattr(verify.retrieval, "colbert_search", colbert_search)
 
-    found = verify._evidence("some claim", SOURCE)
+    found = verify.evidence_from("some claim", SOURCE)
 
     assert calls["source"] == SOURCE
     assert len(found) == 1

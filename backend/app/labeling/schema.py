@@ -110,11 +110,24 @@ class ClaimIn(BaseModel):
 class CandidateIn(BaseModel):
     claim_id: str = Field(pattern=CLAIM_ID)
     reference_id: str = Field(max_length=200)
-    cand_id: str = Field(default="", max_length=20)  # retrieved: from the session. human_added: left empty
-    origin: Literal["retrieved", "human_added"]
+    # retrieved: found by the analysis, for an extracted claim. retrieved_added: found by the live
+    # search for a claim added by hand. human_added: a passage the person selected.
+    origin: Literal["retrieved", "retrieved_added", "human_added"]
     status: Literal["relevant", "rejected"]
-    page: int | None = None  # human_added only: retrieved rows are filled in from the analysis
+    # A retrieved row sends only cand_id: save copies the rest from the analysis. The other two
+    # send the passage itself, and save builds their cand_id from it.
+    cand_id: str = Field(default="", max_length=20)
+    rank: int | None = Field(default=None, ge=1, le=50)  # retrieved_added only
+    score: float | None = None  # retrieved_added only
+    page: int | None = None
     passage: str = Field(default="", max_length=TEXT)
+
+
+class AddedClaimIn(BaseModel):
+    """A claim added by hand, to search the reference papers for."""
+
+    claim_id: str = Field(pattern=CLAIM_ID)
+    claim: str = Field(min_length=1, max_length=TEXT)
 
 
 class LabelIn(BaseModel):
