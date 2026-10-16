@@ -13,6 +13,11 @@
 # commit authored by a nonexistent identity deployed straight to READY with the vars blanked,
 # and was BLOCKED without them. No paid plan needed.
 #
+# Blanking the vars is not enough for a real teammate: the CLI also reads the commit author from
+# the checkout's .git, and every teammate-authored commit hung at "Building…" anyway (#401). So
+# the job deletes .git after checkout. Checked on 3d5ad37 (authored by a teammate) as a preview:
+# with .git it hung until the step timed out, without .git it was READY in under a minute.
+#
 # That block on its own is recoverable (a re-run, or fixing the association, gets you a normal
 # BLOCKED/ERROR state). What actually cost 6 hours three separate times (#203, #212, a retried
 # #157) was `vercel deploy` hitting a still-blocked commit and hanging on an interactive
@@ -65,6 +70,8 @@ jobs:
       GITHUB_EVENT_NAME: ""
     steps:
       - uses: actions/checkout@v4
+      - name: Remove .git so the Vercel CLI cannot read the commit author
+        run: rm -rf ../.git
       - uses: actions/setup-node@v4
         with:
           node-version: 22
