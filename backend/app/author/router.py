@@ -498,9 +498,12 @@ async def _run_draft_check(check_id: str, user: str | None):
                 await gateway._publish(
                     check_id, "checking", claim=index, key=citation["key"], source=identifier
                 )
+                # The judge reads where the citation stands, so a method cited for the
+                # authors' own setup is checked as that method, not as the whole sentence.
+                claim = logic.cited_text(citation["sentence"], citation["key"])
                 try:
                     result = await asyncio.to_thread(
-                        verify_cached, citation["claim"], identifier, gateway.verify_claim, entry["fields"]
+                        verify_cached, claim, identifier, gateway.verify_claim, entry["fields"]
                     )
                 except Exception as error:  # a crash in the pipeline is an honest "unavailable"
                     result = {"status": "error", "reason": "failed", "message": str(error)}

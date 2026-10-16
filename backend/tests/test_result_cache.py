@@ -161,3 +161,23 @@ def test_judge_is_cached_by_claim_and_evidence_together(monkeypatch):
     changed_evidence = run("claim A", ["evidence 2"])
     assert changed_evidence["quote"] == "evidence 2"
     assert len(calls) == 2
+
+
+def test_a_claim_with_the_cited_mark_gets_the_citation_aware_judge(monkeypatch):
+    import dspy
+
+    used = []
+
+    def chain_of_thought(signature):
+        def judge(claim, evidence):
+            used.append(signature.__name__)
+            return _FakePrediction(verdict="supports", quote="q", reasoning="r")
+
+        return judge
+
+    monkeypatch.setattr(dspy, "ChainOfThought", chain_of_thought)
+
+    run = verify._build_judge()
+    run("We use AdamW [cited] with weight decay 0.1.", ["AdamW decouples weight decay."])
+    run("ColBERT reduces the index 10x.", ["evidence"])
+    assert used == ["JudgeCitedClaim", "JudgeClaim"]

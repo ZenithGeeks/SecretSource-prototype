@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
 LABELS = ("supports", "refutes", "insufficient")
+CITED_MARK = "[cited]"  # app.author.logic.cited_text puts it where the citation stands
 
 _judge = None  # built on first use: needs dspy and a running LM
 
@@ -154,7 +155,8 @@ def _build_judge():
 
     from app.llm import dspy_lm
 
-    language_model = dspy_lm(temperature=0.0, max_tokens=1000)
+    # 1500, not 1000: the cited_for field made some answers run past 1000 and fail to parse.
+    language_model = dspy_lm(temperature=0.0, max_tokens=1500)
 
     class JudgeClaim(dspy.Signature):
         """Decide whether the cited paper's passages support the claim made about it.
@@ -167,14 +169,41 @@ def _build_judge():
         quote: str = dspy.OutputField(desc="The sentence from the evidence that decides it, or empty")
         reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
 
-    judge = dspy.ChainOfThought(JudgeClaim)
+    class JudgeCitedClaim(dspy.Signature):
+        """Decide whether the cited paper's passages support what the claim credits to it.
+        First decide what the citation is for. "[cited]" marks where the citation stands; it
+        usually covers the words just before it. When the claim describes the citing authors'
+        own work (their setup, values, data or results) and cites a method, tool, model or
+        dataset they used, the citation is only for that method, tool, model or dataset. The
+        authors' own settings are not claims about the cited paper, and settings that differ
+        from the cited paper's do not count against it.
+        Then answer "supports" if the passages state everything the citation is for,
+        "refutes" if a passage contradicts it, and "insufficient" if any part of it is not
+        in the passages."""
+
+        claim: str = dspy.InputField(desc="A sentence that cites the source paper")
+        evidence: list[str] = dspy.InputField(desc="Passages from the cited paper")
+        cited_for: str = dspy.OutputField(
+            desc="What the claim credits to the cited paper, in one short sentence"
+        )
+        verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")
+        quote: str = dspy.OutputField(desc="The sentence from the evidence that decides it, or empty")
+        reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
+
+    # Only the Author check marks the citation (#437). A paper analysis keeps the first
+    # judge until labeled data (#423) can score the second one on its claims.
+    judges = {
+        "judge": dspy.ChainOfThought(JudgeClaim),
+        "judge-cited": dspy.ChainOfThought(JudgeCitedClaim),
+    }
 
     def run(claim: str, evidence: list[str]) -> dict:
-        key = store.cache_key("judge", VLLM_MODEL, claim, "\x00".join(evidence))
+        name = "judge-cited" if CITED_MARK in claim else "judge"
+        key = store.cache_key(name, VLLM_MODEL, claim, "\x00".join(evidence))
         if (cached := store.recall_cache(key)) is not None:
             return cached
         with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            prediction = judge(claim=claim, evidence=evidence)
+            prediction = judges[name](claim=claim, evidence=evidence)
         record_llm_usage("judge", usage)
         verdict = prediction.verdict.strip().lower()
         result = {
