@@ -250,8 +250,7 @@ What would cut cost or time per analysis:
 
 | Change | Saves | Trade-off |
 | --- | --- | --- |
-| Index figure captions as text in ColBERT and leave ColPali off the default path | about $0.75 of the $1.11, and most of the Docling wait | captions changed 1 verdict in 15 (#163); the judge reads captions as text, but this needs an eval first |
-| Remember which cited papers are already indexed, across analyses | ColBERT upload time for 30% of cited papers (79 of 262 were seen before) | none; today the list lives in memory and the worker starts a new process for each job |
+| Leave ColPali off the default path (#446) | about $0.75 of the $1.11, and the Docling wait on cited papers | ColBERT already indexes caption text with the rest of the page; #163 found figures changed 1 verdict in 15, so #446 measures it again first |
 | Gateway from 4 vCPU / 8 GiB to 1 vCPU / 2 GiB | about $0.20 | check its memory use first |
 
 Tried and dropped: running more Docling at once. On 10 cited PDFs with 4 CPUs, like the
