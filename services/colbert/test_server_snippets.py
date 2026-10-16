@@ -38,3 +38,10 @@ def test_api_search_keeps_the_whole_passage(client):
     response = client.get("/api/search", params={"query": "index size"})
 
     assert [hit["text"] for hit in response.json()["topk"]] == [PASSAGE]
+
+
+def test_a_newline_or_tab_is_a_word_boundary_too(mcp):
+    from server import snippet
+
+    assert snippet("alpha\nbeta gamma", 7) == "alpha"
+    assert snippet("alpha\tbeta", 7) == "alpha"

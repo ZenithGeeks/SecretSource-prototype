@@ -78,7 +78,9 @@ else
   say "no $IMAGE:deployed yet, so this deploy has no image to roll back to"
 fi
 started=$(date -u +%FT%TZ)
-(cd "$WORKER_DIR" && docker compose up -d --no-deps --no-build worker)
+# --force-recreate: without it compose sometimes left the old container running after a rebuild
+# ("Container ... Running"), and the start-up check below then failed (the first CI run, d0de39d).
+(cd "$WORKER_DIR" && docker compose up -d --no-deps --no-build --force-recreate worker)
 
 # The worker logs this line once its start-up check (backend/app/native.py) has passed.
 for _ in $(seq 24); do
@@ -96,5 +98,5 @@ docker logs --since "$started" "$CONTAINER" 2>&1 | tail -20 >&2
 [[ -n $rollback ]] || fail "no rollback image; roll back by hand from a pre-* tag (deploy/ss-core/README.md)"
 say "rolling back to $IMAGE:$rollback" >&2
 docker tag "$IMAGE:$rollback" "$IMAGE:latest"
-(cd "$WORKER_DIR" && docker compose up -d --no-deps --no-build worker)
+(cd "$WORKER_DIR" && docker compose up -d --no-deps --no-build --force-recreate worker)
 exit 1

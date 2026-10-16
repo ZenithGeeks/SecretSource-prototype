@@ -144,6 +144,31 @@ describe('Author Check a draft', () => {
     expect(screen.getByText('“we leave compression to future work”')).toBeInTheDocument()
   })
 
+  test('a verdict whose quote is not in the source passages keeps its verdict and shows a warning', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: (key) =>
+        key === 'khattab2020'
+          ? {
+              verdict: 'supports',
+              passage: 'a sentence the paper never wrote',
+              page: 2,
+              audit: [{ check: 'quote-not-in-evidence', detail: "quote is not in the passages the judge was given: 'a sentence'" }],
+            }
+          : { verdict: 'supports', passage: 'all good', page: 1 },
+    })
+    renderDraftCheck()
+    fireEvent.click(await screen.findByRole('button', { name: 'Low confidence' }))
+    const rows = within(await screen.findByRole('list', { name: 'Citations' })).getAllByRole('button')
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row).toHaveTextContent('\\cite{khattab2020}')
+      expect(row).toHaveTextContent('Source backs it')
+    }
+    fireEvent.click(rows[0])
+    expect(screen.getByText(/This quote is not in the source passages the check read/)).toBeInTheDocument()
+  })
+
   test('Re-check starts a run on the gateway and the new verdicts land', async () => {
     renderDraftCheck()
     await screen.findByText(/3 need work/)
