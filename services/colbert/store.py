@@ -15,7 +15,7 @@ import re
 import sys
 from pathlib import Path
 
-from encoder import Encoder
+from encoder import DOC_LEN, Encoder
 from pypdf import PdfReader
 from vectorfiles import PaperFiles, maxsim
 
@@ -111,7 +111,9 @@ class Store:
         regardless of which process asks.
         """
         path = Path(path)
-        content_hash = hashlib.sha256(PASSAGES_VERSION.encode() + path.read_bytes()).hexdigest()
+        # DOC_LEN is in the hash so a change to it re-encodes papers already in the store
+        versions = f"{PASSAGES_VERSION}:{DOC_LEN}".encode()
+        content_hash = hashlib.sha256(versions + path.read_bytes()).hexdigest()
         stored_hash, stored_count = self.files.stored_hash(path.name)
         if stored_hash == content_hash:
             return stored_count

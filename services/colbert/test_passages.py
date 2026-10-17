@@ -56,7 +56,7 @@ def test_a_paper_without_a_references_heading_keeps_everything(tmp_path):
     assert any("Bootstrapping" in text for text in texts)
 
 
-def test_the_passage_version_is_part_of_the_content_hash(tmp_path, monkeypatch):
+def test_the_passage_version_and_doc_len_are_part_of_the_content_hash(tmp_path, monkeypatch):
     calls = []
 
     class Files:
@@ -81,5 +81,7 @@ def test_the_passage_version_is_part_of_the_content_hash(tmp_path, monkeypatch):
     index.add_pdf(pdf)  # same bytes, same version: skipped
     monkeypatch.setattr(store, "PASSAGES_VERSION", "3")
     index.add_pdf(pdf)  # same bytes, new version: indexed again
+    monkeypatch.setattr(store, "DOC_LEN", store.DOC_LEN + 1)
+    index.add_pdf(pdf)  # same bytes, new document length: indexed again
 
-    assert len(calls) == 2
+    assert len(calls) == 3
