@@ -41,19 +41,20 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app import dependencies, researcher, store
+from app import dependencies, researcher, store, uploads
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
 from app.author.router import DRAFT_CHECK, author_pdfs
 from app.author.router import router as author_router
 from app.config import (
     AVATARS_DIR,
+    PAPERS_BUCKET,
     PAPERS_DIR,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
@@ -584,6 +585,45 @@ async def upload_analysis(
 ):
     path = save_upload(await file.read(), file.filename)
     return _start(path.as_posix(), verify, user)
+
+
+class UploadRequest(BaseModel):
+    filename: str
+    size: int = Field(gt=0, le=uploads.MAX_UPLOAD_BYTES)
+
+
+@app.post("/uploads")
+async def new_upload(body: UploadRequest, request: Request, user: str | None = Depends(current_user)):
+    """A URL to PUT one PDF straight to the papers bucket (#266), or {"url": null} where direct
+    uploads are not set up (no bucket, or no page allowed to use it), and the PDF goes through
+    POST /analyses/upload instead."""
+    if not (PAPERS_BUCKET and uploads.UPLOAD_ORIGINS):
+        return {"url": None}
+    origin = request.headers.get("origin", "")
+    try:
+        return await asyncio.to_thread(uploads.start_upload, body.filename, body.size, origin, user)
+    except PermissionError as error:
+        raise HTTPException(403, str(error)) from None
+    except uploads.UploadRefused as error:
+        logger.warning("upload refused: %s", error)
+        raise HTTPException(503, "storage would not take the upload, try again shortly") from None
+
+
+class UploadedPaper(BaseModel):
+    object_name: str
+    verify: bool = True
+
+
+@app.post("/analyses/from-upload")
+async def analyse_uploaded_paper(body: UploadedPaper, user: str | None = Depends(current_user)):
+    """Start an analysis of a PDF the caller uploaded with a URL from POST /uploads, once."""
+    try:
+        path = await asyncio.to_thread(uploads.claim, body.object_name, user, PAPERS_DIR)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from None
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    return _start(path.as_posix(), body.verify, user)
 
 
 @app.get("/analyses")

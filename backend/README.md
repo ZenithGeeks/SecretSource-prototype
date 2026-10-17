@@ -312,6 +312,14 @@ the Cloud Storage bucket `gcp-edu-471706-papers`:
 
 Without the shared folder, every uploaded PDF ends with "no paper found matching the title".
 
+The browser uploads a paper's PDF straight to that bucket, because the Vercel proxy refuses a
+request body over 4.5 MB (#266). `POST /uploads` starts a Cloud Storage resumable upload for one
+PDF of the size the browser states and returns its URL; the browser PUTs the file there and calls
+`POST /analyses/from-upload`. This needs `PAPERS_BUCKET`, `UPLOAD_ORIGINS` (the web app's origin)
+and a CORS rule on the bucket that allows PUT from that origin
+(`gcloud storage buckets update gs://gcp-edu-471706-papers --cors-file=...`). Without the two
+settings, uploads go through `POST /analyses/upload` as before.
+
 ## Tests
 
 The tests need `google-adk` and `pymupdf`, so run them inside the gateway image. Mount the

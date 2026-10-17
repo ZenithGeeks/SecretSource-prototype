@@ -88,6 +88,12 @@ if SERVICE_AUTH not in ("none", "google-id-token"):
     raise ValueError(f"SERVICE_AUTH must be 'none' or 'google-id-token', got {SERVICE_AUTH!r}")
 
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
+# The Cloud Storage bucket mounted at PAPERS_DIR in production. When set, the browser uploads
+# PDFs straight to it (app/uploads.py); when empty, uploads go through POST /analyses/upload.
+PAPERS_BUCKET = os.getenv("PAPERS_BUCKET", "")
+# The pages allowed to upload to that bucket, comma-separated. The bucket's CORS rule allows the
+# same origins (deploy/cloudrun.sh).
+UPLOAD_ORIGINS = {o.strip() for o in os.getenv("UPLOAD_ORIGINS", "").split(",") if o.strip()}
 AVATARS_DIR = Path(os.getenv("AVATARS_DIR", "data/avatars"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 
