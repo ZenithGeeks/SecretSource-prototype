@@ -59,15 +59,18 @@ reader never learns the paper cited a source that settles the claim.
 
 | Rule | Number | Why this number |
 | --- | --- | --- |
-| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with ColBERT 64/300 (#490) on 17 Oct 2026: 12, 12, 12 |
+| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with caption passages (SCRUM-343) on 18 Oct 2026: 12, 12, 12 |
 
 The 13 rows in `docs/eval/decisive-checks.csv` are the checks production rated backed (9) or
 contradicted (4) on arXiv 2409.12191, 2407.01449 and 2112.01488. They are production's verdicts,
 not human labels, so this rule checks that verdicts stay put, not that they are right. Two rows
 were corrected by hand in #490: production said contradicted for the ColBERT check (2004.12832)
 and the DensePhrases check (2021.acl-long.518), but both claims hold, so they now expect backed.
-With the corrected labels, ColBERT 32/180 keeps 10. The row 64/300 does not keep is the MTEB
-check (2210.07316): production said contradicted, 64/300 says insufficient in all 3 runs.
+A third was corrected in SCRUM-343: production said contradicted for the late-interaction engines
+check (2304.01982), but the sentence it rests on is about plain ColBERT scoring, not the engines
+the claim names, so it now expects insufficient. With these labels, ColBERT 32/180 and 64/300
+with plain 120-word windows each keep 11. The row that is not kept is the MTEB check (2210.07316):
+production said contradicted, the current pipeline says insufficient in all 3 runs.
 
 This rule blocks a merge. Raise the number when a change keeps more; lowering it needs its own
 pull request with the reason.

@@ -6,7 +6,7 @@ paper,claim,source,expected
 2407.01449,Mapping latent representations of textual content to corresponding representations of visual content has been done by aligning disjoint visual and text encoders through contrastive losses.,10.48550/ARXIV.2303.15343,supports
 2407.01449,Mapping latent representations of textual content to corresponding representations of visual content has been done by aligning disjoint visual and text encoders through contrastive losses.,10.48550/ARXIV.2103.00020,supports
 2407.01449,Optimized late interaction engines enable scaling corpus sizes to millions of documents with reduced latency degradations.,2205.09707,supports
-2407.01449,Optimized late interaction engines enable scaling corpus sizes to millions of documents with reduced latency degradations.,2304.01982,refutes
+2407.01449,Optimized late interaction engines enable scaling corpus sizes to millions of documents with reduced latency degradations.,2304.01982,insufficient
 2407.01449,The memory footprint of the naive ColBERT indexing strategy can be improved through compression and clustering mechanisms.,2205.09707,supports
 2407.01449,The memory footprint of the naive ColBERT indexing strategy can be improved through compression and clustering mechanisms.,2409.14683,supports
 2112.01488,"Late interaction was introduced in ColBERT, where queries and documents are encoded into multi-vector representations.",10.1145/3397271.3401075,supports
