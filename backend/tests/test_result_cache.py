@@ -163,6 +163,18 @@ def test_judge_is_cached_by_claim_and_evidence_together(monkeypatch):
     assert len(calls) == 2
 
 
+def test_the_judge_instructions_are_part_of_its_cache_key(monkeypatch):
+    keys = []
+    monkeypatch.setattr(verify.store, "cache_key", lambda *parts: keys.append(parts) or "key")
+    answer = _FakePrediction(verdict="supports", quote="q", reasoning="r")
+    _stub_dspy(monkeypatch, [], lambda claim, evidence: answer)
+
+    verify._build_judge()("claim A", ["evidence 1"])
+
+    # A reworded prompt must not read answers cached under the old one.
+    assert any("Before answering" in part for part in keys[0])
+
+
 def test_a_claim_with_the_cited_mark_gets_the_citation_aware_judge(monkeypatch):
     import dspy
 

@@ -164,7 +164,13 @@ def _build_judge():
     class JudgeClaim(dspy.Signature):
         """Decide whether the cited paper's passages support the claim made about it.
         Answer "supports" only if a passage states it, "refutes" if a passage contradicts it,
-        and "insufficient" if the passages do not settle the question."""
+        and "insufficient" if the passages do not settle the question.
+        Before answering "supports", check each number, each comparison (more or less, higher
+        or lower, easy or hard), each direction (from A to B) and what each value belongs to:
+        the row and column of a table, or the item that "respectively" pairs it with. If any
+        of them differs from the passage, the passage contradicts the claim. A claim that
+        leaves out details the passage gives is not contradicted by that. The claim may use
+        different words than the passage; judge whether it means the same thing."""
 
         claim: str = dspy.InputField(desc="A claim that cites the source paper")
         evidence: list[str] = dspy.InputField(desc="Passages from the cited paper")
@@ -195,14 +201,14 @@ def _build_judge():
 
     # Only the Author check marks the citation (#437). A paper analysis keeps the first
     # judge until labeled data (#423) can score the second one on its claims.
-    judges = {
-        "judge": dspy.ChainOfThought(JudgeClaim),
-        "judge-cited": dspy.ChainOfThought(JudgeCitedClaim),
-    }
+    signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim}
+    judges = {name: dspy.ChainOfThought(signature) for name, signature in signatures.items()}
 
     def run(claim: str, evidence: list[str]) -> dict:
         name = "judge-cited" if CITED_MARK in claim else "judge"
-        key = store.cache_key(name, VLLM_MODEL, claim, "\x00".join(evidence))
+        # The instructions are in the key, so a reworded prompt never reads the old prompt's answers.
+        instructions = signatures[name].instructions
+        key = store.cache_key(name, VLLM_MODEL, instructions, claim, "\x00".join(evidence))
         if (cached := store.recall_cache(key)) is not None:
             return cached
         with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
