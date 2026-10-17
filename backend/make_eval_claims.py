@@ -34,6 +34,14 @@ TRANSIENT = (LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError)
 PROSE_WORDS = frozenset({"the", "is", "are", "we", "this", "that", "which", "our", "it", "was", "be", "can"})
 # Same pattern as CAPTION in services/colbert/store.py, which starts a passage at each caption.
 CAPTION = re.compile(r"^\s*(?:Figure|Fig\.|Table)\s*(?:\d+|[IVX]+)\s*[.:|]", re.I)
+# A caption that opens with a field name shows a dataset example ("Figure 2: Caption: The cow is
+# ahead of the person. Label: False."). caption_text() cuts the label off, so the example would
+# read as a fact.
+EXAMPLE_CAPTION = re.compile(
+    r"^\s*(?:Figure|Fig\.|Table)\s*(?:\d+|[IVX]+)\s*[.:|]\s*"
+    r"(?:Caption|Label|Question|Answer|Input|Output|Prompt|Instruction|Q|A)\s*:",
+    re.I,
+)
 WORD = re.compile(r"[a-z0-9]+")
 CAPTION_WORDS = 25
 
@@ -114,8 +122,13 @@ def sample_passages(passages: list[dict], per_paper: int) -> list[dict]:
 
 
 def sample_captions(passages: list[dict], sample: int) -> list[dict]:
-    """Up to `sample` caption passages, cut to their caption text, the same ones every run."""
-    captions = [{**p, "text": caption_text(p["text"])} for p in passages if CAPTION.match(p["text"])]
+    """Up to `sample` caption passages, cut to their caption text, the same ones every run.
+    Captions of dataset examples are skipped."""
+    captions = [
+        {**p, "text": caption_text(p["text"])}
+        for p in passages
+        if CAPTION.match(p["text"]) and not EXAMPLE_CAPTION.match(p["text"])
+    ]
     captions = [c for c in captions if len(c["text"].split()) >= 6]
     return random.Random(SEED).sample(captions, min(sample, len(captions)))
 
