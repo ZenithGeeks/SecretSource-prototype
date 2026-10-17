@@ -897,15 +897,34 @@ def _section_of(source: dict | None, headings: list[dict], sizes: dict[int, tupl
 
 
 def _paragraph_text(paragraph) -> str:
-    """Paragraph text with each citation <ref target="#b12"> rendered as [b12]."""
+    """Paragraph text with each citation <ref target="#b12"> rendered as [b12]. A citation
+    with no target leaves no citation text behind (#481)."""
     parts = [paragraph.text or ""]
     for child in paragraph:
-        if child.tag == TEI_TAG + "ref" and child.get("type") == "bibr" and child.get("target"):
-            parts.append("[" + child.get("target").lstrip("#") + "]")
+        text = "".join(child.itertext())
+        if child.tag == TEI_TAG + "ref" and child.get("type") == "bibr":
+            target = child.get("target")
+            parts.append("[" + target.lstrip("#") + "]" if target else _without_citation(text))
         else:
-            parts.append("".join(child.itertext()))
+            parts.append(text)
         parts.append(child.tail or "")
     return "".join(parts)
+
+
+CITATION_YEAR = re.compile(r"\b(?:19|20)\d\d")
+
+
+def _without_citation(text: str) -> str:
+    """What to keep of a citation GROBID could not link: a name written before its bracket
+    ("HallusionBench" in "HallusionBench (Guan et al., 2023)"), and nothing of the citation.
+
+    Its raw text ("OpenAI., 2023;") used to stay in the paper text, then in the claim, and
+    then in the retrieval query, where it matched reference-list entries.
+    """
+    before, bracket, _ = text.partition("(")
+    if bracket:
+        return before
+    return "" if CITATION_YEAR.search(text) else text
 
 
 def _body_text(tei) -> str:
