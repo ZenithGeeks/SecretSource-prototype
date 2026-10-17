@@ -3,7 +3,7 @@
 Two evals that decided #490 and #492:
 
 - **Retrieval**: is the passage a claim was written from among the 4 passages the judge gets? It scores ColBERT alone, so it can compare encoders, passage cutting and rerankers.
-- **Verdicts**: does the whole pipeline, retrieval and judge, return the claim's known verdict? `backend/eval_generated.py` runs 433 claims. `backend/eval_decisive.py` (13 real production checks) stays the merge gate in `CONSTRAINTS.md`.
+- **Verdicts**: does the whole pipeline, retrieval and judge, return the claim's known verdict? `backend/eval_generated.py` runs 426 claims. `backend/eval_decisive.py` (13 real production checks) stays the merge gate in `CONSTRAINTS.md`.
 
 The claims were written by the project LLM from passages of the 28 papers in `papers.csv`. A "supports" claim restates its passage; a "refutes" claim changes one fact in it. So the kind is the expected verdict and the passage index is the retrieval gold, and neither comes from a retriever.
 
@@ -14,8 +14,8 @@ ColBERT settings are written query/passage token limits: "64/300" is `QUERY_LEN,
 | File | What |
 |---|---|
 | `papers.csv` | The 28 PDFs: file name as saved in `data/papers`, and source URL |
-| `claims.jsonl` | 282 claims from 168 prose passages: `id`, `paper`, `gold` (passage index), `kind`, `text` |
-| `caption-claims.jsonl` | 151 claims from 300 sampled figure and table captions; `caption` is the caption text a passage must hold whole to count |
+| `claims.jsonl` | 278 claims from 168 prose passages: `id`, `paper`, `gold` (passage index), `kind`, `text` |
+| `caption-claims.jsonl` | 148 claims from 300 sampled figure and table captions; `caption` is the caption text a passage must hold whole to count |
 
 `gold` in `claims.jsonl` indexes passages cut with 120-word windows and no caption breaks, the `pdf_passages` of #490 (commit 5ae4133). To score it, export passages with that version of `services/colbert/store.py`. Caption claims are scored by caption text, so they work with any cutting.
 
@@ -86,6 +86,7 @@ Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs (run-to-r
 
 ## Caveats
 
+- The results above were measured on the first 433 claims. Reading the 19 claims that failed in every run showed 7 whose expected verdict was wrong, so they were removed: two Visual-spatial-reasoning dataset examples labelled "False" taken as facts, two "refutes" claims that another passage of the paper states as true, one "supports" claim that overstates its passage, and two ambiguous ones. The other 12 are real pipeline errors.
 - The claims are LLM-written and each has one gold passage. A broad claim can be supported by other passages too, so a retrieval "miss" is sometimes a fair answer.
 - These claims may favour LLM-based retrievers: jina-v4 led here and was worst on the real rows.
 - Verdict runs use the shared LLM gateway. Gateway failures show up as "error" verdicts; read the confusion counts before comparing two runs.
