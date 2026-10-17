@@ -11,6 +11,7 @@ name replaces its old passages.
 
 import hashlib
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,17 @@ from pypdf import PdfReader
 from vectorfiles import PaperFiles, maxsim
 
 WORDS_PER_PASSAGE = 120
+# Part of the content hash, so a PDF indexed before a change to how passages are cut is
+# indexed again the next time it is asked for. 2: reference lists are left out (#476).
+PASSAGES_VERSION = "2"
+
+REFERENCES_HEADING = re.compile(
+    r"^\s*(?:\d+\.?\s*)?(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.M
+)
+YEAR = re.compile(r"\b(19[5-9]\d|20[0-3]\d)[a-z]?\b")
+PROSE_WORDS = frozenset(
+    {"the", "is", "are", "we", "this", "that", "which", "our", "it", "was", "be", "can", "these", "its", "as"}
+)
 
 
 def _word_spans(text: str) -> list[tuple[int, int]]:
@@ -32,15 +44,46 @@ def _word_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _is_bibliography(words: list[str]) -> bool:
+    """Whether a passage reads like reference-list entries: almost no prose words and many
+    years. Tables have few prose words too, but no years, so they stay.
+
+    The thresholds come from six arXiv papers (#476): 114 of 134 reference passages fall
+    under them, and 4 of 208 appendix passages (JSON with dates, a licence list).
+    """
+    prose = sum(word.lower().strip(".,;:()") in PROSE_WORDS for word in words) / len(words)
+    years = len(YEAR.findall(" ".join(words))) / len(words)
+    return prose < 0.03 and years >= 0.015
+
+
 def pdf_passages(path: Path) -> list[dict]:
     """PDF -> ~120-word passages. Each one knows its page and where on that page it sits.
-    We chunk per page: a passage that crossed a page break could not name one page."""
+    We chunk per page: a passage that crossed a page break could not name one page.
+
+    After the References heading, passages that read like reference entries are left out.
+    They matched claims full of model names and took the evidence slots from the body text
+    (#476). An appendix after the references is still indexed.
+    """
     passages = []
+    in_references = False
     for number, page in enumerate(PdfReader(path).pages, start=1):
         text = page.extract_text() or ""
         words, spans = text.split(), _word_spans(text)
-        for i in range(0, len(words), WORDS_PER_PASSAGE):
-            chunk = words[i : i + WORDS_PER_PASSAGE]
+        references_from = len(words)  # the first word of the reference list on this page
+        if in_references:
+            references_from = 0
+        elif heading := REFERENCES_HEADING.search(text):
+            in_references, references_from = True, len(text[: heading.end()].split())
+        # A passage starts at the heading, so none holds both body text and reference entries.
+        starts = [
+            *range(0, references_from, WORDS_PER_PASSAGE),
+            *range(references_from, len(words), WORDS_PER_PASSAGE),
+        ]
+        for i in starts:
+            stop = references_from if i < references_from else len(words)
+            chunk = words[i : min(i + WORDS_PER_PASSAGE, stop)]
+            if i >= references_from and _is_bibliography(chunk):
+                continue
             passages.append(
                 {
                     "text": " ".join(chunk),
@@ -68,7 +111,7 @@ class Store:
         regardless of which process asks.
         """
         path = Path(path)
-        content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        content_hash = hashlib.sha256(PASSAGES_VERSION.encode() + path.read_bytes()).hexdigest()
         stored_hash, stored_count = self.files.stored_hash(path.name)
         if stored_hash == content_hash:
             return stored_count
