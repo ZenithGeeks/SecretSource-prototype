@@ -7,7 +7,7 @@ import { useState } from 'react'
 import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
 import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
-import { answersFor, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
+import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
 import { AuthorizedImage } from './AuthorizedImage'
@@ -380,11 +380,14 @@ function CitedWork({
   citation,
   verdict,
   failure,
+  named = false,
   onShow,
 }: {
   citation: Citation
   verdict?: Verdict
   failure?: Unchecked
+  /** The claim only names this work as something the paper used, so it was not checked. */
+  named?: boolean
   onShow?: (target: Target) => void
 }) {
   const link = citationLink(citation)
@@ -411,7 +414,12 @@ function CitedWork({
       </p>
       {verdict && <Answer verdict={verdict} onShow={onShow} />}
       {failure && <Failure failure={failure} />}
-      {!verdict && !failure && (
+      {!verdict && !failure && named && (
+        <p className="mt-1 text-xs text-ink-muted">
+          Not checked — the claim only names this as something the paper used.
+        </p>
+      )}
+      {!verdict && !failure && !named && (
         <p className="mt-1 text-xs text-ink-muted">Not checked — verification did not run.</p>
       )}
     </li>
@@ -621,7 +629,8 @@ export function ClaimCard({
             const answers = answersFor(claim, citation)
             // The card already leads with this one's quote, explanation and pages.
             if (answers.verdict && answers.verdict === primary) return null
-            return <CitedWork key={i} citation={citation} onShow={onShow} {...answers} />
+            const named = (claim.named ?? []).includes(citedAs(citation))
+            return <CitedWork key={i} citation={citation} named={named} onShow={onShow} {...answers} />
           })}
         </ul>
       )}

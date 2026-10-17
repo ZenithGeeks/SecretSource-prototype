@@ -12,6 +12,7 @@ import re
 from collections import Counter, defaultdict
 
 from app.pipeline.claims import _tokens
+from app.pipeline.verify import checked_citations
 
 UNSORTED = "unsorted"  # the project that holds every paper not put in a project
 MATCH = 0.34  # share of a question's words a claim must contain to count as an answer
@@ -54,7 +55,14 @@ def standing(claim: dict) -> str:
 
 
 def tally(papers: list[dict]) -> dict:
-    counts = Counter(standing(claim) for paper in papers for claim in paper.get("claims", []))
+    """Claims per standing. A claim whose citations only name what the paper used (#475) had
+    nothing to check, so it is left out rather than counted as unchecked."""
+    counts = Counter(
+        standing(claim)
+        for paper in papers
+        for claim in paper.get("claims", [])
+        if claim.get("verdicts") or claim.get("unchecked") or not _only_names(claim)
+    )
     return {name: counts.get(name, 0) for name in ("backed", "silent", "contradicted", "unchecked")}
 
 
@@ -134,6 +142,10 @@ def _cited_work(claim: dict, verdict: dict) -> dict:
 def _page(verdict: dict) -> str:
     evidence = verdict.get("evidence") or []
     return f"p.{evidence[0]['page']}" if evidence and evidence[0].get("page") else ""
+
+
+def _only_names(claim: dict) -> bool:
+    return bool(claim.get("named")) and not checked_citations(claim)
 
 
 # --- Home ----------------------------------------------------------------------------

@@ -51,6 +51,7 @@ export type Claim = {
   citations: Citation[]
   verdicts?: Verdict[]
   unchecked?: Unchecked[] // cited works we tried and could not read
+  named?: string[] // cited works the claim only names as something the paper uses; not checked (#475)
   sentence?: string // the paper's own wording, which the claim paraphrases
   section?: string // the number of the section the sentence is in, e.g. "3.1" (#152)
   source?: Source | null // null when that sentence could not be found in the PDF

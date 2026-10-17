@@ -63,3 +63,14 @@ def test_the_planners_skip_named_citations():
     claim = {**_claim("We train on MS MARCO", "MS MARCO", "ColBERT"), "named": ["MS MARCO"]}
 
     assert checked_citations(claim) == [({"title": "ColBERT"}, "ColBERT")]
+
+
+def test_the_library_tally_leaves_out_claims_that_only_name_what_they_use():
+    from app import researcher
+
+    own = {**_claim("We train on MS MARCO", "MS MARCO"), "named": ["MS MARCO"]}
+    silent = {**_claim("ColBERT encodes tokens", "ColBERT"), "verdicts": [{"verdict": "insufficient"}]}
+
+    assert researcher.tally([{"claims": [own, silent]}]) == {
+        "backed": 0, "silent": 1, "contradicted": 0, "unchecked": 0,
+    }

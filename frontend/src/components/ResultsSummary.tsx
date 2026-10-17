@@ -31,6 +31,7 @@ const COUNT_STYLES: Record<Standing, string> = {
   insufficient: 'text-insufficient',
   supports: 'text-supports',
   unchecked: 'text-ink-muted',
+  named: 'text-ink-muted',
   uncited: 'text-ink-muted',
 }
 
@@ -115,6 +116,7 @@ function headline(counts: Record<Standing, number>) {
   if (counts.unchecked) {
     return `${counts.unchecked} ${plural(counts.unchecked, 'claim', 'claims')} could not be checked`
   }
+  if (!counts.supports) return 'No claim cites a work that could be checked against it'
   return 'Every checked citation says what the paper says it does'
 }
 
@@ -123,10 +125,12 @@ const BAR_STYLES: Record<Standing, string> = {
   insufficient: 'bg-insufficient',
   supports: 'bg-supports',
   unchecked: 'bg-neutral',
+  named: 'bg-neutral',
   uncited: 'bg-neutral',
 }
 
-/** The four kinds the design counts; "no citation" joins them only when the paper has such a claim. */
+/** The four kinds the design counts; "names what it uses" and "no citation" join them only
+ * when the paper has such a claim. */
 const TILES: Standing[] = ['refutes', 'insufficient', 'supports', 'unchecked']
 
 function ResearcherSummary({
@@ -140,7 +144,7 @@ function ResearcherSummary({
 }: SummaryProps & { actionsInToolbar: boolean }) {
   // Only fetched when there is no page viewer to open it in; the link needs the user's token.
   const pdf = useAuthorizedUrl(paper && !onOpenPaper ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined)
-  const kinds = counts.uncited ? [...TILES, 'uncited' as const] : TILES
+  const kinds = [...TILES, ...(['named', 'uncited'] as const).filter((kind) => counts[kind] > 0)]
 
   const actions = (
     <>

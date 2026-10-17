@@ -15,6 +15,7 @@ const DOT: Record<Standing, string> = {
   insufficient: 'bg-insufficient',
   supports: 'bg-supports',
   unchecked: 'bg-neutral',
+  named: 'bg-neutral',
   uncited: 'bg-neutral',
 }
 
