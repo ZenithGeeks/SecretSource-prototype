@@ -15,7 +15,10 @@ from transformers import AutoModel, AutoTokenizer, logging
 logging.set_verbosity_error()  # hides the expected "linear.weight UNEXPECTED" note (we load it by hand)
 
 CHECKPOINT = "colbert-ir/colbertv2.0"
-QUERY_LEN, DOC_LEN = 32, 180  # from the checkpoint's artifact.metadata
+# The checkpoint was trained at 32/180. 180 cut 120 of 171 real passages (median 197 wordpieces);
+# the ColBERTv2 paper used 300 on BEIR and 64-token queries for claims. 300/64 ranked the right
+# passage in the top 4 for 0.965 of 282 claims vs 0.936 at 32/180, and 0.763 vs 0.697 on SciFact.
+QUERY_LEN, DOC_LEN = 64, 300
 
 
 class Encoder:
@@ -48,7 +51,7 @@ class Encoder:
         return F.normalize(hidden, dim=-1).cpu(), batch["input_ids"].cpu(), batch["attention_mask"].cpu()
 
     def query(self, text: str) -> torch.Tensor:
-        """-> [32, 128]"""
+        """-> [QUERY_LEN, 128]"""
         return self._run([text], self.q_marker, QUERY_LEN, "max_length")[0][0]
 
     def docs(self, texts: list[str], batch_size: int = 16) -> list[torch.Tensor]:
