@@ -36,7 +36,7 @@ def _histogram_count(histogram):
 @pytest.fixture
 def stub_pipeline(monkeypatch):
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
-    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(main, "prepare_source", lambda s: {"status": "ok", "path": s})
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     findings = [{"kind": "claim-limit"}, {"kind": "ungrounded-quote"}]

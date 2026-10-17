@@ -6,6 +6,7 @@ UI can show the place instead of telling the reader to go looking.
 """
 
 import hashlib
+import logging
 import re
 import time
 import unicodedata
@@ -20,7 +21,7 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import local_pdf, tool_error
+from app.pipeline.sources import local_pdf, lookup_key, tool_error
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -31,8 +32,11 @@ NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertio
 # each other. The cap keeps a long paper from opening a connection per window.
 EXTRACT_WORKERS = 3
 
+logger = logging.getLogger(__name__)
+
 _claim_extractor = None  # lazy: needs dspy and a running LM
 _cited_claim_extractor = None
+_citation_roles = None
 
 
 def _windows(text: str, size: int = MAX_CHARS) -> list[str]:
@@ -984,6 +988,124 @@ def _build_cited_claim_extractor():
     return run
 
 
+def _build_citation_roles():
+    import dspy
+
+    from app.llm import dspy_lm
+
+    language_model = dspy_lm(temperature=0.0, max_tokens=3000)
+
+    class ClaimRoles(pydantic.BaseModel):
+        claim: int = Field(description="The claim's number")
+        about_this_paper: bool = Field(
+            description="True when the claim is about this paper's own results, setup or design"
+        )
+        named: list[int] = Field(
+            description="When about_this_paper: the numbers of its citations that only name something"
+        )
+
+    class CitationRoles(dspy.Signature):
+        """For each claim, decide whether it is about this paper's own work, and if so, which of
+        its citations only name something this paper uses.
+
+        A claim is about this paper's own work when it states this paper's results, its
+        evaluation setup or its design, often with "we", "our" or this paper's model name.
+        A claim is not about this paper when it describes other work: what a cited model,
+        dataset or benchmark is, how it works or what it was trained on; what other systems
+        do; what earlier work found; the state of a field. Its citations are all checked.
+        In a claim about this paper's own work, a citation only names something when the
+        cited work just identifies a benchmark, dataset, metric, model or technique this paper
+        uses, so it cannot show this paper's claim true or false. If the claim also says what
+        the cited work is, measures or does (for example that a benchmark tests college-level
+        reasoning), the cited work can show that part, so it is not named.
+        When unsure, say the claim is not about this paper."""
+
+        paper: str = dspy.InputField(desc="The title of the paper the claims come from")
+        claims: str = dspy.InputField(desc="Numbered claims from the paper, each with its numbered citations")
+        roles: list[ClaimRoles] = dspy.OutputField(desc="One entry for every numbered claim")
+
+    classify = dspy.ChainOfThought(CitationRoles)
+
+    def run(title: str, claims: list[dict]) -> list[set[int]]:
+        listing = _claims_with_citations(claims)
+        # The prompt is in the key, so a reworded prompt never reads the old answers.
+        key = store.cache_key("citation-roles", VLLM_MODEL, CitationRoles.__doc__, title, listing)
+        if (cached := store.recall_cache(key)) is None:
+            with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+                roles = classify(paper=title, claims=listing).roles
+            record_llm_usage("citation-roles", usage)
+            cached = {"roles": [entry.model_dump() for entry in roles]}
+            store.remember_cache(key, cached)
+        positions = [set() for _ in claims]
+        for entry in cached["roles"]:
+            if entry["about_this_paper"] and 1 <= entry["claim"] <= len(claims):
+                positions[entry["claim"] - 1] = {number - 1 for number in entry["named"]}
+        return positions
+
+    return run
+
+
+def _claims_with_citations(claims: list[dict]) -> str:
+    """The claims as the citation-role model reads them: the paper's own sentence, then each
+    cited work's title. A claim without citations is left out but keeps its number."""
+    lines = []
+    for number, claim in enumerate(claims, 1):
+        if not claim["citations"]:
+            continue
+        sentence = re.sub(r"\s*\[b\d+\]", "", claim["sentence"] or claim["claim"]).strip()
+        lines.append(f"{number}. {sentence}")
+        for position, citation in enumerate(claim["citations"], 1):
+            year = f" ({citation['year']})" if citation.get("year") else ""
+            lines.append(f"   [{position}] {citation.get('title') or citation.get('url', '')}{year}")
+    return "\n".join(lines)
+
+
+def _mark_named_citations(title: str, claims: list[dict]) -> None:
+    """Set each claim's `named`: the lookup keys of its citations that only name a benchmark,
+    dataset, model or technique the paper uses. Those are not checked, because the cited work
+    cannot say what this paper found or did with it (#475).
+
+    When the model call fails, nothing is named and every citation is checked, as before.
+    """
+    global _citation_roles
+    from dspy.utils.exceptions import DSPyError
+
+    for claim in claims:
+        claim["named"] = []
+    if not any(claim["citations"] for claim in claims):
+        return
+    try:
+        if _citation_roles is None:
+            _citation_roles = _build_citation_roles()
+        roles = _citation_roles(title, claims)
+    except DSPyError as error:
+        logger.warning("citation roles failed, checking every citation: %r", error)
+        return
+    for claim, positions in zip(claims, roles, strict=True):
+        if not _says_own_work(claim["sentence"] or claim["claim"], title):
+            continue
+        claim["named"] = [
+            source
+            for position, citation in enumerate(claim["citations"])
+            if position in positions and (source := lookup_key(citation))
+        ]
+
+
+OWN_WORK = re.compile(r"\b(we|our|us|this (paper|work))\b", re.I)
+
+
+def _says_own_work(sentence: str, title: str) -> bool:
+    """Whether the sentence itself shows it is about this paper: "we", "our", or the model
+    name a title like "ColPali: Efficient ..." starts with.
+
+    The model also says so, but it mixed up a paper's model with the one it builds on
+    ("the naive ColBERT indexing strategy" in the ColPali paper), and naming that citation
+    skipped a check that backed the claim. A skipped check is never seen, so both must agree.
+    """
+    name = title.split(":")[0].strip() if ":" in title else ""
+    return bool(OWN_WORK.search(sentence) or (name and name.lower() in sentence.lower()))
+
+
 def _cited_claim(extracted, references: dict, cited: list[str], pdf_path: str) -> dict:
     raw_claim, sentence = extracted.claim, extracted.sentence
     marker_ids = _markers_for(raw_claim, sentence, cited)
@@ -1099,6 +1221,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         )
         header = _paper_header(tei)
         header["title"] = paper_title(pdf_path, header["title"], given)
+        _mark_named_citations(header["title"], claims)
         headings, sizes = _outline(tei, pdf_path), _page_sizes(tei)
         for claim in claims:
             if section := _section_of(claim["source"], headings, sizes):

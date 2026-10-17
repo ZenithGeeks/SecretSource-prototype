@@ -36,8 +36,7 @@ from app.config import PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations
 from app.pipeline.figures import paper_figures
-from app.pipeline.sources import lookup_key
-from app.pipeline.verify import check_prepared, fold_check, prepare_source
+from app.pipeline.verify import check_prepared, checked_citations, fold_check, prepare_source
 
 
 @node
@@ -79,10 +78,9 @@ def plan_checks(ctx: Context, claims: list[dict], verify: bool = True) -> list[s
     jobs = []
     if verify:
         for index, claim in enumerate(claims):
-            for citation in claim["citations"]:
-                if source := lookup_key(citation):
-                    url = citation.get("url", "")
-                    jobs.append({"claim": index, "text": claim["claim"], "source": source, "url": url})
+            for citation, source in checked_citations(claim):
+                url = citation.get("url", "")
+                jobs.append({"claim": index, "text": claim["claim"], "source": source, "url": url})
     ctx.state["jobs"] = jobs
     return list(dict.fromkeys(job["source"] for job in jobs))
 

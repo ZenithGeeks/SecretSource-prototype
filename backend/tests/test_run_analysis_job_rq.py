@@ -40,7 +40,7 @@ def stubbed_pipeline(monkeypatch):
 
     monkeypatch.setattr(main.store, "save", save)
     monkeypatch.setattr(main, "extract_claims_with_citations", extract)
-    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
     monkeypatch.setattr(
         main, "check_prepared",
