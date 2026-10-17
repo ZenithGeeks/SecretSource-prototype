@@ -8,11 +8,14 @@ parts of them. So switching backends changes the storage calls here and nothing 
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 # Backend selection.
@@ -36,6 +39,23 @@ def _supabase():
             os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"]
         )
     return _client
+
+
+def _execute_with_retry(query):
+    """Run a Supabase query, and once more if the server dropped the connection.
+
+    The client keeps one HTTP/2 connection for every thread. When Supabase closes it, the
+    next request fails with httpx.RemoteProtocolError("Server disconnected"), and asking
+    again opens a new one. Every query here is a select, an upsert or a delete, so running
+    it twice leaves the same rows. A delete whose first answer was lost answers "no rows" the
+    second time, so delete() can say False for a row it did remove.
+    """
+    import httpx
+
+    try:
+        return query.execute()
+    except httpx.RemoteProtocolError:
+        return query.execute()
 
 
 # SQLite.
@@ -133,9 +153,9 @@ def _sqlite():
 # Public API.
 def save(analysis: dict) -> None:
     if _use_supabase():
-        _supabase().table("analyses").upsert(
+        _execute_with_retry(_supabase().table("analyses").upsert(
             {"id": analysis["id"], "data": analysis}
-        ).execute()
+        ))
         return
     with _sqlite() as database:
         database.execute(
@@ -149,7 +169,7 @@ def save(analysis: dict) -> None:
 def load(analysis_id: str) -> dict | None:
     """One stored analysis, or None if there is no such row."""
     if _use_supabase():
-        rows = _supabase().table("analyses").select("data").eq("id", analysis_id).execute().data
+        rows = _execute_with_retry(_supabase().table("analyses").select("data").eq("id", analysis_id)).data
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute("SELECT data FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
@@ -159,7 +179,7 @@ def load(analysis_id: str) -> dict | None:
 def load_all() -> dict[str, dict]:
     """Every stored analysis, oldest first, keyed by id."""
     if _use_supabase():
-        rows = _supabase().table("analyses").select("started,data").order("started").execute().data
+        rows = _execute_with_retry(_supabase().table("analyses").select("started,data").order("started")).data
         analyses = [row["data"] for row in rows]
         for row, analysis in zip(rows, analyses, strict=True):
             analysis.setdefault("started", row.get("started"))
@@ -174,7 +194,7 @@ def load_all() -> dict[str, dict]:
 
 def delete(analysis_id: str) -> bool:
     if _use_supabase():
-        deleted = _supabase().table("analyses").delete().eq("id", analysis_id).execute().data
+        deleted = _execute_with_retry(_supabase().table("analyses").delete().eq("id", analysis_id)).data
         return bool(deleted)
     with _sqlite() as database:
         deleted = database.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,)).rowcount
@@ -185,7 +205,7 @@ def delete(analysis_id: str) -> bool:
 def remember_source(key: str, resolution: dict) -> None:
     """Where a cited work's PDF lives, so a re-run does not ask a rate-limited API again."""
     if _use_supabase():
-        _supabase().table("sources").upsert({"key": key, "data": resolution}).execute()
+        _execute_with_retry(_supabase().table("sources").upsert({"key": key, "data": resolution}))
         return
     with _sqlite() as database:
         database.execute(
@@ -198,7 +218,7 @@ def remember_source(key: str, resolution: dict) -> None:
 
 def recall_source(key: str) -> dict | None:
     if _use_supabase():
-        rows = _supabase().table("sources").select("data").eq("key", key).limit(1).execute().data
+        rows = _execute_with_retry(_supabase().table("sources").select("data").eq("key", key).limit(1)).data
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute("SELECT data FROM sources WHERE key = ?", (key,)).fetchone()
@@ -208,7 +228,7 @@ def recall_source(key: str) -> dict | None:
 def forget_source(key: str) -> None:
     """Drop a cited work's cached location, so the next run looks it up again."""
     if _use_supabase():
-        _supabase().table("sources").delete().eq("key", key).execute()
+        _execute_with_retry(_supabase().table("sources").delete().eq("key", key))
         return
     with _sqlite() as database:
         database.execute("DELETE FROM sources WHERE key = ?", (key,))
@@ -224,9 +244,18 @@ def cache_key(*parts: str) -> str:
 def remember_cache(key: str, data: dict) -> None:
     """A GROBID parse or an LLM call's result, so the identical input never repeats the call.
     Same key/data-blob shape as `sources`, in its own table since these come from a different
-    part of the pipeline (app/pipeline/claims.py, app/pipeline/verify.py) and never mix."""
+    part of the pipeline (app/pipeline/claims.py, app/pipeline/verify.py) and never mix.
+
+    A failed write is logged and skipped: the result is still returned to the caller, and the
+    next run only repeats the call.
+    """
     if _use_supabase():
-        _supabase().table("cache").upsert({"key": key, "data": data}).execute()
+        import httpx
+
+        try:
+            _execute_with_retry(_supabase().table("cache").upsert({"key": key, "data": data}))
+        except httpx.TransportError as error:
+            logger.warning("cache write for %s failed: %r", key[:12], error)
         return
     with _sqlite() as database:
         database.execute(
@@ -238,8 +267,16 @@ def remember_cache(key: str, data: dict) -> None:
 
 
 def recall_cache(key: str) -> dict | None:
+    """The cached result for `key`, or None. A failed read counts as a miss, so a dropped
+    connection costs one repeated call instead of the whole analysis."""
     if _use_supabase():
-        rows = _supabase().table("cache").select("data").eq("key", key).limit(1).execute().data
+        import httpx
+
+        try:
+            rows = _execute_with_retry(_supabase().table("cache").select("data").eq("key", key).limit(1)).data
+        except httpx.TransportError as error:
+            logger.warning("cache read for %s failed, treating it as a miss: %r", key[:12], error)
+            return None
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute("SELECT data FROM cache WHERE key = ?", (key,)).fetchone()
@@ -250,9 +287,9 @@ def save_project(project: dict) -> None:
     """A researcher's project: its name and the analyses in it. `owner` is the user id, or
     None when login is off."""
     if _use_supabase():
-        _supabase().table("projects").upsert(
+        _execute_with_retry(_supabase().table("projects").upsert(
             {"id": project["id"], "owner": project.get("owner"), "data": project}
-        ).execute()
+        ))
         return
     with _sqlite() as database:
         database.execute(
@@ -268,7 +305,7 @@ def load_projects(owner: str | None) -> list[dict]:
     if _use_supabase():
         query = _supabase().table("projects").select("data")
         query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
-        return [row["data"] for row in query.execute().data]
+        return [row["data"] for row in _execute_with_retry(query).data]
     with _sqlite() as database:
         rows = database.execute(
             "SELECT data FROM projects WHERE owner IS ?", (owner,)
@@ -280,7 +317,7 @@ def delete_project(project_id: str) -> None:
     """One project, by id. The caller checks ownership first (main.py's _project()), so this
     never takes an owner — same split as analyses' _delete_one() vs. delete_projects() below."""
     if _use_supabase():
-        _supabase().table("projects").delete().eq("id", project_id).execute()
+        _execute_with_retry(_supabase().table("projects").delete().eq("id", project_id))
         return
     with _sqlite() as database:
         database.execute("DELETE FROM projects WHERE id = ?", (project_id,))
@@ -293,7 +330,7 @@ def delete_projects(owner: str | None) -> None:
     if _use_supabase():
         query = _supabase().table("projects").delete()
         query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
-        query.execute()
+        _execute_with_retry(query)
         return
     with _sqlite() as database:
         database.execute("DELETE FROM projects WHERE owner IS ?", (owner,))
@@ -309,7 +346,7 @@ def _pref_key(owner: str | None) -> str:
 def save_preferences(owner: str | None, data: dict) -> None:
     key = _pref_key(owner)
     if _use_supabase():
-        _supabase().table("preferences").upsert({"owner": key, "data": data}).execute()
+        _execute_with_retry(_supabase().table("preferences").upsert({"owner": key, "data": data}))
         return
     with _sqlite() as database:
         database.execute(
@@ -323,7 +360,7 @@ def save_preferences(owner: str | None, data: dict) -> None:
 def load_preferences(owner: str | None) -> dict | None:
     key = _pref_key(owner)
     if _use_supabase():
-        rows = _supabase().table("preferences").select("data").eq("owner", key).limit(1).execute().data
+        rows = _execute_with_retry(_supabase().table("preferences").select("data").eq("owner", key).limit(1)).data
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute("SELECT data FROM preferences WHERE owner = ?", (key,)).fetchone()
@@ -344,9 +381,9 @@ def save_author_row(table: str, row: dict) -> None:
     login is off."""
     table = _author_table(table)
     if _use_supabase():
-        _supabase().table(table).upsert(
+        _execute_with_retry(_supabase().table(table).upsert(
             {"id": row["id"], "owner": row.get("owner"), "data": row}
-        ).execute()
+        ))
         return
     with _sqlite() as database:
         database.execute(
@@ -363,7 +400,7 @@ def load_author_rows(table: str, owner: str | None) -> list[dict]:
     if _use_supabase():
         query = _supabase().table(table).select("data")
         query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
-        return [row["data"] for row in query.execute().data]
+        return [row["data"] for row in _execute_with_retry(query).data]
     with _sqlite() as database:
         rows = database.execute(
             f"SELECT data FROM {table} WHERE owner IS ? ORDER BY rowid", (owner,)
@@ -375,7 +412,7 @@ def load_author_row(table: str, row_id: str) -> dict | None:
     """One row by id, whoever owns it: the caller checks the owner (a 404 either way)."""
     table = _author_table(table)
     if _use_supabase():
-        rows = _supabase().table(table).select("data").eq("id", row_id).limit(1).execute().data
+        rows = _execute_with_retry(_supabase().table(table).select("data").eq("id", row_id).limit(1)).data
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute(f"SELECT data FROM {table} WHERE id = ?", (row_id,)).fetchone()
@@ -385,7 +422,7 @@ def load_author_row(table: str, row_id: str) -> dict | None:
 def delete_author_row(table: str, row_id: str) -> bool:
     table = _author_table(table)
     if _use_supabase():
-        deleted = _supabase().table(table).delete().eq("id", row_id).execute().data
+        deleted = _execute_with_retry(_supabase().table(table).delete().eq("id", row_id)).data
         return bool(deleted)
     with _sqlite() as database:
         deleted = database.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,)).rowcount
@@ -399,7 +436,7 @@ def delete_author_rows(owner: str | None) -> None:
         if _use_supabase():
             query = _supabase().table(table).delete()
             query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
-            query.execute()
+            _execute_with_retry(query)
             continue
         with _sqlite() as database:
             database.execute(f"DELETE FROM {table} WHERE owner IS ?", (owner,))
