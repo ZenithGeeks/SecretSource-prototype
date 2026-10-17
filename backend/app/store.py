@@ -360,7 +360,8 @@ def save_preferences(owner: str | None, data: dict) -> None:
 def load_preferences(owner: str | None) -> dict | None:
     key = _pref_key(owner)
     if _use_supabase():
-        rows = _execute_with_retry(_supabase().table("preferences").select("data").eq("owner", key).limit(1)).data
+        query = _supabase().table("preferences").select("data").eq("owner", key).limit(1)
+        rows = _execute_with_retry(query).data
         return rows[0]["data"] if rows else None
     with _sqlite() as database:
         row = database.execute("SELECT data FROM preferences WHERE owner = ?", (key,)).fetchone()
