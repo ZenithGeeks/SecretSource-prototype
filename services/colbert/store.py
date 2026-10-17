@@ -13,6 +13,7 @@ import hashlib
 import os
 import re
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 from encoder import DOC_LEN, Encoder
@@ -20,13 +21,21 @@ from pypdf import PdfReader
 from vectorfiles import PaperFiles, maxsim
 
 WORDS_PER_PASSAGE = 120
+# A last window shorter than this joins the one before it, so a break at a caption leaves no
+# scrap of a few words. At most 159 words, about 255 tokens: inside the encoder's DOC_LEN of 300.
+MIN_TAIL_WORDS = 40
 # Part of the content hash, so a PDF indexed before a change to how passages are cut is
 # indexed again the next time it is asked for. 2: reference lists are left out (#476).
-PASSAGES_VERSION = "2"
+# 3: a figure or table caption starts a new passage (#491).
+PASSAGES_VERSION = "3"
 
 REFERENCES_HEADING = re.compile(
     r"^\s*(?:\d+\.?\s*)?(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.M
 )
+# "Figure 3:", "Fig. 2.", "Table IV |" at the start of a line. The punctuation after the number
+# is what tells a caption from a sentence that refers to one ("Table 3 presents ..."): on 28
+# papers this matched 601 caption lines and left out 60 such references.
+CAPTION = re.compile(r"^\s*(?:Figure|Fig\.|Table)\s*(?:\d+|[IVX]+)\s*[.:|]", re.I | re.M)
 YEAR = re.compile(r"\b(19[5-9]\d|20[0-3]\d)[a-z]?\b")
 PROSE_WORDS = frozenset(
     {"the", "is", "are", "we", "this", "that", "which", "our", "it", "was", "be", "can", "these", "its", "as"}
@@ -56,6 +65,14 @@ def _is_bibliography(words: list[str]) -> bool:
     return prose < 0.03 and years >= 0.015
 
 
+def _windows(start: int, stop: int) -> list[tuple[int, int]]:
+    """(first, end) word positions of the 120-word windows over [start, stop)."""
+    cuts = list(range(start, stop, WORDS_PER_PASSAGE))
+    if len(cuts) > 1 and stop - cuts[-1] < MIN_TAIL_WORDS:
+        cuts.pop()
+    return list(pairwise([*cuts, stop]))
+
+
 def pdf_passages(path: Path) -> list[dict]:
     """PDF -> ~120-word passages. Each one knows its page and where on that page it sits.
     We chunk per page: a passage that crossed a page break could not name one page.
@@ -63,6 +80,9 @@ def pdf_passages(path: Path) -> list[dict]:
     After the References heading, passages that read like reference entries are left out.
     They matched claims full of model names and took the evidence slots from the body text
     (#476). An appendix after the references is still indexed.
+
+    A figure or table caption starts a new passage, so a caption is never split between two
+    passages and its passage begins with the label (#491).
     """
     passages = []
     in_references = False
@@ -74,14 +94,13 @@ def pdf_passages(path: Path) -> list[dict]:
             references_from = 0
         elif heading := REFERENCES_HEADING.search(text):
             in_references, references_from = True, len(text[: heading.end()].split())
-        # A passage starts at the heading, so none holds both body text and reference entries.
-        starts = [
-            *range(0, references_from, WORDS_PER_PASSAGE),
-            *range(references_from, len(words), WORDS_PER_PASSAGE),
-        ]
-        for i in starts:
-            stop = references_from if i < references_from else len(words)
-            chunk = words[i : min(i + WORDS_PER_PASSAGE, stop)]
+        # A passage starts at the heading, so none holds both body text and reference entries,
+        # and at every caption. Each piece between two breaks is cut into 120-word passages.
+        captions = [len(text[: match.start()].split()) for match in CAPTION.finditer(text)]
+        breaks = sorted({0, references_from, len(words), *captions})
+        pieces = [window for start, stop in pairwise(breaks) for window in _windows(start, stop)]
+        for i, stop in pieces:
+            chunk = words[i:stop]
             if i >= references_from and _is_bibliography(chunk):
                 continue
             passages.append(
