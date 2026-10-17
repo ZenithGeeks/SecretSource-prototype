@@ -393,7 +393,7 @@ function CitedWork({
   const link = citationLink(citation)
   return (
     <li>
-      <Label>Cited paper</Label>
+      <Label>Cited work</Label>
       <p className="text-sm text-ink-muted">
         {link ? (
           <a
@@ -640,7 +640,7 @@ export function ClaimCard({
       {/* No reference line here, so the file name is the only way to name the source. */}
       {loose.verdicts.filter((verdict) => verdict !== primary).map((verdict, i) => (
         <div key={`loose-verdict-${i}`}>
-          <Label>Cited paper</Label>
+          <Label>Cited work</Label>
           <p className="truncate text-sm text-ink-muted" title={verdict.source}>
             {verdict.source}
           </p>
@@ -649,7 +649,7 @@ export function ClaimCard({
       ))}
       {loose.failures.map((failure, i) => (
         <div key={`loose-failure-${i}`}>
-          <Label>Cited paper</Label>
+          <Label>Cited work</Label>
           <p className="truncate text-sm text-ink-muted" title={failure.source}>
             {failure.source}
           </p>

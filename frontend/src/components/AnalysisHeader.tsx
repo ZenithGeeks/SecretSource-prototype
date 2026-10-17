@@ -36,7 +36,6 @@ export function AnalysisHeader({ analysis }: { analysis: Analysis }) {
   const file = analysis.file ? paperName(analysis.file) : analysis.paper
   const title = analysis.title || file
   const claims = progress.claims
-  const checked = progress.verdicts.supports + progress.verdicts.refutes + progress.verdicts.insufficient
 
   let label: string
   if (running) label = progress.seconds !== null ? `Analyzing · ${duration(progress.seconds)}` : 'Analyzing'
@@ -45,7 +44,8 @@ export function AnalysisHeader({ analysis }: { analysis: Analysis }) {
 
   const meta = [
     analysis.title ? file : '',
-    running ? '' : `${claims} ${claims === 1 ? 'claim' : 'claims'}${checked ? `, ${checked} ${checked === 1 ? 'citation' : 'citations'} checked` : ''}`,
+    // The summary line under the header has the check counts; one number per idea.
+    running ? '' : `${claims} ${claims === 1 ? 'claim' : 'claims'}`,
   ].filter(Boolean)
 
   return (
