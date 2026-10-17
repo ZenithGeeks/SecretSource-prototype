@@ -1027,6 +1027,8 @@ def _build_citation_roles():
     classify = dspy.ChainOfThought(CitationRoles)
 
     def run(title: str, claims: list[dict]) -> list[set[int]]:
+        """Per claim, the 0-based indexes of its citations that only name something. The
+        prompt numbers claims and citations from 1, so they are converted here, once."""
         listing = _claims_with_citations(claims)
         # The prompt is in the key, so a reworded prompt never reads the old answers.
         key = store.cache_key("citation-roles", VLLM_MODEL, CitationRoles.__doc__, title, listing)
@@ -1036,11 +1038,11 @@ def _build_citation_roles():
             record_llm_usage("citation-roles", usage)
             cached = {"roles": [entry.model_dump() for entry in roles]}
             store.remember_cache(key, cached)
-        positions = [set() for _ in claims]
+        named_indexes = [set() for _ in claims]
         for entry in cached["roles"]:
             if entry["about_this_paper"] and 1 <= entry["claim"] <= len(claims):
-                positions[entry["claim"] - 1] = {number - 1 for number in entry["named"]}
-        return positions
+                named_indexes[entry["claim"] - 1] = {number - 1 for number in entry["named"]}
+        return named_indexes
 
     return run
 
@@ -1061,9 +1063,9 @@ def _claims_with_citations(claims: list[dict]) -> str:
 
 
 def _mark_named_citations(title: str, claims: list[dict]) -> None:
-    """Set each claim's `named`: the lookup keys of its citations that only name a benchmark,
-    dataset, model or technique the paper uses. Those are not checked, because the cited work
-    cannot say what this paper found or did with it (#475).
+    """Set each claim's `named`: the lookup keys (see `lookup_key`) of its citations that only
+    name a benchmark, dataset, metric, model or technique the paper uses. Those are not
+    checked, because the cited work cannot say what this paper found or did with it (#475).
 
     When the model call fails, nothing is named and every citation is checked, as before.
     """
@@ -1081,13 +1083,14 @@ def _mark_named_citations(title: str, claims: list[dict]) -> None:
     except DSPyError as error:
         logger.warning("citation roles failed, checking every citation: %r", error)
         return
-    for claim, positions in zip(claims, roles, strict=True):
+    for claim, named_indexes in zip(claims, roles, strict=True):
+        # The model and the sentence must both say the claim is about this paper's own work.
         if not _says_own_work(claim["sentence"] or claim["claim"], title):
             continue
         claim["named"] = [
             source
-            for position, citation in enumerate(claim["citations"])
-            if position in positions and (source := lookup_key(citation))
+            for index, citation in enumerate(claim["citations"])
+            if index in named_indexes and (source := lookup_key(citation))
         ]
 
 

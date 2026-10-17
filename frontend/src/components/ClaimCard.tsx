@@ -380,14 +380,14 @@ function CitedWork({
   citation,
   verdict,
   failure,
-  named = false,
+  onlyNamed = false,
   onShow,
 }: {
   citation: Citation
   verdict?: Verdict
   failure?: Unchecked
   /** The claim only names this work as something the paper used, so it was not checked. */
-  named?: boolean
+  onlyNamed?: boolean
   onShow?: (target: Target) => void
 }) {
   const link = citationLink(citation)
@@ -414,12 +414,12 @@ function CitedWork({
       </p>
       {verdict && <Answer verdict={verdict} onShow={onShow} />}
       {failure && <Failure failure={failure} />}
-      {!verdict && !failure && named && (
+      {!verdict && !failure && onlyNamed && (
         <p className="mt-1 text-xs text-ink-muted">
           Not checked — the claim only names this as something the paper used.
         </p>
       )}
-      {!verdict && !failure && !named && (
+      {!verdict && !failure && !onlyNamed && (
         <p className="mt-1 text-xs text-ink-muted">Not checked — verification did not run.</p>
       )}
     </li>
@@ -629,8 +629,9 @@ export function ClaimCard({
             const answers = answersFor(claim, citation)
             // The card already leads with this one's quote, explanation and pages.
             if (answers.verdict && answers.verdict === primary) return null
-            const named = (claim.named ?? []).includes(citedAs(citation))
-            return <CitedWork key={i} citation={citation} named={named} onShow={onShow} {...answers} />
+            // claim.named holds lookup keys; citedAs builds the same key in the same order.
+            const onlyNamed = (claim.named ?? []).includes(citedAs(citation))
+            return <CitedWork key={i} citation={citation} onlyNamed={onlyNamed} onShow={onShow} {...answers} />
           })}
         </ul>
       )}

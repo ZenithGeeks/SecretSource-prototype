@@ -59,7 +59,7 @@ export const STANDING_MEANINGS: Record<Standing, string> = {
   unchecked: 'We could not read a cited paper, so this claim has not been checked at all.',
   supports: 'A cited paper says what this claim says it does.',
   named:
-    'The claim is about this paper’s own work. It cites a benchmark, dataset, model or method only to name what it used, so there is nothing in the cited work to check it against.',
+    'The claim is about this paper’s own work. Its citations only name something the paper used, such as a benchmark, dataset or model, so there is nothing in them to check it against.',
   uncited: 'The sentence this claim came from cites nothing, so there is nothing to check.',
 }
 
