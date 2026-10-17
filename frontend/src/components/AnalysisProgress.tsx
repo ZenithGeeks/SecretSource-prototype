@@ -135,7 +135,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
       checked ? count(progress.checksDone, 'check') : 'sources not checked',
       progress.verdicts.supports ? `${progress.verdicts.supports} backed` : '',
       progress.verdicts.refutes ? `${progress.verdicts.refutes} contradicted` : '',
-      progress.verdicts.insufficient ? `${progress.verdicts.insufficient} not enough evidence` : '',
+      progress.verdicts.insufficient ? `${progress.verdicts.insufficient} silent` : '',
       progress.failed ? `${progress.failed} couldn't check` : '',
       elapsed,
     ].filter(Boolean)
