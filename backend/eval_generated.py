@@ -90,10 +90,8 @@ def main() -> None:
         for run in range(1, args.runs + 1):
             verdicts = list(pool.map(lambda c: judge(c, prepared[c["paper"]]), claims))
             runs.append({c["id"]: v for c, v in zip(claims, verdicts, strict=True)})
-            print(
-                f"run {run}: {sum(v == c['kind'] for c, v in zip(claims, verdicts)) / len(claims):.3f}",
-                flush=True,
-            )
+            accuracy = sum(runs[-1][c["id"]] == c["kind"] for c in claims) / len(claims)
+            print(f"run {run}: {accuracy:.3f}", flush=True)
 
     for name in sorted({c["claim_file"] for c in claims}):
         print(f"\n== {name}")
