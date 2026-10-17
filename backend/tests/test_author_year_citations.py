@@ -82,3 +82,14 @@ def test_a_linked_citation_becomes_a_marker_the_claim_can_use():
     document = tei("(Ren et al., 2021b;", "Formal et al., 2021a)")
     claims._link_author_year_citations(document)
     assert claims._body_text(document).split() == ["[b52]", "[b11]"]
+
+
+def test_a_citation_that_stays_unlinked_leaves_no_text_in_the_paragraph():
+    document = tei("(Ren et al., 2021)", "OpenAI., 2023;", "HallusionBench (Guan et al., 2023)", "Figure 3")
+    claims._link_author_year_citations(document)
+
+    text = claims._paragraph_text(document.find(".//tei:p", claims.TEI_NAMESPACE))
+
+    assert "OpenAI" not in text and "Guan" not in text and "2023" not in text
+    assert "HallusionBench" in text  # a name written before the bracket is not the citation
+    assert "Figure 3" in text  # GROBID sometimes tags text with no year as bibr; it stays
