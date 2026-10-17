@@ -1,6 +1,7 @@
 """pdf_passages leaves a paper's reference list out of the index, and keeps the body before it
-and the appendix after it (#476). The PDF is built with PyMuPDF, so the real pypdf text
-extraction runs. Needs torch, like test_store.py: store.py loads the encoder module."""
+and the appendix after it (#476). It starts a new passage at each figure or table caption (#491).
+The PDF is built with PyMuPDF, so the real pypdf text extraction runs. Needs torch, like
+test_store.py: store.py loads the encoder module."""
 
 import pytest
 import store
@@ -56,6 +57,29 @@ def test_a_paper_without_a_references_heading_keeps_everything(tmp_path):
     assert any("Bootstrapping" in text for text in texts)
 
 
+def test_a_caption_starts_its_own_passage_and_stays_whole(tmp_path):
+    caption = "Table 2: MRR@10 and latency of each model on MS MARCO."
+    pdf = _pdf(tmp_path / "paper.pdf", f"{BODY}\n{caption}\n{BODY}")
+
+    texts = [passage["text"] for passage in store.pdf_passages(pdf)]
+
+    assert [text for text in texts if "Table 2:" in text][0].startswith(caption)
+
+
+def test_a_short_last_window_joins_the_one_before_it():
+    assert store._windows(0, 150) == [(0, 150)]  # 30 words left over is under MIN_TAIL_WORDS
+    assert store._windows(0, 170) == [(0, 120), (120, 170)]
+    assert store._windows(0, 20) == [(0, 20)]  # a short piece on its own stays
+
+
+def test_a_sentence_that_mentions_a_table_does_not_start_a_passage(tmp_path):
+    pdf = _pdf(tmp_path / "paper.pdf", f"{BODY}\nTable 3 presents the results on BEIR.\n{BODY}")
+
+    texts = [passage["text"] for passage in store.pdf_passages(pdf)]
+
+    assert not any(text.startswith("Table 3") for text in texts)
+
+
 def test_the_passage_version_and_doc_len_are_part_of_the_content_hash(tmp_path, monkeypatch):
     calls = []
 
@@ -79,7 +103,7 @@ def test_the_passage_version_and_doc_len_are_part_of_the_content_hash(tmp_path, 
 
     index.add_pdf(pdf)
     index.add_pdf(pdf)  # same bytes, same version: skipped
-    monkeypatch.setattr(store, "PASSAGES_VERSION", "3")
+    monkeypatch.setattr(store, "PASSAGES_VERSION", store.PASSAGES_VERSION + "-next")
     index.add_pdf(pdf)  # same bytes, new version: indexed again
     monkeypatch.setattr(store, "DOC_LEN", store.DOC_LEN + 1)
     index.add_pdf(pdf)  # same bytes, new document length: indexed again
