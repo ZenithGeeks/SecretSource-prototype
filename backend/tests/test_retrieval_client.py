@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import requests
-from app.clients import retrieval
+from app.clients import cloud_run, retrieval
 
 
 def test_retry_policy_is_one_retry_for_transient_failures_only():
@@ -159,7 +159,7 @@ def test_a_pdf_over_the_limit_is_uploaded_without_its_images(monkeypatch, tmp_pa
 
     sent = _uploaded(monkeypatch)
     pdf = _pdf_with_image(tmp_path / "2312.02139.pdf")
-    monkeypatch.setattr(retrieval, "UPLOAD_LIMIT_BYTES", pdf.stat().st_size - 1)
+    monkeypatch.setattr(cloud_run, "UPLOAD_LIMIT_BYTES", pdf.stat().st_size - 1)
 
     assert retrieval.colbert_add(str(pdf))["status"] == "ok"
 

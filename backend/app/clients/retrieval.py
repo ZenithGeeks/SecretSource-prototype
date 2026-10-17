@@ -10,17 +10,16 @@ be on another machine or on Cloud Run.
 """
 
 import json
-import tempfile
 import threading
 import time
-from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.clients.cloud_run import uploadable
 from app.clients.service_auth import auth_headers
 from app.config import COLBERT_URL, COLPALI_URL
 
@@ -34,10 +33,6 @@ RETRY = Retry(
     status_forcelist=(502, 503, 504), allowed_methods=frozenset({"GET", "POST"}),
     raise_on_status=False,
 )
-# Cloud Run refuses a request body over 32 MiB with HTTP 413. The ColBERT service reads only
-# the text of an upload (pypdf, page by page), so a copy without the images indexes the same
-# passages: DiffiT's 43.4 MiB arXiv PDF becomes 0.7 MiB with the same text on all 31 pages.
-UPLOAD_LIMIT_BYTES = 32 * 2**20
 _session = requests.Session()
 _session.mount("https://", HTTPAdapter(max_retries=RETRY, pool_maxsize=16))
 _session.mount("http://", HTTPAdapter(max_retries=RETRY, pool_maxsize=16))
@@ -70,7 +65,7 @@ def colbert_search(query: str, k: int = 10, source: str | None = None) -> list[d
 
 def colbert_add(path: str) -> dict:
     """Index one PDF. Safe to run again: re-adding replaces the paper's passages."""
-    with _uploadable(Path(path)) as upload, open(upload, "rb") as pdf:
+    with uploadable(Path(path)) as upload, open(upload, "rb") as pdf:
         response = _session.post(
             f"{COLBERT_URL}/api/upload", files=_pdf(path, pdf), headers=auth_headers(COLBERT_URL), timeout=900
         )
@@ -79,24 +74,6 @@ def colbert_add(path: str) -> dict:
         return {"status": "error", "message": _detail(response), "reason": "indexing-failed",
                 "retryable": False}
     return {"status": "ok", **response.json()}
-
-
-@contextmanager
-def _uploadable(pdf: Path) -> Iterator[Path]:
-    """The PDF itself, or a copy without its images when it is over UPLOAD_LIMIT_BYTES. The
-    upload keeps the original file name, so the passages are filed under the same source."""
-    if pdf.stat().st_size <= UPLOAD_LIMIT_BYTES:
-        yield pdf
-        return
-    import pymupdf
-
-    with tempfile.TemporaryDirectory() as folder, pymupdf.open(pdf) as document:
-        for page in document:
-            for image in page.get_images(full=True):
-                page.delete_image(image[0])
-        copy = Path(folder) / pdf.name
-        document.save(copy, garbage=4, deflate=True)
-        yield copy
 
 
 HEALTH_TTL = 30  # seconds

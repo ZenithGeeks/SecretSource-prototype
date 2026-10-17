@@ -12,6 +12,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pydantic
 from pydantic import Field
@@ -362,6 +363,7 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
     """
     import requests
 
+    from app.clients.cloud_run import uploadable
     from app.clients.service_auth import auth_headers
 
     with open(pdf_path, "rb") as pdf_file:
@@ -370,6 +372,10 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
     key = store.cache_key("grobid", endpoint, ",".join(coordinates), content)
     if (cached := store.recall_cache(key)) is not None:
         return ET.fromstring(cached["tei"])
+    # A PDF over Cloud Run's 32 MiB limit goes with its images at low resolution. The text, the
+    # layout and the figure areas stay, so the TEI and its coords are the same.
+    with uploadable(Path(pdf_path), keep_images=True) as upload:
+        upload_bytes = upload.read_bytes()
 
     # One timeout or 5xx used to fail the whole analysis, since nothing works without the
     # paper's text. GROBID also answers 503 while all its workers are busy, which passes.
@@ -377,7 +383,7 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
         try:
             response = requests.post(
                 f"{GROBID_URL}/api/{endpoint}",
-                files={"input": pdf_bytes},
+                files={"input": upload_bytes},
                 data={"teiCoordinates": list(coordinates)},
                 headers=auth_headers(GROBID_URL),
                 timeout=300,
