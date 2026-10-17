@@ -230,6 +230,20 @@ def unchecked_reason(verdict: dict, citation: dict) -> str:
     return "web-source" if reason == "unresolvable" and citation.get("url") else reason
 
 
+def checked_citations(claim: dict) -> list[tuple[dict, str]]:
+    """Each citation of `claim` to check, with the key it is looked up by. The gateway and the
+    graph both plan their jobs with this. Left out: citations with nothing to look up by, and
+    the ones that only name something the paper uses (`named`)."""
+    from app.pipeline.sources import lookup_key
+
+    named = set(claim.get("named", []))
+    return [
+        (citation, source)
+        for citation in claim["citations"]
+        if (source := lookup_key(citation)) and source not in named
+    ]
+
+
 def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
     """Add the result of one check to its claim. The gateway and the graph both use this.
 

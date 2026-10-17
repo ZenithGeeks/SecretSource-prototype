@@ -76,9 +76,10 @@ from app.ownership import require_owner
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
-from app.pipeline.sources import index_paper, lookup_key
+from app.pipeline.sources import index_paper
 from app.pipeline.verify import (
     check_prepared,
+    checked_citations,
     fold_check,
     prepare_source,
     unchecked_reason,
@@ -388,8 +389,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
             jobs = [
                 (index, claim, citation, source)
                 for index, claim in enumerate(claims)
-                for citation in claim["citations"]
-                if (source := lookup_key(citation))
+                for citation, source in checked_citations(claim)
             ]
 
             # The totals, so the web app can show "12 of 33 checks" instead of a growing list.

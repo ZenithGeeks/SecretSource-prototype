@@ -39,7 +39,7 @@ def stubbed_pipeline(monkeypatch):
     # instead of returning synchronously -- returning synchronously races run_analysis_job's
     # _background drain loop under pytest's capture and can hang it (unrelated to this change).
     monkeypatch.setattr(main, "index_paper", lambda title: f"indexed:{title}")
-    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
     monkeypatch.setattr(
         main, "check_prepared",

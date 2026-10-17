@@ -16,7 +16,7 @@ export function analysisLabel(analysis: Analysis): string {
 }
 
 /** One claim's standing, worst first: that order is the reading order. */
-export const STANDINGS = ['refutes', 'insufficient', 'unchecked', 'supports', 'uncited'] as const
+export const STANDINGS = ['refutes', 'insufficient', 'unchecked', 'supports', 'named', 'uncited'] as const
 
 export type Standing = (typeof STANDINGS)[number]
 
@@ -26,6 +26,7 @@ export const STANDING_LABELS: Record<Standing, string> = {
   insufficient: 'Source is silent',
   unchecked: 'Not checked',
   supports: 'Source backs it',
+  named: 'Names what it uses',
   uncited: 'No citation',
 }
 
@@ -36,6 +37,7 @@ const COUNT_WORDS: Record<Standing, readonly [string, string]> = {
   insufficient: ['silent', 'silent'],
   supports: ['backs it', 'back it'],
   unchecked: ['not checked', 'not checked'],
+  named: ['names what it uses', 'name what they use'],
   uncited: ['no citation', 'no citation'],
 }
 
@@ -56,6 +58,8 @@ export const STANDING_MEANINGS: Record<Standing, string> = {
   insufficient: 'We read the cited paper and it does not settle the claim either way.',
   unchecked: 'We could not read a cited paper, so this claim has not been checked at all.',
   supports: 'A cited paper says what this claim says it does.',
+  named:
+    'The claim is about this paper’s own work. Its citations only name something the paper used, such as a benchmark, dataset or model, so there is nothing in them to check it against.',
   uncited: 'The sentence this claim came from cites nothing, so there is nothing to check.',
 }
 
@@ -72,7 +76,9 @@ export function standingOf(claim: Claim): Standing {
   if (verdicts.some((verdict) => verdict.verdict === 'insufficient')) return 'insufficient'
   if (verdicts.length) return 'supports'
   if ((claim.unchecked ?? []).length) return 'unchecked'
-  return claim.citations.length ? 'unchecked' : 'uncited'
+  if (!claim.citations.length) return 'uncited'
+  const named = new Set(claim.named ?? [])
+  return claim.citations.every((citation) => named.has(citedAs(citation))) ? 'named' : 'unchecked'
 }
 
 /** A supported claim needs no reading; one that failed or was never checked does. */

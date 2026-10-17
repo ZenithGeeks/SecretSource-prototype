@@ -59,6 +59,7 @@ const PILL = {
   insufficient: { pill: 'bg-insufficient-soft text-insufficient', dot: 'bg-insufficient' },
   supports: { pill: 'bg-supports-soft text-supports', dot: 'bg-supports' },
   unchecked: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
+  named: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
   uncited: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
 } as const
 
