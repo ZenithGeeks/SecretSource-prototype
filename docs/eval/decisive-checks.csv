@@ -2,7 +2,7 @@ paper,claim,source,expected
 2409.12191,"Recent advancements in large vision-language models (LVLMs)OpenAI., 2023; have led to significant improvements in a short span.",2301.12597,supports
 2409.12191,The MMMU benchmark is used to represent college-level problem-solving ability.,2311.16502,supports
 2407.01449,Neural embedding models based on fine-tuned large language models display state-of-the-art performance on a variety of text embedding tasks and top the retrieval leaderboards.,2210.07316,refutes
-2407.01449,"In the late interaction paradigm introduced by ColBERT, an embedding is pre-computed and indexed per document token.",10.48550/ARXIV.2004.12832,refutes
+2407.01449,"In the late interaction paradigm introduced by ColBERT, an embedding is pre-computed and indexed per document token.",10.48550/ARXIV.2004.12832,supports
 2407.01449,Mapping latent representations of textual content to corresponding representations of visual content has been done by aligning disjoint visual and text encoders through contrastive losses.,10.48550/ARXIV.2303.15343,supports
 2407.01449,Mapping latent representations of textual content to corresponding representations of visual content has been done by aligning disjoint visual and text encoders through contrastive losses.,10.48550/ARXIV.2103.00020,supports
 2407.01449,Optimized late interaction engines enable scaling corpus sizes to millions of documents with reduced latency degradations.,2205.09707,supports
@@ -11,4 +11,4 @@ paper,claim,source,expected
 2407.01449,The memory footprint of the naive ColBERT indexing strategy can be improved through compression and clustering mechanisms.,2409.14683,supports
 2112.01488,"Late interaction was introduced in ColBERT, where queries and documents are encoded into multi-vector representations.",10.1145/3397271.3401075,supports
 2112.01488,BEIR is a benchmark consisting of 13 diverse retrieval and semantic similarity tasks.,2104.08663,refutes
-2112.01488,"DensePhrases is a system for Open-QA that relies on multi-vector encoding of passages, though its search is conducted at the level of individual vectors.",10.18653/v1/2021.acl-long.518,refutes
+2112.01488,"DensePhrases is a system for Open-QA that relies on multi-vector encoding of passages, though its search is conducted at the level of individual vectors.",10.18653/v1/2021.acl-long.518,supports
