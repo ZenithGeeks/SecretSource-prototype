@@ -72,13 +72,15 @@ Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs (run-to-r
 | Setup | Prose claims (282) | Caption claims (151) | `eval_decisive.py` (13) |
 |---|---|---|---|
 | 64/300, 120-word windows | 0.960 | 0.874 | 11, 11, 11 |
-| 64/300, caption passages (main) | 0.955 | 0.934 | 12, 12, 12 |
+| 64/300, caption passages (before SCRUM-345) | 0.955 | 0.934 | 12, 12, 12 |
+| + judge checks numbers, direction and table columns (SCRUM-345) | 0.948 (runs 2-3: 0.961) | 0.927 (runs 2-3: 0.947) | 12, 12, 12 |
 
 ## Tried and not adopted
 
 | Idea | Result | Why not |
 |---|---|---|
 | bge-reranker-v2-m3 over ColBERT's top 20 | Ours top 4: 0.965 → 0.904 (+6 / -23 claims); SciFact 0.763 → 0.797 | Hurts ranking within one paper, which is what the pipeline does; +120-160 ms per claim |
+| Judge prompt v1: check numbers, comparisons, direction, table column; without the "different words" sentence | False "supports" 15 → 12 (prose), 6 → 3 (captions); `eval_decisive.py` 12 → 11 | It made the judge demand the claim's exact terms (DensePhrases row) |
 | Judge gets 6 passages instead of 4 | Prose 0.955 → 0.948, captions 0.934 → 0.954 (inside the spread); `eval_decisive.py` 12 → 10 | The extra passages gave the judge contradicting-looking text on real rows; +18% time |
 | jina-embeddings-v4 instead of ColBERT | Best retrieval scores above | `eval_decisive.py` kept 9 of 13 against ColBERT's 12; 14x slower to index; research-only licence |
 
