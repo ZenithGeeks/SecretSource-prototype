@@ -59,7 +59,7 @@ reader never learns the paper cited a source that settles the claim.
 
 | Rule | Number | Why this number |
 | --- | --- | --- |
-| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with dspy's LM cache off (SCRUM-347) on 18 Oct 2026: 12, 12, 12 |
+| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with dspy's LM cache off on 18 Oct 2026, after SCRUM-348: 13, 12, 12 |
 
 The 13 rows in `docs/eval/decisive-checks.csv` are the checks production rated backed (9) or
 contradicted (4) on arXiv 2409.12191, 2407.01449 and 2112.01488. They are production's verdicts,
@@ -75,6 +75,9 @@ SCRUM-347 changed the DensePhrases row again, to insufficient. Its passages say 
 one dense vector searched with MIPS, but none says the system encodes passages as many vectors.
 Before SCRUM-347 the 12 of 13 came from dspy's cache replaying one answer; asked again 3 times,
 the judge said insufficient each time.
+SCRUM-348 changed the MTEB check to insufficient. Production said contradicted, but the
+pipeline said insufficient in all 9 fresh runs on 18 Oct 2026, so the bar of 12 had no room
+left for the DensePhrases row, which still flips to supports in about 2 of 3 runs.
 
 This rule blocks a merge. Raise the number when a change keeps more; lowering it needs its own
 pull request with the reason.
