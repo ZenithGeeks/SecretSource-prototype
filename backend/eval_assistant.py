@@ -86,7 +86,7 @@ def main() -> None:
                 f" + check {finished - answered:4.1f}s = {finished - started:4.1f}s,"
                 f" {not_backed}/{len(row_verdicts)} not backed  {row['question']}"
             )
-            for statement, verdict in zip(statements, row_verdicts):
+            for statement, verdict in zip(statements, row_verdicts, strict=True):
                 print(f"    {verdict:<12} {statement}")
         not_backed = sum(verdict != "supports" for verdict in verdicts)
         print(
