@@ -92,6 +92,21 @@ Steps in that run: claims extracted at 37 s, checks from 48 s to 84 s (11 checks
 by 84 s. A paper the store has seen before reuses cached answers and runs faster, so time a
 paper it has not seen. This rule warns and does not block.
 
+## Assistant answers, measured, not yet enforced
+
+The assistant in `docs/ideas/secretsource-assistant.md` is not built yet. These numbers come from
+the test in #504: 20 questions about the three decisive-check papers, each answered as short
+statements that the judge then checks. Every question names its paper, so questions across the
+whole library may do worse. They become rules when the first assistant PR lands.
+
+| Metric | Today | Direction |
+| --- | --- | --- |
+| Slowest checked answer, in each of 3 runs without the answer cache | 13.0 s, local GPU, one user at a time | must stay under 20 s, the one-pager's target |
+| Statements the judge does not back | 1 to 3% (worst run 3/115) | must not rise above 3% |
+
+Checked by `python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh` in the
+worker container, alone on the LLM gateway.
+
 ## How quality and time are checked
 
 | Rule | Checked by | Runs |
