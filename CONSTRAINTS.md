@@ -59,7 +59,7 @@ reader never learns the paper cited a source that settles the claim.
 
 | Rule | Number | Why this number |
 | --- | --- | --- |
-| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with caption passages (SCRUM-343) on 18 Oct 2026: 12, 12, 12 |
+| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with dspy's LM cache off (SCRUM-347) on 18 Oct 2026: 12, 12, 12 |
 
 The 13 rows in `docs/eval/decisive-checks.csv` are the checks production rated backed (9) or
 contradicted (4) on arXiv 2409.12191, 2407.01449 and 2112.01488. They are production's verdicts,
@@ -71,6 +71,10 @@ check (2304.01982), but the sentence it rests on is about plain ColBERT scoring,
 the claim names, so it now expects insufficient. With these labels, ColBERT 32/180 and 64/300
 with plain 120-word windows each keep 11. The row that is not kept is the MTEB check (2210.07316):
 production said contradicted, the current pipeline says insufficient in all 3 runs.
+SCRUM-347 changed the DensePhrases row again, to insufficient. Its passages say each phrase is
+one dense vector searched with MIPS, but none says the system encodes passages as many vectors.
+Before SCRUM-347 the 12 of 13 came from dspy's cache replaying one answer; asked again 3 times,
+the judge said insufficient each time.
 
 This rule blocks a merge. Raise the number when a change keeps more; lowering it needs its own
 pull request with the reason.
