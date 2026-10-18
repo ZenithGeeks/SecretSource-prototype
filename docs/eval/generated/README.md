@@ -108,7 +108,7 @@ The decisive checks this changes with ColPali on, in all 3 runs:
 - Row 13 (DensePhrases, labelled insufficient) becomes supports. The crop is the paper's Figure 1: it draws a passage as many phrase vectors and a search that picks single vectors, which is what the claim says.
 - Row 3 (MTEB, labelled refutes) becomes supports. Without the figure it is insufficient, so it was already a miss. The crop is Figure 4, where SGPT-5.8B and GTR-XXL score highest, but the paper's text says no model wins on every task.
 
-The merge gate runs with ColPali off. There the judge gets no image, and the signature, inputs and answer cache key are the same as on main. In the same session, with another eval sharing the LLM gateway, the off mode kept 12, 11, 12 with an earlier version of this change and 11, 11, 11 on main. Both builds lose row 3 every time. Rows 13 and 8 move between runs on main too, so these differences are the judge's run-to-run noise.
+The merge gate runs with ColPali off. There the judge gets no image, and the signature, inputs and answer cache key are the same as on main. Run alone on the gateway, branch first, the off mode kept 11, 12, 12 with this change and 11, 12, 11 on main. Both builds lose row 3 every time. Row 13 flips in run 1 on both and once more on main, so these differences are the judge's run-to-run noise.
 
 ## Tried and not adopted
 
