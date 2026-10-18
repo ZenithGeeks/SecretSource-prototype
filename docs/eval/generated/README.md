@@ -101,7 +101,7 @@ With ColPali off, 0.109 on the figure claims.
 
 - Crop on every claim: with a figure in the prompt, the judge read the text worse even when the text decided the claim. On caption claims it called 26 "supports" claims "refutes" over 3 runs, against 6 on main. In a logged run, 22 of 28 such false "refutes" came with a crop of a different figure than the caption's own. A guard that also named the crop's figure and told the judge to ignore an unrelated one did not help: prose 0.941, captions 0.890.
 - Crop + passages, only when the text says insufficient: the text sets are back at main, but decisive row 8 (XTR) went from insufficient to refutes in all 3 runs. The crop was the paper's overview diagram; the judge reread the abstract and decided from it.
-- Crop + caption, no passages: row 8 stays insufficient. The figure answer can only come from the figure.
+- Crop + caption, no passages: row 8 stays insufficient. The second answer can only come from the figure and its caption.
 
 The decisive checks this changes with ColPali on, in all 3 runs:
 
