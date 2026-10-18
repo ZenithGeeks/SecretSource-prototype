@@ -66,7 +66,7 @@ def judge(monkeypatch):
     monkeypatch.setattr(verify, "evidence_from", lambda claim, name: [PASSAGE])
     monkeypatch.setattr(verify, "_figures_ready", lambda source: False)
     verdict = {"verdict": "supports", "quote": "Math reasoning improves.", "reasoning": "It says so."}
-    monkeypatch.setattr(verify, "_judge", lambda claim, passages: verdict)
+    monkeypatch.setattr(verify, "_judge", lambda claim, passages, figure=None: verdict)
 
 
 def check(identifier: str = DOI, claim: str = "KisMATH improves math reasoning") -> dict:

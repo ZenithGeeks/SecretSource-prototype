@@ -5,6 +5,7 @@ query, and the LLM judges whether they support it: supports / refutes / insuffic
 Visual evidence (ColPali) is optional and skipped when that service is down.
 """
 
+import hashlib
 import logging
 import threading
 import time
@@ -153,8 +154,24 @@ def _captions(hits: list[dict]) -> list[str]:
     return [f"{hit['label']}: {hit['caption']}" for hit in hits if hit.get("caption")]
 
 
+def _figure_crop(hits: list[dict], source: Path) -> Path | None:
+    """This worker's copy of the first figure hit, for the judge to look at, or None.
+
+    A hit's image is the crop's path on the ColPali service. Docling wrote the same crop
+    here under the same file name, so the name finds it. Page hits have no image.
+    """
+    from app.pipeline.figures import figures_dir
+
+    for hit in hits:
+        if hit.get("image"):
+            crop = figures_dir(source) / Path(hit["image"]).name
+            return crop if crop.is_file() else None
+    return None
+
+
 def _build_judge():
     import dspy
+    from dspy.utils.exceptions import AdapterParseError
 
     from app.llm import dspy_lm
 
@@ -199,20 +216,56 @@ def _build_judge():
         quote: str = dspy.OutputField(desc="The sentence from the evidence that decides it, or empty")
         reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
 
+    class JudgeFigure(dspy.Signature):
+        """Decide whether a figure from the cited paper supports the claim made about it.
+        Answer "supports" only if the figure shows it, "refutes" if the figure contradicts it,
+        and "insufficient" if the figure does not settle the question.
+        Before answering "supports", read each number off the figure and check each
+        comparison (more or less, higher or lower), each direction and which series, axis or
+        label each value belongs to. If any of them differs from the figure, the figure
+        contradicts the claim. A claim that leaves out details the figure gives is not
+        contradicted by that. The claim may use different words than the figure; judge
+        whether it means the same thing."""
+
+        claim: str = dspy.InputField(desc="A claim that cites the source paper")
+        figure: dspy.Image = dspy.InputField(desc="A figure from the cited paper")
+        evidence: list[str] = dspy.InputField(desc="The figure's caption, or empty")
+        verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")
+        quote: str = dspy.OutputField(desc="The value or label in the figure that decides it, or empty")
+        reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
+
     # Only the Author check marks the citation (#437). A paper analysis keeps the first
     # judge until labeled data (#423) can score the second one on its claims.
-    signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim}
+    signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim, "judge-figure": JudgeFigure}
     judges = {name: dspy.ChainOfThought(signature) for name, signature in signatures.items()}
 
-    def run(claim: str, evidence: list[str]) -> dict:
-        name = "judge-cited" if CITED_MARK in claim else "judge"
+    def ask(name: str, inputs: dict) -> dspy.Prediction:
+        with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
+            if name != "judge-figure":
+                return judges[name](**inputs)
+            try:
+                return judges[name](**inputs)
+            except AdapterParseError:
+                # About 1 reply in 10 with a figure is not JSON. Ask once more, past dspy's
+                # cache: at temperature 0 it would hand back the same reply.
+                with dspy.context(lm=language_model.copy(cache=False)):
+                    return judges[name](**inputs)
+
+    def run(claim: str, evidence: list[str], figure: Path | None = None) -> dict:
+        name = "judge-cited" if CITED_MARK in claim else "judge-figure" if figure else "judge"
         # The instructions are in the key, so a reworded prompt never reads the old prompt's answers.
         instructions = signatures[name].instructions
-        key = store.cache_key(name, VLLM_MODEL, instructions, claim, "\x00".join(evidence))
+        parts = [name, VLLM_MODEL, instructions, claim, "\x00".join(evidence)]
+        if figure:
+            parts.append(hashlib.sha256(figure.read_bytes()).hexdigest())
+        key = store.cache_key(*parts)
         if (cached := store.recall_cache(key)) is not None:
             return cached
-        with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            prediction = judges[name](claim=claim, evidence=evidence)
+        inputs = {"claim": claim, "evidence": evidence}
+        if figure:
+            inputs["figure"] = dspy.Image.from_path(figure.as_posix())
+        with dspy.track_usage() as usage:
+            prediction = ask(name, inputs)
         record_llm_usage("judge", usage)
         verdict = prediction.verdict.strip().lower()
         result = {
@@ -331,8 +384,18 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
 
         if _judge is None:
             _judge = _build_judge()
+        verdict = _judge(claim, passages)
+        # Numbers read off a chart are often in no passage, so a claim the text cannot settle
+        # is asked again about the top figure, with only its caption. With the passages next
+        # to a figure, the judge read the text worse, and turned text it had found
+        # insufficient into a verdict (#501). Pages are empty with VISUAL_EVIDENCE off, and
+        # the Author check's judge has no figure input.
+        figure = _figure_crop(pages, source)
+        if verdict["verdict"] == "insufficient" and figure and CITED_MARK not in claim:
+            caption = _captions([hit for hit in pages if hit.get("image")][:1])
+            verdict = _judge(claim, caption, figure)
         return {"status": "ok", "claim": claim, "source": source.name,
-                **_judge(claim, passages), "evidence": evidence, "pages": pages,
+                **verdict, "evidence": evidence, "pages": pages,
                 "page_model": page_model, "indexed_in": indexed_in, **version}
     except Exception as error:
         from app.pipeline.sources import tool_error

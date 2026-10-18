@@ -64,7 +64,7 @@ def services(monkeypatch):
     monkeypatch.setattr(verify.retrieval, "colpali_search", colpali_search)
     monkeypatch.setattr(verify, "_index_visually", index_figures)
     judged = {"verdict": "supports", "quote": "", "reasoning": ""}
-    monkeypatch.setattr(verify, "_judge", lambda claim, passages: judged)
+    monkeypatch.setattr(verify, "_judge", lambda claim, passages, figure=None: judged)
     monkeypatch.setattr(verify, "_indexed", set())
     monkeypatch.setattr(verify, "_visual_indexing", {}, raising=False)
     monkeypatch.setattr(verify, "_figures_due", {}, raising=False)

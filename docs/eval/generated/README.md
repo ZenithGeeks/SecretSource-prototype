@@ -16,6 +16,7 @@ ColBERT settings are written query/passage token limits: "64/300" is `QUERY_LEN,
 | `papers.csv` | The 28 PDFs: file name as saved in `data/papers`, and source URL |
 | `claims.jsonl` | 278 claims from 168 prose passages: `id`, `paper`, `gold` (passage index), `kind`, `text` |
 | `caption-claims.jsonl` | 148 claims from 300 sampled figure and table captions; `caption` is the caption text a passage must hold whole to count |
+| `figure-claims.jsonl` | 52 claims (26 supports/refutes pairs) that only a figure can decide; `figure` is the Docling crop the claim was written from |
 
 `gold` in `claims.jsonl` indexes passages cut with 120-word windows and no caption breaks, the `pdf_passages` of #490 (commit 5ae4133). To score it, export passages with that version of `services/colbert/store.py`. Caption claims are scored by caption text, so they work with any cutting.
 
@@ -75,6 +76,39 @@ Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs. Before S
 | 64/300, caption passages (before SCRUM-345) | 0.955 | 0.934 | 12, 12, 12 |
 | + judge checks numbers, direction and table columns (SCRUM-345) | 0.948 (runs 2-3: 0.961) | 0.927 (runs 2-3: 0.947) | 12, 12, 12 |
 | Same, dspy's LM cache off, 7 faulty claims dropped (SCRUM-344, SCRUM-347) | 0.965 (278) | 0.962 (148) | 12, 12, 12 (DensePhrases row now insufficient) |
+
+## Figure evidence for the judge (SCRUM-346)
+
+With `VISUAL_EVIDENCE` on, a claim the text leaves "insufficient" is asked again about the top ColPali figure hit. That second call gets the claim, the figure's crop as an image and its caption, but not the passages. Some claims rest on a number read off a chart that no passage or caption states. With `VISUAL_EVIDENCE` off, the judge reads text only, as before.
+
+`figure-claims.jsonl` comes from `backend/make_figure_claims.py`. It keeps a figure only if the claim's key number is in neither the caption nor the 4 passages the judge gets. 51 figures from 19 papers passed that filter. Three readers checked every pair against its figure and kept 26. The other 25 had a wrong value, swapped labels, a series not in the figure, a contradicted value too close to the real one, or an unreadable figure.
+
+Retrieval: for 51 of the 52 claims, ColPali's top figure hit is the figure the claim was written from. This used Ops-Colqwen3-4B on vLLM, not production's colqwen2-v1.0. Each claim was written from its own figure, so retrieval is easier here than for claims in real papers.
+
+The judge on its own, with the claim's own figure (`backend/eval_figures.py --runs 3`), got 5, 5 and 6 of 52 right from text, and 48, 49 and 45 with the figure.
+
+The whole pipeline (`eval_generated.py --runs 3 --fresh`, ColPali on, local ColBERT 64/300), mean of 3 runs. Each column is one way to give the judge the figure; the last one is what this change does:
+
+| Claims | main (captions only) | Crop on every claim | Crop + passages when text says insufficient | Crop + caption when text says insufficient |
+|---|---|---|---|---|
+| `figure-claims.jsonl` (52) | 0.083 | 0.853 | 0.782 | 0.769 (spread 0.058) |
+| `claims.jsonl` (278) | 0.977 | 0.966 | 0.976 | 0.976 (spread 0.007) |
+| `caption-claims.jsonl` (148) | 0.975 | 0.899 | 0.975 | 0.986 (spread 0.000) |
+| Errors (reply not JSON after one retry) | 0 | 20 | 3 | 5, all on figure claims |
+| `eval_decisive.py` (13), kept per run | 12, 12, 11 | 11, 11, 11 | 9, 10, 10 | 11, 11, 11 |
+
+With ColPali off, 0.109 on the figure claims.
+
+- Crop on every claim: with a figure in the prompt, the judge read the text worse even when the text decided the claim. On caption claims it called 26 "supports" claims "refutes" over 3 runs, against 6 on main. In a logged run, 22 of 28 such false "refutes" came with a crop of a different figure than the caption's own. A guard that also named the crop's figure and told the judge to ignore an unrelated one did not help: prose 0.941, captions 0.890.
+- Crop + passages, only when the text says insufficient: the text sets are back at main, but decisive row 8 (XTR) went from insufficient to refutes in all 3 runs. The crop was the paper's overview diagram; the judge reread the abstract and decided from it.
+- Crop + caption, no passages: row 8 stays insufficient. The second answer can only come from the figure and its caption.
+
+The decisive checks this changes with ColPali on, in all 3 runs:
+
+- Row 13 (DensePhrases, labelled insufficient) becomes supports. The crop is the paper's Figure 1: it draws a passage as many phrase vectors and a search that picks single vectors, which is what the claim says.
+- Row 3 (MTEB, labelled refutes) becomes supports. Without the figure it is insufficient, so it was already a miss. The crop is Figure 4, where SGPT-5.8B and GTR-XXL score highest, but the paper's text says no model wins on every task.
+
+The merge gate runs with ColPali off. There the judge gets no image, and the signature, inputs and answer cache key are the same as on main. Run alone on the gateway, branch first, the off mode kept 11, 12, 12 with this change and 11, 12, 11 on main. Both builds lose row 3 every time. Row 13 flips in run 1 on both and once more on main, so these differences are the judge's run-to-run noise.
 
 ## Tried and not adopted
 

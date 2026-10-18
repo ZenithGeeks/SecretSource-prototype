@@ -11,6 +11,7 @@ import pydantic
 import pytest
 from app import store
 from app.pipeline import claims, verify
+from dspy.utils.exceptions import AdapterParseError
 
 
 @pytest.fixture(autouse=True)
@@ -193,3 +194,113 @@ def test_a_claim_with_the_cited_mark_gets_the_citation_aware_judge(monkeypatch):
     run("We use AdamW [cited] with weight decay 0.1.", ["AdamW decouples weight decay."])
     run("ColBERT reduces the index 10x.", ["evidence"])
     assert used == ["JudgeCitedClaim", "JudgeClaim"]
+
+
+def _png(path, color):
+    from PIL import Image
+
+    Image.new("RGB", (1, 1), color).save(path)
+    return path
+
+
+def _parse_error():
+    import dspy
+
+    return AdapterParseError(
+        adapter_name="JSONAdapter", signature=dspy.Signature("claim -> verdict"), lm_response="not json"
+    )
+
+
+def test_a_claim_with_a_figure_is_judged_by_the_signature_that_has_a_figure_input(monkeypatch, tmp_path):
+    import dspy
+
+    seen = []
+
+    def chain_of_thought(signature):
+        def judge(**inputs):
+            if "figure" in inputs:
+                seen.append((signature, inputs))
+            return _FakePrediction(verdict="supports", quote="q", reasoning="r")
+
+        return judge
+
+    monkeypatch.setattr(dspy, "ChainOfThought", chain_of_thought)
+
+    verify._build_judge()("figure claim one", ["evidence"], figure=_png(tmp_path / "a.png", "red"))
+
+    assert len(seen) == 1
+    signature, inputs = seen[0]
+    assert "figure" in signature.input_fields
+    assert isinstance(inputs["figure"], dspy.Image)
+
+
+def test_the_figure_file_is_part_of_the_judge_cache_key(monkeypatch, tmp_path):
+    calls = []
+    _stub_dspy(
+        monkeypatch,
+        calls,
+        lambda claim, evidence, figure: _FakePrediction(verdict="supports", quote="q", reasoning="r"),
+    )
+    red = _png(tmp_path / "red.png", "red")
+    blue = _png(tmp_path / "blue.png", "blue")
+
+    run = verify._build_judge()
+    run("figure claim two", ["evidence"], figure=red)
+    run("figure claim two", ["evidence"], figure=blue)
+    assert len(calls) == 2
+
+    run("figure claim two", ["evidence"], figure=red)
+    assert len(calls) == 2
+
+
+def test_a_judge_without_a_figure_keeps_its_old_cache_key(monkeypatch):
+    keys = []
+    monkeypatch.setattr(verify.store, "cache_key", lambda *parts: keys.append(parts) or "key")
+    answer = _FakePrediction(verdict="supports", quote="q", reasoning="r")
+    _stub_dspy(monkeypatch, [], lambda claim, evidence: answer)
+
+    verify._build_judge()("claim A", ["evidence 1"])
+
+    # Answers cached before the figure judge existed must still be found.
+    assert len(keys[0]) == 5
+    assert all(isinstance(part, str) for part in keys[0])
+
+
+def test_a_figure_judge_reply_that_does_not_parse_is_asked_again_without_the_cache(monkeypatch, tmp_path):
+    import app.llm
+
+    copies = []
+
+    class FakeLM:
+        def copy(self, **kwargs):
+            copies.append(kwargs)
+            return FakeLM()
+
+    monkeypatch.setattr(app.llm, "dspy_lm", lambda **kwargs: FakeLM())
+    calls = []
+
+    def answer(claim, evidence, figure):
+        if len(calls) == 1:
+            raise _parse_error()
+        return _FakePrediction(verdict="refutes", quote="q", reasoning="r")
+
+    _stub_dspy(monkeypatch, calls, answer)
+
+    result = verify._build_judge()("figure claim three", ["evidence"], figure=_png(tmp_path / "a.png", "red"))
+
+    assert result["verdict"] == "refutes"
+    assert len(calls) == 2
+    assert copies == [{"cache": False}]
+
+
+def test_the_text_only_judge_does_not_ask_again_when_the_reply_does_not_parse(monkeypatch):
+    calls = []
+
+    def answer(claim, evidence):
+        raise _parse_error()
+
+    _stub_dspy(monkeypatch, calls, answer)
+
+    with pytest.raises(AdapterParseError):
+        verify._build_judge()("text claim four", ["evidence"])
+    assert len(calls) == 1
