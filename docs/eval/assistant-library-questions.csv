@@ -1,0 +1,21 @@
+question,answerable
+"Which retrieval models use late interaction, and how do they differ?",yes
+How much smaller is the ColBERTv2 index than the original ColBERT index?,yes
+Which benchmarks test retrieval models on domains they were not trained on?,yes
+How does BLIP-2 connect a frozen image encoder to a frozen language model?,yes
+What does InstructBLIP add to BLIP-2?,yes
+What data was CLIP trained on?,yes
+Which datasets test visual question answering?,yes
+What is the MTEB benchmark?,yes
+What is instruction tuning and why does it help zero-shot performance?,yes
+How does ColPali compare with text retrievers on visually rich documents?,yes
+Who collected the VizWiz questions and what makes them hard?,yes
+What is the MMMU benchmark?,yes
+How does PLAID speed up ColBERTv2 search?,yes
+What is DensePhrases?,yes
+How does AlphaFold predict protein structures?,no
+How does CRISPR-Cas9 edit a gene?,no
+What consensus algorithm does Bitcoin use?,no
+What learning rate was used to train Llama 3?,no
+How many parameters does Gemini Ultra have?,no
+What causes inflation according to monetary theory?,no

@@ -95,17 +95,21 @@ paper it has not seen. This rule warns and does not block.
 ## Assistant answers, measured, not yet enforced
 
 The assistant in `docs/ideas/secretsource-assistant.md` is not built yet. These numbers come from
-the test in #504: 20 questions about the three decisive-check papers, each answered as short
-statements that the judge then checks. Every question names its paper, so questions across the
-whole library may do worse. They become rules when the first assistant PR lands.
+two tests, each answering 20 questions as short statements that the judge then checks. In #504
+every question names one of the three decisive-check papers. In #506 no paper is named: 14
+questions are answered from the whole local library (about 30 papers) and 6 ask about topics it
+does not hold. They become rules when the first assistant PR lands.
 
 | Metric | Today | Direction |
 | --- | --- | --- |
-| Slowest checked answer, in each of 3 runs without the answer cache | 13.0 s, local GPU, one user at a time | must stay under 20 s, the one-pager's target |
-| Statements the judge does not back | 1 to 3% (worst run 3/115) | must not rise above 3% |
+| Slowest checked answer about one paper, in each of 3 runs without the answer cache | 13.0 s, local GPU, one user at a time | must stay under 20 s, the one-pager's target |
+| Slowest checked answer from the whole library, the same way | 19.3 to 27.1 s; 5 of 42 answers over 20 s | must fall under 20 s |
+| Statements the judge does not back | 1 to 3% about one paper, 0 to 1% from the library | must not rise above 3% |
+| Questions outside the library answered with no statements | 6 of 6 in every run | must stay 6 of 6 |
 
-Checked by `python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh` in the
-worker container, alone on the LLM gateway.
+Checked by `python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh`, and the
+same with `assistant-library-questions.csv`, in the worker container with
+`PAPERS_DIR=/app/data/papers`, alone on the LLM gateway.
 
 ## How quality and time are checked
 

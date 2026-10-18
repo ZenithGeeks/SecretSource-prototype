@@ -15,8 +15,8 @@ Two features come without typing: a one-click 5W1H explain card for any paper or
 The assistant can search the open literature (OpenAlex and arXiv first, since Semantic Scholar refuses most requests even with an API key). It suggests papers, and adding one runs the existing analysis. Memory starts simple: a per-user record in Supabase of the papers and concepts asked about, with short summaries.
 
 ## Key Assumptions to Validate
-- [x] Checking every cited statement is fast enough: an answer within 20 s. Test on 20 questions from the three eval papers; measure time per answer. Measured in #504: median 7.7 to 9.4 s, slowest 13.0 s over 3 runs, judge on the local GPU.
-- [x] Checked answers are mostly backed: if over about a third come back "not backed", it feels broken. Measure that share on the same 20 questions. Measured in #504: 1 to 3% not backed. Each question named one paper, so this does not cover questions across the whole library.
+- [ ] Checking every cited statement is fast enough: an answer within 20 s. Test on 20 questions from the three eval papers; measure time per answer. Measured in #504: median 7.7 to 9.4 s, slowest 13.0 s over 3 runs, judge on the local GPU. Questions about the whole library (#506) are slower: median 14.2 to 18.1 s, slowest 27.1 s, 5 of 42 answers over 20 s.
+- [x] Checked answers are mostly backed: if over about a third come back "not backed", it feels broken. Measure that share on the same 20 questions. Measured in #504: 1 to 3% not backed when the question names a paper, and 0 to 1% for questions about the whole library (#506). All 6 questions outside the library got no statements, in every run.
 - [ ] Students prefer it to SciSpace for understanding a paper: 3 to 5 thesis students try both on their own paper; time how long until they can explain it.
 - [ ] The 9arm LLM holds up under chat traffic: 5 users chatting at once, latency and rate limits.
 - [ ] OpenAlex and arXiv search is good enough without Semantic Scholar: on 10 questions, a relevant paper in the top 5.
