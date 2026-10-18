@@ -10,8 +10,9 @@ Every claim goes through the pipeline's own prepare_source and check_prepared, l
 eval_decisive.py, so this scores retrieval and the judge together on ~400 claims instead of 13.
 The claims are LLM-written; eval_decisive.py's real rows stay the merge gate.
 
---fresh replaces app.store's answer cache with no-ops in this process, so every run asks the
-judge again. --evidence-count sets verify.EVIDENCE_COUNT, the passages the judge gets.
+--fresh replaces app.store's answer cache with no-ops and turns off dspy's LM cache in this
+process, so every run asks the judge again. --evidence-count sets verify.EVIDENCE_COUNT, the
+passages the judge gets.
 """
 
 import argparse
@@ -21,6 +22,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import dspy
 from app import store
 from app.pipeline import verify
 
@@ -79,6 +81,8 @@ def main() -> None:
     if args.fresh:
         store.recall_cache = lambda key: None
         store.remember_cache = lambda key, data: None
+        # dspy caches LM responses too, in memory and on disk; without this runs 2+ replay run 1.
+        dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
     claims = load_claims(args.claims)
     papers = {c["paper"] for c in claims}
     prepared = {paper: verify.prepare_source((PAPERS / paper).as_posix()) for paper in sorted(papers)}

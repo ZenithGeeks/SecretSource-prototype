@@ -14,6 +14,7 @@ import csv
 import sys
 from pathlib import Path
 
+import dspy
 from app import store
 from app.pipeline import verify
 
@@ -35,6 +36,8 @@ def main() -> None:
         # Neither read nor write: a fresh answer must not replace the one the pipeline uses.
         store.recall_cache = lambda key: None
         store.remember_cache = lambda key, data: None
+        # dspy caches LM responses too, in memory and on disk; without this runs 2+ replay run 1.
+        dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
 
     paths = {case["source"]: verify.prepare_source(case["source"]) for case in cases}
     kept_per_run = []

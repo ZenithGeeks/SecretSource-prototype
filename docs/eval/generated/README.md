@@ -67,13 +67,14 @@ Retrieval on `claims.jsonl` (282 claims) and SciFact (300 claims):
 
 Caption claims (151), whole caption among the top 4: 0.762 with 120-word windows, 0.954 with caption passages (#492).
 
-Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs (run-to-run spread up to 0.028, so smaller differences are noise):
+Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs. Before SCRUM-347, `--fresh` left dspy's LM cache on, so runs 2 and 3 mostly replayed run 1 and the spread looked smaller than it is. With the cache off, the run-to-run spread is 0.004 on prose claims and 0.027 on caption claims, and up to 0.039 for one kind (caption "refutes"); 18 of the 426 claims changed verdict between runs. Smaller differences are noise.
 
 | Setup | Prose claims (282) | Caption claims (151) | `eval_decisive.py` (13) |
 |---|---|---|---|
 | 64/300, 120-word windows | 0.960 | 0.874 | 11, 11, 11 |
 | 64/300, caption passages (before SCRUM-345) | 0.955 | 0.934 | 12, 12, 12 |
 | + judge checks numbers, direction and table columns (SCRUM-345) | 0.948 (runs 2-3: 0.961) | 0.927 (runs 2-3: 0.947) | 12, 12, 12 |
+| Same, dspy's LM cache off, 7 faulty claims dropped (SCRUM-344, SCRUM-347) | 0.965 (278) | 0.962 (148) | 12, 12, 12 (DensePhrases row now insufficient) |
 
 ## Tried and not adopted
 

@@ -11,4 +11,4 @@ paper,claim,source,expected
 2407.01449,The memory footprint of the naive ColBERT indexing strategy can be improved through compression and clustering mechanisms.,2409.14683,supports
 2112.01488,"Late interaction was introduced in ColBERT, where queries and documents are encoded into multi-vector representations.",10.1145/3397271.3401075,supports
 2112.01488,BEIR is a benchmark consisting of 13 diverse retrieval and semantic similarity tasks.,2104.08663,refutes
-2112.01488,"DensePhrases is a system for Open-QA that relies on multi-vector encoding of passages, though its search is conducted at the level of individual vectors.",10.18653/v1/2021.acl-long.518,supports
+2112.01488,"DensePhrases is a system for Open-QA that relies on multi-vector encoding of passages, though its search is conducted at the level of individual vectors.",10.18653/v1/2021.acl-long.518,insufficient
