@@ -16,6 +16,7 @@ ColBERT settings are written query/passage token limits: "64/300" is `QUERY_LEN,
 | `papers.csv` | The 28 PDFs: file name as saved in `data/papers`, and source URL |
 | `claims.jsonl` | 278 claims from 168 prose passages: `id`, `paper`, `gold` (passage index), `kind`, `text` |
 | `caption-claims.jsonl` | 148 claims from 300 sampled figure and table captions; `caption` is the caption text a passage must hold whole to count |
+| `figure-claims.jsonl` | 52 claims (26 supports/refutes pairs) that only a figure can decide; `figure` is the Docling crop the claim was written from |
 
 `gold` in `claims.jsonl` indexes passages cut with 120-word windows and no caption breaks, the `pdf_passages` of #490 (commit 5ae4133). To score it, export passages with that version of `services/colbert/store.py`. Caption claims are scored by caption text, so they work with any cutting.
 
@@ -75,6 +76,36 @@ Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs. Before S
 | 64/300, caption passages (before SCRUM-345) | 0.955 | 0.934 | 12, 12, 12 |
 | + judge checks numbers, direction and table columns (SCRUM-345) | 0.948 (runs 2-3: 0.961) | 0.927 (runs 2-3: 0.947) | 12, 12, 12 |
 | Same, dspy's LM cache off, 7 faulty claims dropped (SCRUM-344, SCRUM-347) | 0.965 (278) | 0.962 (148) | 12, 12, 12 (DensePhrases row now insufficient) |
+
+## Figure evidence for the judge (SCRUM-346)
+
+With `VISUAL_EVIDENCE` on, the judge also gets the crop of the top ColPali figure hit as an image. Some claims rest on a number read off a chart that no passage or caption states. With it off, the judge reads text only, as before.
+
+`figure-claims.jsonl` comes from `backend/make_figure_claims.py`. It keeps a figure only if the claim's key number is in neither the caption nor the 4 passages the judge gets. 51 figures from 19 papers passed that filter. Three readers checked every pair against its figure and kept 26. The other 25 had a wrong value, swapped labels, a series not in the figure, a contradicted value too close to the real one, or an unreadable figure.
+
+Retrieval: for 51 of the 52 claims, ColPali's top figure hit is the figure the claim was written from. This used Ops-Colqwen3-4B on vLLM, not production's colqwen2-v1.0. Each claim was written from its own figure, so retrieval is easier here than for claims in real papers.
+
+The judge on its own, with the claim's own figure (`backend/eval_figures.py --runs 3`), got 5, 5 and 6 of 52 right from text, and 48, 49 and 45 with the figure.
+
+The whole pipeline (`eval_generated.py --runs 3 --fresh`, ColPali on, local ColBERT 64/300), mean of 3 runs:
+
+| Claims | ColPali off | main, ColPali on (captions only) | This change, ColPali on (crop to the judge) |
+|---|---|---|---|
+| `figure-claims.jsonl` (52) | 0.109 | 0.083 | 0.853 (supports 0.872, refutes 0.833; spread 0.058) |
+| `claims.jsonl` (278) | | 0.977 (spread 0.004) | 0.966 (spread 0.011) |
+| `caption-claims.jsonl` (148) | | 0.975 (spread 0.014) | 0.899 (spread 0.000) |
+| `eval_decisive.py` (13), kept per run | | 12, 12, 11 | 11, 11, 11 |
+
+The crop helps the claims only a figure can decide and hurts the rest:
+
+- Caption "supports" claims: 0.972 on main, 0.838 with the crop. Over the 3 runs the judge called 26 of them "refutes", against 6 on main. A likely cause is that the top ColPali hit is not the figure the caption belongs to, and the judge trusts the image over the caption. That is not checked yet: the runs did not save per-claim verdicts.
+- Prose claims: 12 "supports" claims judged "refutes", against 6 on main.
+- 17 errors on the 426 claims, against none on main: replies that were not valid JSON even after one retry.
+- On the figure claims, the crop turned 11 "refutes" claims into "supports" over the 3 runs, and gave 3 errors.
+
+The decisive check that changes with ColPali on is DensePhrases (row 13, labelled insufficient). The crop is the paper's Figure 1: it draws a passage as many phrase vectors and a search that picks single vectors, which is what the claim says. So the judge says supports in all 3 runs. The text alone does not say it, and the merge gate runs with ColPali off, so the row stays insufficient.
+
+With ColPali off, the judge gets no image and the answer cache key is unchanged. In the same session, with another eval sharing the LLM gateway, this change kept 12, 11, 12 and main kept 11, 11, 11. Both builds lose row 3 every time. Row 13 turns into supports in 1 of 3 runs here and 2 of 3 on main, and main also lost row 8 once. These rows move with the judge's run-to-run noise, not with this change.
 
 ## Tried and not adopted
 
