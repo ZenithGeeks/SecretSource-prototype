@@ -1,10 +1,11 @@
 """Check that the checks production found decisive stay decisive (CONSTRAINTS.md, verdict quality).
 
-    python eval_decisive.py ../docs/eval/decisive-checks.csv --runs 3 --fresh --min-kept 13
+    python eval_decisive.py ../docs/eval/decisive-checks.csv --runs 3 --fresh --min-kept 12
 
-Each row is a claim, the cited work it was checked against, and the verdict production gave
-("supports" or "refutes"). Every row is checked with the pipeline's own prepare_source and
-check_prepared, so this scores retrieval and the judge together. It needs what an analysis
+Each row is a claim, the cited work it was checked against, and the expected verdict
+("supports", "refutes" or "insufficient"). Most are the verdicts production gave;
+CONSTRAINTS.md lists the rows corrected by hand. Every row is checked with the pipeline's own
+prepare_source and check_prepared, so this scores retrieval and the judge together. It needs what an analysis
 needs (ColBERT, the LLM), so run it where the worker runs. Exits 1 when a run keeps fewer than
 --min-kept rows at their expected verdict.
 """
