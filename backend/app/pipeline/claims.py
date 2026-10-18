@@ -27,6 +27,10 @@ TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 MAX_CHARS = 12_000  # ~3k tokens per window, fits an 8k context with room for output
+# Citing windows are smaller: the extractor lists every citing claim, and a 12k window with
+# 39 citing sentences ran past its 4000-token answer (#139). 6k holds about 20.
+CITING_CHARS = 6_000
+ROLES_BATCH = 10  # claims per citation-role call
 NEAR_DUPLICATE = 0.8  # word-level ratio above which two claims are one assertion, reworded
 # Windows extracted at once. Each one is a full LLM round trip and they do not depend on
 # each other. The cap keeps a long paper from opening a connection per window.
@@ -942,7 +946,7 @@ def _cited_sentences(paper_text: str) -> list[str]:
     return [s for s in re.split(r"(?<=[.!?])\s+", paper_text) if MARKER.search(s)]
 
 
-def _citing_windows(paper_text: str) -> list[str]:
+def _citing_windows(paper_text: str, size: int = CITING_CHARS) -> list[str]:
     """Windows built only from paragraphs that cite something.
 
     Asked over the whole paper, the model picks citing sentences at the rate they occur,
@@ -950,7 +954,7 @@ def _citing_windows(paper_text: str) -> list[str]:
     four-window paper takes one.
     """
     citing = [p for p in paper_text.split("\n\n") if MARKER.search(p)]
-    return _windows("\n\n".join(citing)) if citing else []
+    return _windows("\n\n".join(citing), size) if citing else []
 
 
 def _markers_for(claim: str, sentence: str, cited: list[str]) -> list[str]:
@@ -971,12 +975,19 @@ def _markers_for(claim: str, sentence: str, cited: list[str]) -> list[str]:
     return list(dict.fromkeys(MARKER.findall(best))) if ratio >= SENTENCE_MATCH else []
 
 
-def _build_cited_claim_extractor():
+# "3-6 claims" got 6 from nearly every window and missed most citing sentences; asking for
+# every one covers 85-88% of them, and CLAIM_LIMIT sets the budget (#139).
+CLAIMS_ASKED = "Every claim from this part that cites other work, with the sentence each came from"
+
+
+def _build_cited_claim_extractor(claims_asked: str = CLAIMS_ASKED, max_tokens: int = 4000):
+    """Args are the claims field's description and the answer's token budget, so
+    eval_extractor.py can compare prompts on the same windows (#139)."""
     import dspy
 
     from app.llm import dspy_lm
 
-    language_model = dspy_lm()
+    language_model = dspy_lm(max_tokens=max_tokens)
 
     class CitedClaim(pydantic.BaseModel):
         claim: str = Field(description="One sentence, keeping its [bN] markers")
@@ -988,14 +999,13 @@ def _build_cited_claim_extractor():
         paper's own sentence exactly as written so it can be found in the original."""
 
         paper: str = dspy.InputField(desc="Paper text; [b12]-style markers point at cited references")
-        claims: list[CitedClaim] = dspy.OutputField(
-            desc="3-6 claims from this part, with the sentence each came from"
-        )
+        claims: list[CitedClaim] = dspy.OutputField(desc=claims_asked)
 
     extract = dspy.ChainOfThought(ExtractCitedClaims)
 
     def run(paper_text: str) -> list:
-        key = store.cache_key("extract-cited", VLLM_MODEL, paper_text)
+        # The prompt is in the key, so a reworded prompt never reads the old answers.
+        key = store.cache_key("extract-cited", VLLM_MODEL, claims_asked, paper_text)
         if (cached := store.recall_cache(key)) is not None:
             return [CitedClaim(**c) for c in cached["claims"]]
         with dspy.track_usage() as usage, dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
@@ -1098,7 +1108,10 @@ def _mark_named_citations(title: str, claims: list[dict]) -> None:
     try:
         if _citation_roles is None:
             _citation_roles = _build_citation_roles()
-        roles = _citation_roles(title, claims)
+        # 20 claims in one call ran past max_tokens=3000 (#139); 10 fit with room.
+        roles = []
+        for start in range(0, len(claims), ROLES_BATCH):
+            roles += _citation_roles(title, claims[start : start + ROLES_BATCH])
     except DSPyError as error:
         logger.warning("citation roles failed, checking every citation: %r", error)
         return
