@@ -27,3 +27,14 @@ def test_only_long_prose_passages_are_sampled():
     assert claims.is_prose(PASSAGE)
     assert not claims.is_prose("12.4 55.1 63.0 71.9 ColPali BM25 " * 20)  # a table
     assert not claims.is_prose("We show that it works.")  # too short
+
+
+def test_captions_of_dataset_examples_are_not_sampled():
+    example = "Figure 2: Caption: The cow is ahead of the person. Label: False."
+    caption = "Figure 3: Top: accuracy of each model on the test split."
+    passages = [
+        {"paper": "vsr.pdf", "index": 0, "text": example},
+        {"paper": "vsr.pdf", "index": 1, "text": caption},
+    ]
+    sampled = claims.sample_captions(passages, sample=10)
+    assert [p["index"] for p in sampled] == [1]
