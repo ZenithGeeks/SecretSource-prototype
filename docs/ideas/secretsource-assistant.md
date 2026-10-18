@@ -1,6 +1,6 @@
 # SecretSource Assistant
 
-One-pager from the idea-refine session on 2026-10-17.
+One-pager from the idea-refine session on 2026-10-17. The first test of its assumptions is #504 (SCRUM-349).
 
 ## Problem Statement
 How might we help a researcher understand papers and concepts in minutes, using their own library and the open literature, with answers they can trust because every citation has been checked against its source?
@@ -12,11 +12,11 @@ It is built mostly from parts that already exist: the ADK agent team (`backend/a
 
 Two features come without typing: a one-click 5W1H explain card for any paper or graph node, and a gap finder that lists unbacked claims, contradictions between sources, and much-cited works not yet read.
 
-The assistant can search the open literature (OpenAlex and arXiv first, since Semantic Scholar refuses most requests, see memory `s2-throttling`). It suggests papers, and adding one runs the existing analysis. Memory starts simple: a per-user record in Supabase of the papers and concepts asked about, with short summaries.
+The assistant can search the open literature (OpenAlex and arXiv first, since Semantic Scholar refuses most requests even with an API key). It suggests papers, and adding one runs the existing analysis. Memory starts simple: a per-user record in Supabase of the papers and concepts asked about, with short summaries.
 
 ## Key Assumptions to Validate
-- [ ] Checking every cited statement is fast enough: an answer within 20 s. Test on 20 questions from the three eval papers; measure time per answer.
-- [ ] Checked answers are mostly backed: if over about a third come back "not backed", it feels broken. Measure that share on the same 20 questions.
+- [x] Checking every cited statement is fast enough: an answer within 20 s. Test on 20 questions from the three eval papers; measure time per answer. Measured in #504: median 7.7 to 9.4 s, slowest 13.0 s over 3 runs, judge on the local GPU.
+- [x] Checked answers are mostly backed: if over about a third come back "not backed", it feels broken. Measure that share on the same 20 questions. Measured in #504: 1 to 3% not backed. Each question named one paper, so this does not cover questions across the whole library.
 - [ ] Students prefer it to SciSpace for understanding a paper: 3 to 5 thesis students try both on their own paper; time how long until they can explain it.
 - [ ] The 9arm LLM holds up under chat traffic: 5 users chatting at once, latency and rate limits.
 - [ ] OpenAlex and arXiv search is good enough without Semantic Scholar: on 10 questions, a relevant paper in the top 5.
@@ -35,7 +35,7 @@ In: the assistant panel on the library, graph and analysis screens with screen c
 
 ## Open Questions
 - What counts as "learned": anything asked about, or only what the user confirmed?
-- How do the two frontend teammates split the panel, explain card and gap finder? (memory `team-ownership`)
+- How do the two frontend teammates split the panel, explain card and gap finder?
 - Does each conversation stay separate, or see the user's other conversations?
 - Cost: a chat question priced as if the LLM were paid, against $0.50 per analysis and $10 per user per month in CONSTRAINTS.md.
 
