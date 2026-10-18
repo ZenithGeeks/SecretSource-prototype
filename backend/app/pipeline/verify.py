@@ -216,16 +216,27 @@ def _build_judge():
         quote: str = dspy.OutputField(desc="The sentence from the evidence that decides it, or empty")
         reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
 
-    # Same instructions as JudgeClaim; the figure is one more input (#497).
-    JudgeClaimWithFigure = JudgeClaim.append(
-        "figure",
-        dspy.InputField(desc="A figure from the cited paper; values read from it count as evidence"),
-        type_=dspy.Image,
-    )
+    class JudgeFigure(dspy.Signature):
+        """Decide whether a figure from the cited paper supports the claim made about it.
+        Answer "supports" only if the figure shows it, "refutes" if the figure contradicts it,
+        and "insufficient" if the figure does not settle the question.
+        Before answering "supports", read each number off the figure and check each
+        comparison (more or less, higher or lower), each direction and which series, axis or
+        label each value belongs to. If any of them differs from the figure, the figure
+        contradicts the claim. A claim that leaves out details the figure gives is not
+        contradicted by that. The claim may use different words than the figure; judge
+        whether it means the same thing."""
+
+        claim: str = dspy.InputField(desc="A claim that cites the source paper")
+        figure: dspy.Image = dspy.InputField(desc="A figure from the cited paper")
+        evidence: list[str] = dspy.InputField(desc="The figure's caption, or empty")
+        verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")
+        quote: str = dspy.OutputField(desc="The value or label in the figure that decides it, or empty")
+        reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
 
     # Only the Author check marks the citation (#437). A paper analysis keeps the first
     # judge until labeled data (#423) can score the second one on its claims.
-    signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim, "judge-figure": JudgeClaimWithFigure}
+    signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim, "judge-figure": JudgeFigure}
     judges = {name: dspy.ChainOfThought(signature) for name, signature in signatures.items()}
 
     def ask(name: str, inputs: dict) -> dspy.Prediction:
@@ -373,11 +384,18 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
 
         if _judge is None:
             _judge = _build_judge()
-        # The judge also looks at the top figure: numbers read off a chart are often in no
-        # passage. Pages are empty with VISUAL_EVIDENCE off, so then it reads text only.
+        verdict = _judge(claim, passages)
+        # Numbers read off a chart are often in no passage, so a claim the text cannot settle
+        # is asked again about the top figure, with only its caption. With the passages next
+        # to a figure, the judge read the text worse, and turned text it had found
+        # insufficient into a verdict (#501). Pages are empty with VISUAL_EVIDENCE off, and
+        # the Author check's judge has no figure input.
         figure = _figure_crop(pages, source)
+        if verdict["verdict"] == "insufficient" and figure and CITED_MARK not in claim:
+            caption = _captions([hit for hit in pages if hit.get("image")][:1])
+            verdict = _judge(claim, caption, figure)
         return {"status": "ok", "claim": claim, "source": source.name,
-                **_judge(claim, passages, figure), "evidence": evidence, "pages": pages,
+                **verdict, "evidence": evidence, "pages": pages,
                 "page_model": page_model, "indexed_in": indexed_in, **version}
     except Exception as error:
         from app.pipeline.sources import tool_error

@@ -79,7 +79,7 @@ Verdict accuracy, `eval_generated.py --runs 3 --fresh`, mean of 3 runs. Before S
 
 ## Figure evidence for the judge (SCRUM-346)
 
-With `VISUAL_EVIDENCE` on, the judge also gets the crop of the top ColPali figure hit as an image. Some claims rest on a number read off a chart that no passage or caption states. With it off, the judge reads text only, as before.
+With `VISUAL_EVIDENCE` on, a claim the text leaves "insufficient" is asked again about the top ColPali figure hit. That second call gets the claim, the figure's crop as an image and its caption, but not the passages. Some claims rest on a number read off a chart that no passage or caption states. With `VISUAL_EVIDENCE` off, the judge reads text only, as before.
 
 `figure-claims.jsonl` comes from `backend/make_figure_claims.py`. It keeps a figure only if the claim's key number is in neither the caption nor the 4 passages the judge gets. 51 figures from 19 papers passed that filter. Three readers checked every pair against its figure and kept 26. The other 25 had a wrong value, swapped labels, a series not in the figure, a contradicted value too close to the real one, or an unreadable figure.
 
@@ -87,25 +87,28 @@ Retrieval: for 51 of the 52 claims, ColPali's top figure hit is the figure the c
 
 The judge on its own, with the claim's own figure (`backend/eval_figures.py --runs 3`), got 5, 5 and 6 of 52 right from text, and 48, 49 and 45 with the figure.
 
-The whole pipeline (`eval_generated.py --runs 3 --fresh`, ColPali on, local ColBERT 64/300), mean of 3 runs:
+The whole pipeline (`eval_generated.py --runs 3 --fresh`, ColPali on, local ColBERT 64/300), mean of 3 runs. Each column is one way to give the judge the figure; the last one is what this change does:
 
-| Claims | ColPali off | main, ColPali on (captions only) | This change, ColPali on (crop to the judge) |
-|---|---|---|---|
-| `figure-claims.jsonl` (52) | 0.109 | 0.083 | 0.853 (supports 0.872, refutes 0.833; spread 0.058) |
-| `claims.jsonl` (278) | | 0.977 (spread 0.004) | 0.966 (spread 0.011) |
-| `caption-claims.jsonl` (148) | | 0.975 (spread 0.014) | 0.899 (spread 0.000) |
-| `eval_decisive.py` (13), kept per run | | 12, 12, 11 | 11, 11, 11 |
+| Claims | main (captions only) | Crop on every claim | Crop + passages when text says insufficient | Crop + caption when text says insufficient |
+|---|---|---|---|---|
+| `figure-claims.jsonl` (52) | 0.083 | 0.853 | 0.782 | 0.769 (spread 0.058) |
+| `claims.jsonl` (278) | 0.977 | 0.966 | 0.976 | 0.976 (spread 0.007) |
+| `caption-claims.jsonl` (148) | 0.975 | 0.899 | 0.975 | 0.986 (spread 0.000) |
+| Errors (reply not JSON after one retry) | 0 | 20 | 3 | 5, all on figure claims |
+| `eval_decisive.py` (13), kept per run | 12, 12, 11 | 11, 11, 11 | 9, 10, 10 | 11, 11, 11 |
 
-The crop helps the claims only a figure can decide and hurts the rest:
+With ColPali off, 0.109 on the figure claims.
 
-- Caption "supports" claims: 0.972 on main, 0.838 with the crop. Over the 3 runs the judge called 26 of them "refutes", against 6 on main. A likely cause is that the top ColPali hit is not the figure the caption belongs to, and the judge trusts the image over the caption. That is not checked yet: the runs did not save per-claim verdicts.
-- Prose claims: 12 "supports" claims judged "refutes", against 6 on main.
-- 17 errors on the 426 claims, against none on main: replies that were not valid JSON even after one retry.
-- On the figure claims, the crop turned 11 "refutes" claims into "supports" over the 3 runs, and gave 3 errors.
+- Crop on every claim: with a figure in the prompt, the judge read the text worse even when the text decided the claim. On caption claims it called 26 "supports" claims "refutes" over 3 runs, against 6 on main. In a logged run, 22 of 28 such false "refutes" came with a crop of a different figure than the caption's own. A guard that also named the crop's figure and told the judge to ignore an unrelated one did not help: prose 0.941, captions 0.890.
+- Crop + passages, only when the text says insufficient: the text sets are back at main, but decisive row 8 (XTR) went from insufficient to refutes in all 3 runs. The crop was the paper's overview diagram; the judge reread the abstract and decided from it.
+- Crop + caption, no passages: row 8 stays insufficient. The figure answer can only come from the figure.
 
-The decisive check that changes with ColPali on is DensePhrases (row 13, labelled insufficient). The crop is the paper's Figure 1: it draws a passage as many phrase vectors and a search that picks single vectors, which is what the claim says. So the judge says supports in all 3 runs. The text alone does not say it, and the merge gate runs with ColPali off, so the row stays insufficient.
+The decisive checks this changes with ColPali on, in all 3 runs:
 
-With ColPali off, the judge gets no image and the answer cache key is unchanged. In the same session, with another eval sharing the LLM gateway, this change kept 12, 11, 12 and main kept 11, 11, 11. Both builds lose row 3 every time. Row 13 turns into supports in 1 of 3 runs here and 2 of 3 on main, and main also lost row 8 once. These rows move with the judge's run-to-run noise, not with this change.
+- Row 13 (DensePhrases, labelled insufficient) becomes supports. The crop is the paper's Figure 1: it draws a passage as many phrase vectors and a search that picks single vectors, which is what the claim says.
+- Row 3 (MTEB, labelled refutes) becomes supports. Without the figure it is insufficient, so it was already a miss. The crop is Figure 4, where SGPT-5.8B and GTR-XXL score highest, but the paper's text says no model wins on every task.
+
+The merge gate runs with ColPali off. There the judge gets no image, and the signature, inputs and answer cache key are the same as on main. In the same session, with another eval sharing the LLM gateway, the off mode kept 12, 11, 12 with an earlier version of this change and 11, 11, 11 on main. Both builds lose row 3 every time. Rows 13 and 8 move between runs on main too, so these differences are the judge's run-to-run noise.
 
 ## Tried and not adopted
 
