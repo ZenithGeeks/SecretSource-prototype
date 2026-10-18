@@ -1,0 +1,21 @@
+paper,question
+2409.12191,What is Naive Dynamic Resolution in Qwen2-VL?
+2409.12191,"How does Qwen2-VL encode the positions of text, image and video tokens?"
+2409.12191,Who developed Qwen2-VL and which model sizes were released?
+2409.12191,Why does Qwen2-VL process images and video frames in one framework?
+2409.12191,How was Qwen2-VL trained?
+2409.12191,How does Qwen2-VL-72B compare with GPT-4o on document understanding benchmarks?
+2409.12191,How long a video can Qwen2-VL understand?
+2407.01449,What problem does ColPali solve in document retrieval?
+2407.01449,How does ColPali turn a page image into embeddings?
+2407.01449,What is the ViDoRe benchmark?
+2407.01449,Why is ColPali faster to index than OCR-based pipelines?
+2407.01449,Which vision language model is ColPali built on?
+2407.01449,How does ColPali compare with BM25 and other text retrievers on ViDoRe?
+2407.01449,How does ColPali score a query against a page?
+2112.01488,What is residual compression in ColBERTv2?
+2112.01488,How does ColBERTv2 use denoised supervision during training?
+2112.01488,How much smaller is the ColBERTv2 index than the ColBERT index?
+2112.01488,What is the LoTTE benchmark?
+2112.01488,Why does late interaction work better than single-vector retrieval out of domain?
+2112.01488,Who wrote ColBERTv2 and where was it published?
