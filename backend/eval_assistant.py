@@ -71,14 +71,15 @@ def answer_from_library(question: str) -> list[Cited]:
     hits = colbert_search(question, k=LIBRARY_PASSAGES)
     numbered = [f"[{number}] {hit['text']}" for number, hit in enumerate(hits, 1)]
     statements = dspy.Predict(AnswerFromLibrary)(passages=numbered, question=question).statements
-    cited = []
-    for statement in statements[:MAX_STATEMENTS]:
-        if 1 <= statement.passage <= len(hits):
-            source = hits[statement.passage - 1]["source"]
-            cited.append((statement.text, source, PAPERS_DIR / source))
-        else:
-            cited.append((statement.text, f"passage {statement.passage}", None))
-    return cited
+    return [cite(statement, hits) for statement in statements[:MAX_STATEMENTS]]
+
+
+def cite(statement: Statement, hits: list[dict]) -> Cited:
+    """The statement with the paper of the passage it names, or no path if the number is wrong."""
+    if 1 <= statement.passage <= len(hits):
+        source = hits[statement.passage - 1]["source"]
+        return (statement.text, source, PAPERS_DIR / source)
+    return (statement.text, f"passage {statement.passage}", None)
 
 
 _prepared: dict[str, Path | None] = {}
@@ -100,16 +101,17 @@ def prepare_papers(cited: list[Cited]) -> list[Cited]:
     return ready
 
 
+def check(item: Cited) -> str:
+    """The judge's verdict on one statement whose paper prepare_papers made ready."""
+    text, source, path = item
+    if path is None:
+        return "unchecked"
+    result = verify.check_prepared(text, source, path)
+    return result.get("verdict", "error") if result["status"] == "ok" else "error"
+
+
 def judge(cited: list[Cited]) -> list[str]:
     """The judge's verdict on each statement, checked in parallel as an analysis does."""
-
-    def check(item: Cited) -> str:
-        text, source, path = item
-        if path is None:
-            return "unchecked"
-        result = verify.check_prepared(text, source, path)
-        return result.get("verdict", "error") if result["status"] == "ok" else "error"
-
     with ThreadPoolExecutor(max_workers=PARALLEL_CHECKS) as pool:
         return list(pool.map(check, cited))
 
