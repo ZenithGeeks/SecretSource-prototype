@@ -571,6 +571,18 @@ The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: 
 A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
 when the run does not say.
 
+#### `GET /researcher/gaps`
+
+What the caller's library leaves open, from verdicts already found (no LLM call). Three lists,
+newest paper first:
+
+- `notBacked`: claims that were checked but that no cited work backs or contradicts: `claim`,
+  `checked` (the works read), `analysis`, `claimIndex`.
+- `contradicted`: claims a cited work contradicts: `claim`, `for`, `against`, `analysis`,
+  `claimIndex`. Home's `conflicts` is the first 5 of this list.
+- `missing`: works cited by at least two claims that are not in the library: `paper`, `note`,
+  `identifier`, `analysis` (a paper that cites it). Home's `queue` is the first 5.
+
 ### Assistant
 
 Questions about the caller's papers, answered as short statements that the judge checks before

@@ -926,6 +926,12 @@ async def knowledge_graph(user: str | None = Depends(current_user)):
     return await asyncio.to_thread(_per_owner, "graph", user, researcher.graph)
 
 
+@app.get("/researcher/gaps")
+async def library_gaps(user: str | None = Depends(current_user)):
+    """What the caller's own library leaves open (researcher.gaps). Reads stored verdicts only."""
+    return await asyncio.to_thread(_per_owner, "gaps", user, researcher.gaps)
+
+
 # --- the assistant: questions answered as checked statements (app/assistant.py) ---
 
 
