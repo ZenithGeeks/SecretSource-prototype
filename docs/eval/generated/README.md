@@ -83,7 +83,7 @@ With `VISUAL_EVIDENCE` on, a claim the text leaves "insufficient" is asked again
 
 `figure-claims.jsonl` comes from `backend/make_figure_claims.py`. It keeps a figure only if the claim's key number is in neither the caption nor the 4 passages the judge gets. 51 figures from 19 papers passed that filter. Three readers checked every pair against its figure and kept 26. The other 25 had a wrong value, swapped labels, a series not in the figure, a contradicted value too close to the real one, or an unreadable figure.
 
-Retrieval: for 51 of the 52 claims, ColPali's top figure hit is the figure the claim was written from. This used Ops-Colqwen3-4B on vLLM, not production's colqwen2-v1.0. Each claim was written from its own figure, so retrieval is easier here than for claims in real papers.
+Retrieval: for 51 of the 52 claims, ColPali's top figure hit is the figure the claim was written from. This used Ops-Colqwen3-4B on vLLM. Production's colqwen2-v1.0 gets 50 of 52: both misses are the two claims about CLIP's `figure-19.png`, and both got `figure-21.png`. Each claim was written from its own figure, so retrieval is easier here than for claims in real papers.
 
 The judge on its own, with the claim's own figure (`backend/eval_figures.py --runs 3`), got 5, 5 and 6 of 52 right from text, and 48, 49 and 45 with the figure.
 
@@ -98,6 +98,18 @@ The whole pipeline (`eval_generated.py --runs 3 --fresh`, ColPali on, local ColB
 | `eval_decisive.py` (13), kept per run | 12, 12, 11 | 11, 11, 11 | 9, 10, 10 | 11, 11, 11 |
 
 With ColPali off, 0.109 on the figure claims.
+
+The table above used Ops-Colqwen3-4B for ColPali. Production runs colqwen2-v1.0. The same last column with colqwen2-v1.0 (19 Oct 2026, same judge, ColBERT and claim sets):
+
+| Claims | Ops-Colqwen3-4B | colqwen2-v1.0 |
+|---|---|---|
+| `figure-claims.jsonl` (52) | 0.769 (spread 0.058) | 0.756 (spread 0.019) |
+| `claims.jsonl` (278) | 0.976 (spread 0.007) | 0.981 (spread 0.004) |
+| `caption-claims.jsonl` (148) | 0.986 (spread 0.000) | 0.968 (spread 0.007) |
+| Errors (reply not JSON after one retry) | 5, all on figure claims | 4, all on figure claims |
+| `eval_decisive.py` (13), kept per run | 11, 11, 11 | 11, 11, 11 |
+
+3 caption claims that Ops-Colqwen3-4B got right in all 3 runs are wrong in 2 or 3 runs with colqwen2-v1.0. For one of them, "Figure 13 illustrates that the cat is located below the keyboard" (a refutes claim), colqwen2-v1.0's top hit is Figure 14, and the judge says supports in all 3 runs. The decisive checks lost are the same two, rows 3 and 13.
 
 - Crop on every claim: with a figure in the prompt, the judge read the text worse even when the text decided the claim. On caption claims it called 26 "supports" claims "refutes" over 3 runs, against 6 on main. In a logged run, 22 of 28 such false "refutes" came with a crop of a different figure than the caption's own. A guard that also named the crop's figure and told the judge to ignore an unrelated one did not help: prose 0.941, captions 0.890.
 - Crop + passages, only when the text says insufficient: the text sets are back at main, but decisive row 8 (XTR) went from insufficient to refutes in all 3 runs. The crop was the paper's overview diagram; the judge reread the abstract and decided from it.
