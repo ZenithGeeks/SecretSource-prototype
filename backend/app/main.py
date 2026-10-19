@@ -33,6 +33,7 @@ startup does not grow with every analysis ever stored.
 
 import asyncio
 import copy
+import gc
 import hashlib
 import json
 import logging
@@ -356,6 +357,11 @@ async def lifespan(app: FastAPI):
     _loop = asyncio.get_running_loop()
     setup_tracing()
     restore()
+    # What exists now (imports, the restored rows) lives as long as the process. Freezing it
+    # stops each full GC pass from walking it again. Without this, the first owner load after
+    # start-up set off a full pass of about 41 ms (#551).
+    gc.collect()
+    gc.freeze()
     # Log where each dependency is and whether it answers, without holding up startup.
     app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))
     app.state.snapshot_subscriber = asyncio.create_task(_subscribe_forever())
