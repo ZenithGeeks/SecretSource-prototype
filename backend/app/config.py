@@ -128,6 +128,10 @@ PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 # keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.
 PARALLEL_SOURCES_TOTAL = int(os.getenv("PARALLEL_SOURCES_TOTAL") or PARALLEL_SOURCES)
 PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECKS)
+# How many LLM requests this process sends at once, over every caller: analyses, author
+# checks and the assistant's agents. The 9arm key allows 3 and refuses the rest with HTTP 429
+# (#511). Other processes on the same key are not counted.
+LLM_PARALLEL_REQUESTS = int(os.getenv("LLM_PARALLEL_REQUESTS", "3"))
 # How many Docling PDF conversions run at once in this process. Each one holds about 2 GB of
 # layout and table models while it runs, which killed Cloud Run gateway instances at 4Gi and 8Gi.
 DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
