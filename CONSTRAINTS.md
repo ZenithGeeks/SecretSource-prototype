@@ -106,10 +106,17 @@ does not hold. They become rules when the first assistant PR lands.
 | Slowest checked answer from the whole library, the same way | 19.3 to 27.1 s; 5 of 42 answers over 20 s | must fall under 20 s |
 | Statements the judge does not back | 1 to 3% about one paper, 0 to 1% from the library | must not rise above 3% |
 | Questions outside the library answered with no statements | 6 of 6 in every run | must stay 6 of 6 |
+| Last verdict of a checked answer, 5 people chatting at once (SCRUM-363) | median 61.7 s, p90 131.6 s; 34 of 39 answers over 20 s | must fall under 20 s, the one-pager's target |
+| Statements not backed, 5 people chatting at once | 4% (7 of 183) | must stay under one third, the one-pager's ceiling |
 
 Checked by `python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh`, and the
 same with `assistant-library-questions.csv`, in the worker container with
 `PAPERS_DIR=/app/data/papers`, alone on the LLM gateway.
+
+The two rows for 5 people come from `python load_assistant.py <gateway> ../docs/eval/assistant-*questions.csv
+--users 5`: 40 questions through the chat routes, on a fresh gateway (each paper indexed in ColBERT the
+first time a check reads it) with the 9arm key's cap of 3 requests. A second run on the same gateway
+replays dspy's and the store's answer caches, so only a first run measures the work.
 
 ## How quality and time are checked
 
