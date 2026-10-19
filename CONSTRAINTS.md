@@ -94,8 +94,8 @@ paper it has not seen. This rule warns and does not block.
 
 ## Assistant answers, measured, not yet enforced
 
-The assistant in `docs/ideas/secretsource-assistant.md` is not built yet. These numbers come from
-two tests, each answering 20 questions as short statements that the judge then checks. In #504
+The assistant in `docs/ideas/secretsource-assistant.md` answers from `backend/app/assistant.py`
+since SCRUM-360; no screen calls it yet. These numbers come from two tests, each answering 20 questions as short statements that the judge then checks. In #504
 every question names one of the three decisive-check papers. In #506 no paper is named: 14
 questions are answered from the whole local library (about 30 papers) and 6 ask about topics it
 does not hold. They become rules when the first assistant PR lands.
