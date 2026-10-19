@@ -120,6 +120,28 @@ same with `assistant-library-questions.csv`, in the worker container with
 
 Neither runs in CI: both need the LLM gateway and a GPU, which the shared CI runner does not have.
 
+## Where the system runs
+
+From 17 Oct 2026 the system is developed and run on the local stack only, until it is
+finished. Then it is deployed to Google Cloud in one planned release.
+
+| Rule | Number | Why |
+| --- | --- | --- |
+| Cloud Run services serving traffic | 0 (gateway, colbert, colpali and grobid at manual scaling, 0 instances) | each deploy and each idle GPU or CPU minute costs money on a university account, and the design is still changing |
+| Deploys to Google Cloud | none until the release | a half-finished pipeline in production gives teammates and testers wrong verdicts |
+
+What was switched off on 17 Oct 2026, and how to turn it back on at release time:
+
+| What | Off with | On again with |
+| --- | --- | --- |
+| Cloud Run services | `gcloud run services update <svc> --region asia-southeast1 --scaling=0` | `--scaling=auto --min=0` and the old max (gateway 1, colpali 2, colbert 10, grobid 3) |
+| Cloud Scheduler `scale-guard-gateway`, `gpu-guard-colpali` | `gcloud scheduler jobs pause` | `gcloud scheduler jobs resume`, after the services are back on automatic scaling |
+| Workflows `deploy-gateway`, `deploy` | `gh workflow disable` | `gh workflow enable` |
+
+Checked by `gcloud run services list` (every service shows manual scaling with 0 instances)
+and `gh workflow list --all`. A change that needs a cloud deploy before the release needs
+an entry under Exceptions first.
+
 ## Exceptions
 
 None.
