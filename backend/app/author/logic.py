@@ -15,7 +15,7 @@ import hashlib
 import re
 import unicodedata
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 VERDICTS = ("supports", "refutes", "insufficient", "unavailable", "unchecked")
 NEEDS_WORK = ("refutes", "insufficient")
@@ -40,7 +40,7 @@ def content_hash(files: list[dict]) -> str:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # --- .bib -------------------------------------------------------------------------------

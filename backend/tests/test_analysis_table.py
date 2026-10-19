@@ -1,6 +1,8 @@
 """The per-owner index on the gateway's analyses, and the per-owner caches built on it (#314)."""
 
 import random
+import threading
+import time
 
 import pytest
 from app import main
@@ -62,6 +64,7 @@ def test_setdefault_indexes_the_row_it_inserts():
 def gateway(monkeypatch, tmp_path):
     main.analyses.clear()
     main._derived.clear()
+    main._consensus_cache.clear()
     main._missing.clear()
     # papers_of also reads the Author role's rows from the store; none here unless a test adds them.
     monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "analyses.db"))
@@ -71,6 +74,7 @@ def gateway(monkeypatch, tmp_path):
     yield main
     main.analyses.clear()
     main._derived.clear()
+    main._consensus_cache.clear()
     main._missing.clear()
 
 
@@ -202,3 +206,69 @@ def test_consensus_is_reused_until_one_of_the_owners_rows_changes(gateway, monke
     gateway.analyses["p1"]["stages"].append({"stage": "verified"})
     assert gateway._consensus("a", "late interaction") is not first
     assert builds == ["late interaction", "something else", "late interaction"]
+
+
+def test_consensus_keeps_only_a_few_questions_per_owner(gateway, monkeypatch):
+    monkeypatch.setattr(gateway, "_CONSENSUS_CACHE_PER_OWNER", 2)
+    built = []
+
+    def consensus(question, rows):
+        built.append((question, rows[0]["owner"]))
+        return {"question": question, "n": len(built)}
+
+    monkeypatch.setattr(gateway.researcher, "consensus", consensus)
+    gateway.analyses["p1"] = _paper("p1", "a", "papers/one.pdf")
+    gateway.analyses["q1"] = _paper("q1", "b", "papers/other.pdf")
+
+    first = gateway._consensus("a", "q0")
+    second = gateway._consensus("a", "q1")
+    third = gateway._consensus("a", "q2")
+    assert gateway._consensus("a", "q2") is third
+    assert gateway._consensus("a", "q1") is second
+    again = gateway._consensus("a", "q0")
+    assert again is not first
+    other = gateway._consensus("b", "q0")
+    assert gateway._consensus("b", "q0") is other
+    assert built == [("q0", "a"), ("q1", "a"), ("q2", "a"), ("q0", "a"), ("q0", "b")]
+
+
+def test_owned_by_is_safe_while_another_thread_changes_the_table():
+    table = AnalysisTable()
+    stop = threading.Event()
+    errors = []
+
+    def writer():
+        index = 0
+        try:
+            while not stop.is_set():
+                analysis_id = f"id{index % 40}"
+                table[analysis_id] = _row(analysis_id, "a" if index % 2 == 0 else "b")
+                if index % 5 == 0:
+                    table.pop(analysis_id, None)
+                index += 1
+        except Exception as exc:
+            errors.append(exc)
+            stop.set()
+
+    def reader():
+        while not stop.is_set():
+            try:
+                list(table.owned_by("a"))
+                list(table.values())
+                list(table)
+            except Exception as exc:
+                errors.append(exc)
+                stop.set()
+
+    threads = [threading.Thread(target=writer, daemon=True)]
+    threads.extend(threading.Thread(target=reader, daemon=True) for _ in range(2))
+    for thread in threads:
+        thread.start()
+    time_limit = time.monotonic() + 0.3
+    while time.monotonic() < time_limit and not stop.is_set():
+        time.sleep(0.01)
+    stop.set()
+    for thread in threads:
+        thread.join(2)
+        assert not thread.is_alive()
+    assert errors == []

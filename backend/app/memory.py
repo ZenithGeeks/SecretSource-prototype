@@ -15,7 +15,7 @@ MEMORY_OWNER, a Supabase user id the operator sets for this process.
 import asyncio
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from google.adk.memory import BaseMemoryService
 from google.adk.memory.base_memory_service import SearchMemoryResponse
@@ -43,7 +43,7 @@ def _readable(analysis: dict) -> tuple[str, str]:
     """The paper's name and the date the analysis started, as the model should see them."""
     paper = analysis.get("title") or os.path.basename(analysis.get("file") or analysis.get("paper") or "")
     started = next((stage["at"] for stage in analysis.get("stages", []) if stage.get("at")), None)
-    when = datetime.fromtimestamp(started, timezone.utc).date().isoformat() if started else ""
+    when = datetime.fromtimestamp(started, UTC).date().isoformat() if started else ""
     return paper, when
 
 

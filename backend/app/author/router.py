@@ -97,13 +97,31 @@ def _public(row: dict) -> dict:
 def _owner_rows(user: str | None) -> list[dict]:
     """This user's analyses, oldest first. The gateway loads that owner from the store on
     demand and keeps an index, so this does not scan every user. A test that swaps in a plain
-    dict has no index; it is filtered the same way."""
+    dict has no index; it is filtered the same way.
+
+    The first call for an owner reads the store. A route awaits it via asyncio.to_thread; calling
+    it directly on the event loop blocks every other request (#169)."""
     gateway = _gateway()
     table = gateway.analyses
     if hasattr(table, "owned_by") and hasattr(gateway, "ensure_owner"):
         gateway.ensure_owner(user)
         return table.owned_by(user)
     return [row for row in table.values() if row.get("owner") == user]
+
+
+def _memory_checks(draft_id: str, user: str | None) -> list[dict]:
+    """This draft's checks already in memory. Does not read the store: the Re-check guard calls
+    it on the event loop, after ensure_owner has loaded this owner on a worker thread."""
+    table = _gateway().analyses
+    if hasattr(table, "owned_by"):
+        rows = table.owned_by(user)
+    else:
+        rows = [row for row in table.values() if row.get("owner") == user]
+    return [
+        row
+        for row in rows
+        if row.get("kind") == DRAFT_CHECK and row.get("draftId") == draft_id
+    ]
 
 
 def _checks_by_draft(user: str | None) -> dict[str, list[dict]]:
@@ -287,7 +305,7 @@ def _text_files_from_upload(name: str, content: bytes) -> list[dict]:
 @router.get("/drafts")
 async def list_drafts(user: str | None = Depends(current_user)):
     drafts = await asyncio.to_thread(_rows, DRAFTS, user)
-    runs = _checks_by_draft(user)
+    runs = await asyncio.to_thread(_checks_by_draft, user)
     views = [draft_view(d, runs.get(d["id"])) for d in drafts]
     return sorted(views, key=lambda d: d.get("updated", ""), reverse=True)
 
@@ -322,7 +340,7 @@ async def upload_draft(
 async def get_draft(draft_id: str, user: str | None = Depends(current_user)):
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
     project = await asyncio.to_thread(_project_of, draft, user)
-    view = draft_view(draft, _checks_of(draft_id, user))
+    view = draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
     view["files"] = _draft_files(draft, project)
     view["pdfs"] = _pdfs_for(draft, project)
     return view
@@ -338,14 +356,14 @@ async def update_draft(draft_id: str, request: DraftIn, user: str | None = Depen
             await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
         draft["projectId"] = request.projectId or None
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, _checks_of(draft_id, user))
+    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
 
 
 @router.delete("/drafts/{draft_id}")
 async def delete_draft(draft_id: str, user: str | None = Depends(current_user)):
     await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
     gateway = _gateway()
-    for run in _checks_of(draft_id, user):
+    for run in await asyncio.to_thread(_checks_of, draft_id, user):
         if run.get("status") != "running":
             await gateway._delete_one(run["id"])
     await asyncio.to_thread(store.delete_author_row, DRAFTS, draft_id)
@@ -368,7 +386,7 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
     else:
         draft["files"].append({"name": name, "kind": _kind_of(name), "content": request.content})
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, _checks_of(draft_id, user))
+    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
 
 
 @router.delete("/drafts/{draft_id}/files/{name:path}")
@@ -381,7 +399,7 @@ async def delete_file(draft_id: str, name: str, user: str | None = Depends(curre
     if not draft["files"]:
         raise HTTPException(400, "a draft keeps at least one file")
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, _checks_of(draft_id, user))
+    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
 
 
 @router.post("/drafts/{draft_id}/save")
@@ -390,7 +408,7 @@ async def save_draft(draft_id: str, user: str | None = Depends(current_user)):
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
     _bump_version(draft)
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, _checks_of(draft_id, user))
+    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
 
 
 def _bump_version(draft: dict) -> None:
@@ -467,7 +485,8 @@ async def _run_draft_check(check_id: str, user: str | None):
         for entry in entries:
             by_key.setdefault(entry["key"], entry)
         pdfs = _pdfs_for(draft, project)
-        previous = _latest_done([r for r in _checks_of(draft["id"], user) if r["id"] != check_id])
+        earlier = await asyncio.to_thread(_checks_of, draft["id"], user)
+        previous = _latest_done([r for r in earlier if r["id"] != check_id])
         carried = {
             (c["key"], c.get("claim")): c["resolution"]
             for c in (previous or {}).get("citations", [])
@@ -562,11 +581,13 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
     409 with the running check's id, rather than a second run the screen would lose."""
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
     gateway = _gateway()
-    # The guard and the row it guards, with no await between them: the event loop cannot
-    # switch to a second request (a double-click on Re-check, a client retry) after this one
-    # saw no running check and before its own row is in place, so at most one of them gets
-    # past here. The row is filled in below; until then it is a running check to everyone.
-    running = next((r for r in _checks_of(draft_id, user) if r.get("status") == "running"), None)
+    # Load this owner's rows off the loop. The guard below then reads only memory, with no
+    # await until the row is inserted: the event loop cannot switch to a second request (a
+    # double-click on Re-check, a client retry) after this one saw no running check and before
+    # its own row is in place, so at most one of them gets past here. The row is filled in
+    # below; until then it is a running check to everyone.
+    await asyncio.to_thread(gateway.ensure_owner, user)
+    running = next((r for r in _memory_checks(draft_id, user) if r.get("status") == "running"), None)
     if running:
         raise HTTPException(409, f"a check is already running: {running['id']}")
     check_id = _new_id()
@@ -609,7 +630,7 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
 async def list_draft_checks(draft_id: str, user: str | None = Depends(current_user)):
     """The check history, newest first, each with what changed since the one before."""
     await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    runs = _checks_of(draft_id, user)
+    runs = await asyncio.to_thread(_checks_of, draft_id, user)
     views = []
     done_before: dict | None = None
     for run in runs:
@@ -640,20 +661,20 @@ def _previous_of(run: dict, user: str | None) -> dict | None:
 
 @router.get("/checks/{check_id}")
 async def get_check(check_id: str, user: str | None = Depends(current_user)):
-    run = _check(check_id, user)
-    return check_view(run, _previous_of(run, user))
+    run = await asyncio.to_thread(_check, check_id, user)
+    return check_view(run, await asyncio.to_thread(_previous_of, run, user))
 
 
 @router.get("/checks/{check_id}/events")
 async def check_events(check_id: str, user: str | None = Depends(current_user)):
-    _check(check_id, user)
+    await asyncio.to_thread(_check, check_id, user)
     return StreamingResponse(_gateway()._event_stream(check_id), media_type="text/event-stream")
 
 
 @router.get("/checks/{check_id}/compare")
 async def compare_checks(check_id: str, user: str | None = Depends(current_user)):
-    run = _check(check_id, user)
-    previous = _previous_of(run, user)
+    run = await asyncio.to_thread(_check, check_id, user)
+    previous = await asyncio.to_thread(_previous_of, run, user)
     if previous is None:
         raise HTTPException(404, "nothing earlier to compare with")
     return {
@@ -665,7 +686,7 @@ async def compare_checks(check_id: str, user: str | None = Depends(current_user)
 
 @router.delete("/checks/{check_id}")
 async def delete_check(check_id: str, user: str | None = Depends(current_user)):
-    run = _check(check_id, user)
+    run = await asyncio.to_thread(_check, check_id, user)
     if run.get("status") not in _gateway().FINISHED:
         raise HTTPException(409, "the check is still running")
     await _gateway()._delete_one(check_id)
@@ -687,7 +708,7 @@ async def update_citation(
 ):
     """What the author did about an issue: "Replace with …" (a new key, and the verdict the
     replacement was verified with), "Keep mine" / "Override · add note", or reopening it."""
-    run = _check(check_id, user)
+    run = await asyncio.to_thread(_check, check_id, user)
     citation = next((c for c in run.get("citations", []) if c["id"] == citation_id), None)
     if citation is None:
         raise HTTPException(404, "no such citation")
@@ -723,7 +744,7 @@ async def update_citation(
     gateway = _gateway()
     gateway._save_soon(check_id)
     await gateway._saved(check_id)
-    return check_view(run, _previous_of(run, user))
+    return check_view(run, await asyncio.to_thread(_previous_of, run, user))
 
 
 @router.post("/drafts/{draft_id}/report")
@@ -731,7 +752,7 @@ async def draft_report(draft_id: str, user: str | None = Depends(current_user)):
     """The verification report as a PDF: every citation of the latest check, its verdict and
     the passage it rests on."""
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    latest = _latest_done(_checks_of(draft_id, user))
+    latest = _latest_done(await asyncio.to_thread(_checks_of, draft_id, user))
     if latest is None:
         raise HTTPException(409, "check the draft first, then export its report")
     html = logic.report_html(draft, latest)
@@ -828,7 +849,7 @@ async def list_projects(user: str | None = Depends(current_user)):
     projects, drafts = await asyncio.gather(
         asyncio.to_thread(_rows, PROJECTS, user), asyncio.to_thread(_rows, DRAFTS, user)
     )
-    runs = _checks_by_draft(user)
+    runs = await asyncio.to_thread(_checks_by_draft, user)
     return [_project_view(p, drafts, runs) for p in projects]
 
 
@@ -863,7 +884,7 @@ async def get_project(project_id: str, user: str | None = Depends(current_user))
     """Project detail: the project, its drafts, and every draft's check history."""
     project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
     drafts = [d for d in await asyncio.to_thread(_rows, DRAFTS, user) if d.get("projectId") == project_id]
-    runs = _checks_by_draft(user)
+    runs = await asyncio.to_thread(_checks_by_draft, user)
     history = {}
     for draft in drafts:
         views, done_before = [], None
@@ -1048,7 +1069,7 @@ async def library(user: str | None = Depends(current_user)):
         asyncio.to_thread(_rows, DRAFTS, user),
         asyncio.to_thread(_rows, SOURCES, user),
     )
-    runs = _checks_by_draft(user)
+    runs = await asyncio.to_thread(_checks_by_draft, user)
     by_id = {p["id"]: p for p in projects}
     unsorted = [s for s in sources if not s.get("projectId")]
     unsorted_drafts = [d for d in drafts if not d.get("projectId")]

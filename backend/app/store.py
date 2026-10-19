@@ -172,7 +172,7 @@ def _analysis_from_row(row) -> dict:
 
 
 def _sqlite_analyses(
-    where: str, params: tuple = (), *, order: str = "started", limit: int | None = None
+    where: str, params: tuple = (), *, order: str = "started, id", limit: int | None = None
 ) -> list[dict]:
     sql = f"SELECT started, data FROM analyses WHERE {where} ORDER BY {order}"
     if limit is not None:
@@ -193,7 +193,9 @@ def _supabase_collect(apply) -> list:
     start = 0
     rows: list = []
     while True:
-        query = apply(_supabase().table("analyses").select("started,data"))
+        # `started` is not unique and can be null. Ordering by it alone makes offset pages skip
+        # or repeat rows once a page boundary falls inside a tie. `id` is the primary key.
+        query = apply(_supabase().table("analyses").select("started,data")).order("id")
         batch = _execute_with_retry(query.range(start, start + _SUPABASE_PAGE - 1)).data or []
         rows.extend(batch)
         if len(batch) < _SUPABASE_PAGE:
@@ -266,12 +268,17 @@ def load_recent(limit: int) -> list[dict]:
         return []
     if _use_supabase():
         rows = _execute_with_retry(
-            _supabase().table("analyses").select("started,data").order("started", desc=True).limit(limit)
+            _supabase()
+            .table("analyses")
+            .select("started,data")
+            .order("started", desc=True)
+            .order("id", desc=True)
+            .limit(limit)
         ).data or []
         return [_analysis_from_row(row) for row in reversed(rows)]
     with _sqlite() as database:
         rows = database.execute(
-            "SELECT started, data FROM analyses ORDER BY started DESC LIMIT ?", (limit,)
+            "SELECT started, data FROM analyses ORDER BY started DESC, id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [_analysis_from_row(row) for row in reversed(rows)]
 
