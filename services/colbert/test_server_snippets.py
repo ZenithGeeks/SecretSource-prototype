@@ -1,5 +1,6 @@
-"""search_passages cuts each passage to snippet_chars on a word boundary when asked, and
-keeps the whole passage otherwise. /api/search, which the pipeline uses, never cuts."""
+"""search_passages cuts each passage on a word boundary. The default cut is 280 characters;
+snippet_chars overrides it, and full_text returns the whole passage. /api/search, which the
+pipeline uses, never cuts."""
 
 from conftest import PASSAGE
 
@@ -20,7 +21,7 @@ def test_a_word_that_ends_at_the_limit_is_kept(mcp):
     assert texts(answer) == ["ColBERTv2 compresses each token vector"]
 
 
-def test_whole_passage_without_snippet_chars_or_when_it_is_short_enough(mcp):
+def test_a_passage_shorter_than_the_snippet_is_kept_whole(mcp):
     whole = mcp.call_tool("search_passages", {"query": "index size"})
     long_limit = mcp.call_tool("search_passages", {"query": "index size", "snippet_chars": 1000})
 
