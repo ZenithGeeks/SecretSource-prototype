@@ -196,7 +196,7 @@ def main() -> None:
     write = dspy.Predict(WriteCaptionClaims if args.captions else WriteClaims)
     # The first call imports litellm; threads that start together race on a half-loaded module.
     results = [claims_for(sources[0], write, args.captions)]
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:  # the judge gateway allows 3 requests at once
         results += pool.map(lambda s: claims_for(s, write, args.captions), sources[1:])
 
     with open(args.out, "w", encoding="utf-8") as file:

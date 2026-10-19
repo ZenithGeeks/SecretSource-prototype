@@ -70,7 +70,8 @@ def main() -> None:
     parser.add_argument("claims", type=Path, nargs="+", help="JSON lines with id, paper, kind, text")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--fresh", action="store_true", help="no answer cache: the judge answers every run")
-    parser.add_argument("--workers", type=int, default=4, help="claims judged at once")
+    # The judge gateway allows 3 requests at once, and other callers share the key (#511).
+    parser.add_argument("--workers", type=int, default=2, help="claims judged at once")
     parser.add_argument("--out", type=Path, help="write every claim's verdicts here")
     parser.add_argument("--evidence-count", type=int, help="override verify.EVIDENCE_COUNT for this run")
     args = parser.parse_args()
@@ -79,6 +80,7 @@ def main() -> None:
         verify.EVIDENCE_COUNT = args.evidence_count
     print(f"judge gets {verify.EVIDENCE_COUNT} passages per claim")
     if args.fresh:
+        # Turn off the pipeline's result cache (app/store.py), so every run asks the judge again.
         store.recall_cache = lambda key: None
         store.remember_cache = lambda key, data: None
         # dspy caches LM responses too, in memory and on disk; without this runs 2+ replay run 1.
