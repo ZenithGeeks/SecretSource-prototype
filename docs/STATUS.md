@@ -62,6 +62,19 @@ Sprint 4 is the current window: today, 19 Oct 2026, falls inside its dates. The 
 - **2026-10-19.** [PR #488](https://github.com/ZenithGeeks/SecretSource-prototype/pull/488) merged. Development and runs stay on the local stack until the system is finished, then one planned Google Cloud release. See [Where the system runs](../CONSTRAINTS.md#where-the-system-runs).
 - **2026-10-17.** Assistant memory: our own memory service on a Supabase table, a few facts distilled by the LLM at the end of each chat, read with `load_memory`. See [SPEC.md](../SPEC.md).
 
+## Task board
+
+[GitHub Issues](https://github.com/ZenithGeeks/SecretSource-prototype/issues) is the shared task board for Vitawat, the Grok Bot assistants, Claude Code, and Cursor.
+
+| Label | Meaning |
+| --- | --- |
+| `agent-claude` | Task for Claude Code |
+| `agent-cursor` | Task for Cursor (agent or cloud agent) |
+| `agent-grok` | Task for Grok Bot assistants |
+| `today` | In today's daily plan |
+
+The Project Manager bot labels each weekday's plan with `today`, and removes that label from finished or deferred items. Agents work only on issues labeled `today`, so a session does not spend tokens on the rest of the backlog. See the session rule in [CLAUDE.md](../CLAUDE.md).
+
 ## Who does what
 
 | Who | Role |
@@ -72,6 +85,8 @@ Sprint 4 is the current window: today, 19 Oct 2026, falls inside its dates. The 
 | Grok Bot — QA SecretSource | QA |
 | Grok Bot — Report SecretSource | Final report and slides |
 | Claude Code | Implementation |
+
+Cursor agents follow the same daily-plan rule for `agent-cursor`: work only on issues labeled `today`.
 
 ## Notes from Claude Code
 
