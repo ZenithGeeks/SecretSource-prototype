@@ -10,6 +10,14 @@ from app.agents import team
 from google.adk.tools.function_tool import FunctionTool
 
 
+def test_rag_agent_treats_a_weak_search_hit_as_weak():
+    instruction = team.rag_agent.instruction
+
+    assert "full_text" in instruction
+    assert "low_confidence" in instruction
+    assert "do not quote it as support" in instruction
+
+
 def test_the_coordinator_routes_to_the_chat_specialists_and_calls_check_claim_as_a_tool():
     assert [agent.name for agent in team.root_agent.sub_agents if agent.mode == "chat"] == [
         "rag_agent",
