@@ -48,6 +48,11 @@ AUDIT_FINDINGS = Counter(
 
 LLM_CALLS = Counter("llm_calls_total", "LLM calls made", ["phase"])  # extract | judge
 LLM_TOKENS = Counter("llm_tokens_total", "LLM tokens used", ["phase", "kind"])  # kind: prompt | completion
+# The 9arm key allows 3 requests at once and answers a 4th with HTTP 429 (#511). Counted in
+# app/llm.py once per call, after the client's own retries, so each one is a call that failed.
+LLM_RATE_LIMITED = Counter(
+    "llm_rate_limited_total", "LLM calls that still got HTTP 429 after their retries"
+)
 
 
 # The running analysis's own token counts, keyed "<phase>_<kind>" (for example "judge_prompt"),
