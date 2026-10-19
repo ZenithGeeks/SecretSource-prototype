@@ -126,7 +126,8 @@ def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:
     from app import main, store
 
     analysis_id = job.args[0]
-    stored = store.load_all().get(analysis_id)
+    # One row by id. load_all would read every analysis anyone has stored (#314).
+    stored = store.load(analysis_id)
     if stored is not None:
         analysis = stored
     else:

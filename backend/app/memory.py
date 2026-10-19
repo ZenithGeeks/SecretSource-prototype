@@ -106,6 +106,7 @@ class AnalysisMemory(BaseMemoryService):
         return None  # the gateway saves analyses itself; a chat session adds nothing to them
 
     async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
-        analyses = await asyncio.to_thread(store.load_all)  # oldest first
-        memories = search(query, list(analyses.values()), self.owner)
+        # Ownerless rows, plus MEMORY_OWNER's. Not the whole table (#314).
+        analyses = await asyncio.to_thread(store.load_readable, self.owner)
+        memories = search(query, analyses, self.owner)
         return SearchMemoryResponse(memories=memories)

@@ -14,10 +14,35 @@ class AnalysisTable(dict):
     def __init__(self):
         super().__init__()
         self._by_owner: dict[str | None, dict[str, None]] = {}
+        # Owners whose stored rows have been merged in. clear() drops this with the rows, so a
+        # test that empties the table also asks the store again next time.
+        self._loaded: set[str | None] = set()
 
     def owned_by(self, owner: str | None) -> list[dict]:
         """This owner's analyses, oldest first. Rows with no owner (signed-out runs) are owner None."""
         return [self[analysis_id] for analysis_id in self._by_owner.get(owner, ())]
+
+    def owner_loaded(self, owner: str | None) -> bool:
+        return owner in self._loaded
+
+    def mark_owner_loaded(self, owner: str | None) -> None:
+        self._loaded.add(owner)
+
+    def order_owner(self, owner: str | None, ordered_ids: list[str]) -> None:
+        """Put this owner's ids in `ordered_ids` order. An id the table no longer has is skipped.
+        An id that is indexed but missing from `ordered_ids` stays, at the end, so a reorder
+        cannot drop a row."""
+        current = self._by_owner.get(owner)
+        if current is None:
+            return
+        ordered: dict[str, None] = {}
+        for analysis_id in ordered_ids:
+            if analysis_id in current:
+                ordered[analysis_id] = None
+        for analysis_id in current:
+            if analysis_id not in ordered:
+                ordered[analysis_id] = None
+        self._by_owner[owner] = ordered
 
     def _unindex(self, analysis_id: str, analysis: dict) -> None:
         ids = self._by_owner.get(analysis.get("owner"))
@@ -65,3 +90,4 @@ class AnalysisTable(dict):
     def clear(self) -> None:
         super().clear()
         self._by_owner.clear()
+        self._loaded.clear()

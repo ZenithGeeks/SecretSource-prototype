@@ -94,15 +94,27 @@ def _public(row: dict) -> dict:
 # --- drafts and their checks ------------------------------------------------------------
 
 
+def _owner_rows(user: str | None) -> list[dict]:
+    """This user's analyses, oldest first. The gateway loads that owner from the store on
+    demand and keeps an index, so this does not scan every user. A test that swaps in a plain
+    dict has no index; it is filtered the same way."""
+    gateway = _gateway()
+    table = gateway.analyses
+    if hasattr(table, "owned_by") and hasattr(gateway, "ensure_owner"):
+        gateway.ensure_owner(user)
+        return table.owned_by(user)
+    return [row for row in table.values() if row.get("owner") == user]
+
+
 def _checks_by_draft(user: str | None) -> dict[str, list[dict]]:
     """Every check this user ran, grouped by draft, each group oldest first: one pass over
-    the gateway's rows for a whole request, however many drafts it lists."""
+    this user's rows for a whole request, however many drafts it lists."""
     by_draft: dict[str, list[dict]] = {}
-    for a in _gateway().analyses.values():
-        if a.get("kind") == DRAFT_CHECK and a.get("owner") == user:
-            by_draft.setdefault(a.get("draftId"), []).append(a)
+    for row in _owner_rows(user):
+        if row.get("kind") == DRAFT_CHECK:
+            by_draft.setdefault(row.get("draftId"), []).append(row)
     for runs in by_draft.values():
-        runs.sort(key=lambda a: a.get("startedAt", ""))
+        runs.sort(key=lambda row: row.get("startedAt", ""))
     return by_draft
 
 
@@ -110,16 +122,17 @@ def _checks_of(draft_id: str, user: str | None) -> list[dict]:
     """Every check run on a draft, oldest first. For one draft; a route that lists many uses
     _checks_by_draft once instead of this once per draft.
 
-    Filtered before anything is sorted or grouped: a citation PATCH or a draft read costs one
-    pass over the gateway's rows plus this draft's own checks, not a grouping and a sort of
-    every check the user ever ran. (No per-draft index: `analyses` is written from five
-    places, and a missed one would hide a check from its draft.)"""
+    Filtered before anything is sorted or grouped: a citation PATCH or a draft read looks at
+    this user's rows, then this draft's checks, not a grouping of every check they ever ran.
+    There is still no per-draft index: `analyses` is written from several places, and a second
+    index would hide a check if one write forgot it. The owner index lives on the table and
+    is updated by every write."""
     runs = [
-        a
-        for a in _gateway().analyses.values()
-        if a.get("draftId") == draft_id and a.get("kind") == DRAFT_CHECK and a.get("owner") == user
+        row
+        for row in _owner_rows(user)
+        if row.get("draftId") == draft_id and row.get("kind") == DRAFT_CHECK
     ]
-    runs.sort(key=lambda a: a.get("startedAt", ""))
+    runs.sort(key=lambda row: row.get("startedAt", ""))
     return runs
 
 
@@ -609,7 +622,11 @@ async def list_draft_checks(draft_id: str, user: str | None = Depends(current_us
 def _check(check_id: str, user: str | None) -> dict:
     """One of the caller's draft checks; a paper analysis with that id is a 404 like a missing
     one."""
-    return require_owner(_gateway().analyses.get(check_id), user, "check", kind=DRAFT_CHECK)
+    gateway = _gateway()
+    # lookup reads one row from the store when this process has not loaded it yet. A plain dict
+    # swapped in by a test has no lookup; .get is the same answer for rows it already holds.
+    get = gateway.lookup if hasattr(gateway, "lookup") else gateway.analyses.get
+    return require_owner(get(check_id), user, "check", kind=DRAFT_CHECK)
 
 
 def _previous_of(run: dict, user: str | None) -> dict | None:
@@ -1153,7 +1170,7 @@ async def export_data(user: str | None = Depends(current_user)):
         asyncio.to_thread(_rows, DRAFTS, user),
         asyncio.to_thread(_rows, SOURCES, user),
     )
-    runs = _checks_by_draft(user)
+    runs = await asyncio.to_thread(_checks_by_draft, user)
     checks = [check_view(r) for d in drafts for r in runs.get(d["id"], [])]
     return {
         "exportedAt": logic.now_iso(),
@@ -1174,7 +1191,14 @@ def author_pdfs(user: str | None) -> set[str]:
             if row.get("pdf"):
                 names.add(Path(row["pdf"]).name)
     gateway = _gateway()
-    for run in gateway.analyses.owned_by(user):
+    if hasattr(gateway, "ensure_owner") and hasattr(gateway.analyses, "owned_by"):
+        gateway.ensure_owner(user)
+    rows = (
+        gateway.analyses.owned_by(user)
+        if hasattr(gateway.analyses, "owned_by")
+        else _owner_rows(user)
+    )
+    for run in rows:
         if run.get("kind") == DRAFT_CHECK:
             for c in run.get("citations", []):
                 pdf = (c.get("evidence") or {}).get("pdf")

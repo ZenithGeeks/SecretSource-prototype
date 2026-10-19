@@ -21,8 +21,10 @@ POST /verify            {"claim", "source"} -> one verdict, outside any analysis
 /author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 GET  /health
 
-Analyses live in memory while they run. They are also written to SQLite (app/store.py)
-as they progress. A restart keeps the history.
+Analyses live in memory while they run. They are also written to SQLite or Supabase
+(app/store.py) as they progress. A restart keeps the history, but only running analyses and
+the newest rows are loaded then. Older rows are read when their owner asks, so memory at
+startup does not grow with every analysis ever stored.
 """
 
 import asyncio
@@ -100,10 +102,28 @@ DEFAULT_DPI, MAX_DPI = 110, 300
 # We match the whole name. This stops the route from serving any path.
 # The request only sends a number, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
+# How many of the newest analyses to hold after a restart, on top of every running one.
+# The rest stay in the store until their owner asks. Read at call time so a test can lower it.
+_STARTUP_RECENT_DEFAULT = 50
 
 analyses = AnalysisTable()
 streams: dict[str, asyncio.Queue] = {}
 _deleted: set[str] = set()
+# Ids the store has already said are absent. A page image must not ask again for each one.
+_missing: set[str] = set()
+# ensure_owner and lookup both insert rows. A restart's subscriber and a request can do that
+# at the same time; the lock keeps one owner's merge from interleaving with the other.
+_load_lock = threading.RLock()
+
+
+def startup_recent() -> int:
+    raw = os.getenv("ANALYSES_STARTUP_RECENT", str(_STARTUP_RECENT_DEFAULT)).strip()
+    if not raw:
+        return _STARTUP_RECENT_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _STARTUP_RECENT_DEFAULT
 
 # Shared by every run, so N analyses at once are not N times the load on the retrieval
 # services and the LLM (#170). _run_queued takes its own limit first, then one of these.
@@ -111,13 +131,28 @@ all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
 all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
 
 
+def _hold(row: dict) -> None:
+    """Keep one analysis in memory. A running row gets a stream, so a client that reconnects
+    replays the stages already recorded, the same way restore does for jobs found at startup."""
+    analysis_id = row["id"]
+    if analysis_id in _deleted:
+        return
+    analyses[analysis_id] = row
+    if row.get("status") == "running" and analysis_id not in streams:
+        queue = streams.setdefault(analysis_id, asyncio.Queue())
+        for stage in row.get("stages") or ():
+            queue.put_nowait(stage)
+
+
 def restore():
-    """Load stored analyses on startup. A "running" row may belong to a job an RQ worker is
-    still executing (or was, before this gateway process last exited); only mark it interrupted
-    when the job itself is confirmed gone, and otherwise let the snapshot subscriber catch it up."""
+    """Load running analyses and the newest stored rows. A "running" row may belong to a job an RQ
+    worker is still executing (or was, before this gateway process last exited); only mark it
+    interrupted when the job itself is confirmed gone, and otherwise let the snapshot subscriber
+    catch it up. Older finished rows stay in the store until ensure_owner reads that owner."""
+    _missing.clear()
     analyses.clear()
-    analyses.update(store.load_all())
-    for analysis in analyses.values():
+    analyses.update(store.load_startup(startup_recent()))
+    for analysis in list(analyses.values()):
         if analysis["status"] != "running":
             continue
         alive = job_is_alive(analysis["id"])
@@ -505,10 +540,75 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     return {"id": analysis_id}
 
 
+def ensure_owner(user: str | None) -> None:
+    """Load this owner's analyses from the store, once. A row already in memory is kept: it may
+    be a newer snapshot, or a run that has not been saved yet. Other owners are not read."""
+    if analyses.owner_loaded(user):
+        return
+    stored = store.load_owned(user)
+    with _load_lock:
+        if analyses.owner_loaded(user):
+            return
+        stored_ids: list[str] = []
+        seen: set[str] = set()
+        for row in stored:
+            analysis_id = row["id"]
+            if analysis_id in _deleted or analysis_id in seen:
+                continue
+            seen.add(analysis_id)
+            stored_ids.append(analysis_id)
+            if analysis_id not in analyses:
+                _hold(row)
+        memory_only = [
+            row["id"]
+            for row in analyses.owned_by(user)
+            if row["id"] not in seen and row["id"] not in _deleted
+        ]
+        analyses.order_owner(user, stored_ids + memory_only)
+        analyses.mark_owner_loaded(user)
+
+
+def lookup(analysis_id: str) -> dict | None:
+    """The analysis in memory, or that one row from the store. A loaded row is kept, so the next
+    read of it does not ask again. Nothing is loaded for an id this process has deleted."""
+    if analysis_id in _deleted:
+        return None
+    row = analyses.get(analysis_id)
+    if row is not None:
+        return row
+    if analysis_id in _missing:
+        return None
+    # A test may swap in a plain dict. It has no owner index; don't try to build one.
+    if not hasattr(analyses, "owner_loaded"):
+        return store.load(analysis_id)
+    loaded = store.load(analysis_id)
+    if not loaded or loaded.get("id", analysis_id) in _deleted:
+        if not loaded:
+            _missing.add(analysis_id)
+        return None
+    with _load_lock:
+        if analysis_id in _deleted:
+            return None
+        current = analyses.get(analysis_id)
+        if current is not None:
+            return current
+        _hold(loaded)
+        owner = loaded.get("owner")
+        if analyses.owner_loaded(owner):
+            ordered = sorted(
+                analyses.owned_by(owner),
+                key=lambda item: (item.get("started") or "", item["id"]),
+            )
+            analyses.order_owner(owner, [item["id"] for item in ordered])
+        return analyses.get(analysis_id)
+
+
 def visible_to(user: str | None) -> list[dict]:
     """The analyses this exact user may read, oldest first: their own when signed in, or the
     ones with no owner when signed out (current_user() only ever returns None then). Every
-    analysis is private to its owner; nothing here is shared across users."""
+    analysis is private to its owner; nothing here is shared across users. The first call for
+    an owner reads that owner's rows from the store; later calls use the copy in memory."""
+    ensure_owner(user)
     return analyses.owned_by(user)
 
 
@@ -544,13 +644,13 @@ def _owned(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
     owned by someone else, or another kind (a check's id on an analysis route) is a 404, not
     a 403, so an id does not tell anyone that it exists. The rule itself lives in
     app/ownership.py, shared with the Author role's rows."""
-    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
+    return require_owner(lookup(analysis_id), user, "analysis", kind)
 
 
 def _mine(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
     """The analysis, only if this exact user created it. Same test as _owned(); kept as its
     own function since deleting one's own analysis is a distinct action from reading it."""
-    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
+    return require_owner(lookup(analysis_id), user, "analysis", kind)
 
 
 @app.post("/analyses")
@@ -626,8 +726,7 @@ async def analyse_uploaded_paper(body: UploadedPaper, user: str | None = Depends
     return _start(path.as_posix(), body.verify, user)
 
 
-@app.get("/analyses")
-async def list_analyses(user: str | None = Depends(current_user)):
+def _listed(user: str | None) -> list[dict]:
     # The list leaves out what only one analysis's own view needs. Rows with no "kind" are
     # older paper analyses; rows of kind "check" are single-claim checks saved before their
     # routes were removed (#333), and stay out of the list.
@@ -639,9 +738,16 @@ async def list_analyses(user: str | None = Depends(current_user)):
     ]
 
 
+@app.get("/analyses")
+async def list_analyses(user: str | None = Depends(current_user)):
+    # The first call for this owner reads their rows from the store. That must not run on the
+    # event loop: a Supabase read is the same kind of wait _save_soon moved off it (#169).
+    return await asyncio.to_thread(_listed, user)
+
+
 @app.get("/analyses/{analysis_id}")
 async def get_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    return _owned(analysis_id, user)
+    return await asyncio.to_thread(_owned, analysis_id, user)
 
 
 async def _delete_one(analysis_id: str) -> None:
@@ -693,7 +799,7 @@ async def _event_stream(item_id: str):
 
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    analysis = _mine(analysis_id, user)
+    analysis = await asyncio.to_thread(_mine, analysis_id, user)
     if analysis["status"] == "running":
         # A started job keeps saving to the store, so a deleted row would come back on restart.
         if not await asyncio.to_thread(cancel_if_queued, analysis_id):
@@ -705,7 +811,7 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
     """The web app reads this with fetch(), so its token travels in the Authorization header."""
-    _owned(analysis_id, user)
+    await asyncio.to_thread(_owned, analysis_id, user)
     return StreamingResponse(_event_stream(analysis_id), media_type="text/event-stream")
 
 
@@ -722,7 +828,7 @@ def papers_of(user: str | None) -> frozenset[str]:
     may read (visible_to), each cited paper a check read for one of them, their Author
     PDFs, and the papers shared with the labeling team. The Author PDFs live outside `analyses`, so
     they are read each call, not cached."""
-    shared = labeling_pool.pdf_names(analyses.get, _paper_names)
+    shared = labeling_pool.pdf_names(lookup, _paper_names)
     return _per_owner("papers", user, _paper_names) | author_pdfs(user) | shared
 
 
@@ -758,8 +864,9 @@ PRIVATE_CACHE = {"Cache-Control": "private, max-age=31536000"}
 
 @app.get("/papers/{name}")
 async def paper(name: str, user: str | None = Depends(current_user)):
+    path = await asyncio.to_thread(_paper, name, user)
     return FileResponse(
-        _paper(name, user), media_type="application/pdf", filename=name, headers={"Cache-Control": "private"}
+        path, media_type="application/pdf", filename=name, headers={"Cache-Control": "private"}
     )
 
 
@@ -782,7 +889,7 @@ def _render(path: Path, page_number: int, dpi: int) -> Path:
 async def page_image(
     name: str, page_number: int, dpi: int = DEFAULT_DPI, user: str | None = Depends(current_user)
 ):
-    path = _paper(name, user)
+    path = await asyncio.to_thread(_paper, name, user)
     image = await asyncio.to_thread(_render, path, page_number, min(dpi, MAX_DPI))
     return FileResponse(image, media_type="image/png", headers=PRIVATE_CACHE)
 
@@ -790,10 +897,10 @@ async def page_image(
 @app.get("/papers/{name}/figures/{figure}.png")
 async def figure_image(name: str, figure: str, user: str | None = Depends(current_user)):
     """One cropped figure of a paper, the image a verdict's `pages` entry points at."""
-    paper = _paper(name, user)
+    owned = await asyncio.to_thread(_paper, name, user)
     if not FIGURE_NAME.fullmatch(figure):
         raise HTTPException(400, "a figure is named figure-<n>")
-    path = figures_dir(paper) / f"{figure}.png"
+    path = figures_dir(owned) / f"{figure}.png"
     if not path.is_file():
         raise HTTPException(404, f"no such figure: {figure}")
     # A crop never changes once written, so it is cached like a rendered page.
@@ -804,7 +911,7 @@ async def figure_image(name: str, figure: str, user: str | None = Depends(curren
 async def find(name: str, q: str, page: int | None = None, user: str | None = Depends(current_user)):
     """Where a piece of text sits in the paper: page, boxes, and the page size to scale by.
     Boxes are PDF points, top-left origin. The browser scales them by dpi / 72."""
-    path = _paper(name, user)
+    path = await asyncio.to_thread(_paper, name, user)
     found = await asyncio.to_thread(locate, path.as_posix(), q, page)
     return found or {"page": None, "boxes": []}
 
@@ -836,15 +943,22 @@ def _project(project_id: str, stored: list[dict]) -> dict:
     return project
 
 
+def _with_visible(user: str | None, build):
+    """Run `build` on this user's analyses. Off the event loop: the first call reads the store."""
+    return build(visible_to(user))
+
+
 @app.get("/researcher/home")
 async def researcher_home(user: str | None = Depends(current_user)):
-    return await asyncio.to_thread(researcher.home, visible_to(user))
+    return await asyncio.to_thread(_with_visible, user, researcher.home)
 
 
 @app.get("/researcher/projects")
 async def researcher_projects(user: str | None = Depends(current_user)):
-    stored = await asyncio.to_thread(store.load_projects, user)
-    return await asyncio.to_thread(researcher.projects, stored, visible_to(user))
+    def build(rows: list[dict]) -> list[dict]:
+        return researcher.projects(store.load_projects(user), rows)
+
+    return await asyncio.to_thread(_with_visible, user, build)
 
 
 @app.post("/researcher/projects")
@@ -871,8 +985,11 @@ async def rename_project(
     project["name"] = name
     project["updated"] = datetime.now(timezone.utc).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    projected = await asyncio.to_thread(researcher.projects, [project], visible_to(user))
-    return projected[0]
+
+    def projected(rows: list[dict]) -> dict:
+        return researcher.projects([project], rows)[0]
+
+    return await asyncio.to_thread(_with_visible, user, projected)
 
 
 @app.delete("/researcher/projects/{project_id}")
@@ -887,8 +1004,10 @@ async def delete_project(project_id: str, user: str | None = Depends(current_use
 
 @app.get("/researcher/projects/{project_id}/library")
 async def project_library(project_id: str, user: str | None = Depends(current_user)):
-    stored = await asyncio.to_thread(store.load_projects, user)
-    found = await asyncio.to_thread(researcher.library, project_id, stored, visible_to(user))
+    def build(rows: list[dict]) -> dict | None:
+        return researcher.library(project_id, store.load_projects(user), rows)
+
+    found = await asyncio.to_thread(_with_visible, user, build)
     if found is None:
         raise HTTPException(404, "no such project")
     return found
@@ -899,22 +1018,36 @@ async def add_to_project(
     project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
 ):
     """Put an analysed paper the caller may read (visible_to) into one of their own projects."""
-    _owned(request.analysis_id, user)
+    await asyncio.to_thread(_owned, request.analysis_id, user)
     stored = await asyncio.to_thread(store.load_projects, user)
     project = _project(project_id, stored)
     if request.analysis_id not in project["analyses"]:
         project["analyses"].append(request.analysis_id)
     project["updated"] = datetime.now(timezone.utc).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    projected = await asyncio.to_thread(researcher.projects, [project], visible_to(user))
-    return projected[0]
+
+    def projected(rows: list[dict]) -> dict:
+        return researcher.projects([project], rows)[0]
+
+    return await asyncio.to_thread(_with_visible, user, projected)
+
+
+def _consensus(user: str | None, question: str) -> dict:
+    """consensus() walks every claim. Reuse the answer until one of this owner's rows changes,
+    the same way the graph is reused. The question is part of the key, so a different question
+    is a different answer."""
+    return _per_owner(
+        ("consensus", question),
+        user,
+        lambda rows, question=question: researcher.consensus(question, rows),
+    )
 
 
 @app.post("/researcher/consensus")
 async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
     """What the works cited across the caller's own analysed papers say about a question. Reuses the
     verdicts already found; it makes no LLM calls."""
-    return await asyncio.to_thread(researcher.consensus, request.question, visible_to(user))
+    return await asyncio.to_thread(_consensus, user, request.question)
 
 
 @app.get("/researcher/graph")
@@ -979,10 +1112,13 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         raise HTTPException(400, f"scope must be one of {', '.join(DELETE_SCOPES)}")
     researcher = scope in ("all", "researcher")
     author = scope in ("all", "author")
-    mine = [
-        analysis for analysis in visible_to(user)
-        if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
-    ]
+    def owned_in_scope() -> list[dict]:
+        return [
+            analysis for analysis in visible_to(user)
+            if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
+        ]
+
+    mine = await asyncio.to_thread(owned_in_scope)
     ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
@@ -1069,7 +1205,9 @@ async def verify(request: VerifyRequest, user: str | None = Depends(current_user
 @app.get("/health")
 async def health():
     """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
-    check at most 30 s old. `degraded` is true when a required one did not answer."""
+    check at most 30 s old. `degraded` is true when a required one did not answer. `analyses` is
+    how many this process is holding (running, the newest at startup, and owners loaded since),
+    not how many the store has."""
     return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
 
 

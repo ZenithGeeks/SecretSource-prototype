@@ -19,8 +19,10 @@ source-resolution cache and the researcher's projects. Three tables:
 - **Server-only**: RLS enabled with **no policies**; the gateway connects with the **service
   role**, which bypasses RLS. Browsers get nothing.
 - Mirrors `store.py` so switching SQLite → Supabase is a connection change, not a schema one.
-- `analyses` keeps its `owner` inside the `data` blob (filtered in the gateway); `projects` has
-  a real `owner` column (nullable when login is off) and is queried by it — hence `projects_owner_idx`.
+- `analyses` keeps `owner` and `status` inside the `data` blob. Expression indexes on
+  `(data->>'owner', started)` and `(data->>'status', started)` let the gateway read one owner's
+  rows, or the running ones, without loading the table. `projects` has a real `owner` column
+  (nullable when login is off) and is queried by it — hence `projects_owner_idx`.
 
 ## Enable it
 
@@ -62,5 +64,7 @@ them again is safe. In order:
 - `20260913160000_researcher_projects.sql` — `projects` (+ `projects_owner_idx`).
 - `20260927120000_author_role.sql` — `author_projects`, `author_drafts`, `author_sources` (+ owner indexes).
 - `20261012160000_labeling_rows.sql` — `labeling_rows`, the Labeler role's rows (+ a `(tab, id)` index).
+- `20261019120000_analyses_owner_status_idx.sql` — expression indexes so one owner's analyses,
+  and the running ones, can be read without scanning `analyses`.
 - `20260914120000_adk_sessions.sql` — the `adk` schema for chat sessions, locked away from the
   browser roles (ADK creates its own tables inside it at runtime).

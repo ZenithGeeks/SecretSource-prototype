@@ -181,7 +181,7 @@ def test_restore_marks_interrupted_only_when_the_job_is_confirmed_gone(monkeypat
         "alive": _stored_running("alive"),
         "unknown": _stored_running("unknown"),
     }
-    monkeypatch.setattr(main.store, "load_all", lambda: copy.deepcopy(stored))
+    monkeypatch.setattr(main.store, "load_startup", lambda recent: copy.deepcopy(stored))
     saved = []
     monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
     monkeypatch.setattr(
@@ -203,7 +203,7 @@ def test_restore_marks_interrupted_only_when_the_job_is_confirmed_gone(monkeypat
 
 def test_restore_gives_a_left_running_analysis_a_stream_with_its_stages(monkeypatch):
     stored = {"alive": _stored_running("alive")}
-    monkeypatch.setattr(main.store, "load_all", lambda: copy.deepcopy(stored))
+    monkeypatch.setattr(main.store, "load_startup", lambda recent: copy.deepcopy(stored))
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
     monkeypatch.setattr(main, "job_is_alive", lambda analysis_id: True)
 
@@ -291,7 +291,10 @@ def test_failure_callback_marks_a_stored_running_row_as_error(monkeypatch):
         "id": "job-f1", "paper": "p.pdf", "status": "running", "owner": None,
         "stages": [{"stage": "extracting", "at": 1.0}], "claims": [],
     }}
-    monkeypatch.setattr(main.store, "load_all", lambda: copy.deepcopy(stored))
+    row = stored["job-f1"]
+    monkeypatch.setattr(
+        main.store, "load", lambda analysis_id: copy.deepcopy(row) if analysis_id == "job-f1" else None
+    )
     saved = []
     monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
     published = []
@@ -311,7 +314,7 @@ def test_failure_callback_marks_a_stored_running_row_as_error(monkeypatch):
 
 
 def test_failure_callback_builds_from_job_args_with_no_stored_row(monkeypatch):
-    monkeypatch.setattr(main.store, "load_all", lambda: {})
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: None)
     saved = []
     monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
     monkeypatch.setattr("app.queue.redis_connection", lambda: _NullRedis())

@@ -59,14 +59,19 @@ def test_setdefault_indexes_the_row_it_inserts():
 
 
 @pytest.fixture
-def gateway(monkeypatch):
+def gateway(monkeypatch, tmp_path):
     main.analyses.clear()
     main._derived.clear()
+    main._missing.clear()
     # papers_of also reads the Author role's rows from the store; none here unless a test adds them.
+    monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "analyses.db"))
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
     monkeypatch.setattr(main, "author_pdfs", lambda user: set())
     yield main
     main.analyses.clear()
     main._derived.clear()
+    main._missing.clear()
 
 
 def _paper(analysis_id, owner, file, sources=()):
@@ -150,6 +155,22 @@ def test_author_pdfs_does_not_scan_every_users_analyses(gateway, real_author_pdf
     assert real_author_pdfs("a") == {"mine.pdf"}
 
 
+def test_order_owner_follows_the_given_ids_and_keeps_a_row_that_was_left_out():
+    table = AnalysisTable()
+    for analysis_id in ("a", "b", "c"):
+        table[analysis_id] = _row(analysis_id, "owner")
+    table.order_owner("owner", ["c", "a"])
+    assert [row["id"] for row in table.owned_by("owner")] == ["c", "a", "b"]
+
+
+def test_clear_forgets_which_owners_were_loaded():
+    table = AnalysisTable()
+    table.mark_owner_loaded("owner")
+    assert table.owner_loaded("owner")
+    table.clear()
+    assert not table.owner_loaded("owner")
+
+
 def test_the_graph_is_rebuilt_when_a_paper_is_indexed_after_it_finished(gateway, monkeypatch):
     builds = []
     monkeypatch.setattr(
@@ -163,3 +184,21 @@ def test_the_graph_is_rebuilt_when_a_paper_is_indexed_after_it_finished(gateway,
     row["indexed_in"] = {"index": "openalex"}  # _index_self, after "done", no new stage
     assert gateway._per_owner("graph", "a", gateway.researcher.graph) is not first
     assert builds == [1, 1]
+
+
+def test_consensus_is_reused_until_one_of_the_owners_rows_changes(gateway, monkeypatch):
+    builds = []
+
+    def consensus(question, rows):
+        builds.append(question)
+        return {"question": question, "n": len(builds)}
+
+    monkeypatch.setattr(gateway.researcher, "consensus", consensus)
+    gateway.analyses["p1"] = _paper("p1", "a", "papers/one.pdf")
+
+    first = gateway._consensus("a", "late interaction")
+    assert gateway._consensus("a", "late interaction") is first
+    assert gateway._consensus("a", "something else") is not first
+    gateway.analyses["p1"]["stages"].append({"stage": "verified"})
+    assert gateway._consensus("a", "late interaction") is not first
+    assert builds == ["late interaction", "something else", "late interaction"]

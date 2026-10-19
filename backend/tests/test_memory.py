@@ -1,5 +1,5 @@
 """Memory over past analyses (SCRUM-172): what load_memory finds, and whose analyses it may read.
-No database: store.load_all is replaced by a list of analyses."""
+No database: store.load_readable is replaced by a list of analyses."""
 
 import asyncio
 
@@ -73,7 +73,9 @@ def test_nothing_matching_returns_nothing():
 
 
 def test_the_service_reads_the_store_and_uses_memory_owner(monkeypatch):
-    monkeypatch.setattr(memory.store, "load_all", lambda: {a["id"]: a for a in ANALYSES})
+    # The service asks the store only for rows the memory may read. This stand-in returns the
+    # whole list so the assertions below still show that search() drops anyone else.
+    monkeypatch.setattr(memory.store, "load_readable", lambda owner: list(ANALYSES))
     monkeypatch.setenv("MEMORY_OWNER", "user-bo")
     service = memory.AnalysisMemory()
     response = asyncio.run(
