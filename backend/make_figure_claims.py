@@ -124,7 +124,7 @@ def main() -> None:
     write = dspy.Predict(WriteFigureClaims)
     # The first call imports litellm; threads that start together race on a half-loaded module.
     results = [claims_for(figures[0], write)]
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:  # the judge gateway allows 3 requests at once
         results += pool.map(lambda f: claims_for(f, write), figures[1:])
 
     kept = take_round_robin([claims for claims, _ in results if claims], args.max_figures)
