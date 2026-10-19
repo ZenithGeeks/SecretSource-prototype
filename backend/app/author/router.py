@@ -33,7 +33,7 @@ from app.author.verify import citation_outcome, reference_checks, verify_cached
 from app.config import PARALLEL_CHECKS
 from app.metrics import AUDIT_FINDINGS
 from app.ownership import require_owner
-from app.queue import cancel_if_queued, enqueue_draft_check
+from app.queue import DraftJobState, draft_check_disposition, enqueue_draft_check
 
 # The browser uses /api/author; Vite/nginx remove /api before forwarding to FastAPI.
 router = APIRouter(prefix="/author", tags=["author"])
@@ -702,10 +702,19 @@ async def compare_checks(check_id: str, user: str | None = Depends(current_user)
 async def delete_check(check_id: str, user: str | None = Depends(current_user)):
     run = _check(check_id, user)
     if run.get("status") not in _gateway().FINISHED:
-        # A started job keeps saving, so a deleted row would come back on the next restart.
-        # A job still waiting in the queue can be cancelled, and then the row can go.
-        if not await asyncio.to_thread(cancel_if_queued, check_id):
+        # Memory can say "running" after the job has finished, because a dropped pub/sub
+        # snapshot never arrives. A missing job, and a queued one we cancel, can be deleted.
+        # Only a worker that is actually running the job refuses. Redis being down is 503,
+        # not 409: a 409 here blocks every later Re-check.
+        state = await asyncio.to_thread(draft_check_disposition, check_id)
+        if state is DraftJobState.UNAVAILABLE:
+            raise HTTPException(503, "the analysis queue is unavailable, try again shortly")
+        if state is DraftJobState.STARTED:
             raise HTTPException(409, "the check is still running")
+        if state is DraftJobState.FINISHED:
+            stored = await asyncio.to_thread(store.load, check_id)
+            if stored is not None:
+                _gateway().analyses[check_id] = stored
     await _gateway()._delete_one(check_id)
     return {"deleted": check_id}
 
@@ -726,6 +735,10 @@ async def update_citation(
     """What the author did about an issue: "Replace with …" (a new key, and the verdict the
     replacement was verified with), "Keep mine" / "Override · add note", or reopening it."""
     run = _check(check_id, user)
+    if run.get("status") not in _gateway().FINISHED:
+        # The worker holds the copy it will save next. Writing this process's copy would
+        # be overwritten, so the override would silently disappear.
+        raise HTTPException(409, "the check is still running")
     citation = next((c for c in run.get("citations", []) if c["id"] == citation_id), None)
     if citation is None:
         raise HTTPException(404, "no such citation")

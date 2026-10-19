@@ -8,6 +8,7 @@ asyncio one. `run_analysis_job` and `run_draft_check_job` are what a worker actu
 """
 
 import asyncio
+import enum
 import json
 import logging
 import time
@@ -17,6 +18,7 @@ import redis.asyncio
 from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
 from opentelemetry import trace
 from rq import Queue, SimpleWorker, Worker
+from rq.exceptions import InvalidJobOperation, NoSuchJobError
 from rq.job import Callback, Job, JobStatus
 from rq.serializers import JSONSerializer
 
@@ -222,16 +224,170 @@ def job_is_alive(analysis_id: str) -> bool | None:
         return False
 
 
+class DraftJobState(enum.Enum):
+    """What deleting a draft check should do with its RQ job.
+
+    CANCELLED and MISSING may delete the row. STARTED must not: a live worker would save
+    the row back. FINISHED means read the store, which has the final row when a snapshot
+    was dropped. UNAVAILABLE is Redis, not a running job.
+    """
+
+    CANCELLED = "cancelled"
+    MISSING = "missing"
+    STARTED = "started"
+    FINISHED = "finished"
+    UNAVAILABLE = "unavailable"
+
+
+_FINISHED_JOBS = {JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED}
+_NOT_STARTED = {JobStatus.QUEUED, JobStatus.DEFERRED, JobStatus.SCHEDULED, JobStatus.CREATED}
+
+
+class _DraftCheckDropped(BaseException):
+    """The gateway cancelled this job or deleted its row.
+
+    A BaseException so `_run_draft_check`'s `except Exception` does not record it as a
+    failed check and save the row back.
+    """
+
+
 def cancel_if_queued(analysis_id: str) -> bool:
-    """True only if the job was still queued (never started) and is now cancelled."""
+    """True only if the job was still queued (never started) and is now cancelled.
+
+    Analysis delete uses this. A missing job or a Redis outage stays False, so that
+    delete still answers 409. Draft-check delete uses `draft_check_disposition`, which
+    separates those cases. `cancel()` raising because the job was just cancelled is a
+    successful cancel, not an error.
+    """
     try:
         job = Job.fetch(analysis_id, connection=redis_connection(), serializer=JSONSerializer)
     except Exception:
         return False
-    if job.get_status(refresh=True) != JobStatus.QUEUED:
+    try:
+        if job.get_status(refresh=True) != JobStatus.QUEUED:
+            return False
+    except Exception:
         return False
-    job.cancel()
+    try:
+        job.cancel()
+    except InvalidJobOperation:
+        return True
+    except Exception:
+        return False
     return True
+
+
+def _cancel(job: Job) -> DraftJobState:
+    """Cancel `job`. Already-cancelled and already-gone are success, not errors."""
+    try:
+        job.cancel()
+    except InvalidJobOperation:
+        return DraftJobState.CANCELLED
+    except NoSuchJobError:
+        return DraftJobState.MISSING
+    except redis.exceptions.RedisError:
+        return DraftJobState.UNAVAILABLE
+    except Exception as error:
+        logger.warning("cancelling job %s failed: %s", job.id, error)
+        return DraftJobState.UNAVAILABLE
+    return DraftJobState.CANCELLED
+
+
+def _worker_still_registered(job: Job) -> bool | None:
+    """True when the worker that took `job` still has a Redis key, False when that key is
+    gone, None when the job names no worker. Redis errors propagate."""
+    try:
+        job.refresh()
+    except NoSuchJobError:
+        return False
+    name = job.worker_name
+    if not name:
+        return None
+    return bool(job.connection.exists(Worker.redis_worker_namespace_prefix + name))
+
+
+def draft_check_disposition(check_id: str) -> DraftJobState:
+    """Classify this draft check's job for delete.
+
+    409 is only for a job a worker is actually running. A missing job can be deleted.
+    Redis being down is UNAVAILABLE. A queued job is cancelled here; a started job whose
+    worker record has expired is cancelled too, so RQ's abandoned-job cleanup does not
+    save an error row after the delete. `cancel()` is caught: a second delete must not 500.
+    """
+    try:
+        job = Job.fetch(check_id, connection=redis_connection(), serializer=JSONSerializer)
+    except NoSuchJobError:
+        return DraftJobState.MISSING
+    except redis.exceptions.RedisError:
+        return DraftJobState.UNAVAILABLE
+    except Exception as error:
+        logger.warning("looking up draft check job %s failed: %s", check_id, error)
+        return DraftJobState.UNAVAILABLE
+    try:
+        status = job.get_status(refresh=True)
+    except NoSuchJobError:
+        return DraftJobState.MISSING
+    except InvalidJobOperation:
+        # The hash has no status: the job record is gone.
+        return DraftJobState.MISSING
+    except redis.exceptions.RedisError:
+        return DraftJobState.UNAVAILABLE
+    except Exception as error:
+        logger.warning("reading draft check job %s failed: %s", check_id, error)
+        return DraftJobState.UNAVAILABLE
+
+    if status in _FINISHED_JOBS:
+        return DraftJobState.FINISHED
+    if status == JobStatus.CANCELED:
+        return DraftJobState.CANCELLED
+    if status == JobStatus.STARTED:
+        try:
+            alive = _worker_still_registered(job)
+        except redis.exceptions.RedisError:
+            return DraftJobState.UNAVAILABLE
+        except Exception as error:
+            logger.warning("checking the worker for draft check %s failed: %s", check_id, error)
+            return DraftJobState.UNAVAILABLE
+        if alive is False:
+            return _cancel(job)
+        return DraftJobState.STARTED
+    if status in _NOT_STARTED:
+        return _cancel(job)
+    return DraftJobState.STARTED
+
+
+def _job_record_canceled(check_id: str) -> bool:
+    """True when this job was cancelled or its record is gone. Any other error (Redis down,
+    the test double) is False: a check keeps going when we cannot tell."""
+    try:
+        job = Job.fetch(check_id, connection=redis_connection(), serializer=JSONSerializer)
+        return job.get_status(refresh=True) == JobStatus.CANCELED
+    except NoSuchJobError:
+        return True
+    except Exception:
+        return False
+
+
+def _draft_check_should_stop(check_id: str, seen_stored: list[bool]) -> bool:
+    """True when the worker must exit without saving.
+
+    A missing row is not enough on its own: the gateway's first save can still be in
+    flight when the worker starts. It counts only after this job has seen the row stored,
+    which is how a delete that won the race is told apart from a save that has not landed.
+    """
+    from app import store
+
+    if _job_record_canceled(check_id):
+        return True
+    try:
+        stored = store.load(check_id)
+    except Exception as error:
+        logger.warning("reading draft check %s before save failed: %s", check_id, error)
+        return False
+    if stored is not None:
+        seen_stored[0] = True
+        return False
+    return bool(seen_stored[0])
 
 
 def run_draft_check_job(
@@ -249,52 +405,82 @@ def run_draft_check_job(
     The gateway has already recorded the row and the queued stage. This rebuilds that row in
     the worker (RQ jobs are sync, so the async check runs in its own event loop) and loads the
     draft's earlier checks from the store: the worker does not share the gateway's memory, and
-    an override on the previous check is carried forward from those rows. Stages go out through
+    an override on the previous check is carried forward from those rows.     Stages go out through
     the same `_publish` path as an analysis, so the gateway's subscriber keeps the SSE stream.
+
+    Before it starts, and again before every save, it stops when the job was cancelled or
+    the row was deleted after it had been stored. Otherwise a cancel that loses the race
+    with the worker writes the check back after the gateway deleted it.
     """
     from app import main
-    from app.author.router import DRAFT_CHECK, _run_draft_check, new_draft_check
+    from app.author.router import _run_draft_check, new_draft_check
 
     async def run():
+        seen_stored = [False]
+        if _draft_check_should_stop(check_id, seen_stored):
+            return {"id": check_id, "status": "cancelled"}
+
         # Only this draft's other checks. Loading every analysis would pin the worker's
         # memory to the whole history, and a paper analysis is not an override source.
         loaded: list[str] = []
+        original_save = main.store.save
+        original_publish = main._publish
+        stopped = {"value": False}
+
+        def guarded_save(analysis):
+            if isinstance(analysis, dict) and analysis.get("id") == check_id:
+                if stopped["value"] or _draft_check_should_stop(check_id, seen_stored):
+                    stopped["value"] = True
+                    return
+            original_save(analysis)
+            if isinstance(analysis, dict) and analysis.get("id") == check_id:
+                seen_stored[0] = True
+
+        async def guarded_publish(analysis_id, stage, **fields):
+            if analysis_id == check_id and (
+                stopped["value"] or _draft_check_should_stop(check_id, seen_stored)
+            ):
+                stopped["value"] = True
+                raise _DraftCheckDropped()
+            return await original_publish(analysis_id, stage, **fields)
+
+        main.store.save = guarded_save
+        main._publish = guarded_publish
         try:
-            for row in main.store.load_all().values():
-                if row.get("id") == check_id:
-                    continue
-                if (
-                    row.get("kind") != DRAFT_CHECK
-                    or row.get("draftId") != draft_id
-                    or row.get("owner") != owner
-                ):
-                    continue
-                main.analyses[row["id"]] = row
-                loaded.append(row["id"])
+            try:
+                for row in main.store.load_draft_checks(draft_id, owner):
+                    if row.get("id") == check_id:
+                        continue
+                    main.analyses[row["id"]] = row
+                    loaded.append(row["id"])
 
-            check = new_draft_check(
-                check_id,
-                owner,
-                draft_id,
-                draft_title,
-                version,
-                content_hash,
-                started_at or "",
-                list(stages or []),
-            )
-            main.analyses[check_id] = check
-            main.streams[check_id] = asyncio.Queue()
+                check = new_draft_check(
+                    check_id,
+                    owner,
+                    draft_id,
+                    draft_title,
+                    version,
+                    content_hash,
+                    started_at or "",
+                    list(stages or []),
+                )
+                main.analyses[check_id] = check
+                main.streams[check_id] = asyncio.Queue()
 
-            attributes = {
-                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
-                SpanAttributes.INPUT_VALUE: draft_title,
-                "draft_check.id": check_id,
-                "draft.id": draft_id,
-            }
-            with tracer.start_as_current_span("draft-check", attributes=attributes):
-                await _run_draft_check(check_id, owner)
-            return {"id": check_id, "status": main.analyses[check_id]["status"]}
+                attributes = {
+                    SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
+                    SpanAttributes.INPUT_VALUE: draft_title,
+                    "draft_check.id": check_id,
+                    "draft.id": draft_id,
+                }
+                with tracer.start_as_current_span("draft-check", attributes=attributes):
+                    await _run_draft_check(check_id, owner)
+                return {"id": check_id, "status": main.analyses[check_id]["status"]}
+            except _DraftCheckDropped:
+                return {"id": check_id, "status": "cancelled"}
         finally:
+            main.store.save = original_save
+            main._publish = original_publish
             main.analyses.pop(check_id, None)
             main.streams.pop(check_id, None)
             for sibling_id in loaded:
@@ -311,7 +497,7 @@ def _on_draft_check_job_failure(job: Job, connection, *exc_info) -> None:
     from app.author.router import new_draft_check
 
     check_id = job.args[0]
-    stored = store.load_all().get(check_id)
+    stored = store.load(check_id)
     if stored is not None:
         check = stored
     else:

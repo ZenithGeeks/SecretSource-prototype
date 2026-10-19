@@ -606,11 +606,13 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 
 `POST /author/drafts/{id}/check` → `{"id"}`. It records a `queued` stage and puts the check on
 the same Redis queue as a paper analysis (`app/queue.py`, `run_draft_check_job`). A worker runs
-it. Every `\cite` in the draft's `.tex` files is verified against the work its bib entry names
-(an uploaded PDF, else DOI, arXiv id, URL or title), `PARALLEL_CHECKS` at a time. A worker runs
-one job at a time, so that is the limit for that worker; each extra worker has its own. The same
-(claim, source) pair is judged once and read from the `cache` table after that. `409` while a
-check of that draft is queued or running. `503` when the queue cannot be reached; nothing is kept.
+it. Draft checks wait behind paper analyses already on that queue, and a check still running
+after 30 minutes is stopped (`JOB_TIMEOUT`). Every `\cite` in the draft's `.tex` files is
+verified against the work its bib entry names (an uploaded PDF, else DOI, arXiv id, URL or
+title), `PARALLEL_CHECKS` at a time. A worker runs one job at a time, so that is the limit for
+that worker; each extra worker has its own. The same (claim, source) pair is judged once and
+read from the `cache` table after that. `409` while a check of that draft is queued or running.
+`503` when the queue cannot be reached; nothing is kept.
 
 | Route | Does |
 | --- | --- |
@@ -618,8 +620,8 @@ check of that draft is queued or running. `503` when the queue cannot be reached
 | `GET /author/checks/{id}` | the same plus `citations` and `stages` |
 | `GET /author/checks/{id}/events` | SSE, like `/analyses/{id}/events`: `queued`, then `planned`, `checking`/`checked` per citation, then `done` or `error` |
 | `GET /author/checks/{id}/compare` | against the finished check before it: `{current, previous, rows}`; a row's `change` is `added`, `removed`, `fixed`, `new`, `changed` or `same` |
-| `PATCH /author/checks/{id}/citations/{cid}` | what the author did: `resolution` `{kind: replaced|overridden, note, previousKey}` (or `null` to reopen), and for a replacement the new `key`, `sourceRef`, `verdict`, `evidence` |
-| `DELETE /author/checks/{id}` | a queued check is cancelled and deleted. `409` once a worker has started it |
+| `PATCH /author/checks/{id}/citations/{cid}` | what the author did: `resolution` `{kind: replaced|overridden, note, previousKey}` (or `null` to reopen), and for a replacement the new `key`, `sourceRef`, `verdict`, `evidence`. `409` while the check is still queued or running |
+| `DELETE /author/checks/{id}` | deletes a finished check. A queued check is cancelled first. A missing job is deleted too, and so is a started job whose worker record has expired. `409` only while a worker is running it. `503` when Redis cannot be reached. A finished or failed job whose snapshot was missed is read back from the store, then deleted |
 
 A citation is `{id, key, file, line, column, section, sentence, claim, verdict, sourceRef,
 evidence: {passage, pdf, page}, explanation, reason, message, resolution}`. An overridden

@@ -12,6 +12,7 @@ from app.author import router as author
 from app.author import verify as author_verify
 from app.author.router import new_draft_check
 from app.queue import _on_draft_check_job_failure, run_draft_check_job
+from rq.job import JobStatus
 
 TEX = r"Late interaction scores with MaxSim~\cite{khattab2020}."
 BIB = """@inproceedings{khattab2020,
@@ -225,7 +226,7 @@ def test_failure_callback_marks_a_stored_running_check_as_error(monkeypatch):
         "2026-10-19T00:00:00+00:00",
         [_queued()],
     )
-    monkeypatch.setattr(main.store, "load_all", lambda: {"chk-f": stored})
+    monkeypatch.setattr(main.store, "load", lambda check_id: stored if check_id == "chk-f" else None)
     saved = []
     monkeypatch.setattr(main.store, "save", lambda row: saved.append(copy.deepcopy(row)))
     published = []
@@ -247,7 +248,7 @@ def test_failure_callback_marks_a_stored_running_check_as_error(monkeypatch):
 
 
 def test_failure_callback_builds_a_row_when_nothing_was_stored(monkeypatch):
-    monkeypatch.setattr(main.store, "load_all", lambda: {})
+    monkeypatch.setattr(main.store, "load", lambda check_id: None)
     saved = []
     monkeypatch.setattr(main.store, "save", lambda row: saved.append(row))
     monkeypatch.setattr("app.queue.redis_connection", lambda: FakeRedis())
@@ -268,3 +269,107 @@ def test_failure_callback_builds_a_row_when_nothing_was_stored(monkeypatch):
     assert check["stages"][-1]["stage"] == "error"
     assert check["status"] == "error"
     assert check["finishedAt"].endswith("+00:00")
+
+
+class _Job:
+    def __init__(self, status):
+        self.status = status
+        self.id = "chk-race"
+
+    def get_status(self, refresh=True):
+        return self.status
+
+
+def test_a_cancelled_job_exits_before_it_saves(draft, monkeypatch):
+    """Cancel won before the worker started. The job must not write the row back."""
+    calls = []
+    monkeypatch.setattr(main, "verify_claim", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(main, "redis_connection", lambda: FakeRedis())
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: _Job(JobStatus.CANCELED))
+
+    result = run_draft_check_job(
+        "chk-race",
+        "user-ada",
+        "draft1",
+        "Related work",
+        1,
+        "hash",
+        [_queued()],
+        "2026-10-19T00:00:00+00:00",
+    )
+
+    assert result == {"id": "chk-race", "status": "cancelled"}
+    assert calls == []
+    assert main.store.load("chk-race") is None
+
+
+def _stop_after_first_save(monkeypatch, job, *, cancel: bool):
+    """Publish one stage, wait until it is stored, then drop the row. The next publish is
+    the worker's next save, and it must not put the check back."""
+
+    async def scripted(check_id, user):
+        await main._publish(check_id, "planned", checks=1)
+        await main._saved(check_id)
+        if cancel:
+            job.status = JobStatus.CANCELED
+        main.store.delete(check_id)
+        await main._publish(check_id, "done")
+
+    monkeypatch.setattr(author, "_run_draft_check", scripted)
+
+
+def test_a_cancel_during_the_check_does_not_save_the_deleted_row(draft, monkeypatch):
+    """The worker was already running when cancel ran. It had stored a stage; the delete
+    removed it. The next save must not put the check back."""
+    monkeypatch.setattr(main, "redis_connection", lambda: FakeRedis())
+    job = _Job(JobStatus.STARTED)
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: job)
+    _stop_after_first_save(monkeypatch, job, cancel=True)
+
+    result = run_draft_check_job(
+        "chk-race",
+        "user-ada",
+        "draft1",
+        "Related work",
+        1,
+        "hash",
+        [_queued()],
+        "2026-10-19T00:00:00+00:00",
+    )
+
+    assert result == {"id": "chk-race", "status": "cancelled"}
+    assert main.store.load("chk-race") is None
+
+
+def test_a_deleted_row_is_not_saved_again_when_cancel_did_not_stick(draft, monkeypatch):
+    """Status still says started, but the gateway already deleted the row this job had stored."""
+    monkeypatch.setattr(main, "redis_connection", lambda: FakeRedis())
+    job = _Job(JobStatus.STARTED)
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: job)
+    _stop_after_first_save(monkeypatch, job, cancel=False)
+
+    result = run_draft_check_job(
+        "chk-race",
+        "user-ada",
+        "draft1",
+        "Related work",
+        1,
+        "hash",
+        [_queued()],
+        "2026-10-19T00:00:00+00:00",
+    )
+
+    assert result == {"id": "chk-race", "status": "cancelled"}
+    assert main.store.load("chk-race") is None
+
+
+def test_load_draft_checks_is_scoped_to_the_draft_and_owner(draft):
+    started = "2026-10-01T00:00:00+00:00"
+    main.store.save(new_draft_check("mine", "user-ada", "draft1", "T", 1, "h", "2026-10-02T00:00:00+00:00"))
+    main.store.save(new_draft_check("other-owner", "user-bo", "draft1", "T", 1, "h", started))
+    main.store.save(new_draft_check("other-draft", "user-ada", "draft2", "T", 1, "h", started))
+    main.store.save({"id": "paper", "owner": "user-ada", "status": "done"})
+
+    ids = {row["id"] for row in main.store.load_draft_checks("draft1", "user-ada")}
+
+    assert ids == {"mine"}

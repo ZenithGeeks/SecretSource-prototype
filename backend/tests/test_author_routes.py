@@ -15,12 +15,15 @@ import zipfile
 from datetime import datetime, timedelta
 
 import pytest
+import redis
 from app import auth, main
 from app.author import router as author
 from app.author import verify as author_verify
 from app.metrics import AUDIT_FINDINGS
 from app.pipeline import sources
 from fastapi.testclient import TestClient
+from rq.exceptions import InvalidJobOperation, NoSuchJobError
+from rq.job import JobStatus
 
 TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
 ADA = {"Authorization": "Bearer token-ada"}
@@ -391,12 +394,41 @@ def test_one_drafts_checks_are_only_its_own_oldest_first(monkeypatch):
     assert author._previous_of(rows[0], "ada")["id"] == "early"
 
 
-def test_a_second_check_while_one_runs_is_refused(client):
+class _RQJob:
+    """The slice of an RQ job delete talks to: status, cancel, and whether its worker key exists."""
+
+    def __init__(self, status, *, worker_alive=True, cancel_error=None, worker_name="worker-1"):
+        self.status = status
+        self.worker_alive = worker_alive
+        self.cancel_error = cancel_error
+        self.worker_name = worker_name
+        self.cancelled = False
+        self.connection = self
+        self.id = "job"
+
+    def get_status(self, refresh=True):
+        return self.status
+
+    def refresh(self):
+        return None
+
+    def exists(self, key):
+        return self.worker_alive
+
+    def cancel(self):
+        if self.cancel_error is not None:
+            raise self.cancel_error
+        self.cancelled = True
+        self.status = JobStatus.CANCELED
+
+
+def test_a_second_check_while_one_runs_is_refused(client, monkeypatch):
     draft = make_draft(client)
     first = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
     refused = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA)
     assert refused.status_code == 409 and first in refused.json()["detail"]
-    # a check whose worker has started is left alone by delete (no queued job to cancel)
+    # a worker that still holds the job is left alone
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: _RQJob(JobStatus.STARTED))
     assert client.delete(f"/author/checks/{first}", headers=ADA).status_code == 409
 
 
@@ -482,15 +514,110 @@ def test_a_finished_check_can_be_deleted(client, monkeypatch):
 
 
 def test_deleting_a_queued_check_cancels_its_job(client, monkeypatch):
-    cancelled = []
-    monkeypatch.setattr(author, "cancel_if_queued", lambda check_id: cancelled.append(check_id) or True)
+    job = _RQJob(JobStatus.QUEUED)
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: job)
     draft = make_draft(client)
     check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
 
     assert client.delete(f"/author/checks/{check_id}", headers=ADA).json() == {"deleted": check_id}
 
-    assert cancelled == [check_id]
+    assert job.cancelled
     assert check_id not in main.analyses
+
+
+def test_cancelling_an_already_cancelled_job_does_not_500(client, monkeypatch):
+    """A second delete used to call cancel() on a job that was already cancelled and 500."""
+    job = _RQJob(JobStatus.QUEUED, cancel_error=InvalidJobOperation("already canceled"))
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: job)
+    draft = make_draft(client)
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    assert client.delete(f"/author/checks/{check_id}", headers=ADA).status_code == 200
+    assert check_id not in main.analyses
+
+
+def test_deleting_a_check_whose_job_is_gone_lets_a_recheck_through(client, monkeypatch):
+    def missing(*args, **kwargs):
+        raise NoSuchJobError("gone")
+
+    monkeypatch.setattr("app.queue.Job.fetch", missing)
+    draft = make_draft(client)
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    deleted = client.delete(f"/author/checks/{check_id}", headers=ADA)
+    assert deleted.status_code == 200, deleted.text
+    assert client.get(f"/author/checks/{check_id}", headers=ADA).status_code == 404
+    assert client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).status_code == 200
+
+
+def test_delete_while_redis_is_down_is_503_and_the_row_stays(client, monkeypatch):
+    def down(*args, **kwargs):
+        raise redis.exceptions.ConnectionError("redis is down")
+
+    monkeypatch.setattr("app.queue.Job.fetch", down)
+    draft = make_draft(client)
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    response = client.delete(f"/author/checks/{check_id}", headers=ADA)
+    assert response.status_code == 503
+    assert check_id in main.analyses
+    refused = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA)
+    assert refused.status_code == 409 and check_id in refused.json()["detail"]
+
+
+def test_delete_reloads_a_finished_check_when_the_snapshot_was_lost(client, monkeypatch):
+    """The job finished and the store has the final row, but pub/sub dropped it, so memory
+    still says running. Delete must read the store instead of answering 409."""
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: _RQJob(JobStatus.FINISHED))
+    draft = make_draft(client)
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+    stored = json.loads(json.dumps(main.analyses[check_id]))
+    stored["status"] = "done"
+    stored["finishedAt"] = "2026-10-19T00:00:00+00:00"
+    stored["stages"].append({"stage": "done", "at": 2.0})
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: stored if analysis_id == check_id else None)
+    seen = {}
+    original = main._delete_one
+
+    async def spy(analysis_id):
+        seen["status"] = main.analyses[analysis_id]["status"]
+        await original(analysis_id)
+
+    monkeypatch.setattr(main, "_delete_one", spy)
+
+    assert client.delete(f"/author/checks/{check_id}", headers=ADA).status_code == 200
+    assert seen["status"] == "done"
+    assert client.get(f"/author/checks/{check_id}", headers=ADA).status_code == 404
+
+
+def test_delete_of_a_started_job_whose_worker_is_gone(client, monkeypatch):
+    job = _RQJob(JobStatus.STARTED, worker_alive=False)
+    monkeypatch.setattr("app.queue.Job.fetch", lambda *args, **kwargs: job)
+    draft = make_draft(client)
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    assert client.delete(f"/author/checks/{check_id}", headers=ADA).status_code == 200
+    assert job.cancelled
+    assert client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).status_code == 200
+
+
+def test_patching_a_citation_while_the_check_runs_is_refused(client, monkeypatch):
+    stub_verify(monkeypatch)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+    citation = main.analyses[check_id]["citations"][0]
+    citation_id = citation["id"]
+    assert "resolution" not in citation
+    main.analyses[check_id]["status"] = "running"
+
+    response = client.patch(
+        f"/author/checks/{check_id}/citations/{citation_id}",
+        headers=ADA,
+        json={"resolution": {"kind": "overridden", "note": "too soon"}},
+    )
+
+    assert response.status_code == 409
+    assert "resolution" not in main.analyses[check_id]["citations"][0]
 
 
 def test_resolving_a_citation_is_kept_and_an_override_survives_a_recheck(client, monkeypatch):
