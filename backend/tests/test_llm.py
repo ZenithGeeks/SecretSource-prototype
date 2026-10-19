@@ -183,3 +183,19 @@ def test_cancelled_wait_does_not_keep_a_slot(monkeypatch):
     asyncio.run(wait_then_cancel())
 
     assert llm._slots.acquire(blocking=False)
+
+
+def test_each_call_records_how_long_it_waited_for_a_slot():
+    def waits():
+        return REGISTRY.get_sample_value("llm_slot_wait_seconds_count") or 0
+
+    before = waits()
+    with llm._slot():
+        pass
+
+    async def hold_async_slot():
+        async with llm._async_slot():
+            pass
+
+    asyncio.run(hold_async_slot())
+    assert waits() == before + 2
