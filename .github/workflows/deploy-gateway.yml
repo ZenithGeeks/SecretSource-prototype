@@ -94,10 +94,15 @@ jobs:
           # Contact address Unpaywall asks for, not a key, so a repo variable (#408).
           UNPAYWALL_EMAIL: ${{ vars.UNPAYWALL_EMAIL }}
           OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          # Postgres for the assistant's chats (app/sessions.py): the Supabase session pooler URL.
+          SESSION_DB_URL: ${{ secrets.SESSION_DB_URL }}
         run: |
           # Without a reachable Redis the gateway answers every POST /analyses with 503, so refuse
           # to deploy rather than ship that. The worker that drains the queue runs on ss-core.
           if [ -z "$REDIS_URL" ]; then echo "::error::the REDIS_URL secret is not set"; exit 1; fi
+          # Without it chats live in memory, and the scale-to-zero instance loses them on every
+          # cold start. The rest of the gateway still works, so warn instead of failing.
+          if [ -z "$SESSION_DB_URL" ]; then echo "::warning::the SESSION_DB_URL secret is not set"; fi
           # 1 vCPU, 4Gi (#467): analyses run in the ss-core worker, so the gateway no longer runs
           # Docling. Its daily memory p99 has been under 0.2 GB since 2026-09-29, and a draft check
           # peaked at 0.63 GB using 0.1 to 0.2 vCPU. Turning VISUAL_EVIDENCE on brings Docling back
@@ -111,7 +116,7 @@ jobs:
           gcloud run deploy gateway --image "$IMAGE" --region "$REGION" --quiet \
             --port 8080 --memory 4Gi --allow-unauthenticated \
             --max-instances 1 --no-cpu-throttling --cpu 1 --scaling auto --min 0 \
-            --set-env-vars "DOCLING_PARALLEL=1,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,S2_API_KEY=$S2_API_KEY,SCOPUS_API_KEY=$SCOPUS_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL,TEACHER_GOOGLE_ENABLED=$TEACHER_GOOGLE_ENABLED,TEACHER_GOOGLE_CLIENT_ID=$TEACHER_GOOGLE_CLIENT_ID,TEACHER_GOOGLE_CLIENT_SECRET=$TEACHER_GOOGLE_CLIENT_SECRET,TEACHER_GOOGLE_REDIRECT_URI=$TEACHER_GOOGLE_REDIRECT_URI,TEACHER_GOOGLE_ENCRYPTION_KEY=$TEACHER_GOOGLE_ENCRYPTION_KEY,TEACHER_GOOGLE_SUCCESS_REDIRECT=$TEACHER_GOOGLE_SUCCESS_REDIRECT,UNPAYWALL_EMAIL=$UNPAYWALL_EMAIL,OPENALEX_API_KEY=$OPENALEX_API_KEY,PAPERS_BUCKET=gcp-edu-471706-papers,UPLOAD_ORIGINS=https://secretsource-web.vercel.app"
+            --set-env-vars "DOCLING_PARALLEL=1,SERVICE_AUTH=google-id-token,GROBID_URL=$GROBID_URL,COLBERT_URL=$COLBERT_URL,COLPALI_URL=$COLPALI_URL,VLLM_URL=$VLLM_URL,VLLM_MODEL=$VLLM_MODEL,VLLM_API_KEY=$VLLM_API_KEY,S2_API_KEY=$S2_API_KEY,SCOPUS_API_KEY=$SCOPUS_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,REDIS_URL=$REDIS_URL,TEACHER_GOOGLE_ENABLED=$TEACHER_GOOGLE_ENABLED,TEACHER_GOOGLE_CLIENT_ID=$TEACHER_GOOGLE_CLIENT_ID,TEACHER_GOOGLE_CLIENT_SECRET=$TEACHER_GOOGLE_CLIENT_SECRET,TEACHER_GOOGLE_REDIRECT_URI=$TEACHER_GOOGLE_REDIRECT_URI,TEACHER_GOOGLE_ENCRYPTION_KEY=$TEACHER_GOOGLE_ENCRYPTION_KEY,TEACHER_GOOGLE_SUCCESS_REDIRECT=$TEACHER_GOOGLE_SUCCESS_REDIRECT,UNPAYWALL_EMAIL=$UNPAYWALL_EMAIL,OPENALEX_API_KEY=$OPENALEX_API_KEY,SESSION_DB_URL=$SESSION_DB_URL,PAPERS_BUCKET=gcp-edu-471706-papers,UPLOAD_ORIGINS=https://secretsource-web.vercel.app"
 
       - name: Print the gateway URL
         run: gcloud run services describe gateway --region "$REGION" --format 'value(status.url)'

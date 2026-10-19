@@ -570,6 +570,39 @@ The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: 
 A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
 when the run does not say.
 
+### Assistant
+
+Questions about the caller's papers, answered as short statements that the judge checks before
+they count (`app/assistant.py`). A chat is an ADK session (`app/chats.py`), kept in Postgres when
+`SESSION_DB_URL` is set and in memory otherwise, where a restart loses it. Cloud Run needs the
+`SESSION_DB_URL` repo secret for that reason. Another user's chat is a `404`.
+
+| Route | Does |
+| --- | --- |
+| `POST /assistant/chats` | body `{"context"}`, optional; starts a chat: `{id, title, updated}` |
+| `GET /assistant/chats` | the caller's chats, newest first |
+| `GET /assistant/chats/{id}` | the chat, its `context` (the screen of the last question) and `messages` |
+| `POST /assistant/chats/{id}/messages` | body `{"question", "context"}`; the answer as server-sent events |
+
+`context` is `{"screen", "analysis", "node"}`, all optional. With `analysis`, or a graph `node`
+of an analysed paper (`a:<id>`) or of one of its claims (`c:<id>:<n>`), the answer comes from
+that paper; an analysis that is not the caller's is a `404`. Otherwise it comes from the
+passages of the papers the caller may open (`papers_of`).
+
+The events, one `data:` line each:
+
+| `type` | Fields | When |
+| --- | --- | --- |
+| `statement` | `index`, `text`, `source` (the PDF), `page` (of the passage, when the answer named one) | all at once, when the answer is written |
+| `verdict` | `index`, `verdict` (`supports`, `refutes`, `insufficient`, `unchecked`, `error`), `quote`, `reasoning` | as each check ends, in any order |
+| `done` | `statements` | last; `0` when the papers do not answer the question |
+| `error` | `message` | the answer failed; nothing follows |
+
+A statement whose verdict is not `supports` is not backed; the reply shows it marked, not
+hidden. The reply is saved to the chat once `done` is sent. After an `error`, or when the reader
+leaves first, the question stays in the chat with no reply. Two questions to one chat at once
+are both recorded: a write that finds the chat changed reads it again and retries.
+
 ### Author
 
 The Author role's own records: LaTeX drafts, the projects (a `.bib` plus drafts) they belong
