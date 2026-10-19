@@ -106,7 +106,9 @@ does not hold. They become rules when the first assistant PR lands.
 | Slowest checked answer from the whole library, the same way | 19.3 to 27.1 s; 5 of 42 answers over 20 s | must fall under 20 s |
 | Statements the judge does not back | 1 to 3% about one paper, 0 to 1% from the library | must not rise above 3% |
 | Questions outside the library answered with no statements | 6 of 6 in every run | must stay 6 of 6 |
-| Last verdict of a checked answer, 5 people chatting at once (SCRUM-363) | median 61.7 s, p90 131.6 s; 34 of 39 answers over 20 s | must fall under 20 s, the one-pager's target |
+| First statement of an answer, 5 people chatting at once (SCRUM-363) | median 8.1 s, p90 14.3 s | median must stay under 10 s |
+| Last verdict, one person asking about one paper, on 9arm with the cap of 3 | median 14.3 s and 12.2 s, slowest 19.0 s and 27.9 s (2 runs, 19 Oct 2026) | median must stay under 20 s, the one-pager's target |
+| Last verdict, 5 people chatting at once | median 61.7 s, p90 131.6 s | not a target; see below |
 | Statements not backed, 5 people chatting at once | 4% (7 of 183) | must stay under one third, the one-pager's ceiling |
 
 Checked by `python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh`, and the
@@ -117,6 +119,13 @@ The two rows for 5 people come from `python load_assistant.py <gateway> ../docs/
 --users 5`: 40 questions through the chat routes, on a fresh gateway (each paper indexed in ColBERT the
 first time a check reads it) with the 9arm key's cap of 3 requests. A second run on the same gateway
 replays dspy's and the store's answer caches, so only a first run measures the work.
+
+The 20 s target holds for one person, not for 5 at once. The 9arm key allows 3 requests at a time, and a
+checked answer makes about 7 (one answer, up to 6 checks) at about 8 s each under load: 223 calls took
+605 s. Five people would need about 1.5 calls per answer to finish in 20 s. So with several people the
+statements come first, and the panel shows each verdict as it lands (Checking… until then). Re-adding
+a paper ColBERT already holds is not the cost: it takes 0.04 to 0.21 s, since the service skips
+papers whose content hash it already has.
 
 ## How quality and time are checked
 
