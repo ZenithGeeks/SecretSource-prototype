@@ -1,0 +1,13 @@
+paper,claim,source,expected
+swap,Figure 13 illustrates that the cat is located below the keyboard.,data/papers/Visual-spatial-reasoning.pdf,refutes
+swap,Figure 13 illustrates that the keyboard is located below the cat.,data/papers/Visual-spatial-reasoning.pdf,supports
+swap,Figure 14 shows the chair above the sandwich.,data/papers/Visual-spatial-reasoning.pdf,refutes
+swap,Figure 14 shows the sandwich above the chair.,data/papers/Visual-spatial-reasoning.pdf,supports
+swap,"In Figure 1, the bench is at the right side of the potted plant.",data/papers/Visual-spatial-reasoning.pdf,refutes
+swap,"In Figure 1, the potted plant is at the right side of the bench.",data/papers/Visual-spatial-reasoning.pdf,supports
+swap,The caption of Figure 2 says the person is ahead of the cow.,data/papers/Visual-spatial-reasoning.pdf,refutes
+swap,The caption of Figure 2 says the cow is ahead of the person.,data/papers/Visual-spatial-reasoning.pdf,supports
+swap,"In Figure 11, the car is at the back of the cow.",data/papers/Visual-spatial-reasoning.pdf,refutes
+swap,"In Figure 11, the cow is at the back of the car.",data/papers/Visual-spatial-reasoning.pdf,supports
+swap,ColBERT extends ColBERTv2 with residual compression.,2112.01488,refutes
+swap,ColBERTv2 extends ColBERT with residual compression.,2112.01488,supports

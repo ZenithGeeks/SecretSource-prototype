@@ -184,16 +184,21 @@ def _build_judge():
         and "insufficient" if the passages do not settle the question.
         Before answering "supports", check each number, each comparison (more or less, higher
         or lower, easy or hard), each direction (from A to B) and what each value belongs to:
-        the row and column of a table, or the item that "respectively" pairs it with. If any
+        the row and column of a table, or the item that "respectively" pairs it with. Also
+        check which thing is on each side of a relation: "A is left of B" and "B is left of
+        A" say opposite things, as do "A is derived from B" and "B is derived from A". If any
         of them differs from the passage, the passage contradicts the claim. A claim that
         leaves out details the passage gives is not contradicted by that. The claim may use
         different words than the passage; judge whether it means the same thing."""
 
         claim: str = dspy.InputField(desc="A claim that cites the source paper")
         evidence: list[str] = dspy.InputField(desc="Passages from the cited paper")
+        # Copied before the reasoning starts: without it the judge restated "the cat is below
+        # the keyboard" the wrong way round and matched that to the passage (#517).
+        claim_says: str = dspy.OutputField(desc="The claim's words, copied in the claim's own order")
+        reasoning: str = dspy.OutputField(desc="Compare the claim with the passages, step by step")
         verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")
         quote: str = dspy.OutputField(desc="The sentence from the evidence that decides it, or empty")
-        reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
 
     class JudgeCitedClaim(dspy.Signature):
         """Decide whether the cited paper's passages support what the claim credits to it.
@@ -237,7 +242,13 @@ def _build_judge():
     # Only the Author check marks the citation (#437). A paper analysis keeps the first
     # judge until labeled data (#423) can score the second one on its claims.
     signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim, "judge-figure": JudgeFigure}
-    judges = {name: dspy.ChainOfThought(signature) for name, signature in signatures.items()}
+    # Predict for "judge": ChainOfThought puts its reasoning before every other output, and
+    # claim_says only helps if it comes first.
+    judges = {
+        "judge": dspy.Predict(JudgeClaim),
+        "judge-cited": dspy.ChainOfThought(JudgeCitedClaim),
+        "judge-figure": dspy.ChainOfThought(JudgeFigure),
+    }
 
     def ask(name: str, inputs: dict) -> dspy.Prediction:
         with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):

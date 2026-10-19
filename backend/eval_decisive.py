@@ -54,7 +54,11 @@ def main() -> None:
                 verdict = "error: " + prepared.get("reason", "failed")
             else:
                 result = verify.check_prepared(case["claim"], case["source"], Path(prepared["path"]))
-                verdict = result.get("verdict", "error") if result["status"] == "ok" else "error"
+                if result["status"] == "ok":
+                    verdict = result.get("verdict", "error")
+                else:
+                    # With the reason, so a failed call is not read as a changed verdict.
+                    verdict = f"error: {result.get('reason', '')} {result.get('message', '')[:120]}"
             kept += verdict == case["expected"]
             print(f"run {run} {number}/{len(cases)} {case['expected']:>8} -> {verdict:<12} {case['source']}")
         kept_per_run.append(kept)
