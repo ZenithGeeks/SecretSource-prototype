@@ -80,6 +80,7 @@ def main() -> None:
         verify.EVIDENCE_COUNT = args.evidence_count
     print(f"judge gets {verify.EVIDENCE_COUNT} passages per claim")
     if args.fresh:
+        # Turn off the pipeline's result cache (app/store.py), so every run asks the judge again.
         store.recall_cache = lambda key: None
         store.remember_cache = lambda key, data: None
         # dspy caches LM responses too, in memory and on disk; without this runs 2+ replay run 1.

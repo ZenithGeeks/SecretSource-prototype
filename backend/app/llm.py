@@ -37,6 +37,7 @@ def count_adk_rate_limit(kwargs, completion_response, start_time, end_time):
 
 
 def adk_model() -> LiteLlm:
+    """The vLLM model for ADK agents, with thinking off."""
     return LiteLlm(
         model=f"openai/{VLLM_MODEL}",
         api_base=VLLM_URL,
@@ -47,7 +48,8 @@ def adk_model() -> LiteLlm:
     )
 
 
-def dspy_lm(temperature: float = 0.3, max_tokens: int = 2000):
+def dspy_lm(temperature: float = 0.3, max_tokens: int = 2000) -> dspy.LM:
+    """The vLLM model for DSPy programs, with thinking off."""
     return dspy.LM(
         f"openai/{VLLM_MODEL}",
         api_base=VLLM_URL,

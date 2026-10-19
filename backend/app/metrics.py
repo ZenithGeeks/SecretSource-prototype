@@ -9,8 +9,12 @@ name is defined exactly once.
 
 import threading
 from contextvars import ContextVar
+from typing import TYPE_CHECKING, Literal
 
 from prometheus_client import Counter, Gauge, Histogram
+
+if TYPE_CHECKING:  # dspy takes 0.3 s to import; this module is loaded before any LLM call
+    from dspy.utils.usage_tracker import UsageTracker
 
 # --- Analysis lifecycle: success rate, duration, queueing (backend/app/main.py) ---
 
@@ -46,7 +50,7 @@ AUDIT_FINDINGS = Counter(
 
 # --- LLM usage, from dspy.track_usage() around each call (pipeline/claims.py, pipeline/verify.py) ---
 
-LLM_CALLS = Counter("llm_calls_total", "LLM calls made", ["phase"])  # extract | judge
+LLM_CALLS = Counter("llm_calls_total", "LLM calls made", ["phase"])  # see Phase below
 LLM_TOKENS = Counter("llm_tokens_total", "LLM tokens used", ["phase", "kind"])  # kind: prompt | completion
 # The 9arm key allows 3 requests at once and answers a 4th with HTTP 429 (#511). Counted in
 # app/llm.py once per call, after the client's own retries, so each one is a call that failed.
@@ -55,21 +59,25 @@ LLM_RATE_LIMITED = Counter(
 )
 
 
-# The running analysis's own token counts, keyed "<phase>_<kind>" (for example "judge_prompt"),
-# so its saved record says what its LLM calls cost (CONSTRAINTS.md). main._run_queued sets it to
-# analysis["llm_tokens"]. asyncio.to_thread copies the context, and the copy points at the same
-# dict, so calls made in worker threads add to it; the lock stops two threads losing an addition.
+# Which pipeline step made an LLM call: claim extraction, citation roles (both
+# pipeline/claims.py) or the judge (pipeline/verify.py).
+Phase = Literal["extract", "citation-roles", "judge"]
+
+# The running analysis's token counts, keyed "<phase>_<kind>" (for example "judge_prompt"), so
+# its saved record says what its LLM calls cost (CONSTRAINTS.md). main._run_queued sets it to
+# analysis["llm_tokens"]. Worker threads share this one dict on purpose, so additions go
+# through the lock.
 current_analysis_tokens: ContextVar[dict[str, int] | None] = ContextVar(
     "current_analysis_tokens", default=None
 )
 _tokens_lock = threading.Lock()
 
 
-def record_llm_usage(phase: str, tracker) -> None:
+def record_llm_usage(phase: Phase, tracker: "UsageTracker") -> None:
     """Add one LLM call's tokens to the Prometheus counters and to the running analysis.
 
     Args:
-        phase: which step made the call, "extract" or "judge".
+        phase: which step made the call.
         tracker: the dspy.track_usage() tracker that was open around the call. Every model
             entry in it is summed.
     """
