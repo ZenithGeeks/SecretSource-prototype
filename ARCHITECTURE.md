@@ -440,7 +440,9 @@ TLS, so anyone who can write to that Redis could queue a job. `backend/app/queue
 **Known limits.**
 
 - Nothing limits the load across workers: `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL`
-  only limit the run inside one worker (see step 5).
+  only limit the run inside one worker (see step 5). `LLM_PARALLEL_REQUESTS` (default 3) caps the
+  LLM requests in flight in one process, but the gateway, each worker and any eval script that
+  share a key still add up.
 - The gateway keeps analyses in memory, fed by a worker's Redis snapshots (`_subscribe_forever`).
   If Redis cannot be reached when the gateway starts, an analysis that was `running` is left
   `running` rather than checked against its job.
@@ -546,7 +548,7 @@ adds an analysis to it.
 | figure extraction | `backend/app/pipeline/figures.py` |
 | search behaviour (chunks, batches, collections) | `services/colbert`, `services/colpali` |
 | which LLM is used, or how it is called | `backend/app/llm.py`, `backend/app/config.py` |
-| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS` in `.env`; analyses at once = worker count (`--scale worker=N`) |
+| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS`, `LLM_PARALLEL_REQUESTS` in `.env`; analyses at once = worker count (`--scale worker=N`) |
 | how analyses are queued, or the Redis connection | `backend/app/queue.py` |
 | what the worker process does | `backend/worker.py` |
 | the graph in `adk web` | `backend/app/workflow.py` |

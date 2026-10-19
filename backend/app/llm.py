@@ -1,14 +1,59 @@
 """One model behind two frameworks. ADK agents get a LiteLlm.
 DSPy programs get a dspy.LM. Both use the OpenAI wire format,
-which is what vLLM serves."""
+which is what vLLM serves. Together they keep at most LLM_PARALLEL_REQUESTS requests
+in flight in this process."""
+
+import asyncio
+import threading
+from contextlib import asynccontextmanager
 
 import dspy
 from dspy.utils.callback import BaseCallback
 from dspy.utils.exceptions import LMRateLimitError
 from google.adk.models.lite_llm import LiteLlm
 
-from app.config import VLLM_API_KEY, VLLM_MODEL, VLLM_URL
+from app.config import LLM_PARALLEL_REQUESTS, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.metrics import LLM_RATE_LIMITED
+
+# One slot per request in flight, for every model in this process. dspy calls come from
+# worker threads and ADK calls from the event loop, so this is a threading semaphore.
+_slots = threading.BoundedSemaphore(LLM_PARALLEL_REQUESTS)
+
+
+@asynccontextmanager
+async def _async_slot():
+    """Hold a request slot without blocking the event loop."""
+    # Polling, not asyncio.to_thread(_slots.acquire): a cancelled to_thread call still takes
+    # the slot in its thread, and nothing gives it back.
+    while not _slots.acquire(blocking=False):
+        await asyncio.sleep(0.05)
+    try:
+        yield
+    finally:
+        _slots.release()
+
+
+class CappedLM(dspy.LM):
+    """A dspy.LM that holds a request slot for each call, retries included."""
+
+    def __call__(self, *args, **kwargs):
+        with _slots:
+            return super().__call__(*args, **kwargs)
+
+    async def acall(self, *args, **kwargs):
+        async with _async_slot():
+            return await super().acall(*args, **kwargs)
+
+
+class CappedLiteLlm(LiteLlm):
+    """An ADK LiteLlm that holds a request slot for each model turn."""
+
+    async def generate_content_async(self, llm_request, stream=False):
+        # Held until the caller has read the last response, so a streamed turn keeps its slot.
+        async with _async_slot():
+            async for response in super().generate_content_async(llm_request, stream):
+                yield response
+
 
 # Qwen3 thinks before it answers unless told not to. The compose vLLM is started with
 # `--default-chat-template-kwargs '{"enable_thinking": false}'`. A vLLM somewhere else
@@ -36,9 +81,9 @@ def count_adk_rate_limit(kwargs, completion_response, start_time, end_time):
         LLM_RATE_LIMITED.inc()
 
 
-def adk_model() -> LiteLlm:
-    """The vLLM model for ADK agents, with thinking off."""
-    return LiteLlm(
+def adk_model() -> CappedLiteLlm:
+    """The vLLM model for ADK agents, with thinking off and the shared request limit."""
+    return CappedLiteLlm(
         model=f"openai/{VLLM_MODEL}",
         api_base=VLLM_URL,
         api_key=VLLM_API_KEY,
@@ -48,9 +93,9 @@ def adk_model() -> LiteLlm:
     )
 
 
-def dspy_lm(temperature: float = 0.3, max_tokens: int = 2000) -> dspy.LM:
-    """The vLLM model for DSPy programs, with thinking off."""
-    return dspy.LM(
+def dspy_lm(temperature: float = 0.3, max_tokens: int = 2000) -> CappedLM:
+    """The vLLM model for DSPy programs, with thinking off and the shared request limit."""
+    return CappedLM(
         f"openai/{VLLM_MODEL}",
         api_base=VLLM_URL,
         api_key=VLLM_API_KEY,
