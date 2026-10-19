@@ -60,7 +60,7 @@ async def owned_analysis(analysis_id: str, user: str | None = Depends(current_us
         try:
             return main._owned(analysis_id, user)
         except HTTPException:
-            row = main.analyses.get(analysis_id)
+            row = main.lookup(analysis_id)
             if row and row.get("kind", "paper") == "paper" and analysis_id in pool.pooled():
                 return row
             raise
@@ -272,7 +272,7 @@ async def pool_state(
                 name_of[account] = r.get("annotator", "")
         shared = []
         for analysis_id, topic in pool.pooled().items():
-            row = main.analyses.get(analysis_id)
+            row = main.lookup(analysis_id)
             if not row:
                 continue
             status = row.get("status")
@@ -327,11 +327,21 @@ async def set_paper_topic(
 
 
 def _doi_in_pool(main, doi: str) -> str | None:
+    """The pooled analysis of this DOI. Each lookup can read the store, so the only caller
+    (scopus_add) runs this on a worker thread."""
     for analysis_id in pool.pooled():
-        row = main.analyses.get(analysis_id)
+        row = main.lookup(analysis_id)
         if row and str(row.get("paper", "")).lower() == doi.lower():
             return analysis_id
     return None
+
+
+def _pooled_dois(main) -> set[str]:
+    """DOIs already in the labeling pool. Looks each analysis up, so it runs off the event loop."""
+    return {
+        str((main.lookup(analysis_id) or {}).get("paper", "")).lower()
+        for analysis_id in pool.pooled()
+    }
 
 
 @router.get("/scopus/search")
@@ -349,7 +359,7 @@ async def scopus_search(
         raise HTTPException(503, f"Scopus is not set up: {error}") from error
     except Exception as error:  # a refused key, a timeout, Scopus being down
         raise HTTPException(502, "Scopus did not answer") from error
-    listed = {str(main.analyses.get(i, {}).get("paper", "")).lower() for i in pool.pooled()}
+    listed = await asyncio.to_thread(_pooled_dois, main)
     return {"results": [{**paper, "added": paper["doi"].lower() in listed} for paper in found]}
 
 

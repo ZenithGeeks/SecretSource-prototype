@@ -1008,8 +1008,9 @@ A failed check returns `status: "error"` with `message` and `reason`.
 
 #### `GET /health`
 
-No login needed. `ok` means the gateway is up. The rest comes from `app/dependencies.py`, from a
-check at most 30 s old:
+No login needed. `ok` means the gateway is up. `analyses` is how many rows this process is
+holding (running jobs, the newest loaded at startup, and owners read since), not how many the
+store has. The rest comes from `app/dependencies.py`, from a check at most 30 s old:
 
 ```json
 {

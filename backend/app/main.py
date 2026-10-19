@@ -25,8 +25,10 @@ POST /assistant/chats/{id}/messages   {"question", "context"} -> SSE: statements
 /author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 GET  /health
 
-Analyses live in memory while they run. They are also written to SQLite (app/store.py)
-as they progress. A restart keeps the history.
+Analyses live in memory while they run. They are also written to SQLite or Supabase
+(app/store.py) as they progress. A restart keeps the history, but only running analyses and
+the newest rows are loaded then. Older rows are read when their owner asks, so memory at
+startup does not grow with every analysis ever stored.
 """
 
 import asyncio
@@ -39,8 +41,9 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -104,10 +107,37 @@ DEFAULT_DPI, MAX_DPI = 110, 300
 # We match the whole name. This stops the route from serving any path.
 # The request only sends a number, never a directory.
 FIGURE_NAME = re.compile(r"figure-\d+")
+# How many of the newest analyses to hold after a restart, on top of every running one.
+# The rest stay in the store until their owner asks. Read at call time so a test can lower it.
+_STARTUP_RECENT_DEFAULT = 50
 
-analyses = AnalysisTable()
+# The event loop inserts, replaces and deletes rows (a new run, a snapshot, a delete) while a
+# request thread reads and merges them. One lock covers the table, the owner index, the
+# negative cache and the stream map, so a read cannot iterate a dict the loop is changing.
+_load_lock = threading.RLock()
+analyses = AnalysisTable(_load_lock)
 streams: dict[str, asyncio.Queue] = {}
 _deleted: set[str] = set()
+# Ids the store has already said are absent, and when. A repeat of the same id must not ask
+# again at once, but the mark expires: another instance may save that row later, and a client
+# trying random ids must not grow this without bound. A snapshot or a save of the id drops it
+# immediately. Touched only while holding _load_lock.
+_MISSING_TTL_SECONDS = 60.0
+_MISSING_MAX = 1024
+_missing: OrderedDict[str, float] = OrderedDict()
+# The loop a request thread schedules SSE queues onto. Set when the process starts serving.
+# A test that calls lookup with no loop opens the queue on the calling thread instead.
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def startup_recent() -> int:
+    raw = os.getenv("ANALYSES_STARTUP_RECENT", str(_STARTUP_RECENT_DEFAULT)).strip()
+    if not raw:
+        return _STARTUP_RECENT_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _STARTUP_RECENT_DEFAULT
 
 # Shared by every run, so N analyses at once are not N times the load on the retrieval
 # services and the LLM (#170). _run_queued takes its own limit first, then one of these.
@@ -115,15 +145,97 @@ all_sources = asyncio.Semaphore(PARALLEL_SOURCES_TOTAL)
 all_checks = asyncio.Semaphore(PARALLEL_CHECKS_TOTAL)
 
 
+def _forget_missing(analysis_id: str) -> None:
+    """Drop a negative lookup. Caller holds _load_lock."""
+    _missing.pop(analysis_id, None)
+
+
+def _missing_hit(analysis_id: str) -> bool:
+    """Whether this id was confirmed absent recently enough to skip the store. Caller holds _load_lock."""
+    seen = _missing.get(analysis_id)
+    if seen is None:
+        return False
+    if time.monotonic() - seen >= _MISSING_TTL_SECONDS:
+        _missing.pop(analysis_id, None)
+        return False
+    return True
+
+
+def _remember_missing(analysis_id: str) -> None:
+    """Record one absent id, dropping expired marks and the oldest past the cap. Caller holds _load_lock."""
+    now = time.monotonic()
+    _missing[analysis_id] = now
+    _missing.move_to_end(analysis_id)
+    expired = [
+        marked
+        for marked, at in _missing.items()
+        if now - at >= _MISSING_TTL_SECONDS and marked != analysis_id
+    ]
+    for marked in expired:
+        _missing.pop(marked, None)
+    while len(_missing) > _MISSING_MAX:
+        _missing.popitem(last=False)
+
+
+def _hold(row: dict) -> bool:
+    """Keep one analysis in memory. Caller holds _load_lock.
+
+    Returns whether a stream still has to be opened. That queue is an asyncio.Queue, which the
+    event loop reads, so the caller opens it on the loop rather than here: this runs on a
+    request thread."""
+    analysis_id = row["id"]
+    if analysis_id in _deleted:
+        return False
+    _forget_missing(analysis_id)
+    analyses[analysis_id] = row
+    return row.get("status") == "running" and analysis_id not in streams
+
+
+def _open_stream(analysis_id: str) -> None:
+    """Give a running analysis the queue a reconnecting client replays. On the event-loop thread
+    when a loop is running; the queue then already holds every stage recorded so far."""
+    with _load_lock:
+        if analysis_id in streams or analysis_id in _deleted:
+            return
+        row = analyses.get(analysis_id)
+        if row is None or row.get("status") != "running":
+            return
+        queue: asyncio.Queue = asyncio.Queue()
+        streams[analysis_id] = queue
+        for stage in row.get("stages") or ():
+            queue.put_nowait(stage)
+
+
+def _schedule_stream(analysis_id: str) -> None:
+    """Open `analysis_id`'s stream on the event loop. A caller that is already on the loop opens
+    it directly. With no loop running (a unit test), the calling thread is the one that will
+    read the queue, so it opens it here."""
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is not None:
+        _open_stream(analysis_id)
+        return
+    loop = _loop
+    if loop is not None and loop.is_running():
+        loop.call_soon_threadsafe(_open_stream, analysis_id)
+        return
+    _open_stream(analysis_id)
+
+
 def restore():
-    """Load stored analyses on startup. A "running" row may belong to a job an RQ worker is
-    still executing (or was, before this gateway process last exited); only mark it interrupted
-    when the job itself is confirmed gone, and otherwise let the snapshot subscriber catch it up."""
-    analyses.clear()
-    analyses.update(store.load_all())
-    for analysis in analyses.values():
-        if analysis["status"] != "running":
-            continue
+    """Load running analyses and the newest stored rows. A "running" row may belong to a job an RQ
+    worker is still executing (or was, before this gateway process last exited); only mark it
+    interrupted when the job itself is confirmed gone, and otherwise let the snapshot subscriber
+    catch it up. Older finished rows stay in the store until ensure_owner reads that owner."""
+    loaded = store.load_startup(startup_recent())
+    with _load_lock:
+        _missing.clear()
+        analyses.clear()
+        analyses.update(loaded)
+        pending = [analysis for analysis in analyses.values() if analysis["status"] == "running"]
+    for analysis in pending:
         alive = job_is_alive(analysis["id"])
         if alive is False:
             analysis.update(status="error", message="interrupted by a restart")
@@ -132,6 +244,8 @@ def restore():
                 {"stage": "error", "message": "interrupted by a restart"}
             )
             store.save(analysis)
+            with _load_lock:
+                _forget_missing(analysis["id"])
         else:
             if alive is None:
                 logger.warning(
@@ -139,9 +253,7 @@ def restore():
                     analysis["id"],
                 )
             # SSE replay invariant: a stream must hold every stage already recorded.
-            queue = streams.setdefault(analysis["id"], asyncio.Queue())
-            for stage in analysis["stages"]:
-                queue.put_nowait(stage)
+            _open_stream(analysis["id"])
 
 
 def _apply_snapshot(snapshot: dict) -> None:
@@ -153,34 +265,49 @@ def _apply_snapshot(snapshot: dict) -> None:
     replaces analyses[id], so it never mutates a dict another part of the process still holds.
     """
     analysis_id = snapshot["id"]
-    if snapshot.get("deleted"):
-        # Another instance deleted it: drop our copy and end any stream still open on it.
-        _deleted.add(analysis_id)
-        analyses.pop(analysis_id, None)
-        queue = streams.pop(analysis_id, None)
-        if queue is not None:
+    with _load_lock:
+        # The publisher has this row, so a previous "not in the store" answer is stale.
+        _forget_missing(analysis_id)
+        if snapshot.get("deleted"):
+            # Another instance deleted it: drop our copy and end any stream still open on it.
+            _deleted.add(analysis_id)
+            analyses.pop(analysis_id, None)
+            queue = streams.pop(analysis_id, None)
+            if queue is not None:
+                queue.put_nowait(None)
+            return
+        if analysis_id in _deleted:
+            return
+        local = analyses.get(analysis_id)
+        seen = len(local["stages"]) if local else 0
+        stages = snapshot["stages"]
+        new = stages[seen:]
+        if not new:
+            return
+        analyses[analysis_id] = snapshot
+        queue = streams.get(analysis_id)
+        if queue is None:
+            # The queue is new, so it has to hold the whole history. A client replays `stages`
+            # and then skips that many items off the queue; a queue that only had `new` would
+            # swallow the live events that follow.
+            queue = asyncio.Queue()
+            streams[analysis_id] = queue
+            pending = stages
+        else:
+            pending = new
+        for stage in pending:
+            queue.put_nowait(stage)
+        if snapshot["status"] in ("done", "error"):
             queue.put_nowait(None)
-        return
-    if analysis_id in _deleted:
-        return
-    local = analyses.get(analysis_id)
-    seen = len(local["stages"]) if local else 0
-    new = snapshot["stages"][seen:]
-    if not new:
-        return
-    analyses[analysis_id] = snapshot
-    queue = streams.setdefault(analysis_id, asyncio.Queue())
-    for stage in new:
-        queue.put_nowait(stage)
-    if snapshot["status"] in ("done", "error"):
-        queue.put_nowait(None)
 
 
 async def _resync_running() -> None:
     """Snapshots published while the subscriber was disconnected are gone: pub/sub keeps
     nothing. The worker also saves each stage to the store, so read running analyses back
     from there. _apply_snapshot skips whatever this gateway already has."""
-    for analysis_id in [a["id"] for a in analyses.values() if a["status"] == "running"]:
+    with _load_lock:
+        running_ids = [a["id"] for a in analyses.values() if a["status"] == "running"]
+    for analysis_id in running_ids:
         stored = await asyncio.to_thread(store.load, analysis_id)
         if stored:
             _apply_snapshot(stored)
@@ -225,6 +352,8 @@ async def _subscribe_forever() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _loop
+    _loop = asyncio.get_running_loop()
     setup_tracing()
     restore()
     # Log where each dependency is and whether it answers, without holding up startup.
@@ -300,6 +429,10 @@ async def _save_while_unsaved(analysis_id: str) -> None:
                 await asyncio.to_thread(store.save, snapshot)
             except Exception:
                 logger.exception("saving analysis %s failed", analysis_id)
+            else:
+                # This id is in the store now. A lookup that missed it before the save must try again.
+                with _load_lock:
+                    _forget_missing(analysis_id)
     finally:
         _savers.pop(analysis_id, None)
 
@@ -455,7 +588,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
         analysis["status"] = "done"
-        analysis["completed"] = datetime.now(timezone.utc).isoformat()
+        analysis["completed"] = datetime.now(UTC).isoformat()
         await _publish(analysis_id, "done")
         _detach(_index_self(analysis_id, analysis["title"]))
     except Exception as error:
@@ -481,17 +614,22 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     an RQ worker."""
     analysis_id = uuid.uuid4().hex[:12]
     analysis = _new_analysis(analysis_id, paper, owner)
-    analysis["started"] = datetime.now(timezone.utc).isoformat()
+    analysis["started"] = datetime.now(UTC).isoformat()
     queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
     analysis["stages"].append(queued)
-    analyses[analysis_id] = analysis
-    streams[analysis_id] = asyncio.Queue()
-    streams[analysis_id].put_nowait(queued)
+    with _load_lock:
+        _forget_missing(analysis_id)
+        analyses[analysis_id] = analysis
+        # On the event loop, like the rest of _start: the queue is what the loop waits on.
+        queue: asyncio.Queue = asyncio.Queue()
+        streams[analysis_id] = queue
+        queue.put_nowait(queued)
     try:
         enqueue_analysis(analysis_id, paper, verify, owner, [queued], analysis["started"])
     except Exception:
-        analyses.pop(analysis_id, None)
-        streams.pop(analysis_id, None)
+        with _load_lock:
+            analyses.pop(analysis_id, None)
+            streams.pop(analysis_id, None)
         logger.warning("enqueuing analysis %s failed", analysis_id)
         raise HTTPException(503, "the analysis queue is unavailable, try again shortly") from None
     ANALYSES_STARTED.inc()
@@ -509,17 +647,100 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
     return {"id": analysis_id}
 
 
+def ensure_owner(user: str | None) -> None:
+    """Load this owner's analyses from the store, once. A row already in memory is kept: it may
+    be a newer snapshot, or a run that has not been saved yet. Other owners are not read."""
+    if analyses.owner_loaded(user):
+        return
+    stored = store.load_owned(user)
+    to_open: list[str] = []
+    with _load_lock:
+        if analyses.owner_loaded(user):
+            return
+        stored_ids: list[str] = []
+        seen: set[str] = set()
+        for row in stored:
+            analysis_id = row["id"]
+            if analysis_id in _deleted or analysis_id in seen:
+                continue
+            seen.add(analysis_id)
+            stored_ids.append(analysis_id)
+            if analysis_id not in analyses and _hold(row):
+                to_open.append(analysis_id)
+        memory_only = [
+            row["id"]
+            for row in analyses.owned_by(user)
+            if row["id"] not in seen and row["id"] not in _deleted
+        ]
+        analyses.order_owner(user, stored_ids + memory_only)
+        analyses.mark_owner_loaded(user)
+    for analysis_id in to_open:
+        _schedule_stream(analysis_id)
+
+
+def lookup(analysis_id: str) -> dict | None:
+    """The analysis in memory, or that one row from the store. A loaded row is kept, so the next
+    read of it does not ask again. Nothing is loaded for an id this process has deleted, or for
+    one the store recently said was absent."""
+    # A test may swap in a plain dict. It has no owner index; don't try to build one.
+    if not hasattr(analyses, "owner_loaded"):
+        if analysis_id in _deleted:
+            return None
+        row = analyses.get(analysis_id)
+        return row if row is not None else store.load(analysis_id)
+    with _load_lock:
+        if analysis_id in _deleted:
+            return None
+        row = analyses.get(analysis_id)
+        if row is not None:
+            return row
+        if _missing_hit(analysis_id):
+            return None
+    loaded = store.load(analysis_id)
+    to_open = False
+    with _load_lock:
+        if analysis_id in _deleted:
+            return None
+        current = analyses.get(analysis_id)
+        if current is not None:
+            return current
+        if not loaded or loaded.get("id", analysis_id) in _deleted:
+            if not loaded:
+                _remember_missing(analysis_id)
+            return None
+        to_open = _hold(loaded)
+        owner = loaded.get("owner")
+        if analyses.owner_loaded(owner):
+            ordered = sorted(
+                analyses.owned_by(owner),
+                key=lambda item: (item.get("started") or "", item["id"]),
+            )
+            analyses.order_owner(owner, [item["id"] for item in ordered])
+        held = analyses.get(analysis_id)
+    if to_open:
+        _schedule_stream(analysis_id)
+    return held
+
+
 def visible_to(user: str | None) -> list[dict]:
     """The analyses this exact user may read, oldest first: their own when signed in, or the
     ones with no owner when signed out (current_user() only ever returns None then). Every
-    analysis is private to its owner; nothing here is shared across users."""
+    analysis is private to its owner; nothing here is shared across users. The first call for
+    an owner reads that owner's rows from the store; later calls use the copy in memory."""
+    ensure_owner(user)
     return analyses.owned_by(user)
 
 
 # What papers_of and the knowledge graph built for each owner, and the state of that owner's
 # analyses they were built from. A page image request runs papers_of each time, and the graph
-# rebuilds from every claim, so both are reused until one of the owner's rows changes.
+# rebuilds from every claim, so both are reused until one of the owner's rows changes. One
+# entry per owner per name. Consensus is not kept here: its key is the question text.
 _derived: dict[tuple[str, str | None], tuple[tuple, object]] = {}
+# The last few consensus answers per owner. A question is free text, so an unbounded map of
+# them would grow with every distinct question a user asked. Older questions are dropped.
+_CONSENSUS_CACHE_PER_OWNER = 8
+_consensus_cache: OrderedDict[tuple[str | None, str], tuple[tuple, dict]] = OrderedDict()
+_consensus_lock = threading.Lock()
 
 
 def _rows_state(rows: list[dict]) -> tuple:
@@ -548,13 +769,13 @@ def _owned(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
     owned by someone else, or another kind (a check's id on an analysis route) is a 404, not
     a 403, so an id does not tell anyone that it exists. The rule itself lives in
     app/ownership.py, shared with the Author role's rows."""
-    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
+    return require_owner(lookup(analysis_id), user, "analysis", kind)
 
 
 def _mine(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
     """The analysis, only if this exact user created it. Same test as _owned(); kept as its
     own function since deleting one's own analysis is a distinct action from reading it."""
-    return require_owner(analyses.get(analysis_id), user, "analysis", kind)
+    return require_owner(lookup(analysis_id), user, "analysis", kind)
 
 
 @app.post("/analyses")
@@ -630,8 +851,7 @@ async def analyse_uploaded_paper(body: UploadedPaper, user: str | None = Depends
     return _start(path.as_posix(), body.verify, user)
 
 
-@app.get("/analyses")
-async def list_analyses(user: str | None = Depends(current_user)):
+def _listed(user: str | None) -> list[dict]:
     # The list leaves out what only one analysis's own view needs. Rows with no "kind" are
     # older paper analyses; rows of kind "check" are single-claim checks saved before their
     # routes were removed (#333), and stay out of the list.
@@ -643,18 +863,27 @@ async def list_analyses(user: str | None = Depends(current_user)):
     ]
 
 
+@app.get("/analyses")
+async def list_analyses(user: str | None = Depends(current_user)):
+    # The first call for this owner reads their rows from the store. That must not run on the
+    # event loop: a Supabase read is the same kind of wait _save_soon moved off it (#169).
+    return await asyncio.to_thread(_listed, user)
+
+
 @app.get("/analyses/{analysis_id}")
 async def get_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    return _owned(analysis_id, user)
+    return await asyncio.to_thread(_owned, analysis_id, user)
 
 
 async def _delete_one(analysis_id: str) -> None:
     # A worker may still publish a snapshot after this delete; it must not come back.
-    _deleted.add(analysis_id)
     # Out of memory first, so no new save starts. A save already running would store the row
-    # again after the delete, so wait for it.
-    analyses.pop(analysis_id, None)
-    streams.pop(analysis_id, None)
+    # again after the delete, so wait for it. The wait is outside the lock.
+    with _load_lock:
+        _deleted.add(analysis_id)
+        _forget_missing(analysis_id)
+        analyses.pop(analysis_id, None)
+        streams.pop(analysis_id, None)
     await _saved(analysis_id)
     await asyncio.to_thread(store.delete, analysis_id)
     # Tell the other instances, which may hold this row from the queued snapshot (#331). The
@@ -697,7 +926,7 @@ async def _event_stream(item_id: str):
 
 @app.delete("/analyses/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: str | None = Depends(current_user)):
-    analysis = _mine(analysis_id, user)
+    analysis = await asyncio.to_thread(_mine, analysis_id, user)
     if analysis["status"] == "running":
         # A started job keeps saving to the store, so a deleted row would come back on restart.
         if not await asyncio.to_thread(cancel_if_queued, analysis_id):
@@ -709,7 +938,7 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
 @app.get("/analyses/{analysis_id}/events")
 async def analysis_events(analysis_id: str, user: str | None = Depends(current_user)):
     """The web app reads this with fetch(), so its token travels in the Authorization header."""
-    _owned(analysis_id, user)
+    await asyncio.to_thread(_owned, analysis_id, user)
     return StreamingResponse(_event_stream(analysis_id), media_type="text/event-stream")
 
 
@@ -726,7 +955,7 @@ def papers_of(user: str | None) -> frozenset[str]:
     may read (visible_to), each cited paper a check read for one of them, their Author
     PDFs, and the papers shared with the labeling team. The Author PDFs live outside `analyses`, so
     they are read each call, not cached."""
-    shared = labeling_pool.pdf_names(analyses.get, _paper_names)
+    shared = labeling_pool.pdf_names(lookup, _paper_names)
     return _per_owner("papers", user, _paper_names) | author_pdfs(user) | shared
 
 
@@ -762,8 +991,9 @@ PRIVATE_CACHE = {"Cache-Control": "private, max-age=31536000"}
 
 @app.get("/papers/{name}")
 async def paper(name: str, user: str | None = Depends(current_user)):
+    path = await asyncio.to_thread(_paper, name, user)
     return FileResponse(
-        _paper(name, user), media_type="application/pdf", filename=name, headers={"Cache-Control": "private"}
+        path, media_type="application/pdf", filename=name, headers={"Cache-Control": "private"}
     )
 
 
@@ -786,7 +1016,7 @@ def _render(path: Path, page_number: int, dpi: int) -> Path:
 async def page_image(
     name: str, page_number: int, dpi: int = DEFAULT_DPI, user: str | None = Depends(current_user)
 ):
-    path = _paper(name, user)
+    path = await asyncio.to_thread(_paper, name, user)
     image = await asyncio.to_thread(_render, path, page_number, min(dpi, MAX_DPI))
     return FileResponse(image, media_type="image/png", headers=PRIVATE_CACHE)
 
@@ -794,10 +1024,10 @@ async def page_image(
 @app.get("/papers/{name}/figures/{figure}.png")
 async def figure_image(name: str, figure: str, user: str | None = Depends(current_user)):
     """One cropped figure of a paper, the image a verdict's `pages` entry points at."""
-    paper = _paper(name, user)
+    owned = await asyncio.to_thread(_paper, name, user)
     if not FIGURE_NAME.fullmatch(figure):
         raise HTTPException(400, "a figure is named figure-<n>")
-    path = figures_dir(paper) / f"{figure}.png"
+    path = figures_dir(owned) / f"{figure}.png"
     if not path.is_file():
         raise HTTPException(404, f"no such figure: {figure}")
     # A crop never changes once written, so it is cached like a rendered page.
@@ -808,7 +1038,7 @@ async def figure_image(name: str, figure: str, user: str | None = Depends(curren
 async def find(name: str, q: str, page: int | None = None, user: str | None = Depends(current_user)):
     """Where a piece of text sits in the paper: page, boxes, and the page size to scale by.
     Boxes are PDF points, top-left origin. The browser scales them by dpi / 72."""
-    path = _paper(name, user)
+    path = await asyncio.to_thread(_paper, name, user)
     found = await asyncio.to_thread(locate, path.as_posix(), q, page)
     return found or {"page": None, "boxes": []}
 
@@ -840,15 +1070,22 @@ def _project(project_id: str, stored: list[dict]) -> dict:
     return project
 
 
+def _with_visible(user: str | None, build):
+    """Run `build` on this user's analyses. Off the event loop: the first call reads the store."""
+    return build(visible_to(user))
+
+
 @app.get("/researcher/home")
 async def researcher_home(user: str | None = Depends(current_user)):
-    return await asyncio.to_thread(researcher.home, visible_to(user))
+    return await asyncio.to_thread(_with_visible, user, researcher.home)
 
 
 @app.get("/researcher/projects")
 async def researcher_projects(user: str | None = Depends(current_user)):
-    stored = await asyncio.to_thread(store.load_projects, user)
-    return await asyncio.to_thread(researcher.projects, stored, visible_to(user))
+    def build(rows: list[dict]) -> list[dict]:
+        return researcher.projects(store.load_projects(user), rows)
+
+    return await asyncio.to_thread(_with_visible, user, build)
 
 
 @app.post("/researcher/projects")
@@ -856,7 +1093,7 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
     name = request.name.strip()
     if not name:
         raise HTTPException(400, "a project needs a name")
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     project = {"id": uuid.uuid4().hex[:12], "owner": user, "name": name,
                "description": request.description.strip(), "analyses": [], "created": now, "updated": now}
     await asyncio.to_thread(store.save_project, project)
@@ -873,10 +1110,13 @@ async def rename_project(
     stored = await asyncio.to_thread(store.load_projects, user)
     project = _project(project_id, stored)
     project["name"] = name
-    project["updated"] = datetime.now(timezone.utc).isoformat()
+    project["updated"] = datetime.now(UTC).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    projected = await asyncio.to_thread(researcher.projects, [project], visible_to(user))
-    return projected[0]
+
+    def projected(rows: list[dict]) -> dict:
+        return researcher.projects([project], rows)[0]
+
+    return await asyncio.to_thread(_with_visible, user, projected)
 
 
 @app.delete("/researcher/projects/{project_id}")
@@ -891,8 +1131,10 @@ async def delete_project(project_id: str, user: str | None = Depends(current_use
 
 @app.get("/researcher/projects/{project_id}/library")
 async def project_library(project_id: str, user: str | None = Depends(current_user)):
-    stored = await asyncio.to_thread(store.load_projects, user)
-    found = await asyncio.to_thread(researcher.library, project_id, stored, visible_to(user))
+    def build(rows: list[dict]) -> dict | None:
+        return researcher.library(project_id, store.load_projects(user), rows)
+
+    found = await asyncio.to_thread(_with_visible, user, build)
     if found is None:
         raise HTTPException(404, "no such project")
     return found
@@ -903,22 +1145,52 @@ async def add_to_project(
     project_id: str, request: ProjectPaperRequest, user: str | None = Depends(current_user)
 ):
     """Put an analysed paper the caller may read (visible_to) into one of their own projects."""
-    _owned(request.analysis_id, user)
+    await asyncio.to_thread(_owned, request.analysis_id, user)
     stored = await asyncio.to_thread(store.load_projects, user)
     project = _project(project_id, stored)
     if request.analysis_id not in project["analyses"]:
         project["analyses"].append(request.analysis_id)
-    project["updated"] = datetime.now(timezone.utc).isoformat()
+    project["updated"] = datetime.now(UTC).isoformat()
     await asyncio.to_thread(store.save_project, project)
-    projected = await asyncio.to_thread(researcher.projects, [project], visible_to(user))
-    return projected[0]
+
+    def projected(rows: list[dict]) -> dict:
+        return researcher.projects([project], rows)[0]
+
+    return await asyncio.to_thread(_with_visible, user, projected)
+
+
+def _trim_consensus(user: str | None) -> None:
+    """Keep the newest questions for this owner. Caller holds _consensus_lock."""
+    keys = [key for key in _consensus_cache if key[0] == user]
+    extra = len(keys) - _CONSENSUS_CACHE_PER_OWNER
+    for key in keys[: max(extra, 0)]:
+        _consensus_cache.pop(key, None)
+
+
+def _consensus(user: str | None, question: str) -> dict:
+    """consensus() walks every claim. Reuse the answer until one of this owner's rows changes,
+    the same way the graph is reused. Only the last few questions per owner are kept."""
+    rows = visible_to(user)
+    state = _rows_state(rows)
+    key = (user, question)
+    with _consensus_lock:
+        cached = _consensus_cache.get(key)
+        if cached is not None and cached[0] == state:
+            _consensus_cache.move_to_end(key)
+            return cached[1]
+    value = researcher.consensus(question, rows)
+    with _consensus_lock:
+        _consensus_cache[key] = (state, value)
+        _consensus_cache.move_to_end(key)
+        _trim_consensus(user)
+    return value
 
 
 @app.post("/researcher/consensus")
 async def field_consensus(request: ConsensusRequest, user: str | None = Depends(current_user)):
     """What the works cited across the caller's own analysed papers say about a question. Reuses the
     verdicts already found; it makes no LLM calls."""
-    return await asyncio.to_thread(researcher.consensus, request.question, visible_to(user))
+    return await asyncio.to_thread(_consensus, user, request.question)
 
 
 @app.get("/researcher/graph")
@@ -1119,10 +1391,13 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         raise HTTPException(400, f"scope must be one of {', '.join(DELETE_SCOPES)}")
     researcher = scope in ("all", "researcher")
     author = scope in ("all", "author")
-    mine = [
-        analysis for analysis in visible_to(user)
-        if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
-    ]
+    def owned_in_scope() -> list[dict]:
+        return [
+            analysis for analysis in visible_to(user)
+            if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
+        ]
+
+    mine = await asyncio.to_thread(owned_in_scope)
     ids = [analysis["id"] for analysis in mine if analysis.get("status") != "running"]
     for analysis_id in ids:
         await _delete_one(analysis_id)
@@ -1209,7 +1484,9 @@ async def verify(request: VerifyRequest, user: str | None = Depends(current_user
 @app.get("/health")
 async def health():
     """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
-    check at most 30 s old. `degraded` is true when a required one did not answer."""
+    check at most 30 s old. `degraded` is true when a required one did not answer. `analyses` is
+    how many this process is holding (running, the newest at startup, and owners loaded since),
+    not how many the store has."""
     return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
 
 

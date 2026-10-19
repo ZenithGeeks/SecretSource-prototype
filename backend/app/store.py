@@ -139,6 +139,19 @@ def _connect() -> sqlite3.Connection:
         _db.execute(PREFERENCES_SCHEMA)
         for table in AUTHOR_TABLES:
             _db.execute(AUTHOR_SCHEMA.format(table=table))
+        # One owner's rows, and the running ones, without a scan of every JSON blob (#314).
+        # The expressions match the WHERE clauses in load_owned and load_running.
+        _db.execute(
+            "CREATE INDEX IF NOT EXISTS analyses_owner_started_idx "
+            "ON analyses (json_extract(data, '$.owner'), started)"
+        )
+        _db.execute(
+            "CREATE INDEX IF NOT EXISTS analyses_status_started_idx "
+            "ON analyses (json_extract(data, '$.status'), started)"
+        )
+        # load_recent's ORDER BY. Without it start-up reads every row to sort them: 3.4 s
+        # against 0.06 s on 5,000 analyses. Supabase has analyses_started_idx already.
+        _db.execute("CREATE INDEX IF NOT EXISTS analyses_started_id_idx ON analyses (started, id)")
         _db_path = path
     return _db
 
@@ -151,6 +164,55 @@ def _sqlite():
 
 
 # Public API.
+def _analysis_from_row(row) -> dict:
+    """One stored analysis. `started` is filled from the column when the JSON has none, the same
+    way load_all has always done, so a row read on its own matches one read with the others."""
+    data = row["data"]
+    analysis = data if isinstance(data, dict) else json.loads(data)
+    if "started" in row.keys() and row["started"] is not None:
+        analysis.setdefault("started", row["started"])
+    return analysis
+
+
+def _sqlite_analyses(
+    where: str, params: tuple = (), *, order: str = "started, id", limit: int | None = None
+) -> list[dict]:
+    sql = f"SELECT started, data FROM analyses WHERE {where} ORDER BY {order}"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params = (*params, limit)
+    with _sqlite() as database:
+        rows = database.execute(sql, params).fetchall()
+    return [_analysis_from_row(row) for row in rows]
+
+
+# PostgREST returns at most this many rows per request. A longer result is read in pages.
+_SUPABASE_PAGE = 1000
+
+
+def _supabase_collect(apply) -> list:
+    """Every row of one analyses query. `apply` adds the filters to a fresh builder, because a
+    builder cannot be executed twice."""
+    start = 0
+    rows: list = []
+    while True:
+        # `started` is not unique and can be null. Ordering by it alone makes offset pages skip
+        # or repeat rows once a page boundary falls inside a tie. `id` is the primary key.
+        query = apply(_supabase().table("analyses").select("started,data")).order("id")
+        batch = _execute_with_retry(query.range(start, start + _SUPABASE_PAGE - 1)).data or []
+        rows.extend(batch)
+        if len(batch) < _SUPABASE_PAGE:
+            return rows
+        start += _SUPABASE_PAGE
+
+
+def _supabase_owner(query, owner: str | None):
+    """`owner` is inside the JSON. None is the signed-out space, a JSON null, not the empty string."""
+    if owner is None:
+        return query.is_("data->>owner", "null")
+    return query.eq("data->>owner", owner)
+
+
 def save(analysis: dict) -> None:
     if _use_supabase():
         _execute_with_retry(_supabase().table("analyses").upsert(
@@ -169,11 +231,69 @@ def save(analysis: dict) -> None:
 def load(analysis_id: str) -> dict | None:
     """One stored analysis, or None if there is no such row."""
     if _use_supabase():
-        rows = _execute_with_retry(_supabase().table("analyses").select("data").eq("id", analysis_id)).data
-        return rows[0]["data"] if rows else None
+        rows = _execute_with_retry(
+            _supabase().table("analyses").select("started,data").eq("id", analysis_id)
+        ).data
+        return _analysis_from_row(rows[0]) if rows else None
     with _sqlite() as database:
-        row = database.execute("SELECT data FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
-    return json.loads(row["data"]) if row else None
+        row = database.execute(
+            "SELECT started, data FROM analyses WHERE id = ?", (analysis_id,)
+        ).fetchone()
+    return _analysis_from_row(row) if row else None
+
+
+def load_owned(owner: str | None) -> list[dict]:
+    """This owner's analyses, oldest first. None is the signed-out space. Other owners' rows
+    are not read: the gateway asks per user instead of scanning the table (#314)."""
+    if _use_supabase():
+        def apply(query):
+            return _supabase_owner(query, owner).order("started")
+
+        return [_analysis_from_row(row) for row in _supabase_collect(apply)]
+    if owner is None:
+        return _sqlite_analyses("json_extract(data, '$.owner') IS NULL")
+    return _sqlite_analyses("json_extract(data, '$.owner') = ?", (owner,))
+
+
+def load_running() -> list[dict]:
+    """Analyses still marked running, oldest first. A restart only needs these to recover jobs."""
+    if _use_supabase():
+        def apply(query):
+            return query.eq("data->>status", "running").order("started")
+
+        return [_analysis_from_row(row) for row in _supabase_collect(apply)]
+    return _sqlite_analyses("json_extract(data, '$.status') = ?", ("running",))
+
+
+def load_recent(limit: int) -> list[dict]:
+    """The newest `limit` analyses, oldest first within that window. `limit` <= 0 reads none."""
+    if limit <= 0:
+        return []
+    if _use_supabase():
+        rows = _execute_with_retry(
+            _supabase()
+            .table("analyses")
+            .select("started,data")
+            .order("started", desc=True)
+            .order("id", desc=True)
+            .limit(limit)
+        ).data or []
+        return [_analysis_from_row(row) for row in reversed(rows)]
+    with _sqlite() as database:
+        rows = database.execute(
+            "SELECT started, data FROM analyses ORDER BY started DESC, id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [_analysis_from_row(row) for row in reversed(rows)]
+
+
+def load_startup(recent: int) -> dict[str, dict]:
+    """What the gateway holds after a restart: every running analysis, plus the newest `recent`
+    rows. Oldest first. A live job older than that window is included too. Everything else
+    stays in the store until its owner asks (load_owned)."""
+    found = {row["id"]: row for row in load_recent(recent)}
+    for row in load_running():
+        found.setdefault(row["id"], row)
+    return found
 
 
 def load_draft_checks(draft_id: str, owner: str | None) -> list[dict]:
@@ -204,18 +324,17 @@ def load_draft_checks(draft_id: str, owner: str | None) -> list[dict]:
 
 
 def load_all() -> dict[str, dict]:
-    """Every stored analysis, oldest first, keyed by id."""
+    """Every stored analysis, oldest first, keyed by id.
+
+    Startup does not use this (#314): it reads the whole table. Kept for one-off maintenance
+    (app/backfill_titles.py) and for tests that still want every row."""
     if _use_supabase():
-        rows = _execute_with_retry(_supabase().table("analyses").select("started,data").order("started")).data
-        analyses = [row["data"] for row in rows]
-        for row, analysis in zip(rows, analyses, strict=True):
-            analysis.setdefault("started", row.get("started"))
+        def apply(query):
+            return query.order("started")
+
+        analyses = [_analysis_from_row(row) for row in _supabase_collect(apply)]
         return {analysis["id"]: analysis for analysis in analyses}
-    with _sqlite() as database:
-        rows = database.execute("SELECT started, data FROM analyses ORDER BY started").fetchall()
-    analyses = [json.loads(row["data"]) for row in rows]
-    for row, analysis in zip(rows, analyses, strict=True):
-        analysis.setdefault("started", row["started"])
+    analyses = _sqlite_analyses("1 = 1")
     return {analysis["id"]: analysis for analysis in analyses}
 
 

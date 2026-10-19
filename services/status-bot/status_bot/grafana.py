@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -300,7 +299,7 @@ class GrafanaClient:
                     return resp.status, await resp.json(content_type=None)
                 except ValueError as exc:
                     raise GrafanaError(f"HTTP {resp.status}, not JSON") from exc
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, aiohttp.ClientError) as exc:
             raise GrafanaError(f"{type(exc).__name__} talking to Grafana") from exc
 
     async def query(self, body: dict[str, Any], timeout_s: float = TIMEOUT_S) -> Parsed:

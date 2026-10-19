@@ -199,7 +199,7 @@ def test_restore_keeps_a_live_draft_check_and_interrupts_a_gone_one(monkeypatch)
     live = new_draft_check("live", "ada", "d1", "T", 1, "h", "2026-10-19T00:00:00+00:00", [_queued()])
     dead = new_draft_check("dead", "ada", "d1", "T", 1, "h", "2026-10-19T00:00:00+00:00", [_queued()])
     monkeypatch.setattr(
-        main.store, "load_all", lambda: {"live": copy.deepcopy(live), "dead": copy.deepcopy(dead)}
+        main.store, "load_startup", lambda recent: {"live": copy.deepcopy(live), "dead": copy.deepcopy(dead)}
     )
     saved = []
     monkeypatch.setattr(main.store, "save", lambda row: saved.append(row["id"]))

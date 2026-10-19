@@ -32,7 +32,7 @@ _REGISTRIES = {
 
 
 def _now() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 def _age_seconds(moment: datetime.datetime | None, now: datetime.datetime) -> float:

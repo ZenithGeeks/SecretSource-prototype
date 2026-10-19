@@ -1,5 +1,5 @@
 """Memory over past analyses (SCRUM-172): what load_memory finds, and whose analyses it may read.
-No database: store.load_all is replaced by a list of analyses."""
+No database: store.load_owned is replaced by a list of analyses."""
 
 import asyncio
 
@@ -75,24 +75,38 @@ def test_nothing_matching_returns_nothing():
     assert memory.search("what did we find?", ANALYSES, "user-ada") == []  # only stop words
 
 
+def stand_in_store(monkeypatch):
+    """Replace store.load_owned with every row, and record which owners were asked for."""
+    asked = []
+
+    def load_owned(owner):
+        asked.append(owner)
+        return list(ANALYSES)
+
+    monkeypatch.setattr(memory.store, "load_owned", load_owned)
+    return asked
+
+
 def search_memory(service, user_id, query):
     response = asyncio.run(service.search_memory(app_name="a", user_id=user_id, query=query))
     return texts(response.memories)
 
 
 def test_the_service_reads_the_callers_own_analyses(monkeypatch):
-    monkeypatch.setattr(memory.store, "load_all", lambda: {a["id"]: a for a in ANALYSES})
+    asked = stand_in_store(monkeypatch)
     service = memory.AnalysisMemory()
     found = search_memory(service, "user-bo", "late interaction index size")
     assert found and all(text.startswith("Analysis theirs") for text in found)
     found = search_memory(service, "user-ada", "late interaction index size ColPali")
     assert found and all(text.startswith("Analysis mine") for text in found)
     assert asyncio.run(service.add_session_to_memory(None)) is None
+    assert asked == ["user-bo", "user-ada"]  # each search reads only that user's rows
 
 
 def test_a_service_with_as_user_ignores_the_runners_user_id(monkeypatch):
     # a2a_server.py: ADK names an A2A caller A2A_USER_<context id>, which must not matter.
-    monkeypatch.setattr(memory.store, "load_all", lambda: {a["id"]: a for a in ANALYSES})
+    asked = stand_in_store(monkeypatch)
     service = memory.AnalysisMemory(as_user=SIGNED_OUT)
     found = search_memory(service, "user-bo", "late interaction index size")
     assert found and all(text.startswith("Analysis old1") for text in found)
+    assert asked == [None]  # SIGNED_OUT reads the rows with no owner

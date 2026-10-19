@@ -483,8 +483,9 @@ class _Channel:
 
 
 def test_a_queued_check_is_visible_on_every_gateway_instance(client, monkeypatch):
-    """Instance A takes Re-check; instance B serves the next read. B only hears of the check
-    through the Redis snapshot A sends while the job is still queued."""
+    """Instance A takes Re-check; instance B serves the next read. B reads the saved row from
+    the store on its first request (#314), and the Redis snapshot A sends while the job is
+    still queued keeps it current."""
     channel = _Channel()
     monkeypatch.setattr("app.queue.redis_connection", lambda: channel)
     draft = make_draft(client)
@@ -493,7 +494,9 @@ def test_a_queued_check_is_visible_on_every_gateway_instance(client, monkeypatch
 
     main.analyses.clear()
     main.streams.clear()
-    assert client.get(f"/author/checks/{check_id}", headers=ADA).status_code == 404
+    before_snapshot = client.get(f"/author/checks/{check_id}", headers=ADA)
+    assert before_snapshot.status_code == 200
+    assert before_snapshot.json()["status"] == "running"
     for name, message in channel.published:
         assert name == f"analysis:{check_id}"
         main._apply_snapshot(json.loads(message))

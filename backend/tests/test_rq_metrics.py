@@ -7,7 +7,7 @@ from prometheus_client import CollectorRegistry, generate_latest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from rq.exceptions import NoSuchJobError
 
-NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
 
 def ago(seconds):

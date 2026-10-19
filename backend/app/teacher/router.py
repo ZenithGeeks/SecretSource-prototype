@@ -548,7 +548,7 @@ def teacher_history(
     repository: TeacherGoogleRepository = Depends(get_repository),
 ) -> list[dict[str, Any]]:
     """Recent checked Classroom submissions for the authenticated teacher."""
-    from app.main import analyses
+    from app.main import lookup
 
     courses = repository.list_courses(owner)
     courses_by_id = {course.course_id: course for course in courses}
@@ -586,7 +586,7 @@ def teacher_history(
         timestamps: list[datetime] = []
         analysis_id: str | None = None
         if submission.analysis_id:
-            snapshot = analyses.get(submission.analysis_id)
+            snapshot = lookup(submission.analysis_id)
             if snapshot and snapshot.get("owner") == owner and snapshot.get("status") == "done":
                 analysis_id = submission.analysis_id
                 activity.append("analysis")

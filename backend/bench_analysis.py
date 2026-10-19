@@ -12,7 +12,7 @@ time a paper the store has not seen to compare runs.
 import argparse
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app import store
 from app.queue import enqueue_analysis
@@ -36,7 +36,7 @@ def main() -> None:
 def _run(paper: str) -> dict:
     """Queue one analysis and wait until a worker has finished it."""
     analysis_id = "bench" + uuid.uuid4().hex[:7]
-    started = datetime.now(timezone.utc).isoformat()
+    started = datetime.now(UTC).isoformat()
     queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
     store.save({"id": analysis_id, "paper": paper, "owner": None, "status": "running",
                 "stages": [queued], "claims": [], "started": started})

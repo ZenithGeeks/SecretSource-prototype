@@ -253,9 +253,9 @@ class TeacherEssayAnalysisService:
         if not analysis_id:
             return {"status": "missing", "message": "analysis not started", "claims": []}
         if self._analysis_lookup is None:
-            from app.main import analyses
+            from app.main import lookup
 
-            snapshot = analyses.get(analysis_id)
+            snapshot = lookup(analysis_id)
         else:
             snapshot = self._analysis_lookup(analysis_id)
         return snapshot or {"status": "missing", "message": "analysis not found", "claims": []}
