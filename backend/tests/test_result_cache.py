@@ -87,9 +87,9 @@ class _FakePrediction:
 
 
 class _FakeChainOfThought:
-    """Stands in for dspy.ChainOfThought(Signature): records every call and answers from a
-    dict keyed by the call's own kwargs, so a test can tell a real miss from a wrongly-shared
-    cache hit by using two distinct inputs with two distinct expected answers."""
+    """Stands in for dspy.ChainOfThought(Signature) or dspy.Predict(Signature): records every
+    call and answers from a dict keyed by the call's own kwargs, so a test can tell a real miss
+    from a wrongly-shared cache hit by using two distinct inputs with two distinct expected answers."""
 
     def __init__(self, calls, answer):
         self._calls = calls
@@ -104,6 +104,7 @@ def _stub_dspy(monkeypatch, calls, answer):
     import dspy
 
     monkeypatch.setattr(dspy, "ChainOfThought", lambda signature: _FakeChainOfThought(calls, answer))
+    monkeypatch.setattr(dspy, "Predict", lambda signature: _FakeChainOfThought(calls, answer))
 
 
 def test_claim_extraction_is_cached_per_paper_text(monkeypatch):
@@ -189,6 +190,7 @@ def test_a_claim_with_the_cited_mark_gets_the_citation_aware_judge(monkeypatch):
         return judge
 
     monkeypatch.setattr(dspy, "ChainOfThought", chain_of_thought)
+    monkeypatch.setattr(dspy, "Predict", chain_of_thought)
 
     run = verify._build_judge()
     run("We use AdamW [cited] with weight decay 0.1.", ["AdamW decouples weight decay."])
@@ -225,6 +227,7 @@ def test_a_claim_with_a_figure_is_judged_by_the_signature_that_has_a_figure_inpu
         return judge
 
     monkeypatch.setattr(dspy, "ChainOfThought", chain_of_thought)
+    monkeypatch.setattr(dspy, "Predict", chain_of_thought)
 
     verify._build_judge()("figure claim one", ["evidence"], figure=_png(tmp_path / "a.png", "red"))
 
