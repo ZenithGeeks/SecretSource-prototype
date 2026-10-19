@@ -288,3 +288,54 @@ def test_found_by_one_citation_beats_not_found_by_another():
     researcher._mark_index(node, ("yes", "Semantic Scholar"))
     researcher._mark_index(node, ("no", ""))
     assert node == {"indexed": "yes", "index": "Semantic Scholar"}
+
+
+SILENT = {
+    "id": "g1",
+    "paper": "data/papers/gn.pdf",
+    "file": "data/papers/gn.pdf",
+    "status": "done",
+    "claims": [
+        {
+            "claim": "BN stops working below 8 images per batch.",
+            "citations": [COLBERT],
+            "verdicts": [{"verdict": "insufficient", "cited": "2004.12832", "evidence": []}],
+        },
+        {
+            # One source says too little, another backs it: the claim is backed, not a gap.
+            "claim": "GN is stable across batch sizes.",
+            "citations": [COLBERT, PLAID],
+            "verdicts": [
+                {"verdict": "insufficient", "cited": "2004.12832", "evidence": []},
+                {"verdict": "supports", "cited": "2205.09707", "evidence": []},
+            ],
+        },
+    ],
+}
+
+
+def test_gaps_lists_claims_no_source_backs_with_the_works_that_were_checked():
+    not_backed = researcher.gaps(ANALYSES + [SILENT])["notBacked"]
+    assert not_backed == [
+        {
+            "claim": "BN stops working below 8 images per batch.",
+            "checked": ["ColBERT"],
+            "analysis": "g1",
+            "claimIndex": 0,
+        }
+    ]
+
+
+def test_gaps_lists_every_contradicted_claim_and_every_missing_work_without_homes_limit():
+    many = [
+        {**CHECKED, "id": f"a{n}", "file": f"data/papers/{n}.pdf", "paper": f"data/papers/{n}.pdf"}
+        for n in range(researcher.HOME_CONFLICTS + 2)
+    ]
+    found = researcher.gaps(many + [UNCHECKED])
+    assert len(found["contradicted"]) == researcher.HOME_CONFLICTS + 2
+    assert len(researcher.home(many)["conflicts"]) == researcher.HOME_CONFLICTS
+    assert found["missing"][0]["paper"] == "PLAID (2022)"
+
+
+def test_gaps_of_an_empty_library_are_empty():
+    assert researcher.gaps([]) == {"notBacked": [], "contradicted": [], "missing": []}
