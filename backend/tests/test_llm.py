@@ -11,10 +11,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from app import llm
-from app.metrics import LLM_RATE_LIMITED
 from dspy.utils.exceptions import LMRateLimitError
 from google.adk.models.llm_request import LlmRequest
 from google.genai import types
+from prometheus_client import REGISTRY
 
 
 class TooManyRequests(BaseHTTPRequestHandler):
@@ -31,7 +31,8 @@ class TooManyRequests(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def busy_gateway(monkeypatch):
+def refusing_gateway(monkeypatch):
+    """Point app.llm at a local server that answers every request with 429."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), TooManyRequests)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setattr(llm, "VLLM_URL", f"http://127.0.0.1:{server.server_port}/v1")
@@ -40,10 +41,11 @@ def busy_gateway(monkeypatch):
 
 
 def _rate_limited() -> float:
-    return next(s.value for s in LLM_RATE_LIMITED.collect()[0].samples if s.name.endswith("_total"))
+    return REGISTRY.get_sample_value("llm_rate_limited_total")
 
 
-def test_dspy_call_refused_with_429_is_counted(busy_gateway):
+def test_dspy_call_refused_with_429_is_counted(refusing_gateway):
+    # No retries, so the first 429 is final; no cache, so the call reaches the server.
     lm = llm.dspy_lm().copy(num_retries=0, cache=False)
     before = _rate_limited()
 
@@ -53,7 +55,7 @@ def test_dspy_call_refused_with_429_is_counted(busy_gateway):
     assert _rate_limited() == before + 1
 
 
-def test_adk_call_refused_with_429_is_counted(busy_gateway):
+def test_adk_call_refused_with_429_is_counted(refusing_gateway):
     model = llm.adk_model()
     request = LlmRequest(
         model=model.model, contents=[types.Content(role="user", parts=[types.Part(text="hi")])]

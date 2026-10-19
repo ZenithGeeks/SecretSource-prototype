@@ -18,20 +18,20 @@ from app.metrics import LLM_RATE_LIMITED
 NO_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
 
 
-# Each framework gets its own hook. dspy 3.4 picks a client per request: LiteLLM for ours
-# (extra_body), its own lm15 client for others, and a dspy callback sees both. The LiteLLM hook
-# goes on each ADK request, because a global litellm.failure_callback means importing litellm
-# here, which takes 3 s.
+# A dspy callback, not a LiteLLM one: dspy 3.4 sends some requests through LiteLLM and some
+# through its own lm15 client, and on_lm_end runs for both, once dspy has stopped retrying.
 class CountRateLimits(BaseCallback):
-    """Count dspy.LM calls that got HTTP 429 on every try."""
+    """Count dspy.LM calls that still got HTTP 429 after dspy's retries."""
 
     def on_lm_end(self, call_id, outputs, exception=None):
         if isinstance(exception, LMRateLimitError):
             LLM_RATE_LIMITED.inc()
 
 
+# A LiteLLM failure_callback, passed on each ADK request: setting the global
+# litellm.failure_callback here would import litellm at startup, which takes 3 s.
 def count_adk_rate_limit(kwargs, completion_response, start_time, end_time):
-    """Count LiteLLM calls that got HTTP 429 on every try."""
+    """Count LiteLLM calls that still got HTTP 429 after the OpenAI client's retries."""
     if getattr(kwargs.get("exception"), "status_code", None) == 429:
         LLM_RATE_LIMITED.inc()
 
