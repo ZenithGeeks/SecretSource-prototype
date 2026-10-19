@@ -150,7 +150,7 @@ export type Draft = {
 
 /** A stage of a running check, streamed over SSE like an analysis's stages. */
 export type CheckStage = {
-  stage: 'planned' | 'checking' | 'checked' | 'done' | 'error'
+  stage: 'queued' | 'planned' | 'checking' | 'checked' | 'done' | 'error'
   at?: number
   checks?: number
   sources?: number

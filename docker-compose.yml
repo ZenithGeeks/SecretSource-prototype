@@ -131,7 +131,7 @@ services:
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-} # without one, OpenAlex shares a tiny per-IP budget
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
       PARALLEL_SOURCES: ${PARALLEL_SOURCES:-3} # cited papers downloaded and indexed at the same time
-      PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims judged at the same time
+      PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims or draft citations judged at once, per worker
       PARALLEL_SOURCES_TOTAL: ${PARALLEL_SOURCES_TOTAL:-} # the same, across all runs; empty = PARALLEL_SOURCES
       PARALLEL_CHECKS_TOTAL: ${PARALLEL_CHECKS_TOTAL:-} # the same, across all runs; empty = PARALLEL_CHECKS
       LLM_PARALLEL_REQUESTS: ${LLM_PARALLEL_REQUESTS:-3} # LLM requests in flight per process
@@ -180,8 +180,8 @@ services:
       - redis-data:/data
     restart: unless-stopped
 
-  # Runs analyses pulled off the queue (app/queue.py), one at a time in this process.
-  # Horizontally scalable: the number of workers is how many analyses run at once.
+  # Runs analyses and Author draft checks pulled off the queue (app/queue.py), one job at a
+  # time in this process. Horizontally scalable: the number of workers is how many jobs run at once.
   #   docker compose up -d --scale worker=3
   worker:
     build:

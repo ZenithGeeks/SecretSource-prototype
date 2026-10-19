@@ -971,10 +971,9 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
     scope, so a Researcher clearing papers keeps their Author drafts and the other way round
     (PR #291 review). The confirm dialog is the UI's job; this call is unconditional.
 
-    An analysis still running is skipped and counted in `skipped`: a paper analysis's worker
+    An analysis or draft check still running is skipped and counted in `skipped`: its worker
     keeps saving it, so a deleted row would come back on the next restart (same reason as
-    delete_analysis), and a draft check's in-process task keeps indexing `analyses`/`streams`,
-    so popping them here would make its next `_publish` raise after this call answered 200."""
+    delete_analysis)."""
     if scope not in DELETE_SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(DELETE_SCOPES)}")
     researcher = scope in ("all", "researcher")

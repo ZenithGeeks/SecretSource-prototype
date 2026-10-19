@@ -1,5 +1,5 @@
-"""AnalysisWorker runs only the analysis job. Anyone who can write to Redis could otherwise queue
-a job naming any importable function (or callback), and RQ would call it."""
+"""AnalysisWorker runs only the analysis job and the draft-check job. Anyone who can write to
+Redis could otherwise queue a job naming any importable function (or callback), and RQ would call it."""
 
 import logging
 from types import SimpleNamespace
@@ -41,6 +41,21 @@ def test_the_analysis_job_without_a_failure_callback_runs(worker):
     assert ran == ["j1"]
 
 
+def test_the_draft_check_job_runs(worker):
+    w, ran, refused = worker
+    assert (
+        w.perform_job(_job(func_name=q.DRAFT_CHECK_JOB, failure=q.DRAFT_FAILURE_CALLBACK), queue=None) is True
+    )
+    assert (ran, refused) == (["j1"], [])
+
+
+def test_the_draft_check_job_without_a_failure_callback_runs(worker):
+    w, ran, refused = worker
+    job = _job(func_name=q.DRAFT_CHECK_JOB, failure=None)
+    assert w.perform_job(job, queue=None) is True
+    assert ran == ["j1"]
+
+
 @pytest.mark.parametrize(
     "job",
     [
@@ -48,17 +63,29 @@ def test_the_analysis_job_without_a_failure_callback_runs(worker):
         _job(success="os.system"),
         _job(stopped="os.system"),
         _job(failure="os.system"),
+        _job(func_name=q.DRAFT_CHECK_JOB, failure=q.FAILURE_CALLBACK),
+        _job(failure=q.DRAFT_FAILURE_CALLBACK),
     ],
-    ids=["other function", "success callback", "stopped callback", "other failure callback"],
+    ids=[
+        "other function",
+        "success callback",
+        "stopped callback",
+        "other failure callback",
+        "draft check with the analysis callback",
+        "analysis with the draft-check callback",
+    ],
 )
 def test_anything_else_is_refused_before_it_runs(worker, job):
     w, ran, refused = worker
     assert w.perform_job(job, queue=None) is False
     assert ran == []
-    assert refused == [("j1", "refused: not an analysis job")]
+    assert refused == [("j1", "refused: not an allowed job")]
 
 
 def test_the_allowed_names_match_the_real_functions():
     assert q.ANALYSIS_JOB == f"{q.run_analysis_job.__module__}.{q.run_analysis_job.__name__}"
     failure = q._on_analysis_job_failure
     assert q.FAILURE_CALLBACK == f"{failure.__module__}.{failure.__name__}"
+    assert q.DRAFT_CHECK_JOB == f"{q.run_draft_check_job.__module__}.{q.run_draft_check_job.__name__}"
+    draft_failure = q._on_draft_check_job_failure
+    assert q.DRAFT_FAILURE_CALLBACK == f"{draft_failure.__module__}.{draft_failure.__name__}"

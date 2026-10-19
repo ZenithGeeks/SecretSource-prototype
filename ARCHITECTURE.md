@@ -84,10 +84,11 @@ flowchart TD
    same paper, but each paper is prepared only once. Up to `PARALLEL_SOURCES` papers
    (default 3) are prepared at the same time.
 5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
-   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. A worker runs one analysis
-   at a time, so `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` (default: the per-run
-   values) only limit that one run. With N workers (see [Services](#services)), up to N times
-   that load reaches the retrieval services and the LLM.
+   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. A worker runs one job at a
+   time (one analysis or one Author draft check), so `PARALLEL_SOURCES_TOTAL` and
+   `PARALLEL_CHECKS_TOTAL` (default: the per-run values) only limit that one run. A draft check
+   uses `PARALLEL_CHECKS` the same way, for its citations. With N workers (see [Services](#services)),
+   up to N times that load reaches the retrieval services and the LLM.
 6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
    `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
    keeps only figures whose caption gives their number, like "Figure 2: ...". The web app
@@ -414,7 +415,7 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
 | LLM | extracts claims and judges them | any OpenAI-compatible endpoint (`VLLM_URL`) |
 | `gateway` | the HTTP API; queues each analysis for a worker | `backend/`, port 8080 |
 | `redis` | the analysis job queue, and progress from a worker back to the gateway | compose container, no published port |
-| `worker` | runs analyses pulled off the queue, one at a time in its own process; scale for more analyses at once | `backend/worker.py`; compose service `worker` |
+| `worker` | runs analyses and Author draft checks pulled off the queue, one job at a time in its own process; scale for more jobs at once | `backend/worker.py`; compose service `worker` |
 | `web` | the user interface (nginx) | `frontend/`, port 5173 |
 | `a2a` | the chat agents over A2A | `backend/a2a_server.py`, port 8002, `--profile a2a` |
 

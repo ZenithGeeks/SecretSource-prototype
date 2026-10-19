@@ -3,8 +3,9 @@ verification report. Mounted under /author by app/main.py.
 
 Storage: projects, drafts and sources are one JSON row each in their own tables
 (app/store.py's *_author_row functions), always owner-scoped. A draft check is an `analyses`
-row with kind "draft-check" — the same dict, SSE stream, save-soon and restart recovery the
-paper analyses use — so it is reached through app.main's helpers, imported
+row with kind "draft-check". `POST .../check` enqueues `run_draft_check_job` on the same
+Redis queue as a paper analysis; the worker publishes snapshots and the gateway's subscriber
+turns them into the same SSE stream. The row is reached through app.main's helpers, imported
 lazily here (main imports this module first).
 
 Every route requires the same optional login as the rest of the gateway: with Supabase
@@ -13,7 +14,10 @@ configured a token is mandatory, without it every caller shares the ownerless sp
 
 import asyncio
 import io
+import json
+import logging
 import re
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -29,9 +33,11 @@ from app.author.verify import citation_outcome, reference_checks, verify_cached
 from app.config import PARALLEL_CHECKS
 from app.metrics import AUDIT_FINDINGS
 from app.ownership import require_owner
+from app.queue import DraftJobState, draft_check_disposition, enqueue_draft_check
 
 # The browser uses /api/author; Vite/nginx remove /api before forwarding to FastAPI.
 router = APIRouter(prefix="/author", tags=["author"])
+logger = logging.getLogger(__name__)
 
 PROJECTS, DRAFTS, SOURCES = "author_projects", "author_drafts", "author_sources"
 DRAFT_CHECK = "draft-check"
@@ -432,15 +438,38 @@ async def upload_citation_pdf(
 # --- draft checks -----------------------------------------------------------------------
 
 
-def _spawn(coroutine) -> None:
-    """Start the background run. Its own function so tests can run the coroutine themselves."""
-    asyncio.create_task(coroutine)
+def new_draft_check(
+    check_id: str,
+    owner: str | None,
+    draft_id: str,
+    draft_title: str,
+    version: int,
+    content_hash: str | None,
+    started_at: str,
+    stages: list[dict] | None = None,
+) -> dict:
+    """The skeleton dict a draft check starts as, shared by the gateway's route and the worker's
+    job so the two can never drift apart."""
+    return {
+        "id": check_id,
+        "kind": DRAFT_CHECK,
+        "owner": owner,
+        "draftId": draft_id,
+        "draftTitle": draft_title,
+        "version": version,
+        "contentHash": content_hash,
+        "status": "running",
+        "startedAt": started_at,
+        "stages": list(stages or []),
+        "citations": [],
+    }
 
 
 async def _run_draft_check(check_id: str, user: str | None):
     """Every \\cite of the draft against the work its bib entry names. One verification per
-    citation, PARALLEL_CHECKS at a time and never more than the gateway-wide limit, each
-    read from the cache when the same claim was judged against the same source before."""
+    citation, PARALLEL_CHECKS at a time. A worker runs one job at a time, so that is the
+    limit for that worker; each worker process has its own. A citation is read from the cache
+    when the same claim was judged against the same source before."""
     gateway = _gateway()
     run = gateway.analyses[check_id]
     try:
@@ -494,7 +523,7 @@ async def _run_draft_check(check_id: str, user: str | None):
             identifier = logic.lookup_identifier(entry, pdfs)
             if identifier and pdfs.get(entry["key"]):
                 identifier = (gateway.PAPERS_DIR / identifier).as_posix()
-            async with limit, gateway.all_checks:
+            async with limit:
                 await gateway._publish(
                     check_id, "checking", claim=index, key=citation["key"], source=identifier
                 )
@@ -557,19 +586,9 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
     if running:
         raise HTTPException(409, f"a check is already running: {running['id']}")
     check_id = _new_id()
-    run = {
-        "id": check_id,
-        "kind": DRAFT_CHECK,
-        "owner": user,
-        "draftId": draft_id,
-        "draftTitle": draft["title"],
-        "version": draft.get("version", 1),
-        "contentHash": None,
-        "status": "running",
-        "startedAt": logic.now_iso(),
-        "stages": [],
-        "citations": [],
-    }
+    run = new_draft_check(
+        check_id, user, draft_id, draft["title"], int(draft.get("version", 1)), None, logic.now_iso()
+    )
     gateway.analyses[check_id] = run
     gateway.streams[check_id] = asyncio.Queue()
     try:
@@ -579,17 +598,50 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
             _bump_version(draft)
             await asyncio.to_thread(_save, DRAFTS, draft)
         project = await asyncio.to_thread(_project_of, draft, user)
-        run["version"] = draft.get("version", 1)
+        run["version"] = int(draft.get("version", 1))
         # the draft's files plus the project's .bib: what "unchanged since the previous check" compares
         run["contentHash"] = logic.content_hash(_draft_files(draft, project))
+        queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
+        run["stages"].append(queued)
+        gateway.streams[check_id].put_nowait(queued)
+        try:
+            await asyncio.to_thread(
+                enqueue_draft_check,
+                check_id,
+                user,
+                draft_id,
+                draft["title"],
+                run["version"],
+                run["contentHash"],
+                list(run["stages"]),
+                run["startedAt"],
+            )
+        except Exception:
+            logger.warning("enqueuing draft check %s failed", check_id)
+            raise HTTPException(503, "the analysis queue is unavailable, try again shortly") from None
     except BaseException:
-        # A failed or cancelled save must not leave a check that never runs, which would
-        # refuse every later Re-check of this draft.
+        # A failed or cancelled save, or a queue that cannot be reached, must not leave a check
+        # that never runs: it would refuse every later Re-check of this draft.
         gateway.analyses.pop(check_id, None)
         gateway.streams.pop(check_id, None)
         raise
-    _spawn(_run_draft_check(check_id, user))
+    # Stored now so a gateway restart before a worker picks the job up still finds it. The
+    # worker's saves supersede this.
+    gateway._save_soon(check_id)
+    # Another gateway instance only learns of the check from Redis, and the worker sends its
+    # first snapshot when it starts the job. Best-effort, like _publish.
+    try:
+        await asyncio.to_thread(_publish_row, check_id, run)
+    except Exception as error:
+        logger.warning("publishing queued draft check %s to Redis failed: %s", check_id, error)
     return {"id": check_id}
+
+
+def _publish_row(check_id: str, run: dict) -> None:
+    """The queued snapshot. Looked up on app.queue at call time so a test's Redis stand-in applies."""
+    from app import queue as job_queue
+
+    job_queue.redis_connection().publish(f"analysis:{check_id}", json.dumps(run, default=str))
 
 
 @router.get("/drafts/{draft_id}/checks")
@@ -650,7 +702,19 @@ async def compare_checks(check_id: str, user: str | None = Depends(current_user)
 async def delete_check(check_id: str, user: str | None = Depends(current_user)):
     run = _check(check_id, user)
     if run.get("status") not in _gateway().FINISHED:
-        raise HTTPException(409, "the check is still running")
+        # Memory can say "running" after the job has finished, because a dropped pub/sub
+        # snapshot never arrives. A missing job, and a queued one we cancel, can be deleted.
+        # Only a worker that is actually running the job refuses. Redis being down is 503,
+        # not 409: a 409 here blocks every later Re-check.
+        state = await asyncio.to_thread(draft_check_disposition, check_id)
+        if state is DraftJobState.UNAVAILABLE:
+            raise HTTPException(503, "the analysis queue is unavailable, try again shortly")
+        if state is DraftJobState.STARTED:
+            raise HTTPException(409, "the check is still running")
+        if state is DraftJobState.FINISHED:
+            stored = await asyncio.to_thread(store.load, check_id)
+            if stored is not None:
+                _gateway().analyses[check_id] = stored
     await _gateway()._delete_one(check_id)
     return {"deleted": check_id}
 
@@ -671,6 +735,10 @@ async def update_citation(
     """What the author did about an issue: "Replace with …" (a new key, and the verdict the
     replacement was verified with), "Keep mine" / "Override · add note", or reopening it."""
     run = _check(check_id, user)
+    if run.get("status") not in _gateway().FINISHED:
+        # The worker holds the copy it will save next. Writing this process's copy would
+        # be overwritten, so the override would silently disappear.
+        raise HTTPException(409, "the check is still running")
     citation = next((c for c in run.get("citations", []) if c["id"] == citation_id), None)
     if citation is None:
         raise HTTPException(404, "no such citation")
