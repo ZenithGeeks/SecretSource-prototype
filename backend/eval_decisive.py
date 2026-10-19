@@ -1,13 +1,14 @@
 """Check that the checks production found decisive stay decisive (CONSTRAINTS.md, verdict quality).
 
-    python eval_decisive.py ../docs/eval/decisive-checks.csv --runs 3 --fresh --min-kept 12
+    python eval_decisive.py ../docs/eval/decisive-checks.csv --runs 3 --fresh
 
 Each row is a claim, the cited work it was checked against, and the expected verdict
 ("supports", "refutes" or "insufficient"). Most are the verdicts production gave;
 CONSTRAINTS.md lists the rows corrected by hand. Every row is checked with the pipeline's own
 prepare_source and check_prepared, so this scores retrieval and the judge together. It needs what an analysis
-needs (ColBERT, the LLM), so run it where the worker runs. Exits 1 when a run keeps fewer than
---min-kept rows at their expected verdict.
+needs (ColBERT, the LLM), so run it where the worker runs. The gate compares a PR's rows with
+main's, run the same day (CONSTRAINTS.md): the hosted model changes without notice, so the
+model id is printed first. --min-kept still exits 1 when a run keeps fewer rows.
 """
 
 import argparse
@@ -16,7 +17,9 @@ import sys
 from pathlib import Path
 
 import dspy
+import requests
 from app import store
+from app.config import VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.pipeline import verify
 
 
@@ -31,6 +34,7 @@ def main() -> None:
     parser.add_argument("--min-kept", type=int, default=0, help="fail when a run keeps fewer rows")
     args = parser.parse_args()
 
+    print("gateway model:", gateway_model())
     with args.cases.open(newline="", encoding="utf-8") as file:
         cases = list(csv.DictReader(file))
     if args.fresh:
@@ -58,6 +62,25 @@ def main() -> None:
 
     print(f"kept per run: {kept_per_run}; minimum {min(kept_per_run)}, required {args.min_kept}")
     sys.exit(1 if min(kept_per_run) < args.min_kept else 0)
+
+
+def gateway_model() -> str:
+    """The model behind VLLM_MODEL as the gateway reports it, so a run can be dated (SCRUM-376).
+
+    A LiteLLM gateway lists the upstream model and a deployment id under /model/info. Plain vLLM
+    has no such route, so the answer then only names VLLM_MODEL.
+    """
+    headers = {"Authorization": f"Bearer {VLLM_API_KEY}"}
+    try:
+        reply = requests.get(f"{VLLM_URL}/model/info", headers=headers, timeout=10)
+        entries = reply.json().get("data", []) if reply.ok else []
+    except (requests.RequestException, ValueError) as error:
+        return f"{VLLM_MODEL} (no model info from {VLLM_URL}: {error})"
+    for entry in entries:
+        if entry.get("model_name") == VLLM_MODEL:
+            info = entry.get("model_info", {})
+            return f"{VLLM_MODEL} = {info.get('key')} (deployment id {info.get('id')})"
+    return f"{VLLM_MODEL} (not listed by {VLLM_URL}/model/info)"
 
 
 if __name__ == "__main__":

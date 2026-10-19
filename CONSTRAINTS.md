@@ -59,7 +59,7 @@ reader never learns the paper cited a source that settles the claim.
 
 | Rule | Number | Why this number |
 | --- | --- | --- |
-| Decisive checks kept, in every one of 3 runs without the answer cache | at least 12 of 13 | measured with dspy's LM cache off on 18 Oct 2026, after SCRUM-348: 13, 12, 12 |
+| Decisive checks kept, 3 runs each without the answer cache, the PR and main run the same day with the same settings | every row main keeps in all 3 of its runs, the PR keeps in all 3 of its runs; the count out of 13 is recorded, not enforced | SCRUM-376: on 19 Oct 2026 main fell from 13, 12, 12 to 11, 10, 10 with the same prompt, passages and request as the day before, because the model behind the gateway had changed. A fixed count cannot hold on a model we do not control |
 
 The 13 rows in `docs/eval/decisive-checks.csv` are the checks production rated backed (9) or
 contradicted (4) on arXiv 2409.12191, 2407.01449 and 2112.01488. They are production's verdicts,
@@ -78,6 +78,14 @@ the judge said insufficient each time.
 SCRUM-348 changed the MTEB check to insufficient. Production said contradicted, but the
 pipeline said insufficient in all 9 fresh runs on 18 Oct 2026, so the bar of 12 had no room
 left for the DensePhrases row, which still flips to supports in about 2 of 3 runs.
+SCRUM-376 replaced the fixed count with a comparison against main. On 19 Oct 2026 main kept
+11, 10, 10: the MTEB and DensePhrases rows said refutes in every run. The prompt, the retrieved
+passages and the HTTP request were the same as on 18 Oct, byte for byte, so the model behind
+the gateway's `qwen3.8-27b-fp8` had changed (the gateway serves it as `qwen/qwen3.8-27b-nvfp4`
+from a staging host), and nothing on our side recorded when. A count out of 13 therefore says
+as much about the model that day as about the change under test. A row that flips between
+main's own runs is noise and does not count against the PR. `eval_decisive.py` prints the
+gateway's model id before the first run, so the next change of model has a date.
 
 This rule blocks a merge. Raise the number when a change keeps more; lowering it needs its own
 pull request with the reason.
@@ -131,7 +139,7 @@ papers whose content hash it already has.
 
 | Rule | Checked by | Runs |
 | --- | --- | --- |
-| Decisive checks kept | `python eval_decisive.py ../docs/eval/decisive-checks.csv --runs 3 --fresh --min-kept 12` in the worker container | by hand before merging a change to the pipeline, prompts, retrieval or models; the result goes in the PR's Verified section |
+| Decisive checks kept | `python eval_decisive.py ../docs/eval/decisive-checks.csv --runs 3 --fresh` in the worker container, once on the PR and once on main, the same day | by hand before merging a change to the pipeline, prompts, retrieval or models; both results, the gateway's model id and the rows that differ go in the PR's Verified section |
 | Analysis time | `python bench_analysis.py data/papers/<new paper>.pdf` in the gateway container | the same changes, by hand |
 
 Neither runs in CI: both need the LLM gateway and a GPU, which the shared CI runner does not have.
