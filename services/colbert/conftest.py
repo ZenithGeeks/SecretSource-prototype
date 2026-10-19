@@ -42,7 +42,7 @@ class FakeStore:
         # The query can ask for a long passage, several hits, or a chosen top score.
         # "index size" stays the one strong hit the older tests expect.
         parts = query.split()
-        score = 21.5
+        score = 40.5  # above the 28.21 line, the way a real strong hit scores with 64-token queries
         text = PASSAGE
         count = 1
         for part in parts:

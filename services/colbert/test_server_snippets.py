@@ -26,6 +26,18 @@ def test_a_passage_shorter_than_the_snippet_is_kept_whole(mcp):
     long_limit = mcp.call_tool("search_passages", {"query": "index size", "snippet_chars": 1000})
 
     assert texts(whole) == texts(long_limit) == [PASSAGE]
+    assert whole["topk"][0]["truncated"] is False
+
+
+def test_null_snippet_chars_uses_the_default_cut(mcp):
+    from conftest import LONG_PASSAGE
+
+    answer = mcp.call_tool("search_passages", {"query": "long", "snippet_chars": None})
+
+    text = answer["topk"][0]["text"]
+    assert text == " ".join(["abcd"] * 56)
+    assert LONG_PASSAGE.startswith(text)
+    assert answer["topk"][0]["truncated"] is True
 
 
 def test_snippet_chars_below_one_is_refused(mcp):

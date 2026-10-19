@@ -14,7 +14,11 @@ def test_tools_list_names_each_tool_and_its_parameters(mcp):
     assert list(search["properties"]) == ["query", "k", "source", "snippet_chars", "full_text"]
     assert search["required"] == ["query"]
     assert search["properties"]["k"]["default"] == 5
-    assert search["properties"]["snippet_chars"]["default"] == 280
+    assert search["properties"]["k"]["minimum"] == 1
+    # Null keeps the 280-character default. The description says so; the schema default is null.
+    snippet = search["properties"]["snippet_chars"]
+    assert snippet["default"] is None
+    assert any(item.get("type") == "null" for item in snippet["anyOf"])
     assert search["properties"]["full_text"]["default"] is False
 
 

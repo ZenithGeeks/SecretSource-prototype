@@ -11,7 +11,8 @@ def test_each_tool_describes_its_parameters_and_result(mcp):
     assert "100" in search
     assert "default is 5" in search
     assert "low_confidence" in search
-    assert "under 14.105" in search
+    assert "under 28.21" in search
+    assert "truncated" in search
 
 
 def test_search_is_read_only(mcp):
