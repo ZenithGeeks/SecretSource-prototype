@@ -109,7 +109,24 @@ The table above used Ops-Colqwen3-4B for ColPali. Production runs colqwen2-v1.0.
 | Errors (reply not JSON after one retry) | 5, all on figure claims | 4, all on figure claims |
 | `eval_decisive.py` (13), kept per run | 11, 11, 11 | 11, 11, 11 |
 
-3 caption claims that Ops-Colqwen3-4B got right in all 3 runs are wrong in 2 or 3 runs with colqwen2-v1.0. For one of them, "Figure 13 illustrates that the cat is located below the keyboard" (a refutes claim), colqwen2-v1.0's top hit is Figure 14, and the judge says supports in all 3 runs. The decisive checks lost are the same two, rows 3 and 13.
+The decisive checks lost are the same two, rows 3 and 13.
+
+3 caption claims that Ops-Colqwen3-4B got right in all 3 runs are wrong with colqwen2-v1.0. A second set of runs (b8d3df7, which records which judge call gave each verdict) shows that all 3 change in the text call. That call gets the captions of the ColPali pages next to the passages, so the ColPali model changes what the judge reads even when no crop is sent:
+
+- `Finetuned-language-models-are-zero-shot-learners.pdf#140` (supports): Ops-Colqwen3-4B finds Figure 14, whose caption states the claim. colqwen2-v1.0 finds Figures 15 and 2, and the judge says refutes. This one is a retrieval loss.
+- `Visual-spatial-reasoning.pdf#77` (refutes, "the cat is located below the keyboard"): colqwen2-v1.0 finds the right caption, Figure 13 "The keyboard is below the cat.", and the judge says supports. The judge read the relation the wrong way round. Ops-Colqwen3-4B finds unrelated figures, and the judge refutes from the passages.
+- `Visual-spatial-reasoning.pdf#9` (refutes, "the person is located ahead of the cow"): colqwen2-v1.0 finds Figure 2, "The cow is ahead of the person. Label: False.", and the judge says supports. A false label does not show that the person is ahead of the cow either, so "refutes" was the wrong expected verdict.
+
+The two claims whose figure call differs (`Finetuned-language-models-are-zero-shot-learners.pdf#143` and `#145`) keep their verdict.
+
+Both VSR claims, and the two `Visual-spatial-reasoning.pdf#78` claims, were written from dataset-example captions (`Figure 2: Caption: ...`). #498 dropped their "supports" twins and made `make_eval_claims.py` skip such captions, so these 4 are now removed from `caption-claims.jsonl` too, leaving 144 claims. The tables above still count 148. Scored on the 144 (same runs, the 4 claims left out):
+
+| ColPali | Caption claims (144), per run | Verdicts from the text call / figure call (432) |
+|---|---|---|
+| Ops-Colqwen3-4B | 0.986, 0.986, 0.986 | 428 / 4 |
+| colqwen2-v1.0 | 0.979, 0.979, 0.979 | 427 / 5 |
+
+colqwen2-v1.0 now misses one claim more than Ops-Colqwen3-4B, the FLAN #140 retrieval loss. The judge's direction error on #77 is tracked in #517.
 
 - Crop on every claim: with a figure in the prompt, the judge read the text worse even when the text decided the claim. On caption claims it called 26 "supports" claims "refutes" over 3 runs, against 6 on main. In a logged run, 22 of 28 such false "refutes" came with a crop of a different figure than the caption's own. A guard that also named the crop's figure and told the judge to ignore an unrelated one did not help: prose 0.941, captions 0.890.
 - Crop + passages, only when the text says insufficient: the text sets are back at main, but decisive row 8 (XTR) went from insufficient to refutes in all 3 runs. The crop was the paper's overview diagram; the judge reread the abstract and decided from it.
