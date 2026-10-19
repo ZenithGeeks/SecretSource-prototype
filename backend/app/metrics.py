@@ -57,6 +57,13 @@ LLM_TOKENS = Counter("llm_tokens_total", "LLM tokens used", ["phase", "kind"])  
 LLM_RATE_LIMITED = Counter(
     "llm_rate_limited_total", "LLM calls that still got HTTP 429 after their retries"
 )
+# How long each LLM call waited for one of the LLM_PARALLEL_REQUESTS slots in app/llm.py. Many
+# chats at once queue here rather than at the gateway (SCRUM-363).
+LLM_SLOT_WAIT_SECONDS = Histogram(
+    "llm_slot_wait_seconds",
+    "Seconds an LLM call waited for a request slot",
+    buckets=(0.1, 0.5, 1, 2, 5, 10, 20, 40, 80),
+)
 
 
 # Which pipeline step made an LLM call: claim extraction, citation roles (both

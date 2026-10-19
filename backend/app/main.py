@@ -18,6 +18,10 @@ POST /user/avatar        multipart image -> {"url"}
 DELETE /user/avatar
 GET  /user/avatar/me     -> the avatar image
 POST /verify            {"claim", "source"} -> one verdict, outside any analysis
+POST /assistant/chats                 {"context"} -> a new chat of the caller's
+GET  /assistant/chats                 -> the caller's chats, newest first
+GET  /assistant/chats/{id}            -> one chat with its questions and checked replies
+POST /assistant/chats/{id}/messages   {"question", "context"} -> SSE: statements, then verdicts
 /author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 GET  /health
 
@@ -47,7 +51,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
-from app import dependencies, researcher, store, uploads
+from app import chats, dependencies, researcher, store, uploads
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
 from app.author.router import DRAFT_CHECK, author_pdfs
@@ -926,6 +930,137 @@ async def knowledge_graph(user: str | None = Depends(current_user)):
 async def library_gaps(user: str | None = Depends(current_user)):
     """What the caller's own library leaves open (researcher.gaps). Reads stored verdicts only."""
     return await asyncio.to_thread(_per_owner, "gaps", user, researcher.gaps)
+
+
+# --- the assistant: questions answered as checked statements (app/assistant.py) ---
+
+
+class ScreenContext(BaseModel):
+    """What the user was looking at when they asked. `node` is a graph node id from
+    /researcher/graph: "a:<analysis id>" for an analysed paper, "c:<analysis id>:<n>" for a claim."""
+
+    screen: str = ""
+    analysis: str | None = None
+    node: str | None = None
+
+
+class ChatStart(BaseModel):
+    context: ScreenContext = ScreenContext()
+
+
+class ChatQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    context: ScreenContext = ScreenContext()
+
+
+def _analysis_on_screen(context: ScreenContext) -> str | None:
+    """The analysis the question is about: the open one, or the one a graph node belongs to."""
+    if context.analysis:
+        return context.analysis
+    kind, _, rest = (context.node or "").partition(":")
+    if kind in ("a", "c") and rest:
+        return rest.split(":")[0]
+    return None
+
+
+def _paper_on_screen(context: ScreenContext, user: str | None) -> str | None:
+    """The PDF the question is about, or None to answer from the user's whole library. An
+    analysis that is not the user's is a 404, like on every other analysis route."""
+    analysis_id = _analysis_on_screen(context)
+    if analysis_id is None:
+        return None
+    return _owned(analysis_id, user).get("file")
+
+
+async def _keep_alive(events):
+    """The events, with a comment line whenever nothing has come for HEARTBEAT_SECONDS. Getting
+    a paper ready can take minutes, and proxies close a stream that stays quiet."""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def pump():
+        try:
+            async for event in events:
+                await queue.put(event)
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if event is None:
+                return
+            yield event
+    finally:
+        task.cancel()  # the reader left: stop answering
+
+
+async def _reply(user: str | None, chat_id: str, turn: str, question: str, paper: str | None):
+    """Server-sent events for one answer (assistant.answer), then the reply is saved to the chat.
+    Only a finished answer is saved. After an error, or a reader who left, the question stays in
+    the chat with no reply."""
+    from app import assistant  # imports dspy, about 0.6 s, so not at start-up
+
+    statements: list[dict] = []
+    try:
+        if paper is None:
+            events = assistant.answer(question, papers=papers_of(user))
+        else:
+            prepared = await asyncio.to_thread(prepare_source, paper)
+            if prepared["status"] != "ok":
+                yield f"data: {json.dumps({'type': 'error', 'message': 'this paper could not be read'})}\n\n"
+                return
+            events = assistant.answer(question, paper=Path(prepared["path"]))
+        async for event in events:
+            if event["type"] == "statement":
+                statements.append({"text": event["text"], "source": event["source"], "page": event["page"]})
+            elif event["type"] == "verdict":
+                statements[event["index"]].update(
+                    verdict=event["verdict"], quote=event["quote"], reasoning=event["reasoning"]
+                )
+            yield f"data: {json.dumps(event)}\n\n"
+    except Exception:
+        logger.exception("answering a question in chat %s failed", chat_id)
+        yield f"data: {json.dumps({'type': 'error', 'message': 'the answer failed, ask again'})}\n\n"
+        return
+    await chats.add_reply(user, chat_id, turn, statements)
+
+
+@app.post("/assistant/chats")
+async def start_chat(body: ChatStart | None = None, user: str | None = Depends(current_user)):
+    context = (body or ChatStart()).context.model_dump()
+    return chats.summary(await chats.start(user, context))
+
+
+@app.get("/assistant/chats")
+async def list_chats(user: str | None = Depends(current_user)):
+    return [chats.summary(chat) for chat in await chats.mine(user)]
+
+
+@app.get("/assistant/chats/{chat_id}")
+async def get_chat(chat_id: str, user: str | None = Depends(current_user)):
+    chat = await chats.find(user, chat_id)
+    if chat is None:
+        raise HTTPException(404, "no such chat")
+    return {**chats.summary(chat), "context": chat.state, "messages": chats.messages(chat)}
+
+
+@app.post("/assistant/chats/{chat_id}/messages")
+async def ask(chat_id: str, body: ChatQuestion, user: str | None = Depends(current_user)):
+    """Answer a question as server-sent events: each statement with its citation, then each
+    verdict as its check ends, then "done" (assistant.answer). The web app reads them with
+    fetch(), so the token travels in the Authorization header."""
+    paper = _paper_on_screen(body.context, user)  # before streaming, so a 404 is still a 404
+    turn = await chats.add_question(user, chat_id, body.question, body.context.model_dump())
+    if turn is None:
+        raise HTTPException(404, "no such chat")
+    return StreamingResponse(
+        _keep_alive(_reply(user, chat_id, turn, body.question, paper)), media_type="text/event-stream"
+    )
 
 
 # --- account settings, shared by every role (Settings modal) ---

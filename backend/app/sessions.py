@@ -14,6 +14,7 @@ import os
 from sqlalchemy import event
 
 SCHEMA = "adk"
+SIGNED_OUT = ""  # the ADK user id of a caller with no login; it owns the analyses with no owner
 
 
 def session_db_url() -> str:

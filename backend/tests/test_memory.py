@@ -4,6 +4,7 @@ No database: store.load_all is replaced by a list of analyses."""
 import asyncio
 
 from app import memory
+from app.memory import SIGNED_OUT
 
 
 def analysis(analysis_id, owner, claim, cited, verdict, quote, title="ColBERTv2", at=1789300000.0):
@@ -40,7 +41,7 @@ def texts(entries):
 
 
 def test_the_best_matching_verdict_comes_first_with_its_quote():
-    found = memory.search("what did we find for late interaction index size?", ANALYSES, owner="user-ada")
+    found = memory.search("what did we find for late interaction index size?", ANALYSES, SIGNED_OUT)
     assert found
     best = texts(found)[0]
     assert "Analysis old1" in best and "2112.01488" in best
@@ -49,38 +50,49 @@ def test_the_best_matching_verdict_comes_first_with_its_quote():
     assert found[0].timestamp == "2026-09-10"  # when analysis old1 started
 
 
-def test_another_users_analyses_are_never_read():
-    found = texts(memory.search("late interaction index size", ANALYSES, owner="user-ada"))
-    assert not any("Analysis theirs" in text for text in found)
-    assert texts(memory.search("ColPali page images", ANALYSES, owner="user-ada"))[0].startswith(
-        "Analysis mine"
-    )
+def test_a_user_reads_only_their_own_analyses():
+    found = texts(memory.search("late interaction index size ColPali page images", ANALYSES, "user-ada"))
+    assert found and all(text.startswith("Analysis mine") for text in found)
 
 
-def test_without_an_owner_only_ownerless_analyses_are_read():
-    found = texts(memory.search("ColPali page images late interaction", ANALYSES, owner=""))
+def test_analyses_without_an_owner_are_not_shared_with_signed_in_users():
+    # "old1" matches the question, but it has no owner, so a signed-in user never sees it.
+    assert memory.search("late interaction index size tenfold", ANALYSES, "user-ada") == []
+
+
+def test_signed_out_reads_only_analyses_without_an_owner():
+    found = texts(memory.search("ColPali page images late interaction", ANALYSES, SIGNED_OUT))
     assert found and all(text.startswith("Analysis old1") for text in found)
 
 
 def test_sources_that_could_not_be_checked_are_found_too():
-    found = texts(memory.search("did we check the blog post?", ANALYSES, owner=""))
+    found = texts(memory.search("did we check the blog post?", ANALYSES, SIGNED_OUT))
     assert any("could not be checked against Some blog post (web-source)" in text for text in found)
 
 
 def test_nothing_matching_returns_nothing():
-    assert memory.search("protein folding in yeast", ANALYSES, owner="user-ada") == []
-    assert memory.search("what did we find?", ANALYSES, owner="user-ada") == []  # only stop words
+    assert memory.search("protein folding in yeast", ANALYSES, "user-ada") == []
+    assert memory.search("what did we find?", ANALYSES, "user-ada") == []  # only stop words
 
 
-def test_the_service_reads_the_store_and_uses_memory_owner(monkeypatch):
+def search_memory(service, user_id, query):
+    response = asyncio.run(service.search_memory(app_name="a", user_id=user_id, query=query))
+    return texts(response.memories)
+
+
+def test_the_service_reads_the_callers_own_analyses(monkeypatch):
     monkeypatch.setattr(memory.store, "load_all", lambda: {a["id"]: a for a in ANALYSES})
-    monkeypatch.setenv("MEMORY_OWNER", "user-bo")
     service = memory.AnalysisMemory()
-    response = asyncio.run(
-        service.search_memory(app_name="a", user_id="user-ada", query="index size tenfold")
-    )
-    found = texts(response.memories)
-    # MEMORY_OWNER decides, not the caller's user id: the chat agents do not know who is asking.
-    assert any("Analysis theirs" in text for text in found)
-    assert not any("Analysis mine" in text for text in found)
+    found = search_memory(service, "user-bo", "late interaction index size")
+    assert found and all(text.startswith("Analysis theirs") for text in found)
+    found = search_memory(service, "user-ada", "late interaction index size ColPali")
+    assert found and all(text.startswith("Analysis mine") for text in found)
     assert asyncio.run(service.add_session_to_memory(None)) is None
+
+
+def test_a_service_with_as_user_ignores_the_runners_user_id(monkeypatch):
+    # a2a_server.py: ADK names an A2A caller A2A_USER_<context id>, which must not matter.
+    monkeypatch.setattr(memory.store, "load_all", lambda: {a["id"]: a for a in ANALYSES})
+    service = memory.AnalysisMemory(as_user=SIGNED_OUT)
+    found = search_memory(service, "user-bo", "late interaction index size")
+    assert found and all(text.startswith("Analysis old1") for text in found)

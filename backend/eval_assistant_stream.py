@@ -1,97 +1,55 @@
-"""Time a streamed assistant answer whose statements are checked as soon as each one is written.
+"""Time a streamed assistant answer whose statements are checked as soon as the answer is written.
 
     python eval_assistant_stream.py ../docs/eval/assistant-library-questions.csv --runs 3 --fresh
 
-eval_assistant.py waits for the whole answer, then checks every statement. Here the answer is
-streamed from the LLM, each statement goes to the judge the moment its JSON object closes, and the
-script records when the reader would see each step: the first token, the first statement, the
-first checked statement and the last one. Questions with no paper only (#506's library set).
+eval_assistant.py waits for every check, then reports. Here the events of app/assistant.py's
+answer() are timed as a reader would see them: the first statement, the first checked statement
+and the last one. Questions with no paper only (#506's library set).
 
-The 9arm gateway sends the whole reply at once, so there the first statement arrives just after
-the first token, and only the per-statement checking saves time.
+The 9arm gateway sends the whole reply at once, so the first statement arrives with the whole
+answer, and only checking each statement as its own task saves time. #506 also timed the first
+token of a streamed reply; answer() does not stream tokens, since 9arm buffers them anyway.
 """
 
 import argparse
-import ast
+import asyncio
 import csv
-import json
-import re
 import statistics
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import dspy
-import litellm
-from app import store
-from app.clients.retrieval import colbert_search
-from app.config import PAPERS_DIR, PARALLEL_CHECKS
-from app.llm import dspy_lm
-from eval_assistant import (
-    LIBRARY_PASSAGES,
-    MAX_STATEMENTS,
-    AnswerFromLibrary,
-    Cited,
-    Statement,
-    check,
-    cite,
-    prepare_papers,
-)
+from app import assistant, store
+from app.assistant import Cited
+from app.config import PAPERS_DIR
+from eval_assistant import prepare_papers
 
-# One finished statement object in the streamed list, e.g. {"text": "...", "passage": 3}.
-STATEMENT_OBJECT = re.compile(r"\{[^{}]*\}")
-STEPS = ("first token", "first statement", "first checked", "all checked")
+STEPS = ("first statement", "first checked", "all checked")
 
 
-def parse_statement(raw: str) -> Statement | None:
-    """One streamed statement; DSPy asks for a Python list, so it can come back in either syntax."""
-    for load in (json.loads, ast.literal_eval):
-        try:
-            return Statement.model_validate(load(raw))
-        except (ValueError, SyntaxError):
-            continue
-    return None
-
-
-def stream_and_check(question: str, language_model: dspy.LM) -> tuple[list[Cited], list[str], dict]:
-    """Stream one answer and judge each statement as it arrives.
+async def answer_and_time(question: str) -> tuple[list[str], list[str], dict]:
+    """One answer through assistant.answer().
 
     Returns the statements, their verdicts, and the seconds from the start to each of STEPS.
     """
     started = time.perf_counter()
-    hits = colbert_search(question, k=LIBRARY_PASSAGES)
-    numbered = [f"[{number}] {hit['text']}" for number, hit in enumerate(hits, 1)]
-    messages = dspy.ChatAdapter().format(
-        AnswerFromLibrary, demos=[], inputs={"passages": numbered, "question": question}
-    )
-    reached, cited, checks, written = {}, [], [], ""
-    with ThreadPoolExecutor(max_workers=PARALLEL_CHECKS) as pool:
-        stream = litellm.completion(
-            model=language_model.model, messages=messages, stream=True, **language_model.kwargs
-        )
-        for chunk in stream:
-            written += chunk.choices[0].delta.content or ""
-            if written:
-                reached.setdefault("first token", time.perf_counter() - started)
-            body = written.partition("[[ ## statements ## ]]")[2]
-            for raw in STATEMENT_OBJECT.findall(body)[len(cited):MAX_STATEMENTS]:
-                statement = parse_statement(raw) or Statement(text=raw, passage=0)
-                # The papers were indexed before timing, so this only looks up the path.
-                item = prepare_papers([cite(statement, hits)])[0]
-                cited.append(item)
-                checks.append(pool.submit(check, item))
-                reached.setdefault("first statement", time.perf_counter() - started)
-        for _ in as_completed(checks):
+    reached, statements, verdicts = {}, [], {}
+    async for event in assistant.answer(question):
+        if event["type"] == "statement":
+            reached.setdefault("first statement", time.perf_counter() - started)
+            statements.append(f"{event['text']}  [{event['source']}]")
+        elif event["type"] == "verdict":
             reached.setdefault("first checked", time.perf_counter() - started)
-        reached["all checked"] = time.perf_counter() - started
-    return cited, [future.result() for future in checks], reached
+            verdicts[event["index"]] = event["verdict"]
+    reached["all checked"] = time.perf_counter() - started
+    return statements, [verdicts[index] for index in range(len(statements))], reached
 
 
 def index_library_papers(rows: list[dict]) -> None:
     """Download and index every paper the questions can reach, so no answer waits for it."""
     for row in rows:
-        hits = colbert_search(row["question"], k=LIBRARY_PASSAGES)
-        prepare_papers([(hit["text"], hit["source"], PAPERS_DIR / hit["source"]) for hit in hits])
+        hits = assistant.library_passages(row["question"])
+        prepare_papers([Cited(hit["text"], hit["source"], PAPERS_DIR / hit["source"]) for hit in hits])
 
 
 def main() -> None:
@@ -111,12 +69,11 @@ def main() -> None:
         store.recall_cache = lambda key: None
         store.remember_cache = lambda key, data: None
         dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
-    language_model = dspy_lm(max_tokens=600)
     index_library_papers(rows)
     for run in range(1, args.runs + 1):
         times, verdicts = {step: [] for step in STEPS}, []
         for number, row in enumerate(rows, 1):
-            cited, row_verdicts, reached = stream_and_check(row["question"], language_model)
+            statements, row_verdicts, reached = asyncio.run(answer_and_time(row["question"]))
             answerable = row.get("answerable", "yes") != "no"
             if answerable:
                 verdicts += row_verdicts
@@ -124,9 +81,9 @@ def main() -> None:
                     if step in reached:
                         times[step].append(reached[step])
             steps = ", ".join(f"{step} {reached[step]:4.1f}s" for step in STEPS if step in reached)
-            print(f"run {run} {number}/{len(rows)} {steps}, {len(cited)} statements  {row['question']}")
-            for (text, source, _), verdict in zip(cited, row_verdicts, strict=True):
-                print(f"    {verdict:<12} {text}  [{source}]")
+            print(f"run {run} {number}/{len(rows)} {steps}, {len(statements)} statements  {row['question']}")
+            for statement, verdict in zip(statements, row_verdicts, strict=True):
+                print(f"    {verdict:<12} {statement}")
         not_backed = sum(verdict != "supports" for verdict in verdicts)
         medians = ", ".join(f"{step} {statistics.median(times[step]):.1f}s" for step in STEPS if times[step])
         print(

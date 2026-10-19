@@ -5,7 +5,8 @@ in flight in this process."""
 
 import asyncio
 import threading
-from contextlib import asynccontextmanager
+import time
+from contextlib import asynccontextmanager, contextmanager
 
 import dspy
 from dspy.utils.callback import BaseCallback
@@ -13,20 +14,31 @@ from dspy.utils.exceptions import LMRateLimitError
 from google.adk.models.lite_llm import LiteLlm
 
 from app.config import LLM_PARALLEL_REQUESTS, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
-from app.metrics import LLM_RATE_LIMITED
+from app.metrics import LLM_RATE_LIMITED, LLM_SLOT_WAIT_SECONDS
 
 # One slot per request in flight, for every model in this process. dspy calls come from
 # worker threads and ADK calls from the event loop, so this is a threading semaphore.
 _slots = threading.BoundedSemaphore(LLM_PARALLEL_REQUESTS)
 
 
+@contextmanager
+def _slot():
+    """Hold a request slot, blocking this thread until one is free."""
+    started = time.perf_counter()
+    with _slots:
+        LLM_SLOT_WAIT_SECONDS.observe(time.perf_counter() - started)
+        yield
+
+
 @asynccontextmanager
 async def _async_slot():
     """Hold a request slot without blocking the event loop."""
+    started = time.perf_counter()
     # Polling, not asyncio.to_thread(_slots.acquire): a cancelled to_thread call still takes
     # the slot in its thread, and nothing gives it back.
     while not _slots.acquire(blocking=False):
         await asyncio.sleep(0.05)
+    LLM_SLOT_WAIT_SECONDS.observe(time.perf_counter() - started)
     try:
         yield
     finally:
@@ -37,7 +49,7 @@ class CappedLM(dspy.LM):
     """A dspy.LM that holds a request slot for each call, retries included."""
 
     def __call__(self, *args, **kwargs):
-        with _slots:
+        with _slot():
             return super().__call__(*args, **kwargs)
 
     async def acall(self, *args, **kwargs):
