@@ -157,6 +157,26 @@ def home(analyses: list[dict]) -> dict:
     claims = sum(counts.values())
     verified = claims - counts["unchecked"]
 
+    if not papers:
+        alert = "Analyse a paper to start your library."
+    elif counts["contradicted"]:
+        alert = (
+            f"{_count(counts['contradicted'], 'claim')} in your papers contradicted by the work they cite."
+        )
+    else:
+        alert = f"{verified} of {_count(claims, 'claim')} in your papers checked against their sources."
+
+    return {
+        "alert": alert,
+        "conflicts": contradictions(papers)[:HOME_CONFLICTS],
+        "queue": reading_queue(papers)[:HOME_QUEUE],
+        "library": {"papers": len(papers), "claims": claims, "verified": verified, "tally": counts},
+    }
+
+
+def contradictions(papers: list[dict]) -> list[dict]:
+    """Every claim a cited work contradicts, newest paper first, with the works for and
+    against it."""
     conflicts = []
     for paper in reversed(papers):  # newest first
         for index, claim in enumerate(paper.get("claims", [])):
@@ -178,7 +198,12 @@ def home(analyses: list[dict]) -> dict:
                         "claimIndex": index,
                     }
                 )
+    return conflicts
 
+
+def reading_queue(papers: list[dict]) -> list[dict]:
+    """Works cited by at least two claims that are not analysed yet, most-cited first: by how
+    many papers cite them, then by how many claims."""
     analysed = set().union(*(analysis_keys(paper) for paper in papers)) if papers else set()
     cited_by: dict[str, set[str]] = {}
     claims_citing: Counter = Counter()
@@ -216,24 +241,44 @@ def home(analyses: list[dict]) -> dict:
                 "analysis": first_citer[key],
             }
         )
-        if len(queue) == HOME_QUEUE:
-            break
+    return queue
 
-    if not papers:
-        alert = "Analyse a paper to start your library."
-    elif counts["contradicted"]:
-        alert = (
-            f"{_count(counts['contradicted'], 'claim')} in your papers contradicted by the work they cite."
-        )
-    else:
-        alert = f"{verified} of {_count(claims, 'claim')} in your papers checked against their sources."
 
+# --- Gaps ----------------------------------------------------------------------------
+
+
+def gaps(analyses: list[dict]) -> dict:
+    """What the library leaves open, for the Gaps view: claims no cited work backs, claims a
+    cited work contradicts, and works the library keeps citing but does not hold. The long
+    form of Home's conflicts and reading queue. It reads the stored verdicts only."""
+    papers = library_papers(analyses)
     return {
-        "alert": alert,
-        "conflicts": conflicts[:HOME_CONFLICTS],
-        "queue": queue,
-        "library": {"papers": len(papers), "claims": claims, "verified": verified, "tally": counts},
+        "notBacked": not_backed(papers),
+        "contradicted": contradictions(papers),
+        "missing": reading_queue(papers),
     }
+
+
+def not_backed(papers: list[dict]) -> list[dict]:
+    """Claims that were checked but that no cited work backs or contradicts, newest paper
+    first, with the works that were checked. standing() calls a claim "silent" when any source
+    says too little, even if another backs it; such a claim is backed, so it is left out here."""
+    silent = []
+    for paper in reversed(papers):
+        for index, claim in enumerate(paper.get("claims", [])):
+            verdicts = claim.get("verdicts", [])
+            if not verdicts or any(v.get("verdict") in ("supports", "refutes") for v in verdicts):
+                continue
+            checked = [short_title(_cited_work(claim, v)["title"]) for v in verdicts]
+            silent.append(
+                {
+                    "claim": claim["claim"],
+                    "checked": checked,
+                    "analysis": paper["id"],
+                    "claimIndex": index,
+                }
+            )
+    return silent
 
 
 # --- Projects and the library ---------------------------------------------------------

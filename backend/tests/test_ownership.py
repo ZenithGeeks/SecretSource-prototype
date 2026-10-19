@@ -162,6 +162,15 @@ def test_researcher_graph_only_reflects_the_callers_own_papers(client):
     assert any("b1-exclusive-claim" in label for label in labels)
 
 
+def test_researcher_gaps_only_list_the_callers_own_claims(client):
+    for analysis_id in ("a1", "b1"):
+        main.analyses[analysis_id]["claims"][0]["verdicts"] = [{"verdict": "insufficient", "cited": "x"}]
+    bo = {"Authorization": "Bearer token-bo"}
+    body = client.get("/researcher/gaps", headers=bo).json()
+    assert [gap["claim"] for gap in body["notBacked"]] == ["b1-exclusive-claim"]
+    assert "a1-exclusive-claim" not in str(body)
+
+
 def test_researcher_consensus_only_searches_the_callers_own_papers(client):
     bo = {"Authorization": "Bearer token-bo"}
     body = client.post(

@@ -71,7 +71,9 @@ rag_agent = LlmAgent(
     model=adk_model(),
     instruction=(
         "For questions: use answer_from_docs, reply with its answer in 1-2 sentences.\n"
-        "To inspect raw passages: use search_passages.\n"
+        "To inspect raw passages: use search_passages. It returns short snippets; pass full_text "
+        "true only when you need a whole passage.\n"
+        "If low_confidence is true, the best match is weak: say so, and do not quote it as support.\n"
         "To add a paper: use add_paper with the PDF path, then confirm how many passages were added.\n"
         "If status is error, say so briefly."
     ),

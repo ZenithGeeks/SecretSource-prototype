@@ -16,6 +16,8 @@ PASSAGE = (
     "ColBERTv2 compresses each token vector to a centroid id and a small residual, "
     "which cuts the index size by six to ten times."
 )
+# Longer than the default snippet, with a word boundary exactly where a 280-character cut lands.
+LONG_PASSAGE = " ".join(["abcd"] * 80)
 
 
 class FakeEncoder:
@@ -36,17 +38,32 @@ class FakeStore:
         self.added: list[str] = []
 
     def search(self, query, k=10, source=None):
+        self.last_k = k
+        # The query can ask for a long passage, several hits, or a chosen top score.
+        # "index size" stays the one strong hit the older tests expect.
+        parts = query.split()
+        score = 40.5  # above the 28.21 line, the way a real strong hit scores with 64-token queries
+        text = PASSAGE
+        count = 1
+        for part in parts:
+            if part == "long":
+                text = LONG_PASSAGE
+            elif part == "many":
+                count = 8
+            elif part.startswith("score="):
+                score = float(part.removeprefix("score="))
         hits = [
             {
-                "rank": 1,
-                "score": 21.5,
-                "text": PASSAGE,
+                "rank": i + 1,
+                "score": score - i * 0.01,
+                "text": text,
                 "title": "colbertv2",
                 "source": "colbertv2.pdf",
                 "page": 3,
                 "start": 120,
-                "end": 120 + len(PASSAGE),
-            },
+                "end": 120 + len(text),
+            }
+            for i in range(count)
         ]
         return [hit for hit in hits if source in (None, hit["source"])][:k]
 

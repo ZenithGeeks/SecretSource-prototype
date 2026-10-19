@@ -84,10 +84,11 @@ flowchart TD
    same paper, but each paper is prepared only once. Up to `PARALLEL_SOURCES` papers
    (default 3) are prepared at the same time.
 5. **Judge each claim.** When its paper is ready, `check_prepared` judges the claim. Up to
-   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. A worker runs one analysis
-   at a time, so `PARALLEL_SOURCES_TOTAL` and `PARALLEL_CHECKS_TOTAL` (default: the per-run
-   values) only limit that one run. With N workers (see [Services](#services)), up to N times
-   that load reaches the retrieval services and the LLM.
+   `PARALLEL_CHECKS` claims (default 3) are judged at the same time. A worker runs one job at a
+   time (one analysis or one Author draft check), so `PARALLEL_SOURCES_TOTAL` and
+   `PARALLEL_CHECKS_TOTAL` (default: the per-run values) only limit that one run. A draft check
+   uses `PARALLEL_CHECKS` the same way, for its citations. With N workers (see [Services](#services)),
+   up to N times that load reaches the retrieval services and the LLM.
 6. **Read the paper's own figures.** While steps 3 to 5 run, `paper_figures` in
    `figures.py` runs Docling on the analysed paper and saves a crop of each figure. It
    keeps only figures whose caption gives their number, like "Figure 2: ...". The web app
@@ -267,9 +268,9 @@ flowchart TD
 - A question about earlier work ("did we already check this?") goes to the coordinator's
   `load_memory` tool. The runners in `cli.py` and `a2a_server.py` pass `AnalysisMemory`
   (`app/memory.py`), which searches the saved analyses for the claims, cited papers and
-  quotes that share the most words with the question. It writes nothing. It reads analyses
-  without an owner and those owned by `MEMORY_OWNER`, never the caller's own user id,
-  because the chat agents do not know who is asking.
+  quotes that share the most words with the question. It writes nothing. It reads only the
+  analyses owned by the user id the runner passes. `cli.py` and `a2a_server.py` have no
+  login, so they read only the analyses without an owner.
 
 ### Analysis graph
 
@@ -414,7 +415,7 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
 | LLM | extracts claims and judges them | any OpenAI-compatible endpoint (`VLLM_URL`) |
 | `gateway` | the HTTP API; queues each analysis for a worker | `backend/`, port 8080 |
 | `redis` | the analysis job queue, and progress from a worker back to the gateway | compose container, no published port |
-| `worker` | runs analyses pulled off the queue, one at a time in its own process; scale for more analyses at once | `backend/worker.py`; compose service `worker` |
+| `worker` | runs analyses and Author draft checks pulled off the queue, one job at a time in its own process; scale for more jobs at once | `backend/worker.py`; compose service `worker` |
 | `web` | the user interface (nginx) | `frontend/`, port 5173 |
 | `a2a` | the chat agents over A2A | `backend/a2a_server.py`, port 8002, `--profile a2a` |
 
@@ -536,6 +537,18 @@ from the user's analyses, without new LLM calls:
 
 `POST /researcher/projects` creates a project, and `POST /researcher/projects/{id}/papers`
 adds an analysis to it.
+
+## Assistant
+
+`backend/app/assistant.py` answers a question as at most 6 short statements, each from one
+passage, then judges each with `check_prepared`, the same check an analysis runs. With a paper
+on screen, the passages are that paper's (`AnswerAsStatements`). Otherwise they are the best of
+the caller's own papers in the ColBERT index: it holds every user's papers, so 64 passages are
+searched and the first 8 from the caller's papers kept (`AnswerFromLibrary`). `answer()` yields
+the statements, then each verdict as its check ends. The routes are `/assistant/chats` in
+`main.py`, and each chat is an ADK session (`app/chats.py`) whose state holds the screen the
+last question came from. The answer does not go through the coordinator agent: that would add
+at least one LLM turn to each question, and #504 and #506 measured the direct path.
 
 ## Where to change what
 

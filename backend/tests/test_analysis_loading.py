@@ -111,15 +111,6 @@ def test_startup_keeps_running_rows_outside_the_recent_window(db):
     assert list(found) == ["new", "live"]  # newest window first, then a live job it did not cover
 
 
-def test_readable_memory_skips_other_owners(db):
-    _paper("shared", None, "2020-01-01T00:00:00+00:00")
-    _paper("mine", "ada", "2020-02-01T00:00:00+00:00")
-    _paper("theirs", "bo", "2020-03-01T00:00:00+00:00")
-
-    assert [row["id"] for row in store.load_readable("")] == ["shared"]
-    assert [row["id"] for row in store.load_readable("ada")] == ["shared", "mine"]
-
-
 def test_a_restart_does_not_load_the_table_and_a_request_loads_one_owner(db, monkeypatch, tmp_path):
     for index in range(5):
         _paper(

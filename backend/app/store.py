@@ -293,14 +293,31 @@ def load_startup(recent: int) -> dict[str, dict]:
     return found
 
 
-def load_readable(owner: str) -> list[dict]:
-    """Analyses the chat memory may read: those with no owner, and `owner`'s when that is set.
-    Oldest first. Anyone else's rows are not loaded."""
-    rows = load_owned(None)
-    if owner:
-        rows.extend(load_owned(owner))
-        rows.sort(key=lambda row: (row.get("started") or "", row.get("id") or ""))
-    return rows
+def load_draft_checks(draft_id: str, owner: str | None) -> list[dict]:
+    """Draft checks for one draft and owner. The worker reads these for override
+    carry-over; loading every analysis would pull the whole history into the process."""
+    if _use_supabase():
+        query = (
+            _supabase()
+            .table("analyses")
+            .select("data")
+            .eq("data->>kind", "draft-check")
+            .eq("data->>draftId", draft_id)
+        )
+        if owner is None:
+            query = query.is_("data->>owner", "null")
+        else:
+            query = query.eq("data->>owner", owner)
+        rows = _execute_with_retry(query).data or []
+        return [row["data"] for row in rows]
+    with _sqlite() as database:
+        rows = database.execute(
+            "SELECT data FROM analyses WHERE json_extract(data, '$.kind') = ? "
+            "AND json_extract(data, '$.draftId') = ? "
+            "AND json_extract(data, '$.owner') IS ?",
+            ("draft-check", draft_id, owner),
+        ).fetchall()
+    return [json.loads(row["data"]) for row in rows]
 
 
 def load_all() -> dict[str, dict]:

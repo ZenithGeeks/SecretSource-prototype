@@ -35,19 +35,20 @@ docker compose up -d gateway worker
 curl http://localhost:8080/health
 ```
 
-`gateway` only accepts a request and puts the analysis on a Redis queue; `worker` is the
-process that actually runs it (see [ARCHITECTURE.md#services](../ARCHITECTURE.md#services)).
+`gateway` only accepts a request and puts the analysis, or an Author draft check, on a Redis
+queue; `worker` is the process that actually runs it (see [ARCHITECTURE.md#services](../ARCHITECTURE.md#services)).
 Starting `gateway` alone brings up its dependencies (`redis`, `grobid`) but not `worker`, so
-analyses would queue and never run.
+analyses and draft checks would queue and never run.
 
-Run more than one worker to run more analyses at once:
+Run more than one worker to run more jobs at once:
 `docker compose up -d --scale worker=3`, or start extra `python worker.py` processes outside
-compose. How many analyses run at once equals how many workers are running.
+compose. How many analyses and draft checks run at once equals how many workers are running.
+One worker runs one job at a time, so a draft check waits behind whatever that worker is already doing.
 
 Production uses Redis Cloud's free plan, which has no TLS. Anyone who can write to that Redis
-could queue a job, so the worker only runs `app.queue.run_analysis_job` (and its own failure
-callback) and refuses anything else, and jobs are stored as JSON, not pickle, for the same
-reason (`AnalysisWorker` in `app/queue.py`).
+could queue a job, so the worker only runs `app.queue.run_analysis_job` and
+`app.queue.run_draft_check_job` (and each job's own failure callback) and refuses anything else,
+and jobs are stored as JSON, not pickle, for the same reason (`AnalysisWorker` in `app/queue.py`).
 
 The gateway needs GROBID, ColBERT and an LLM endpoint. ColPali is optional. Their URLs come
 from `.env` (see the root [README](../README.md)).
@@ -61,7 +62,7 @@ python -m uvicorn app.main:app --port 8080
 ```
 
 You also need a Redis server reachable at `REDIS_URL`, and, in another terminal from the same
-`backend/` folder, `python worker.py` running the actual analyses.
+`backend/` folder, `python worker.py` running the analyses and draft checks.
 
 On the host, use `localhost` URLs in `.env`, not compose service names. The host also needs
 `dspy` and `pymupdf`, which `requirements.txt` installs.
@@ -99,14 +100,13 @@ default".
 | `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses and projects in Supabase instead of SQLite, and turn on login (see Login) |
 | `SESSION_DB_URL` | empty | Postgres URL where the chat agents keep their sessions (`app/sessions.py`); empty keeps them in memory, so a restart forgets them. ADK's tables go in the `adk` schema, never `public` |
-| `MEMORY_OWNER` | empty | the Supabase user id whose analyses the chat agents' `load_memory` may read, besides analyses without an owner |
 | `DIRECT_URL` | empty | used when `SESSION_DB_URL` is empty; it is the name Supabase's Connect dialog gives the session pooler URL |
 | `A2A_HOST`, `A2A_PORT` | `localhost`, `8002` | the address the A2A agent card tells callers to use (`a2a_server.py`), not the address the server binds |
 | `S2_API_KEY` | empty | Semantic Scholar key; without it most lookups are rate limited |
 | `UNPAYWALL_EMAIL` | empty | contact email that lets Unpaywall answer lookups |
 | `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
 | `PARALLEL_SOURCES` | `3` | cited papers downloaded and indexed at the same time |
-| `PARALLEL_CHECKS` | `3` | claims judged at the same time |
+| `PARALLEL_CHECKS` | `3` | claims, or draft-check citations, judged at the same time inside one worker. A worker runs one job at a time, so this is that worker's limit |
 | `PARALLEL_SOURCES_TOTAL` | `PARALLEL_SOURCES` | cited papers prepared at the same time inside one worker; a worker runs one analysis at a time, so this only limits that run |
 | `PARALLEL_CHECKS_TOTAL` | `PARALLEL_CHECKS` | claims judged at the same time inside one worker; a worker runs one analysis at a time, so this only limits that run |
 | `GATEWAY_PORT` | `8080` | port when started with `python -m app.main` |
@@ -220,7 +220,7 @@ backend/
 ├── adk_agents/          entry points for `adk web` (chat and analysis)
 ├── cli.py               terminal chat with the coordinator
 ├── a2a_server.py        the agents over A2A
-├── worker.py            runs analyses pulled off the queue (RQ worker process)
+├── worker.py            runs analyses and Author draft checks pulled off the queue (RQ worker)
 └── tests/
 ```
 
@@ -571,6 +571,51 @@ The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: 
 A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
 when the run does not say.
 
+#### `GET /researcher/gaps`
+
+What the caller's library leaves open, from verdicts already found (no LLM call). Three lists,
+newest paper first:
+
+- `notBacked`: claims that were checked but that no cited work backs or contradicts: `claim`,
+  `checked` (the works read), `analysis`, `claimIndex`.
+- `contradicted`: claims a cited work contradicts: `claim`, `for`, `against`, `analysis`,
+  `claimIndex`. Home's `conflicts` is the first 5 of this list.
+- `missing`: works cited by at least two claims that are not in the library: `paper`, `note`,
+  `identifier`, `analysis` (a paper that cites it). Home's `queue` is the first 5.
+
+### Assistant
+
+Questions about the caller's papers, answered as short statements that the judge checks before
+they count (`app/assistant.py`). A chat is an ADK session (`app/chats.py`), kept in Postgres when
+`SESSION_DB_URL` is set and in memory otherwise, where a restart loses it. Cloud Run needs the
+`SESSION_DB_URL` repo secret for that reason. Another user's chat is a `404`.
+
+| Route | Does |
+| --- | --- |
+| `POST /assistant/chats` | body `{"context"}`, optional; starts a chat: `{id, title, updated}` |
+| `GET /assistant/chats` | the caller's chats, newest first |
+| `GET /assistant/chats/{id}` | the chat, its `context` (the screen of the last question) and `messages` |
+| `POST /assistant/chats/{id}/messages` | body `{"question", "context"}`; the answer as server-sent events |
+
+`context` is `{"screen", "analysis", "node"}`, all optional. With `analysis`, or a graph `node`
+of an analysed paper (`a:<id>`) or of one of its claims (`c:<id>:<n>`), the answer comes from
+that paper; an analysis that is not the caller's is a `404`. Otherwise it comes from the
+passages of the papers the caller may open (`papers_of`).
+
+The events, one `data:` line each:
+
+| `type` | Fields | When |
+| --- | --- | --- |
+| `statement` | `index`, `text`, `source` (the PDF), `page` (of the passage, when the answer named one) | all at once, when the answer is written |
+| `verdict` | `index`, `verdict` (`supports`, `refutes`, `insufficient`, `unchecked`, `error`), `quote`, `reasoning` | as each check ends, in any order |
+| `done` | `statements` | last; `0` when the papers do not answer the question |
+| `error` | `message` | the answer failed; nothing follows |
+
+A statement whose verdict is not `supports` is not backed; the reply shows it marked, not
+hidden. The reply is saved to the chat once `done` is sent. After an `error`, or when the reader
+leaves first, the question stays in the chat with no reply. Two questions to one chat at once
+are both recorded: a write that finds the chat changed reads it again and retries.
+
 ### Author
 
 The Author role's own records: LaTeX drafts, the projects (a `.bib` plus drafts) they belong
@@ -603,30 +648,38 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 
 #### Draft checks
 
-`POST /author/drafts/{id}/check` → `{"id"}`. Every `\cite` in the draft's `.tex` files is
+`POST /author/drafts/{id}/check` → `{"id"}`. It records a `queued` stage and puts the check on
+the same Redis queue as a paper analysis (`app/queue.py`, `run_draft_check_job`). A worker runs
+it. Draft checks wait behind paper analyses already on that queue, and a check still running
+after 30 minutes is stopped (`JOB_TIMEOUT`). Every `\cite` in the draft's `.tex` files is
 verified against the work its bib entry names (an uploaded PDF, else DOI, arXiv id, URL or
-title), `PARALLEL_CHECKS` at a time and never over the gateway-wide limit. The same
-(claim, source) pair is judged once and read from the `cache` table after that. `409` while a check of that draft is running.
+title), `PARALLEL_CHECKS` at a time. A worker runs one job at a time, so that is the limit for
+that worker; each extra worker has its own. The same (claim, source) pair is judged once and
+read from the `cache` table after that. `409` while a check of that draft is queued or running.
+`503` when the queue cannot be reached; nothing is kept.
 
 | Route | Does |
 | --- | --- |
 | `GET /author/drafts/{id}/checks` | history, newest first: `{id, version, status, startedAt, finishedAt, summary, sinceLastCheck, previousVersion, previousId, unchanged}`; `unchanged` is a re-check of the same text and bibliography as the check before. Every timestamp is ISO 8601 in UTC with the offset written (`+00:00`) |
 | `GET /author/checks/{id}` | the same plus `citations` and `stages` |
-| `GET /author/checks/{id}/events` | SSE, like `/analyses/{id}/events`: `planned`, `checking`/`checked` per citation, then `done` or `error` |
+| `GET /author/checks/{id}/events` | SSE, like `/analyses/{id}/events`: `queued`, then `planned`, `checking`/`checked` per citation, then `done` or `error` |
 | `GET /author/checks/{id}/compare` | against the finished check before it: `{current, previous, rows}`; a row's `change` is `added`, `removed`, `fixed`, `new`, `changed` or `same` |
-| `PATCH /author/checks/{id}/citations/{cid}` | what the author did: `resolution` `{kind: replaced|overridden, note, previousKey}` (or `null` to reopen), and for a replacement the new `key`, `sourceRef`, `verdict`, `evidence` |
-| `DELETE /author/checks/{id}` | `409` while running |
+| `PATCH /author/checks/{id}/citations/{cid}` | what the author did: `resolution` `{kind: replaced|overridden, note, previousKey}` (or `null` to reopen), and for a replacement the new `key`, `sourceRef`, `verdict`, `evidence`. `409` while the check is still queued or running |
+| `DELETE /author/checks/{id}` | deletes a finished check. A queued check is cancelled first. A missing job is deleted too, and so is a started job whose worker record has expired. `409` only while a worker is running it. `503` when Redis cannot be reached. A finished or failed job whose snapshot was missed is read back from the store, then deleted |
 
 A citation is `{id, key, file, line, column, section, sentence, claim, verdict, sourceRef,
 evidence: {passage, pdf, page}, explanation, reason, message, resolution}`. An overridden
 resolution is carried over to the next check when the same key still cites the same sentence.
 `sinceLastCheck` is `{addedCitations, fixedIssues, newIssues}`.
 
-A draft check runs as an asyncio task inside the gateway, not on an RQ worker like an
-analysis. It needs the gateway to stay up until it finishes. While the client's event stream
-is open, Cloud Run keeps the instance. If the client disconnects, the gateway can scale to
-zero, and a deploy or crash also ends the task. On restart the check is marked "interrupted
-by a restart" and is not retried. Moving draft checks to RQ is tracked in #308.
+A draft check uses the same queue, worker and restart rule as a paper analysis. A gateway
+restart leaves it `running` while its RQ job is still queued or being run, and marks it
+`interrupted by a restart` only when that job is gone. Progress is the analysis SSE path:
+the worker publishes each stage and `useAuthorCheck` reads `GET /author/checks/{id}/events`.
+
+Deploy the worker with this code before the gateway that enqueues `run_draft_check_job`. An
+older worker refuses the job. No new service, queue or environment variable: the worker
+already has the store, `PAPERS_DIR` and `PARALLEL_CHECKS`.
 
 #### Projects and the Library
 

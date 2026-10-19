@@ -6,10 +6,12 @@ claim, cited paper or quote share the most words with the question. The coordina
 `load_memory` only when a question is about earlier work, such as "did we already check this
 citation?".
 
-Whose analyses it may read: the chat agents do not know who is asking (A2A has no login, and
-cli.py uses a fixed user id). So it never follows the caller's user id. It reads the analyses
-without an owner, which is every analysis when login is off, and the ones owned by
-MEMORY_OWNER, a Supabase user id the operator sets for this process.
+Whose analyses it may read: only the ones owned by the user_id ADK passes to search_memory,
+the same rule as the gateway's visible_to. A runner for signed-in users passes the Supabase
+user id, and one with login off passes SIGNED_OUT, which reads only analyses without an owner.
+A Supabase user id is never empty, so a signed-in user never reads the ownerless ones.
+cli.py has no login and uses SIGNED_OUT. a2a_server.py has none either, and ADK names its
+callers A2A_USER_<context id>, so it builds the service with as_user=SIGNED_OUT.
 """
 
 import asyncio
@@ -23,6 +25,7 @@ from google.adk.memory.memory_entry import MemoryEntry
 from google.genai import types
 
 from app import store
+from app.sessions import SIGNED_OUT
 
 RESULTS = 5  # findings returned per search: enough to answer, few enough for the model to read
 WORD = re.compile(r"[a-z0-9]+")
@@ -68,17 +71,19 @@ def _findings(analysis: dict):
             yield shown, f"{said} {unchecked.get('source', '')} {paper}"
 
 
-def readable_by(analysis: dict, owner: str) -> bool:
-    return analysis.get("owner") is None or (bool(owner) and analysis.get("owner") == owner)
+def owner_of(user_id: str) -> str | None:
+    """The analysis owner an ADK user id stands for: None for SIGNED_OUT, else the id itself."""
+    return None if user_id == SIGNED_OUT else user_id
 
 
-def search(query: str, analyses, owner: str = "", limit: int = RESULTS) -> list[MemoryEntry]:
-    """The findings that share the most words with the query, best first. Ties keep the newest
-    analysis first. Nothing is returned when no word matches."""
+def search(query: str, analyses, user_id: str, limit: int = RESULTS) -> list[MemoryEntry]:
+    """The findings in `user_id`'s own analyses that share the most words with the query, best
+    first. Ties keep the newest analysis first. Nothing is returned when no word matches."""
+    owner = owner_of(user_id)
     wanted = _words(query)
     scored = []
     for order, analysis in enumerate(analyses):
-        if not readable_by(analysis, owner):
+        if analysis.get("owner") != owner:
             continue
         for shown, matched in _findings(analysis):
             score = len(wanted & _words(matched))
@@ -97,16 +102,18 @@ def search(query: str, analyses, owner: str = "", limit: int = RESULTS) -> list[
 
 
 class AnalysisMemory(BaseMemoryService):
-    """ADK memory backed by the saved analyses. Read-only."""
+    """ADK memory backed by the saved analyses. Read-only. With `as_user`, every search reads
+    as that user, whatever user id the runner passes."""
 
-    def __init__(self, owner: str | None = None):
-        self.owner = os.getenv("MEMORY_OWNER", "") if owner is None else owner
+    def __init__(self, as_user: str | None = None):
+        self.as_user = as_user
 
     async def add_session_to_memory(self, session) -> None:
         return None  # the gateway saves analyses itself; a chat session adds nothing to them
 
     async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
-        # Ownerless rows, plus MEMORY_OWNER's. Not the whole table (#314).
-        analyses = await asyncio.to_thread(store.load_readable, self.owner)
-        memories = search(query, analyses, self.owner)
-        return SearchMemoryResponse(memories=memories)
+        if self.as_user is not None:
+            user_id = self.as_user
+        # Only this user's rows are read, not the whole table (#314).
+        analyses = await asyncio.to_thread(store.load_owned, owner_of(user_id))  # oldest first
+        return SearchMemoryResponse(memories=search(query, analyses, user_id))

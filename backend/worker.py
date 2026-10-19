@@ -1,4 +1,4 @@
-"""Runs analyses pulled off the queue (app/queue.py).
+"""Runs analyses and Author draft checks pulled off the queue (app/queue.py).
 
     python worker.py
 

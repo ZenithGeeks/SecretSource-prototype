@@ -94,8 +94,8 @@ paper it has not seen. This rule warns and does not block.
 
 ## Assistant answers, measured, not yet enforced
 
-The assistant in `docs/ideas/secretsource-assistant.md` is not built yet. These numbers come from
-two tests, each answering 20 questions as short statements that the judge then checks. In #504
+The assistant in `docs/ideas/secretsource-assistant.md` answers from `backend/app/assistant.py`
+since SCRUM-360; no screen calls it yet. These numbers come from two tests, each answering 20 questions as short statements that the judge then checks. In #504
 every question names one of the three decisive-check papers. In #506 no paper is named: 14
 questions are answered from the whole local library (about 30 papers) and 6 ask about topics it
 does not hold. They become rules when the first assistant PR lands.
@@ -106,10 +106,26 @@ does not hold. They become rules when the first assistant PR lands.
 | Slowest checked answer from the whole library, the same way | 19.3 to 27.1 s; 5 of 42 answers over 20 s | must fall under 20 s |
 | Statements the judge does not back | 1 to 3% about one paper, 0 to 1% from the library | must not rise above 3% |
 | Questions outside the library answered with no statements | 6 of 6 in every run | must stay 6 of 6 |
+| First statement of an answer, 5 people chatting at once (SCRUM-363) | median 8.1 s, p90 14.3 s | median must stay under 10 s |
+| Last verdict, one person asking about one paper, on 9arm with the cap of 3 | median 14.3 s and 12.2 s, slowest 19.0 s and 27.9 s (2 runs, 19 Oct 2026) | median must stay under 20 s, the one-pager's target |
+| Last verdict, 5 people chatting at once | median 61.7 s, p90 131.6 s | not a target; see below |
+| Statements not backed, 5 people chatting at once | 4% (7 of 183) | must stay under one third, the one-pager's ceiling |
 
 Checked by `python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh`, and the
 same with `assistant-library-questions.csv`, in the worker container with
 `PAPERS_DIR=/app/data/papers`, alone on the LLM gateway.
+
+The two rows for 5 people come from `python load_assistant.py <gateway> ../docs/eval/assistant-*questions.csv
+--users 5`: 40 questions through the chat routes, on a fresh gateway (each paper indexed in ColBERT the
+first time a check reads it) with the 9arm key's cap of 3 requests. A second run on the same gateway
+replays dspy's and the store's answer caches, so only a first run measures the work.
+
+The 20 s target holds for one person, not for 5 at once. The 9arm key allows 3 requests at a time, and a
+checked answer makes about 7 (one answer, up to 6 checks) at about 8 s each under load: 223 calls took
+605 s. Five people would need about 1.5 calls per answer to finish in 20 s. So with several people the
+statements come first, and the panel shows each verdict as it lands (Checking… until then). Re-adding
+a paper ColBERT already holds is not the cost: it takes 0.04 to 0.21 s, since the service skips
+papers whose content hash it already has.
 
 ## How quality and time are checked
 
@@ -119,6 +135,28 @@ same with `assistant-library-questions.csv`, in the worker container with
 | Analysis time | `python bench_analysis.py data/papers/<new paper>.pdf` in the gateway container | the same changes, by hand |
 
 Neither runs in CI: both need the LLM gateway and a GPU, which the shared CI runner does not have.
+
+## Where the system runs
+
+From 17 Oct 2026 the system is developed and run on the local stack only, until it is
+finished. Then it is deployed to Google Cloud in one planned release.
+
+| Rule | Number | Why |
+| --- | --- | --- |
+| Cloud Run services serving traffic | 0 (gateway, colbert, colpali and grobid at manual scaling, 0 instances) | each deploy and each idle GPU or CPU minute costs money on a university account, and the design is still changing |
+| Deploys to Google Cloud | none until the release | a half-finished pipeline in production gives teammates and testers wrong verdicts |
+
+What was switched off on 17 Oct 2026, and how to turn it back on at release time:
+
+| What | Off with | On again with |
+| --- | --- | --- |
+| Cloud Run services | `gcloud run services update <svc> --region asia-southeast1 --scaling=0` | `--scaling=auto --min=0` and the old max (gateway 1, colpali 2, colbert 10, grobid 3) |
+| Cloud Scheduler `scale-guard-gateway`, `gpu-guard-colpali` | `gcloud scheduler jobs pause` | `gcloud scheduler jobs resume`, after the services are back on automatic scaling |
+| Workflows `deploy-gateway`, `deploy` | `gh workflow disable` | `gh workflow enable` |
+
+Checked by `gcloud run services list` (every service shows manual scaling with 0 instances)
+and `gh workflow list --all`. A change that needs a cloud deploy before the release needs
+an entry under Exceptions first.
 
 ## Exceptions
 
