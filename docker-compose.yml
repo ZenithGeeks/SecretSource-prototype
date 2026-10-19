@@ -254,7 +254,6 @@ services:
       # What the agent card advertises back to callers, not what the server binds.
       A2A_HOST: ${A2A_HOST:-localhost}
       A2A_PORT: "8002"
-      MEMORY_OWNER: ${MEMORY_OWNER:-} # whose analyses load_memory may read, besides ownerless ones
     volumes:
       - ./data/papers:/app/data/papers
       - analyses:/app/data/db # the gateway's SQLite analyses, for load_memory when Supabase is not set
