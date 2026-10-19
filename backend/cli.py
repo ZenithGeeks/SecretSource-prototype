@@ -20,13 +20,13 @@ logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
 
 from app.agents.team import root_agent  # noqa: E402
-from app.memory import AnalysisMemory  # noqa: E402
+from app.memory import SIGNED_OUT, AnalysisMemory  # noqa: E402
 from app.sessions import session_service  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.genai import types  # noqa: E402
 
 APP_NAME = "secretsource"
-USER_ID = "user"
+USER_ID = SIGNED_OUT  # no login: load_memory reads the analyses without an owner
 
 
 async def ask(runner, session_id, text):

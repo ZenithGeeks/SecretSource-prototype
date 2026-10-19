@@ -100,7 +100,6 @@ default".
 | `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses and projects in Supabase instead of SQLite, and turn on login (see Login) |
 | `SESSION_DB_URL` | empty | Postgres URL where the chat agents keep their sessions (`app/sessions.py`); empty keeps them in memory, so a restart forgets them. ADK's tables go in the `adk` schema, never `public` |
-| `MEMORY_OWNER` | empty | the Supabase user id whose analyses the chat agents' `load_memory` may read, besides analyses without an owner |
 | `DIRECT_URL` | empty | used when `SESSION_DB_URL` is empty; it is the name Supabase's Connect dialog gives the session pooler URL |
 | `A2A_HOST`, `A2A_PORT` | `localhost`, `8002` | the address the A2A agent card tells callers to use (`a2a_server.py`), not the address the server binds |
 | `S2_API_KEY` | empty | Semantic Scholar key; without it most lookups are rate limited |
@@ -571,6 +570,39 @@ The knowledge graph: `stats`, `clusters`, `nodes`, `edges` (a paper to a claim: 
 `asserts`, `backs`, `contradicts`, `silent` or `unchecked`) and `paperEdges` (paper to paper).
 A paper node has `indexed`: `yes` when a public index knew the work, `no` when none did, empty
 when the run does not say.
+
+### Assistant
+
+Questions about the caller's papers, answered as short statements that the judge checks before
+they count (`app/assistant.py`). A chat is an ADK session (`app/chats.py`), kept in Postgres when
+`SESSION_DB_URL` is set and in memory otherwise, where a restart loses it. Cloud Run needs the
+`SESSION_DB_URL` repo secret for that reason. Another user's chat is a `404`.
+
+| Route | Does |
+| --- | --- |
+| `POST /assistant/chats` | body `{"context"}`, optional; starts a chat: `{id, title, updated}` |
+| `GET /assistant/chats` | the caller's chats, newest first |
+| `GET /assistant/chats/{id}` | the chat, its `context` (the screen of the last question) and `messages` |
+| `POST /assistant/chats/{id}/messages` | body `{"question", "context"}`; the answer as server-sent events |
+
+`context` is `{"screen", "analysis", "node"}`, all optional. With `analysis`, or a graph `node`
+of an analysed paper (`a:<id>`) or of one of its claims (`c:<id>:<n>`), the answer comes from
+that paper; an analysis that is not the caller's is a `404`. Otherwise it comes from the
+passages of the papers the caller may open (`papers_of`).
+
+The events, one `data:` line each:
+
+| `type` | Fields | When |
+| --- | --- | --- |
+| `statement` | `index`, `text`, `source` (the PDF), `page` (of the passage, when the answer named one) | all at once, when the answer is written |
+| `verdict` | `index`, `verdict` (`supports`, `refutes`, `insufficient`, `unchecked`, `error`), `quote`, `reasoning` | as each check ends, in any order |
+| `done` | `statements` | last; `0` when the papers do not answer the question |
+| `error` | `message` | the answer failed; nothing follows |
+
+A statement whose verdict is not `supports` is not backed; the reply shows it marked, not
+hidden. The reply is saved to the chat once `done` is sent. After an `error`, or when the reader
+leaves first, the question stays in the chat with no reply. Two questions to one chat at once
+are both recorded: a write that finds the chat changed reads it again and retries.
 
 ### Author
 

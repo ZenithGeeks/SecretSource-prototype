@@ -268,9 +268,9 @@ flowchart TD
 - A question about earlier work ("did we already check this?") goes to the coordinator's
   `load_memory` tool. The runners in `cli.py` and `a2a_server.py` pass `AnalysisMemory`
   (`app/memory.py`), which searches the saved analyses for the claims, cited papers and
-  quotes that share the most words with the question. It writes nothing. It reads analyses
-  without an owner and those owned by `MEMORY_OWNER`, never the caller's own user id,
-  because the chat agents do not know who is asking.
+  quotes that share the most words with the question. It writes nothing. It reads only the
+  analyses owned by the user id the runner passes. `cli.py` and `a2a_server.py` have no
+  login, so they read only the analyses without an owner.
 
 ### Analysis graph
 
@@ -537,6 +537,18 @@ from the user's analyses, without new LLM calls:
 
 `POST /researcher/projects` creates a project, and `POST /researcher/projects/{id}/papers`
 adds an analysis to it.
+
+## Assistant
+
+`backend/app/assistant.py` answers a question as at most 6 short statements, each from one
+passage, then judges each with `check_prepared`, the same check an analysis runs. With a paper
+on screen, the passages are that paper's (`AnswerAsStatements`). Otherwise they are the best of
+the caller's own papers in the ColBERT index: it holds every user's papers, so 64 passages are
+searched and the first 8 from the caller's papers kept (`AnswerFromLibrary`). `answer()` yields
+the statements, then each verdict as its check ends. The routes are `/assistant/chats` in
+`main.py`, and each chat is an ADK session (`app/chats.py`) whose state holds the screen the
+last question came from. The answer does not go through the coordinator agent: that would add
+at least one LLM turn to each question, and #504 and #506 measured the direct path.
 
 ## Where to change what
 

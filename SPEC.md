@@ -110,7 +110,8 @@ One DSPy step on 9arm reads a session's events and returns 0 to 5 facts.
   search waits until the eval shows word matching misses facts.
 - With login off (`user_id` empty), it returns only analyses without an owner, as today.
 - `add_session_to_memory` enqueues the distill job; it does no LLM work in the request.
-- The A2A server and `cli.py` keep `AnalysisMemory` and `MEMORY_OWNER`. They have no login.
+- The A2A server and `cli.py` keep `AnalysisMemory`. They have no login, so they read only
+  analyses without an owner.
 
 ### Gateway API
 
