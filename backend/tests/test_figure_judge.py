@@ -42,6 +42,7 @@ def test_an_insufficient_text_verdict_is_asked_again_with_the_figure(judge):
 
     assert judge.figures == [None, CROP]
     assert result["verdict"] == "supports"
+    assert (result["verdict_from"], result["judged_figure"]) == ("figure", "figure-2.png")
 
 
 def test_the_figure_is_judged_with_its_caption_and_not_the_passages(judge):
@@ -61,6 +62,7 @@ def test_a_text_verdict_that_settles_the_claim_is_kept_without_the_figure(judge,
 
     assert judge.figures == [None]
     assert result["verdict"] == text_verdict
+    assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
 
 
 def test_a_claim_with_the_cited_mark_never_gets_the_figure(judge):
@@ -77,3 +79,14 @@ def test_without_a_figure_crop_the_text_verdict_stands(judge, monkeypatch):
 
     assert judge.figures == [None]
     assert result["verdict"] == "insufficient"
+    assert result["verdict_from"] == "text"
+
+
+def test_without_passages_no_judge_call_gives_the_verdict(judge, monkeypatch):
+    monkeypatch.setattr(verify, "evidence_from", lambda claim, name: [])
+    monkeypatch.setattr(verify, "_visual", lambda claim, source: ([], "m"))
+
+    result = verify.check_prepared("The model scores 71.0.", "2112.01488", PAPER)
+
+    assert judge.figures == []
+    assert (result["verdict"], result["verdict_from"]) == ("insufficient", "none")

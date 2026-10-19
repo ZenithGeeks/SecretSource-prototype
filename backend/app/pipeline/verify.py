@@ -379,12 +379,15 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
         if not passages:
             return {"status": "ok", "claim": claim, "source": source.name,
                     "verdict": "insufficient", "quote": "", "reasoning": "no passages retrieved",
+                    "verdict_from": "none", "judged_figure": "",
                     "evidence": [], "pages": pages, "page_model": page_model,
                     "indexed_in": indexed_in, **version}
 
         if _judge is None:
             _judge = _build_judge()
         verdict = _judge(claim, passages)
+        # Which judge call gave the verdict, so an eval can tell a text flip from a figure one (#514).
+        verdict_from, judged_figure = "text", ""
         # Numbers read off a chart are often in no passage, so a claim the text cannot settle
         # is asked again about the top figure, with only its caption. With the passages next
         # to a figure, the judge read the text worse, and turned text it had found
@@ -394,8 +397,10 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
         if verdict["verdict"] == "insufficient" and figure and CITED_MARK not in claim:
             caption = _captions([hit for hit in pages if hit.get("image")][:1])
             verdict = _judge(claim, caption, figure)
+            verdict_from, judged_figure = "figure", figure.name
         return {"status": "ok", "claim": claim, "source": source.name,
-                **verdict, "evidence": evidence, "pages": pages,
+                **verdict, "verdict_from": verdict_from, "judged_figure": judged_figure,
+                "evidence": evidence, "pages": pages,
                 "page_model": page_model, "indexed_in": indexed_in, **version}
     except Exception as error:
         from app.pipeline.sources import tool_error

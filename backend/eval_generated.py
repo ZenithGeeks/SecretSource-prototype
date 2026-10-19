@@ -21,6 +21,7 @@ import statistics
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 
 import dspy
 from app import store
@@ -28,6 +29,14 @@ from app.pipeline import verify
 
 PAPERS = Path("data/papers")
 VERDICTS = ("supports", "refutes", "insufficient", "error")
+
+
+class Judged(NamedTuple):
+    """One claim's verdict in one run, and which judge call gave it."""
+
+    verdict: str
+    verdict_from: str  # text | figure | none
+    judged_figure: str  # the figure's file name when verdict_from is "figure"
 
 
 def load_claims(paths: list[Path]) -> list[dict]:
@@ -39,19 +48,21 @@ def load_claims(paths: list[Path]) -> list[dict]:
     return claims
 
 
-def judge(claim: dict, prepared: dict) -> str:
+def judge(claim: dict, prepared: dict) -> Judged:
     """The pipeline's verdict for one claim, or "error"."""
     if prepared["status"] != "ok":
-        return "error"
+        return Judged("error", "none", "")
     result = verify.check_prepared(claim["text"], claim["paper"], Path(prepared["path"]))
-    return result.get("verdict", "error") if result["status"] == "ok" else "error"
+    if result["status"] != "ok":
+        return Judged("error", "none", "")
+    return Judged(result["verdict"], result["verdict_from"], result["judged_figure"])
 
 
-def report(claims: list[dict], runs: list[dict[str, str]]) -> None:
+def report(claims: list[dict], runs: list[dict[str, Judged]]) -> None:
     """Accuracy per run and kind, the confusion counts, and the claims that changed verdict."""
     for kind in ("supports", "refutes", "all"):
         chosen = [c for c in claims if kind in ("all", c["kind"])]
-        scores = [sum(run[c["id"]] == c["kind"] for c in chosen) / len(chosen) for run in runs]
+        scores = [sum(run[c["id"]].verdict == c["kind"] for c in chosen) / len(chosen) for run in runs]
         spread = f" (spread {max(scores) - min(scores):.3f})" if len(scores) > 1 else ""
         print(
             f"{kind:<9} n={len(chosen):<4} accuracy per run "
@@ -59,9 +70,9 @@ def report(claims: list[dict], runs: list[dict[str, str]]) -> None:
             + f"; mean {statistics.mean(scores):.3f}{spread}"
         )
     for kind in ("supports", "refutes"):
-        counts = Counter(run[c["id"]] for run in runs for c in claims if c["kind"] == kind)
+        counts = Counter(run[c["id"]].verdict for run in runs for c in claims if c["kind"] == kind)
         print(f"expected {kind:<8} -> " + ", ".join(f"{v} {counts[v]}" for v in VERDICTS if counts[v]))
-    flipped = [c["id"] for c in claims if len({run[c["id"]] for run in runs}) > 1]
+    flipped = [c["id"] for c in claims if len({run[c["id"]].verdict for run in runs}) > 1]
     print(f"{len(flipped)} claims changed verdict between runs")
 
 
@@ -72,7 +83,7 @@ def main() -> None:
     parser.add_argument("--fresh", action="store_true", help="no answer cache: the judge answers every run")
     # The judge gateway allows 3 requests at once, and other callers share the key (#511).
     parser.add_argument("--workers", type=int, default=2, help="claims judged at once")
-    parser.add_argument("--out", type=Path, help="write every claim's verdicts here")
+    parser.add_argument("--out", type=Path, help="each claim's verdicts and which call gave them, here")
     parser.add_argument("--evidence-count", type=int, help="override verify.EVIDENCE_COUNT for this run")
     args = parser.parse_args()
 
@@ -94,9 +105,9 @@ def main() -> None:
     runs = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for run in range(1, args.runs + 1):
-            verdicts = list(pool.map(lambda c: judge(c, prepared[c["paper"]]), claims))
-            runs.append({c["id"]: v for c, v in zip(claims, verdicts, strict=True)})
-            accuracy = sum(runs[-1][c["id"]] == c["kind"] for c in claims) / len(claims)
+            judged = list(pool.map(lambda c: judge(c, prepared[c["paper"]]), claims))
+            runs.append({c["id"]: j for c, j in zip(claims, judged, strict=True)})
+            accuracy = sum(runs[-1][c["id"]].verdict == c["kind"] for c in claims) / len(claims)
             print(f"run {run}: {accuracy:.3f}", flush=True)
 
     for name in sorted({c["claim_file"] for c in claims}):
@@ -105,7 +116,14 @@ def main() -> None:
     if args.out:
         with args.out.open("w", encoding="utf-8") as file:
             for claim in claims:
-                file.write(json.dumps({**claim, "verdicts": [run[claim["id"]] for run in runs]}) + "\n")
+                judged = [run[claim["id"]] for run in runs]
+                record = {
+                    **claim,
+                    "verdicts": [j.verdict for j in judged],
+                    "verdict_from": [j.verdict_from for j in judged],
+                    "judged_figure": [j.judged_figure for j in judged],
+                }
+                file.write(json.dumps(record) + "\n")
 
 
 if __name__ == "__main__":
