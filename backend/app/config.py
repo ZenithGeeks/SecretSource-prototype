@@ -122,7 +122,9 @@ CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 ke
 # How many cited papers are downloaded and indexed at the same time. Indexing uses the
 # GPU services, so keep it small.
 PARALLEL_SOURCES = int(os.getenv("PARALLEL_SOURCES", "3"))
-# How many claims are judged at the same time. Judging only searches and asks the LLM.
+# How many claims (a paper analysis) or citations (a draft check) are judged at the same time.
+# A worker runs one job at a time, so this is that worker's limit. Judging only searches and
+# asks the LLM.
 PARALLEL_CHECKS = int(os.getenv("PARALLEL_CHECKS", "3"))
 # The same two limits for the whole gateway, across every analysis running at once. Each run
 # keeps its own limit above too, so runs take turns. Unset, they keep the load of one run.

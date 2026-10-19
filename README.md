@@ -328,7 +328,7 @@ backend/            gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/teacher/        Google Classroom: OAuth, roster sync, essay-check review
   a2a_server.py       the agent tree over A2A (docker compose --profile a2a)
   cli.py              agent REPL
-  worker.py           runs analyses pulled off the Redis queue (RQ worker process)
+  worker.py           runs analyses and Author draft checks pulled off the Redis queue (RQ worker)
 frontend/           React + Vite UI, served by nginx which proxies /api to the gateway
 services/colbert/   ColBERTv2 text retrieval (HTTP + MCP, per-paper vector files)
 services/colpali/   ColPali visual retrieval (HTTP + MCP, per-paper vector files, opt-in)

@@ -1,9 +1,10 @@
-"""The analysis queue. `POST /analyses` enqueues here (app/main.py); a separate `worker.py`
-process pulls jobs off it and runs the pipeline. Redis also carries cross-process progress —
-see app/main.py's `_publish` (publishes each snapshot) and its Pub/Sub subscriber (applies them).
+"""The job queue. `POST /analyses` and `POST /author/drafts/{id}/check` enqueue here
+(app/main.py, app/author/router.py); a separate `worker.py` process pulls jobs off it and
+runs them. Redis also carries cross-process progress — see app/main.py's `_publish`
+(publishes each snapshot) and its Pub/Sub subscriber (applies them).
 
 RQ needs a synchronous redis-py connection; this module's client is that one, not an
-asyncio one. `run_analysis_job` is the thing a worker actually runs.
+asyncio one. `run_analysis_job` and `run_draft_check_job` are what a worker actually runs.
 """
 
 import asyncio
@@ -58,7 +59,11 @@ def pubsub_client() -> redis.asyncio.Redis:
 
 
 def run_analysis_job(
-    analysis_id: str, paper: str, verify: bool, owner: str | None, stages: list[dict] | None = None,
+    analysis_id: str,
+    paper: str,
+    verify: bool,
+    owner: str | None,
+    stages: list[dict] | None = None,
     started: str | None = None,
 ) -> dict:
     """What a worker process actually runs for one analysis (RQ jobs are sync, so this
@@ -158,8 +163,16 @@ def enqueue_analysis(
     started: str | None = None,
 ):
     return analysis_queue().enqueue(
-        run_analysis_job, analysis_id, paper, verify, owner, stages, started,
-        job_id=analysis_id, job_timeout=JOB_TIMEOUT, on_failure=Callback(_on_analysis_job_failure),
+        run_analysis_job,
+        analysis_id,
+        paper,
+        verify,
+        owner,
+        stages,
+        started,
+        job_id=analysis_id,
+        job_timeout=JOB_TIMEOUT,
+        on_failure=Callback(_on_analysis_job_failure),
     )
 
 
@@ -221,26 +234,171 @@ def cancel_if_queued(analysis_id: str) -> bool:
     return True
 
 
+def run_draft_check_job(
+    check_id: str,
+    owner: str | None,
+    draft_id: str,
+    draft_title: str,
+    version: int,
+    content_hash: str | None,
+    stages: list[dict] | None = None,
+    started_at: str | None = None,
+) -> dict:
+    """What a worker process runs for one Author draft check.
+
+    The gateway has already recorded the row and the queued stage. This rebuilds that row in
+    the worker (RQ jobs are sync, so the async check runs in its own event loop) and loads the
+    draft's earlier checks from the store: the worker does not share the gateway's memory, and
+    an override on the previous check is carried forward from those rows. Stages go out through
+    the same `_publish` path as an analysis, so the gateway's subscriber keeps the SSE stream.
+    """
+    from app import main
+    from app.author.router import DRAFT_CHECK, _run_draft_check, new_draft_check
+
+    async def run():
+        # Only this draft's other checks. Loading every analysis would pin the worker's
+        # memory to the whole history, and a paper analysis is not an override source.
+        loaded: list[str] = []
+        try:
+            for row in main.store.load_all().values():
+                if row.get("id") == check_id:
+                    continue
+                if (
+                    row.get("kind") != DRAFT_CHECK
+                    or row.get("draftId") != draft_id
+                    or row.get("owner") != owner
+                ):
+                    continue
+                main.analyses[row["id"]] = row
+                loaded.append(row["id"])
+
+            check = new_draft_check(
+                check_id,
+                owner,
+                draft_id,
+                draft_title,
+                version,
+                content_hash,
+                started_at or "",
+                list(stages or []),
+            )
+            main.analyses[check_id] = check
+            main.streams[check_id] = asyncio.Queue()
+
+            attributes = {
+                SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.CHAIN.value,
+                SpanAttributes.INPUT_VALUE: draft_title,
+                "draft_check.id": check_id,
+                "draft.id": draft_id,
+            }
+            with tracer.start_as_current_span("draft-check", attributes=attributes):
+                await _run_draft_check(check_id, owner)
+            return {"id": check_id, "status": main.analyses[check_id]["status"]}
+        finally:
+            main.analyses.pop(check_id, None)
+            main.streams.pop(check_id, None)
+            for sibling_id in loaded:
+                main.analyses.pop(sibling_id, None)
+
+    return asyncio.run(run())
+
+
+def _on_draft_check_job_failure(job: Job, connection, *exc_info) -> None:
+    """Runs in the worker when a draft check raises something `_run_draft_check` never sees
+    (a timeout, a crash in the job wrapper), so the check never stays "running"."""
+    from app import store
+    from app.author.logic import now_iso
+    from app.author.router import new_draft_check
+
+    check_id = job.args[0]
+    stored = store.load_all().get(check_id)
+    if stored is not None:
+        check = stored
+    else:
+        stages = job.args[6] if len(job.args) > 6 else job.kwargs.get("stages") or []
+        started_at = job.args[7] if len(job.args) > 7 else job.kwargs.get("started_at")
+        check = new_draft_check(
+            check_id,
+            job.args[1],
+            job.args[2],
+            job.args[3],
+            job.args[4],
+            job.args[5],
+            started_at or "",
+            list(stages or []),
+        )
+
+    if check["status"] == "running":
+        _, exc_value, _ = exc_info
+        message = str(exc_value) if exc_value else "the worker stopped before this check finished"
+        check["status"] = "error"
+        check["message"] = message
+        check["finishedAt"] = now_iso()
+        check["stages"].append({"stage": "error", "message": message, "at": round(time.time(), 1)})
+        store.save(check)
+        # The gateway process is not this one. Publishing is how its open SSE stream ends.
+        try:
+            redis_connection().publish(f"analysis:{check_id}", json.dumps(check, default=str))
+        except Exception as error:
+            logger.warning("publishing failed-job snapshot for %s failed: %s", check_id, error)
+
+
+def enqueue_draft_check(
+    check_id: str,
+    owner: str | None,
+    draft_id: str,
+    draft_title: str,
+    version: int,
+    content_hash: str | None,
+    stages: list[dict],
+    started_at: str | None = None,
+):
+    return analysis_queue().enqueue(
+        run_draft_check_job,
+        check_id,
+        owner,
+        draft_id,
+        draft_title,
+        version,
+        content_hash,
+        stages,
+        started_at,
+        job_id=check_id,
+        job_timeout=JOB_TIMEOUT,
+        on_failure=Callback(_on_draft_check_job_failure),
+    )
+
+
 ANALYSIS_JOB = f"{__name__}.run_analysis_job"
 FAILURE_CALLBACK = f"{__name__}._on_analysis_job_failure"
+DRAFT_CHECK_JOB = f"{__name__}.run_draft_check_job"
+DRAFT_FAILURE_CALLBACK = f"{__name__}._on_draft_check_job_failure"
+
+# An analysis job may only name the analysis failure callback, and a draft check only its own.
+# A callback is itself a function RQ imports and calls.
+_ALLOWED_FAILURE = {
+    ANALYSIS_JOB: {None, FAILURE_CALLBACK},
+    DRAFT_CHECK_JOB: {None, DRAFT_FAILURE_CALLBACK},
+}
 
 
 class AnalysisWorker(SimpleWorker):
-    """Runs analysis jobs and nothing else.
+    """Runs this queue's jobs and nothing else.
 
     Anyone who can write to Redis can queue a job that names any importable function, and RQ
     would call it. JSON (not pickle) keeps reading a job from running code; this check keeps the
-    worker from calling anything but the analysis job and its own failure callback.
+    worker from calling anything but an analysis, a draft check, and that job's own failure callback.
     """
 
     def perform_job(self, job: Job, queue: Queue) -> bool:
+        allowed = _ALLOWED_FAILURE.get(job.func_name)
         if (
-            job.func_name != ANALYSIS_JOB
+            allowed is None
             or job._success_callback_name
             or job._stopped_callback_name
-            or job._failure_callback_name not in (None, FAILURE_CALLBACK)
+            or job._failure_callback_name not in allowed
         ):
-            self.log.warning("refusing job %s: %s is not an analysis job", job.id, job.func_name)
-            self.handle_job_failure(job, queue, exc_string="refused: not an analysis job")
+            self.log.warning("refusing job %s: %s is not an allowed job", job.id, job.func_name)
+            self.handle_job_failure(job, queue, exc_string="refused: not an allowed job")
             return False
         return super().perform_job(job, queue)

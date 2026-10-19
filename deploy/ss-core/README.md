@@ -1,6 +1,6 @@
 # Worker deploys on ss-core
 
-The RQ worker that runs analyses lives on ss-core, in `/var/lib/docker/secretsource-worker`
+The RQ worker that runs analyses and Author draft checks lives on ss-core, in `/var/lib/docker/secretsource-worker`
 (the repo root, unpacked, with its own `.env`). `.github/workflows/deploy-worker.yml` deploys
 it on every push to main that touches `backend/`, by running `deploy-worker.sh` as root on
 the self-hosted runner there (#412).

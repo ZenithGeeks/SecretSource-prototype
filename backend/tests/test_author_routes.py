@@ -52,9 +52,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
     monkeypatch.setattr(main, "PAPERS_DIR", tmp_path / "papers")
     monkeypatch.setattr(main.dependencies, "report", lambda: {"degraded": False, "dependencies": []})
-    # The route hands the run to _spawn; the tests run the coroutine themselves under
+    # The route enqueues an RQ job; these tests run _run_draft_check themselves under
     # asyncio.run (as test_checks.py does), so nothing races the TestClient's loop.
-    monkeypatch.setattr(author, "_spawn", lambda coroutine: coroutine.close())
+    monkeypatch.setattr(author, "enqueue_draft_check", lambda *args, **kwargs: None)
     # The index lookup for cited DOIs (#421) goes to Crossref; these tests stay offline.
     monkeypatch.setattr(author, "reference_checks", lambda entries: {})
     # A title-only entry is looked up by title first (#436); these tests check it by its title.
@@ -213,7 +213,8 @@ def test_a_draft_check_verifies_every_cite_and_persists_per_version(client, monk
         "counts": {"supports": 0, "refutes": 2, "insufficient": 0, "unavailable": 1, "unchecked": 1},
         "open": 2,
     }
-    assert [s["stage"] for s in check["stages"]][0] == "planned" and check["stages"][-1]["stage"] == "done"
+    stages = [s["stage"] for s in check["stages"]]
+    assert stages[0] == "queued" and "planned" in stages and stages[-1] == "done"
     # the pipeline was called once per resolvable citation, with the plain claim and the
     # citation's place marked
     assert sorted(calls) == sorted(
@@ -395,8 +396,101 @@ def test_a_second_check_while_one_runs_is_refused(client):
     first = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
     refused = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA)
     assert refused.status_code == 409 and first in refused.json()["detail"]
-    # a running check is left alone by delete
+    # a check whose worker has started is left alone by delete (no queued job to cancel)
     assert client.delete(f"/author/checks/{first}", headers=ADA).status_code == 409
+
+
+def test_starting_a_check_records_a_queued_stage_and_enqueues_it(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(author, "enqueue_draft_check", lambda *args: calls.append(args))
+    draft = make_draft(client)
+
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    run = main.analyses[check_id]
+    assert run["status"] == "running"
+    assert [stage["stage"] for stage in run["stages"]] == ["queued"]
+    assert run["stages"][0]["message"] == "waiting for a free worker"
+    assert main.streams[check_id].get_nowait() == run["stages"][0]
+    assert calls == [
+        (
+            check_id,
+            "user-ada",
+            draft["id"],
+            "Related work",
+            1,
+            run["contentHash"],
+            [run["stages"][0]],
+            run["startedAt"],
+        )
+    ]
+
+
+def test_starting_a_check_returns_503_and_leaves_nothing_when_enqueue_fails(client, monkeypatch):
+    def boom(*args):
+        raise ConnectionError("redis is down")
+
+    monkeypatch.setattr(author, "enqueue_draft_check", boom)
+    draft = make_draft(client)
+
+    response = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA)
+
+    assert response.status_code == 503
+    assert not [row for row in main.analyses.values() if row.get("draftId") == draft["id"]]
+    # the reserved row is gone, so a later Re-check is accepted
+    monkeypatch.setattr(author, "enqueue_draft_check", lambda *args: None)
+    assert client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).status_code == 200
+
+
+class _Channel:
+    def __init__(self):
+        self.published = []
+
+    def publish(self, channel, message):
+        self.published.append((channel, message))
+
+
+def test_a_queued_check_is_visible_on_every_gateway_instance(client, monkeypatch):
+    """Instance A takes Re-check; instance B serves the next read. B only hears of the check
+    through the Redis snapshot A sends while the job is still queued."""
+    channel = _Channel()
+    monkeypatch.setattr("app.queue.redis_connection", lambda: channel)
+    draft = make_draft(client)
+
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    main.analyses.clear()
+    main.streams.clear()
+    assert client.get(f"/author/checks/{check_id}", headers=ADA).status_code == 404
+    for name, message in channel.published:
+        assert name == f"analysis:{check_id}"
+        main._apply_snapshot(json.loads(message))
+
+    response = client.get(f"/author/checks/{check_id}", headers=ADA)
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert [stage["stage"] for stage in response.json()["stages"]] == ["queued"]
+
+
+def test_a_finished_check_can_be_deleted(client, monkeypatch):
+    stub_verify(monkeypatch)
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+
+    assert client.delete(f"/author/checks/{check_id}", headers=ADA).json() == {"deleted": check_id}
+    assert client.get(f"/author/checks/{check_id}", headers=ADA).status_code == 404
+
+
+def test_deleting_a_queued_check_cancels_its_job(client, monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(author, "cancel_if_queued", lambda check_id: cancelled.append(check_id) or True)
+    draft = make_draft(client)
+    check_id = client.post(f"/author/drafts/{draft['id']}/check", headers=ADA).json()["id"]
+
+    assert client.delete(f"/author/checks/{check_id}", headers=ADA).json() == {"deleted": check_id}
+
+    assert cancelled == [check_id]
+    assert check_id not in main.analyses
 
 
 def test_resolving_a_citation_is_kept_and_an_override_survives_a_recheck(client, monkeypatch):
@@ -744,8 +838,12 @@ def test_delete_all_scoped_to_one_role_keeps_the_other_roles_data(client, monkey
     client.post("/author/sources", headers=ADA, json={"title": "S", "authorsList": ["A B"], "year": 2020})
     researcher_project = client.post("/researcher/projects", headers=ADA, json={"name": "Survey"}).json()
     main.analyses["paper1"] = {
-        "id": "paper1", "paper": "x.pdf", "status": "done", "owner": "user-ada",
-        "stages": [], "claims": [],
+        "id": "paper1",
+        "paper": "x.pdf",
+        "status": "done",
+        "owner": "user-ada",
+        "stages": [],
+        "claims": [],
     }
 
     def author_rows():
