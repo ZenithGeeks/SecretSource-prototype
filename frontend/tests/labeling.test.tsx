@@ -415,6 +415,18 @@ describe('the workspace', () => {
     expect(second).toHaveClass('line-clamp-3')
   })
 
+  it('looks for the whole focused passage in the reference, not only its first 300 characters', async () => {
+    const candidate = gateway.session.claims[0].candidates[0]
+    const short = candidate.passage
+    candidate.passage = `${'recall rose by 4 points on every benchmark we tried. '.repeat(10)}The end.`
+    try {
+      await open()
+      await waitFor(() => expect(api.findInPaper).toHaveBeenCalledWith('refB.pdf', candidate.passage, 5))
+    } finally {
+      candidate.passage = short
+    }
+  })
+
   it('starts with the reference alone when no choice is stored, at any width', async () => {
     window.localStorage.removeItem('labeler.paperView')
     await open()

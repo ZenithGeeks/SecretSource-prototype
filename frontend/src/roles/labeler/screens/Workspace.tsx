@@ -304,7 +304,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const found = useQuery({
     queryKey: ['find', focus?.file, focus?.passage, focus?.page],
-    queryFn: () => api.findInPaper(focus!.file, focus!.passage.slice(0, 300), focus?.page ?? undefined),
+    // The whole passage: a 300-character prefix highlighted only the start of a long one.
+    queryFn: () => api.findInPaper(focus!.file, focus!.passage, focus?.page ?? undefined),
     enabled: Boolean(focus?.passage),
     staleTime: Infinity,
     retry: false,
