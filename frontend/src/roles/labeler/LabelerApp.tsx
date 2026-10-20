@@ -39,7 +39,9 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
       role="Labeler"
       roleIcon={ClipboardCheck}
       onChangeRole={onChangeRole && leave(onChangeRole)}
-      wide
+      // The workspace shows two PDFs and a label panel, so it takes the whole window.
+      wide={analysis ? 'full' : true}
+      foldable
     >
       {analysis ? <Workspace analysisId={analysis} onDirtyChange={setUnsaved} /> : <Queue onOpen={setAnalysis} />}
     </AppShell>

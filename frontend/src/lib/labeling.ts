@@ -428,6 +428,15 @@ export function displayOrder(claim: WorkClaim): Candidate[] {
   return papers.flatMap((id) => claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank))
 }
 
+/** The passage to open first for a claim added by hand: the top-scoring one, taken from the
+ * reference its sentence cites ("[b47]") when the search found that reference. ColBERT scores for
+ * one claim can be compared across references: the query is the same. */
+export function bestCandidate(claim: WorkClaim, references: Reference[]): Candidate | undefined {
+  const cited = new Set(references.filter((r) => r.ref && claim.sentence.includes(`[${r.ref}]`)).map((r) => r.reference_id))
+  const byScore = [...claim.candidates].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+  return byScore.find((c) => cited.has(c.reference_id)) ?? byScore[0]
+}
+
 /** True when a draft is what was last saved (nothing saved yet reads as an empty draft). */
 export const sameDraft = (draft: Draft, saved: Draft | undefined) =>
   JSON.stringify(draft) === JSON.stringify(saved ?? emptyDraft())

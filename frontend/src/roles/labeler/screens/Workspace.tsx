@@ -8,7 +8,7 @@
  */
 
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Empty, LoadingScreen } from '../../../components/ui'
@@ -16,6 +16,7 @@ import { api } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
+  bestCandidate,
   buildSave,
   byline,
   displayOrder,
@@ -48,14 +49,20 @@ import { SelectionBar, type Picked } from '../components/SelectionBar'
 const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
-type PaperView = 'both' | 'reference'
-/** "Reference + this paper" stacks the two PDFs rather than putting them side by side. A two-column paper
- * needs a page about 800px wide to read, and the page content stops at 110rem, so two columns
- * never get more than ~650px each (at 1920, ~450px: text about 5px high). */
+type PaperView = 'both' | 'reference' | 'side'
+const VIEW_NAMES: Record<PaperView, string> = {
+  side: 'Side by side',
+  both: 'Stacked',
+  reference: 'Reference only',
+}
+/** Side by side needs room: a two-column paper needs a page about 700px wide to read. With the
+ * label panel (27rem) and the sidebar folded, two columns get that from 1600px up, so the choice
+ * is offered only there; narrower windows fall back to the stacked view. */
+const SIDE_BY_SIDE_FROM = 1600
 const storedView = (): PaperView => {
   try {
     const stored = window.localStorage.getItem(VIEW_KEY)
-    if (stored === 'reference' || stored === 'both') return stored
+    if (stored === 'reference' || stored === 'both' || stored === 'side') return stored
   } catch {
     // no stored choice: the reference alone, the paper that gets judged
   }
@@ -162,7 +169,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     }
   }
   const wide = useMinWidth(1280)
-  const both = paperView === 'both'
+  const roomy = useMinWidth(SIDE_BY_SIDE_FROM)
+  const view: PaperView = paperView === 'side' && !roomy ? 'both' : paperView
+  const both = view === 'both'
+  const side = view === 'side'
   const save = useSaveLabels(session.analysis_id)
 
   const go = (id: string) => {
@@ -173,6 +183,20 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     setPicked(null)
     save.reset()
   }
+
+  // A claim added by hand has no passages until its search answers, so it opens on the first
+  // reference at page 1. When the passages arrive, open the best one, once per claim, unless the
+  // person has already picked a passage.
+  const autoOpened = useRef(new Set<string>())
+  useEffect(() => {
+    if (claim?.origin !== 'human_added' || autoOpened.current.has(claim.claim_id)) return
+    const best = bestCandidate(claim, session.references)
+    if (!best) return
+    autoOpened.current.add(claim.claim_id)
+    if (!focus || focus.key.startsWith('ref:')) {
+      setFocus({ file: best.reference_file, passage: best.passage, page: best.page, key: best.cand_id })
+    }
+  }, [claim, focus, session.references])
 
   // Moving to another claim keeps the draft of the one being left: it stays marked unsaved until
   // it is saved, and nothing is written that the person did not save.
@@ -290,7 +314,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const left_: Target = {
     paper: session.paper_file,
-    label: 'This paper, where the claim is made',
+    role: 'under-review',
+    label: session.title,
     quote: claim.sentence || claim.claim,
     source: claimSource,
     page: claimSource?.page ?? claim.page ?? 1,
@@ -298,6 +323,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   const shown = focus && session.references.find((r) => r.file === focus.file)
   const right: Target | null = focus && {
     paper: focus.file,
+    role: 'reference',
     // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
     label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
     detail: shown ? byline(shown) : undefined,
@@ -449,18 +475,18 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const viewToggle = (
     <div role="group" aria-label="Which papers to show" className="flex rounded-lg border border-border-subtle p-0.5">
-      {(['both', 'reference'] as const).map((view) => (
+      {(roomy ? (['side', 'both', 'reference'] as const) : (['both', 'reference'] as const)).map((option) => (
         <button
-          key={view}
+          key={option}
           type="button"
-          aria-pressed={paperView === view}
-          onClick={() => choosePaperView(view)}
+          aria-pressed={view === option}
+          onClick={() => choosePaperView(option)}
           className={cn(
             'min-h-11 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-            paperView === view ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+            view === option ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
           )}
         >
-          {view === 'both' ? 'Reference + this paper' : 'Reference only'}
+          {VIEW_NAMES[option]}
         </button>
       ))}
     </div>
@@ -494,8 +520,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_27rem] gap-4">
           <div className="flex min-h-0 min-w-0 flex-col gap-3">
             {selection}
-            {/* The reference, the paper being judged, on top; the claim's paper below it. */}
-            <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : 'grid')}>
+            {/* Side by side: the paper under review left, the reference right, as they are read.
+                Stacked: the reference on top, since it is the paper being judged. */}
+            <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
+              {side && viewer(left_, 'paper')}
               {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
               {both && viewer(left_, 'paper')}
             </div>

@@ -5,7 +5,9 @@
  * researcher/writer/teacher share one layout.
  *
  * `sidebar` goes under the nav (the researcher's recent analyses); `wide` lets the shell grow
- * for a screen that shows a PDF page beside its content. `panel` is a drawer on the right, below
+ * for a screen that shows a PDF page beside its content, and `wide="full"` drops the width cap
+ * (the labeler's two PDFs side by side). `foldable` adds a button that folds the sidebar to a
+ * rail of nav icons, remembered in this browser. `panel` is a drawer on the right, below
  * the toolbar (the Ask panel), and `toolbarLead` comes first among the toolbar's actions.
  *
  * Toolbar: pass `breadcrumb` (["Analyses", "group-norm-2018.pdf"], the last item is the
@@ -16,7 +18,7 @@
  * Figma: R/Sidebar (Redesign 2026) for the sidebar, the Results screen for the toolbar.
  */
 
-import { ChevronRight, LogOut, Menu, Settings as SettingsIcon, X } from 'lucide-react'
+import { ChevronRight, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, X } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -29,6 +31,15 @@ import { Brand } from './Brand'
 import { RoleChip } from './RoleChip'
 
 type Icon = ComponentType<{ className?: string }>
+
+const FOLDED_KEY = 'shell.sidebarFolded'
+const readFolded = () => {
+  try {
+    return window.localStorage.getItem(FOLDED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 export type NavEntry<K extends string = string> = { key: K; label: string; icon: Icon }
 
@@ -223,6 +234,7 @@ export function AppShell<K extends string>({
   sidebar,
   breadcrumb,
   wide = false,
+  foldable = false,
   panel,
   toolbarLead,
   children,
@@ -241,7 +253,8 @@ export function AppShell<K extends string>({
   sidebar?: ReactNode
   /** Shows the sticky toolbar with this trail on its left (last item = current page). */
   breadcrumb?: string[]
-  wide?: boolean
+  wide?: boolean | 'full'
+  foldable?: boolean
   panel?: ReactNode
   toolbarLead?: ReactNode
   children: ReactNode
@@ -250,6 +263,16 @@ export function AppShell<K extends string>({
   // a drawer opened from a top bar.
   const [menuOpen, setMenuOpen] = useState(false)
   const [actionsEl, setActionsEl] = useState<HTMLElement | null>(null)
+  const [foldedChoice, setFoldedChoice] = useState(readFolded)
+  const folded = foldable && foldedChoice
+  const fold = (next: boolean) => {
+    setFoldedChoice(next)
+    try {
+      window.localStorage.setItem(FOLDED_KEY, next ? '1' : '0')
+    } catch {
+      // the choice just is not remembered
+    }
+  }
 
   useEffect(() => {
     if (!menuOpen) return
@@ -350,12 +373,58 @@ export function AppShell<K extends string>({
 
       {/* Solid (not translucent) and viewport-tall, so the profile footer stays pinned to the
           bottom of the screen, not the bottom of a long page. */}
-      <aside className="hidden w-[248px] shrink-0 flex-col gap-[18px] overflow-y-auto border-r border-border-subtle bg-surface px-3 pt-[18px] pb-3.5 lg:sticky lg:top-0 lg:flex lg:h-screen">
-        <div className="px-2">
-          <Brand compact />
-        </div>
-        {sidebarContent}
-      </aside>
+      {folded ? (
+        <aside
+          aria-label="Sidebar, folded"
+          className="hidden w-14 shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen"
+        >
+          <button
+            type="button"
+            onClick={() => fold(false)}
+            aria-label="Open the sidebar"
+            title="Open the sidebar"
+            className="flex size-10 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
+          >
+            <PanelLeftOpen className="size-4" />
+          </button>
+          <nav aria-label="Main" className="flex flex-col gap-0.5">
+            {nav.map(({ key, label, icon: NavIcon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => navigate(key)}
+                aria-label={label}
+                title={label}
+                aria-current={active === key ? 'page' : undefined}
+                className={cn(
+                  'flex size-10 items-center justify-center rounded-lg',
+                  active === key ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-accent-soft/60',
+                )}
+              >
+                <NavIcon className="size-4" />
+              </button>
+            ))}
+          </nav>
+        </aside>
+      ) : (
+        <aside className="hidden w-[248px] shrink-0 flex-col gap-[18px] overflow-y-auto border-r border-border-subtle bg-surface px-3 pt-[18px] pb-3.5 lg:sticky lg:top-0 lg:flex lg:h-screen">
+          <div className="flex items-center justify-between px-2">
+            <Brand compact />
+            {foldable && (
+              <button
+                type="button"
+                onClick={() => fold(true)}
+                aria-label="Fold the sidebar"
+                title="Fold the sidebar"
+                className="flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
+              >
+                <PanelLeftClose className="size-4" />
+              </button>
+            )}
+          </div>
+          {sidebarContent}
+        </aside>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {breadcrumb && (
@@ -374,7 +443,7 @@ export function AppShell<K extends string>({
             <main
               className={cn(
                 'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-                wide ? 'max-w-[110rem]' : 'max-w-6xl',
+                wide === 'full' ? 'max-w-none' : wide ? 'max-w-[110rem]' : 'max-w-6xl',
               )}
             >
               {children}
