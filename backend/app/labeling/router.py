@@ -29,7 +29,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app import auth, config
 from app.auth import current_user
-from app.labeling import dspy_export, ledger, pool, review, scopus
+from app.labeling import dspy_export, identity, ledger, pool, review, scopus
 from app.labeling.identity import annotator
 from app.labeling.schema import (
     TABS,
@@ -647,6 +647,34 @@ async def review_claim(
     # The judges can take a while; the heartbeats keep a proxy from closing a quiet stream.
     events = main._keep_alive(_review_events(store, stamp, claim, saved))
     return StreamingResponse(events, media_type="text/event-stream")
+
+
+async def review_for(analysis_id: str, claim_number: int, user: str | None) -> list[dict]:
+    """The AI's review of claim `claim_number` (1-based, as in the claim bar) for `user`, all at
+    once, for the MCP server. The same rules as the page's review: only a claim the caller saved,
+    labels stay as they are, and what it found goes to the reviews tab.
+
+    Raises:
+        HTTPException: 404 for an analysis the caller may not label or a claim number it does not
+            have, 409 for a claim the caller has not saved.
+    """
+    analysis = await owned_analysis(analysis_id, user)
+    built = build_session(analysis)
+    claims = built["claims"]
+    if not 1 <= claim_number <= len(claims):
+        raise HTTPException(404, f"this paper has claims 1 to {len(claims)}, not {claim_number}")
+    claim = claims[claim_number - 1]
+    who = await asyncio.to_thread(identity.annotator_for, user)
+    me = user or who  # as labeler_id: with login off there is one shared space
+    store = _store()
+    saved = await asyncio.to_thread(_saved_claim, store, built["paper_id"], me, claim["claim_id"])
+    if saved is None:
+        raise HTTPException(409, "save this claim in the labeler before asking for a review")
+    findings = [finding.model_dump() async for finding in review.review(claim, saved)]
+    row = {**_stamp(who, me, built["paper_id"]), "claim_id": claim["claim_id"]}
+    row["findings"] = json.dumps(findings, ensure_ascii=False)
+    await asyncio.to_thread(store.append, "reviews", [row])
+    return findings
 
 
 def _saved_claim(store, paper_id: str, me: str, claim_id: str) -> review.Saved | None:

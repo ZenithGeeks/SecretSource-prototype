@@ -1,9 +1,10 @@
 """The screen agent's tools as an MCP server at /mcp/, for coding agents such as Claude Code or Codex.
 
 The tool list comes from screen_agent's own tools through ADK's adk_to_mcp_tool_type, so an MCP
-client reads the same descriptions as the screen agent. list_papers runs here. The screen tools
-run in the caller's open tab (app/screen_bridge.py). Callers come through Gatehouse, which
-checks their key (app/auth.py, gatehouse_user). docs/agent-tools.md says how to connect.
+client reads the same descriptions as the screen agent, plus review_claim, the labeler's review.
+list_papers and review_claim run here. The screen tools run in the caller's open tab
+(app/screen_bridge.py). Callers come through Gatehouse, which checks their key (app/auth.py,
+gatehouse_user). docs/agent-tools.md says how to connect.
 """
 
 import contextlib
@@ -17,26 +18,46 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from app import screen_bridge
 from app.auth import gatehouse_user
+from app.labeling import router as labeling
 
 server = Server("secretsource-screen")
 _sessions: StreamableHTTPSessionManager | None = None  # set while the app runs, by running()
 
 
+async def review_claim(analysis_id: str, claim_number: int) -> dict:
+    """Review a claim the person labeled in the labeler, as Review in Ask AI does: it checks what
+    they saved (passages left out, levels without a reason) and what the judge reads in the
+    passages behind each level, and lists what it finds. It never changes a label, and it works
+    only on a claim the person has saved. It takes a minute or more.
+
+    Args:
+        analysis_id: the paper's analysis id, from list_papers or the labeler's address (?analysis=).
+        claim_number: the claim's number in the labeler's claim bar, from 1.
+    """
+    raise NotImplementedError  # call_tool runs it with the caller; this only declares the tool
+
+
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
-    """The screen agent's tools, with the descriptions and arguments the screen agent reads."""
+    """The screen agent's tools and review_claim, with the descriptions and arguments they declare."""
     return list(_tools().values())
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> dict:
-    """Run a tool for the caller: list_papers here, a screen tool in the caller's tab."""
+    """Run a tool for the caller: list_papers and review_claim here, a screen tool in the caller's tab."""
     from app.agents.screen import SCREEN_TOOL_NAMES, papers_for  # see _tools for why not at the top
 
     # handle_mcp put the caller there before MCP saw the request.
     user = server.request_context.request.state.user
     if name == "list_papers":
         return {"papers": await papers_for(user)}
+    if name == "review_claim":
+        try:
+            findings = await labeling.review_for(arguments["analysis_id"], arguments["claim_number"], user)
+        except HTTPException as error:
+            raise ValueError(error.detail) from None
+        return {"findings": findings}
     if name not in SCREEN_TOOL_NAMES:
         raise ValueError(f"there is no tool named {name}")
     try:
@@ -66,6 +87,7 @@ def _tools() -> dict[str, types.Tool]:
         # A tool with no arguments comes out as {}; MCP needs an object schema.
         mcp_tool.inputSchema = mcp_tool.inputSchema or {"type": "object", "properties": {}}
         tools[mcp_tool.name] = mcp_tool
+    tools["review_claim"] = adk_to_mcp_tool_type(FunctionTool(review_claim))
     return tools
 
 

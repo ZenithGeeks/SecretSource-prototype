@@ -72,6 +72,11 @@ Code, Codex or any other MCP client. The client takes the screen agent's place: 
 and the person's open tab runs each screen tool with the cursor. `list_papers` runs on the
 gateway. `fill_field` still waits for Apply in the tab, up to 120 s.
 
+MCP also has one tool the screen agent does not: `review_claim(analysis_id, claim_number)`, the
+labeler's Review from Ask AI. It runs on the gateway with the same rules as the button: only a
+claim the caller has saved, it never changes a label, and what it found goes to the reviews tab
+(`docs/labeling.md`). It needs no tab, and it can take over a minute.
+
 1. Open SecretSource with `?connect=agent` in the address (or open Ask, choose Do it and press
    "Connect Claude Code or Codex"), check what the agent may do, and press Allow. The tab then
    holds `/api/agent/bridge` open (`backend/app/screen_bridge.py`) and shows an Agent pill
@@ -102,6 +107,26 @@ gateway. `fill_field` still waits for Apply in the tab, up to 120 s.
    [mcp_servers.secretsource]
    url = "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/"
    env_http_headers = { "apikey" = "GATEHOUSE_KEY" }
+   tool_timeout_sec = 300  # review_claim can run past Codex's 60 s default
+   ```
+
+   VS Code reads `.vscode/mcp.json` and fills in only its own variables (`${env:NAME}`,
+   `${input:id}`); `${GATEHOUSE_KEY}` there fails with "Variable `GATEHOUSE_KEY` not found". This
+   entry asks for the key the first time and keeps it in VS Code's secret storage:
+
+   ```json
+   {
+     "inputs": [
+       { "type": "promptString", "id": "gatehouse-key", "description": "Gatehouse key", "password": true }
+     ],
+     "servers": {
+       "secretsource": {
+         "type": "http",
+         "url": "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/",
+         "headers": { "apikey": "${input:gatehouse-key}" }
+       }
+     }
+   }
    ```
 
    Keep the trailing slash: `/mcp` answers with a redirect. With sign-in off (local stack with no

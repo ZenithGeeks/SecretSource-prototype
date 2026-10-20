@@ -24,10 +24,16 @@ const CANNOT = ['Save, delete or upload anything', 'Start or stop an analysis']
 
 const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
 
-/** Where each agent reads its MCP servers, and the entry that adds SecretSource. */
+/**
+ * Where each agent reads its MCP servers, the entry that adds SecretSource, and how it gets the
+ * Gatehouse key. VS Code fills in only its own variables (`${env:NAME}`, `${input:id}`), so its
+ * entry asks for the key and VS Code keeps it.
+ */
 const CLIENTS = {
   'Claude Code': {
     file: '.mcp.json in your project',
+    key: 'set it as the GATEHOUSE_KEY environment variable',
+    after: 'then restart Claude Code',
     config: `{
   "mcpServers": {
     "secretsource": {
@@ -40,9 +46,29 @@ const CLIENTS = {
   },
   Codex: {
     file: '~/.codex/config.toml',
+    key: 'set it as the GATEHOUSE_KEY environment variable',
+    after: 'then restart Codex',
     config: `[mcp_servers.secretsource]
 url = "${MCP_URL}"
-env_http_headers = { "apikey" = "GATEHOUSE_KEY" }`,
+env_http_headers = { "apikey" = "GATEHOUSE_KEY" }
+tool_timeout_sec = 300`,
+  },
+  'VS Code': {
+    file: '.vscode/mcp.json in your project',
+    key: 'keep it at hand',
+    after: 'VS Code asks for the key the first time and keeps it in its secret storage',
+    config: `{
+  "inputs": [
+    { "type": "promptString", "id": "gatehouse-key", "description": "Gatehouse key", "password": true }
+  ],
+  "servers": {
+    "secretsource": {
+      "type": "http",
+      "url": "${MCP_URL}",
+      "headers": { "apikey": "\${input:gatehouse-key}" }
+    }
+  }
+}`,
   },
 }
 type Client = keyof typeof CLIENTS
@@ -172,7 +198,7 @@ function SetupHelp() {
   const [wide] = useState(() => window.matchMedia?.('(min-width: 1024px)').matches ?? false)
   const [client, setClient] = useState<Client>('Claude Code')
   const [copied, setCopied] = useState(false)
-  const { file, config } = CLIENTS[client]
+  const { file, key, after, config } = CLIENTS[client]
   const copy = () => {
     void navigator.clipboard?.writeText(config).then(() => setCopied(true))
   }
@@ -182,7 +208,7 @@ function SetupHelp() {
         First time? Add SecretSource to your agent
         <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
       </summary>
-      <div role="group" aria-label="Your agent" className="mt-2 mb-3 grid grid-cols-2 rounded-xl border border-border-subtle bg-surface p-0.5">
+      <div role="group" aria-label="Your agent" className="mt-2 mb-3 grid grid-cols-3 rounded-xl border border-border-subtle bg-surface p-0.5">
         {(Object.keys(CLIENTS) as Client[]).map((name) => (
           <button
             key={name}
@@ -202,9 +228,9 @@ function SetupHelp() {
         ))}
       </div>
       <ol className="mb-2 flex list-decimal flex-col gap-1 pl-4 leading-5">
-        <li>Get a Gatehouse key for the email you sign in with, and set it as GATEHOUSE_KEY.</li>
+        <li>Get a Gatehouse key for the email you sign in with, and {key}.</li>
         <li>
-          Add this to {file}, then restart {client}.
+          Add this to {file}; {after}.
         </li>
       </ol>
       <div className="relative">
