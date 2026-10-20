@@ -323,7 +323,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   // `where` is set when the claim was selected in the paper: that text is its sentence.
   const addClaim = (text: string, where: { sentence: string; page: number | null } = { sentence: '', page: null }) => {
-    const id = `${session.paper_id}#h-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
+    // Not crypto.randomUUID: browsers only have it on https and localhost, and teammates may
+    // open the app on plain http at a Tailscale or LAN address. getRandomValues works on both.
+    const suffix = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, '0')).join('')
+    const id = `${session.paper_id}#h-${suffix}`
     const added: WorkClaim = { claim_id: id, claim: text, section: '', source: null, candidates: [], origin: 'human_added', ...where }
     setExtra((all) => [...all, added])
     setDrafts((all) => ({ ...all, [id]: { ...emptyDraft(), status: 'accepted' } }))
