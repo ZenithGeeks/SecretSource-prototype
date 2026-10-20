@@ -2,7 +2,20 @@
  * one extra tab. `getSettingsTabs` is the single place a role's tab set is assembled, so
  * SettingsModal itself never needs to know which role it's showing. */
 
-import { Bell, CircleCheck, Download, GraduationCap, Microscope, Pen, Sparkles, UserCog, UserRound, Users2, Waypoints } from 'lucide-react'
+import {
+  Bell,
+  CircleCheck,
+  ClipboardCheck,
+  Download,
+  GraduationCap,
+  Microscope,
+  Pen,
+  Sparkles,
+  UserCog,
+  UserRound,
+  Users2,
+  Waypoints,
+} from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
 
 import type { Role } from '../screens/Onboarding'
@@ -25,6 +38,7 @@ export const ROLE_NAV: { id: Role; label: string; icon: Icon }[] = [
   { id: 'writer', label: 'Author', icon: Pen },
   { id: 'researcher', label: 'Researcher', icon: Microscope },
   { id: 'teacher', label: 'Teacher', icon: GraduationCap },
+  { id: 'labeler', label: 'Labeler', icon: ClipboardCheck },
 ]
 
 export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRole: () => void): SettingsTabDef[] {
@@ -56,6 +70,8 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
     { id: 'checking', label: 'Checking', icon: CircleCheck, content: <CheckingSection />, group: 'viewing' },
   ]
 
+  // A labeler downloads their labels from the paper list, and Checking is about citations.
+  if (viewingRole === 'labeler') return tabs.filter((tab) => tab.id !== 'data' && tab.id !== 'checking')
   if (viewingRole === 'researcher') {
     tabs.push({
       id: 'field-map',
