@@ -17,12 +17,21 @@ export function AskInput({
   papers,
   disabled,
   placeholder,
+  label = 'Your question',
+  className = 'w-full bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed',
+  menuClassName = 'absolute bottom-full left-[-0.75rem] z-20 mb-3 w-[calc(100%+1.25rem)]',
 }: {
   draft: string
   onChange: (draft: string) => void
   papers: PaperRef[]
   disabled: boolean
   placeholder: string
+  /** The field's accessible name. */
+  label?: string
+  /** The field's own look; the panel's bare field by default. */
+  className?: string
+  /** Where the menu sits. */
+  menuClassName?: string
 }) {
   const [active, setActive] = useState(0)
   // The reader pressed Escape on this draft; typing again brings the menu back.
@@ -72,19 +81,19 @@ export function AskInput({
         }}
         onKeyDown={onKeyDown}
         disabled={disabled}
-        aria-label="Your question"
+        aria-label={label}
         aria-autocomplete="list"
         aria-controls={open ? 'ask-suggestions' : undefined}
         aria-activedescendant={open ? `ask-option-${current}` : undefined}
         placeholder={placeholder}
-        className="w-full bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed"
+        className={className}
       />
       {open && (
         <ul
           id="ask-suggestions"
           role="listbox"
           aria-label={draft.startsWith('/') && !draft.includes(' ') ? 'Commands' : 'Papers'}
-          className="absolute bottom-full left-[-0.75rem] z-20 mb-3 flex max-h-64 w-[calc(100%+1.25rem)] flex-col overflow-y-auto rounded-xl border border-border-subtle bg-surface p-1 shadow-lg"
+          className={cn('flex max-h-64 flex-col overflow-y-auto rounded-xl border border-border-subtle bg-surface p-1 shadow-lg', menuClassName)}
         >
           {options.map((option, index) => (
             <li

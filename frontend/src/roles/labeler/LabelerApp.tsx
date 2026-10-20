@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react'
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { SettingsModal } from '../../components/SettingsModal'
+import { useAgentConnection } from '../../components/useAgentConnection'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
 import { Queue } from './screens/Queue'
@@ -28,6 +29,13 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
   }
   const openPaper = (id: string) => leave(() => setAnalysis(id))()
   usePaperNotices(openPaper)
+  // A coding agent over MCP (docs/agent-tools.md) can open the queue or a paper and point at claims.
+  const agent = useAgentConnection({
+    screen: analysis ? 'workspace' : 'papers',
+    screens: ['papers'],
+    openScreen: () => leave(() => setAnalysis(null))(),
+    openPaper,
+  })
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -50,9 +58,13 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
       // The workspace shows two PDFs and a label panel, so it takes the whole window.
       wide={analysis ? 'full' : true}
       foldable
+      // The labeler has no toolbar of its own; one shows while an agent is connected, to hold its pill.
+      breadcrumb={agent.pill ? ['Papers to label'] : undefined}
+      toolbarLead={agent.pill}
       notifications={<PaperBell onOpen={openPaper} />}
     >
       {analysis ? <Workspace analysisId={analysis} onDirtyChange={setUnsaved} /> : <Queue onOpen={setAnalysis} />}
+      {agent.overlay}
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

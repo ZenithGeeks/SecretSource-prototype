@@ -30,13 +30,19 @@ const gateway = vi.hoisted(() => ({
     others: {},
   },
   streamed: [] as { path: string; body: unknown }[],
+  tools: [] as { path: string; body: unknown }[],
+  toolResult: {} as Record<string, unknown>,
   events: [] as unknown[],
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
   ...(await original<typeof import('../src/lib/api')>()),
-  request: vi.fn(async (path: string) => {
+  request: vi.fn(async (path: string, init?: RequestInit) => {
     if (path.startsWith('/labeling/sessions/')) return gateway.session
+    if (path.startsWith('/agent/tools/')) {
+      gateway.tools.push({ path, body: JSON.parse(String(init?.body)) })
+      return gateway.toolResult
+    }
     throw new Error(`unexpected ${path}`)
   }),
   postEvents: vi.fn(async (path: string, body: unknown, onEvent: (event: unknown) => void) => {
@@ -79,6 +85,7 @@ describe('Ask AI in the labeler', () => {
   beforeEach(() => {
     gateway.session.saved = { claims: [], candidates: [], labels: [] }
     gateway.streamed = []
+    gateway.tools = []
     gateway.events = []
     window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   })
@@ -149,5 +156,21 @@ describe('Ask AI in the labeler', () => {
     expect(unchecked).toHaveTextContent("Can't check")
     expect(within(backed).getByText('What the passage says')).toBeInTheDocument()
     expect(within(backed).getByText('“recall rose by 4 points”')).toBeInTheDocument()
+  })
+
+  it('runs a /command on the open paper, and says what is wrong with one that cannot run', async () => {
+    gateway.toolResult = { claims: 2, saved: 1, reviewed: 0, next_unsaved: { number: 2, claim: 'Method Z is faster.', passages: [] } }
+    await openAsk()
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: '/labeling_progress' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(await screen.findByText(/Saved 1 of 2 claims/)).toBeInTheDocument()
+    expect(gateway.tools).toEqual([{ path: '/agent/tools/labeling_progress', body: { analysis_id: 'a1' } }])
+
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: '/nope' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(await screen.findByText(/There is no \/nope command/)).toBeInTheDocument()
+    expect(gateway.tools).toHaveLength(1)
   })
 })

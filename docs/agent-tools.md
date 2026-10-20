@@ -50,7 +50,7 @@ example `/get_claim @Lost in the Middle 2`. A command runs the tool through
 `POST /agent/tools/{name}` (`backend/app/agent_runs.py`) with the caller's own data, and its result
 shows as statements (`/check_text`, `/find_support`) or as a note. A command that takes a paper
 uses the one that is open when none is named. Commands are not saved in the chat history.
-`/ask_library` is not a command: a plain question does the same.
+`/ask_library` is not a command: a plain question does the same. The labeler's Ask AI question box takes the same commands, always on the open paper (no `@` list there). The labeler can also be connected to a coding agent over MCP: `?connect=agent` shows the connect screen, and `read_screen` lists its claims, passages and references.
 
 ## Targets
 
