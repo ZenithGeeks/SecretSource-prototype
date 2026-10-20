@@ -81,35 +81,47 @@ describe('the labeler queue', () => {
     gateway.downloadFails = false
     gateway.fetched.length = 0
     onOpen.mockClear()
+    window.history.replaceState(null, '', '/')
     vi.restoreAllMocks()
   })
 
+  // The papers table: one <tr> per paper after the header row.
+  const titlesIn = (table: HTMLElement) =>
+    within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell')[0].querySelector('.line-clamp-2')?.textContent)
+  const rowOf = (table: HTMLElement, title: string) => within(table).getAllByRole('row').find((row) => row.querySelector('.line-clamp-2')?.textContent === title)!
+
   it('lists only the papers brought in for labeling, the viewer\'s own topic first', async () => {
     renderQueue()
-    const list = await screen.findByRole('region', { name: 'Papers to label' })
-    const titles = within(list).getAllByText(/paper$|^10\.1\//).map((el) => el.textContent)
-    expect(titles).toEqual(['NLP paper', '10.1/new', 'HPC paper', '10.1/closed'])
-    expect(within(list).getAllByText(/your topic/)).toHaveLength(2) // the two NLP papers
+    const table = await screen.findByRole('table')
+    expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'HPC paper', '10.1/closed'])
+    expect(within(table).getAllByText(/your topic/)).toHaveLength(2) // the two NLP papers
+    expect(within(table).getAllByRole('columnheader').map((th) => th.textContent)).toEqual([
+      'Paper', 'Topic', 'Status', 'My progress', 'Also labeled by', 'Added by', 'Actions',
+    ])
   })
 
   it('opens a ready paper, shows one being read, and says why another failed', async () => {
     renderQueue()
-    const list = await screen.findByRole('region', { name: 'Papers to label' })
-    fireEvent.click(within(list).getByRole('button', { name: /NLP paper/ }))
+    const table = await screen.findByRole('table')
+    fireEvent.click(within(table).getByRole('button', { name: 'NLP paper (Continue)' }))
     expect(onOpen).toHaveBeenCalledWith('x2')
-    expect(within(list).getByRole('button', { name: /reading the paper/ })).toBeDisabled()
-    expect(within(list).getByRole('alert')).toHaveTextContent('no open-access PDF known for DOI:10.1/closed')
+    const reading = rowOf(table, '10.1/new')
+    expect(within(reading).getByText('Reading…')).toBeInTheDocument()
+    expect(within(reading).queryByRole('button', { name: /10\.1\/new \(/ })).toBeNull() // cannot be opened yet
+    expect(within(table).getByRole('alert')).toHaveTextContent('no open-access PDF known for DOI:10.1/closed')
+    expect(within(rowOf(table, '10.1/closed')).getByText('Could not be read')).toBeInTheDocument()
   })
 
   it('lets the person who added a paper remove it', async () => {
     renderQueue()
-    const list = await screen.findByRole('region', { name: 'Papers to label' })
-    const removes = within(list).getAllByRole('button', { name: 'Remove' })
+    const table = await screen.findByRole('table')
+    const removes = within(table).getAllByRole('button', { name: /^Remove / })
     expect(removes).toHaveLength(3) // x2, x3, x4 are mine; x1 is someone else's
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    fireEvent.click(removes[0])
+    fireEvent.click(within(table).getByRole('button', { name: 'Remove NLP paper' }))
     expect(confirm).toHaveBeenCalledWith("Remove this paper from the team's list? Labels already saved are kept.")
     await waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/papers/x2/topic', body: { topic: '' } }]))
+    expect(onOpen).not.toHaveBeenCalled() // Remove does not also open the row
   })
 
   it('says who added a failed paper, and that only they can try again or remove it', async () => {
@@ -119,12 +131,12 @@ describe('the labeler queue', () => {
     })
     try {
       renderQueue()
-      const list = await screen.findByRole('region', { name: 'Papers to label' })
-      const row = within(list).getByRole('button', { name: /3712285/ }).closest('li')!
+      const table = await screen.findByRole('table')
+      const row = rowOf(table, '10.1145/3712285.3771787')
       expect(within(row).getByRole('alert')).toHaveTextContent('Only Nuttadon can try again or remove it.')
-      expect(within(row).queryByRole('button', { name: 'Try again' })).toBeNull()
-      expect(within(row).queryByRole('button', { name: 'Remove' })).toBeNull()
-      expect(within(list).getByText(/HPC · added by Nuttadon/)).toBeInTheDocument()
+      expect(within(row).queryByRole('button', { name: /Try again/ })).toBeNull()
+      expect(within(row).queryByRole('button', { name: /Remove/ })).toBeNull()
+      expect(within(rowOf(table, 'HPC paper')).getAllByRole('cell')[5]).toHaveTextContent('Added by: Nuttadon')
     } finally {
       gateway.pool.papers.pop()
     }
@@ -132,18 +144,18 @@ describe('the labeler queue', () => {
 
   it('lets the person who added a failed paper try it again', async () => {
     renderQueue()
-    const list = await screen.findByRole('region', { name: 'Papers to label' })
-    const row = within(list).getByRole('button', { name: /10\.1\/closed/ }).closest('li')!
+    const table = await screen.findByRole('table')
+    const row = rowOf(table, '10.1/closed')
     expect(within(row).getByRole('alert')).toHaveTextContent('Try again, or remove it.')
-    fireEvent.click(within(row).getByRole('button', { name: 'Try again' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'Try again 10.1/closed' }))
     await waitFor(() => expect(gateway.posts).toEqual([{ path: '/labeling/papers/x4/retry', body: undefined }]))
   })
 
   it('does nothing when the person declines to remove a paper', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderQueue()
-    const list = await screen.findByRole('region', { name: 'Papers to label' })
-    fireEvent.click(within(list).getAllByRole('button', { name: 'Remove' })[0])
+    const table = await screen.findByRole('table')
+    fireEvent.click(within(table).getAllByRole('button', { name: /^Remove / })[0])
     expect(confirm).toHaveBeenCalledOnce()
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(gateway.puts).toEqual([])
@@ -151,26 +163,26 @@ describe('the labeler queue', () => {
 
   it('shows how far the viewer is through each paper and who else labeled it', async () => {
     renderQueue()
-    const list = await screen.findByRole('region', { name: 'Papers to label' })
-    expect(within(list).getByText('2 of 5 claims decided by you')).toBeInTheDocument()
-    expect(within(list).getByText('0 of 3 claims decided by you')).toBeInTheDocument()
-    const bar = within(list).getByRole('progressbar', { name: /NLP paper/ })
+    const table = await screen.findByRole('table')
+    expect(within(table).getByText('2 of 5 claims')).toBeInTheDocument()
+    expect(within(table).getByText('0 of 3 claims')).toBeInTheDocument()
+    const bar = within(table).getByRole('progressbar', { name: /NLP paper/ })
     expect(bar).toHaveAttribute('aria-valuenow', '2')
     expect(bar).toHaveAttribute('aria-valuemax', '5')
-    expect(within(list).getByText('Also labeled by Somchai')).toBeInTheDocument() // not Chanya: that is the viewer
-    expect(within(list).getAllByText(/Also labeled by/)).toHaveLength(1)
+    const labeledBy = within(rowOf(table, 'NLP paper')).getAllByRole('cell')[4]
+    expect(labeledBy).toHaveTextContent('Somchai') // not Chanya: that is the viewer
+    expect(labeledBy).not.toHaveTextContent('Chanya')
   })
 
   it('says Label, Continue or Review depending on how much is judged', async () => {
     gateway.pool.papers.push({ analysis_id: 'x5', title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
-      const list = await screen.findByRole('region', { name: 'Papers to label' })
-      const action = (name: RegExp) => within(within(list).getByRole('button', { name })).getByText(/^(Label|Continue|Review)$/).textContent
-      expect(action(/^HPC paper/)).toBe('Label')
-      expect(action(/^NLP paper/)).toBe('Continue')
-      expect(action(/^Finished paper/)).toBe('Review')
-      expect(within(list).getByText('All 4 claims decided by you')).toBeInTheDocument()
+      const table = await screen.findByRole('table')
+      expect(within(table).getByRole('button', { name: 'HPC paper (Label)' })).toBeInTheDocument()
+      expect(within(table).getByRole('button', { name: 'NLP paper (Continue)' })).toBeInTheDocument()
+      expect(within(table).getByRole('button', { name: 'Finished paper (Review)' })).toBeInTheDocument()
+      expect(within(table).getByText('All 4 claims')).toBeInTheDocument()
     } finally {
       gateway.pool.papers.pop()
     }
@@ -180,12 +192,78 @@ describe('the labeler queue', () => {
     gateway.pool.papers.unshift({ analysis_id: 'x6', title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
-      const list = await screen.findByRole('region', { name: 'Papers to label' })
-      const titles = within(list).getAllByText(/paper$|^10\.1\//).map((el) => el.textContent)
-      expect(titles).toEqual(['NLP paper', '10.1/new', 'Done NLP paper', 'HPC paper', '10.1/closed'])
+      const table = await screen.findByRole('table')
+      expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'Done NLP paper', 'HPC paper', '10.1/closed'])
     } finally {
       gateway.pool.papers.shift()
     }
+  })
+
+  it('filters by topic and status together, with counts for each choice', async () => {
+    renderQueue()
+    const table = await screen.findByRole('table')
+    expect(screen.getByRole('status')).toHaveTextContent('4 papers')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Topic' }))
+    const topics = screen.getByRole('group', { name: 'Topic' })
+    expect(within(topics).getByRole('checkbox', { name: /NLP/ }).closest('label')).toHaveTextContent('NLP2')
+    fireEvent.click(within(topics).getByRole('checkbox', { name: /NLP/ }))
+    expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new'])
+
+    fireEvent.click(screen.getByRole('button', { name: /^Status/ }))
+    const statuses = screen.getByRole('group', { name: 'Status' })
+    // Counts follow the other filters: of the two NLP papers, one is ready and one is being read.
+    expect(within(statuses).getByRole('checkbox', { name: /Ready/ }).closest('label')).toHaveTextContent('Ready1')
+    expect(within(statuses).getByRole('checkbox', { name: /Could not be read/ }).closest('label')).toHaveTextContent('Could not be read0')
+    fireEvent.click(within(statuses).getByRole('checkbox', { name: /Ready/ }))
+    expect(within(statuses).getByRole('checkbox', { name: /Ready/ })).toBeChecked()
+    expect(titlesIn(table)).toEqual(['NLP paper'])
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 4 papers')
+    expect(window.location.search).toContain('topic=NLP')
+  })
+
+  it('lists "You" first under Added by and matches any of the chosen people', async () => {
+    renderQueue()
+    const table = await screen.findByRole('table')
+    fireEvent.click(screen.getByRole('button', { name: 'Added by' }))
+    const people = screen.getByRole('group', { name: 'Added by' })
+    expect(within(people).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['You3', 'Nuttadon1'])
+    fireEvent.click(within(people).getByRole('checkbox', { name: /Nuttadon/ }))
+    expect(titlesIn(table)).toEqual(['HPC paper'])
+    fireEvent.click(within(people).getByRole('checkbox', { name: /You/ }))
+    expect(titlesIn(table)).toHaveLength(4)
+  })
+
+  it('filters by my progress and by words in the title', async () => {
+    renderQueue()
+    const table = await screen.findByRole('table')
+    fireEvent.click(screen.getByRole('button', { name: 'My progress' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'My progress' })).getByRole('checkbox', { name: /Started/ }))
+    expect(titlesIn(table)).toEqual(['NLP paper'])
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles' }), { target: { value: 'hpc' } })
+    expect(titlesIn(table)).toEqual(['HPC paper'])
+  })
+
+  it('says which filters left nothing, and clears them from there', async () => {
+    renderQueue()
+    await screen.findByRole('table')
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles' }), { target: { value: 'nothing like this' } })
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.getByText('No papers match these filters')).toBeInTheDocument()
+    expect(screen.getByText('Title has "nothing like this"')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('0 of 4 papers')
+    const clears = screen.getAllByRole('button', { name: 'Clear filters' })
+    fireEvent.click(clears[clears.length - 1])
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(window.location.search).toBe('')
+  })
+
+  it('keeps the filters in the address bar', async () => {
+    window.history.replaceState(null, '', '/?status=error&topic=SE')
+    renderQueue()
+    const table = await screen.findByRole('table')
+    expect(titlesIn(table)).toEqual(['10.1/closed'])
   })
 
   it('sets a teammate\'s topic from the dropdown', async () => {

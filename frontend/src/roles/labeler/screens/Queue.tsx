@@ -1,12 +1,15 @@
 /** Papers to label: the ones the team brought in from Scopus, and whether the database is ready. */
 
-import { Check, Download, Loader2, TriangleAlert } from 'lucide-react'
-import { useState } from 'react'
+import { Download, Loader2, TriangleAlert } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
-import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool, useRetryPaper, type Pool } from '../../../lib/labeling'
+import { labelingApi, problem, useLabelStatus, usePool } from '../../../lib/labeling'
+import { NoMatch, PaperFilters } from '../components/PaperFilters'
+import { PaperTable } from '../components/PaperTable'
 import { ScopusAdd } from '../components/ScopusAdd'
 import { TeamTopics } from '../components/TeamTopics'
+import { isFinished, matches, NO_FILTERS, readFilters, writeFilters, type Filters } from '../paperFilters'
 
 type Export = Parameters<typeof labelingApi.exportFile>[0]
 
@@ -34,100 +37,17 @@ function Setup({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-type Paper = Pool['papers'][number]
-
-const isFinished = (paper: Paper) => paper.status === 'done' && paper.claims > 0 && paper.judged >= paper.claims
-
-function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; myTopic: string; onOpen: (id: string) => void }) {
-  const assign = useAssignTopic()
-  const retry = useRetryPaper()
-  const ready = paper.status === 'done'
-  const failed = paper.status === 'error'
-  // Only the person who shared a paper can retry or remove it, so others are told who that is.
-  const adder = paper.added_by || 'the person who added it'
-  const finished = isFinished(paper)
-  const others = paper.labelers.filter((name) => name !== me)
-  const action = finished ? 'Review' : paper.judged > 0 ? 'Continue' : 'Label'
-  return (
-    <li className="flex items-stretch gap-2">
-      <button
-        type="button"
-        disabled={!ready}
-        onClick={() => onOpen(paper.analysis_id)}
-        className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-4 py-3 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default disabled:hover:border-border-subtle"
-      >
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-medium text-ink">{paper.title}</span>
-          <span className="block text-sm text-ink-muted">
-            {paper.topic}
-            {paper.topic === myTopic && ' · your topic'}
-            {ready && ` · ${paper.claims} claims`}
-            {paper.status === 'running' && ' · reading the paper…'}
-            {!paper.mine && paper.added_by && ` · added by ${paper.added_by}`}
-          </span>
-          {ready && paper.claims > 0 && (
-            <span className="mt-1.5 block max-w-xs">
-              <span className="flex items-center gap-1.5 text-sm text-ink-muted tabular-nums">
-                {finished && <Check className="size-4 shrink-0 text-supports" aria-hidden="true" />}
-                {finished ? (
-                  <span className="font-medium text-supports">All {paper.claims} claims decided by you</span>
-                ) : (
-                  `${paper.judged} of ${paper.claims} claims decided by you`
-                )}
-              </span>
-              <span
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={paper.claims}
-                aria-valuenow={Math.min(paper.judged, paper.claims)}
-                aria-label={`Claims you decided in ${paper.title}`}
-                className="mt-1 block h-1.5 overflow-hidden rounded bg-border-subtle"
-              >
-                <span
-                  className="block h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none"
-                  style={{ width: `${Math.min(100, (paper.judged / paper.claims) * 100)}%` }}
-                />
-              </span>
-            </span>
-          )}
-          {ready && others.length > 0 && <span className="block text-sm text-ink-muted">Also labeled by {others.join(', ')}</span>}
-          {failed && (
-            <span role="alert" className="block text-sm text-refutes">
-              Could not be read: {paper.reason || 'no open PDF was found'}.{' '}
-              {paper.mine ? 'Try again, or remove it.' : `Only ${adder} can try again or remove it.`}
-              {retry.isError && ` Trying again failed: ${problem(retry.error).title}.`}
-            </span>
-          )}
-        </span>
-        {ready && <span className="text-sm font-medium text-accent">{action}</span>}
-        {paper.status === 'running' && <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" aria-label="Reading the paper" />}
-      </button>
-      {paper.mine && failed && (
-        <Button variant="ghost" disabled={retry.isPending} onClick={() => retry.mutate(paper.analysis_id)}>
-          {retry.isPending ? 'Starting…' : 'Try again'}
-        </Button>
-      )}
-      {paper.mine && (
-        <Button
-          variant="ghost"
-          disabled={assign.isPending || retry.isPending}
-          onClick={() => {
-            if (!window.confirm("Remove this paper from the team's list? Labels already saved are kept.")) return
-            assign.mutate({ analysisId: paper.analysis_id, topic: '' })
-          }}
-        >
-          Remove
-        </Button>
-      )}
-    </li>
-  )
-}
-
 export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   const status = useLabelStatus()
   const pool = usePool()
   const [downloading, setDownloading] = useState<Export | null>(null)
   const [downloadError, setDownloadError] = useState<unknown>(null)
+  const [filters, setFilters] = useState<Filters>(() => readFilters(window.location.search))
+
+  useEffect(() => {
+    const query = writeFilters(window.location.search, filters)
+    window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+  }, [filters])
 
   if (status.isLoading) return <LoadingScreen />
   if (status.error) {
@@ -150,6 +70,8 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
       a.topic.localeCompare(b.topic) ||
       Number(isFinished(a)) - Number(isFinished(b)),
   )
+  const me = pool.data?.me ?? ''
+  const shown = papers.filter((paper) => matches(paper, filters, me))
   return (
     <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -204,18 +126,21 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
           </Setup>
         ))}
 
-      <section aria-labelledby="papers-heading" className="flex flex-col gap-2">
+      <section aria-labelledby="papers-heading" className="flex flex-col gap-3">
         <h2 id="papers-heading" className="text-sm font-semibold text-ink">
           Papers to label
         </h2>
         {papers.length === 0 ? (
           <Empty title="No papers yet" hint="Search Scopus above and add some. They appear here once their text has been read." />
         ) : (
-          <ul className="flex flex-col gap-2">
-            {papers.map((paper) => (
-              <PaperRow key={paper.analysis_id} paper={paper} me={pool.data?.me ?? ''} myTopic={myTopic} onOpen={onOpen} />
-            ))}
-          </ul>
+          <>
+            <PaperFilters papers={papers} topics={pool.data?.topics ?? []} me={me} filters={filters} onChange={setFilters} shown={shown.length} />
+            {shown.length === 0 ? (
+              <NoMatch filters={filters} me={me} onClear={() => setFilters(NO_FILTERS)} />
+            ) : (
+              <PaperTable papers={shown} me={me} myTopic={myTopic} onOpen={onOpen} />
+            )}
+          </>
         )}
       </section>
     </FadeIn>
