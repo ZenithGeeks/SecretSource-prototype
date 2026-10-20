@@ -894,6 +894,8 @@ def test_pool_shows_how_far_each_person_is_through_a_paper(api, monkeypatch):
     assert (papers["a2"]["judged"], papers["a2"]["labelers"]) == (0, ["somchai"])  # only others have judged
     assert (papers["a3"]["judged"], papers["a3"]["labelers"]) == (0, [])  # no file yet
     assert [t for t, _ in db.reads].count("claims") == 1  # one read for the whole list
+    # The team has decided #0 (twice, counted once) and #1; the hand-added claim is not counted.
+    assert [papers[a]["team_judged"] for a in ("a1", "a2", "a3")] == [2, 1, 0]
 
 
 def test_pool_still_answers_with_no_progress_when_the_rows_cannot_be_read(api, monkeypatch):
