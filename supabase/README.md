@@ -64,6 +64,7 @@ them again is safe. In order:
 - `20260913160000_researcher_projects.sql` — `projects` (+ `projects_owner_idx`).
 - `20260927120000_author_role.sql` — `author_projects`, `author_drafts`, `author_sources` (+ owner indexes).
 - `20261012160000_labeling_rows.sql` — `labeling_rows`, the Labeler role's rows (+ a `(tab, id)` index).
+- `20261020150000_labeling_rows_reviews_tab.sql` — lets `labeling_rows` keep the `reviews` tab, the labeler's AI reviews.
 - `20261019120000_analyses_owner_status_idx.sql` — expression indexes so one owner's analyses,
   and the running ones, can be read without scanning `analyses`.
 - `20260914120000_adk_sessions.sql` — the `adk` schema for chat sessions, locked away from the
