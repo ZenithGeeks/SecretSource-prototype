@@ -57,6 +57,7 @@ def test_tool_list_is_the_screen_agents(app):
         "point_at",
         "fill_field",
         "list_papers",
+        "review_claim",
     ]
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["point_at"]["description"] == FunctionTool(screen.point_at).description
@@ -110,6 +111,40 @@ def test_list_papers_runs_on_the_server(app, monkeypatch):
     )
 
     assert result["structuredContent"] == {"papers": [{"id": "a1", "title": "ColBERTv2", "status": "done"}]}
+
+
+def test_review_claim_runs_the_labelers_review_for_the_caller(app, monkeypatch):
+    async def review_for(analysis_id, claim_number, user):
+        assert (analysis_id, claim_number, user) == ("a1", 3, "user-1")
+        return [{"target": {"kind": "claim", "id": "p#2"}, "tone": "agrees", "text": "Level 3 fits."}]
+
+    monkeypatch.setattr(mcp_server.labeling, "review_for", review_for)
+    args = {"analysis_id": "a1", "claim_number": 3}
+
+    async def steps(client):
+        tools = (await rpc(client, "tools/list"))["tools"]
+        result = await rpc(client, "tools/call", {"name": "review_claim", "arguments": args})
+        return tools, result
+
+    tools, result = run_with_client(app, steps)
+
+    review = next(tool for tool in tools if tool["name"] == "review_claim")
+    assert set(review["inputSchema"]["required"]) == {"analysis_id", "claim_number"}
+    assert result["structuredContent"]["findings"][0]["text"] == "Level 3 fits."
+
+
+def test_review_claim_on_an_unsaved_claim_says_to_save_it(app, monkeypatch):
+    async def review_for(analysis_id, claim_number, user):
+        raise HTTPException(409, "save this claim in the labeler before asking for a review")
+
+    monkeypatch.setattr(mcp_server.labeling, "review_for", review_for)
+    args = {"analysis_id": "a1", "claim_number": 1}
+    result = run_with_client(
+        app, lambda client: rpc(client, "tools/call", {"name": "review_claim", "arguments": args})
+    )
+
+    assert result["isError"] is True
+    assert "save this claim" in result["content"][0]["text"]
 
 
 def test_another_user_cannot_answer_a_call(app):

@@ -42,7 +42,8 @@ const CLIENTS = {
     file: '~/.codex/config.toml',
     config: `[mcp_servers.secretsource]
 url = "${MCP_URL}"
-env_http_headers = { "apikey" = "GATEHOUSE_KEY" }`,
+env_http_headers = { "apikey" = "GATEHOUSE_KEY" }
+tool_timeout_sec = 300`,
   },
 }
 type Client = keyof typeof CLIENTS

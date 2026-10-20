@@ -4,6 +4,7 @@ The Sheet is replaced by an in-memory store and the analysis by a fixture, so th
 Google nor the gateway's heavy imports.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
 from app.pipeline import verify
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -1475,3 +1476,43 @@ def test_ask_answers_from_a_reference_the_claim_cites(api, monkeypatch):
     assert events == [{"type": "done", "statements": 0}]
     unknown = {"question": "q", "reference_id": "nope"}
     assert client.post("/labeling/sessions/a1/ask", json=unknown).status_code == 422
+
+
+# review_for: the same review for a coding agent over MCP (app/mcp_server.py)
+
+
+@pytest.fixture
+def agent(monkeypatch):
+    """The fixture's analysis and labeler, for review_for, which runs outside a request."""
+
+    async def owned_analysis(analysis_id, user):
+        return ANALYSIS
+
+    monkeypatch.setattr(labeling, "owned_analysis", owned_analysis)
+    # With login off the page saves as "chanya" (the api fixture); the agent is the same person.
+    monkeypatch.setattr(labeling.identity, "annotator_for", lambda user: "chanya")
+
+
+def test_an_agent_reviews_a_saved_claim_by_its_number(api, agent, monkeypatch):
+    client, db, _ = api
+    _save_claim(client, evidence=4)
+    judged = {"verdict": "insufficient", "quote": "", "reasoning": "It reports recall, not why."}
+    monkeypatch.setattr(verify, "judge_passages", lambda claim, passages: judged)
+
+    findings = asyncio.run(labeling.review_for("a1", 1, None))
+
+    assert len(findings) == 3
+    assert findings[0]["target"]["kind"] == "passage"
+    [row] = db.tabs["reviews"]
+    assert (row["claim_id"], row["annotator"]) == (CLAIM_0, "chanya")
+    assert json.loads(row["findings"]) == findings
+
+
+def test_an_agent_cannot_review_an_unsaved_claim_or_a_claim_that_is_not_there(api, agent):
+    with pytest.raises(HTTPException) as unsaved:
+        asyncio.run(labeling.review_for("a1", 1, None))
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(labeling.review_for("a1", 99, None))
+
+    assert unsaved.value.status_code == 409
+    assert missing.value.status_code == 404
