@@ -13,7 +13,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
 import { cn } from '../lib/utils'
-import { AiCursor, type Pointing } from './AiCursor'
+import { askTarget, type Pointing } from '../lib/askCursor'
+import { AiCursor } from './AiCursor'
 import type { Target } from './PageViewer'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
@@ -74,7 +75,7 @@ function StatementRow({
   onShowSource,
 }: {
   statement: Statement
-  /** Its `data-ask-target`, where the AI cursor points when its check comes in. */
+  /** Its id for the AI cursor (`statement:<id>`), which points here when its check comes in. */
   target: string
   title?: string
   /** Whether the answer is still coming. A statement left without a verdict by a Stop or a
@@ -87,7 +88,7 @@ function StatementRow({
   const explained = Boolean(statement.verdict && (statement.quote || statement.reasoning))
   const pill = cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold', stamp.pill)
   return (
-    <li data-ask-target={target} className={cn('border-l-2 pl-3', stamp.bar)}>
+    <li data-ask-target={askTarget({ kind: 'statement', id: target })} className={cn('border-l-2 pl-3', stamp.bar)}>
       <p className="text-[13px] leading-5 text-ink">{statement.text}</p>
       <div className="mt-1 flex items-center justify-between gap-2">
         {statement.source ? (
@@ -148,7 +149,7 @@ function TurnView({
   const unanswered = turn.status === 'done' && turn.statements.length === 0
   return (
     <div className="flex flex-col gap-3">
-      <p data-ask-target={`question:${turn.id}`} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">
+      <p data-ask-target={askTarget({ kind: 'question', id: String(turn.id) })} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">
         {turn.question}
       </p>
       {turn.statements.length > 0 && (
@@ -163,7 +164,7 @@ function TurnView({
               <StatementRow
                 key={statement.index}
                 statement={statement}
-                target={`statement:${turn.id}-${statement.index}`}
+                target={`${turn.id}-${statement.index}`}
                 title={titles[statement.source]}
                 answering={turn.status === 'answering'}
                 onShowSource={onShowSource}
@@ -454,7 +455,8 @@ export function AssistantPanel({
 }
 
 const CURSOR_REST_MS = 2500
-const REACTIONS: Record<StatementVerdict, Pointing['tone']> = {
+/** The cursor's reaction to each verdict. */
+const VERDICT_TONE: Record<StatementVerdict, Pointing['tone']> = {
   supports: 'agrees',
   refutes: 'flags',
   insufficient: 'asks',
@@ -466,7 +468,7 @@ const REACTIONS: Record<StatementVerdict, Pointing['tone']> = {
  * statement as its check comes in, with a reaction to the verdict. */
 function cursorFor(turn: Turn): Pointing | null {
   const checked = turn.statements.find((s) => s.index === turn.lastChecked)
-  if (checked?.verdict) return { target: { kind: 'statement', id: `${turn.id}-${checked.index}` }, tone: REACTIONS[checked.verdict] }
+  if (checked?.verdict) return { target: { kind: 'statement', id: `${turn.id}-${checked.index}` }, tone: VERDICT_TONE[checked.verdict] }
   if (turn.status !== 'answering') return null
   const first = turn.statements[0]
   return first

@@ -5,7 +5,7 @@
  * another claim starts it afresh and stops a review still running.
  */
 
-import { Check, CircleHelp, Flag, Loader2, Sparkles, Wand2 } from 'lucide-react'
+import { Loader2, Sparkles, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../components/ui'
@@ -20,15 +20,9 @@ import {
   type WorkClaim,
 } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
-import type { Pointing } from '../../../components/AiCursor'
+import { TONES, type Pointing } from '../../../lib/askCursor'
 
 const DWELL_MS = 1100 // how long the cursor stays on each finding before the next one
-
-const TONES = {
-  agrees: { icon: Check, className: 'text-supports', name: 'Looks right' },
-  flags: { icon: Flag, className: 'text-refutes', name: 'Check this' },
-  asks: { icon: CircleHelp, className: 'text-insufficient', name: 'A question' },
-} as const
 
 const VERDICTS: Record<string, string> = {
   supports: 'Backed',
@@ -56,7 +50,6 @@ export function AskPanel({
 }) {
   const review = useReview(analysisId, claim.claim_id, onPoint)
   const cited = references.filter((r) => claim.candidates.some((c) => c.reference_id === r.reference_id))
-  const nameOf = (finding: Finding) => targetName(finding, claim, references)
 
   return (
     <div className="flex flex-col gap-4">
@@ -95,8 +88,8 @@ export function AskPanel({
                 )}
               >
                 <p className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
-                  <tone.icon className={cn('size-3.5', tone.className)} aria-hidden="true" />
-                  <span className={tone.className}>{tone.name}</span> · {nameOf(finding)}
+                  <tone.icon className={cn('size-3.5', tone.text)} aria-hidden="true" />
+                  <span className={tone.text}>{tone.label}</span> · {targetName(finding, claim, references)}
                 </p>
                 <p className="text-ink">{finding.text}</p>
                 <button
@@ -117,7 +110,9 @@ export function AskPanel({
   )
 }
 
-/** A review run: its findings, and which one the cursor is on. */
+/** A review run: its findings, and which one the cursor is on, told to `onPoint` (keep it
+ * stable: it is an effect dependency). The cursor waits DWELL_MS on each finding, then moves on;
+ * once the person picks a finding with Show me, it stays where they put it. */
 function useReview(analysisId: string, claimId: string, onPoint: (pointing: Pointing | null) => void) {
   const [findings, setFindings] = useState<Finding[]>([])
   const [status, setStatus] = useState<'idle' | 'reviewing' | 'done' | 'failed'>('idle')
@@ -131,6 +126,7 @@ function useReview(analysisId: string, claimId: string, onPoint: (pointing: Poin
   // The cursor walks the findings in order as they arrive, then stays on the last one.
   useEffect(() => {
     if (!following || step >= findings.length - 1) return
+    // The first finding is shown at once; each later one after the cursor's stay on the last.
     const timer = window.setTimeout(() => setStep((s) => s + 1), step < 0 ? 0 : DWELL_MS)
     return () => window.clearTimeout(timer)
   }, [following, step, findings.length])
@@ -266,6 +262,7 @@ function Question({ analysisId, references }: { analysisId: string; references: 
   )
 }
 
+/** What a finding is about, in words: the claim, a reference's title, or a passage by rank. */
 function targetName(finding: Finding, claim: WorkClaim, references: Reference[]) {
   const { kind, id } = finding.target
   if (kind === 'claim') return 'The claim'

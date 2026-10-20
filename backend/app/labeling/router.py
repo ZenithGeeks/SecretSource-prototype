@@ -611,7 +611,7 @@ async def save(
 
 
 def _reviewed_claims(store, paper_id: str, me: str) -> set[str]:
-    """The claims of this paper that `me` has asked the AI to review."""
+    """The claims of this paper `me` has had a finished AI review of (one left halfway is not kept)."""
     return {row["claim_id"] for row in store.read("reviews", paper_id) if row.get("annotator_id") == me}
 
 
@@ -624,7 +624,7 @@ async def review_claim(
 ):
     """The AI's review of one claim the caller has saved, as server-sent events.
 
-    Each event is `{"type": "finding", "target", "tone", "text", "suggestion"}`, then
+    Each event is `{"type": "finding", "target", "tone", "text"}`, then
     `{"type": "done", "findings": n}`. What it said is kept in the reviews tab. Only a saved claim
     is reviewed: the person's own decision comes first (docs/labeling.md).
     """
@@ -638,7 +638,7 @@ async def review_claim(
     # A claim added by hand is not in the analysis: it has no retrieved passages to check.
     claim = extracted.get(body.claim_id) or {
         "claim_id": body.claim_id,
-        "claim": saved.claim.get("claim", ""),
+        "claim": saved.claim_row.get("claim", ""),
         "candidates": [],
     }
     stamp = {**_stamp(who, me, paper_id), "claim_id": body.claim_id}
@@ -657,10 +657,11 @@ def _saved_claim(store, paper_id: str, me: str, claim_id: str) -> review.Saved |
     }
     if not mine["claims"]:
         return None
-    return review.Saved(claim=mine["claims"][0], candidates=mine["candidates"], labels=mine["labels"])
+    return review.Saved(claim_row=mine["claims"][0], candidates=mine["candidates"], labels=mine["labels"])
 
 
 async def _review_events(store, stamp: dict, claim: dict, saved: review.Saved):
+    """The review as server-sent events; once it ends, what it found goes to the reviews tab."""
     findings = []
     async for finding in review.review(claim, saved):
         findings.append(finding.model_dump())
@@ -697,6 +698,7 @@ def _reference_path(analysis: dict, reference_id: str) -> str | None:
 
 
 async def _answer_events(question: str, pdf: str):
+    """assistant.answer's events for one PDF, after making sure the PDF is indexed."""
     from app import assistant  # imports dspy, about 0.6 s, so not at start-up
 
     prepared = await asyncio.to_thread(verify.prepare_source, pdf)

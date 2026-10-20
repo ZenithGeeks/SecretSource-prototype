@@ -7,23 +7,10 @@
  */
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, CircleHelp, Flag, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { askTarget, TONES, type AskTarget, type Pointing } from '../lib/askCursor'
 import { cn } from '../lib/utils'
-
-/** An element on the page, found by its `data-ask-target="kind:id"`. */
-export type AskTarget = { kind: string; id: string }
-
-/** Where the cursor is and what it says there; `tone: 'reading'` while the AI is still working. */
-export type Pointing = { target: AskTarget; tone: 'reading' | 'agrees' | 'flags' | 'asks' }
-
-const REACTIONS = {
-  reading: { label: 'Reading…', icon: Loader2, ring: 'border-accent', chip: 'bg-accent text-canvas' },
-  agrees: { label: 'Looks right', icon: Check, ring: 'border-supports', chip: 'bg-supports text-canvas' },
-  flags: { label: 'Check this', icon: Flag, ring: 'border-refutes', chip: 'bg-refutes text-canvas' },
-  asks: { label: 'A question', icon: CircleHelp, ring: 'border-insufficient', chip: 'bg-insufficient text-canvas' },
-} as const
 
 type Box = { top: number; left: number; width: number; height: number }
 
@@ -31,7 +18,7 @@ const SPRING = { type: 'spring', stiffness: 260, damping: 28, mass: 0.8 } as con
 
 export function AiCursor({ pointing }: { pointing: Pointing | null }) {
   const box = useTargetBox(pointing?.target ?? null)
-  const reaction = pointing && REACTIONS[pointing.tone]
+  const reaction = pointing && TONES[pointing.tone]
   return (
     <AnimatePresence>
       {reaction && box && (
@@ -78,18 +65,21 @@ export function AiCursor({ pointing }: { pointing: Pointing | null }) {
 
 /** The target's box on screen, kept up to date while the panel scrolls or the window resizes. */
 function useTargetBox(target: AskTarget | null): Box | null {
-  // The box with the target it was measured for, so a new target never shows the old box.
-  const [measured, setMeasured] = useState<{ target: AskTarget; box: Box } | null>(null)
+  // By key, not by object: callers build a new target object on every render.
+  const key = target && askTarget(target)
+  // The box with the key it was measured for, so a new target never shows the old box.
+  const [measured, setMeasured] = useState<{ key: string; box: Box } | null>(null)
   useEffect(() => {
-    if (!target) return
+    if (!key) return
     // A claim or passage the person has hidden (a rejected claim's passages) has no box.
-    const element = document.querySelector<HTMLElement>(`[data-ask-target="${target.kind}:${CSS.escape(target.id)}"]`)
+    const element = document.querySelector<HTMLElement>(`[data-ask-target="${CSS.escape(key)}"]`)
     if (!element) return
+    // Optional calls: jsdom, which the tests run in, has neither.
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     element.scrollIntoView?.({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
     const measure = () => {
       const rect = element.getBoundingClientRect()
-      setMeasured({ target, box: { top: rect.top, left: rect.left, width: rect.width, height: rect.height } })
+      setMeasured({ key, box: { top: rect.top, left: rect.left, width: rect.width, height: rect.height } })
     }
     const frame = window.requestAnimationFrame(measure)
     // Capture: the label panel scrolls by itself, and its scroll events do not reach the window.
@@ -103,6 +93,6 @@ function useTargetBox(target: AskTarget | null): Box | null {
       window.removeEventListener('resize', measure)
       observer?.disconnect()
     }
-  }, [target])
-  return measured && measured.target === target ? measured.box : null
+  }, [key])
+  return measured && measured.key === key ? measured.box : null
 }

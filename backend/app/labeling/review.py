@@ -3,8 +3,8 @@
 review() checks the saved rows by rule first, then shows the pipeline judge's reading of the
 passages behind each level, and yields one Finding per thing worth pointing at. It never changes
 a label or proposes one: the judge reads the whole claim, while a level grades only the part the
-reference is cited for, and it agreed with 1 of 14 saved levels (20 Oct 2026). Saves after a review
-are marked `ai_reviewed`, so an eval can keep labels the AI may have swayed apart.
+reference is cited for (docs/labeling.md has how often they agree). Saves after a review are
+marked `ai_reviewed`, so an eval can keep labels the AI may have swayed apart.
 """
 
 import asyncio
@@ -38,17 +38,26 @@ class Target(BaseModel):
 
 
 class Finding(BaseModel):
+    """One thing the review points at: it agrees, flags a gap, or asks the person a question."""
+
     target: Target
     tone: Literal["agrees", "flags", "asks"]
     text: str
 
 
 class Saved(NamedTuple):
-    """One person's current rows for one claim."""
+    """One person's current rows for one claim: its claims row, passage rows and label rows."""
 
-    claim: dict
+    claim_row: dict
     candidates: list[dict]
     labels: list[dict]
+
+
+class ReferenceRows(NamedTuple):
+    """What the person saved about one reference: the passages they marked relevant, and their label."""
+
+    passages: list[str]
+    label: dict | None
 
 
 async def review(claim: dict, saved: Saved) -> AsyncIterator[Finding]:
@@ -60,14 +69,15 @@ async def review(claim: dict, saved: Saved) -> AsyncIterator[Finding]:
     """
     for finding in rule_findings(claim, saved):
         yield finding
-    if saved.claim.get("status") == "rejected":
+    if saved.claim_row.get("status") == "rejected":
         return
-    text = saved.claim.get("claim_edited") or saved.claim.get("claim") or claim["claim"]
+    # The wording the person saved: their edit, else the extracted claim as the row copied it.
+    wording = saved.claim_row.get("claim_edited") or saved.claim_row.get("claim") or claim["claim"]
     loop = asyncio.get_running_loop()
     checks = [
-        loop.run_in_executor(_judges, judge_finding, text, reference_id, passages, label)
-        for reference_id, (passages, label) in _references(saved).items()
-        if passages and label
+        loop.run_in_executor(_judges, judge_finding, wording, reference_id, rows.passages, rows.label)
+        for reference_id, rows in _references(saved).items()
+        if rows.passages and rows.label
     ]
     for finished in asyncio.as_completed(checks):
         yield await finished
@@ -76,20 +86,21 @@ async def review(claim: dict, saved: Saved) -> AsyncIterator[Finding]:
 def rule_findings(claim: dict, saved: Saved) -> list[Finding]:
     """What the saved rows themselves get wrong or leave out, with no model."""
     claim_target = Target(kind="claim", id=claim["claim_id"])
-    status = saved.claim.get("status")
+    status = saved.claim_row.get("status")
     if status == "rejected":
         text = "You rejected this claim, so its passages and levels are not checked."
         return [Finding(target=claim_target, tone="agrees", text=text)]
     found = []
-    if status == "edited" and not saved.claim.get("claim_edited", "").strip():
+    if status == "edited" and not saved.claim_row.get("claim_edited", "").strip():
         text = "The claim is marked edited, but the new wording is empty."
         found.append(Finding(target=claim_target, tone="flags", text=text))
 
-    judged = {row["cand_id"] for row in saved.candidates}
-    unjudged = [cand["cand_id"] for cand in claim["candidates"] if cand["cand_id"] not in judged]
-    if unjudged:
-        text = f"{len(unjudged)} passage{'s are' if len(unjudged) > 1 else ' is'} not judged yet."
-        found.append(Finding(target=Target(kind="passage", id=unjudged[0]), tone="flags", text=text))
+    # Passages the person has not decided on (relevant or not); the model is not involved here.
+    decided = {row["cand_id"] for row in saved.candidates}
+    open_ids = [cand["cand_id"] for cand in claim["candidates"] if cand["cand_id"] not in decided]
+    if open_ids:
+        text = f"{len(open_ids)} passage{'s are' if len(open_ids) > 1 else ' is'} not judged yet."
+        found.append(Finding(target=Target(kind="passage", id=open_ids[0]), tone="flags", text=text))
 
     for reference_id, (passages, label) in _references(saved).items():
         target = Target(kind="reference", id=reference_id)
@@ -99,6 +110,7 @@ def rule_findings(claim: dict, saved: Saved) -> list[Finding]:
         elif label and not passages:
             text = "This reference has a level, but none of its passages is marked relevant."
             found.append(Finding(target=target, tone="flags", text=text))
+        # Level 1 says the passages do not back the claim; it needs no sentence to point at.
         elif label and label.get("evidence") != "1" and not label.get("rationale", "").strip():
             text = f"Level {label.get('evidence')} has no reason written. Which sentence backs it?"
             found.append(Finding(target=target, tone="asks", text=text))
@@ -133,11 +145,12 @@ def judge_finding(claim_text: str, reference_id: str, passages: list[str], label
     return Finding(target=target, tone="asks", text=text.strip())
 
 
-def _references(saved: Saved) -> dict[str, tuple[list[str], dict | None]]:
-    """Each reference the person touched: the passages they marked relevant, and their label."""
+def _references(saved: Saved) -> dict[str, ReferenceRows]:
+    """Each reference the person touched, by id, in id order."""
     passages: dict[str, list[str]] = {}
     for row in saved.candidates:
         if row.get("status") == "relevant":
             passages.setdefault(row["reference_id"], []).append(row.get("passage", ""))
     labels = {row["reference_id"]: row for row in saved.labels}
-    return {ref: (passages.get(ref, []), labels.get(ref)) for ref in sorted(passages.keys() | labels.keys())}
+    touched = sorted(passages.keys() | labels.keys())
+    return {ref: ReferenceRows(passages.get(ref, []), labels.get(ref)) for ref in touched}

@@ -42,7 +42,8 @@ import {
   type WorkClaim,
   useLabelSession,
 } from '../../../lib/labeling'
-import { AiCursor, type Pointing } from '../../../components/AiCursor'
+import { AiCursor } from '../../../components/AiCursor'
+import type { Pointing } from '../../../lib/askCursor'
 import { AskPanel } from '../components/AskPanel'
 import { ClaimDecision, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
