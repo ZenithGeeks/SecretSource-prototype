@@ -267,7 +267,8 @@ def openalex_details(dois: list[str]) -> dict[str, dict]:
     return {
         work["doi"].removeprefix("https://doi.org/").lower(): {
             "abstract": _abstract_text(work.get("abstract_inverted_index") or {}),
-            "subject": (work.get("primary_topic") or {}).get("display_name", ""),
+            # OpenAlex can send "display_name": null; the page wants text.
+            "subject": (work.get("primary_topic") or {}).get("display_name") or "",
             "keywords": _keywords(work),
         }
         for work in works

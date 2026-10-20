@@ -69,7 +69,7 @@ export function PaperFilters(props: Props & { shown: number }) {
 /** Shown in place of the table when the filters leave nothing. */
 export function NoMatch({ filters, me, onClear }: { filters: Filters; me: string; onClear: () => void }) {
   const active = [
-    ...(filters.search.trim() ? [`Title has "${filters.search.trim()}"`] : []),
+    ...(filters.search.trim() ? [`Title or keywords have "${filters.search.trim()}"`] : []),
     ...FACETS.filter((facet) => filters[facet].length > 0).map(
       (facet) => `${FACET_LABELS[facet]}: ${filters[facet].map((value) => valueLabel(facet, value, me)).join(' or ')}`,
     ),

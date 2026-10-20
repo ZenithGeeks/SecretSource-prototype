@@ -304,7 +304,7 @@ describe('the labeler queue', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles and keywords' }), { target: { value: 'nothing like this' } })
     expect(screen.queryByRole('table')).toBeNull()
     expect(screen.getByText('No papers match these filters')).toBeInTheDocument()
-    expect(screen.getByText('Title has "nothing like this"')).toBeInTheDocument()
+    expect(screen.getByText('Title or keywords have "nothing like this"')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('0 of 4 papers')
     const clears = screen.getAllByRole('button', { name: 'Clear filters' })
     fireEvent.click(clears[clears.length - 1])
