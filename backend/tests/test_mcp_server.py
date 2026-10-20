@@ -86,7 +86,7 @@ def test_a_screen_tool_runs_in_the_callers_tab(app):
 
     assert result["isError"] is False
     assert result["structuredContent"] == {"status": "done"}
-    assert screen_bridge._pending == {}
+    assert screen_bridge._waiting == {}
 
 
 def test_a_screen_tool_with_no_tab_says_how_to_connect_one(app):
@@ -115,11 +115,11 @@ def test_list_papers_runs_on_the_server(app, monkeypatch):
 def test_another_user_cannot_answer_a_call(app):
     async def steps(client):
         result = asyncio.get_running_loop().create_future()
-        screen_bridge._pending["call-1"] = ("user-2", result)
+        screen_bridge._waiting["call-1"] = ("user-2", result)
         try:
             return await client.post("/agent/bridge/results", json={"id": "call-1", "result": {}})
         finally:
-            del screen_bridge._pending["call-1"]
+            del screen_bridge._waiting["call-1"]
 
     assert run_with_client(app, steps).status_code == 404
 

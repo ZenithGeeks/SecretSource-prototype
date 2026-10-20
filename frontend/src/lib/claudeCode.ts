@@ -50,11 +50,14 @@ export function useClaudeCode(actions: ScreenActions | undefined) {
       )
     let rest: number | undefined
     const close = followEvents<BridgeEvent>('/agent/bridge', async (event) => {
-      if (event.type !== 'tool' || !latest.current) return
+      if (event.type !== 'tool') return
       window.clearTimeout(rest)
       setSteps((all) => [...all, describeTool(event)].slice(-STEPS_SHOWN))
       setWorking(true)
-      const result = await runTool(event, { actions: latest.current, point: setPointing, confirm })
+      // Always answer: an MCP call with no answer waits two minutes on the gateway.
+      const result = await runTool(event, { actions: latest.current!, point: setPointing, confirm }).catch(
+        (error: Error) => ({ status: 'error', message: `the tab could not run it: ${error.message}` }),
+      )
       setWorking(false)
       // The cursor rests where it went, then leaves, unless the next call moves it first.
       rest = window.setTimeout(() => setPointing(null), CURSOR_REST_MS)
@@ -62,6 +65,8 @@ export function useClaudeCode(actions: ScreenActions | undefined) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: event.id, result }),
+      }).catch(() => {
+        // The call timed out or the gateway restarted; the MCP client already has its error.
       })
     })
     return () => {

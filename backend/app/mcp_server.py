@@ -33,6 +33,7 @@ async def call_tool(name: str, arguments: dict) -> dict:
     """Run a tool for the caller: list_papers here, a screen tool in the caller's tab."""
     from app.agents.screen import SCREEN_TOOL_NAMES, papers_for  # see _tools for why not at the top
 
+    # handle_mcp put the caller there before MCP saw the request.
     user = server.request_context.request.state.user
     if name == "list_papers":
         return {"papers": await papers_for(user)}
@@ -40,6 +41,7 @@ async def call_tool(name: str, arguments: dict) -> dict:
         raise ValueError(f"there is no tool named {name}")
     try:
         return await screen_bridge.call_tab(user or "", name, arguments)
+    # The low-level server turns an exception into a tool result with isError, which the client reads.
     except screen_bridge.NoTab:
         raise ValueError(
             "no SecretSource tab is connected: open SecretSource with ?connect=claude-code in the "
@@ -71,6 +73,7 @@ async def handle_mcp(scope, receive, send) -> None:
     """The ASGI app at /mcp/: check the Gatehouse caller, then hand the request to MCP."""
     request = Request(scope)
     try:
+        # MCP builds its own Request on the same scope, so call_tool reads this back.
         request.state.user = await gatehouse_user(request)
     except HTTPException as error:
         await JSONResponse({"detail": error.detail}, error.status_code)(scope, receive, send)

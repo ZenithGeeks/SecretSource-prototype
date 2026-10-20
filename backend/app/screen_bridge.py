@@ -22,7 +22,7 @@ router = APIRouter(prefix="/agent/bridge", tags=["agent"])
 CALL_SECONDS = 120  # long enough to read a fill_field and press Apply
 
 _tabs: dict[str, asyncio.Queue[dict]] = {}  # owner -> the calls waiting for that owner's tab
-_pending: dict[str, tuple[str, asyncio.Future[dict]]] = {}  # call id -> (owner, its result)
+_waiting: dict[str, tuple[str, asyncio.Future[dict]]] = {}  # call id -> (owner, its answer)
 
 
 class NoTab(Exception):
@@ -50,13 +50,13 @@ async def call_tab(owner: str, name: str, args: dict) -> dict:
     if queue is None:
         raise NoTab(owner)
     call_id = uuid.uuid4().hex
-    result = asyncio.get_running_loop().create_future()
-    _pending[call_id] = (owner, result)
+    answer = asyncio.get_running_loop().create_future()
+    _waiting[call_id] = (owner, answer)
     try:
         await queue.put({"type": "tool", "id": call_id, "name": name, "args": args})
-        return await asyncio.wait_for(result, CALL_SECONDS)
+        return await asyncio.wait_for(answer, CALL_SECONDS)
     finally:
-        del _pending[call_id]
+        del _waiting[call_id]
 
 
 @router.get("")
@@ -68,7 +68,7 @@ async def open_bridge(user: str | None = Depends(current_user)):
     queue: asyncio.Queue[dict] = asyncio.Queue()
     _tabs[owner] = queue
 
-    async def calls():
+    async def stream():
         try:
             yield _sse({"type": "ready"})
             while True:
@@ -78,18 +78,18 @@ async def open_bridge(user: str | None = Depends(current_user)):
             if _tabs.get(owner) is queue:
                 del _tabs[owner]
 
-    return StreamingResponse(main._keep_alive(calls()), media_type="text/event-stream")
+    return StreamingResponse(main._keep_alive(stream()), media_type="text/event-stream")
 
 
 @router.post("/results")
 async def send_result(body: BridgeResult, user: str | None = Depends(current_user)):
     """Hand a tool call's result from the tab back to the MCP call that waits for it."""
-    pending = _pending.get(body.id)
-    if pending is None or pending[0] != (user or ""):
+    waiting = _waiting.get(body.id)
+    if waiting is None or waiting[0] != (user or ""):
         raise HTTPException(404, f"no tool call {body.id} is waiting; it may have timed out")
-    _, result = pending
-    if not result.done():
-        result.set_result(body.result)
+    _, answer = waiting
+    if not answer.done():
+        answer.set_result(body.result)
     return {"status": "ok"}
 
 
