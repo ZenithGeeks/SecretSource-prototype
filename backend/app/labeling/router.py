@@ -19,6 +19,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,6 +44,8 @@ from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/labeling", tags=["labeling"])
+
+ExportScope = Literal["mine", "team"]
 
 
 async def mine_analysis(analysis_id: str, user: str | None = Depends(current_user)) -> dict:
@@ -532,14 +535,25 @@ async def save(
     return {"claims": len(claims), "candidates": len(candidates), "labels": len(labels)}
 
 
+def _scoped(tab: str, rows: list[dict], scope: ExportScope, me: str) -> list[dict]:
+    """The current rows of a tab: the account `me`'s own, or everyone's grouped by account and paper."""
+    rows = current(tab, rows)
+    if scope == "mine":
+        return [r for r in rows if r["annotator_id"] == me]
+    return sorted(rows, key=lambda r: (r["annotator_id"], r["paper_id"]))
+
+
 @router.get("/export")
-async def export(tab: str = "labels", _who: str = Depends(annotator)):
+async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Depends(labeler_id)):
     """The current rows of one tab as CSV: the latest row per key, without what a person later
     took back (a rejected claim's labels and passages, a passage they added and then removed).
-    `dspy_claims` and `dspy_verdicts` give the same rows as DSPy examples (dspy_export.py), as JSONL."""
+    `dspy_claims` and `dspy_verdicts` give the same rows as DSPy examples (dspy_export.py), as JSONL.
+
+    `scope=mine` gives only the caller's rows, so people labeling different papers do not get each
+    other's (#585). `scope=team` gives everyone's, for building the dataset."""
     store = _store()
     if tab in ("dspy_claims", "dspy_verdicts"):
-        rows = {name: await asyncio.to_thread(store.read, name) for name in TABS}
+        rows = {name: _scoped(name, await asyncio.to_thread(store.read, name), scope, me) for name in TABS}
         build = dspy_export.claims_examples if tab == "dspy_claims" else dspy_export.verdict_examples
         found = await asyncio.to_thread(build, rows)
         body = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in found)
@@ -550,7 +564,7 @@ async def export(tab: str = "labels", _who: str = Depends(annotator)):
         )
     if tab not in TABS:
         raise HTTPException(404, f"no such tab: {tab}")
-    rows = current(tab, await asyncio.to_thread(store.read, tab))
+    rows = _scoped(tab, await asyncio.to_thread(store.read, tab), scope, me)
     if tab != "claims":
         claims = await asyncio.to_thread(store.read, "claims")
         rejected = {

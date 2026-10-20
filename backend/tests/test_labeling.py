@@ -347,6 +347,27 @@ def test_export_is_csv_of_current_rows(api):
     assert len(text) == 2 and text[0].startswith("ts,annotator,annotator_id,paper_id")
 
 
+def test_export_gives_your_own_rows_unless_the_team_is_asked_for(api):
+    client, db, _ = api
+
+    def label(account, paper):
+        return {"annotator_id": account, "paper_id": paper, "claim_id": f"{paper}#0", "evidence": 3}
+
+    db.append("labels", [label("somchai", "paperB"), label("chanya", "paperA"), label("somchai", "paperA")])
+
+    def accounts_and_papers(url):
+        lines = client.get(url).text.splitlines()[1:]
+        return [tuple(line.split(",")[2:4]) for line in lines]
+
+    assert accounts_and_papers("/labeling/export?tab=labels") == [("chanya", "paperA")]
+    assert accounts_and_papers("/labeling/export?tab=labels&scope=team") == [
+        ("chanya", "paperA"),
+        ("somchai", "paperA"),
+        ("somchai", "paperB"),
+    ]
+    assert client.get("/labeling/export?tab=labels&scope=everyone").status_code == 422
+
+
 def test_export_drops_what_a_person_took_back(api):
     client, _, _ = api
     c0, c1 = "paperA-0123456789ab#0", "paperA-0123456789ab#1"
