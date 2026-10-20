@@ -4,11 +4,14 @@
  *
  * Everything is decided by the person here. The page only shows what the system found (claims,
  * passages) and writes what the person decides. A claim is saved on its own, so a half-labeled
- * paper is never lost and two people can work on different papers at once.
+ * paper is never lost and two people can work on different papers at once. Ask AI can review a
+ * saved claim; it points things out and never changes a label.
  */
 
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { MotionConfig } from 'framer-motion'
+import { ChevronDown, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Empty, LoadingScreen } from '../../../components/ui'
@@ -39,6 +42,8 @@ import {
   type WorkClaim,
   useLabelSession,
 } from '../../../lib/labeling'
+import { AiCursor, type Pointing } from '../../../components/AiCursor'
+import { AskPanel } from '../components/AskPanel'
 import { ClaimDecision, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
 import { LabelForm } from '../components/LabelForm'
@@ -215,6 +220,17 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
+
+  const [askOpen, setAskOpen] = useState(false)
+  // Kept with the claim it was for, so moving to another claim drops the cursor at once.
+  const [pointing, setPointing] = useState<{ claimId: string; at: Pointing } | null>(null)
+  const point = useCallback((at: Pointing | null) => setPointing(at && { claimId: currentId, at }), [currentId])
+  // The review reads what was saved, so the person's own decision always comes first.
+  const reviewBlocked = !saved[currentId]?.status
+    ? 'Save this claim first: the review checks what you saved.'
+    : dirty
+      ? 'Save your changes first: the review checks what you saved.'
+      : null
   const position = claims.findIndex((c) => c.claim_id === currentId)
   const left = claim ? remaining(claim, draft, session.references) : []
 
@@ -460,6 +476,34 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
+  const ask = claim && (
+    <div className={cn('flex min-h-0 flex-col', wide ? 'border-t border-border-subtle' : 'rounded-xl border border-border-subtle bg-surface')}>
+      <button
+        type="button"
+        aria-expanded={askOpen}
+        aria-controls="labeler-ask"
+        onClick={() => setAskOpen(!askOpen)}
+        className="flex min-h-11 items-center gap-2 px-4 text-sm font-medium text-ink hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <Sparkles className="size-4 text-accent" aria-hidden="true" />
+        Ask AI
+        <ChevronDown className={cn('ml-auto size-4 text-ink-muted transition-transform duration-200 motion-reduce:transition-none', askOpen && 'rotate-180')} aria-hidden="true" />
+      </button>
+      {askOpen && (
+        <div id="labeler-ask" className={cn('overflow-y-auto px-4 pb-4', wide && 'max-h-[42vh]')}>
+          <AskPanel
+            key={claim.claim_id}
+            analysisId={session.analysis_id}
+            claim={claim}
+            references={session.references}
+            reviewBlocked={reviewBlocked}
+            onPoint={point}
+          />
+        </div>
+      )}
+    </div>
+  )
+
   const selection = picked && (
     <SelectionBar
       picked={picked}
@@ -531,6 +575,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
           </div>
           <aside aria-label="Label this claim" className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
+            {ask}
             <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
               {legend}
               {saveBar('border-0 p-0')}
@@ -551,9 +596,13 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
           {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
           {selection}
           <div className="flex flex-col gap-5">{panel}</div>
+          {ask}
           {saveBar()}
         </div>
       )}
+      <MotionConfig reducedMotion="user">
+        <AiCursor pointing={askOpen && pointing?.claimId === currentId ? pointing.at : null} />
+      </MotionConfig>
     </div>
   )
 }

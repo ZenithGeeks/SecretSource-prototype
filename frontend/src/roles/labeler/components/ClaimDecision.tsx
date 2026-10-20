@@ -49,7 +49,7 @@ export function ClaimDecision({
     if (draft.status === 'edited' && before.claim === claim.claim_id && before.status !== 'edited') box.current?.focus()
   }, [claim.claim_id, draft.status])
   return (
-    <section aria-labelledby={`${name}-title`} className="flex flex-col gap-3">
+    <section aria-labelledby={`${name}-title`} data-ask-target={`claim:${claim.claim_id}`} className="flex flex-col gap-3">
       <h3 id={`${name}-title`} className="font-serif text-base font-semibold text-ink">
         Claim {position} of {count}
         {claim.origin === 'human_added' && <span className="text-sm font-normal text-accent"> · added</span>}

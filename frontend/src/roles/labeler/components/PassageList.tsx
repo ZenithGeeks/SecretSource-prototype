@@ -57,6 +57,7 @@ function PassageCard({
   return (
     <li
       ref={ref}
+      data-ask-target={`passage:${c.cand_id}`}
       className={cn(
         'rounded-lg border p-3 transition-colors',
         shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
@@ -203,7 +204,7 @@ export function PassageList({
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)
         const added = draft.added.filter((a) => a.reference_id === id)
         return (
-          <section key={id} aria-label={labelOf(id)} className="flex flex-col gap-2">
+          <section key={id} aria-label={labelOf(id)} data-ask-target={`reference:${id}`} className="flex flex-col gap-2">
             <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>
             {cands.length > 0 && (
               <ul className="flex flex-col gap-2">

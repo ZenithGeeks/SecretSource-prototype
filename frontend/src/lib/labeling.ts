@@ -8,7 +8,8 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api, API_BASE, fetchFile, request, type Source } from './api'
+import { api, API_BASE, fetchFile, postEvents, request, type Source } from './api'
+import type { AnswerEvent } from './assistant'
 
 export type Level = 1 | 2 | 3 | 4
 export type Confidence = 'low' | 'medium' | 'high'
@@ -364,6 +365,31 @@ export function useLabelSession(analysisId: string | null) {
 export function useSaveLabels(analysisId: string) {
   return useMutation({ mutationFn: (body: Save) => labelingApi.save(analysisId, body) })
 }
+
+// --- the AI's review of a saved claim (backend/app/labeling/review.py) ---
+
+/** What a finding points at; matches a `data-ask-target="kind:id"` on the page. */
+export type ReviewTarget = { kind: 'claim' | 'passage' | 'reference'; id: string }
+
+export type Finding = {
+  target: ReviewTarget
+  tone: 'agrees' | 'flags' | 'asks'
+  text: string
+}
+
+export type ReviewEvent = ({ type: 'finding' } & Finding) | { type: 'done'; findings: number } | { type: 'error'; message: string }
+
+export const reviewClaim = (analysisId: string, claimId: string, onEvent: (event: ReviewEvent) => void, signal: AbortSignal) =>
+  postEvents(`/labeling/sessions/${encodeURIComponent(analysisId)}/review`, { claim_id: claimId }, onEvent, signal)
+
+/** Asks about the paper under review, or about one of its references with `referenceId`. */
+export const askLabeling = (
+  analysisId: string,
+  question: string,
+  referenceId: string,
+  onEvent: (event: AnswerEvent) => void,
+  signal: AbortSignal,
+) => postEvents(`/labeling/sessions/${encodeURIComponent(analysisId)}/ask`, { question, reference_id: referenceId }, onEvent, signal)
 
 // --- what a person decided about one claim ---
 
