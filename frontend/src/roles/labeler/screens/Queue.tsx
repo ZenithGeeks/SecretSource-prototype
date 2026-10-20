@@ -72,6 +72,7 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   )
   const me = pool.data?.me ?? ''
   const shown = papers.filter((paper) => matches(paper, filters, me))
+  const reading = papers.filter((paper) => paper.status === 'running').length
   return (
     <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -127,9 +128,16 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
         ))}
 
       <section aria-labelledby="papers-heading" className="flex flex-col gap-3">
-        <h2 id="papers-heading" className="text-sm font-semibold text-ink">
-          Papers to label
-        </h2>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 id="papers-heading" className="text-sm font-semibold text-ink">
+            Papers to label
+          </h2>
+          {reading > 0 && (
+            <p className="text-xs text-ink-muted">
+              Reading {reading} {reading === 1 ? 'paper' : 'papers'}. This list updates by itself.
+            </p>
+          )}
+        </div>
         {papers.length === 0 ? (
           <Empty title="No papers yet" hint="Search Scopus above and add some. They appear here once their text has been read." />
         ) : (

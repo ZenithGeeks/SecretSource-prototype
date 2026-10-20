@@ -4,6 +4,7 @@
  * on its title.
  */
 
+import { motion } from 'framer-motion'
 import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
@@ -74,7 +75,12 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   const cell = '@4xl:table-cell @4xl:px-3 @4xl:py-3 @4xl:align-middle'
 
   return (
-    <tr
+    // A row the list gains (a paper just added, one a filter brings back) fades in instead of
+    // popping in. No exit fade: a removed row would stay readable until it ended.
+    <motion.tr
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
       className={cn(
         'relative flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border-subtle px-4 py-3 text-sm last:border-b-0 @4xl:table-row @4xl:p-0',
         ready && 'transition-colors hover:bg-accent-soft/40 motion-reduce:transition-none',
@@ -160,7 +166,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
           </Button>
         )}
       </td>
-    </tr>
+    </motion.tr>
   )
 }
 

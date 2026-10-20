@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   puts: [] as { path: string; body: unknown }[],
+  putFails: false,
   posts: [] as { path: string; body: unknown }[],
   statusError: '',
   scopus: true,
@@ -31,6 +32,10 @@ vi.mock('../src/lib/api', async (original) => ({
   request: vi.fn(async (path: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       gateway.puts.push({ path, body: JSON.parse(String(init.body)) })
+      if (gateway.putFails) {
+        await new Promise((resolve) => setTimeout(resolve, 50)) // long enough to see the list before it fails
+        throw new Error('500: could not write')
+      }
       return {}
     }
     if (init?.method === 'POST') {
@@ -74,6 +79,7 @@ function renderQueue() {
 describe('the labeler queue', () => {
   beforeEach(() => {
     gateway.puts.length = 0
+    gateway.putFails = false
     gateway.posts.length = 0
     gateway.searches.length = 0
     gateway.statusError = ''
@@ -122,6 +128,36 @@ describe('the labeler queue', () => {
     expect(confirm).toHaveBeenCalledWith("Remove this paper from the team's list? Labels already saved are kept.")
     await waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/papers/x2/topic', body: { topic: '' } }]))
     expect(onOpen).not.toHaveBeenCalled() // Remove does not also open the row
+  })
+
+  it('takes a removed paper off the list at once, and puts it back when the save fails', async () => {
+    gateway.putFails = true
+    renderQueue()
+    const table = await screen.findByRole('table')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(within(table).getByRole('button', { name: 'Remove NLP paper' }))
+    await waitFor(() => expect(titlesIn(table)).not.toContain('NLP paper'))
+    await waitFor(() => expect(titlesIn(table)).toContain('NLP paper'))
+  })
+
+  it('turns a paper being read into Ready without a reload', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const before = gateway.pool
+    try {
+      renderQueue()
+      const table = await screen.findByRole('table')
+      expect(screen.getByText('Reading 1 paper. This list updates by itself.')).toBeInTheDocument()
+      gateway.pool = {
+        ...before,
+        papers: before.papers.map((p) => (p.analysis_id === 'x3' ? { ...p, status: 'done', claims: 4 } : p)),
+      }
+      await vi.advanceTimersByTimeAsync(5_000)
+      await waitFor(() => expect(within(rowOf(table, '10.1/new')).getByText('Ready')).toBeInTheDocument())
+      expect(screen.queryByText(/This list updates by itself/)).toBeNull()
+    } finally {
+      gateway.pool = before
+      vi.useRealTimers()
+    }
   })
 
   it('says who added a failed paper, and that only they can try again or remove it', async () => {

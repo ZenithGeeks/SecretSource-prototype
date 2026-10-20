@@ -51,7 +51,6 @@ export function TeamTopics({ pool }: { pool: Pool }) {
                         aria-checked={chosen}
                         aria-label={topic || 'No topic'}
                         title={info ? `${info.name}: ${info.venues}; ${info.journal}` : 'No topic'}
-                        disabled={assign.isPending}
                         onClick={() => !chosen && assign.mutate({ name: person.name, topic })}
                         className={cn(
                           'min-h-10 min-w-12 rounded-lg border px-3 text-sm transition-colors',
