@@ -6,14 +6,14 @@
  *
  * Role teams: build your screens in src/roles/<role>/ (own folder — no collisions), export
  * a <Role>App component, then wire its case below. That one case is the only
- * shared-file edit a role needs. `Skip` (or `?role=app`) opens the existing analysis app.
+ * shared-file edit a role needs.
  */
 
 import { lazy, Suspense, useEffect, useState } from 'react'
 
 import { LoadingScreen } from './components/ui'
 import { authEnabled, supabase } from './lib/supabase'
-import { clearLastRole, isStoredRole, loadLastRole, saveLastRole } from './lib/lastRole'
+import { clearLastRole, isRole, loadLastRole, saveLastRole } from './lib/lastRole'
 import { consumeTeacherGoogleReturn } from './lib/teacherGoogleReturn'
 import { useAuth } from './lib/useAuth'
 import { Auth } from './screens/auth/Auth'
@@ -23,13 +23,12 @@ import type { Role } from './lib/roles'
 // researcher's graph or the author's editor.
 // The picker too: a returning visitor opens their last role and never needs it.
 const Onboarding = lazy(() => import('./screens/Onboarding').then((m) => ({ default: m.Onboarding })))
-const App = lazy(() => import('./App'))
 const LabelerApp = lazy(() => import('./roles/labeler/LabelerApp').then((m) => ({ default: m.LabelerApp })))
 const ResearcherApp = lazy(() => import('./roles/researcher/ResearcherApp').then((m) => ({ default: m.ResearcherApp })))
 const TeacherApp = lazy(() => import('./roles/teacher/TeacherApp').then((m) => ({ default: m.TeacherApp })))
 const AuthorApp = lazy(() => import('./roles/author/AuthorApp').then((m) => ({ default: m.AuthorApp })))
 
-type Screen = 'onboarding' | Role | 'app'
+type Screen = 'onboarding' | Role
 
 function initialScreen(): Screen {
   if (consumeTeacherGoogleReturn()) {
@@ -40,7 +39,7 @@ function initialScreen(): Screen {
     return 'teacher'
   }
   const role = new URLSearchParams(window.location.search).get('role')
-  if (isStoredRole(role)) return role
+  if (isRole(role)) return role
   return loadLastRole() ?? 'onboarding'
 }
 
@@ -91,7 +90,7 @@ export function Root() {
   return (
     <Suspense fallback={<LoadingScreen />}>
       {screen === 'onboarding' ? (
-        <Onboarding lastRole={loadLastRole()} onContinue={setScreen} onSkip={() => setScreen('app')} />
+        <Onboarding lastRole={loadLastRole()} onContinue={setScreen} />
       ) : (
         roleScreen(screen, () => setScreen('onboarding'))
       )}
@@ -109,7 +108,5 @@ function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => v
       return <TeacherApp onChangeRole={onChangeRole} />
     case 'labeler':
       return <LabelerApp onChangeRole={onChangeRole} />
-    case 'app':
-      return <App />
   }
 }

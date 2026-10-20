@@ -4,26 +4,25 @@
  */
 
 import type { Role } from './roles'
-
-export type StoredRole = Role | 'app'
+import { ROLE_INFO } from './roles'
 
 const KEY = 'secretsource.lastRole'
-const STORED_ROLES: readonly StoredRole[] = ['researcher', 'writer', 'teacher', 'labeler', 'app']
 
-export function isStoredRole(value: string | null): value is StoredRole {
-  return value !== null && (STORED_ROLES as readonly string[]).includes(value)
+/** Also checks `?role=`. An old saved or linked `app` is no longer a screen, so it fails. */
+export function isRole(value: string | null): value is Role {
+  return value !== null && Object.hasOwn(ROLE_INFO, value)
 }
 
-export function loadLastRole(): StoredRole | null {
+export function loadLastRole(): Role | null {
   try {
     const value = localStorage.getItem(KEY)
-    return isStoredRole(value) ? value : null
+    return isRole(value) ? value : null
   } catch {
     return null
   }
 }
 
-export function saveLastRole(role: StoredRole): void {
+export function saveLastRole(role: Role): void {
   try {
     localStorage.setItem(KEY, role)
   } catch {
