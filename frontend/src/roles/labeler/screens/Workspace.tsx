@@ -483,11 +483,17 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         type="button"
         aria-expanded={askOpen}
         aria-controls="labeler-ask"
+        aria-label="Ask AI"
         onClick={() => setAskOpen(!askOpen)}
-        className="flex min-h-11 items-center gap-2 px-4 text-sm font-medium text-ink hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+        className="group flex min-h-14 items-center gap-3 px-4 text-left hover:bg-accent-soft/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
-        <Sparkles className="size-4 text-accent" aria-hidden="true" />
-        Ask AI
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas">
+          <Sparkles className="size-4 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-12 motion-reduce:transition-none motion-reduce:group-hover:transform-none" aria-hidden="true" />
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span className="text-sm font-medium text-ink">Ask AI</span>
+          <span className="text-xs text-ink-muted">Review this claim, or ask about its papers</span>
+        </span>
         <ChevronDown className={cn('ml-auto size-4 text-ink-muted transition-transform duration-200 motion-reduce:transition-none', askOpen && 'rotate-180')} aria-hidden="true" />
       </button>
       {askOpen && (

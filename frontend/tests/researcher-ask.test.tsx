@@ -24,7 +24,7 @@ test('Ask opens the panel, which stays open on another screen and closes again',
     </QueryClientProvider>,
   )
 
-  const ask = screen.getByRole('button', { name: 'Ask', pressed: false })
+  const ask = screen.getByRole('button', { name: 'Ask AI', pressed: false })
   fireEvent.click(ask)
   expect(ask).toHaveAttribute('aria-pressed', 'true')
   expect(within(screen.getByRole('complementary', { name: 'Ask' })).getByText('About: your library')).toBeInTheDocument()
