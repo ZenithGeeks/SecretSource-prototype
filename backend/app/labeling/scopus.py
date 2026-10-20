@@ -10,6 +10,7 @@ OpenAlex by DOI.
 
 import logging
 import re
+from typing import Literal
 from urllib.parse import urlparse
 
 from app import config
@@ -61,25 +62,47 @@ VENUES: dict[str, list[str]] = {
 
 FIELDS = "dc:title,prism:doi,prism:publicationName,prism:coverDate,dc:creator,citedby-count"
 
+# Where a search looks: the topic's venues above, or every source Scopus indexes.
+Scope = Literal["topic", "all"]
+
+# A DOI on its own or inside a link (https://dl.acm.org/doi/10.1145/3784828.3785017). It ends
+# at a space, a quote, or a link's query or fragment.
+DOI = re.compile(r"\b10\.\d{4,9}/[^\s\"'<>?#]+")
+
 
 class NotConfigured(Exception):
     """There is no SCOPUS_API_KEY."""
 
 
-def build_query(topic: str, text: str, since: int, until: int | None = None) -> str:
-    """Open-access records of the topic's venues from `since` to `until`, optionally matching `text`."""
-    venues = " OR ".join(f'SRCTITLE("{venue}")' for venue in VENUES[topic])
-    parts = [f"({venues})", "OPENACCESS(1)", f"PUBYEAR > {since - 1}"]
+def doi_in(text: str) -> str | None:
+    """The DOI in a pasted DOI or paper link, without trailing punctuation; None when there is none."""
+    match = DOI.search(text)
+    return match.group().rstrip(".,;)]") if match else None
+
+
+def build_query(topic: str, text: str, since: int, until: int | None = None, scope: Scope = "topic") -> str:
+    """Open-access records from `since` to `until`, optionally matching `text`.
+
+    `scope="topic"` keeps the topic's venues; `"all"` searches every venue. A DOI or paper link
+    in `text` finds that one paper whatever the venue, year or access, so it can always be found.
+    """
+    doi = doi_in(text)
+    if doi:
+        return f'DOI("{doi}")'
+    parts = ["OPENACCESS(1)", f"PUBYEAR > {since - 1}"]
     if until is not None:
         parts.append(f"PUBYEAR < {until + 1}")
     words = " ".join(re.sub(r"[\"{}()\\]", " ", text).split())[:100]  # query syntax, and spaces
     if words:
         parts.append(f'TITLE-ABS-KEY("{words}")')
+    if scope == "all":
+        return " AND ".join(parts)
+    venues = " OR ".join(f'SRCTITLE("{venue}")' for venue in VENUES[topic])
     # SRCTITLE matches the words anywhere in a title, so "International Conference on Software
     # Engineering" also matches "... Software Engineering and Computer Applications" (#579).
     # Scopus applies AND NOT last, so it has to come at the end.
     others = " OR ".join(f'SRCTITLE("{venue} and*")' for venue in VENUES[topic])
-    return " AND ".join(parts) + f" AND NOT ({others})"
+    return f"({venues}) AND " + " AND ".join(parts) + f" AND NOT ({others})"
 
 
 def downloadable(dois: list[str]) -> dict[str, bool]:
@@ -122,9 +145,15 @@ def _has_fetchable_copy(paper: dict) -> bool:
 
 
 def search(
-    topic: str, text: str, since: int, until: int | None = None, sort: str = "cited", start: int = 0
+    topic: str,
+    text: str,
+    since: int,
+    until: int | None = None,
+    sort: str = "cited",
+    start: int = 0,
+    scope: Scope = "topic",
 ) -> dict:
-    """One page of the topic's open-access papers, with how many Scopus has in all.
+    """One page of open-access papers (see `build_query`), with how many Scopus has in all.
 
     Returns:
         `{"total", "results"}`. Each result has its DOI, title, venue, year, first author, citation
@@ -138,7 +167,7 @@ def search(
     if not config.SCOPUS_API_KEY:
         raise NotConfigured("set SCOPUS_API_KEY")
     params = {
-        "query": build_query(topic, text, since, until),
+        "query": build_query(topic, text, since, until, scope),
         "start": start,
         "count": PAGE,
         "field": FIELDS,

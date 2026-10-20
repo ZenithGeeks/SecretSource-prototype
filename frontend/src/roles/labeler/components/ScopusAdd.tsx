@@ -18,6 +18,7 @@ import {
   type Pool,
   type ScopusPaper,
   type ScopusQuery,
+  type ScopusScope,
   type ScopusSort,
 } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
@@ -34,6 +35,14 @@ const SORTS: { key: ScopusSort; label: string }[] = [
   { key: 'match', label: 'Best match' },
 ]
 
+const SCOPES: { key: ScopusScope; label: string }[] = [
+  { key: 'topic', label: 'Topic venues' },
+  { key: 'all', label: 'All of Scopus' },
+]
+
+/** A DOI on its own or inside a paper link; the gateway then looks up only that paper. */
+const DOI = /\b10\.\d{4,9}\/\S+/
+
 /** A year typed into a field, kept inside the years Scopus can be asked about. */
 function clampYear(value: string, fallback: number) {
   const year = Number(value)
@@ -45,7 +54,14 @@ function clampYear(value: string, fallback: number) {
 type Form = Omit<ScopusQuery, 'since' | 'until'> & { since: string; until: string }
 
 export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
-  const [form, setForm] = useState<Form>({ topic: myTopic, q: '', since: '2020', until: String(THIS_YEAR), sort: 'cited' })
+  const [form, setForm] = useState<Form>({
+    topic: myTopic,
+    scope: 'topic',
+    q: '',
+    since: '2020',
+    until: String(THIS_YEAR),
+    sort: 'cited',
+  })
   // The search that is showing. The form can change without searching again.
   const [query, setQuery] = useState<ScopusQuery | null>(null)
   const [added, setAdded] = useState<Record<string, true>>({})
@@ -55,6 +71,8 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
   const papers = search.data?.pages.flatMap((page) => page.results) ?? []
   const total = search.data?.pages[0]?.total ?? 0
   const set = (change: Partial<Form>) => setForm((current) => ({ ...current, ...change }))
+  // A DOI search ignores words, years and venues, so the empty state's suggestions do not apply.
+  const byDoi = query ? DOI.test(query.q) : false
 
   const run = (event?: FormEvent, next: Form = form) => {
     event?.preventDefault()
@@ -64,7 +82,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
     // "Best match" means nothing without words, so an empty search falls back to most cited.
     const sort = next.sort === 'match' && !next.q.trim() ? 'cited' : next.sort
     setForm({ ...next, since: String(since), until: String(until) })
-    setQuery({ topic: next.topic, q: next.q.trim(), since, until, sort })
+    setQuery({ topic: next.topic, scope: next.scope, q: next.q.trim(), since, until, sort })
   }
   /** Changes the form and searches with it at once, for the empty state's suggestions. */
   const retryWith = (change: Partial<Form>) => {
@@ -79,20 +97,25 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
         <div>
           <h2 className="text-sm font-semibold text-ink">Add papers from Scopus</h2>
           <p className="text-xs text-ink-muted">
-            Open-access papers from the topic's conferences and journals
-            {form.topic && TOPIC_INFO[form.topic] ? ` (${TOPIC_INFO[form.topic].venues}; ${TOPIC_INFO[form.topic].journal})` : ''}.
+            {form.scope === 'all'
+              ? 'Open-access papers from any conference or journal. An added paper is filed under the topic you pick.'
+              : `Open-access papers from the topic's conferences and journals${
+                  form.topic && TOPIC_INFO[form.topic] ? ` (${TOPIC_INFO[form.topic].venues}; ${TOPIC_INFO[form.topic].journal})` : ''
+                }.`}{' '}
+            Paste a DOI or a paper link to find that one paper.
           </p>
         </div>
 
         <form onSubmit={run} className="flex flex-col gap-3">
           <div className="flex flex-wrap items-end gap-2">
             <SearchField
-              label="Words in the title or abstract (optional)"
+              label="Words in the title or abstract, or a DOI or link (optional)"
               value={form.q}
               onChange={(q) => set({ q })}
               placeholder="e.g. late interaction retrieval"
               busy={search.isFetching && !search.isFetchingNextPage}
-              maxLength={100}
+              // Room for a long paper link; the gateway keeps the first 100 characters of words.
+              maxLength={300}
               className="min-w-56 flex-1"
             />
             <Button type="submit" disabled={!form.topic || search.isFetching} className="min-h-11">
@@ -100,6 +123,12 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
             </Button>
           </div>
           <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-ink">Search in</span>
+              <div className="flex min-h-11 items-center">
+                <GraphSegmented label="Search in" value={form.scope} options={SCOPES} onChange={(scope) => set({ scope })} />
+              </div>
+            </div>
             <label className="flex flex-col gap-1.5 text-xs font-medium text-ink">
               Topic
               <TopicSelect label="Topic to search" value={form.topic} topics={pool.topics} empty="Pick a topic" onChange={(topic) => set({ topic })} />
@@ -165,14 +194,21 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
         {search.isSuccess && papers.length === 0 && (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-subtle px-4 py-8 text-center">
             <SearchX className="size-5 text-ink-muted" aria-hidden="true" />
-            <p className="text-sm font-medium text-ink">Scopus has no open-access papers for that.</p>
+            <p className="text-sm font-medium text-ink">
+              {byDoi ? 'Scopus has no paper with that DOI.' : 'Scopus has no open-access papers for that.'}
+            </p>
             <div className="flex flex-wrap justify-center gap-2">
-              {query?.q && (
+              {query?.scope === 'topic' && !byDoi && (
+                <Button variant="ghost" onClick={() => retryWith({ scope: 'all' })} className="min-h-9">
+                  Search all of Scopus
+                </Button>
+              )}
+              {query?.q && !byDoi && (
                 <Button variant="ghost" onClick={() => retryWith({ q: '' })} className="min-h-9">
                   Search without the words
                 </Button>
               )}
-              {query && query.since > FIRST_YEAR && (
+              {query && !byDoi && query.since > FIRST_YEAR && (
                 <Button variant="ghost" onClick={() => retryWith({ since: '2010', until: String(THIS_YEAR) })} className="min-h-9">
                   Search 2010 to {THIS_YEAR}
                 </Button>

@@ -153,8 +153,12 @@ export type ScopusPaper = {
 
 export type ScopusSort = 'cited' | 'newest' | 'oldest' | 'match'
 
-/** One Scopus search: the topic's venues, optional words, a year range, and an order. */
-export type ScopusQuery = { topic: string; q: string; since: number; until: number; sort: ScopusSort }
+/** Where a search looks: the topic's venues, or every venue in Scopus. */
+export type ScopusScope = 'topic' | 'all'
+
+/** One Scopus search: where it looks, optional words (or a DOI or paper link), a year range, and
+ * an order. The topic is where an added paper is filed, whatever the scope. */
+export type ScopusQuery = { topic: string; scope: ScopusScope; q: string; since: number; until: number; sort: ScopusSort }
 
 export type ScopusPage = { total: number; results: ScopusPaper[] }
 
@@ -187,9 +191,9 @@ const putJson = (path: string, body: unknown) =>
 
 export const labelingApi = {
   pool: () => request<Pool>('/labeling/pool'),
-  scopusSearch: ({ topic, q, since, until, sort }: ScopusQuery, page: number) =>
+  scopusSearch: ({ topic, scope, q, since, until, sort }: ScopusQuery, page: number) =>
     request<ScopusPage>(
-      `/labeling/scopus/search?${new URLSearchParams({ topic, q, since: String(since), until: String(until), sort, page: String(page) })}`,
+      `/labeling/scopus/search?${new URLSearchParams({ topic, scope, q, since: String(since), until: String(until), sort, page: String(page) })}`,
     ),
   scopusAdd: (doi: string, topic: string) =>
     request<{ id: string; existing: boolean }>('/labeling/scopus/add', {

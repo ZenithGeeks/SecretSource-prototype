@@ -120,6 +120,32 @@ describe('the Scopus search', () => {
     expect(asked[1].get('q')).toBe('')
   })
 
+  it('searches the topic venues unless asked for all of Scopus, and offers that when nothing matches', async () => {
+    const asked = gateway([{ total: 0, results: [] }, { total: 1, results: [paper(0)] }])
+    renderSearch()
+    fireEvent.change(screen.getByLabelText(/Words in the title/), { target: { value: 'Ozaki scheme' } })
+    search()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Search all of Scopus' }))
+
+    expect(await screen.findByText('1 papers · showing 1')).toBeInTheDocument()
+    expect(asked.map((params) => params.get('scope'))).toEqual(['topic', 'all'])
+    expect(screen.getByRole('radio', { name: 'All of Scopus' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('says when a pasted DOI is not in Scopus, without suggestions that do not apply to it', async () => {
+    const asked = gateway([{ total: 0, results: [] }])
+    renderSearch()
+    const link = 'https://dl.acm.org/doi/10.1145/3784828.3785017'
+    fireEvent.change(screen.getByLabelText(/Words in the title/), { target: { value: link } })
+    search()
+
+    expect(await screen.findByText('Scopus has no paper with that DOI.')).toBeInTheDocument()
+    expect(asked[0].get('q')).toBe(link)
+    expect(screen.queryByRole('button', { name: 'Search all of Scopus' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Search without the words' })).toBeNull()
+  })
+
   it('says why a search failed, and tries again', async () => {
     gateway([new Response('{"detail":"the Scopus key has used its quota for now"}', { status: 429 }), { total: 1, results: [paper(0)] }])
     renderSearch()
