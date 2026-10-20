@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { PaperBell } from './components/PaperBell'
 import { Queue } from './screens/Queue'
 import { Workspace } from './screens/Workspace'
 import { usePaperNotices } from './usePaperNotices'
@@ -21,7 +22,8 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
     if (unsaved && !window.confirm('You have unsaved labels. Leave without saving?')) return
     go()
   }
-  usePaperNotices((id) => leave(() => setAnalysis(id))())
+  const openPaper = (id: string) => leave(() => setAnalysis(id))()
+  usePaperNotices(openPaper)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -42,6 +44,7 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
       // The workspace shows two PDFs and a label panel, so it takes the whole window.
       wide={analysis ? 'full' : true}
       foldable
+      notifications={<PaperBell onOpen={openPaper} />}
     >
       {analysis ? <Workspace analysisId={analysis} onDirtyChange={setUnsaved} /> : <Queue onOpen={setAnalysis} />}
     </AppShell>

@@ -235,6 +235,7 @@ export function AppShell<K extends string>({
   breadcrumb,
   wide = false,
   foldable = false,
+  notifications,
   panel,
   toolbarLead,
   children,
@@ -255,6 +256,9 @@ export function AppShell<K extends string>({
   breadcrumb?: string[]
   wide?: boolean | 'full'
   foldable?: boolean
+  /** A button next to the brand (the labeler's bell). It shows on the phone top bar and in the
+   * folded rail too, so it is rendered once per place. */
+  notifications?: ReactNode
   panel?: ReactNode
   toolbarLead?: ReactNode
   children: ReactNode
@@ -340,7 +344,9 @@ export function AppShell<K extends string>({
     <div className="flex min-h-screen flex-col lg:flex-row">
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
         <Brand compact />
-        <button
+        <div className="flex items-center gap-1">
+          {notifications}
+          <button
           type="button"
           onClick={() => setMenuOpen(true)}
           aria-label="Open the menu"
@@ -348,7 +354,8 @@ export function AppShell<K extends string>({
           className="flex size-11 items-center justify-center rounded-lg text-ink hover:bg-accent-soft"
         >
           <Menu className="size-5" />
-        </button>
+          </button>
+        </div>
       </header>
 
       {menuOpen && (
@@ -382,8 +389,12 @@ export function AppShell<K extends string>({
           folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-y-auto px-3 pb-3.5',
         )}
       >
-        <div className={cn('flex items-center', !folded && 'justify-between px-2')}>
-          {!folded && <Brand compact />}
+        <div className={cn('flex items-center', folded ? 'flex-col gap-2' : 'gap-0.5 px-2')}>
+          {!folded && (
+            <div className="mr-auto">
+              <Brand compact />
+            </div>
+          )}
           {/* One button for both states, so keyboard focus stays on it after a click. */}
           {foldable && (
             <button
@@ -401,6 +412,7 @@ export function AppShell<K extends string>({
               {folded ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
           )}
+          {notifications}
         </div>
         {folded ? (
           <nav aria-label="Main" className="flex flex-col gap-0.5">
