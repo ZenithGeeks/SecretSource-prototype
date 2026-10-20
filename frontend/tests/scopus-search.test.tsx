@@ -22,6 +22,7 @@ const paper = (n: number, extra: Partial<ScopusPaper> = {}): ScopusPaper => ({
   first_author: 'Gallego G.',
   cited_by: 2442 - n,
   abstract: n === 0 ? 'Event cameras are bio-inspired sensors.' : '',
+  downloadable: true,
   added: false,
   ...extra,
 })
@@ -127,5 +128,16 @@ describe('the Scopus search', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The Scopus key has used its quota for now.')
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText('1 papers · showing 1')).toBeInTheDocument()
+  })
+
+  it('offers no Add for a paper whose only copy cannot be downloaded', async () => {
+    gateway([{ total: 3, results: [paper(0, { downloadable: false }), paper(1, { downloadable: null }), paper(2)] }])
+    renderSearch()
+    search()
+
+    expect(await screen.findByText('No copy we can download')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add Paper 0' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add Paper 1' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Add Paper 2' })).toBeEnabled()
   })
 })

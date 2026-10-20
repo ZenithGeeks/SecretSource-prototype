@@ -1,6 +1,6 @@
 # SecretSource status
 
-Last updated: 2026-10-19 (Asia/Bangkok)
+Last updated: 2026-10-20 (Asia/Bangkok)
 
 The project manager assistant refreshes this file every weekday morning via pull request. Humans and Claude Code may edit it.
 
@@ -30,7 +30,7 @@ Jira project [SCRUM](https://secretsources.atlassian.net/jira/software/projects/
 | Sprint 6 — Evaluation | 7–20 Nov 2026 | Full evaluation matrix, model/human comparison, ablation |
 | Sprint 7 — Report & Delivery | 21 Nov–9 Dec 2026 | Final report, docs, slides, rehearsals, final presentation |
 
-Sprint 4 is the current window: today, 19 Oct 2026, falls inside its dates. The board still lists every sprint, including this one, as future.
+Sprint 4 is the current window: today, 20 Oct 2026, falls inside Sprint 4, which ends 23 Oct. The board still lists every sprint, including this one, as future.
 
 - Feature freeze: 6 Nov 2026 — [SCRUM-88](https://secretsources.atlassian.net/browse/SCRUM-88) "Feature freeze (6 Nov)". Highest, unassigned, To Do.
 - Final presentation and submission: 9 Dec 2026 — [SCRUM-101](https://secretsources.atlassian.net/browse/SCRUM-101) "Final presentation and submission (9 Dec)". Highest, unassigned, To Do.
@@ -39,13 +39,13 @@ Sprint 4 is the current window: today, 19 Oct 2026, falls inside its dates. The 
 
 1. **[SCRUM-70](https://secretsources.atlassian.net/browse/SCRUM-70)** — Labeling round 1: 80 claims. To Do, unassigned, High. [PR #510](https://github.com/ZenithGeeks/SecretSource-prototype/pull/510) (merged 2026-10-19) says the hand labels do not exist yet.
 2. **[SCRUM-84](https://secretsources.atlassian.net/browse/SCRUM-84)** — Labeling complete: 300 claims and inter-annotator agreement. To Do, unassigned, Highest.
-3. **[SCRUM-89](https://secretsources.atlassian.net/browse/SCRUM-89)** — Full evaluation matrix on the 300-claim benchmark. To Do, unassigned, Highest.
-4. **[SCRUM-80](https://secretsources.atlassian.net/browse/SCRUM-80)** — Vision judge returns a verdict and a reason. To Do, unassigned, Highest. Sprint 4 goal.
-5. **[SCRUM-81](https://secretsources.atlassian.net/browse/SCRUM-81)** — Show figure and table evidence with the region boxed. To Do, unassigned, High. Sprint 4 goal.
-6. **[SCRUM-86](https://secretsources.atlassian.net/browse/SCRUM-86)** — Public Cloud Run deployment with cost documented. To Do, unassigned, High. [Where the system runs](../CONSTRAINTS.md#where-the-system-runs) keeps work on the local stack until the system is finished, then one planned Google Cloud release.
-7. **Partly done, still In Review** (assignee Vitawat). Each merged pull request covers only part of the linked GitHub issue, and that issue is still open:
-   - [SCRUM-271](https://secretsources.atlassian.net/browse/SCRUM-271) — the gateway loads every stored analysis at start-up and scans all of them on each request. [PR #332](https://github.com/ZenithGeeks/SecretSource-prototype/pull/332), [issue #314](https://github.com/ZenithGeeks/SecretSource-prototype/issues/314).
-   - [SCRUM-310](https://secretsources.atlassian.net/browse/SCRUM-310) — `search_passages` returns full passage text for up to 100 hits, with nothing to mark a weak result. [PR #430](https://github.com/ZenithGeeks/SecretSource-prototype/pull/430), [issue #416](https://github.com/ZenithGeeks/SecretSource-prototype/issues/416).
+3. **[SCRUM-81](https://secretsources.atlassian.net/browse/SCRUM-81)** — Show figure and table evidence with the region boxed. To Do, unassigned, High. Sprint 4 goal. Tracked in [issue #554](https://github.com/ZenithGeeks/SecretSource-prototype/issues/554).
+4. **[SCRUM-364](https://secretsources.atlassian.net/browse/SCRUM-364)** — Assistant panel on the Library, Graph and Analysis screens. To Do, unassigned, Medium. Tracked in [issue #534](https://github.com/ZenithGeeks/SecretSource-prototype/issues/534).
+5. **[SCRUM-80](https://secretsources.atlassian.net/browse/SCRUM-80)** — Vision judge returns a verdict and a reason. To Do, unassigned, Highest. Sprint 4 goal. **[SCRUM-78](https://secretsources.atlassian.net/browse/SCRUM-78)** — Spike: vision judge approach for tables and figures. To Do, unassigned, High. Both are still To Do in Jira. [PR #501](https://github.com/ZenithGeeks/SecretSource-prototype/pull/501), [PR #513](https://github.com/ZenithGeeks/SecretSource-prototype/pull/513) and [PR #516](https://github.com/ZenithGeeks/SecretSource-prototype/pull/516) are merged. [Issue #555](https://github.com/ZenithGeeks/SecretSource-prototype/issues/555) checks whether they can close.
+6. **[SCRUM-89](https://secretsources.atlassian.net/browse/SCRUM-89)** — Full evaluation matrix on the 300-claim benchmark. To Do, unassigned, Highest.
+7. **[SCRUM-86](https://secretsources.atlassian.net/browse/SCRUM-86)** — Public Cloud Run deployment with cost documented. To Do, unassigned, High. [Where the system runs](../CONSTRAINTS.md#where-the-system-runs) keeps work on the local stack until the system is finished, then one planned Google Cloud release.
+8. **Partly done, still In Review** (assignee Vitawat). Where the GitHub issue is still open, the merged pull request covers only part of it:
+   - [SCRUM-310](https://secretsources.atlassian.net/browse/SCRUM-310) — `search_passages` returns full passage text for up to 100 hits, with nothing to mark a weak result. GitHub work is finished: [issue #416](https://github.com/ZenithGeeks/SecretSource-prototype/issues/416) is closed by [PR #521](https://github.com/ZenithGeeks/SecretSource-prototype/pull/521). The Jira ticket is still In Review and only needs closing.
    - [SCRUM-318](https://secretsources.atlassian.net/browse/SCRUM-318) — nothing measures how accurate the judge's verdicts are. [PR #435](https://github.com/ZenithGeeks/SecretSource-prototype/pull/435), [issue #423](https://github.com/ZenithGeeks/SecretSource-prototype/issues/423).
    - [SCRUM-320](https://secretsources.atlassian.net/browse/SCRUM-320) — test the citation checks on the 10 papers Sakana's AI Scientist generated. [PR #440](https://github.com/ZenithGeeks/SecretSource-prototype/pull/440), [PR #456](https://github.com/ZenithGeeks/SecretSource-prototype/pull/456), [issue #425](https://github.com/ZenithGeeks/SecretSource-prototype/issues/425).
 
@@ -54,10 +54,12 @@ Sprint 4 is the current window: today, 19 Oct 2026, falls inside its dates. The 
 - Highest-priority deliverables with no assignee, all To Do: [SCRUM-84](https://secretsources.atlassian.net/browse/SCRUM-84), [SCRUM-88](https://secretsources.atlassian.net/browse/SCRUM-88), [SCRUM-89](https://secretsources.atlassian.net/browse/SCRUM-89), and [SCRUM-95](https://secretsources.atlassian.net/browse/SCRUM-95) (final report draft to advisor). [SCRUM-80](https://secretsources.atlassian.net/browse/SCRUM-80) and [SCRUM-101](https://secretsources.atlassian.net/browse/SCRUM-101) are Highest and unassigned as well.
 - [SCRUM-86](https://secretsources.atlassian.net/browse/SCRUM-86) asks for a public Cloud Run deploy. [CONSTRAINTS.md](../CONSTRAINTS.md#where-the-system-runs) allows no Google Cloud deploy until the finished release (merged in [PR #488](https://github.com/ZenithGeeks/SecretSource-prototype/pull/488)).
 - [Issue #307](https://github.com/ZenithGeeks/SecretSource-prototype/issues/307) — Supabase migration history out of sync. Open and unassigned. The issue records the decision to run its repair commands, then `supabase db push --dry-run`. That still needs someone with Supabase login and the database password.
-- [Issue #308](https://github.com/ZenithGeeks/SecretSource-prototype/issues/308) — Author draft checks still run inside the gateway, so a deploy, a crash, or scale-to-zero can mark the run interrupted. Open.
+- No hand labels exist yet. Sprint 4 (labeling round 2, [SCRUM-79](https://secretsources.atlassian.net/browse/SCRUM-79), cumulative 160 claims) ends 23 Oct, so the evaluation work in Sprint 6 ([SCRUM-76](https://secretsources.atlassian.net/browse/SCRUM-76), [SCRUM-84](https://secretsources.atlassian.net/browse/SCRUM-84), [SCRUM-89](https://secretsources.atlassian.net/browse/SCRUM-89)) is at risk. [Issue #556](https://github.com/ZenithGeeks/SecretSource-prototype/issues/556) lists what labeling round 1 ([SCRUM-70](https://secretsources.atlassian.net/browse/SCRUM-70)) needs.
+- [Issue #544](https://github.com/ZenithGeeks/SecretSource-prototype/issues/544) (Scopus label, [SCRUM-374](https://secretsources.atlassian.net/browse/SCRUM-374)) is blocked on checking that Elsevier's API Service Agreement allows showing and caching Scopus data.
 
 ## Recent decisions
 
+- **2026-10-19.** The assistant shipped as a checked-statement chat route ([PR #532](https://github.com/ZenithGeeks/SecretSource-prototype/pull/532)) and the gap finder merged ([PR #548](https://github.com/ZenithGeeks/SecretSource-prototype/pull/548)). Assistant targets in [CONSTRAINTS.md](../CONSTRAINTS.md#assistant-answers-measured-not-yet-enforced) are now the first statement under 10 s for 5 people and the last verdict under 20 s for one person ([PR #545](https://github.com/ZenithGeeks/SecretSource-prototype/pull/545)).
 - **2026-10-19.** Jira cleanup closed 87 tickets whose pull requests were already merged to `main`. All 87 keys are Done.
 - **2026-10-19.** [PR #488](https://github.com/ZenithGeeks/SecretSource-prototype/pull/488) merged. Development and runs stay on the local stack until the system is finished, then one planned Google Cloud release. See [Where the system runs](../CONSTRAINTS.md#where-the-system-runs).
 - **2026-10-17.** Assistant memory: our own memory service on a Supabase table, a few facts distilled by the LLM at the end of each chat, read with `load_memory`. See [SPEC.md](../SPEC.md).

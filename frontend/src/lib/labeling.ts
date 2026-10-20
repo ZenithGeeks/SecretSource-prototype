@@ -146,6 +146,8 @@ export type ScopusPaper = {
   cited_by: number
   /** From OpenAlex; empty when it has none. */
   abstract: string
+  /** Whether the analysis can download its PDF; null when that could not be checked. */
+  downloadable: boolean | null
   added: boolean
 }
 
@@ -173,6 +175,8 @@ export type Pool = {
     status: 'running' | 'done' | 'error'
     reason: string
     mine: boolean
+    /** Who shared it with the team. Only they can retry or remove it. */
+    added_by: string
   }[]
 }
 
@@ -194,6 +198,9 @@ export const labelingApi = {
   setPersonTopic: (name: string, topic: string) => putJson('/labeling/people', { name, topic }),
   setPaperTopic: (analysisId: string, topic: string) =>
     putJson(`/labeling/papers/${encodeURIComponent(analysisId)}/topic`, { topic }),
+  /** Read one of your failed papers again; a new analysis takes its place on the list. */
+  retryPaper: (analysisId: string) =>
+    request<{ id: string }>(`/labeling/papers/${encodeURIComponent(analysisId)}/retry`, { method: 'POST' }),
   status: () => request<LabelStatus>('/labeling/status'),
   session: (analysisId: string) => request<Session>(`/labeling/sessions/${encodeURIComponent(analysisId)}`),
   save: (analysisId: string, body: Save) =>
@@ -250,6 +257,14 @@ export function useAssignTopic() {
   return useMutation({
     mutationFn: (v: { topic: string; name?: string; analysisId?: string }) =>
       v.name !== undefined ? labelingApi.setPersonTopic(v.name, v.topic) : labelingApi.setPaperTopic(v.analysisId!, v.topic),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
+  })
+}
+
+export function useRetryPaper() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (analysisId: string) => labelingApi.retryPaper(analysisId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
   })
 }

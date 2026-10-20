@@ -239,6 +239,9 @@ function ResultRow({
   const [open, setOpen] = useState(false)
   const cited = paper.cited_by ? `cited ${paper.cited_by.toLocaleString()}` : ''
   const meta = [paper.venue, paper.year, paper.first_author, cited].filter(Boolean).join(' · ')
+  // false: the only copy is on a site that refuses scripts, so the paper could never be read.
+  // null: it could not be checked, so adding stays allowed.
+  const unreachable = paper.downloadable === false && !done
   return (
     <motion.li
       initial={{ opacity: 0, y: 6 }}
@@ -257,21 +260,25 @@ function ResultRow({
             className={cn('mt-0.5 size-4 shrink-0 text-ink-muted transition-transform duration-200', open && 'rotate-180')}
             aria-hidden="true"
           />
-          <span className="min-w-0">
+          <span className={cn('min-w-0', unreachable && 'opacity-60')}>
             <span className="block text-sm font-medium text-ink group-hover:text-accent">{paper.title}</span>
             <span className="mt-0.5 block text-xs text-ink-muted tabular-nums [overflow-wrap:anywhere]">{meta}</span>
           </span>
         </button>
-        <Button
-          variant="ghost"
-          className="min-h-11 shrink-0"
-          disabled={done || adding}
-          aria-label={`Add ${paper.title}`}
-          onClick={onAdd}
-        >
-          {adding ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : !done && <Plus className="size-4" aria-hidden="true" />}
-          {done ? 'Added' : 'Add'}
-        </Button>
+        {unreachable ? (
+          <span className="flex min-h-11 shrink-0 items-center text-xs text-ink-muted">No copy we can download</span>
+        ) : (
+          <Button
+            variant="ghost"
+            className="min-h-11 shrink-0"
+            disabled={done || adding}
+            aria-label={`Add ${paper.title}`}
+            onClick={onAdd}
+          >
+            {adding ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : !done && <Plus className="size-4" aria-hidden="true" />}
+            {done ? 'Added' : 'Add'}
+          </Button>
+        )}
       </div>
       <AnimatePresence initial={false}>
         {open && (

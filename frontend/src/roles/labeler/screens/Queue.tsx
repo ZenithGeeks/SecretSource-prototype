@@ -4,7 +4,7 @@ import { Check, Download, Loader2, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
-import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool, type Pool } from '../../../lib/labeling'
+import { labelingApi, problem, useAssignTopic, useLabelStatus, usePool, useRetryPaper, type Pool } from '../../../lib/labeling'
 import { ScopusAdd } from '../components/ScopusAdd'
 import { TeamTopics } from '../components/TeamTopics'
 
@@ -40,7 +40,11 @@ const isFinished = (paper: Paper) => paper.status === 'done' && paper.claims > 0
 
 function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; myTopic: string; onOpen: (id: string) => void }) {
   const assign = useAssignTopic()
+  const retry = useRetryPaper()
   const ready = paper.status === 'done'
+  const failed = paper.status === 'error'
+  // Only the person who shared a paper can retry or remove it, so others are told who that is.
+  const adder = paper.added_by || 'the person who added it'
   const finished = isFinished(paper)
   const others = paper.labelers.filter((name) => name !== me)
   const action = finished ? 'Review' : paper.judged > 0 ? 'Continue' : 'Label'
@@ -59,6 +63,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             {paper.topic === myTopic && ' · your topic'}
             {ready && ` · ${paper.claims} claims`}
             {paper.status === 'running' && ' · reading the paper…'}
+            {!paper.mine && paper.added_by && ` · added by ${paper.added_by}`}
           </span>
           {ready && paper.claims > 0 && (
             <span className="mt-1.5 block max-w-xs">
@@ -86,19 +91,26 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             </span>
           )}
           {ready && others.length > 0 && <span className="block text-sm text-ink-muted">Also labeled by {others.join(', ')}</span>}
-          {paper.status === 'error' && (
+          {failed && (
             <span role="alert" className="block text-sm text-refutes">
-              Could not be read: {paper.reason || 'no open PDF was found'}. Remove it and add another.
+              Could not be read: {paper.reason || 'no open PDF was found'}.{' '}
+              {paper.mine ? 'Try again, or remove it.' : `Only ${adder} can try again or remove it.`}
+              {retry.isError && ` Trying again failed: ${problem(retry.error).title}.`}
             </span>
           )}
         </span>
         {ready && <span className="text-sm font-medium text-accent">{action}</span>}
         {paper.status === 'running' && <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" aria-label="Reading the paper" />}
       </button>
+      {paper.mine && failed && (
+        <Button variant="ghost" disabled={retry.isPending} onClick={() => retry.mutate(paper.analysis_id)}>
+          {retry.isPending ? 'Starting…' : 'Try again'}
+        </Button>
+      )}
       {paper.mine && (
         <Button
           variant="ghost"
-          disabled={assign.isPending}
+          disabled={assign.isPending || retry.isPending}
           onClick={() => {
             if (!window.confirm("Remove this paper from the team's list? Labels already saved are kept.")) return
             assign.mutate({ analysisId: paper.analysis_id, topic: '' })

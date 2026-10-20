@@ -2,19 +2,25 @@
 
 Scopus (Elsevier) answers with metadata, not PDFs: a DOI for each paper. The DOI then goes to the
 same analysis the Researcher role runs, which looks for an open-access copy (Semantic Scholar,
-Unpaywall, arXiv). So a search keeps only open-access records, and a paper whose PDF still cannot
-be reached fails in that analysis with a reason the queue shows. Scopus gives no abstracts on our
-key, so they come from OpenAlex by DOI.
+Unpaywall, arXiv). So a search keeps only open-access records, and `downloadable` marks the ones
+whose PDF the analysis can actually fetch. A paper whose PDF still cannot be reached fails in that
+analysis with a reason the queue shows. Scopus gives no abstracts on our key, so they come from
+OpenAlex by DOI.
 """
 
 import logging
 import re
+from urllib.parse import urlparse
 
 from app import config
+from app.pipeline.sources import SEMANTIC_SCHOLAR_URL, USER_AGENT
 
 log = logging.getLogger(__name__)
 
 URL = "https://api.elsevier.com/content/search/scopus"
+# Publishers that answer a script with 403 or an HTML page, even for open-access papers (#408).
+# doi.org only redirects to the publisher's landing page.
+SCRIPT_REFUSED_HOSTS = ("dl.acm.org", "ieeexplore.ieee.org", "direct.mit.edu", "doi.org")
 PAGE = 25  # the most the standard Scopus key returns per request
 TIMEOUT = 30
 # The orders a search can ask for, as Scopus names them. Without one Scopus lists the newest first,
@@ -69,7 +75,50 @@ def build_query(topic: str, text: str, since: int, until: int | None = None) -> 
     words = " ".join(re.sub(r"[\"{}()\\]", " ", text).split())[:100]  # query syntax, and spaces
     if words:
         parts.append(f'TITLE-ABS-KEY("{words}")')
-    return " AND ".join(parts)
+    # SRCTITLE matches the words anywhere in a title, so "International Conference on Software
+    # Engineering" also matches "... Software Engineering and Computer Applications" (#579).
+    # Scopus applies AND NOT last, so it has to come at the end.
+    others = " OR ".join(f'SRCTITLE("{venue} and*")' for venue in VENUES[topic])
+    return " AND ".join(parts) + f" AND NOT ({others})"
+
+
+def downloadable(dois: list[str]) -> dict[str, bool]:
+    """Whether the analysis can fetch each paper's PDF, as far as Semantic Scholar knows.
+
+    One batch request for the whole page. An arXiv copy always works; a publisher's PDF works
+    unless the publisher refuses scripts. Keys are lower-case DOIs. A DOI that Semantic Scholar
+    does not know, or every DOI when it does not answer, is left out: the caller treats that as
+    unknown and still lets the paper be added.
+    """
+    import requests
+
+    headers = {**USER_AGENT, **({"x-api-key": config.S2_API_KEY} if config.S2_API_KEY else {})}
+    try:
+        response = requests.post(
+            f"{SEMANTIC_SCHOLAR_URL}/batch",
+            params={"fields": "externalIds,openAccessPdf"},
+            json={"ids": [f"DOI:{doi}" for doi in dois]},
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as error:
+        log.warning("could not check %d papers for a downloadable copy: %r", len(dois), error)
+        return {}
+    # The answer has one entry per id, in order, and null for an id it does not know.
+    return {
+        doi.lower(): _has_fetchable_copy(paper)
+        for doi, paper in zip(dois, response.json(), strict=True)
+        if paper is not None
+    }
+
+
+def _has_fetchable_copy(paper: dict) -> bool:
+    if (paper.get("externalIds") or {}).get("ArXiv"):
+        return True
+    url = (paper.get("openAccessPdf") or {}).get("url") or ""
+    host = urlparse(url).hostname or ""
+    return bool(url) and not any(host == h or host.endswith(f".{h}") for h in SCRIPT_REFUSED_HOSTS)
 
 
 def search(

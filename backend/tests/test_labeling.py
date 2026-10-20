@@ -587,6 +587,52 @@ class ScopusReply:
         return self.body
 
 
+def test_scopus_query_leaves_out_venues_that_only_start_with_a_topic_venue():
+    q = scopus.build_query("SE", "", 2020)
+    # "... Software Engineering and Computer Applications" is not ICSE (#579).
+    assert 'SRCTITLE("International Conference on Software Engineering and*")' in q
+    # Scopus applies AND NOT last, so it must close the query.
+    assert q.endswith(")") and q.rsplit(" AND NOT ", 1)[1].startswith("(SRCTITLE(")
+
+
+class S2Reply:
+    def __init__(self, papers):
+        self.papers = papers
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.papers
+
+
+def test_a_paper_is_downloadable_with_an_arxiv_copy_or_a_pdf_scripts_may_fetch(monkeypatch):
+    import requests
+
+    papers = [
+        {"externalIds": {"ArXiv": "2307.08177"}, "openAccessPdf": {"url": "https://dl.acm.org/doi/pdf/1"}},
+        {"externalIds": {}, "openAccessPdf": {"url": "https://dl.acm.org/doi/pdf/2"}},
+        {"externalIds": {}, "openAccessPdf": {"url": "https://www.example.edu/paper.pdf"}},
+        {"externalIds": {}, "openAccessPdf": None},
+        None,  # Semantic Scholar does not know this DOI
+    ]
+    monkeypatch.setattr(requests, "post", lambda *a, **k: S2Reply(papers))
+
+    found = scopus.downloadable(["10.1/A", "10.1/b", "10.1/c", "10.1/d", "10.1/e"])
+
+    assert found == {"10.1/a": True, "10.1/b": False, "10.1/c": True, "10.1/d": False}
+
+
+def test_downloadable_is_unknown_when_semantic_scholar_does_not_answer(monkeypatch):
+    import requests
+
+    def refuse(*args, **kwargs):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(requests, "post", refuse)
+    assert scopus.downloadable(["10.1/a"]) == {}
+
+
 def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
     with pytest.raises(scopus.NotConfigured):
@@ -729,6 +775,67 @@ def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch
     assert papers["e1"]["status"] == "error" and "no open-access PDF" in papers["e1"]["reason"]
 
 
+def test_pool_says_who_added_each_paper(api, monkeypatch):
+    from app import main
+
+    client, _, _ = api
+    monkeypatch.setattr(main.analyses, "get", lambda i: {**ANALYSIS, "id": i, "status": "running"})
+    pool.assign("Nuttadon", "paper", "p1", "HPC", "nuttadon-id")
+    pool.assign("chanya", "paper", "p2", "CV", "chanya-id")
+    papers = {p["analysis_id"]: p for p in client.get("/labeling/pool").json()["papers"]}
+    assert (papers["p1"]["added_by"], papers["p2"]["added_by"]) == ("Nuttadon", "chanya")
+
+
+FAILED = {
+    "id": "e1",
+    "paper": "10.1145/3712285.3771787",
+    "owner": "nuttadon-id",
+    "status": "error",
+    "stages": [{"stage": "error", "message": "Connection broken: IncompleteRead"}],
+    "claims": [],
+}
+
+
+def _fake_start(monkeypatch, started):
+    from app import main
+
+    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None):
+        started.append((analysis_id, paper, owner))
+
+    monkeypatch.setattr(main, "enqueue_analysis", fake_enqueue)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: SimpleNamespace(publish=lambda *a: 0))
+
+
+def test_retry_puts_a_new_analysis_of_the_same_doi_in_place_of_the_failed_one(api, monkeypatch):
+    client, _, app = api
+    app.dependency_overrides[labeling.mine_analysis] = lambda: FAILED
+    app.dependency_overrides[labeling.current_user] = lambda: "nuttadon-id"
+    started = []
+    _fake_start(monkeypatch, started)
+    pool.assign("Nuttadon", "paper", "e1", "HPC", "nuttadon-id")
+
+    reply = client.post("/labeling/papers/e1/retry")
+
+    assert reply.status_code == 200
+    new_id = reply.json()["id"]
+    assert started == [(new_id, "10.1145/3712285.3771787", "nuttadon-id")]
+    assert pool.pooled() == {new_id: "HPC"}
+
+
+def test_retry_refuses_a_paper_that_did_not_fail_or_is_not_listed(api, monkeypatch):
+    client, _, app = api
+    started = []
+    _fake_start(monkeypatch, started)
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {**FAILED, "status": "done"}
+    pool.assign("Nuttadon", "paper", "e1", "HPC", "nuttadon-id")
+    assert client.post("/labeling/papers/e1/retry").status_code == 409
+
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {**FAILED, "id": "e2"}
+    assert client.post("/labeling/papers/e2/retry").status_code == 404
+    assert started == []
+
+
 def _claim(who, claim_id, paper="paperA-0123456789ab", status="accepted"):
     return {
         "annotator": who,
@@ -818,6 +925,21 @@ def test_a_failed_scopus_search_says_why(api, monkeypatch):
     assert fail_with(requests.Timeout("slow")).status_code == 504
     key = fail_with(requests.HTTPError("HTTP 401", response=ScopusReply(status=401)))
     assert key.status_code == 502 and "API key" in key.json()["detail"]
+
+
+def test_scopus_search_says_which_papers_can_be_downloaded(api, monkeypatch):
+    client, _, _ = api
+    found = [{"doi": doi, "title": doi} for doi in ("10.1/A", "10.1/b", "10.1/c")]
+    monkeypatch.setattr(scopus, "search", lambda *args: {"total": 3, "results": found})
+    monkeypatch.setattr(scopus, "downloadable", lambda dois: {"10.1/a": True, "10.1/b": False})
+
+    results = client.get("/labeling/scopus/search", params={"topic": "SE"}).json()["results"]
+
+    assert [(r["doi"], r["downloadable"]) for r in results] == [
+        ("10.1/A", True),
+        ("10.1/b", False),
+        ("10.1/c", None),
+    ]
 
 
 def test_every_venue_name_is_specific_enough_to_match_only_that_venue():
