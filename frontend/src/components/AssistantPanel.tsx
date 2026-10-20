@@ -1,0 +1,429 @@
+/**
+ * The Ask panel (Figma: Redesign 2026, R/16–R/18, R/11 Mobile, components A/Stamp, A/Statement,
+ * A/Why). The reader asks about what is on screen; the answer streams in as statements, each
+ * with its source and a stamp that turns from Checking… into the judge's verdict. A drawer on
+ * desktop, a full-screen sheet on a phone. The chat itself lives in useAssistant, so the panel
+ * can unmount on a screen change without losing it.
+ */
+
+import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Loader2, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+
+import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
+import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
+import { cn } from '../lib/utils'
+import type { Target } from './PageViewer'
+
+/** What the chip says the question is about. `library` cannot be removed: it is the default. */
+export type AskAbout = { kind: 'paper' | 'node' | 'library'; label: string }
+
+type Stamp = { label: string; pill: string; bar: string }
+
+const STAMPS: Record<StatementVerdict | 'checking', Stamp> = {
+  supports: { label: 'Backed', pill: 'bg-supports-soft text-supports', bar: 'border-supports' },
+  refutes: { label: 'Contradicted', pill: 'bg-refutes-soft text-refutes', bar: 'border-refutes' },
+  insufficient: { label: 'Not backed', pill: 'bg-insufficient-soft text-insufficient', bar: 'border-insufficient' },
+  unchecked: { label: 'Can’t check', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
+  error: { label: 'Can’t check', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
+  checking: { label: 'Checking…', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
+}
+
+// 24 px hit areas on desktop, 44 px on a phone (the design's decisions note).
+const ICON_BUTTON =
+  'flex size-11 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:size-7'
+
+const NOTE = 'Each statement is checked against the passage it cites. A statement no passage backs is marked, not hidden.'
+
+/** "3 of 4 backed · 1 contradicted" once every check is in, "Checking 1 of 3" until then. */
+function answerSummary(turn: Turn) {
+  const checked = turn.statements.filter((s) => s.verdict).length
+  if (checked < turn.statements.length) return `Checking ${checked + 1} of ${turn.statements.length}`
+  const backed = turn.statements.filter((s) => s.verdict === 'supports').length
+  const contradicted = turn.statements.filter((s) => s.verdict === 'refutes').length
+  const parts = [`${backed} of ${turn.statements.length} backed`]
+  if (contradicted) parts.push(`${contradicted} contradicted`)
+  return parts.join(' · ')
+}
+
+/** The judge's passage and reasoning behind a stamp (A/Why). */
+function Why({ statement, title, onShowSource }: { statement: Statement; title?: string; onShowSource: (target: Target) => void }) {
+  return (
+    <div className="mt-2 flex flex-col gap-1.5 rounded-xl bg-neutral-soft p-3">
+      <p className="type-label text-ink-muted">What the passage says{statement.page ? ` · page ${statement.page}` : ''}</p>
+      {statement.quote && <p className="font-serif text-[15px] leading-6 italic text-ink">“{statement.quote}”</p>}
+      {statement.reasoning && <p className="text-xs leading-5 text-ink-muted">{statement.reasoning}</p>}
+      <button
+        type="button"
+        onClick={() => onShowSource(sourceTarget(statement, title))}
+        className="self-start text-xs font-medium text-accent underline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        Open passage
+      </button>
+    </div>
+  )
+}
+
+/** One checked statement (A/Statement): the sentence, its source, and its stamp. */
+function StatementRow({
+  statement,
+  title,
+  answering,
+  onShowSource,
+}: {
+  statement: Statement
+  title?: string
+  /** Whether the answer is still coming. A statement left without a verdict by a Stop or a
+   * failure could not be checked, so it stops saying Checking…. */
+  answering: boolean
+  onShowSource: (target: Target) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const stamp = STAMPS[statement.verdict ?? (answering ? 'checking' : 'unchecked')]
+  const explained = Boolean(statement.verdict && (statement.quote || statement.reasoning))
+  const pill = cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold', stamp.pill)
+  return (
+    <li className={cn('border-l-2 pl-3', stamp.bar)}>
+      <p className="text-[13px] leading-5 text-ink">{statement.text}</p>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        {statement.source ? (
+          <button
+            type="button"
+            onClick={() => onShowSource(sourceTarget(statement, title))}
+            className="min-h-11 truncate text-left text-xs text-ink-muted underline hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:min-h-6"
+          >
+            {sourceLabel(statement, title)}
+          </button>
+        ) : (
+          <span className="text-xs text-ink-muted">No passage named</span>
+        )}
+        {explained ? (
+          // The button is the 44px (phone) or 24px (desktop) hit area; the pill inside stays small.
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            aria-label={`${stamp.label}: why`}
+            className="flex min-h-11 shrink-0 items-center rounded-full focus-visible:outline-2 focus-visible:outline-accent lg:min-h-6"
+          >
+            <span className={pill}>
+              <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+              {stamp.label}
+            </span>
+          </button>
+        ) : (
+          <span className={pill}>
+            {statement.verdict || !answering ? (
+              <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+            ) : (
+              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+            )}
+            {stamp.label}
+          </span>
+        )}
+      </div>
+      {open && <Why statement={statement} title={title} onShowSource={onShowSource} />}
+    </li>
+  )
+}
+
+/** A question and what came back for it: the statements, or why there are none. */
+function TurnView({
+  turn,
+  about,
+  titles,
+  onAskAgain,
+  onShowSource,
+}: {
+  turn: Turn
+  about: AskAbout
+  titles: Record<string, string>
+  onAskAgain?: () => void
+  onShowSource: (target: Target) => void
+}) {
+  const unanswered = turn.status === 'done' && turn.statements.length === 0
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">{turn.question}</p>
+      {turn.statements.length > 0 && (
+        <section aria-label="Answer" className="flex flex-col gap-2.5">
+          {/* The one line a screen reader hears change while the checks come in. */}
+          <p role="status" className="type-label flex items-center gap-1.5 text-ink-muted">
+            <Sparkles className="size-3.5" aria-hidden="true" />
+            Answer · {answerSummary(turn)}
+          </p>
+          <ul className="flex flex-col gap-3">
+            {turn.statements.map((statement) => (
+              <StatementRow
+                key={statement.index}
+                statement={statement}
+                title={titles[statement.source]}
+                answering={turn.status === 'answering'}
+                onShowSource={onShowSource}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
+      {turn.status === 'answering' && turn.statements.length === 0 && (
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          Reading the papers…
+        </p>
+      )}
+      {unanswered && (
+        <div className="flex gap-2.5 rounded-xl bg-neutral-soft p-3">
+          <SearchX className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+          <div className="text-[13px] leading-5">
+            <p className="font-medium text-ink">
+              {about.kind === 'library' ? 'No paper in your library answers this.' : 'This paper does not answer this.'}
+            </p>
+            <p className="text-ink-muted">
+              Nothing was written, so nothing is unchecked.{' '}
+              {about.kind === 'library' ? 'Add the paper to your library, or ask about one you have.' : 'Remove the chip to ask your whole library.'}
+            </p>
+          </div>
+        </div>
+      )}
+      {turn.status === 'failed' && (
+        <div className="flex gap-2.5 rounded-xl border border-border-subtle bg-neutral-soft p-3">
+          <CircleAlert className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+          <div className="flex flex-col items-start gap-2 text-[13px] leading-5 text-ink">
+            <p>The answer failed. Your question is kept in this chat.</p>
+            {onAskAgain && (
+              <button
+                type="button"
+                onClick={onAskAgain}
+                className="min-h-11 rounded-lg border border-border-subtle bg-surface px-3 text-[13px] font-medium hover:bg-accent-soft lg:min-h-8"
+              >
+                Ask again
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {turn.status === 'stopped' && <p className="text-xs text-ink-muted">Stopped. What arrived is kept.</p>}
+    </div>
+  )
+}
+
+/** The reader's earlier chats, newest first (R/18b). */
+function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onBack: () => void; onNew: () => void }) {
+  const [chats, setChats] = useState<ChatSummary[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    listChats().then(setChats, () => setFailed(true))
+  }, [])
+  return (
+    <>
+      <div className="flex items-center gap-2 px-5 pt-4 pb-2">
+        <button type="button" onClick={onBack} aria-label="Back to the chat" className={ICON_BUTTON}>
+          <ChevronLeft className="size-4" aria-hidden="true" />
+        </button>
+        <h2 className="flex-1 text-[15px] font-semibold text-ink">Your chats</h2>
+        <button type="button" onClick={onNew} aria-label="New chat" className={ICON_BUTTON}>
+          <Plus className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5">
+        {failed && <p className="py-3 text-[13px] text-ink-muted">Your chats could not be loaded.</p>}
+        {chats?.length === 0 && <p className="py-3 text-[13px] text-ink-muted">No chats yet.</p>}
+        <ul className="divide-y divide-border-subtle">
+          {chats?.map((chat) => (
+            <li key={chat.id}>
+              <button
+                type="button"
+                onClick={() => onPick(chat.id)}
+                className="flex w-full items-center gap-2 py-3 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 text-[13px] leading-5 text-ink">{chat.title || 'Untitled chat'}</span>
+                  <span className="text-xs text-ink-muted">{whenLabel(chat.updated)}</span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </>
+  )
+}
+
+export function AssistantPanel({
+  assistant,
+  context,
+  about,
+  titles = {},
+  onClearAbout,
+  onClose,
+  onShowSource,
+  className,
+}: {
+  assistant: Assistant
+  context: AskContext
+  about: AskAbout
+  /** Paper titles by PDF file name, so a source reads as its title. */
+  titles?: Record<string, string>
+  /** Removes the chip, so the next question asks the whole library. */
+  onClearAbout: () => void
+  onClose: () => void
+  onShowSource: (target: Target) => void
+  className?: string
+}) {
+  const [view, setView] = useState<'chat' | 'chats'>('chat')
+  const end = useRef<HTMLDivElement>(null)
+  const { turns, answering, draft, setDraft } = assistant
+  const last = turns.at(-1)
+
+  // Follow a new question and new statements; a verdict landing does not move the reader.
+  useEffect(() => {
+    end.current?.scrollIntoView?.({ block: 'end' })
+  }, [turns.length, last?.statements.length])
+
+  const send = () => {
+    const question = draft.trim()
+    if (!question || answering) return
+    setDraft('')
+    void assistant.ask(question, context)
+  }
+
+  const newChat = () => {
+    assistant.newChat()
+    setView('chat')
+  }
+
+  return (
+    <aside
+      aria-label="Ask"
+      className={cn(
+        'fixed inset-0 z-50 flex flex-col bg-surface lg:static lg:z-auto lg:h-full lg:border-l lg:border-border-subtle',
+        className,
+      )}
+    >
+      {view === 'chats' ? (
+        <ChatList
+          onBack={() => setView('chat')}
+          onNew={newChat}
+          onPick={(id) => {
+            setView('chat')
+            void assistant.openChat(id)
+          }}
+        />
+      ) : (
+        <>
+          <div className="flex items-center gap-2 px-5 pt-4 pb-3">
+            {/* On a phone the panel covers the screen, so Back is how the reader returns to it. */}
+            <button type="button" onClick={onClose} aria-label="Back to the screen" className={cn(ICON_BUTTON, 'lg:hidden')}>
+              <ChevronLeft className="size-4" aria-hidden="true" />
+            </button>
+            <h2 className="flex flex-1 items-center gap-1.5 text-[15px] font-semibold text-ink">
+              <Sparkles className="size-4 text-accent" aria-hidden="true" />
+              Ask
+            </h2>
+            <button type="button" onClick={() => setView('chats')} aria-label="Your chats" className={ICON_BUTTON}>
+              <Clock className="size-4" aria-hidden="true" />
+            </button>
+            <button type="button" onClick={newChat} aria-label="New chat" className={ICON_BUTTON}>
+              <Plus className="size-4" aria-hidden="true" />
+            </button>
+            <button type="button" onClick={onClose} aria-label="Close Ask" className={cn(ICON_BUTTON, 'hidden lg:flex')}>
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="mx-5 flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent">
+            {about.kind === 'library' ? (
+              <LibraryIcon className="size-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span className="min-w-0 flex-1 truncate">About: {about.label}</span>
+            {about.kind !== 'library' && (
+              <button
+                type="button"
+                onClick={onClearAbout}
+                aria-label="Ask about your whole library instead"
+                className="-my-2 flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent/10 lg:size-6"
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-4">
+            {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
+            {turns.length === 0 && !assistant.openFailed && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[15px] font-medium text-ink">
+                  {about.kind === 'library' ? 'Ask about the papers in your library.' : `Ask about ${about.label}.`}
+                </p>
+                <p className="text-[13px] leading-5 text-ink-muted">
+                  Answers come back as short statements. Each one cites a passage and is checked by the judge before it
+                  counts.{about.kind === 'library' && ' Open a paper or select a graph node first to ask about that one only.'}
+                </p>
+              </div>
+            )}
+            {turns.map((turn) => (
+              <TurnView
+                key={turn.id}
+                turn={turn}
+                about={about}
+                titles={titles}
+                onShowSource={onShowSource}
+                onAskAgain={turn === last && !answering ? () => void assistant.ask(turn.question, context, true) : undefined}
+              />
+            ))}
+            <div ref={end} />
+          </div>
+
+          <div className="px-5 pb-4">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                send()
+              }}
+              className="flex items-center gap-2 rounded-xl border border-border-subtle bg-neutral-soft py-1.5 pr-1.5 pl-3"
+            >
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                disabled={answering}
+                aria-label="Your question"
+                placeholder={
+                  answering
+                    ? 'Answering… Stop keeps what’s here'
+                    : about.kind === 'library'
+                      ? 'Ask about your library…'
+                      : about.kind === 'paper'
+                        ? 'Ask about this paper…'
+                        : 'Ask about this node…'
+                }
+                className="min-w-0 flex-1 bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed"
+              />
+              {answering ? (
+                <button
+                  type="button"
+                  onClick={assistant.stop}
+                  className="flex min-h-11 items-center gap-1.5 rounded-lg border border-accent px-3 text-[13px] font-medium text-accent hover:bg-accent-soft lg:min-h-8"
+                >
+                  <Square className="size-3 fill-current" aria-hidden="true" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  aria-label="Send"
+                  className="flex size-11 items-center justify-center rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-50 lg:size-8"
+                >
+                  <ArrowUp className="size-4" aria-hidden="true" />
+                </button>
+              )}
+            </form>
+            <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+          </div>
+        </>
+      )}
+    </aside>
+  )
+}

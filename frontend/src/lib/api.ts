@@ -327,6 +327,19 @@ export function followEvents<T>(path: string, onEvent: (event: T) => void, onOpe
   return () => controller.abort()
 }
 
+/** POSTs `body` and calls `onEvent` with each server-sent event of the answer, until it ends or
+ * `signal` aborts. Unlike followEvents it never reconnects: a POST would ask the question again. */
+export async function postEvents<T>(path: string, body: unknown, onEvent: (event: T) => void, signal: AbortSignal) {
+  const response = await send(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!response.body) throw new Error(`no answer stream from ${path}`)
+  await readEvents(response.body, (data) => onEvent(JSON.parse(data)))
+}
+
 /** EventSource's own default pause before it reconnects. */
 const RECONNECT_MS = 3000
 
