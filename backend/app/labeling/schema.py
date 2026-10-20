@@ -63,8 +63,9 @@ TABS: dict[str, list[str]] = {
 }
 
 # Who labels which topic, and which analyses are shared with the labeling team. Not in TABS: its
-# rows have no paper_id, and the labeling flow reads every tab in TABS per paper.
-ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner"]
+# rows have no paper_id, and the labeling flow reads every tab in TABS per paper. `doi` is set
+# for a paper whose PDF was uploaded by hand: its analysis only knows the file.
+ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner", "doi"]
 ALL_TABS = {**TABS, "assignments": ASSIGNMENTS}
 
 # What makes two rows "the same" for the purpose of replacing one with a later one.
@@ -86,6 +87,15 @@ class TopicIn(BaseModel):
 class ScopusAddIn(BaseModel):
     doi: str = Field(pattern=r"^10\.\d{4,9}/\S+$", max_length=200)
     topic: Literal["CV", "NLP", "SE", "HPC"]
+
+
+class UploadShareIn(BaseModel):
+    """An uploaded paper to list: its topic ("" with `replaces`, which gives it), its DOI or
+    paper link when known, and the failed paper of yours it takes the place of."""
+
+    topic: Topic = ""
+    doi: str = Field("", max_length=300)
+    replaces: str = Field("", max_length=64)
 
 
 class PersonTopicIn(TopicIn):

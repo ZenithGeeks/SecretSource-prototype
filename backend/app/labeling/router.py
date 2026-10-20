@@ -37,6 +37,7 @@ from app.labeling.schema import (
     SaveIn,
     ScopusAddIn,
     TopicIn,
+    UploadShareIn,
     current,
 )
 from app.pipeline import verify
@@ -281,6 +282,7 @@ async def pool_state(
                 name_of[account] = r.get("annotator", "")
         shared = []
         doi_of: dict[str, str] = {}  # analysis id -> DOI, for the subject and keywords below
+        uploaded = pool.uploaded_dois()
         sharers = pool.shared_by()
         for analysis_id, topic in pool.pooled().items():
             row = main.lookup(analysis_id)
@@ -293,8 +295,9 @@ async def pool_state(
             reason = next((s.get("message", "") for s in reversed(stages) if s.get("stage") == "error"), "")
             paper_id = Path(row["file"]).stem if row.get("file") else ""
             counts = by_paper.get(paper_id, {}) if paper_id else {}
-            # A paper added from Scopus was started from its DOI; an uploaded one has none.
-            if doi := scopus.doi_in(str(row.get("paper", ""))):
+            # A paper added from Scopus was started from its DOI; an uploaded one may have one
+            # on its assignment.
+            if doi := uploaded.get(analysis_id) or scopus.doi_in(str(row.get("paper", ""))):
                 doi_of[analysis_id] = doi.lower()
             shared.append(
                 {
@@ -367,28 +370,75 @@ async def retry_paper(
     _store()
     # On the event loop, as scopus_add does: _start schedules its save with create_task (#397).
     started = main._start(analysis["paper"], True, user)
+    # An uploaded paper's analysis only knows its file, so its DOI moves to the new one.
+    doi = (await asyncio.to_thread(pool.uploaded_dois)).get(analysis["id"], "")
     # The new analysis is listed before the failed one leaves, so the paper never disappears.
-    await asyncio.to_thread(pool.assign, who, "paper", started["id"], topic, user or "")
+    await asyncio.to_thread(pool.assign, who, "paper", started["id"], topic, user or "", doi)
     await asyncio.to_thread(pool.assign, who, "paper", analysis["id"], "", analysis.get("owner") or "")
     return {"id": started["id"]}
 
 
+@router.post("/papers/{analysis_id}/share-upload")
+async def share_upload(
+    body: UploadShareIn,
+    analysis: dict = Depends(mine_analysis),
+    user: str | None = Depends(current_user),
+    who: str = Depends(annotator),
+):
+    """List one of your analyses of an uploaded PDF for the team.
+
+    For a paper whose PDF the analysis cannot download. The browser uploads the PDF and starts
+    the analysis as the Researcher role does (POST /analyses/upload, or the papers bucket where
+    the web proxy would refuse a large file), then calls this. `doi` links the paper to its
+    Scopus record, so it shows as added there and gets its keywords. `replaces` is one of your
+    listed papers that could not be read: it leaves the list, and this one takes its topic and,
+    when no DOI is given, its DOI.
+    """
+    from app import main
+
+    pooled = await asyncio.to_thread(pool.pooled)
+    if analysis["id"] in pooled:
+        raise HTTPException(409, "that analysis is already on the list")
+    doi = (scopus.doi_in(body.doi) or "").lower()
+    topic = body.topic
+    if body.replaces:
+        failed = await asyncio.to_thread(main.lookup, body.replaces)
+        topic = pooled.get(body.replaces, "")
+        if not failed or failed.get("owner") != user or not topic:
+            raise HTTPException(404, "you have no listed paper with that id")
+        if failed.get("status") != "error":
+            raise HTTPException(409, "only a paper that could not be read can be replaced")
+        doi = doi or await asyncio.to_thread(lambda: _paper_doi(main, body.replaces, pool.uploaded_dois()))
+    if not topic:
+        raise HTTPException(422, "pick a topic for the paper")
+    listed = doi and await asyncio.to_thread(_doi_in_pool, main, doi)
+    if listed and listed != body.replaces:
+        raise HTTPException(409, "that paper is already on the list; upload its PDF from its row there")
+    _store()
+    await asyncio.to_thread(pool.assign, who, "paper", analysis["id"], topic, user or "", doi)
+    if body.replaces:
+        await asyncio.to_thread(pool.assign, who, "paper", body.replaces, "", user or "")
+    return {"id": analysis["id"]}
+
+
+def _paper_doi(main, analysis_id: str, uploaded: dict[str, str]) -> str:
+    """The analysis's DOI, lower-case: the one its PDF was uploaded with (`uploaded`, from
+    pool.uploaded_dois), or the DOI it was started from; "" for neither. Looks the analysis up,
+    which can read the store, so callers run this off the event loop."""
+    paper = str((main.lookup(analysis_id) or {}).get("paper", ""))
+    return (uploaded.get(analysis_id) or scopus.doi_in(paper) or "").lower()
+
+
 def _doi_in_pool(main, doi: str) -> str | None:
-    """The pooled analysis of this DOI. Each lookup can read the store, so the only caller
-    (scopus_add) runs this on a worker thread."""
-    for analysis_id in pool.pooled():
-        row = main.lookup(analysis_id)
-        if row and str(row.get("paper", "")).lower() == doi.lower():
-            return analysis_id
-    return None
+    """The pooled analysis of this DOI. Runs off the event loop, like _paper_doi."""
+    uploaded = pool.uploaded_dois()
+    return next((a for a in pool.pooled() if _paper_doi(main, a, uploaded) == doi.lower()), None)
 
 
 def _pooled_dois(main) -> set[str]:
-    """DOIs already in the labeling pool. Looks each analysis up, so it runs off the event loop."""
-    return {
-        str((main.lookup(analysis_id) or {}).get("paper", "")).lower()
-        for analysis_id in pool.pooled()
-    }
+    """DOIs already in the labeling pool. Runs off the event loop, like _paper_doi."""
+    uploaded = pool.uploaded_dois()
+    return {doi for analysis_id in pool.pooled() if (doi := _paper_doi(main, analysis_id, uploaded))}
 
 
 @router.get("/scopus/search")

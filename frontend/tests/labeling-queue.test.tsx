@@ -6,6 +6,7 @@ const gateway = vi.hoisted(() => ({
   puts: [] as { path: string; body: unknown }[],
   putFails: false,
   posts: [] as { path: string; body: unknown }[],
+  uploads: [] as string[],
   statusError: '',
   scopus: true,
   downloadFails: false,
@@ -29,6 +30,14 @@ const gateway = vi.hoisted(() => ({
 
 vi.mock('../src/lib/api', async (original) => ({
   ...(await original<typeof import('../src/lib/api')>()),
+  // A labeler's PDF goes up the Researcher role's way, then share-upload lists it.
+  api: {
+    ...(await original<typeof import('../src/lib/api')>()).api,
+    uploadAnalysis: vi.fn(async (file: File) => {
+      gateway.uploads.push(file.name)
+      return { id: 'up1' }
+    }),
+  },
   request: vi.fn(async (path: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       gateway.puts.push({ path, body: JSON.parse(String(init.body)) })
@@ -81,6 +90,7 @@ describe('the labeler queue', () => {
     gateway.puts.length = 0
     gateway.putFails = false
     gateway.posts.length = 0
+    gateway.uploads.length = 0
     gateway.searches.length = 0
     gateway.statusError = ''
     gateway.scopus = true
@@ -169,8 +179,9 @@ describe('the labeler queue', () => {
       renderQueue()
       const table = await screen.findByRole('table')
       const row = rowOf(table, '10.1145/3712285.3771787')
-      expect(within(row).getByRole('alert')).toHaveTextContent('Only Nuttadon can try again or remove it.')
+      expect(within(row).getByRole('alert')).toHaveTextContent('Only Nuttadon can try again, upload its PDF or remove it.')
       expect(within(row).queryByRole('button', { name: /Try again/ })).toBeNull()
+      expect(within(row).queryByRole('button', { name: /Upload the PDF/ })).toBeNull()
       expect(within(row).queryByRole('button', { name: /Remove/ })).toBeNull()
       expect(within(rowOf(table, 'HPC paper')).getAllByRole('cell')[5]).toHaveTextContent('Added by: Nuttadon')
     } finally {
@@ -182,9 +193,26 @@ describe('the labeler queue', () => {
     renderQueue()
     const table = await screen.findByRole('table')
     const row = rowOf(table, '10.1/closed')
-    expect(within(row).getByRole('alert')).toHaveTextContent('Try again, or remove it.')
+    expect(within(row).getByRole('alert')).toHaveTextContent('Try again, upload its PDF, or remove it.')
     fireEvent.click(within(row).getByRole('button', { name: 'Try again 10.1/closed' }))
     await waitFor(() => expect(gateway.posts).toEqual([{ path: '/labeling/papers/x4/retry', body: undefined }]))
+  })
+
+  it('lets the person who added a failed paper upload its PDF in its place', async () => {
+    renderQueue()
+    const row = rowOf(await screen.findByRole('table'), '10.1/closed')
+    expect(within(row).getByRole('button', { name: 'Upload the PDF of 10.1/closed' })).toBeEnabled()
+
+    // The button opens the browser's file picker; a test picks the file on its input directly.
+    const pdf = new File(['%PDF-1.7'], 'closed.pdf', { type: 'application/pdf' })
+    fireEvent.change(row.querySelector('input[type="file"]')!, { target: { files: [pdf] } })
+
+    await waitFor(() =>
+      expect(gateway.posts).toEqual([
+        { path: '/labeling/papers/up1/share-upload', body: { topic: '', doi: '', replaces: 'x4' } },
+      ]),
+    )
+    expect(gateway.uploads).toEqual(['closed.pdf'])
   })
 
   it('does nothing when the person declines to remove a paper', async () => {

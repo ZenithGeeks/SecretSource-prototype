@@ -15,6 +15,7 @@ import {
   TOPIC_INFO,
   useScopusAdd,
   useScopusSearch,
+  useUploadPaper,
   type Pool,
   type ScopusPaper,
   type ScopusQuery,
@@ -25,6 +26,7 @@ import { cn } from '../../../lib/utils'
 import { GraphSegmented } from '../../researcher/components/GraphSegmented'
 import { PaperKeywords } from './PaperKeywords'
 import { TopicSelect } from './TopicSelect'
+import { UploadPdfButton } from './UploadPdfButton'
 
 const THIS_YEAR = new Date().getFullYear()
 const FIRST_YEAR = 1990
@@ -68,6 +70,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
   const [added, setAdded] = useState<Record<string, true>>({})
   const search = useScopusSearch(query)
   const add = useScopusAdd()
+  const upload = useUploadPaper(({ doi }) => doi && setAdded((all) => ({ ...all, [doi]: true })))
 
   const papers = search.data?.pages.flatMap((page) => page.results) ?? []
   const total = search.data?.pages[0]?.total ?? 0
@@ -189,6 +192,11 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
             {problem(add.error).title}. {problem(add.error).hint}
           </p>
         )}
+        {upload.isError && (
+          <p role="alert" className="text-sm text-refutes">
+            The PDF was not added: {problem(upload.error).title}. {problem(upload.error).hint}
+          </p>
+        )}
 
         {search.isPending && query && <ResultSkeleton />}
 
@@ -232,12 +240,16 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
                   delay={index < 25 ? index * 0.03 : 0}
                   done={paper.added || Boolean(added[paper.doi])}
                   adding={add.isPending && add.variables?.doi === paper.doi}
+                  uploading={upload.isPending && upload.variables?.doi === paper.doi}
+                  // One upload at a time: the progress shown is the latest upload's only.
+                  uploadBlocked={upload.isPending}
                   onAdd={() =>
                     add.mutate(
                       { doi: paper.doi, topic: query?.topic ?? form.topic },
                       { onSuccess: () => setAdded((all) => ({ ...all, [paper.doi]: true })) },
                     )
                   }
+                  onUpload={(file) => upload.mutate({ file, topic: query?.topic ?? form.topic, doi: paper.doi })}
                 />
               ))}
             </ul>
@@ -265,13 +277,20 @@ function ResultRow({
   delay,
   done,
   adding,
+  uploading,
+  uploadBlocked,
   onAdd,
+  onUpload,
 }: {
   paper: ScopusPaper
   delay: number
   done: boolean
   adding: boolean
+  uploading: boolean
+  uploadBlocked: boolean
   onAdd: () => void
+  /** For a paper whose PDF the analysis cannot download: the labeler's own copy instead. */
+  onUpload: (file: File) => void
 }) {
   const [open, setOpen] = useState(false)
   const cited = paper.cited_by ? `cited ${paper.cited_by.toLocaleString()}` : ''
@@ -303,7 +322,10 @@ function ResultRow({
           </span>
         </button>
         {unreachable ? (
-          <span className="flex min-h-11 shrink-0 items-center text-xs text-ink-muted">No copy we can download</span>
+          <span className="flex shrink-0 flex-col items-end">
+            <UploadPdfButton title={paper.title} busy={uploading} disabled={uploadBlocked} onFile={onUpload} />
+            <span className="text-xs text-ink-muted">No copy we can download</span>
+          </span>
         ) : (
           <Button
             variant="ghost"

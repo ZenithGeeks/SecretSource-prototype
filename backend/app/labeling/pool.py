@@ -54,8 +54,20 @@ def people() -> dict[str, str]:
     return {r["key"]: r["topic"] for r in rows() if r["kind"] == "person" and r["topic"]}
 
 
-def assign(who: str, kind: str, key: str, topic: str, owner: str = "") -> None:
+def uploaded_dois() -> dict[str, str]:
+    """analysis id -> DOI, for each shared paper whose PDF was uploaded by hand."""
+    return {r["key"]: r["doi"] for r in rows() if r["kind"] == "paper" and r["topic"] and r.get("doi")}
+
+
+def assign(who: str, kind: str, key: str, topic: str, owner: str = "", doi: str = "") -> None:
+    """Record `who` giving a person or a paper a topic; "" takes it back.
+
+    A later row replaces an earlier one for the same key, so a row without a DOI would lose the
+    one the paper was uploaded with: when none is given, the earlier row's DOI is copied over.
+    """
     global _cache
+    if kind == "paper" and not doi:
+        doi = next((r.get("doi", "") for r in rows() if r["kind"] == "paper" and r["key"] == key), "")
     row = {
         "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "annotator": who,
@@ -63,6 +75,7 @@ def assign(who: str, kind: str, key: str, topic: str, owner: str = "") -> None:
         "key": key,
         "topic": topic,
         "owner": owner,
+        "doi": doi,
     }
     ledger.get_store().append("assignments", [row])
     with _lock:
