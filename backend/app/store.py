@@ -68,7 +68,7 @@ def postgres_safe(value):
     only the Supabase writes use this.
     """
     if isinstance(value, str):
-        return value.replace("\x00", "�")
+        return value.replace("\x00", "\ufffd")
     if isinstance(value, dict):
         return {postgres_safe(key): postgres_safe(item) for key, item in value.items()}
     if isinstance(value, list | tuple):

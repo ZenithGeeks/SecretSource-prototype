@@ -56,9 +56,9 @@ def test_an_analysis_with_nul_is_saved_with_a_replacement_character(monkeypatch)
         "id": "a1",
         "data": {
             "id": "a1",
-            "title": "Paper�",
-            "claims": [{"text": "a�b", "score": 0.5, "spans": [1, 2]}],
-            "by�key": None,
+            "title": "Paper\ufffd",
+            "claims": [{"text": "a\ufffdb", "score": 0.5, "spans": [1, 2]}],
+            "by\ufffdkey": None,
         },
     }
     assert analysis["title"] == "Paper\x00"  # the caller's dict is left as it was
@@ -74,11 +74,11 @@ def test_every_store_write_replaces_nul(monkeypatch):
     store.save_preferences(None, {"note": "n\x00"})
     store.save_author_row(author_table, {"id": "r1", "owner": None, "body": "t\x00"})
 
-    assert client.rows["sources"]["data"] == {"url": "https://x�"}
-    assert client.rows["cache"]["data"] == {"text": "c�"}
-    assert client.rows["projects"]["data"]["name"] == "P�"
-    assert client.rows["preferences"]["data"] == {"note": "n�"}
-    assert client.rows[author_table]["data"]["body"] == "t�"
+    assert client.rows["sources"]["data"] == {"url": "https://x\ufffd"}
+    assert client.rows["cache"]["data"] == {"text": "c\ufffd"}
+    assert client.rows["projects"]["data"]["name"] == "P\ufffd"
+    assert client.rows["preferences"]["data"] == {"note": "n\ufffd"}
+    assert client.rows[author_table]["data"]["body"] == "t\ufffd"
 
 
 def test_labeling_rows_replace_nul(monkeypatch):
@@ -87,7 +87,7 @@ def test_labeling_rows_replace_nul(monkeypatch):
     Ledger().append("labels", [{"claim_id": "c\x00"}])
 
     [row] = client.rows["labeling_rows"]
-    assert row["data"]["claim_id"] == "c�"
+    assert row["data"]["claim_id"] == "c\ufffd"
 
 
 def test_teacher_rows_replace_nul():
@@ -95,11 +95,11 @@ def test_teacher_rows_replace_nul():
 
     TeacherGoogleRepository(client)._upsert("teacher_feedback", {"feedback_text": "f\x00"}, "owner")
 
-    assert client.rows["teacher_feedback"] == {"feedback_text": "f�"}
+    assert client.rows["teacher_feedback"] == {"feedback_text": "f\ufffd"}
 
 
 def test_tuples_are_cleaned_and_lengths_kept():
-    assert store.postgres_safe(("a\x00", "b")) == ["a�", "b"]
+    assert store.postgres_safe(("a\x00", "b")) == ["a\ufffd", "b"]
     assert len(store.postgres_safe("x\x00y")) == len("x\x00y")
 
 
