@@ -28,6 +28,7 @@ import { SETTINGS_DEFAULTS, useSettings } from '../lib/settings'
 import { authEnabled } from '../lib/supabase'
 import { useAuth, signOut } from '../lib/useAuth'
 import { cn } from '../lib/utils'
+import { askTarget } from '../lib/askCursor'
 import { Brand } from './Brand'
 import { RoleChip } from './RoleChip'
 import { Avatar } from './settings'
@@ -299,6 +300,7 @@ export function AppShell<K extends string>({
             key={key}
             type="button"
             onClick={() => navigate(key)}
+            data-ask-target={askTarget({ kind: 'screen', id: key })}
             aria-current={active === key ? 'page' : undefined}
             className={cn(
               'flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[13px] leading-[18px] font-medium lg:py-[7px]',
@@ -422,6 +424,7 @@ export function AppShell<K extends string>({
                 key={key}
                 type="button"
                 onClick={() => navigate(key)}
+                data-ask-target={askTarget({ kind: 'screen', id: key })}
                 aria-label={label}
                 title={label}
                 aria-current={active === key ? 'page' : undefined}

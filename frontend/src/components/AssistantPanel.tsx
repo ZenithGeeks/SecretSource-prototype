@@ -8,7 +8,7 @@
 
 import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Loader2, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
 import { MotionConfig } from 'framer-motion'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
@@ -267,6 +267,7 @@ export function AssistantPanel({
   onClearAbout,
   onClose,
   onShowSource,
+  doIt,
   className,
 }: {
   assistant: Assistant
@@ -280,9 +281,12 @@ export function AssistantPanel({
   onClearAbout: () => void
   onClose: () => void
   onShowSource: (target: Target) => void
+  /** The Do it view (components/DoIt) for a role whose screens the agent can work; none hides the switch. */
+  doIt?: ReactNode
   className?: string
 }) {
   const [view, setView] = useState<'chat' | 'chats'>('chat')
+  const [mode, setMode] = useState<'answer' | 'do'>('answer')
   const end = useRef<HTMLDivElement>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
@@ -296,7 +300,7 @@ export function AssistantPanel({
     const timer = window.setTimeout(() => setRested(lastId), CURSOR_REST_MS)
     return () => window.clearTimeout(timer)
   }, [lastStatus, lastId])
-  const pointing = view === 'chat' && last && last.id !== rested ? cursorFor(last) : null
+  const pointing = view === 'chat' && mode === 'answer' && last && last.id !== rested ? cursorFor(last) : null
 
   // Follow a new question and new statements; a verdict landing does not move the reader.
   useEffect(() => {
@@ -354,97 +358,121 @@ export function AssistantPanel({
             </button>
           </div>
 
-          <div className="mx-5 flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent">
-            {about.kind === 'library' ? (
-              <LibraryIcon className="size-3.5 shrink-0" aria-hidden="true" />
-            ) : (
-              <FileText className="size-3.5 shrink-0" aria-hidden="true" />
-            )}
-            <span className="min-w-0 flex-1 truncate">About: {about.label}</span>
-            {about.kind !== 'library' && (
-              <button
-                type="button"
-                onClick={onClearAbout}
-                aria-label="Ask about your whole library instead"
-                className="-my-2 flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent/10 lg:size-6"
-              >
-                <X className="size-3.5" aria-hidden="true" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-4">
-            {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
-            {turns.length === 0 && !assistant.openFailed && (
-              <div className="flex flex-col gap-2">
-                <p className="text-[15px] font-medium text-ink">
-                  {about.kind === 'library' ? 'Ask about the papers in your library.' : `Ask about ${about.label}.`}
-                </p>
-                <p className="text-[13px] leading-5 text-ink-muted">
-                  Answers come back as short statements. Each one cites a passage and is checked by the judge before it
-                  counts.{about.kind === 'library' && canNarrow && ' Open a paper or select a graph node first to ask about that one only.'}
-                </p>
-              </div>
-            )}
-            {turns.map((turn) => (
-              <TurnView
-                key={turn.id}
-                turn={turn}
-                about={about}
-                titles={titles}
-                onShowSource={onShowSource}
-                onAskAgain={turn === last && !answering ? () => void assistant.ask(turn.question, context, true) : undefined}
-              />
-            ))}
-            <div ref={end} />
-          </div>
-
-          <div className="px-5 pb-4">
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                send()
-              }}
-              className="flex items-center gap-2 rounded-xl border border-border-subtle bg-neutral-soft py-1.5 pr-1.5 pl-3"
-            >
-              <input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                disabled={answering}
-                aria-label="Your question"
-                placeholder={
-                  answering
-                    ? 'Answering… Stop keeps what’s here'
-                    : about.kind === 'library'
-                      ? 'Ask about your library…'
-                      : about.kind === 'paper'
-                        ? 'Ask about this paper…'
-                        : 'Ask about this node…'
-                }
-                className="min-w-0 flex-1 bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed"
-              />
-              {answering ? (
+          {doIt && (
+            <div role="group" aria-label="What Ask does" className="mx-5 mb-3 grid grid-cols-2 rounded-xl border border-border-subtle p-0.5">
+              {(['answer', 'do'] as const).map((option) => (
                 <button
+                  key={option}
                   type="button"
-                  onClick={assistant.stop}
-                  className="flex min-h-11 items-center gap-1.5 rounded-lg border border-accent px-3 text-[13px] font-medium text-accent hover:bg-accent-soft lg:min-h-8"
+                  aria-pressed={mode === option}
+                  onClick={() => setMode(option)}
+                  className={cn(
+                    'min-h-9 rounded-lg text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+                    mode === option ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+                  )}
                 >
-                  <Square className="size-3 fill-current" aria-hidden="true" />
-                  Stop
+                  {option === 'answer' ? 'Answer' : 'Do it'}
                 </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!draft.trim()}
-                  aria-label="Send"
-                  className="flex size-11 items-center justify-center rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-50 lg:size-8"
+              ))}
+            </div>
+          )}
+          {mode === 'do' && doIt ? (
+            doIt
+          ) : (
+            <>
+              <div className="mx-5 flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent">
+                {about.kind === 'library' ? (
+                  <LibraryIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                ) : (
+                  <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                )}
+                <span className="min-w-0 flex-1 truncate">About: {about.label}</span>
+                {about.kind !== 'library' && (
+                  <button
+                    type="button"
+                    onClick={onClearAbout}
+                    aria-label="Ask about your whole library instead"
+                    className="-my-2 flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent/10 lg:size-6"
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-4">
+                {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
+                {turns.length === 0 && !assistant.openFailed && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-[15px] font-medium text-ink">
+                      {about.kind === 'library' ? 'Ask about the papers in your library.' : `Ask about ${about.label}.`}
+                    </p>
+                    <p className="text-[13px] leading-5 text-ink-muted">
+                      Answers come back as short statements. Each one cites a passage and is checked by the judge before it
+                      counts.{about.kind === 'library' && canNarrow && ' Open a paper or select a graph node first to ask about that one only.'}
+                    </p>
+                  </div>
+                )}
+                {turns.map((turn) => (
+                  <TurnView
+                    key={turn.id}
+                    turn={turn}
+                    about={about}
+                    titles={titles}
+                    onShowSource={onShowSource}
+                    onAskAgain={turn === last && !answering ? () => void assistant.ask(turn.question, context, true) : undefined}
+                  />
+                ))}
+                <div ref={end} />
+              </div>
+
+              <div className="px-5 pb-4">
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    send()
+                  }}
+                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-neutral-soft py-1.5 pr-1.5 pl-3"
                 >
-                  <ArrowUp className="size-4" aria-hidden="true" />
-                </button>
-              )}
-            </form>
-            <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
-          </div>
+                  <input
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    disabled={answering}
+                    aria-label="Your question"
+                    placeholder={
+                      answering
+                        ? 'Answering… Stop keeps what’s here'
+                        : about.kind === 'library'
+                          ? 'Ask about your library…'
+                          : about.kind === 'paper'
+                            ? 'Ask about this paper…'
+                            : 'Ask about this node…'
+                    }
+                    className="min-w-0 flex-1 bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed"
+                  />
+                  {answering ? (
+                    <button
+                      type="button"
+                      onClick={assistant.stop}
+                      className="flex min-h-11 items-center gap-1.5 rounded-lg border border-accent px-3 text-[13px] font-medium text-accent hover:bg-accent-soft lg:min-h-8"
+                    >
+                      <Square className="size-3 fill-current" aria-hidden="true" />
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={!draft.trim()}
+                      aria-label="Send"
+                      className="flex size-11 items-center justify-center rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-50 lg:size-8"
+                    >
+                      <ArrowUp className="size-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </form>
+                <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+              </div>
+            </>
+          )}
         </>
       )}
       <MotionConfig reducedMotion="user">
