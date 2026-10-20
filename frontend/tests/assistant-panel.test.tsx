@@ -80,6 +80,23 @@ const statement = (index: number, text: string, page = 6) => ({
 })
 
 describe('the Ask panel', () => {
+  it("moves the AI cursor from the question to each statement as its check comes in, reacting to the verdict", async () => {
+    const stream = controlledStream()
+    gateway(stream)
+    render(<Panel />)
+
+    await ask('Why does batch norm fail with small batches?')
+    expect(await screen.findByText('Reading…')).toBeInTheDocument()
+    await stream.send(statement(0, 'BN normalizes with the batch mean.', 1))
+    await stream.send({ type: 'verdict', index: 0, verdict: 'refutes', quote: '', reasoning: '' })
+    expect(await screen.findByText('Check this')).toBeInTheDocument()
+    await stream.send(statement(1, 'BN stops working below 8 images.'))
+    await stream.send({ type: 'verdict', index: 1, verdict: 'supports', quote: '', reasoning: '' })
+    expect(await screen.findByText('Looks right')).toBeInTheDocument()
+    // The cursor is a picture of what the stamps already say, so screen readers skip it.
+    expect(screen.getByText('Looks right').closest('[aria-hidden="true"]')).not.toBeNull()
+  })
+
   it('stamps each statement Checking… until its verdict arrives', async () => {
     const stream = controlledStream()
     const calls = gateway(stream)

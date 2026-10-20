@@ -34,6 +34,8 @@ export type Turn = {
   question: string
   statements: Statement[]
   status: 'answering' | 'done' | 'failed' | 'stopped'
+  /** The statement whose check came in last, where the AI cursor points (components/AiCursor). */
+  lastChecked?: number
 }
 
 let nextTurnId = 0
@@ -42,7 +44,7 @@ export type ChatSummary = { id: string; title: string; updated: number }
 
 type ChatMessage = { role: 'user'; text: string } | { role: 'assistant'; statements: Statement[] }
 
-type AnswerEvent =
+export type AnswerEvent =
   | ({ type: 'statement' } & Pick<Statement, 'index' | 'text' | 'source' | 'page'>)
   | ({ type: 'verdict' } & Required<Pick<Statement, 'index' | 'verdict' | 'quote' | 'reasoning'>>)
   | { type: 'done'; statements: number }
@@ -71,7 +73,8 @@ function applyEvent(turn: Turn, event: AnswerEvent): Turn {
     }
     case 'verdict': {
       const { type: _, ...check } = event
-      return { ...turn, statements: turn.statements.map((s) => (s.index === check.index ? { ...s, ...check } : s)) }
+      const statements = turn.statements.map((s) => (s.index === check.index ? { ...s, ...check } : s))
+      return { ...turn, statements, lastChecked: check.index }
     }
     case 'done':
       return { ...turn, status: 'done' }
