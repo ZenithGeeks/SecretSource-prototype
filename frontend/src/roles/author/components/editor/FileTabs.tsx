@@ -54,7 +54,7 @@ export function FileTabs({
                 ;(event.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus()
               }}
               className={cn(
-                'flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-3.5 py-2 font-mono text-[12.5px] whitespace-nowrap',
+                'flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-3.5 py-2 font-mono text-[12px] whitespace-nowrap',
                 selected ? 'bg-surface font-medium text-ink' : 'text-ink-muted hover:text-ink',
               )}
             >

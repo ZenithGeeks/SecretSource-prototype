@@ -188,7 +188,7 @@ function TeacherClassSearch({ onOpenClasses }: { onOpenClasses: () => void }) {
       type="button"
       onClick={onOpenClasses}
       aria-label="Search classes"
-      className="flex h-[36px] w-full items-center gap-2 rounded-[8px] border border-border-subtle bg-canvas px-2.5 text-left text-[11px] text-ink-muted hover:border-accent"
+      className="flex h-[36px] w-full items-center gap-2 rounded-lg border border-border-subtle bg-canvas px-2.5 text-left text-[11px] text-ink-muted hover:border-accent"
     >
       <Search className="size-3.5 shrink-0" />
       <span className="flex-1">Search classes</span>

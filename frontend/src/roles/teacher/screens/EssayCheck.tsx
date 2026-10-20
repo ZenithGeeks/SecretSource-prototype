@@ -308,7 +308,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
         <div className="min-w-0">
           <button type="button" onClick={onBack} className="mb-2 inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted hover:text-accent"><ChevronLeft className="size-3.5" />Back to assignment</button>
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">{courseLabel} / Essay review</p>
-          <h1 className="mt-1 truncate font-serif text-[29px] font-semibold leading-9 text-ink">{data.student.name} <span className="font-normal text-ink-muted">· {assignmentLabel}</span></h1>
+          <h1 className="mt-1 truncate font-serif text-[30px] font-semibold leading-9 text-ink">{data.student.name} <span className="font-normal text-ink-muted">· {assignmentLabel}</span></h1>
           <p className="mt-1 truncate text-[12px] text-ink-muted">{data.student.fileName} <span aria-hidden="true">·</span> {data.reviews.length} citations to review</p>
         </div>
         {analysis?.id && <Button type="button" variant="ghost" disabled={recheckBusy} onClick={() => setRecheckOpen(true)}>{analyze.isPending ? 'Starting analysis...' : 'Recheck essay'}</Button>}
@@ -366,7 +366,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
         <section aria-labelledby="teacher-feedback-heading" className="space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.7px] text-accent">Student feedback</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-accent">Student feedback</p>
               <h2 id="teacher-feedback-heading" className="mt-1 font-serif text-2xl font-semibold leading-[30px] text-ink">Write to {data.student.name}</h2>
               <p className="mt-1 text-sm leading-6 text-ink-muted">Add a personal note and choose which reviewed citations to include.</p>
             </div>

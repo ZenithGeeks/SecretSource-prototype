@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import 'react-pdf/dist/Page/AnnotationLayer.css'
+import '../styles/pdf-annotation-layer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -417,7 +417,7 @@ export function PageViewer({
               title={compactQuote ? target.quote : undefined}
               className={cn(
                 'font-serif italic text-ink',
-                compactQuote ? 'line-clamp-2 text-[13px] leading-5' : 'text-[15px] leading-[23px]',
+                compactQuote ? 'line-clamp-2 text-[13px] leading-5' : 'text-[15px] leading-[22px]',
               )}
             >
               “{target.quote}”

@@ -223,7 +223,7 @@ export function PreviewPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-canvas">
       <div className="flex items-center gap-2.5 border-b border-border-subtle bg-canvas px-3.5 py-2 text-xs">
-        <span className="text-[12.5px] font-medium text-ink">Live preview</span>
+        <span className="text-[12px] font-medium text-ink">Live preview</span>
         <span className="hidden text-ink-muted sm:inline">rendered with LaTeX.js · updates as you type</span>
         {rendering && <Loader2 className="size-3.5 animate-spin text-ink-muted" aria-label="Rendering" />}
         <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className="ml-auto rounded text-accent hover:underline">

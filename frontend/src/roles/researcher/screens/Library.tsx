@@ -517,7 +517,7 @@ function ProjectDetail({
               aria-pressed={filter === seg.key}
               onClick={() => setFilter(seg.key)}
               className={cn(
-                'rounded-[7px] px-3 py-[5px] text-[13px] font-medium',
+                'rounded-lg px-3 py-[5px] text-[13px] font-medium',
                 filter === seg.key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
               )}
             >

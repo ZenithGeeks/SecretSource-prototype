@@ -38,7 +38,7 @@ export function AssignmentDetail({ courseId, assignmentId, onOpenEssay, onNaviga
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Assignment summary">
-        {stats.map((stat) => <Card key={stat.label} className="px-4 py-3"><p className="text-[10px] font-semibold uppercase tracking-[0.09em] text-ink-muted">{stat.label}</p><p className="mt-1 font-serif text-[24px] font-semibold leading-7">{stat.value}</p><p className="mt-1 text-[10px] text-ink-muted">{stat.detail}</p></Card>)}
+        {stats.map((stat) => <Card key={stat.label} className="px-4 py-3"><p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">{stat.label}</p><p className="mt-1 font-serif text-[26px] font-semibold leading-7">{stat.value}</p><p className="mt-1 text-[10px] text-ink-muted">{stat.detail}</p></Card>)}
       </section>
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -54,7 +54,7 @@ export function AssignmentDetail({ courseId, assignmentId, onOpenEssay, onNaviga
             <p className="border-t border-border-subtle pt-3 text-[10px] leading-4 text-ink-muted">Materials stay managed in Google Classroom.</p>
           </Card>
           <Card className="space-y-3 bg-accent-soft/55 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">Review essays</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Review essays</p>
             <p className="text-[11px] leading-5 text-ink-muted">Open a submitted essay to check its claims and source evidence.</p>
             <Button type="button" className="w-full" onClick={() => firstSubmitted && onOpenEssay(firstSubmitted.studentId)} disabled={!firstSubmitted}>Check the evidence</Button>
           </Card>

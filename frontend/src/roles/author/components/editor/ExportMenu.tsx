@@ -147,13 +147,13 @@ export function ExportMenu({
                 {item.title}
                 {busy === item.kind && <Loader2 className="size-3.5 animate-spin text-ink-muted" aria-hidden="true" />}
               </span>
-              <span id={`${id}-${item.kind}-hint`} className="text-[11.5px] text-ink-muted">
+              <span id={`${id}-${item.kind}-hint`} className="text-[11px] text-ink-muted">
                 {item.hint}
               </span>
             </button>
           ))}
           {openIssues > 0 && (
-            <p className="mt-1 border-t border-border-subtle px-4 pt-2 pb-1 text-[11.5px] text-refutes">
+            <p className="mt-1 border-t border-border-subtle px-4 pt-2 pb-1 text-[11px] text-refutes">
               {openIssues} issue{openIssues === 1 ? '' : 's'} still open — the report will list {openIssues === 1 ? 'it' : 'them'}.
             </p>
           )}

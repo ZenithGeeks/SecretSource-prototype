@@ -378,7 +378,7 @@ function Abstract({ text }: { text: string }) {
   const long = text.length > 420
   return (
     <div className="flex flex-col items-start gap-1">
-      <p className={cn('font-paper text-[16px] leading-[1.55] text-ink', long && !whole && 'line-clamp-4')}>{text}</p>
+      <p className={cn('font-paper text-[15px] leading-[1.55] text-ink', long && !whole && 'line-clamp-4')}>{text}</p>
       {long && (
         <button
           type="button"

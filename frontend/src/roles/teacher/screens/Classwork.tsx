@@ -28,7 +28,7 @@ export function Classwork({ workspace, onOpenAssignment }: {
     <div className="space-y-4">
       <Card className="overflow-x-auto p-0">
         <table className="w-full min-w-[720px] border-collapse text-left">
-          <thead className="bg-surface text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+          <thead className="bg-surface text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
             <tr className="h-[42px] border-b border-border-subtle">
               <th className="w-12 px-4"><input aria-label="Select all assignments" type="checkbox" checked={allSelected} onChange={toggleAll} className="size-4 accent-accent" /></th>
               <th className="px-2">Assignment</th><th className="w-32 px-3">Due</th><th className="w-36 px-3">Submitted</th><th className="w-24 px-3">Missing</th><th className="w-24 px-3">Returned</th><th className="w-8" />

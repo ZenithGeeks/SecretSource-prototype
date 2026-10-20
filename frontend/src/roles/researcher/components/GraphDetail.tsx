@@ -46,7 +46,7 @@ function IndexNote({ node }: { node: GraphNode | undefined }) {
 }
 
 function Quote({ children }: { children: ReactNode }) {
-  return <p className="font-serif text-[14px] leading-[21px] italic text-ink">{children}</p>
+  return <p className="font-serif text-[14px] leading-[22px] italic text-ink">{children}</p>
 }
 
 function Cited({ quote, page }: { quote?: string; page?: string }) {
@@ -153,7 +153,7 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
   return (
     <aside aria-label="Pair detail" className={PANEL}>
       <div className="flex items-center gap-2">
-        <h2 className="min-w-0 flex-1 text-[15px] leading-[21px] font-semibold text-ink">
+        <h2 className="min-w-0 flex-1 text-[15px] leading-[22px] font-semibold text-ink">
           {label(edge.a)} <span className="font-normal text-ink-muted">↔</span> {label(edge.b)}
         </h2>
         <button type="button" onClick={onClose} aria-label="Close" title="Close" className={ICON_BUTTON}>
