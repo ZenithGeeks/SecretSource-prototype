@@ -52,7 +52,7 @@ function modelName(checkpoint: string) {
 /** What the paper calls a visual hit: "Figure 3" where it has a name, "page 7" otherwise. */
 /** What to write under a crop: the caption when it already names the figure, the label
  * with the caption after it when it does not, the label alone when there is no caption. */
-function captionOf(hit: NonNullable<Verdict['pages']>[number]) {
+function captionOf(hit: Hit) {
   const label = hitName(hit)
   const caption = (hit.caption ?? '').trim()
   if (!caption) return label
@@ -257,28 +257,70 @@ function Passages({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Tar
   )
 }
 
-/** The crops of figures the cited work was matched on: naming a figure and making the reader
- * open a page to see it is most of the work of looking it up. Pages have no crop. */
-function FigureCrops({ verdict }: { verdict: Verdict }) {
-  const hits = (verdict.pages ?? []).filter((hit) => hit.kind === 'figure' && hit.image)
+type Hit = NonNullable<Verdict['pages']>[number]
+
+/** Whether the verdict was read off this crop: the figure judge's crop, matched by file name. */
+function isJudged(verdict: Verdict, hit: Hit) {
+  if (verdict.verdict_from !== 'figure' || !verdict.judged_figure || !hit.image) return false
+  return hit.image.split('/').pop() === verdict.judged_figure
+}
+
+/** The page a hit was found on, with the crop's box outlined where we know it (#564). */
+function hitTarget(verdict: Verdict, hit: Hit): Target {
+  return {
+    paper: verdict.source,
+    label: `${hitName(hit)} of ${verdict.source}`,
+    source: hit.region ?? null,
+    page: hit.page,
+    verdict: verdict.verdict,
+  }
+}
+
+/** The figure and table crops the cited work was matched on: naming a figure and making the
+ * reader open a page to see it is most of the work of looking it up. Pages have no crop. The
+ * crop the verdict was read off comes first and says so; the others follow in match order. */
+function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
+  const hits = (verdict.pages ?? []).filter((hit) => hit.kind !== 'page' && hit.image)
   if (!hits.length) return null
+  const ordered = [...hits.filter((hit) => isJudged(verdict, hit)), ...hits.filter((hit) => !isJudged(verdict, hit))]
   return (
     <div className="flex flex-wrap gap-3">
-      {hits.map((hit, k) => (
-        <figure key={k} className="max-w-56 space-y-1">
+      {ordered.map((hit, k) => {
+        const judged = isJudged(verdict, hit)
+        const image = (
           <AuthorizedImage
             src={figureImageUrl(verdict.source, hit.image as string)}
             alt={hit.caption || `${hitName(hit)} of ${verdict.source}`}
             loading="lazy"
-            className="max-h-40 rounded-lg border border-border-subtle bg-surface object-contain"
+            className={cn(
+              'max-h-40 rounded-lg border bg-surface object-contain',
+              judged ? 'border-accent' : 'border-border-subtle',
+            )}
           />
-          <figcaption className="text-xs text-ink-muted">
-            {/* Docling's caption usually already opens with "Figure 3:", so prefixing the
-                label again reads as a stutter. */}
-            {captionOf(hit)}
-          </figcaption>
-        </figure>
-      ))}
+        )
+        return (
+          <figure key={k} className="max-w-56 space-y-1">
+            {judged && <p className="type-label text-accent">The verdict rests on this {hit.kind ?? 'figure'}</p>}
+            {onShow ? (
+              <button
+                type="button"
+                onClick={() => onShow(hitTarget(verdict, hit))}
+                aria-label={`Show ${hitName(hit)} on its page in ${verdict.source}`}
+                className="block rounded-lg focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {image}
+              </button>
+            ) : (
+              image
+            )}
+            <figcaption className="text-xs text-ink-muted">
+              {/* Docling's caption usually already opens with "Figure 3:", so prefixing the
+                  label again reads as a stutter. */}
+              {captionOf(hit)}
+            </figcaption>
+          </figure>
+        )
+      })}
     </div>
   )
 }
@@ -296,15 +338,7 @@ function PageChips({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Ta
             key={k}
             type="button"
             title={title}
-            onClick={() =>
-              onShow({
-                paper: verdict.source,
-                label: `${hitName(hit)} of ${verdict.source}`,
-                source: null, // the crop itself is rendered by #36; this opens its page
-                page: hit.page,
-                verdict: verdict.verdict,
-              })
-            }
+            onClick={() => onShow(hitTarget(verdict, hit))}
             className={cn(chip, 'hover:underline focus-visible:outline-2 focus-visible:outline-accent')}
           >
             <FileText className="size-4" aria-hidden="true" />
@@ -356,7 +390,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
         <PreprintNote verdict={verdict} />
       </div>
 
-      <FigureCrops verdict={verdict} />
+      <FigureCrops verdict={verdict} onShow={onShow} />
       <div className="flex flex-wrap items-center gap-2">
         <PageChips verdict={verdict} onShow={onShow} />
         {verdict.evidence.length > 0 && (
@@ -620,7 +654,7 @@ export function ClaimCard({
           )}
         </div>
       ) : null}
-      {primary && <FigureCrops verdict={primary} />}
+      {primary && <FigureCrops verdict={primary} onShow={onShow} />}
       {primary && showEvidence && primary.evidence.length > 0 && <Passages verdict={primary} onShow={onShow} />}
 
       {claim.citations.length > 0 && (
