@@ -141,6 +141,23 @@ def check(item: Cited) -> dict:
     return {key: result.get(key, "") for key in ("verdict", "quote", "reasoning")}
 
 
+async def check_text(sentences: list[str], papers: frozenset[str]) -> list[dict]:
+    """Judge each sentence against the paper of the library passage that fits it best, with the
+    same check as an answer's statements. A sentence no passage fits is "unchecked". The search
+    and the judge run on the assistant's check threads, so a long text queues behind them."""
+    loop = asyncio.get_running_loop()
+
+    def judged(sentence: str) -> dict:
+        hits = library_passages(sentence, papers)
+        if not hits:
+            return {"text": sentence, "source": None, "page": None, "verdict": "unchecked",
+                    "quote": "", "reasoning": "no passage in your papers fits this sentence"}
+        item = cite(Statement(text=sentence, passage=1), hits)
+        return {"text": sentence, "source": item.source, "page": item.page, **check(item)}
+
+    return list(await asyncio.gather(*(loop.run_in_executor(_checks, judged, text) for text in sentences)))
+
+
 async def answer(
     question: str, paper: Path | None = None, papers: frozenset[str] | None = None
 ) -> AsyncIterator[dict]:

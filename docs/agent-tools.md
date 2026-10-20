@@ -15,9 +15,35 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `point_at` | browser | Moves the AI cursor to a target, rings it, shows a note | `target` (`kind:id`), `note` | `{status: "done"}`, or `{status: "error", message: "not on the screen"}` |
 | `fill_field` | browser, after the person approves | Shows the text, waits for Apply or Cancel, then types it into the field | `target` (`field:id`), `text` | `{status: "applied"}` or `{status: "cancelled"}` |
 | `list_papers` | server | The person's analysed papers, newest first, at most 50 | none | `[{id, title, status}]` |
+| `get_analysis` | server | One analysis: status, why it failed, claims per standing, each claim with its number | `analysis_id` | `{id, title, status, stage, message, standing, claims: [{number, claim, section, standing}]}` |
+| `get_claim` | server | The evidence behind one claim: verdict, quote and reasoning per cited paper, and citations that could not be checked | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, standing, verdicts, unchecked}` |
+| `search_claims` | server | Claims in the person's papers that share words with the query, best first, at most 10 | `query` | `{claims: [{analysis_id, title, number, claim, standing}]}` |
+| `find_in_paper` | server | The page of a paper's PDF where some text sits | `analysis_id`, `text` | `{page}`, `page` is null when the text is not there |
+| `find_support` | server | Passages in the person's papers that bear on a claim (search only, no judge) | `claim` | `{passages: [{paper, page, text}]}` |
+| `check_text` | server | Judges each of the first 6 sentences of some writing against the paper whose passage fits it best | `text` | `{results: [{text, source, page, verdict, quote, reasoning}], not_checked}` |
+| `ask_library` | server | Answers a question from the person's papers, as the Ask panel does, each statement judged | `question` | `{statements: [{text, source, page, verdict, quote, reasoning}]}` |
+| `get_gaps` | server | Claims no cited work backs, claims one contradicts, works cited but not held; up to 10 of each | none | `{notBacked, contradicted, missing}` |
+| `bibtex` | server | BibTeX entries for a paper and the works its claims cite | `analysis_id` | `{bibtex}` |
+| `submit_analysis` | server | Starts an analysis of a DOI, arXiv ID or URL in the background | `paper` | `{id, status}`; poll `get_analysis` |
+| `labeling_progress` | server | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
 
-The agent cannot save, delete, upload or start an analysis. There is no tool for it, and the
-instructions tell it to point at the button and let the person press it.
+The agent cannot save labels, delete or upload anything. There is no tool for it, and the
+instructions tell it to point at the button and let the person press it. It can start an
+analysis with `submit_analysis`, which only queues a run the person sees in their list.
+
+The server tools are in `backend/app/agents/data_tools.py`. They read only the caller's own
+analyses; an id that is not theirs comes back as "no analysis ... among your papers", the same as
+a missing one.
+
+## Commands in the Ask input
+
+The person can run the server tools by hand in the Ask panel (`frontend/src/components/AskInput.tsx`,
+`frontend/src/lib/askCommands.ts`). Typing `/` lists the commands and `@` lists their papers, for
+example `/get_claim @Lost in the Middle 2`. A command runs the tool through
+`POST /agent/tools/{name}` (`backend/app/agent_runs.py`) with the caller's own data, and its result
+shows as statements (`/check_text`, `/find_support`) or as a note. A command that takes a paper
+uses the one that is open when none is named. Commands are not saved in the chat history.
+`/ask_library` is not a command: a plain question does the same.
 
 ## Targets
 
@@ -55,7 +81,10 @@ Conversations live in the gateway's memory for an hour.
 1. Write the function in `backend/app/agents/screen.py`. A browser tool has only a docstring, goes
    into `tools=[...]` as `LongRunningFunctionTool(func=...)`, and its name goes in
    `SCREEN_TOOL_NAMES`. A server tool has a body, and goes straight into `tools=[...]`; `/mcp/`
-   needs a branch for it in `call_tool` (`backend/app/mcp_server.py`). The docstring is the
+   needs a branch for it in `call_tool` (`backend/app/mcp_server.py`), unless it belongs in
+   `DATA_TOOLS` in `data_tools.py`, which the agent and `/mcp/` both pick up. A tool that
+   changes nothing also goes in `READ_ONLY` in `mcp_server.py`, so MCP clients can run it
+   without asking. The docstring is the
    model's documentation: say what it does, what it returns, and `Args:`.
 2. For a browser tool, add its runner to `frontend/src/lib/agentTools.ts`. Animate with the cursor
    first, act second, and return a small JSON object the agent can read. Anything that changes
@@ -69,13 +98,17 @@ Conversations live in the gateway's memory for an hour.
 
 The gateway serves the same tools over MCP at `/mcp/` (`backend/app/mcp_server.py`), for Claude
 Code, Codex or any other MCP client. The client takes the screen agent's place: it plans the steps,
-and the person's open tab runs each screen tool with the cursor. `list_papers` runs on the
-gateway. `fill_field` still waits for Apply in the tab, up to 120 s.
+and the person's open tab runs each screen tool with the cursor. `list_papers` and the data tools run on the
+gateway, with no tab needed. `fill_field` still waits for Apply in the tab, up to 120 s.
 
 MCP also has one tool the screen agent does not: `review_claim(analysis_id, claim_number)`, the
 labeler's Review from Ask AI. It runs on the gateway with the same rules as the button: only a
 claim the caller has saved, it never changes a label, and what it found goes to the reviews tab
 (`docs/labeling.md`). It needs no tab, and it can take over a minute.
+
+The tools that only read are marked `readOnlyHint`, so a client can run them without asking each
+time. The server also offers one prompt, `check_my_draft`, which Claude Code lists as a slash
+command: it asks the agent to run `check_text` on the writing you give it.
 
 1. Open SecretSource with `?connect=agent` in the address (or open Ask, choose Do it and press
    "Connect Claude Code or Codex"), check what the agent may do, and press Allow. The tab then

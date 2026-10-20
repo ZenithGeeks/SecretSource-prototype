@@ -1516,3 +1516,17 @@ def test_an_agent_cannot_review_an_unsaved_claim_or_a_claim_that_is_not_there(ap
 
     assert unsaved.value.status_code == 409
     assert missing.value.status_code == 404
+
+
+def test_progress_for_names_the_first_claim_the_person_has_not_saved(api, agent):
+    client, _, _ = api
+
+    before = asyncio.run(labeling.progress_for("a1", None))
+    _save_claim(client, evidence=4)
+    after = asyncio.run(labeling.progress_for("a1", None))
+
+    assert (before["saved"], before["reviewed"]) == (0, 0)
+    assert before["next_unsaved"]["number"] == 1
+    assert before["next_unsaved"]["passages"]
+    assert after["saved"] == 1
+    assert after["next_unsaved"]["number"] == 2  # claim 1 is saved, so the next one is offered

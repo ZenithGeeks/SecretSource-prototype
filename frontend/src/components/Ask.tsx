@@ -14,6 +14,7 @@ import { api, paperName } from '../lib/api'
 import type { Role } from '../lib/roles'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
+import type { PaperRef } from '../lib/askCommands'
 import { useAgentBridge } from '../lib/agentBridge'
 import { useAnalyses } from '../lib/useAnalysis'
 import { useAuth } from '../lib/useAuth'
@@ -68,6 +69,8 @@ export function useAsk({
     analyses.flatMap((a) => (a.file && a.title ? [[paperName(a.file), shortTitle(a.title)]] : [])),
   )
 
+  const papers: PaperRef[] = analyses.flatMap((a) => (a.title ? [{ id: a.id, label: shortTitle(a.title) }] : []))
+
   const asked = analysis && analysis !== cleared ? analysis : null
   const askedNode = !asked && node && node.id !== cleared ? node : null
   const context: AskContext = { screen, analysis: asked ?? undefined, node: askedNode?.id }
@@ -105,6 +108,7 @@ export function useAsk({
       context={context}
       about={about}
       titles={titles}
+      papers={papers}
       canNarrow={canNarrow}
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
       onClose={() => setOpen(false)}

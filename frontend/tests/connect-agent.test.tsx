@@ -59,7 +59,7 @@ describe('the connect screen', () => {
     expect(screen.getByRole('dialog', { name: 'Let your coding agent use this tab' })).toBeInTheDocument()
     expect(screen.getByText('ann@example.com')).toBeInTheDocument()
     expect(screen.getByText('Fill in a field, after you press Apply')).toBeInTheDocument()
-    expect(screen.getByText('Save, delete or upload anything')).toBeInTheDocument()
+    expect(screen.getByText('Save labels, delete or upload anything')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }))
     expect(onAllow).toHaveBeenCalled()
   })

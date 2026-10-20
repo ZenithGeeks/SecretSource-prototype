@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Target } from '../components/PageViewer'
 import { postEvents, request } from './api'
+import { describeResult, type Parsed } from './askCommands'
 
 /** What the question is about: the screen it was asked on, and the analysis or graph node there. */
 export type AskContext = { screen: string; analysis?: string; node?: string }
@@ -36,6 +37,8 @@ export type Turn = {
   status: 'answering' | 'done' | 'failed' | 'stopped'
   /** The statement whose check came in last, where the AI cursor points (components/AiCursor). */
   lastChecked?: number
+  /** What a /command (lib/askCommands) answered when it is not statements. */
+  note?: string
 }
 
 let nextTurnId = 0
@@ -174,6 +177,32 @@ export function useAssistant() {
     }
   }
 
+  /** Runs a /command: its tool's result becomes this turn's statements or note. Not saved in the chat. */
+  async function run(question: string, command: Extract<Parsed, { name: string }>) {
+    controller.current?.abort()
+    const abort = new AbortController()
+    controller.current = abort
+    const isCurrent = () => controller.current === abort
+    const turn: Turn = { id: nextTurnId++, question, statements: [], status: 'answering' }
+    setTurns((all) => [...all, turn])
+    try {
+      const result = await request<Record<string, unknown>>(`/agent/tools/${command.name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(command.args),
+        signal: abort.signal,
+      })
+      if (isCurrent()) updateTurn(turn.id, (shown) => ({ ...shown, ...describeResult(command.name, result), status: 'done' }))
+    } catch {
+      if (isCurrent()) updateTurn(turn.id, (shown) => ({ ...shown, status: 'failed' }))
+    }
+  }
+
+  /** Shows a /command that cannot run, such as an unknown name, as a finished turn. */
+  function refuse(question: string, note: string) {
+    setTurns((all) => [...all, { id: nextTurnId++, question, statements: [], status: 'done', note }])
+  }
+
   /** Stops the answer and keeps what arrived. */
   function stop() {
     controller.current?.abort()
@@ -203,7 +232,7 @@ export function useAssistant() {
     }
   }
 
-  return { chatId, turns, answering, openFailed, draft, setDraft, ask, stop, newChat, openChat }
+  return { chatId, turns, answering, openFailed, draft, setDraft, ask, run, refuse, stop, newChat, openChat }
 }
 
 export type Assistant = ReturnType<typeof useAssistant>

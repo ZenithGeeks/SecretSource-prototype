@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from app import auth, mcp_server, screen_bridge, store
-from app.agents import screen
+from app.agents import data_tools, screen
+from app.agents.data_tools import DATA_TOOLS
 from fastapi import FastAPI, HTTPException, Request
 from google.adk.tools import FunctionTool
 
@@ -57,12 +58,17 @@ def test_tool_list_is_the_screen_agents(app):
         "point_at",
         "fill_field",
         "list_papers",
+        *[tool.__name__ for tool in DATA_TOOLS],
         "review_claim",
     ]
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["point_at"]["description"] == FunctionTool(screen.point_at).description
     assert by_name["point_at"]["inputSchema"]["required"] == ["target", "note"]
     assert by_name["read_screen"]["inputSchema"] == {"type": "object", "properties": {}}
+    assert by_name["get_claim"]["inputSchema"]["required"] == ["analysis_id", "claim_number"]
+    assert "tool_context" not in by_name["get_claim"]["inputSchema"]["properties"]
+    assert by_name["get_analysis"]["annotations"]["readOnlyHint"] is True
+    assert by_name["submit_analysis"].get("annotations") is None
 
 
 def test_a_screen_tool_runs_in_the_callers_tab(app):
@@ -223,3 +229,27 @@ def test_gatehouse_without_a_secret_set_refuses_everyone(supabase, monkeypatch):
 def test_gatehouse_with_login_off_is_nobody(monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     assert caller_for({}) is None
+
+
+def test_a_data_tool_runs_for_the_caller(app, monkeypatch):
+    async def get_analysis(analysis_id, tool_context):
+        return {"id": analysis_id, "user": tool_context.state["user"]}
+
+    monkeypatch.setattr(data_tools, "DATA_TOOLS", [get_analysis])
+    call = {"name": "get_analysis", "arguments": {"analysis_id": "a1"}}
+    result = run_with_client(app, lambda client: rpc(client, "tools/call", call))
+
+    assert result["structuredContent"] == {"id": "a1", "user": "user-1"}
+
+
+def test_the_check_my_draft_prompt_asks_for_check_text(app):
+    async def steps(client):
+        listed = await rpc(client, "prompts/list")
+        got = await rpc(client, "prompts/get", {"name": "check_my_draft", "arguments": {"text": "My draft."}})
+        return listed, got
+
+    listed, got = run_with_client(app, steps)
+
+    assert [prompt["name"] for prompt in listed["prompts"]] == ["check_my_draft"]
+    assert "check_text" in got["messages"][0]["content"]["text"]
+    assert got["messages"][0]["content"]["text"].endswith("My draft.")
