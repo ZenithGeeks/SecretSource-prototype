@@ -5,7 +5,8 @@
  * researcher/writer/teacher share one layout.
  *
  * `sidebar` goes under the nav (the researcher's recent analyses); `wide` lets the shell grow
- * for a screen that shows a PDF page beside its content.
+ * for a screen that shows a PDF page beside its content. `panel` is a drawer on the right, below
+ * the toolbar (the Ask panel), and `toolbarLead` comes first among the toolbar's actions.
  *
  * Toolbar: pass `breadcrumb` (["Analyses", "group-norm-2018.pdf"], the last item is the
  * current page) to show it, and fill its right side from any screen with
@@ -222,6 +223,8 @@ export function AppShell<K extends string>({
   sidebar,
   breadcrumb,
   wide = false,
+  panel,
+  toolbarLead,
   children,
 }: {
   nav: NavEntry<K>[]
@@ -239,6 +242,8 @@ export function AppShell<K extends string>({
   /** Shows the sticky toolbar with this trail on its left (last item = current page). */
   breadcrumb?: string[]
   wide?: boolean
+  panel?: ReactNode
+  toolbarLead?: ReactNode
   children: ReactNode
 }) {
   // Below the lg breakpoint the sidebar would leave a phone almost no room, so it moves into
@@ -358,18 +363,28 @@ export function AppShell<K extends string>({
           // sticks just below it (the bar is 3.75rem tall).
           <div className="sticky top-[3.75rem] z-20 flex min-h-[52px] items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8">
             <Breadcrumb items={breadcrumb} />
-            <div ref={setActionsEl} className="flex shrink-0 items-center gap-1" />
+            <div className="flex shrink-0 items-center gap-1">
+              {toolbarLead}
+              <div ref={setActionsEl} className="flex items-center gap-1" />
+            </div>
           </div>
         )}
         <ToolbarSlot.Provider value={breadcrumb ? actionsEl : null}>
-          <main
-            className={cn(
-              'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-              wide ? 'max-w-[110rem]' : 'max-w-6xl',
+          <div className="flex min-w-0 flex-1">
+            <main
+              className={cn(
+                'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
+                wide ? 'max-w-[110rem]' : 'max-w-6xl',
+              )}
+            >
+              {children}
+            </main>
+            {/* Sticks under the 52px toolbar and stays as tall as the window while the page scrolls.
+                On a phone the panel itself covers the screen. */}
+            {panel && (
+              <div className="lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0">{panel}</div>
             )}
-          >
-            {children}
-          </main>
+          </div>
         </ToolbarSlot.Provider>
       </div>
     </div>

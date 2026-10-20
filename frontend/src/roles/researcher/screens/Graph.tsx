@@ -18,7 +18,7 @@
 import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
 import { AlertCircle, CheckCircle2, GitFork, HelpCircle, Maximize2, Search, ZoomIn, ZoomOut } from 'lucide-react'
-import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentType, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
 import { Empty, LoadingScreen } from '../../../components/ui'
@@ -317,7 +317,18 @@ function InsightTile({ insight, active, onToggle }: { insight: Insight; active: 
 /** What a role shows in place of an empty canvas; a role that passes none gets the canvas. */
 export type GraphEmptyMessage = { title: string; hint: string }
 
-function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
+/** A graph node the reader selected, for the Ask panel's chip and context. */
+export type SelectedNode = { id: string; label: string }
+
+function GraphCanvas({
+  emptyMessage,
+  askPanel,
+  onSelectNode,
+}: {
+  emptyMessage?: GraphEmptyMessage
+  askPanel?: ReactNode
+  onSelectNode?: (node: SelectedNode | null) => void
+}) {
   const { data: graph, isError } = useKnowledgeGraph()
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
@@ -350,6 +361,15 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
   // The hovered node id: like Obsidian, hovering spotlights that node's neighbours and dims the rest.
   const [hovered, setHovered] = useState<string | null>(null)
+  // With Ask open the right panel has two tabs; Ask is the one the reader just opened.
+  const [side, setSide] = useState<'details' | 'ask'>('ask')
+
+  useEffect(() => {
+    const node = view === 'claims' && claimSel ? graph?.nodes.find((n) => n.id === claimSel) : undefined
+    onSelectNode?.(node ? { id: node.id, label: node.label } : null)
+  }, [view, claimSel, graph, onSelectNode])
+  // Leaving the canvas (for Ask the field) leaves no node to ask about.
+  useEffect(() => () => onSelectNode?.(null), [onSelectNode])
 
   const paperIds = useMemo(
     () => (graph ? new Set(graph.edges.map((e) => e.source)) : new Set<string>()),
@@ -468,9 +488,21 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
     if (cy && graph) cy.style(stylesheet(pal, graph.clusters, view))
   }, [pal, view, graph])
 
-  if (isError) return <Empty title="The graph could not load" hint="Refresh the page to try again." />
-  if (!graph) return <LoadingScreen label="Loading the graph…" />
-  if (emptyMessage && graph.nodes.length === 0) return <Empty title={emptyMessage.title} hint={emptyMessage.hint} />
+  // Ask stays open while the graph loads, fails or is empty.
+  const withAsk = (content: ReactNode) =>
+    askPanel ? (
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
+        <div className="min-w-0 flex-1">{content}</div>
+        <div className="overflow-hidden lg:h-[calc(100dvh-14rem)] lg:w-[400px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border-subtle">
+          {askPanel}
+        </div>
+      </div>
+    ) : (
+      content
+    )
+  if (isError) return withAsk(<Empty title="The graph could not load" hint="Refresh the page to try again." />)
+  if (!graph) return withAsk(<LoadingScreen label="Loading the graph…" />)
+  if (emptyMessage && graph.nodes.length === 0) return withAsk(<Empty title={emptyMessage.title} hint={emptyMessage.hint} />)
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =
@@ -481,6 +513,12 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
   const claimCount = graph.nodes.filter((n) => n.kind === 'claim').length
   const notIndexed = graph.nodes.filter((n) => n.kind === 'paper' && n.indexed === 'no').length
   const selectedEdge = pairSel ? graph.paperEdges.find((e) => e.id === pairSel) : undefined
+  const detail =
+    view === 'claims' && claimSel ? (
+      <GraphClaimDetail graph={graph} claimId={claimSel} onClose={() => setClaimSel(null)} />
+    ) : view === 'papers' && selectedEdge ? (
+      <GraphPairDetail graph={graph} edge={selectedEdge} onClose={() => setPairSel(null)} />
+    ) : null
 
   return (
     <>
@@ -674,8 +712,30 @@ function GraphCanvas({ emptyMessage }: { emptyMessage?: GraphEmptyMessage }) {
           )}
         </div>
 
-        {view === 'claims' && claimSel && <GraphClaimDetail graph={graph} claimId={claimSel} onClose={() => setClaimSel(null)} />}
-        {view === 'papers' && selectedEdge && <GraphPairDetail graph={graph} edge={selectedEdge} onClose={() => setPairSel(null)} />}
+        {askPanel ? (
+          <div className="flex w-full flex-col gap-2 lg:w-[400px] lg:shrink-0">
+            {detail && (
+              <GraphSegmented
+                label="Side panel"
+                value={side}
+                options={[
+                  { key: 'details', label: 'Details' },
+                  { key: 'ask', label: 'Ask' },
+                ]}
+                onChange={setSide}
+              />
+            )}
+            {detail && side === 'details' ? (
+              detail
+            ) : (
+              <div className="overflow-hidden lg:h-[calc(100dvh-22rem)] lg:min-h-[560px] lg:rounded-2xl lg:border lg:border-border-subtle">
+                {askPanel}
+              </div>
+            )}
+          </div>
+        ) : (
+          detail
+        )}
       </div>
     </>
   )
@@ -692,12 +752,18 @@ export function Graph({
   initialTab = 'graph',
   emptyMessage,
   hideTabs = false,
+  askPanel,
+  onSelectNode,
 }: {
   onOpenAnalysis: (id: string) => void
   initialTab?: 'graph' | 'consensus'
   emptyMessage?: GraphEmptyMessage
   /** Leaves out the Graph | Ask the field switch, for a host that reaches each from its own nav. */
   hideTabs?: boolean
+  /** The Ask panel, shown as a tab of the graph's right panel while it is open. */
+  askPanel?: ReactNode
+  /** Told which claim node is selected, so a question can be about it. */
+  onSelectNode?: (node: SelectedNode | null) => void
 }) {
   const [tab, setTab] = useState<'graph' | 'consensus'>(initialTab)
   return (
@@ -715,7 +781,20 @@ export function Graph({
           />
         </div>
       )}
-      {tab === 'graph' ? <GraphCanvas emptyMessage={emptyMessage} /> : <FieldConsensus onOpenAnalysis={onOpenAnalysis} />}
+      {tab === 'graph' ? (
+        <GraphCanvas emptyMessage={emptyMessage} askPanel={askPanel} onSelectNode={onSelectNode} />
+      ) : (
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
+          <div className="min-w-0 flex-1">
+            <FieldConsensus onOpenAnalysis={onOpenAnalysis} />
+          </div>
+          {askPanel && (
+            <div className="overflow-hidden lg:sticky lg:top-[68px] lg:h-[calc(100dvh-6rem)] lg:w-[400px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border-subtle">
+              {askPanel}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
