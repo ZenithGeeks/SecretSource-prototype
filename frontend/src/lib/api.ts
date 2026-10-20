@@ -22,17 +22,22 @@ export type Verdict = {
   cited?: string // what we looked the source up by, which is how a citation finds its verdict
   evidence: { text: string; page: number; start: number; end: number; score: number }[]
   /** Pages whose images match the claim — empty unless the ColPali service is running. */
-  // What the cited paper *shows* that matches: a cropped figure where one was found,
+  // What the cited paper *shows* that matches: a cropped figure or table where one was found,
   // a whole page where none was (#29). `image` is the crop on disk, for #36 to render.
   pages?: {
     page: number
     score: number
-    kind?: 'figure' | 'page'
+    kind?: 'figure' | 'table' | 'page'
     label?: string
     caption?: string
     image?: string
+    region?: Source | null // the crop's box on its page (#564); null or missing on older analyses
   }[]
   page_model?: string // the checkpoint that matched them, e.g. vidore/colqwen2-v1.0
+  /** Which judge call gave the verdict (#516): the passages, or the top crop when they were not
+   * enough. `judged_figure` is that crop's file name, a figure or a table. */
+  verdict_from?: 'text' | 'figure' | 'none'
+  judged_figure?: string
   /** Set when the PDF read was the arXiv copy, not the publisher's (#424). */
   source_version?: 'preprint'
   arxiv?: string // that copy's arXiv id, e.g. "2507.11408"
