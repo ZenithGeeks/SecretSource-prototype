@@ -616,6 +616,29 @@ def test_scopus_query_leaves_out_venues_that_only_start_with_a_topic_venue():
     assert q.endswith(")") and q.rsplit(" AND NOT ", 1)[1].startswith("(SRCTITLE(")
 
 
+def test_scopus_query_over_all_of_scopus_keeps_every_filter_but_the_venues():
+    q = scopus.build_query("HPC", "Ozaki scheme", 2020, 2026, scope="all")
+    assert q == 'OPENACCESS(1) AND PUBYEAR > 2019 AND PUBYEAR < 2027 AND TITLE-ABS-KEY("Ozaki scheme")'
+
+
+def test_a_pasted_doi_or_paper_link_finds_that_paper_in_any_venue():
+    # The SCA/HPCAsia 2026 paper the HPC venue list could not reach.
+    link = "https://dl.acm.org/doi/10.1145/3784828.3785017"
+    assert scopus.build_query("HPC", link, 2020) == 'DOI("10.1145/3784828.3785017")'
+    assert scopus.doi_in("doi.org/10.1145/3784828.3785017.") == "10.1145/3784828.3785017"
+    assert scopus.doi_in("https://x.org/10.1109/TPDS.2024.1?via=feed") == "10.1109/TPDS.2024.1"
+    assert scopus.doi_in("Ozaki scheme 2026") is None
+
+
+def test_a_doi_keeps_its_own_parentheses_and_never_ends_in_a_backslash():
+    wiley = "10.1002/(SICI)1097-4571(199806)49:8<693::AID-ASI4>3.0.CO;2-0"
+    assert scopus.doi_in("10.1002/(SICI)1097-4571(199806)") == "10.1002/(SICI)1097-4571(199806)"
+    assert scopus.doi_in(f"see ({wiley[:31]}).") == "10.1002/(SICI)1097-4571(199806)"
+    assert scopus.doi_in("(doi 10.1145/3784828.3785017)") == "10.1145/3784828.3785017"
+    # A backslash would escape the closing quote of DOI("...") and Scopus would refuse the query.
+    assert scopus.build_query("HPC", "10.1145/x\\", 2020) == 'DOI("10.1145/x")'
+
+
 class S2Reply:
     def __init__(self, papers):
         self.papers = papers
@@ -929,6 +952,7 @@ def test_scopus_search_says_when_it_is_not_set_up(api, monkeypatch):
     assert client.get("/labeling/scopus/search", params={"topic": "NLP"}).status_code == 503
     assert client.get("/labeling/scopus/search", params={"topic": "Cooking"}).status_code == 422
     assert client.get("/labeling/scopus/search", params={"topic": "NLP", "sort": "random"}).status_code == 422
+    assert client.get("/labeling/scopus/search", params={"topic": "NLP", "scope": "web"}).status_code == 422
 
 
 def test_a_failed_scopus_search_says_why(api, monkeypatch):

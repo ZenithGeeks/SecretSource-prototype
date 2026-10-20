@@ -392,11 +392,14 @@ async def scopus_search(
     until: int | None = None,
     sort: str = "cited",
     page: int = 0,
+    scope: scopus.Scope = "topic",
     _who: str = Depends(annotator),
 ):
-    """One page of a topic's open-access papers from Scopus, with the total and each abstract.
+    """One page of open-access papers from Scopus, with the total and each abstract.
 
-    Each paper says whether it is already listed, and whether its PDF can be downloaded: true,
+    `scope` is "topic" for the topic's venues or "all" for every venue; a DOI or paper link in
+    `q` finds that paper. The topic is still checked: an added paper is filed under it. Each
+    paper says whether it is already listed, and whether its PDF can be downloaded: true,
     false, or null when that could not be checked. A failure says why: the page shows it.
     """
     from app import main
@@ -407,7 +410,7 @@ async def scopus_search(
         raise HTTPException(422, f"sort must be one of {', '.join(scopus.SORTS)}")
     try:
         start = max(page, 0) * scopus.PAGE
-        found = await asyncio.to_thread(scopus.search, topic, q, since, until, sort, start)
+        found = await asyncio.to_thread(scopus.search, topic, q, since, until, sort, start, scope)
     except scopus.NotConfigured as error:
         raise HTTPException(503, f"Scopus is not set up: {error}") from error
     except requests.Timeout as error:
