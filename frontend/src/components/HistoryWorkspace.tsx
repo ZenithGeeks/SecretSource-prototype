@@ -13,7 +13,7 @@ import { HistoryList } from './HistoryList'
 import { AnalysisContents } from './TableOfContents'
 import { analysisLabel } from '../lib/claims'
 import type { ContentsRow } from '../lib/outline'
-import { useAnalyses } from '../lib/useAnalysis'
+import { useAnalyses, useAnalysisNotices } from '../lib/useAnalysis'
 import { History } from '../roles/researcher/screens/History'
 
 export function initialAnalysis(): string | null {
@@ -47,6 +47,11 @@ export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}
     setCurrent(null)
     setJump(null)
   }
+  // A clicked notice opens its analysis, as picking it in the sidebar list does.
+  useAnalysisNotices(analyses.data, (id) => {
+    select(id)
+    onPicked?.()
+  })
   const pickSection = (row: ContentsRow) => {
     setSection(row.n)
     setCurrent(row.n)

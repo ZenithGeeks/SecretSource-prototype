@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 
+import { showDoneNotice } from '../../lib/desktopNotice'
 import { usePool } from '../../lib/labeling'
 
 const READY_MS = 8000 // a failure stays until closed: its reason is worth reading
@@ -47,6 +48,7 @@ export function usePaperNotices(onOpen: (analysisId: string) => void) {
           duration: Infinity,
           closeButton: true,
         })
+        showDoneNotice('Could not analyse a paper you added', paper.title, paper.analysis_id)
       } else {
         toast.success('Ready to label', {
           id: paper.analysis_id,
@@ -54,6 +56,7 @@ export function usePaperNotices(onOpen: (analysisId: string) => void) {
           duration: READY_MS,
           action: { label: 'Open', onClick: () => open.current(paper.analysis_id) },
         })
+        showDoneNotice('Ready to label', paper.title, paper.analysis_id, () => open.current(paper.analysis_id))
       }
       if (document.hidden) {
         unseen.current += 1

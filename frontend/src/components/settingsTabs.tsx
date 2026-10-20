@@ -51,7 +51,13 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
   // arrow-key travel follows what the eye sees.
   const tabs: SettingsTabDef[] = [
     { id: 'account', label: 'Account', icon: UserRound, content: <AccountSection />, group: 'general' },
-    { id: 'appearance', label: 'Appearance', icon: Sparkles, content: <AppearanceSection />, group: 'general' },
+    {
+      id: 'appearance',
+      label: 'Appearance',
+      icon: Sparkles,
+      content: <AppearanceSection verdictBadges={viewingRole !== 'labeler'} />,
+      group: 'general',
+    },
     { id: 'notifications', label: 'Notifications', icon: Bell, content: <NotificationsSection />, group: 'general' },
     {
       id: 'data',
