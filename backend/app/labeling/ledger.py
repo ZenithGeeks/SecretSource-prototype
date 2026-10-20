@@ -43,12 +43,20 @@ class Ledger:
                 return found
 
     def append(self, tab: str, rows: list[dict]) -> None:
+        from app import store
+
         if not rows:
             return
         columns = ALL_TABS[tab]
+        # Claims and sentences come from PDF text, which can hold NUL (#570).
         self._table().insert(
             [
-                {"tab": tab, "data": {c: "" if row.get(c) is None else str(row[c]) for c in columns}}
+                {
+                    "tab": tab,
+                    "data": store.postgres_safe(
+                        {c: "" if row.get(c) is None else str(row[c]) for c in columns}
+                    ),
+                }
                 for row in rows
             ]
         ).execute()
