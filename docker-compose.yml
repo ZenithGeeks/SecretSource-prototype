@@ -122,7 +122,8 @@ services:
       COLPALI_URL: ${COLPALI_URL:-http://colpali:8894} # optional; visual hints are skipped when it is not running
       GROBID_URL: ${GROBID_URL:-http://grobid:8070}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0} # the analysis queue and cross-process SSE (app/queue.py)
-      SERVICE_AUTH: ${SERVICE_AUTH:-none} # google-id-token for the shared Cloud Run services
+      SERVICE_AUTH: ${SERVICE_AUTH:-none} # google-id-token for Cloud Run, api-key for the team gateway
+      SERVICE_API_KEY: ${SERVICE_API_KEY:-} # your own key for the team gateway (SERVICE_AUTH=api-key)
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-} # e.g. secrets/service-auth.json
       PAPERS_DIR: data/papers
       ANALYSES_DB: /app/data/db/analyses.db

@@ -128,3 +128,39 @@ def test_mcp_client_for_other_hosts_adds_nothing(fake_fetch):
     assert client.auth is None  # no signing hook at all, so nothing can add a token
     asyncio.run(client.aclose())
     assert not fake_fetch
+
+
+GATEWAY = "https://gateway.example.ts.net:8443"
+
+
+@pytest.fixture
+def api_key_mode(monkeypatch):
+    """SERVICE_AUTH=api-key with ColBERT behind the team gateway and GROBID local."""
+    monkeypatch.setattr(service_auth, "SERVICE_AUTH", "api-key")
+    monkeypatch.setattr(service_auth, "SERVICE_API_KEY", "sk-teammate")
+    monkeypatch.setattr(service_auth, "_KEYED_ORIGINS", {GATEWAY, "http://grobid:8070"})
+
+
+def test_api_key_goes_to_the_service_origins_only(api_key_mode, fake_fetch):
+    assert service_auth.auth_headers(f"{GATEWAY}/colbert/api/search") == {"apikey": "sk-teammate"}
+    assert service_auth.auth_headers("http://grobid:8070/api/processFulltextDocument") == {
+        "apikey": "sk-teammate"
+    }
+    assert service_auth.auth_headers("https://llm.example.com/v1/chat/completions") == {}
+    assert service_auth.auth_headers(f"{COLBERT}/api/search") == {}
+    assert not fake_fetch
+
+
+def test_config_needs_a_key_in_api_key_mode(monkeypatch):
+    monkeypatch.setenv("SERVICE_AUTH", "api-key")
+    monkeypatch.delenv("SERVICE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="SERVICE_API_KEY"):
+        importlib.reload(config)
+    monkeypatch.setenv("SERVICE_AUTH", "none")
+    importlib.reload(config)
+
+
+def test_mcp_client_sends_the_api_key(api_key_mode, fake_fetch):
+    pytest.importorskip("google.adk")
+    client = service_auth.mcp_http_client_factory(f"{GATEWAY}/colbert")()
+    assert _signed_headers(client, f"{GATEWAY}/colbert/mcp/")["apikey"] == "sk-teammate"

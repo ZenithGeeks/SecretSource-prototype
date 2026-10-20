@@ -1,10 +1,15 @@
-"""Google identity tokens for calls to the private Cloud Run services.
+"""Credentials for calls to the shared colbert, colpali and grobid services.
 
-The shared colbert, colpali and grobid services only accept callers that hold an
-identity token for them. With SERVICE_AUTH=google-id-token, `auth_headers(url)`
-returns `Authorization: Bearer <token>` for a *.run.app URL. For any other host it
-returns nothing. So a Google token never goes to the compose containers or to a
-third-party LLM endpoint.
+With SERVICE_AUTH=api-key, `auth_headers(url)` returns `apikey: <SERVICE_API_KEY>` for a
+URL on the same origin as COLBERT_URL, COLPALI_URL or GROBID_URL. That is the team gateway
+(APISIX key-auth) in front of the host's GPU services. The LLM does not use this module: its
+key goes in VLLM_API_KEY.
+
+With SERVICE_AUTH=google-id-token, it returns `Authorization: Bearer <token>` for a
+*.run.app URL, the private Cloud Run services.
+
+For any other host it returns nothing. So neither credential goes to a third-party LLM
+endpoint, and a Google token never goes to the compose containers.
 
 google-auth picks where the token comes from, in this order:
 - The file GOOGLE_APPLICATION_CREDENTIALS names: a service-account key, or the
@@ -19,7 +24,7 @@ The audience is the service origin. Cloud Run checks it.
 import threading
 from urllib.parse import urlsplit
 
-from app.config import SERVICE_AUTH
+from app.config import COLBERT_URL, COLPALI_URL, GROBID_URL, SERVICE_API_KEY, SERVICE_AUTH
 
 # audience -> google-auth IDTokenCredentials. Each one refreshes itself once its token
 # expires.
@@ -27,19 +32,35 @@ _credentials = {}
 _lock = threading.Lock()
 
 
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+# The only origins that get SERVICE_API_KEY.
+_KEYED_ORIGINS = {_origin(url) for url in (COLBERT_URL, COLPALI_URL, GROBID_URL)}
+
+
+def sends_key(url: str) -> bool:
+    """Whether calls to this URL carry SERVICE_API_KEY."""
+    return SERVICE_AUTH == "api-key" and _origin(url) in _KEYED_ORIGINS
+
+
 def _audience(url: str) -> str | None:
     parts = urlsplit(url)
     if SERVICE_AUTH != "google-id-token" or not (parts.hostname or "").endswith(".run.app"):
         return None
-    return f"{parts.scheme}://{parts.netloc}"
+    return _origin(url)
 
 
 def signs(url: str) -> bool:
-    """Whether calls to this URL carry an identity token."""
+    """Whether calls to this URL carry a Google identity token."""
     return _audience(url) is not None
 
 
 def auth_headers(url: str) -> dict[str, str]:
+    if sends_key(url):
+        return {"apikey": SERVICE_API_KEY}
     audience = _audience(url)
     if audience is None:
         return {}
@@ -79,13 +100,13 @@ def mcp_http_client_factory(url: str):
     except ImportError:
         from httpx import Auth
 
-    class IdTokenAuth(Auth):
+    class ServiceAuth(Auth):
         async def async_auth_flow(self, request):
             # A token refresh is blocking I/O. Keep it off the event loop.
             request.headers.update(await asyncio.to_thread(auth_headers, url))
             yield request
 
-    signing = IdTokenAuth() if _audience(url) else None
+    signing = ServiceAuth() if _audience(url) or sends_key(url) else None
 
     def factory(headers=None, timeout=None, auth=None):
         return create_mcp_http_client(headers=headers, timeout=timeout, auth=auth or signing)
