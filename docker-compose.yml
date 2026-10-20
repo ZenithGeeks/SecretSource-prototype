@@ -142,6 +142,7 @@ services:
       # Both set: analyses are stored in Supabase Postgres instead of SQLite (supabase/README.md).
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      GATEHOUSE_SECRET: ${GATEHOUSE_SECRET:-} # the screen agent's MCP server at /mcp/ (docs/agent-tools.md)
       # Google Classroom OAuth is handled only by the gateway; the browser never sees these.
       TEACHER_GOOGLE_ENABLED: ${TEACHER_GOOGLE_ENABLED:-false}
       TEACHER_GOOGLE_CLIENT_ID: ${TEACHER_GOOGLE_CLIENT_ID:-}

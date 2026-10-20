@@ -55,7 +55,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
-from app import chats, dependencies, researcher, store, uploads
+from app import chats, dependencies, mcp_server, researcher, store, uploads
 from app.agent_runs import router as agent_router
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
@@ -95,6 +95,7 @@ from app.pipeline.verify import (
     verify_claim,
 )
 from app.queue import cancel_if_queued, enqueue_analysis, job_is_alive, pubsub_client, redis_connection
+from app.screen_bridge import router as bridge_router
 from app.teacher.router import router as teacher_router
 from app.tracing import setup_tracing
 
@@ -366,7 +367,8 @@ async def lifespan(app: FastAPI):
     # Log where each dependency is and whether it answers, without holding up startup.
     app.state.dependency_check = asyncio.create_task(asyncio.to_thread(dependencies.log_report))
     app.state.snapshot_subscriber = asyncio.create_task(_subscribe_forever())
-    yield
+    async with mcp_server.running():
+        yield
     app.state.snapshot_subscriber.cancel()
     with suppress(asyncio.CancelledError):
         await app.state.snapshot_subscriber
@@ -395,6 +397,8 @@ app.include_router(teacher_router)
 app.include_router(author_router)
 app.include_router(labeling_router)
 app.include_router(agent_router)
+app.include_router(bridge_router)
+app.mount("/mcp", mcp_server.handle_mcp)  # MCP clients use /mcp/: Starlette redirects /mcp
 
 
 class AnalysisRequest(BaseModel):

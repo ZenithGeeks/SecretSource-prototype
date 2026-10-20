@@ -72,10 +72,14 @@ def fill_field(target: str, text: str) -> None:
 async def list_papers(tool_context: ToolContext) -> list[dict]:
     """The person's analysed papers, newest first: id, title and status ("done", "running" or
     "error"). Use the id with open_paper."""
+    # The session keeps "" for a signed-out person; visible_to takes None for that.
+    return await papers_for(tool_context.state.get("user") or None)
+
+
+async def papers_for(user: str | None) -> list[dict]:
+    """The last 50 analyses `user` may read, newest first, as list_papers gives them."""
     from app import main  # main imports the agent routes, so not at the top
 
-    # The session keeps "" for a signed-out person; visible_to takes None for that.
-    user = tool_context.state.get("user") or None
     rows = await asyncio.to_thread(main.visible_to, user)
     return [
         {"id": row["id"], "title": row.get("title") or row.get("paper", ""), "status": row.get("status", "")}

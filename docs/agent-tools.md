@@ -52,9 +52,11 @@ Conversations live in the gateway's memory for an hour.
 
 ## Adding a tool
 
-1. Write the function in `backend/app/agents/screen.py`. A browser tool has only a docstring and
-   goes in `SCREEN_TOOLS`. A server tool has a body, and goes straight into `tools=[...]`. The
-   docstring is the model's documentation: say what it does, what it returns, and `Args:`.
+1. Write the function in `backend/app/agents/screen.py`. A browser tool has only a docstring, goes
+   into `tools=[...]` as `LongRunningFunctionTool(func=...)`, and its name goes in
+   `SCREEN_TOOL_NAMES`. A server tool has a body, and goes straight into `tools=[...]`; `/mcp/`
+   needs a branch for it in `call_tool` (`backend/app/mcp_server.py`). The docstring is the
+   model's documentation: say what it does, what it returns, and `Args:`.
 2. For a browser tool, add its runner to `frontend/src/lib/agentTools.ts`. Animate with the cursor
    first, act second, and return a small JSON object the agent can read. Anything that changes
    data must go through the confirm step, as `fill_field` does.
@@ -62,3 +64,49 @@ Conversations live in the gateway's memory for an hour.
    agent has is listed here.
 4. Run the eval (`backend/eval_screen_agent.py`) before and after. A new tool changes what the
    model chooses for every task, not only the new ones.
+
+## Using the tools from Claude Code or Codex (MCP)
+
+The gateway serves the same tools over MCP at `/mcp/` (`backend/app/mcp_server.py`), for Claude
+Code, Codex or any other MCP client. The client takes the screen agent's place: it plans the steps,
+and the person's open tab runs each screen tool with the cursor. `list_papers` runs on the
+gateway. `fill_field` still waits for Apply in the tab, up to 120 s.
+
+1. Open SecretSource with `?connect=agent` in the address (or open Ask, choose Do it and press
+   "Connect Claude Code or Codex"), check what the agent may do, and press Allow. The tab then
+   holds `/api/agent/bridge` open (`backend/app/screen_bridge.py`) and shows an Agent pill
+   beside Ask, with the recent steps, any change waiting for Apply, and Disconnect. The tab stays
+   connected across reloads until you disconnect. One tab per account: allowing a second tab
+   moves the bridge there.
+2. Get a Gatehouse key whose email is the one you sign in to SecretSource with. Gatehouse sends
+   that email and `GATEHOUSE_SECRET` with each call; the gateway matches the email to a
+   confirmed SecretSource account.
+3. Add the server to your agent, with the key in an environment variable. Claude Code reads
+   `.mcp.json` in the project:
+
+   ```json
+   {
+     "mcpServers": {
+       "secretsource": {
+         "type": "http",
+         "url": "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/",
+         "headers": { "apikey": "${GATEHOUSE_KEY}" }
+       }
+     }
+   }
+   ```
+
+   Codex reads `~/.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.secretsource]
+   url = "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/"
+   env_http_headers = { "apikey" = "GATEHOUSE_KEY" }
+   ```
+
+   Keep the trailing slash: `/mcp` answers with a redirect. With sign-in off (local stack with no
+   Supabase), `http://localhost:8080/mcp/` works without a key.
+
+A screen tool with no tab connected returns an error that says how to connect one. The MCP
+server is stateless, but the bridge lives in one gateway process's memory, like the
+conversations above.

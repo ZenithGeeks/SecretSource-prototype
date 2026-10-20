@@ -1,21 +1,22 @@
 /**
  * Ask's Do it mode: the person says what they want done, and the screen agent does it on screen
- * with the AI cursor (lib/screenAgent). A change waits here for Apply or Cancel.
+ * with the AI cursor (lib/screenAgent). A change waits here for Apply or Cancel. The same view
+ * offers to connect a coding agent instead (components/ConnectAgent).
  */
 
 import { MotionConfig } from 'framer-motion'
-import { ArrowUp, Loader2, MousePointerClick, Square } from 'lucide-react'
+import { ArrowUp, Loader2, MousePointerClick, Square, SquareTerminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { ScreenActions } from '../lib/agentTools'
 import type { Pointing } from '../lib/askCursor'
-import { useScreenAgent, type AgentLine } from '../lib/screenAgent'
+import { useScreenAgent, type AgentLine, type PendingChange } from '../lib/screenAgent'
 import { cn } from '../lib/utils'
 import { AiCursor } from './AiCursor'
 
 const EXAMPLES = ['Open my most recent paper', 'Show me where to search the library', 'Take me to the graph']
 
-export function DoIt({ actions }: { actions: ScreenActions }) {
+export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onConnectAgent?: () => void }) {
   const [pointing, setPointing] = useState<Pointing | null>(null)
   const agent = useScreenAgent(actions, setPointing)
   const [draft, setDraft] = useState('')
@@ -58,28 +59,7 @@ export function DoIt({ actions }: { actions: ScreenActions }) {
         {agent.lines.map((line, index) => (
           <Line key={index} line={line} />
         ))}
-        {agent.pending && (
-          <div role="group" aria-label="Approve this change" className="flex flex-col gap-2 rounded-xl border border-insufficient bg-insufficient-soft p-3">
-            <p className="text-xs font-medium text-ink">Fill in “{agent.pending.label || 'this field'}” with:</p>
-            <p className="rounded-lg bg-surface px-2.5 py-1.5 font-mono text-[13px] text-ink [overflow-wrap:anywhere]">{agent.pending.text}</p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => agent.pending?.answer(false)}
-                className="min-h-9 rounded-lg px-3 text-sm font-medium text-ink-muted hover:bg-accent-soft hover:text-ink"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => agent.pending?.answer(true)}
-                className="min-h-9 rounded-lg bg-accent px-3 text-sm font-medium text-canvas hover:opacity-90"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        )}
+        {agent.pending && <ApproveChange change={agent.pending} />}
         {agent.running && !agent.pending && (
           <p className="flex items-center gap-2 text-xs text-ink-muted">
             <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" /> Working…
@@ -119,6 +99,16 @@ export function DoIt({ actions }: { actions: ScreenActions }) {
             </button>
           )}
         </form>
+        {onConnectAgent && (
+          <button
+            type="button"
+            onClick={onConnectAgent}
+            className="mt-2 flex min-h-9 w-full items-center justify-center gap-2 rounded-lg text-xs text-ink-muted transition-colors hover:bg-accent-soft hover:text-ink"
+          >
+            <SquareTerminal className="size-3.5" aria-hidden="true" />
+            Work from your terminal: connect Claude Code or Codex
+          </button>
+        )}
       </div>
       <MotionConfig reducedMotion="user">
         <AiCursor pointing={pointing} />
@@ -140,4 +130,30 @@ function Line({ line }: { line: AgentLine }) {
     )
   }
   return <p className={cn('text-[13px] leading-5', line.kind === 'error' ? 'text-refutes' : 'text-ink')}>{line.text}</p>
+}
+
+/** A change waiting for the person: what goes in which field, with Apply and Cancel. */
+export function ApproveChange({ change }: { change: PendingChange }) {
+  return (
+    <div role="group" aria-label="Approve this change" className="flex flex-col gap-2 rounded-xl border border-insufficient bg-insufficient-soft p-3">
+      <p className="text-xs font-medium text-ink">Fill in “{change.label || 'this field'}” with:</p>
+      <p className="rounded-lg bg-surface px-2.5 py-1.5 font-mono text-[13px] text-ink [overflow-wrap:anywhere]">{change.text}</p>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => change.answer(false)}
+          className="min-h-9 rounded-lg px-3 text-sm font-medium text-ink-muted hover:bg-accent-soft hover:text-ink"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => change.answer(true)}
+          className="min-h-9 rounded-lg bg-accent px-3 text-sm font-medium text-canvas hover:opacity-90"
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  )
 }
