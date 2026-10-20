@@ -1,7 +1,7 @@
 /** Ask's Do it mode: the browser tools the screen agent calls, and the loop that runs them and
  * sends their results back. A change waits for Apply. */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -147,5 +147,38 @@ describe('Do it', () => {
     expect(await screen.findByText('Filtered.')).toBeInTheDocument()
     expect(screen.getByText('Filter: late interaction')).toBeInTheDocument()
     await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'fill_field', result: { status: 'applied' } }))
+  })
+
+  it('shows a badge when the agent hands work to a specialist, and settles it when the specialist answers', async () => {
+    gateway.streams = [
+      [
+        { type: 'session', id: 's1' },
+        { type: 'agent', name: 'data_agent', state: 'working', task: 'Which claims are contradicted?' },
+        { type: 'step', name: 'get_gaps' },
+        { type: 'agent', name: 'data_agent', state: 'done' },
+        { type: 'say', text: 'Two claims are contradicted.' },
+        { type: 'done' },
+      ],
+    ]
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Which claims are contradicted?' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+
+    expect(await screen.findByText('Two claims are contradicted.')).toBeInTheDocument()
+    const badge = screen.getByText('Papers specialist').parentElement!.parentElement!
+    expect(within(badge).getByText('Done')).toBeInTheDocument()
+    expect(within(badge).getByText('Which claims are contradicted?')).toBeInTheDocument()
+    expect(screen.getByText('Looking for gaps in your library')).toBeInTheDocument()
+  })
+
+  it('marks a hand-over stopped when the stream ends before the specialist answers', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'agent', name: 'data_agent', state: 'working', task: 'Check my draft' }, { type: 'done' }],
+    ]
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check my draft' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+
+    expect(await screen.findByText('Stopped')).toBeInTheDocument()
   })
 })
