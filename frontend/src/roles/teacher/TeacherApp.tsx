@@ -45,7 +45,7 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   // A teacher's screens show classes and essays, not papers, so Ask always asks the library.
-  const ask = useAsk({ screen: route.screen, canNarrow: false })
+  const ask = useAsk({ role: 'teacher', screen: route.screen, canNarrow: false })
   const importClass = useImportTeacherClass()
   const refreshClass = useRefreshTeacherClass()
   const googleConnection = useTeacherGoogleConnection()

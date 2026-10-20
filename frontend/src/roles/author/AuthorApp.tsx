@@ -101,6 +101,7 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
   // What is on screen to ask about: the open analysis on History, or the selected graph node.
   const ask = useAsk({
+    role: 'writer',
     screen,
     analysis: screen === 'history' ? history.selected : null,
     analysisFile: history.selectedName,

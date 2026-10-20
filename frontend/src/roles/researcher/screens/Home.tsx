@@ -7,6 +7,7 @@
 
 import { useRef, useState } from 'react'
 
+import { Mascot } from '../../../components/Mascot'
 import { Card, Empty, FadeIn, LoadingScreen, VerdictBadge } from '../../../components/ui'
 import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
@@ -72,10 +73,13 @@ export function Home({
 
   return (
     <FadeIn className="mx-auto flex w-full max-w-[960px] flex-col gap-7 pt-4">
-      <header className="flex flex-col gap-2">
-        <p className="type-label text-accent">{today}</p>
-        <h1 className="type-display font-serif text-ink">{greeting(firstName)}</h1>
-        <p className="text-[15px] leading-6 text-ink-muted">{home.alert}</p>
+      <header className="flex items-center gap-5">
+        <Mascot role="researcher" size={84} className="hidden shrink-0 sm:block" />
+        <div className="flex flex-col gap-2">
+          <p className="type-label text-accent">{today}</p>
+          <h1 className="type-display font-serif text-ink">{greeting(firstName)}</h1>
+          <p className="text-[15px] leading-6 text-ink-muted">{home.alert}</p>
+        </div>
       </header>
 
       <HomeAnalyzeCard

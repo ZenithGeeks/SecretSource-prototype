@@ -10,6 +10,7 @@ import type { KeyboardEvent, Ref } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Brand } from '../components/Brand'
+import { Mascot } from '../components/Mascot'
 import { Badge, Button, VerdictBadge } from '../components/ui'
 import { ROLE_INFO } from '../lib/roles'
 import type { Role } from '../lib/roles'
@@ -130,7 +131,23 @@ export function Onboarding({
             ))}
           </div>
 
-          <HowItWorks key={story.id} story={story} />
+          {/* Quip perches on the panel's top edge and swaps with the role. Inline styles keep
+              these one-off offsets out of the CSS bundle, which is at its size budget. */}
+          <div style={{ position: 'relative' }}>
+            <AnimatePresence initial={false}>
+              <motion.div
+                key={story.id}
+                style={{ position: 'absolute', top: -62, right: 20, zIndex: 1 }}
+                initial={{ opacity: 0, y: 8, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.12 } }}
+                transition={{ duration: 0.25, ease: EASE_OUT }}
+              >
+                <Mascot role={story.id} size={96} animated />
+              </motion.div>
+            </AnimatePresence>
+            <HowItWorks key={story.id} story={story} />
+          </div>
         </div>
 
         <div className="mt-8 flex flex-col-reverse items-center justify-center gap-2 sm:flex-row">

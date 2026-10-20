@@ -3,6 +3,7 @@
 import { Download, Loader2, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { labelingApi, problem, useLabelStatus, usePool } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
@@ -86,11 +87,14 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink">Label data</h1>
-          <p className="text-sm text-ink-muted">
-            Signed in as {status.data?.annotator}. You judge every claim and passage; nothing is saved until you save it.
-          </p>
+        <div className="flex items-center gap-3">
+          <Mascot role="labeler" size={52} className="hidden shrink-0 sm:block" />
+          <div>
+            <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink">Label data</h1>
+            <p className="text-sm text-ink-muted">
+              Signed in as {status.data?.annotator}. You judge every claim and passage; nothing is saved until you save it.
+            </p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-1">
           <div role="radiogroup" aria-label="Whose labels to download" className="flex rounded-lg border border-border-subtle p-0.5">

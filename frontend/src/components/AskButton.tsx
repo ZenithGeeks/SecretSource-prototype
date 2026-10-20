@@ -4,11 +4,13 @@
  */
 
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
-import { Sparkles, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useState } from 'react'
 
+import type { Role } from '../lib/roles'
 import { cn } from '../lib/utils'
 import type { AskAbout } from './AssistantPanel'
+import { Mascot } from './Mascot'
 
 const INTRO_KEY = 'ask.introSeen'
 
@@ -18,7 +20,17 @@ const SCOPE: Record<AskAbout['kind'], string> = {
   library: 'about your library',
 }
 
-export function AskButton({ open, about, onToggle }: { open: boolean; about: AskAbout; onToggle: () => void }) {
+export function AskButton({
+  role,
+  open,
+  about,
+  onToggle,
+}: {
+  role: Role
+  open: boolean
+  about: AskAbout
+  onToggle: () => void
+}) {
   const [introSeen, setIntroSeen] = useState(readIntroSeen)
   const dismiss = () => {
     setIntroSeen(true)
@@ -47,16 +59,14 @@ export function AskButton({ open, about, onToggle }: { open: boolean; about: Ask
             : 'border-accent bg-accent-soft text-ink hover:bg-surface',
         )}
       >
+        {/* Quip is plum, so on the open (plum) button it sits on a canvas disc to stay visible. */}
         <span
           className={cn(
             'flex size-7 items-center justify-center rounded-full transition-colors lg:size-6',
-            open ? 'bg-canvas text-accent' : 'bg-accent text-canvas',
+            open && 'bg-canvas',
           )}
         >
-          <Sparkles
-            className="size-3.5"
-            aria-hidden="true"
-          />
+          <Mascot role={role} size={26} />
         </span>
         {/* On a phone only the icon shows: the toolbar also holds the breadcrumb and the screen's actions. */}
         <span className="sr-only sm:not-sr-only">Ask AI</span>
@@ -74,11 +84,16 @@ export function AskButton({ open, about, onToggle }: { open: boolean; about: Ask
               className="absolute top-full right-0 z-40 mt-2 w-72 rounded-xl border border-border-subtle bg-surface p-3 text-left shadow-lg"
             >
               <span aria-hidden="true" className="absolute -top-1.5 right-6 size-3 rotate-45 border-t border-l border-border-subtle bg-surface" />
-              <p className="text-sm font-medium text-ink">Ask AI about your papers</p>
-              <p className="mt-1 text-xs leading-5 text-ink-muted">
-                Ask in your own words. The answer comes from your papers, and every sentence in it is checked against the
-                passage it cites, so you see what is backed and what is not.
-              </p>
+              <div className="flex gap-3">
+                <Mascot role={role} size={44} animated className="shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-ink">Ask AI about your papers</p>
+                  <p className="mt-1 text-xs leading-5 text-ink-muted">
+                    Ask in your own words. The answer comes from your papers, and every sentence in it is checked against
+                    the passage it cites, so you see what is backed and what is not.
+                  </p>
+                </div>
+              </div>
               <div className="mt-2 flex justify-end gap-1">
                 <button
                   type="button"

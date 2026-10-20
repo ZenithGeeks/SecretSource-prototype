@@ -56,6 +56,7 @@ function Panel({ about = LIBRARY, context = { screen: 'library' }, onShowSource 
   const assistant = useAssistant()
   return (
     <AssistantPanel
+      role="researcher"
       assistant={assistant}
       context={context}
       about={about}

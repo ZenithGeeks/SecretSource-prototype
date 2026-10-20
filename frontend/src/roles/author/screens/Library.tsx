@@ -8,6 +8,7 @@
 import { AlertCircle, ArrowRight, Bookmark, FileText, Trash2, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 
+import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
@@ -193,9 +194,12 @@ export function Library({
   return (
     <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Library</h1>
-          <p className="text-sm text-ink-muted">The sources behind your drafts. Each project keeps its own .bib, PDFs and check results.</p>
+        <div className="flex items-center gap-3">
+          <Mascot role="writer" size={52} className="hidden shrink-0 sm:block" />
+          <div>
+            <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Library</h1>
+            <p className="text-sm text-ink-muted">The sources behind your drafts. Each project keeps its own .bib, PDFs and check results.</p>
+          </div>
         </div>
         <Button onClick={() => importInput.current?.click()} disabled={busy === 'import'} className="self-start sm:self-auto">
           <Upload className="size-4" aria-hidden="true" />

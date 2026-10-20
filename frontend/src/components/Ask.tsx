@@ -11,6 +11,7 @@ import { MotionConfig } from 'framer-motion'
 import { useState } from 'react'
 
 import { api, paperName } from '../lib/api'
+import type { Role } from '../lib/roles'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
 import { useAgentBridge } from '../lib/agentBridge'
@@ -29,6 +30,7 @@ import { PageViewer, type Target } from './PageViewer'
 export type AskNode = { id: string; label: string }
 
 export function useAsk({
+  role,
   screen,
   analysis = null,
   analysisFile = null,
@@ -36,6 +38,8 @@ export function useAsk({
   canNarrow = true,
   actions,
 }: {
+  /** Whose Quip (components/Mascot) the button and panel show. */
+  role: Role
   screen: string
   /** The open analysis's id, when the screen shows one. */
   analysis?: string | null
@@ -90,12 +94,13 @@ export function useAsk({
   const button = (
     <div className="flex items-center gap-2">
       {bridge.connected && <AgentStatus bridge={bridge} />}
-      <AskButton open={open} about={about} onToggle={() => setOpen(!open)} />
+      <AskButton role={role} open={open} about={about} onToggle={() => setOpen(!open)} />
     </div>
   )
 
   const panel = open ? (
     <AssistantPanel
+      role={role}
       assistant={assistant}
       context={context}
       about={about}
