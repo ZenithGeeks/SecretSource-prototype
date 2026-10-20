@@ -8,9 +8,12 @@
 import { Check, CircleAlert, CircleHelp, Loader2, Sparkles, Wand2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 
+import { AskInput } from '../../../components/AskInput'
 import { Mascot } from '../../../components/Mascot'
 import { Badge, Button } from '../../../components/ui'
 import type { Statement, StatementVerdict } from '../../../lib/assistant'
+import { request } from '../../../lib/api'
+import { describeResult, parseCommand } from '../../../lib/askCommands'
 import {
   askLabeling,
   problem,
@@ -41,7 +44,7 @@ const VERDICTS: Record<StatementVerdict | 'checking', Verdict> = {
   checking: { label: 'Checking…', tone: 'neutral', icon: Loader2 },
 }
 
-type Answer = { question: string; statements: Statement[]; status: 'answering' | 'done' | 'failed'; error?: string }
+type Answer = { question: string; statements: Statement[]; status: 'answering' | 'done' | 'failed'; error?: string; note?: string }
 
 export function AskPanel({
   analysisId,
@@ -189,6 +192,10 @@ function Question({ analysisId, references }: { analysisId: string; references: 
     controller.current?.abort()
     controller.current = new AbortController()
     setAnswer({ question, statements: [], status: 'answering' })
+    if (question.startsWith('/')) {
+      void runCommand(question, controller.current.signal)
+      return
+    }
     const update = (change: (a: Answer) => Answer) => setAnswer((a) => (a ? change(a) : a))
     askLabeling(
       analysisId,
@@ -206,6 +213,26 @@ function Question({ analysisId, references }: { analysisId: string; references: 
       .catch((reason: unknown) => {
         if ((reason as Error).name !== 'AbortError') update((a) => ({ ...a, status: 'failed', error: problem(reason).title }))
       })
+  }
+
+  /** A /command (lib/askCommands) on the open paper: its tool's result, not an answer from the paper. */
+  async function runCommand(question: string, signal: AbortSignal) {
+    const parsed = parseCommand(question, [], analysisId)
+    if ('error' in parsed) {
+      setAnswer({ question, statements: [], status: 'failed', error: parsed.error })
+      return
+    }
+    try {
+      const result = await request<Record<string, unknown>>(`/agent/tools/${parsed.name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed.args),
+        signal,
+      })
+      setAnswer({ question, statements: [], status: 'done', ...describeResult(parsed.name, result) })
+    } catch (reason) {
+      if ((reason as Error).name !== 'AbortError') setAnswer({ question, statements: [], status: 'failed', error: problem(reason).title })
+    }
   }
 
   return (
@@ -229,12 +256,15 @@ function Question({ analysisId, references }: { analysisId: string; references: 
         <div className="flex items-end gap-2">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-ink-muted">
             Question
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              maxLength={2000}
-              placeholder="e.g. Which dataset does it report recall on?"
-              className="min-h-9 rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink placeholder:text-ink-muted"
+            <AskInput
+              draft={text}
+              onChange={setText}
+              papers={[]}
+              disabled={false}
+              label="Question"
+              placeholder="e.g. Which dataset does it report recall on? Or / for commands"
+              className="min-h-9 w-full rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink placeholder:text-ink-muted"
+              menuClassName="absolute bottom-full left-0 z-20 mb-1 w-full"
             />
           </label>
           <Button type="submit" disabled={!text.trim() || answer?.status === 'answering'} className="min-h-9">
@@ -272,7 +302,10 @@ function AnswerView({ answer }: { answer: Answer }) {
           ))}
         </ol>
       )}
-      {answer.status === 'done' && statements.length === 0 && <p className="text-ink-muted">No passage in it answers that.</p>}
+      {answer.note && (
+        <pre className="rounded-lg bg-neutral-soft p-2.5 font-sans text-sm leading-5 whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{answer.note}</pre>
+      )}
+      {answer.status === 'done' && statements.length === 0 && !answer.note && <p className="text-ink-muted">No passage in it answers that.</p>}
       {answer.status === 'failed' && (
         <p role="alert" className="text-refutes">
           Could not answer: {answer.error}

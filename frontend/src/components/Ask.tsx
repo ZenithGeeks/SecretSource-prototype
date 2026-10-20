@@ -7,7 +7,6 @@
  * with `viewer`.
  */
 
-import { MotionConfig } from 'framer-motion'
 import { useState } from 'react'
 
 import { api, paperName } from '../lib/api'
@@ -15,17 +14,14 @@ import type { Role } from '../lib/roles'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
 import type { PaperRef } from '../lib/askCommands'
-import { useAgentBridge } from '../lib/agentBridge'
 import { useAnalyses } from '../lib/useAnalysis'
-import { useAuth } from '../lib/useAuth'
 import type { ScreenActions } from '../lib/agentTools'
-import { AiCursor } from './AiCursor'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
-import { AgentStatus, ConnectAgent } from './ConnectAgent'
 import { DoIt } from './DoIt'
 import { PageViewer, type Target } from './PageViewer'
+import { useAgentConnection } from './useAgentConnection'
 
 /** A graph node the reader selected, which a question can be about. */
 export type AskNode = { id: string; label: string }
@@ -59,12 +55,7 @@ export function useAsk({
   const [cleared, setCleared] = useState<string | null>(null)
   const [source, setSource] = useState<Target | null>(null)
   const { data: analyses = [] } = useAnalyses()
-  const { session } = useAuth()
-  const bridge = useAgentBridge(actions)
-  // ?connect=agent opens the connect screen, so docs and the agent's error can link to it.
-  const [connecting, setConnecting] = useState(
-    () => new URLSearchParams(window.location.search).get('connect') === 'agent',
-  )
+  const agent = useAgentConnection(actions)
   const titles = Object.fromEntries(
     analyses.flatMap((a) => (a.file && a.title ? [[paperName(a.file), shortTitle(a.title)]] : [])),
   )
@@ -86,17 +77,9 @@ export function useAsk({
     setSource({ ...target, source: found?.page ? (found as Target['source']) : null })
   }
 
-  /** Closes the connect screen and drops ?connect=, so a reload does not open it again. */
-  function closeConnect() {
-    setConnecting(false)
-    const url = new URL(window.location.href)
-    url.searchParams.delete('connect')
-    window.history.replaceState(window.history.state, '', url)
-  }
-
   const button = (
     <div className="flex items-center gap-2">
-      {bridge.connected && <AgentStatus bridge={bridge} />}
+      {agent.pill}
       <AskButton role={role} open={open} about={about} onToggle={() => setOpen(!open)} />
     </div>
   )
@@ -113,7 +96,7 @@ export function useAsk({
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
       onClose={() => setOpen(false)}
       onShowSource={(target) => void showSource(target)}
-      doIt={actions && <DoIt actions={actions} onConnectAgent={bridge.connected ? undefined : () => setConnecting(true)} />}
+      doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
     />
   ) : undefined
 
@@ -124,21 +107,7 @@ export function useAsk({
           <PageViewer target={source} onClose={() => setSource(null)} className="h-[90vh] w-full max-w-4xl" />
         </div>
       )}
-      {connecting && bridge.canConnect && !bridge.connected && (
-        <ConnectAgent
-          email={session?.user?.email ?? null}
-          onAllow={() => {
-            bridge.connect(true)
-            closeConnect()
-          }}
-          onCancel={closeConnect}
-        />
-      )}
-      {bridge.connected && (
-        <MotionConfig reducedMotion="user">
-          <AiCursor pointing={bridge.pointing} />
-        </MotionConfig>
-      )}
+      {agent.overlay}
     </>
   )
 
