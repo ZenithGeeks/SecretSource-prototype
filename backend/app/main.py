@@ -56,6 +56,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from app import chats, dependencies, mcp_server, researcher, store, uploads
+from app.agent_runs import get_runner
 from app.agent_runs import router as agent_router
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
@@ -354,11 +355,20 @@ async def _subscribe_forever() -> None:
 
 
 @asynccontextmanager
+def _warm_agents() -> None:
+    """Import the agent modules and build what they need, before the first request. They pull in
+    DSPy and LiteLLM, and importing those on the first /agent call while another request logged
+    an error hung the gateway: LiteLLM's logging filter imported a part of a half-loaded package."""
+    mcp_server._tools()
+    get_runner()
+
+
 async def lifespan(app: FastAPI):
     global _loop
     _loop = asyncio.get_running_loop()
     setup_tracing()
     restore()
+    await asyncio.to_thread(_warm_agents)  # about a second; the app takes no request until it is done
     # What exists now (imports, the restored rows) lives as long as the process. Freezing it
     # stops each full GC pass from walking it again. Without this, the first owner load after
     # start-up set off a full pass of about 41 ms (#551).

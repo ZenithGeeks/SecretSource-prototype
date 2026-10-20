@@ -179,3 +179,15 @@ def test_a_command_from_the_ask_panel_runs_a_data_tool_for_the_person(api, monke
     assert seen == ["user-1"]
     assert client.post("/agent/tools/delete_everything", json={}).status_code == 404
     assert client.post("/agent/tools/get_gaps", json={"extra": 1}).status_code == 422
+
+
+def test_the_gateway_builds_the_agents_before_its_first_request():
+    from app import main, mcp_server
+
+    agent_runs.get_runner.cache_clear()
+    mcp_server._tools.cache_clear()
+
+    main._warm_agents()
+
+    assert agent_runs.get_runner.cache_info().currsize == 1
+    assert mcp_server._tools.cache_info().currsize == 1
