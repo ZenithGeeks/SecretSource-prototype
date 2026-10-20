@@ -142,6 +142,44 @@ def test_without_visual_hits_nothing_is_read(monkeypatch, tmp_path):
     ]
 
 
+def test_a_colpali_table_hit_comes_out_of_visual_with_its_kind_and_region(monkeypatch, tmp_path):
+    # Through _visual, the manifest on disk and paper_media's cache: _visual swallows errors,
+    # so a break anywhere on this path would only show as no visual evidence.
+    monkeypatch.setattr(figures, "PAPERS_DIR", tmp_path)
+    pdf = tmp_path / "paper.pdf"
+    directory = figures.figures_dir(pdf)
+    directory.mkdir(parents=True)
+    crop = directory / "table-1.png"
+    crop.write_bytes(b"png")
+    table = {
+        "kind": "table",
+        "page": 3,
+        "caption": "Table 1: Results.",
+        "image": crop.as_posix(),
+        "region": REGION,
+    }
+    manifest = {"version": figures.MANIFEST_VERSION, "figures": [], "tables": [table], "formulas": []}
+    (directory / figures.MANIFEST).write_text(json.dumps(manifest))
+    service_hit = {
+        "source": "paper.pdf",
+        "page": 3,
+        "score": 9.5,
+        "kind": "figure",
+        "label": "Table 1",
+        "caption": "Table 1: Results.",
+        "image": "/service/paper/table-1.png",
+    }
+    monkeypatch.setattr(verify.retrieval, "colpali_available", lambda: True)
+    monkeypatch.setattr(
+        verify.retrieval, "colpali_search", lambda claim, k, source: {"topk": [service_hit], "model": "m"}
+    )
+
+    hits, model = verify._visual("ColBERT reaches 31.3 MAP on TREC CAR.", pdf)
+
+    assert model == "m"
+    assert [(hit["kind"], hit["region"], hit["label"]) for hit in hits] == [("table", REGION, "Table 1")]
+
+
 def test_tables_with_a_crop_go_into_the_vision_index_with_the_figures(monkeypatch, tmp_path):
     media = {
         "status": "ok",

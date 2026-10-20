@@ -17,6 +17,7 @@ ColBERT settings are written query/passage token limits: "64/300" is `QUERY_LEN,
 | `claims.jsonl` | 278 claims from 168 prose passages: `id`, `paper`, `gold` (passage index), `kind`, `text` |
 | `caption-claims.jsonl` | 148 claims from 300 sampled figure and table captions; `caption` is the caption text a passage must hold whole to count |
 | `figure-claims.jsonl` | 52 claims (26 supports/refutes pairs) that only a figure can decide; `figure` is the Docling crop the claim was written from |
+| `table-claims.jsonl` | 36 claims (18 supports/refutes pairs) from 5 tables of ColBERT, DPR and RocketQA; `figure` is the Docling table crop |
 
 `gold` in `claims.jsonl` indexes passages cut with 120-word windows and no caption breaks, the `pdf_passages` of #490 (commit 5ae4133). To score it, export passages with that version of `services/colbert/store.py`. Caption claims are scored by caption text, so they work with any cutting.
 
@@ -139,6 +140,21 @@ The decisive checks this changes with ColPali on, in all 3 runs:
 
 The merge gate runs with ColPali off. There the judge gets no image, and the signature, inputs and answer cache key are the same as on main. Run alone on the gateway, branch first, the off mode kept 11, 12, 12 with this change and 11, 12, 11 on main. Both builds lose row 3 every time. Row 13 flips in run 1 on both and once more on main, so these differences are the judge's run-to-run noise.
 
+## Table crops for the judge (SCRUM-81)
+
+Since #564, Docling's table crops go into ColPali with the figure crops. A table can then be the top hit that the figure judge looks at. The judge gets the crop and its caption, with the same prompt as for a figure.
+
+`table-claims.jsonl` was written by hand from the table crops of `10.1145-3397271.3401075.pdf` (ColBERT, Tables 1-4), `10.18653-v1-2020.emnlp-main.550.pdf` (DPR, Tables 2 and 4) and `10.18653-v1-2021.naacl-main.466.pdf` (RocketQA, Table 2). Each "refutes" claim takes its number from the wrong row or column of the same table, or flips a comparison. The key numbers are in no caption. One reader wrote and checked them. Make the crops with `python -m app.pipeline.figures <pdf>` before a run.
+
+The figure judge on its own (`backend/eval_figure_judge.py --runs 2`), 20 Oct 2026, gateway model `openai/qwen/qwen3.8-27b-nvfp4`, main's prompt and a prompt that names tables, run the same day:
+
+| Prompt | Tables (36), per run | Figures (52), per run | False "supports" on tables (2 runs) | Replies not JSON (2 runs) |
+|---|---|---|---|---|
+| main (figure only) | 32, 33 | 48, 46 | 6 | 0 tables, 4 figures |
+| names tables, row and column | 32, 33 | 46, 46 | 3 | 4 tables, 5 figures |
+
+Main's prompt stays. The false "supports" on tables came from three claims, all row swaps: ColBERT Table 4 (143 against 154 GiB) and RocketQA Table 2 twice (ME-BERT's 33.8 given to ANCE, doc2query's 89.1 given to DeepCT).
+
 ## Tried and not adopted
 
 | Idea | Result | Why not |
@@ -146,6 +162,7 @@ The merge gate runs with ColPali off. There the judge gets no image, and the sig
 | bge-reranker-v2-m3 over ColBERT's top 20 | Ours top 4: 0.965 → 0.904 (+6 / -23 claims); SciFact 0.763 → 0.797 | Hurts ranking within one paper, which is what the pipeline does; +120-160 ms per claim |
 | Judge prompt v1: check numbers, comparisons, direction, table column; without the "different words" sentence | False "supports" 15 → 12 (prose), 6 → 3 (captions); `eval_decisive.py` 12 → 11 | It made the judge demand the claim's exact terms (DensePhrases row) |
 | Judge gets 6 passages instead of 4 | Prose 0.955 → 0.948, captions 0.934 → 0.954 (inside the spread); `eval_decisive.py` 12 → 10 | The extra passages gave the judge contradicting-looking text on real rows; +18% time |
+| Figure judge prompt that names tables and their rows and columns | Tables 32, 33 of 36 on both prompts; figures 46, 46 against 48, 46 | No gain outside the spread; 4 replies on tables were not JSON, against 0 |
 | jina-embeddings-v4 instead of ColBERT | Best retrieval scores above | `eval_decisive.py` kept 9 of 13 against ColBERT's 12; 14x slower to index; research-only licence |
 
 ## Caveats

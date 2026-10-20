@@ -178,12 +178,12 @@ def _with_region(hit: dict, crops: dict[str, dict]) -> dict:
 
 
 def _captions(hits: list[dict]) -> list[str]:
-    """Figure captions as evidence the judge can read and quote."""
+    """Figure and table captions as evidence the judge can read and quote."""
     return [f"{hit['label']}: {hit['caption']}" for hit in hits if hit.get("caption")]
 
 
 def _figure_crop(hits: list[dict], source: Path) -> Path | None:
-    """This worker's copy of the first figure hit, for the judge to look at, or None.
+    """This worker's copy of the first figure or table hit, for the judge to look at, or None.
 
     A hit's image is the crop's path on the ColPali service. Docling wrote the same crop
     here under the same file name, so the name finds it. Page hits have no image.
@@ -261,6 +261,8 @@ def _build_judge():
         whether it means the same thing."""
 
         claim: str = dspy.InputField(desc="A claim that cites the source paper")
+        # Table crops come in here too. Naming tables in this prompt scored the same on
+        # table-claims.jsonl (32 and 33 of 36, both prompts) and was reverted (#564).
         figure: dspy.Image = dspy.InputField(desc="A figure from the cited paper")
         evidence: list[str] = dspy.InputField(desc="The figure's caption, or empty")
         verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")
