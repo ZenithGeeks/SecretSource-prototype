@@ -129,13 +129,38 @@ def test_a_run_that_keeps_calling_server_tools_stops_at_the_cap(api, monkeypatch
 
 
 def test_the_agent_is_built_from_the_documented_tools():
-    names = [getattr(tool, "name", getattr(tool, "__name__", "")) for tool in screen.screen_agent.tools]
-    assert names == [
-        "read_screen", "open_screen", "open_paper", "point_at", "fill_field", "list_papers",
-        *[tool.__name__ for tool in DATA_TOOLS],
-    ]
+    names = [getattr(tool, "name", getattr(tool, "__name__", "")) for tool in screen.SCREEN_TOOLS]
+    assert names == ["read_screen", "open_screen", "open_paper", "point_at", "fill_field", "list_papers"]
+    # The data tools belong to the specialist the screen agent hands work to; ADK lists it as a tool.
+    assert [agent.name for agent in screen.screen_agent.sub_agents] == ["data_agent"]
+    assert screen.screen_agent.tools[-1].name == "data_agent"
+    assert screen.data_agent.tools == DATA_TOOLS
     text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
-    assert all(f"`{name}" in text for name in names)
+    listed = [*names, "data_agent", *[tool.__name__ for tool in DATA_TOOLS]]
+    assert all(f"`{name}" in text for name in listed)
+
+
+def test_a_data_request_goes_to_the_data_agent_and_the_stream_says_so(api, monkeypatch):
+    client, model, _ = api
+    data_model = ScriptedModel(replies=["Two claims are contradicted."], seen=[])
+    monkeypatch.setattr(screen.data_agent, "model", data_model)
+    model.replies = [
+        {"name": "data_agent", "args": {"request": "Which claims are contradicted?"}},
+        "Two claims are contradicted.",
+    ]
+
+    got = events(client.post("/agent/runs", json={"message": "Which claims are contradicted?"}))
+
+    agents = [e for e in got if e["type"] == "agent"]
+    assert agents == [
+        {"type": "agent", "name": "data_agent", "state": "working", "task": "Which claims are contradicted?"},
+        {"type": "agent", "name": "data_agent", "state": "done"},
+    ]
+    said = [e for e in got if e["type"] == "say"]
+    assert said == [{"type": "say", "text": "Two claims are contradicted."}]  # the coordinator's, once
+    assert got.index(agents[0]) < got.index(agents[1]) < got.index(said[0])
+    # The coordinator's request, not the whole chat, is what the specialist was asked.
+    assert "Which claims are contradicted?" in str(data_model.seen[0].contents)
 
 
 def test_a_command_from_the_ask_panel_runs_a_data_tool_for_the_person(api, monkeypatch):

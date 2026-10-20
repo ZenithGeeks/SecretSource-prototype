@@ -15,21 +15,28 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `point_at` | browser | Moves the AI cursor to a target, rings it, shows a note | `target` (`kind:id`), `note` | `{status: "done"}`, or `{status: "error", message: "not on the screen"}` |
 | `fill_field` | browser, after the person approves | Shows the text, waits for Apply or Cancel, then types it into the field | `target` (`field:id`), `text` | `{status: "applied"}` or `{status: "cancelled"}` |
 | `list_papers` | server | The person's analysed papers, newest first, at most 50 | none | `[{id, title, status}]` |
-| `get_analysis` | server | One analysis: status, why it failed, claims per standing, each claim with its number | `analysis_id` | `{id, title, status, stage, message, standing, claims: [{number, claim, section, standing}]}` |
-| `get_claim` | server | The evidence behind one claim: verdict, quote and reasoning per cited paper, and citations that could not be checked | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, standing, verdicts, unchecked}` |
-| `search_claims` | server | Claims in the person's papers that share words with the query, best first, at most 10 | `query` | `{claims: [{analysis_id, title, number, claim, standing}]}` |
-| `find_in_paper` | server | The page of a paper's PDF where some text sits | `analysis_id`, `text` | `{page}`, `page` is null when the text is not there |
-| `find_support` | server | Passages in the person's papers that bear on a claim (search only, no judge) | `claim` | `{passages: [{paper, page, text}]}` |
-| `check_text` | server | Judges each of the first 6 sentences of some writing against the paper whose passage fits it best | `text` | `{results: [{text, source, page, verdict, quote, reasoning}], not_checked}` |
-| `ask_library` | server | Answers a question from the person's papers, as the Ask panel does, each statement judged | `question` | `{statements: [{text, source, page, verdict, quote, reasoning}]}` |
-| `get_gaps` | server | Claims no cited work backs, claims one contradicts, works cited but not held; up to 10 of each | none | `{notBacked, contradicted, missing}` |
-| `bibtex` | server | BibTeX entries for a paper and the works its claims cite | `analysis_id` | `{bibtex}` |
-| `submit_analysis` | server | Starts an analysis of a DOI, arXiv ID or URL in the background | `paper` | `{id, status}`; poll `get_analysis` |
-| `labeling_progress` | server | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
+| `get_analysis` | server, `data_agent` | One analysis: status, why it failed, claims per standing, each claim with its number | `analysis_id` | `{id, title, status, stage, message, standing, claims: [{number, claim, section, standing}]}` |
+| `get_claim` | server, `data_agent` | The evidence behind one claim: verdict, quote and reasoning per cited paper, and citations that could not be checked | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, standing, verdicts, unchecked}` |
+| `search_claims` | server, `data_agent` | Claims in the person's papers that share words with the query, best first, at most 10 | `query` | `{claims: [{analysis_id, title, number, claim, standing}]}` |
+| `find_in_paper` | server, `data_agent` | The page of a paper's PDF where some text sits | `analysis_id`, `text` | `{page}`, `page` is null when the text is not there |
+| `find_support` | server, `data_agent` | Passages in the person's papers that bear on a claim (search only, no judge) | `claim` | `{passages: [{paper, page, text}]}` |
+| `check_text` | server, `data_agent` | Judges each of the first 6 sentences of some writing against the paper whose passage fits it best | `text` | `{results: [{text, source, page, verdict, quote, reasoning}], not_checked}` |
+| `ask_library` | server, `data_agent` | Answers a question from the person's papers, as the Ask panel does, each statement judged | `question` | `{statements: [{text, source, page, verdict, quote, reasoning}]}` |
+| `get_gaps` | server, `data_agent` | Claims no cited work backs, claims one contradicts, works cited but not held; up to 10 of each | none | `{notBacked, contradicted, missing}` |
+| `bibtex` | server, `data_agent` | BibTeX entries for a paper and the works its claims cite | `analysis_id` | `{bibtex}` |
+| `submit_analysis` | server, `data_agent` | Starts an analysis of a DOI, arXiv ID or URL in the background | `paper` | `{id, status}`; poll `get_analysis` |
+| `labeling_progress` | server, `data_agent` | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
 
 The agent cannot save labels, delete or upload anything. There is no tool for it, and the
 instructions tell it to point at the button and let the person press it. It can start an
 analysis with `submit_analysis`, which only queues a run the person sees in their list.
+
+The screen agent is a coordinator. It keeps the browser tools and `list_papers`, and hands anything
+that needs the contents of the person's papers to `data_agent`, a specialist with the server tools
+below (`backend/app/agents/screen.py`). `data_agent` runs in one turn and gives its answer back to
+the coordinator, which words the reply. A coding agent over MCP has no `data_agent`: it gets the
+server tools directly. Each hand-over reaches the browser as an event (see How a turn runs) and
+shows in the chat as a badge: working, then done or failed.
 
 The server tools are in `backend/app/agents/data_tools.py`. They read only the caller's own
 analyses; an id that is not theirs comes back as "no analysis ... among your papers", the same as
@@ -67,7 +74,9 @@ so React sees the change.
 
 1. The browser POSTs the person's message to `/api/agent/runs` with the screen they are on.
 2. The stream sends `{"type": "session", "id"}`, then the agent's steps: `{"type": "step", "name"}`
-   for a server tool, `{"type": "say", "text"}` for its words.
+   for a server tool, `{"type": "agent", "name", "state", "task"}` when it hands work to a specialist
+   (`state` is `working`, then `done` or `failed`; `task` comes with `working`), `{"type": "say", "text"}`
+   for its words.
 3. A browser tool arrives as `{"type": "tool", "id", "name", "args"}` and the stream ends with
    `{"type": "done"}`. The browser runs it from the registry in `frontend/src/lib/agentTools.ts`
    with the cursor, then POSTs `{id, name, result}` to `/api/agent/runs/{session}/results`. That

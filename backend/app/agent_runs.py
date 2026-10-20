@@ -5,7 +5,9 @@ POST /agent/runs starts a conversation with the person's message. Whenever the a
 screen tool the stream sends `{"type": "tool", "id", "name", "args"}` and ends. The browser does
 it and POSTs the result to /agent/runs/{session_id}/results, which goes on with a new stream.
 Other events: `{"type": "session", "id"}` first, `{"type": "step", "name"}` for a server tool,
-`{"type": "say", "text"}` for the agent's words, and `{"type": "done"}` last.
+`{"type": "agent", "name", "state", "task"}` when the agent hands work to a specialist
+(`state` is "working", then "done" or "failed"), `{"type": "say", "text"}` for the agent's words,
+and `{"type": "done"}` last.
 
 Sessions live in this process's memory for an hour: one gateway instance serves the app today
 (memory gateway-multi-instance-state). A second instance would need them in the database.
@@ -34,6 +36,8 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 APP_NAME = "secretsource-screen"
 MAX_LLM_CALLS = 8  # per request; a task takes 3-5 in eval_screen_agent.py, so this stops a loop, not a task
 SESSION_SECONDS = 3600
+# The specialists the screen agent hands work to (app/agents/screen.py), reported to the browser.
+DELEGATES = frozenset({"data_agent"})
 
 _sessions = InMemorySessionService()
 _started: dict[str, tuple[float, str]] = {}  # session id -> (when it began, user id)
@@ -115,9 +119,18 @@ async def _events(session_id: str, user_id: str, message: types.Content, session
             for call in calls:
                 if call.id in (event.long_running_tool_ids or ()):
                     yield _sse({"type": "tool", "id": call.id, "name": call.name, "args": call.args or {}})
+                elif call.name in DELEGATES:
+                    task = (call.args or {}).get("request", "")
+                    yield _sse({"type": "agent", "name": call.name, "state": "working", "task": task})
                 else:
                     yield _sse({"type": "step", "name": call.name})
-            if event.content and not calls and not event.get_function_responses():
+            responses = event.get_function_responses()
+            for response in responses:
+                if response.name in DELEGATES:
+                    state = "failed" if "error" in (response.response or {}) else "done"
+                    yield _sse({"type": "agent", "name": response.name, "state": state})
+            # A specialist's reply goes back to the coordinator, which words the answer.
+            if event.author not in DELEGATES and event.content and not calls and not responses:
                 if text := "".join(part.text or "" for part in event.content.parts or []).strip():
                     yield _sse({"type": "say", "text": text})
     except LlmCallsLimitExceededError:

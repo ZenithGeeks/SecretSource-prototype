@@ -111,10 +111,12 @@ def _tools() -> dict[str, types.Tool]:
     from google.adk.tools import BaseTool, FunctionTool
     from google.adk.tools.mcp_tool.conversion_utils import adk_to_mcp_tool_type
 
-    from app.agents.screen import screen_agent
+    from app.agents.data_tools import DATA_TOOLS
+    from app.agents.screen import SCREEN_TOOLS
 
     tools = {}
-    for tool in screen_agent.tools:
+    # The data tools are listed directly: a coding agent plans its own steps, so it has no data_agent.
+    for tool in [*SCREEN_TOOLS, *DATA_TOOLS]:
         mcp_tool = adk_to_mcp_tool_type(tool if isinstance(tool, BaseTool) else FunctionTool(tool))
         # A tool with no arguments comes out as {}; MCP needs an object schema.
         mcp_tool.inputSchema = mcp_tool.inputSchema or {"type": "object", "properties": {}}
