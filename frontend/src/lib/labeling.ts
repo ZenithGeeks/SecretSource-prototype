@@ -224,20 +224,21 @@ export function useLabelStatus() {
   return useQuery({ queryKey: ['labeling', 'status'], queryFn: labelingApi.status, retry: false })
 }
 
-/** How often the pool is asked again while one of the viewer's papers is being analysed. */
-export const POOL_POLL_MS = 15_000
+/** How often the paper list asks again: often while a paper is being read, so its row turns
+ * Ready soon after the analysis ends, and every half minute otherwise, for teammates' topics
+ * and progress. One ask reads ~20 claim rows from Supabase, about 140 ms. */
+export const POOL_POLL_MS = { reading: 5_000, idle: 30_000 }
 
-/** The pool, asked again every 15 s while a paper the viewer added is still running, so its row
- * and the notice that it finished appear without a reload. An analysis takes minutes. It keeps
- * asking in a background tab, which is where the tab title tells the viewer. */
 export function usePool() {
   return useQuery({
     queryKey: ['labeling', 'pool'],
     queryFn: labelingApi.pool,
     retry: false,
     refetchInterval: (query) =>
-      query.state.data?.papers.some((paper) => paper.mine && paper.status === 'running') ? POOL_POLL_MS : false,
+      query.state.data?.papers.some((p) => p.status === 'running') ? POOL_POLL_MS.reading : POOL_POLL_MS.idle,
+    // A hidden tab keeps asking, so the paper notices and the tab title still update there.
     refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -264,13 +265,37 @@ export function useScopusAdd() {
   })
 }
 
-/** Sets a person's topic (`name`) or shares one of your own analyses (`analysisId`); "" undoes it. */
+type Assignment = { topic: string; name?: string; analysisId?: string }
+
+/** The pool as it will be once `v` is saved: a paper with no topic leaves the list. */
+function assigned(pool: Pool, v: Assignment): Pool {
+  if (v.name !== undefined)
+    return { ...pool, people: pool.people.map((p) => (p.name === v.name ? { ...p, topic: v.topic } : p)) }
+  const papers = v.topic
+    ? pool.papers.map((p) => (p.analysis_id === v.analysisId ? { ...p, topic: v.topic } : p))
+    : pool.papers.filter((p) => p.analysis_id !== v.analysisId)
+  return { ...pool, papers }
+}
+
+/** Sets a person's topic (`name`) or shares one of your own analyses (`analysisId`); "" undoes it.
+ * The list shows the change at once and goes back if the save fails. */
 export function useAssignTopic() {
   const queryClient = useQueryClient()
+  const queryKey = ['labeling', 'pool']
   return useMutation({
-    mutationFn: (v: { topic: string; name?: string; analysisId?: string }) =>
+    mutationFn: (v: Assignment) =>
       v.name !== undefined ? labelingApi.setPersonTopic(v.name, v.topic) : labelingApi.setPaperTopic(v.analysisId!, v.topic),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
+    onMutate: async (v) => {
+      // A poll that lands after this would bring back the old topic for a moment.
+      await queryClient.cancelQueries({ queryKey })
+      const before = queryClient.getQueryData<Pool>(queryKey)
+      if (before) queryClient.setQueryData(queryKey, assigned(before, v))
+      return { before }
+    },
+    onError: (_error, _v, context) => {
+      if (context?.before) queryClient.setQueryData(queryKey, context.before)
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
 

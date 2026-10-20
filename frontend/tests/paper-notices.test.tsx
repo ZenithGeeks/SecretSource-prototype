@@ -97,16 +97,16 @@ describe('paper notices', () => {
     expect(screen.queryByText('Ready to label')).not.toBeInTheDocument()
   })
 
-  it('asks again on its own while a paper the viewer added is running, and stops after', async () => {
+  it('asks again soon while a paper the viewer added is running, and slows down after', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     gateway([pool([paper('a')]), pool([paper('a', { status: 'done' })])])
     renderNotices()
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
 
-    await act(() => vi.advanceTimersByTimeAsync(POOL_POLL_MS))
+    await act(() => vi.advanceTimersByTimeAsync(POOL_POLL_MS.reading))
     expect(await screen.findByText('Ready to label')).toBeInTheDocument()
 
-    await act(() => vi.advanceTimersByTimeAsync(POOL_POLL_MS * 2))
+    await act(() => vi.advanceTimersByTimeAsync(POOL_POLL_MS.reading * 2))
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
