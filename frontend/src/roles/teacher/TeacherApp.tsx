@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell, ToolbarActions } from '../../components/AppShell'
+import { useAsk } from '../../components/Ask'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { markTeacherGoogleReturn } from '../../lib/teacherGoogleReturn'
@@ -43,6 +44,8 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [connectionError, setConnectionError] = useState('')
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
+  // A teacher's screens show classes and essays, not papers, so Ask always asks the library.
+  const ask = useAsk({ screen: route.screen, canNarrow: false })
   const importClass = useImportTeacherClass()
   const refreshClass = useRefreshTeacherClass()
   const googleConnection = useTeacherGoogleConnection()
@@ -136,7 +139,10 @@ export function TeacherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       }
       breadcrumb={breadcrumbFor(route)}
       wide
+      toolbarLead={ask.button}
+      panel={ask.panel}
     >
+      {ask.viewer}
       {route.screen === 'classes' && (
         <ToolbarActions>
           <ButtonAddClass onClick={() => navigate({ screen: 'add-class-connect' })} />

@@ -13,22 +13,15 @@
  * through screen changes; on Graph the panel is a tab of the graph's own right panel.
  */
 
-import { Home as HomeIcon, Library as LibraryIcon, ListChecks, Microscope, Sparkles, Waypoints } from 'lucide-react'
+import { Home as HomeIcon, Library as LibraryIcon, ListChecks, Microscope, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
-import type { AskAbout } from '../../components/AssistantPanel'
-import { AssistantPanel } from '../../components/AssistantPanel'
+import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
-import { PageViewer, type Target } from '../../components/PageViewer'
 import { SettingsModal } from '../../components/SettingsModal'
-import { api, paperName } from '../../lib/api'
-import type { AskContext } from '../../lib/assistant'
-import { shortTitle, useAssistant } from '../../lib/assistant'
 import { settingsRequested } from '../../lib/settingsDeepLink'
-import { useAnalyses } from '../../lib/useAnalysis'
-import { cn } from '../../lib/utils'
 import { Graph } from './screens/Graph'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
@@ -88,46 +81,15 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
 
   useEffect(() => syncScreenParams(screen, history.selected), [screen, history.selected])
 
-  const assistant = useAssistant()
-  const [askOpen, setAskOpen] = useState(false)
-  const [graphNode, setGraphNode] = useState<{ id: string; label: string } | null>(null)
-  // The paper or node whose chip the reader removed: questions about it go to the whole
-  // library. Opening a different paper or node brings the chip back.
-  const [cleared, setCleared] = useState<string | null>(null)
-  const [source, setSource] = useState<Target | null>(null)
-  const { data: analyses = [] } = useAnalyses()
-  const titles = Object.fromEntries(
-    analyses.flatMap((a) => (a.file && a.title ? [[paperName(a.file), shortTitle(a.title)]] : [])),
-  )
-
+  const [graphNode, setGraphNode] = useState<AskNode | null>(null)
   const onGraph = screen === 'graph' || screen === 'field-consensus'
   // What is on screen to ask about: the open analysis, or the selected graph node.
-  const analysis = screen === 'analyses' && history.selected !== cleared ? history.selected : null
-  const node = onGraph && graphNode && graphNode.id !== cleared ? graphNode : null
-  const context: AskContext = { screen, analysis: analysis ?? undefined, node: node?.id }
-  const about: AskAbout = analysis
-    ? { kind: 'paper', label: titles[paperName(history.selectedName ?? '')] || history.selectedName || 'this paper' }
-    : node
-      ? { kind: 'node', label: node.label }
-      : { kind: 'library', label: 'your library' }
-
-  /** Opens a statement's page with its quote marked, when the quote can be found on it. */
-  async function showSource(target: Target) {
-    const found = target.quote ? await api.findInPaper(target.paper, target.quote, target.page).catch(() => null) : null
-    setSource({ ...target, source: found?.page ? (found as Target['source']) : null })
-  }
-
-  const askPanel = askOpen && (
-    <AssistantPanel
-      assistant={assistant}
-      context={context}
-      about={about}
-      titles={titles}
-      onClearAbout={() => setCleared(analysis ?? node?.id ?? null)}
-      onClose={() => setAskOpen(false)}
-      onShowSource={(target) => void showSource(target)}
-    />
-  )
+  const ask = useAsk({
+    screen,
+    analysis: screen === 'analyses' ? history.selected : null,
+    analysisFile: history.selectedName,
+    node: onGraph ? graphNode : null,
+  })
 
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
@@ -162,22 +124,9 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
       wide={(screen === 'analyses' && history.wide) || screen === 'graph' || screen === 'field-consensus'}
       sidebar={history.sidebar}
       breadcrumb={breadcrumb}
-      toolbarLead={
-        <button
-          type="button"
-          onClick={() => setAskOpen(!askOpen)}
-          aria-pressed={askOpen}
-          className={cn(
-            'inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium lg:min-h-8',
-            askOpen ? 'border-accent bg-accent-soft text-accent' : 'border-transparent text-ink hover:bg-accent-soft',
-          )}
-        >
-          <Sparkles className="size-4" aria-hidden="true" />
-          {/* Icon only on a phone, where the toolbar also holds the breadcrumb and the screen's own actions. */}
-          <span className="sr-only sm:not-sr-only">Ask</span>
-        </button>
-      }
-      panel={onGraph ? undefined : askPanel}
+      toolbarLead={ask.button}
+      // On Graph the panel is a tab of the graph's own right panel.
+      panel={onGraph ? undefined : ask.panel}
     >
       {screen === 'home' && <Home onOpen={navigate} onOpenAnalysis={openAnalysis} />}
       {screen === 'library' && (
@@ -187,16 +136,12 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
         <Graph
           onOpenAnalysis={openAnalysis}
           initialTab={screen === 'field-consensus' ? 'consensus' : 'graph'}
-          askPanel={askPanel || undefined}
+          askPanel={ask.panel}
           onSelectNode={setGraphNode}
         />
       )}
       {screen === 'analyses' && history.main}
-      {source && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/45 p-4" role="dialog" aria-modal="true" aria-label={source.label}>
-          <PageViewer target={source} onClose={() => setSource(null)} className="h-[90vh] w-full max-w-4xl" />
-        </div>
-      )}
+      {ask.viewer}
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
