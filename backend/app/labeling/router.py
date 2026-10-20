@@ -318,7 +318,10 @@ async def set_paper_topic(
     body: TopicIn, analysis: dict = Depends(mine_analysis), who: str = Depends(annotator)
 ):
     """Share one of your own analyses with the team under a topic, or take it back with ""."""
-    _paper_id(analysis)
+    # Only sharing needs the paper. A paper that failed to download has none, and must still
+    # come off the list (#576).
+    if body.topic:
+        _paper_id(analysis)
     _store()
     await asyncio.to_thread(
         pool.assign, who, "paper", analysis["id"], body.topic, analysis.get("owner") or ""
