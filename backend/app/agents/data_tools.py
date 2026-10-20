@@ -158,7 +158,10 @@ async def find_in_paper(analysis_id: str, text: str, tool_context: ToolContext) 
         return _missing(analysis_id)
     if not analysis.get("file"):
         return _error("this analysis has no paper yet; wait for it to finish")
-    path = await asyncio.to_thread(main._paper, Path(analysis["file"]).name, user)
+    try:
+        path = await asyncio.to_thread(main._paper, Path(analysis["file"]).name, user)
+    except HTTPException as error:  # the analysis names a PDF this server does not have
+        return _error(str(error.detail))
     found = await asyncio.to_thread(locate, path.as_posix(), text, None)
     return {"page": (found or {}).get("page")}
 
