@@ -1,5 +1,6 @@
 """Routes for the screen agent (app/agents/screen.py), as server-sent events.
 
+POST /agent/tools/{name} runs one data tool for the Ask panel's /commands.
 POST /agent/runs starts a conversation with the person's message. Whenever the agent calls a
 screen tool the stream sends `{"type": "tool", "id", "name", "args"}` and ends. The browser does
 it and POSTs the result to /agent/runs/{session_id}/results, which goes on with a new stream.
@@ -14,6 +15,7 @@ import functools
 import json
 import logging
 import time
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -76,6 +78,21 @@ async def send_result(session_id: str, body: ToolResult, user: str | None = Depe
     response = types.FunctionResponse(id=body.id, name=body.name, response=body.result)
     message = types.Content(role="user", parts=[types.Part(function_response=response)])
     return _stream(session_id, owner, message)
+
+
+@router.post("/tools/{name}")
+async def run_tool(name: str, args: dict, user: str | None = Depends(current_user)):
+    """Run one data tool (app/agents/data_tools.py) for the person, for the Ask panel's /commands.
+    The result is what the tool gives the agent."""
+    from app.agents.data_tools import DATA_TOOLS  # see get_runner for why not at the top
+
+    tool = next((tool for tool in DATA_TOOLS if tool.__name__ == name), None)
+    if tool is None:
+        raise HTTPException(404, f"there is no tool named {name}")
+    try:
+        return await tool(**args, tool_context=SimpleNamespace(state={"user": user or ""}))
+    except TypeError as error:  # a missing or unknown argument
+        raise HTTPException(422, f"{name}: {error}") from None
 
 
 def _stream(session_id: str, user_id: str, message: types.Content, session_event: dict | None = None):

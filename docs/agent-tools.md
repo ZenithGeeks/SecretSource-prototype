@@ -35,6 +35,16 @@ The server tools are in `backend/app/agents/data_tools.py`. They read only the c
 analyses; an id that is not theirs comes back as "no analysis ... among your papers", the same as
 a missing one.
 
+## Commands in the Ask input
+
+The person can run the server tools by hand in the Ask panel (`frontend/src/components/AskInput.tsx`,
+`frontend/src/lib/askCommands.ts`). Typing `/` lists the commands and `@` lists their papers, for
+example `/get_claim @Lost in the Middle 2`. A command runs the tool through
+`POST /agent/tools/{name}` (`backend/app/agent_runs.py`) with the caller's own data, and its result
+shows as statements (`/check_text`, `/find_support`) or as a note. A command that takes a paper
+uses the one that is open when none is named. Commands are not saved in the chat history.
+`/ask_library` is not a command: a plain question does the same.
+
 ## Targets
 
 A target is `kind:id`, the value of a `data-ask-target` attribute on the page (`lib/askCursor.ts`,

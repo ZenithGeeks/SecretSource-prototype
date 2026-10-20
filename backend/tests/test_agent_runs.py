@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from app import agent_runs
-from app.agents import screen
+from app.agents import data_tools, screen
 from app.agents.data_tools import DATA_TOOLS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -136,3 +136,21 @@ def test_the_agent_is_built_from_the_documented_tools():
     ]
     text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
     assert all(f"`{name}" in text for name in names)
+
+
+def test_a_command_from_the_ask_panel_runs_a_data_tool_for_the_person(api, monkeypatch):
+    client, _, _ = api
+    seen = []
+
+    async def get_gaps(tool_context):
+        seen.append(tool_context.state["user"])
+        return {"notBacked": [], "contradicted": [], "missing": []}
+
+    monkeypatch.setattr(data_tools, "DATA_TOOLS", [get_gaps])
+
+    assert client.post("/agent/tools/get_gaps", json={}).json() == {
+        "notBacked": [], "contradicted": [], "missing": []
+    }
+    assert seen == ["user-1"]
+    assert client.post("/agent/tools/delete_everything", json={}).status_code == 404
+    assert client.post("/agent/tools/get_gaps", json={"extra": 1}).status_code == 422

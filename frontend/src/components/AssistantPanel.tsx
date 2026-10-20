@@ -15,7 +15,9 @@ import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistan
 import type { Role } from '../lib/roles'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
+import { parseCommand, type PaperRef } from '../lib/askCommands'
 import { AiCursor } from './AiCursor'
+import { AskInput } from './AskInput'
 import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
 
@@ -148,7 +150,7 @@ function TurnView({
   onAskAgain?: () => void
   onShowSource: (target: Target) => void
 }) {
-  const unanswered = turn.status === 'done' && turn.statements.length === 0
+  const unanswered = turn.status === 'done' && turn.statements.length === 0 && !turn.note
   return (
     <div className="flex flex-col gap-3">
       <p data-ask-target={askTarget({ kind: 'question', id: String(turn.id) })} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">
@@ -175,6 +177,7 @@ function TurnView({
           </ul>
         </section>
       )}
+      {turn.note && <pre className="rounded-xl bg-neutral-soft p-3 font-sans text-[13px] leading-5 whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{turn.note}</pre>}
       {turn.status === 'answering' && turn.statements.length === 0 && (
         <p className="flex items-center gap-2 text-xs text-ink-muted">
           <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
@@ -266,6 +269,7 @@ export function AssistantPanel({
   context,
   about,
   titles = {},
+  papers = [],
   canNarrow = true,
   onClearAbout,
   onClose,
@@ -280,6 +284,8 @@ export function AssistantPanel({
   about: AskAbout
   /** Paper titles by PDF file name, so a source reads as its title. */
   titles?: Record<string, string>
+  /** The reader's papers, which @ lists and a /command can name. */
+  papers?: PaperRef[]
   /** Whether the role has a paper or graph node to open, so the empty panel says how to narrow a question. */
   canNarrow?: boolean
   /** Removes the chip, so the next question asks the whole library. */
@@ -316,7 +322,13 @@ export function AssistantPanel({
     const question = draft.trim()
     if (!question || answering) return
     setDraft('')
-    void assistant.ask(question, context)
+    if (!question.startsWith('/')) {
+      void assistant.ask(question, context)
+      return
+    }
+    const parsed = parseCommand(question, papers, context.analysis)
+    if ('error' in parsed) assistant.refuse(question, parsed.error)
+    else void assistant.run(question, parsed)
   }
 
   const newChat = () => {
@@ -439,21 +451,20 @@ export function AssistantPanel({
                   }}
                   className="flex items-center gap-2 rounded-xl border border-border-subtle bg-neutral-soft py-1.5 pr-1.5 pl-3"
                 >
-                  <input
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
+                  <AskInput
+                    draft={draft}
+                    onChange={setDraft}
+                    papers={papers}
                     disabled={answering}
-                    aria-label="Your question"
                     placeholder={
                       answering
                         ? 'Answering… Stop keeps what’s here'
                         : about.kind === 'library'
-                          ? 'Ask about your library…'
+                          ? 'Ask about your library, / for commands, @ for a paper…'
                           : about.kind === 'paper'
-                            ? 'Ask about this paper…'
-                            : 'Ask about this node…'
+                            ? 'Ask about this paper, / for commands…'
+                            : 'Ask about this node, / for commands…'
                     }
-                    className="min-w-0 flex-1 bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed"
                   />
                   {answering ? (
                     <button

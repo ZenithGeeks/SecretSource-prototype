@@ -19,8 +19,10 @@ const CAN = [
   'Open screens and papers',
   'Point at things with its cursor',
   'Fill in a field, after you press Apply',
+  'Read your papers, claims and verdicts',
+  'Start checking a paper you name',
 ]
-const CANNOT = ['Save, delete or upload anything', 'Start or stop an analysis']
+const CANNOT = ['Save labels, delete or upload anything', 'Change your papers or your account']
 
 const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
 
