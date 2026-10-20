@@ -266,11 +266,17 @@ async def pool_state(
         # paper_id -> account -> extracted claims judged. A claim someone added by hand makes them
         # a labeler of the paper but is not one of the claims the paper is counted in.
         by_paper: dict[str, dict[str, int]] = {}
+        # paper_id -> extracted claims anyone has judged. Two people on one claim count once.
+        team_decided: dict[str, set[str]] = {}
         name_of = {me: who}  # account -> the name on its latest row; the viewer by their name now
         for r in _claim_rows():
-            counts = by_paper.setdefault(r.get("paper_id", ""), {})
+            paper_id = r.get("paper_id", "")
+            counts = by_paper.setdefault(paper_id, {})
             account = r.get("annotator_id", "")
-            counts[account] = counts.get(account, 0) + (r.get("origin") != "human_added")
+            extracted = r.get("origin") != "human_added"
+            counts[account] = counts.get(account, 0) + extracted
+            if extracted:
+                team_decided.setdefault(paper_id, set()).add(r.get("claim_id", ""))
             if account != me:
                 name_of[account] = r.get("annotator", "")
         shared = []
@@ -284,7 +290,8 @@ async def pool_state(
                 continue  # nothing to label
             stages = row.get("stages") or []
             reason = next((s.get("message", "") for s in reversed(stages) if s.get("stage") == "error"), "")
-            counts = by_paper.get(Path(row["file"]).stem, {}) if row.get("file") else {}
+            paper_id = Path(row["file"]).stem if row.get("file") else ""
+            counts = by_paper.get(paper_id, {}) if paper_id else {}
             shared.append(
                 {
                     "analysis_id": analysis_id,
@@ -292,6 +299,7 @@ async def pool_state(
                     "topic": topic,
                     "claims": len(row.get("claims") or []),
                     "judged": counts.get(me, 0),
+                    "team_judged": len(team_decided.get(paper_id, ())) if paper_id else 0,
                     "labelers": sorted({name_of[account] for account in counts}),
                     "status": status,
                     "reason": reason if status == "error" else "",

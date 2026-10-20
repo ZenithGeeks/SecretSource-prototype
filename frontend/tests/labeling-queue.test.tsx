@@ -19,10 +19,10 @@ const gateway = vi.hoisted(() => ({
       { name: 'Nuttadon', topic: '' },
     ],
     papers: [
-      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, labelers: [], status: 'done', reason: '', mine: false, added_by: 'Nuttadon' },
-      { analysis_id: 'x2', title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
-      { analysis_id: 'x3', title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, labelers: [], status: 'running', reason: '', mine: true },
-      { analysis_id: 'x4', title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
+      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, team_judged: 0, labelers: [], status: 'done', reason: '', mine: false, added_by: 'Nuttadon' },
+      { analysis_id: 'x2', title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, team_judged: 4, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
+      { analysis_id: 'x3', title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'running', reason: '', mine: true },
+      { analysis_id: 'x4', title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
     ],
   },
 }))
@@ -102,7 +102,7 @@ describe('the labeler queue', () => {
     expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'HPC paper', '10.1/closed'])
     expect(within(table).getAllByText(/your topic/)).toHaveLength(2) // the two NLP papers
     expect(within(table).getAllByRole('columnheader').map((th) => th.textContent)).toEqual([
-      'Paper', 'Topic', 'Status', 'My progress', 'Also labeled by', 'Added by', 'Actions',
+      'Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by', 'Actions',
     ])
   })
 
@@ -162,7 +162,7 @@ describe('the labeler queue', () => {
 
   it('says who added a failed paper, and that only they can try again or remove it', async () => {
     gateway.pool.papers.push({
-      analysis_id: 'x7', title: '10.1145/3712285.3771787', topic: 'HPC', claims: 0, judged: 0, labelers: [],
+      analysis_id: 'x7', title: '10.1145/3712285.3771787', topic: 'HPC', claims: 0, judged: 0, team_judged: 0, labelers: [],
       status: 'error', reason: 'Connection broken: IncompleteRead', mine: false, added_by: 'Nuttadon',
     })
     try {
@@ -197,13 +197,15 @@ describe('the labeler queue', () => {
     expect(gateway.puts).toEqual([])
   })
 
-  it('shows how far the viewer is through each paper and who else labeled it', async () => {
+  it("shows the team's progress on each paper, the viewer's own count, and who else labeled it", async () => {
     renderQueue()
     const table = await screen.findByRole('table')
-    expect(within(table).getByText('2 of 5 claims')).toBeInTheDocument()
+    // Chanya decided 2 of the NLP paper's claims; with Somchai the team has decided 4.
+    expect(within(table).getByText('4 of 5 claims')).toBeInTheDocument()
+    expect(within(rowOf(table, 'NLP paper')).getByText('You: 2')).toBeInTheDocument()
     expect(within(table).getByText('0 of 3 claims')).toBeInTheDocument()
-    const bar = within(table).getByRole('progressbar', { name: /NLP paper/ })
-    expect(bar).toHaveAttribute('aria-valuenow', '2')
+    const bar = within(table).getByRole('progressbar', { name: 'Claims the team decided in NLP paper' })
+    expect(bar).toHaveAttribute('aria-valuenow', '4')
     expect(bar).toHaveAttribute('aria-valuemax', '5')
     const labeledBy = within(rowOf(table, 'NLP paper')).getAllByRole('cell')[4]
     expect(labeledBy).toHaveTextContent('Somchai') // not Chanya: that is the viewer
@@ -211,7 +213,7 @@ describe('the labeler queue', () => {
   })
 
   it('says Label, Continue or Review depending on how much is judged', async () => {
-    gateway.pool.papers.push({ analysis_id: 'x5', title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
+    gateway.pool.papers.push({ analysis_id: 'x5', title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')
@@ -225,7 +227,7 @@ describe('the labeler queue', () => {
   })
 
   it('puts papers the viewer has not finished before finished ones of the same topic', async () => {
-    gateway.pool.papers.unshift({ analysis_id: 'x6', title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
+    gateway.pool.papers.unshift({ analysis_id: 'x6', title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')

@@ -13,7 +13,7 @@ import { problem, useAssignTopic, useRetryPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 import { addedByOf, isFinished, type Paper } from '../paperFilters'
 
-const COLUMNS = ['Paper', 'Topic', 'Status', 'My progress', 'Also labeled by', 'Added by']
+const COLUMNS = ['Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by']
 
 // On narrow screens the header row is hidden, so each cell carries its own small label.
 function CellLabel({ children }: { children: ReactNode }) {
@@ -40,24 +40,32 @@ function StatusBadge({ status }: { status: Paper['status'] }) {
   )
 }
 
-function MyProgress({ paper }: { paper: Paper }) {
+/** The team's progress as the bar, the viewer's own count under it. A second person on the same
+ * claim does not move the bar, but it is how agreement is measured, so "You" stays visible. */
+function TeamProgress({ paper }: { paper: Paper }) {
   if (paper.status !== 'done') return <span className="text-ink-muted">Not ready</span>
   if (paper.claims === 0) return <span className="text-ink-muted">No claims</span>
-  const finished = isFinished(paper)
+  const teamDone = paper.team_judged >= paper.claims
   return (
     <span className="flex w-full max-w-60 flex-col gap-1.5">
       <span className="flex items-center gap-1 whitespace-nowrap tabular-nums">
-        <CellLabel>My progress</CellLabel>
-        {finished ? (
+        <CellLabel>Progress</CellLabel>
+        {teamDone ? (
           <>
             <Check className="size-4 shrink-0 text-supports" aria-hidden="true" />
             <span className="font-medium text-supports">All {paper.claims} claims</span>
           </>
         ) : (
-          `${paper.judged} of ${paper.claims} claims`
+          `${paper.team_judged} of ${paper.claims} claims`
         )}
       </span>
-      <Progress value={paper.judged} max={paper.claims} label={`Claims you decided in ${paper.title}`} tone={finished ? 'supports' : 'accent'} />
+      <Progress
+        value={paper.team_judged}
+        max={paper.claims}
+        label={`Claims the team decided in ${paper.title}`}
+        tone={teamDone ? 'supports' : 'accent'}
+      />
+      <span className="text-xs text-ink-muted tabular-nums">You: {isFinished(paper) ? 'all' : paper.judged}</span>
     </span>
   )
 }
@@ -119,7 +127,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
         <StatusBadge status={paper.status} />
       </td>
       <td className={cn(cell, 'w-full @4xl:w-40')}>
-        <MyProgress paper={paper} />
+        <TeamProgress paper={paper} />
       </td>
       <td className={cell}>
         <CellLabel>Also labeled by</CellLabel>

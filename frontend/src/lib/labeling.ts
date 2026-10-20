@@ -170,6 +170,8 @@ export type Pool = {
     claims: number
     /** How many of its claims the signed-in person has judged. */
     judged: number
+    /** How many of its claims anyone on the team has judged; two people on one claim count once. */
+    team_judged: number
     /** Everyone who has judged any of its claims, the signed-in person included. */
     labelers: string[]
     status: 'running' | 'done' | 'error'
