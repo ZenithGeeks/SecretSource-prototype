@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from app.clients.service_auth import auth_headers, signs
+from app.clients.service_auth import auth_headers, sends_key, signs
 from app.config import (
     ANALYSES_DB,
     COLBERT_URL,
@@ -45,7 +45,9 @@ def _shown(url: str) -> str:
 
 
 def _signed(url: str) -> str:
-    return "google-id-token" if signs(url) else "none"
+    if signs(url):
+        return "google-id-token"
+    return "api key" if sends_key(url) else "none"
 
 
 class Answer(NamedTuple):
