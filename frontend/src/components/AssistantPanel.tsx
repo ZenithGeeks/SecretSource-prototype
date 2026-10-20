@@ -254,6 +254,7 @@ export function AssistantPanel({
   context,
   about,
   titles = {},
+  canNarrow = true,
   onClearAbout,
   onClose,
   onShowSource,
@@ -264,6 +265,8 @@ export function AssistantPanel({
   about: AskAbout
   /** Paper titles by PDF file name, so a source reads as its title. */
   titles?: Record<string, string>
+  /** Whether the role has a paper or graph node to open, so the empty panel says how to narrow a question. */
+  canNarrow?: boolean
   /** Removes the chip, so the next question asks the whole library. */
   onClearAbout: () => void
   onClose: () => void
@@ -359,7 +362,7 @@ export function AssistantPanel({
                 </p>
                 <p className="text-[13px] leading-5 text-ink-muted">
                   Answers come back as short statements. Each one cites a passage and is checked by the judge before it
-                  counts.{about.kind === 'library' && ' Open a paper or select a graph node first to ask about that one only.'}
+                  counts.{about.kind === 'library' && canNarrow && ' Open a paper or select a graph node first to ask about that one only.'}
                 </p>
               </div>
             )}

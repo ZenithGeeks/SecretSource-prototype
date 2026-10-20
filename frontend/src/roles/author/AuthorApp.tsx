@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
 import { settingsRequested } from '../../lib/settingsDeepLink'
@@ -97,6 +98,14 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [notice, setNotice] = useState<string | null>(null)
   const closeNotice = useCallback(() => setNotice(null), [])
   const history = useHistoryWorkspace()
+  const [graphNode, setGraphNode] = useState<AskNode | null>(null)
+  // What is on screen to ask about: the open analysis on History, or the selected graph node.
+  const ask = useAsk({
+    screen,
+    analysis: screen === 'history' ? history.selected : null,
+    analysisFile: history.selectedName,
+    node: screen === 'graph' ? graphNode : null,
+  })
 
   useEffect(
     () => syncParams({ screen, draftId, target: editorTarget, projectId }, history.selected),
@@ -162,6 +171,13 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
       // page viewer).
       wide={wide || (screen === 'history' && history.wide) || screen === 'graph'}
       sidebar={screen === 'history' ? history.sidebar : undefined}
+      // The toolbar is where Ask lives, so every Author screen in the shell has one.
+      breadcrumb={
+        screen === 'history' && history.selectedName ? ['History', history.selectedName] : [NAV.find((n) => n.key === NAV_FOR[screen])?.label ?? 'Home']
+      }
+      toolbarLead={ask.button}
+      // On Graph the panel is a tab of the graph's own right panel.
+      panel={screen === 'graph' ? undefined : ask.panel}
     >
       {screen === 'home' && (
         <DraftCheck
@@ -188,6 +204,8 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
       {screen === 'graph' && (
         <Graph
           onOpenAnalysis={openAnalysis}
+          askPanel={ask.panel}
+          onSelectNode={setGraphNode}
           emptyMessage={{
             title: 'Nothing to graph yet',
             hint: 'The graph is built from analysed papers. Analyse one on History and it appears here with the claims it makes and the works it cites.',
@@ -195,6 +213,7 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
         />
       )}
       {screen === 'history' && history.main}
+      {ask.viewer}
       <Toast message={notice} onClose={closeNotice} ms={10_000} />
       <SettingsModal
         open={settingsOpen}
