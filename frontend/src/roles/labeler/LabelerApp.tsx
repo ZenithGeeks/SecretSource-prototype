@@ -10,6 +10,7 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { Queue } from './screens/Queue'
 import { Workspace } from './screens/Workspace'
+import { usePaperNotices } from './usePaperNotices'
 
 const NAV: NavEntry<'papers'>[] = [{ key: 'papers', label: 'Papers to label', icon: Tags }]
 
@@ -20,6 +21,7 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
     if (unsaved && !window.confirm('You have unsaved labels. Leave without saving?')) return
     go()
   }
+  usePaperNotices((id) => leave(() => setAnalysis(id))())
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)

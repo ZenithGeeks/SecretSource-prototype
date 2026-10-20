@@ -224,8 +224,21 @@ export function useLabelStatus() {
   return useQuery({ queryKey: ['labeling', 'status'], queryFn: labelingApi.status, retry: false })
 }
 
+/** How often the pool is asked again while one of the viewer's papers is being analysed. */
+export const POOL_POLL_MS = 15_000
+
+/** The pool, asked again every 15 s while a paper the viewer added is still running, so its row
+ * and the notice that it finished appear without a reload. An analysis takes minutes. It keeps
+ * asking in a background tab, which is where the tab title tells the viewer. */
 export function usePool() {
-  return useQuery({ queryKey: ['labeling', 'pool'], queryFn: labelingApi.pool, retry: false })
+  return useQuery({
+    queryKey: ['labeling', 'pool'],
+    queryFn: labelingApi.pool,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.papers.some((paper) => paper.mine && paper.status === 'running') ? POOL_POLL_MS : false,
+    refetchIntervalInBackground: true,
+  })
 }
 
 /** The pages of one Scopus search, 25 papers each; null searches nothing yet. Each page costs

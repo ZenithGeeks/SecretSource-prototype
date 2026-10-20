@@ -27,13 +27,14 @@
     "cytoscape": "^3.34.3",
     "cytoscape-cola": "^2.5.1",
     "fflate": "^0.8.3",
-    "latex.js": "^0.12.6",
     "framer-motion": "^13.4.4",
+    "latex.js": "^0.12.6",
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
     "react-cytoscapejs": "^2.0.0",
     "react-dom": "^19.2.8",
     "react-pdf": "^10.5.0",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
