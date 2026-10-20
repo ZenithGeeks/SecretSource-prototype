@@ -100,6 +100,63 @@ export function StandingBadge({ standing, title }: { standing: Standing; title?:
   return <VerdictBadge verdict={standing} title={title} />
 }
 
+const TONES = {
+  neutral: 'border-border-subtle bg-neutral-soft text-ink-muted',
+  accent: 'border-transparent bg-accent-soft text-ink',
+  supports: 'border-transparent bg-supports-soft text-supports',
+  refutes: 'border-transparent bg-refutes-soft text-refutes',
+  insufficient: 'border-transparent bg-insufficient-soft text-insufficient',
+} as const
+
+/** A small label for a state or a tag. Put an icon or words in it: colour alone is not enough. */
+export function Badge({
+  tone = 'neutral',
+  title,
+  className,
+  children,
+}: {
+  tone?: keyof typeof TONES
+  title?: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex w-fit shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap [&>svg]:size-3.5 [&>svg]:shrink-0',
+        TONES[tone],
+        className,
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+/** A thin bar for "value of max". `label` names it for screen readers. */
+export function Progress({ value, max, label, tone = 'accent' }: { value: number; max: number; label: string; tone?: 'accent' | 'supports' }) {
+  const now = Math.min(value, max)
+  return (
+    <span
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={now}
+      aria-label={label}
+      className="block h-1.5 w-full overflow-hidden rounded-full bg-border-subtle"
+    >
+      <span
+        className={cn(
+          'block h-full rounded-full transition-[width] duration-200 motion-reduce:transition-none',
+          tone === 'supports' ? 'bg-supports' : 'bg-accent',
+        )}
+        style={{ width: `${max > 0 ? (now / max) * 100 : 0}%` }}
+      />
+    </span>
+  )
+}
+
 export function Empty({ title, hint }: { title: string; hint: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border-subtle px-6 py-12 text-center">
