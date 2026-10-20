@@ -3,9 +3,15 @@
 The whole stack runs in Docker on one machine (the host). Teammates reach it over Tailscale.
 Nothing runs on Google Cloud any more.
 
-Only the web app is shared, at one https address. The gateway, Grafana, Prometheus and the
-GPU services stay on the host's localhost. The web app sends every `/api` call to the gateway
-for you, so teammates never need another port.
+Two https addresses are shared, tailnet only:
+
+| Address | What | Who needs it |
+|---|---|---|
+| https://wttw-1.tailcf73b7.ts.net | the web app (it sends `/api` calls to the host's gateway itself) | everyone |
+| https://wttw-1.tailcf73b7.ts.net:8443 | the team gateway ([gatehouse](https://github.com/EarthWittawat/gatehouse)) in front of ColBERT, ColPali, GROBID and the judge LLM | developers |
+
+Every call through the team gateway needs a personal key. Grafana, Prometheus, the GPU
+services themselves and the gateway's admin pages stay on the host's localhost.
 
 ## For teammates
 
@@ -33,21 +39,26 @@ is missing from the Supabase redirect list (step 4 below).
 ### Developing
 
 You run grobid, redis, the gateway, the worker and the web app yourself. They need no GPU.
-ColBERT runs on the host and you reach it over Tailscale.
+ColBERT, ColPali and the judge LLM come from the host through the team gateway.
 
-1. Copy `deploy/team-dev.env` to `.env` in the repo root.
-2. Fill in the keys the host sends you privately (`VLLM_API_KEY`, `S2_API_KEY`,
-   `OPENALEX_API_KEY`, `SCOPUS_API_KEY`). Do not post them in chat groups or commit them.
+1. Ask the host for your personal key. It starts with `sk-`. One key is one person: do not
+   share it, post it in a chat group or commit it. The host can turn off one key without
+   touching anyone else's.
+2. Copy `deploy/team-dev.env` to `.env` in the repo root and put your key in both
+   `SERVICE_API_KEY` and `VLLM_API_KEY`. Add the source-lookup keys (`S2_API_KEY`,
+   `OPENALEX_API_KEY`, `SCOPUS_API_KEY`) from the host or your own free accounts.
 3. `docker compose up -d --build`, then open http://localhost:5173.
 
-Check that your containers can reach the host:
-`docker compose exec gateway python -c "import urllib.request; print(urllib.request.urlopen('https://wttw-1.tailcf73b7.ts.net:8893/health').read())"`.
-It should print `{"ok":true,...}`. This works with Docker Desktop on Windows and macOS. On
-Linux, if the name does not resolve, add `dns: [100.100.100.100]` to the gateway and worker
-services in a `docker-compose.override.yml`.
+Check that your containers reach the team gateway with your key:
+`docker compose exec gateway python -c "import os, urllib.request as u; print(u.urlopen(u.Request(os.environ['COLBERT_URL'] + '/health', headers={'apikey': os.environ['SERVICE_API_KEY']})).read())"`.
+It should print `{"ok":true,...}`. An HTTP 401 means the key is wrong or turned off. This works
+with Docker Desktop on Windows and macOS. On Linux, if the name does not resolve, add
+`dns: [100.100.100.100]` to the gateway and worker services in a `docker-compose.override.yml`.
 
-The judge LLM key is shared by the whole team and allows 3 requests at a time. The template
-sets `PARALLEL_CHECKS=1` so your test runs leave room for the labelers.
+The judge LLM allows 3 calls at a time for the whole team, and your key allows 1. The
+template sets `PARALLEL_CHECKS=1` and `LLM_PARALLEL_REQUESTS=1` to match: with more, your
+extra calls are refused at once (HTTP 429). When the team's 3 slots are busy, your call waits
+for a free one, up to about 30 s.
 
 ## For the host
 
@@ -60,7 +71,6 @@ Do these once.
    ```
    docker compose up -d --build
    tailscale serve --bg 5173
-   tailscale serve --bg --https=8893 http://127.0.0.1:8893
    tailscale serve status
    ```
    `tailscale serve status` prints the https address to send to teammates. The share stays
@@ -70,7 +80,10 @@ Do these once.
 5. Invite teammates in the admin console (Users, Invite), or share only this machine
    (Machines, the host, Share). Sharing the machine does not count against the plan's user
    limit.
-6. Optional: add an access rule so teammates can reach only port 443 on the host.
+6. For developers: run the team gateway (https://github.com/EarthWittawat/gatehouse, see its
+   README), share it with `tailscale serve --bg --https=8443 http://127.0.0.1:9080`, and make
+   one key per developer there. Never share a GPU service's own port: the services check no key.
+7. Optional: add an access rule so teammates can reach only ports 443 and 8443 on the host.
 
 Keep the host awake while the team works: turn off sleep in Windows power settings, and set
 Docker Desktop to start when you sign in.
@@ -82,6 +95,8 @@ Docker Desktop to start when you sign in.
 - `SCOPUS_API_KEY` turns on the Labeler's paper search.
 - `REDIS_URL` stays empty, so the queue is the local redis container.
 - `PAPERS_BUCKET` and `UPLOAD_ORIGINS` stay empty, so PDF uploads go through the gateway.
-- The judge LLM key accepts 3 requests at a time (`PARALLEL_CHECKS=3`). If two people run
-  analyses at once, the second waits in the queue, or gets 429 errors if more than one
-  worker runs.
+- `VLLM_URL=http://host.docker.internal:9080/llm/v1` with the host's own gatehouse key, so the
+  host's analyses share the judge LLM's 3 slots with the developers instead of competing with
+  them. The provider key itself lives only in gatehouse's `.env`.
+- Analyses from the web app run one at a time on the host's worker (the RQ queue); a second
+  one waits its turn.
