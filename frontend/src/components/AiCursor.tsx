@@ -56,7 +56,7 @@ export function AiCursor({ pointing, scroll = true }: { pointing: Pointing | nul
               className={cn('mt-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap shadow-md', reaction.chip)}
             >
               <reaction.icon className={cn('size-3.5', pointing.tone === 'reading' && 'animate-spin motion-reduce:animate-none')} />
-              {reaction.label}
+              {pointing.label || reaction.label}
             </motion.span>
           </motion.div>
         </motion.div>

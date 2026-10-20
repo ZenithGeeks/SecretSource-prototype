@@ -84,13 +84,6 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
   const onGraph = screen === 'graph' || screen === 'field-consensus'
   // What is on screen to ask about: the open analysis, or the selected graph node.
-  const ask = useAsk({
-    screen,
-    analysis: screen === 'analyses' ? history.selected : null,
-    analysisFile: history.selectedName,
-    node: onGraph ? graphNode : null,
-  })
-
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
     history.closePage()
@@ -100,6 +93,20 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     history.open(id)
     navigate('analyses')
   }
+
+  const ask = useAsk({
+    screen,
+    analysis: screen === 'analyses' ? history.selected : null,
+    analysisFile: history.selectedName,
+    node: onGraph ? graphNode : null,
+    // What Ask's Do it mode may do here: the sidebar's screens, and opening a paper.
+    actions: {
+      screen,
+      screens: NAV.map((entry) => entry.key),
+      openScreen: (next) => navigate(next as ResearcherScreen),
+      openPaper: openAnalysis,
+    },
+  })
 
   const breadcrumb =
     screen === 'analyses'

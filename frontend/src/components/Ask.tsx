@@ -11,9 +11,11 @@ import { api, paperName } from '../lib/api'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
 import { useAnalyses } from '../lib/useAnalysis'
+import type { ScreenActions } from '../lib/agentTools'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
+import { DoIt } from './DoIt'
 import { PageViewer, type Target } from './PageViewer'
 
 /** A graph node the reader selected, which a question can be about. */
@@ -25,6 +27,7 @@ export function useAsk({
   analysisFile = null,
   node = null,
   canNarrow = true,
+  actions,
 }: {
   screen: string
   /** The open analysis's id, when the screen shows one. */
@@ -34,6 +37,8 @@ export function useAsk({
   node?: AskNode | null
   /** False for a role with no paper or graph node to open (Teacher). */
   canNarrow?: boolean
+  /** What the screen agent may do in this role; with it, Ask gets the Do it mode. */
+  actions?: ScreenActions
 }) {
   const assistant = useAssistant()
   const [open, setOpen] = useState(false)
@@ -73,6 +78,7 @@ export function useAsk({
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
       onClose={() => setOpen(false)}
       onShowSource={(target) => void showSource(target)}
+      doIt={actions && <DoIt actions={actions} />}
     />
   ) : undefined
 

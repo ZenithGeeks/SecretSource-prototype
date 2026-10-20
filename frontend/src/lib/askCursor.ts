@@ -1,15 +1,19 @@
 /** What the AI cursor (components/AiCursor) points at, and how each of its reactions looks. */
 
-import { Check, CircleHelp, Flag, Loader2 } from 'lucide-react'
+import { Check, CircleHelp, Flag, Loader2, MousePointer2 } from 'lucide-react'
 
 /** An element on the page the cursor can point at. */
-export type AskTarget = { kind: 'claim' | 'passage' | 'reference' | 'statement' | 'question'; id: string }
+export type AskTarget = {
+  kind: 'claim' | 'passage' | 'reference' | 'statement' | 'question' | 'screen' | 'field' | 'paper'
+  id: string
+}
 
 /** The `data-ask-target` value that marks an element as `target`; the cursor finds it by this. */
 export const askTarget = ({ kind, id }: AskTarget) => `${kind}:${id}`
 
-/** Where the cursor is and what it says there; `tone: 'reading'` while the AI is still working. */
-export type Pointing = { target: AskTarget; tone: keyof typeof TONES }
+/** Where the cursor is and what it says there; `tone: 'reading'` while the AI is still working.
+ * `label` replaces the tone's own words, as when the screen agent points with a note. */
+export type Pointing = { target: AskTarget; tone: keyof typeof TONES; label?: string }
 
 /** How each tone looks, on the cursor and in a findings list. */
 export const TONES = {
@@ -17,4 +21,5 @@ export const TONES = {
   agrees: { label: 'Looks right', icon: Check, text: 'text-supports', ring: 'border-supports', chip: 'bg-supports text-canvas' },
   flags: { label: 'Check this', icon: Flag, text: 'text-refutes', ring: 'border-refutes', chip: 'bg-refutes text-canvas' },
   asks: { label: 'A question', icon: CircleHelp, text: 'text-insufficient', ring: 'border-insufficient', chip: 'bg-insufficient text-canvas' },
+  shows: { label: 'Here', icon: MousePointer2, text: 'text-accent', ring: 'border-accent', chip: 'bg-accent text-canvas' },
 } as const

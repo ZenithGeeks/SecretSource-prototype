@@ -16,6 +16,7 @@ import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher
 import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
+import { askTarget } from '../../../lib/askCursor'
 import { cn } from '../../../lib/utils'
 import { LibraryAddMenu, type LibraryAddItem } from '../components/LibraryAddMenu'
 import { count } from '../components/LibraryCount'
@@ -505,6 +506,7 @@ function ProjectDetail({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter by title, author or claim"
           aria-label="Filter papers"
+          data-ask-target={askTarget({ kind: 'field', id: 'library-filter' })}
           className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
         />
         <div className="flex flex-wrap gap-0.5 rounded-[9px] bg-neutral-soft p-0.5">

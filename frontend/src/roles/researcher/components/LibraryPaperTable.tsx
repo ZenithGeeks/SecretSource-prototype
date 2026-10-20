@@ -4,6 +4,7 @@ import { ChevronRight } from 'lucide-react'
 
 import { verdictCountLabel } from '../../../lib/claims'
 import type { LibraryPaper } from '../../../lib/researcher'
+import { askTarget } from '../../../lib/askCursor'
 import { cn } from '../../../lib/utils'
 import { count } from './LibraryCount'
 
@@ -73,6 +74,7 @@ export function LibraryPaperTable({
           key={paper.id}
           type="button"
           onClick={() => onOpen(paper.id)}
+          data-ask-target={askTarget({ kind: 'paper', id: paper.id })}
           title="Open this analysis"
           className="flex w-full items-center gap-5 border-t border-border-subtle px-5 py-3 text-left hover:bg-accent-soft"
         >
