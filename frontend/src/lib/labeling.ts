@@ -215,9 +215,9 @@ export const labelingApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ claim_id: claimId, claim }),
     }),
-  /** The labels as CSV, or as the two sets of DSPy examples (JSONL). */
-  exportFile: (tab: 'labels' | 'claims' | 'candidates' | 'dspy_claims' | 'dspy_verdicts') =>
-    fetchFile(`${API_BASE}/api/labeling/export?tab=${tab}`),
+  /** The labels as CSV, or as the two sets of DSPy examples (JSONL): your own rows, or the whole team's. */
+  exportFile: (tab: 'labels' | 'claims' | 'candidates' | 'dspy_claims' | 'dspy_verdicts', scope: 'mine' | 'team' = 'mine') =>
+    fetchFile(`${API_BASE}/api/labeling/export?tab=${tab}&scope=${scope}`),
 }
 
 export function useLabelStatus() {

@@ -304,8 +304,28 @@ describe('the labeler queue', () => {
       await waitFor(() => expect(saved).toHaveLength(saved.length > 0 ? saved.length : 1))
       await waitFor(() => expect(button).toBeEnabled())
     }
-    expect(gateway.fetched.map((u) => u.split('tab=')[1])).toEqual(['labels', 'dspy_claims', 'dspy_verdicts'])
+    expect(gateway.fetched.map((u) => u.split('tab=')[1])).toEqual([
+      'labels&scope=mine',
+      'dspy_claims&scope=mine',
+      'dspy_verdicts&scope=mine',
+    ])
     expect(saved).toEqual(['evidence_labels.csv', 'dspy_claims.jsonl', 'dspy_verdicts.jsonl'])
+  })
+
+  it('downloads the whole team only when asked, under its own file name', async () => {
+    const saved: string[] = []
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download)
+    })
+    renderQueue()
+    fireEvent.click(await screen.findByRole('radio', { name: 'Whole team' }))
+    const button = await screen.findByRole('button', { name: 'Download labels CSV' })
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(saved).toEqual(['evidence_labels_team.csv']))
+    expect(gateway.fetched.at(-1)).toContain('tab=labels&scope=team')
   })
 
   it('says so, in plain words, when a download fails', async () => {

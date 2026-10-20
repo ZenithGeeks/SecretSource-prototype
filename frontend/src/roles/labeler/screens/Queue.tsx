@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { labelingApi, problem, useLabelStatus, usePool } from '../../../lib/labeling'
+import { cn } from '../../../lib/utils'
 import { NoMatch, PaperFilters } from '../components/PaperFilters'
 import { PaperTable } from '../components/PaperTable'
 import { ScopusAdd } from '../components/ScopusAdd'
@@ -12,6 +13,7 @@ import { TeamTopics } from '../components/TeamTopics'
 import { isFinished, matches, NO_FILTERS, readFilters, writeFilters, type Filters } from '../paperFilters'
 
 type Export = Parameters<typeof labelingApi.exportFile>[0]
+type Scope = NonNullable<Parameters<typeof labelingApi.exportFile>[1]>
 
 const DOWNLOADS: { tab: Export; file: string; label: string }[] = [
   { tab: 'labels', file: 'evidence_labels.csv', label: 'Download labels CSV' },
@@ -19,9 +21,16 @@ const DOWNLOADS: { tab: Export; file: string; label: string }[] = [
   { tab: 'dspy_verdicts', file: 'dspy_verdicts.jsonl', label: 'Download DSPy verdicts (JSONL)' },
 ]
 
-async function download(tab: Export, file: string) {
-  const blob = await labelingApi.exportFile(tab)
-  const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: file })
+const SCOPES: { scope: Scope; label: string }[] = [
+  { scope: 'mine', label: 'Your labels' },
+  { scope: 'team', label: 'Whole team' },
+]
+
+async function download(tab: Export, file: string, scope: Scope) {
+  const blob = await labelingApi.exportFile(tab, scope)
+  // A team file gets its own name, so it never overwrites your own download.
+  const name = scope === 'team' ? file.replace('.', '_team.') : file
+  const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name })
   link.click()
   URL.revokeObjectURL(link.href)
 }
@@ -41,6 +50,7 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   const status = useLabelStatus()
   const pool = usePool()
   const [downloading, setDownloading] = useState<Export | null>(null)
+  const [scope, setScope] = useState<Scope>('mine')
   const [downloadError, setDownloadError] = useState<unknown>(null)
   const [filters, setFilters] = useState<Filters>(() => readFilters(window.location.search))
 
@@ -82,6 +92,23 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1">
+          <div role="radiogroup" aria-label="Whose labels to download" className="flex rounded-lg border border-border-subtle p-0.5">
+            {SCOPES.map((option) => (
+              <button
+                key={option.scope}
+                type="button"
+                role="radio"
+                aria-checked={scope === option.scope}
+                onClick={() => setScope(option.scope)}
+                className={cn(
+                  'min-h-9 rounded-md px-3 text-sm',
+                  scope === option.scope ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           {DOWNLOADS.map(({ tab, file, label }) => (
             <Button
               key={tab}
@@ -90,7 +117,7 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
               onClick={() => {
                 setDownloading(tab)
                 setDownloadError(null)
-                download(tab, file)
+                download(tab, file, scope)
                   .catch(setDownloadError)
                   .finally(() => setDownloading(null))
               }}
