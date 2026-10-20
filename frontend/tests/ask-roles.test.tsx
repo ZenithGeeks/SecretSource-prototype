@@ -24,7 +24,7 @@ function renderAt(search: string, app: ReactNode) {
 }
 
 function openAsk() {
-  fireEvent.click(screen.getByRole('button', { name: 'Ask', pressed: false }))
+  fireEvent.click(screen.getByRole('button', { name: 'Ask AI', pressed: false }))
   return within(screen.getByRole('complementary', { name: 'Ask' }))
 }
 

@@ -400,6 +400,18 @@ def prepare_source(source_pdf_path: str, wait_for_figures: bool = False) -> dict
         return tool_error(error)
 
 
+def judge_passages(claim: str, passages: list[str]) -> dict:
+    """The judge's verdict on a claim against passages someone else chose, with no retrieval.
+
+    The labeler's review uses it on the passages a person marked relevant. Returns `verdict`
+    (one of LABELS), `quote` and `reasoning`, cached like every judge call.
+    """
+    global _judge
+    if _judge is None:
+        _judge = _build_judge()
+    return _judge(claim, passages)
+
+
 def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
     """Judge a claim against a paper that prepare_source already made ready."""
     global _judge

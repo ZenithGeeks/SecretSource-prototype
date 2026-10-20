@@ -4,7 +4,9 @@ A person opens one of their finished analyses. The page lists its claims, and fo
 passages retrieval found in the cited papers, and the person judges every one of them: keep,
 edit or reject a claim; relevant or not for a passage; add what the system missed; give each
 (claim, reference paper) a 1-4 label. Saving appends rows to the labeling table in Supabase. Nothing here
-decides anything: the AI's output is only what the page shows first.
+decides anything: the AI's output is only what the page shows first. A person can ask the AI to
+review a claim they saved (review.py); it suggests changes, and later saves of that claim are marked
+`ai_reviewed`.
 
 What the browser sends is checked against the analysis, so the saved rows can be trusted as a gold
 set: a retrieved passage's rank, score and text are copied from the analysis, not from the
@@ -23,17 +25,19 @@ from typing import Literal
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app import auth, config
 from app.auth import current_user
-from app.labeling import dspy_export, ledger, pool, scopus
+from app.labeling import dspy_export, ledger, pool, review, scopus
 from app.labeling.identity import annotator
 from app.labeling.schema import (
     TABS,
     TOPICS,
     AddedClaimIn,
+    AskIn,
     PersonTopicIn,
+    ReviewIn,
     SaveIn,
     ScopusAddIn,
     TopicIn,
@@ -598,17 +602,144 @@ async def save(
         labels.append({**stamp, **row})
 
     store = _store()
+    reviewed = await asyncio.to_thread(_reviewed_claims, store, paper_id, me)
+    for row in (*claims, *candidates, *labels):
+        row["ai_reviewed"] = "1" if row["claim_id"] in reviewed else ""
     for tab, rows in (("claims", claims), ("candidates", candidates), ("labels", labels)):
         await asyncio.to_thread(store.append, tab, rows)
     return {"claims": len(claims), "candidates": len(candidates), "labels": len(labels)}
 
 
+def _reviewed_claims(store, paper_id: str, me: str) -> set[str]:
+    """The claims of this paper `me` has had a finished AI review of (one left halfway is not kept)."""
+    return {row["claim_id"] for row in store.read("reviews", paper_id) if row.get("annotator_id") == me}
+
+
+@router.post("/sessions/{analysis_id}/review")
+async def review_claim(
+    body: ReviewIn,
+    analysis: dict = Depends(owned_analysis),
+    who: str = Depends(annotator),
+    me: str = Depends(labeler_id),
+):
+    """The AI's review of one claim the caller has saved, as server-sent events.
+
+    Each event is `{"type": "finding", "target", "tone", "text"}`, then
+    `{"type": "done", "findings": n}`. What it said is kept in the reviews tab. Only a saved claim
+    is reviewed: the person's own decision comes first (docs/labeling.md).
+    """
+    store = _store()
+    built = build_session(analysis)
+    paper_id = built["paper_id"]
+    saved = await asyncio.to_thread(_saved_claim, store, paper_id, me, body.claim_id)
+    if saved is None:
+        raise HTTPException(409, "save this claim before asking for a review")
+    extracted = {c["claim_id"]: c for c in built["claims"]}
+    # A claim added by hand is not in the analysis: it has no retrieved passages to check.
+    claim = extracted.get(body.claim_id) or {
+        "claim_id": body.claim_id,
+        "claim": saved.claim_row.get("claim", ""),
+        "candidates": [],
+    }
+    stamp = {**_stamp(who, me, paper_id), "claim_id": body.claim_id}
+    from app import main
+
+    # The judges can take a while; the heartbeats keep a proxy from closing a quiet stream.
+    events = main._keep_alive(_review_events(store, stamp, claim, saved))
+    return StreamingResponse(events, media_type="text/event-stream")
+
+
+def _saved_claim(store, paper_id: str, me: str, claim_id: str) -> review.Saved | None:
+    """`me`'s current rows for one claim, or None when they have not saved a decision on it."""
+    mine = {
+        tab: [
+            row
+            for row in current(tab, store.read(tab, paper_id))
+            if row["annotator_id"] == me and row["claim_id"] == claim_id
+        ]
+        for tab in TABS
+    }
+    if not mine["claims"]:
+        return None
+    return review.Saved(claim_row=mine["claims"][0], candidates=mine["candidates"], labels=mine["labels"])
+
+
+async def _review_events(store, stamp: dict, claim: dict, saved: review.Saved):
+    """The review as server-sent events; once it ends, what it found goes to the reviews tab.
+    A failure is an error event, so the page does not show a half review as a finished one."""
+    findings = []
+    try:
+        async for finding in review.review(claim, saved):
+            findings.append(finding.model_dump())
+            yield f"data: {json.dumps({'type': 'finding', **findings[-1]})}\n\n"
+    except Exception:
+        log.exception("the review of %s failed", stamp["claim_id"])
+        yield f"data: {json.dumps({'type': 'error', 'message': 'the review stopped partway; try again'})}\n\n"
+        return
+    row = {**stamp, "findings": json.dumps(findings, ensure_ascii=False)}
+    await asyncio.to_thread(store.append, "reviews", [row])
+    yield f"data: {json.dumps({'type': 'done', 'findings': len(findings)})}\n\n"
+
+
+@router.post("/sessions/{analysis_id}/ask")
+async def ask(body: AskIn, analysis: dict = Depends(owned_analysis)):
+    """Answer a question from the paper under review, or from one of its references.
+
+    The same answer as the other roles' Ask (assistant.answer): short statements, each checked by
+    the judge, as server-sent events.
+    """
+    if not body.reference_id:
+        pdf = analysis["file"]
+    elif (pdf := _reference_path(analysis, body.reference_id)) is None:
+        raise HTTPException(422, f"{body.reference_id} is not a paper this analysis read")
+    from app import main
+
+    events = main._keep_alive(_answer_events(body.question, pdf))
+    return StreamingResponse(events, media_type="text/event-stream")
+
+
+def _reference_path(analysis: dict, reference_id: str) -> str | None:
+    """Where the analysis found a reference's PDF, by the id build_session gave it."""
+    for claim in analysis.get("claims", []):
+        for verdict in claim.get("verdicts") or []:
+            if verdict.get("source") and Path(verdict["source"]).stem == reference_id:
+                return verdict["source"]
+    return None
+
+
+async def _answer_events(question: str, pdf: str):
+    """assistant.answer's events for one PDF, after making sure the PDF is indexed."""
+    from app import assistant  # imports dspy, about 0.6 s, so not at start-up
+
+    prepared = await asyncio.to_thread(verify.prepare_source, pdf)
+    if prepared["status"] != "ok":
+        yield f"data: {json.dumps({'type': 'error', 'message': 'this paper could not be read'})}\n\n"
+        return
+    try:
+        async for event in assistant.answer(question, paper=Path(prepared["path"])):
+            yield f"data: {json.dumps(event)}\n\n"
+    except Exception:
+        log.exception("answering a labeler's question failed")
+        yield f"data: {json.dumps({'type': 'error', 'message': 'the answer stopped partway; try again'})}\n\n"
+
+
 def _scoped(tab: str, rows: list[dict], scope: ExportScope, me: str) -> list[dict]:
     """The current rows of a tab: the account `me`'s own, or everyone's grouped by account and paper."""
-    rows = current(tab, rows)
+    return _in_scope(current(tab, rows), scope, me)
+
+
+def _in_scope(rows: list[dict], scope: ExportScope, me: str) -> list[dict]:
+    """The rows `scope` covers, in their saved order within each account and paper (a stable sort),
+    so current() still finds the latest row per key."""
     if scope == "mine":
-        return [r for r in rows if r["annotator_id"] == me]
-    return sorted(rows, key=lambda r: (r["annotator_id"], r["paper_id"]))
+        return [r for r in rows if _account(r) == me]
+    return sorted(rows, key=lambda r: (_account(r), r["paper_id"]))
+
+
+def _account(row: dict) -> str:
+    """Whose row it is. A row from before rows carried annotator_id is the person's by name,
+    as in current()."""
+    return row.get("annotator_id") or row.get("annotator", "")
 
 
 @router.get("/export")
@@ -621,7 +752,9 @@ async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Dep
     other's (#585). `scope=team` gives everyone's, for building the dataset."""
     store = _store()
     if tab in ("dspy_claims", "dspy_verdicts"):
-        rows = {name: _scoped(name, await asyncio.to_thread(store.read, name), scope, me) for name in TABS}
+        # Every saved row, not only the current ones: dspy_export reads a label's level from
+        # before the AI review out of the history.
+        rows = {name: _in_scope(await asyncio.to_thread(store.read, name), scope, me) for name in TABS}
         build = dspy_export.claims_examples if tab == "dspy_claims" else dspy_export.verdict_examples
         found = await asyncio.to_thread(build, rows)
         body = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in found)

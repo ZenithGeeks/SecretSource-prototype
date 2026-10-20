@@ -5,14 +5,13 @@
  * as Graph does), and `viewer` anywhere inside the shell.
  */
 
-import { Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 import { api, paperName } from '../lib/api'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
 import { useAnalyses } from '../lib/useAnalysis'
-import { cn } from '../lib/utils'
+import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
 import { PageViewer, type Target } from './PageViewer'
@@ -62,21 +61,7 @@ export function useAsk({
     setSource({ ...target, source: found?.page ? (found as Target['source']) : null })
   }
 
-  const button = (
-    <button
-      type="button"
-      onClick={() => setOpen(!open)}
-      aria-pressed={open}
-      className={cn(
-        'inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium lg:min-h-8',
-        open ? 'border-accent bg-accent-soft text-accent' : 'border-transparent text-ink hover:bg-accent-soft',
-      )}
-    >
-      <Sparkles className="size-4" aria-hidden="true" />
-      {/* Icon only on a phone, where the toolbar also holds the breadcrumb and the screen's own actions. */}
-      <span className="sr-only sm:not-sr-only">Ask</span>
-    </button>
-  )
+  const button = <AskButton open={open} about={about} onToggle={() => setOpen(!open)} />
 
   const panel = open ? (
     <AssistantPanel

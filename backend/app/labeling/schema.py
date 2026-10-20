@@ -27,6 +27,7 @@ TABS: dict[str, list[str]] = {
         "sentence",
         "page",
         "section",
+        "ai_reviewed",  # "1" once the person ran the AI review on this claim
     ],
     # One row per retrieved passage (or hand-picked one) a person judged.
     "candidates": [
@@ -43,6 +44,7 @@ TABS: dict[str, list[str]] = {
         "score",
         "page",
         "passage",
+        "ai_reviewed",  # "1" once the person ran the AI review on this claim
     ],
     # One row per (claim, reference paper): the 1-4 label. Same columns as evidence_labels.csv
     # (minus the paper text, which would not fit a cell, and the split, which split_dataset.py
@@ -59,6 +61,7 @@ TABS: dict[str, list[str]] = {
         "rationale",
         "spans",
         "confidence",
+        "ai_reviewed",  # "1" once the person ran the AI review on this claim
     ],
 }
 
@@ -66,7 +69,10 @@ TABS: dict[str, list[str]] = {
 # rows have no paper_id, and the labeling flow reads every tab in TABS per paper. `doi` is set
 # for a paper whose PDF was uploaded by hand: its analysis only knows the file.
 ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner", "doi"]
-ALL_TABS = {**TABS, "assignments": ASSIGNMENTS}
+# One row per AI review of a saved claim, with what it said (JSON). Not in TABS: the page never
+# shows it again; it is there so an eval can see which labels the AI may have swayed.
+REVIEWS = ["ts", "annotator", "annotator_id", "paper_id", "claim_id", "findings"]
+ALL_TABS = {**TABS, "assignments": ASSIGNMENTS, "reviews": REVIEWS}
 
 # What makes two rows "the same" for the purpose of replacing one with a later one.
 KEYS: dict[str, tuple[str, ...]] = {
@@ -147,6 +153,15 @@ class LabelIn(BaseModel):
     rationale: str = Field(default="", max_length=2000)
     spans: list[str] = Field(default_factory=list, max_length=10)
     confidence: Literal["low", "medium", "high"] = "medium"
+
+
+class ReviewIn(BaseModel):
+    claim_id: str = Field(pattern=CLAIM_ID)
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    reference_id: str = Field(default="", max_length=200)  # "" asks the paper under review
 
 
 class SaveIn(BaseModel):

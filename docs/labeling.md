@@ -60,6 +60,25 @@ within a topic. Removing a paper from the team's list asks first; saved labels a
 Two people can label the same pair: the page tells the second person it was already labeled. Keep a
 double-labeled subset in the test split and measure agreement (weighted kappa) before trusting it.
 
+## Ask AI
+
+**Ask AI** under the claim panel has two parts:
+- **Review** works only on a claim you saved, with no unsaved changes. It points out passages you
+  have not judged, a relevant reference with no level, a level with no relevant passage, and a level
+  with no reason. Then it shows how the pipeline's judge reads the passages you marked relevant. A
+  cursor moves to each thing it talks about.
+- **Ask a question** answers from the paper under review or from one of the references this claim
+  cites. The answer is the same checked statements as Ask in the other roles.
+
+The review never changes or proposes a label. The judge reads the whole claim, but a level grades only
+the part the reference is cited for. On 20 Oct 2026 it agreed with 1 of the 14 saved levels: it said
+"insufficient" on 13 levels of 3 or 4. So where it disagrees, it asks whether your level holds.
+
+Each review is kept in the `reviews` tab (ts, annotator, annotator_id, paper_id, claim_id, and the
+findings as JSON). Every later save of that claim writes `ai_reviewed = "1"` on its `claims`,
+`candidates` and `labels` rows. Before using labels to train or score anything, report the numbers
+with and without the `ai_reviewed` rows, since the AI may have swayed those.
+
 ## Making the GEPA files
 
 "Download labels CSV" (or `/api/labeling/export?tab=labels`) gives the current labels, without the

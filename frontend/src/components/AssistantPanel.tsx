@@ -7,11 +7,14 @@
  */
 
 import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Loader2, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
+import { MotionConfig } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
 import { cn } from '../lib/utils'
+import { askTarget, type Pointing } from '../lib/askCursor'
+import { AiCursor } from './AiCursor'
 import type { Target } from './PageViewer'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
@@ -66,11 +69,14 @@ function Why({ statement, title, onShowSource }: { statement: Statement; title?:
 /** One checked statement (A/Statement): the sentence, its source, and its stamp. */
 function StatementRow({
   statement,
+  target,
   title,
   answering,
   onShowSource,
 }: {
   statement: Statement
+  /** Its id for the AI cursor (`statement:<id>`), which points here when its check comes in. */
+  target: string
   title?: string
   /** Whether the answer is still coming. A statement left without a verdict by a Stop or a
    * failure could not be checked, so it stops saying Checking…. */
@@ -82,7 +88,7 @@ function StatementRow({
   const explained = Boolean(statement.verdict && (statement.quote || statement.reasoning))
   const pill = cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold', stamp.pill)
   return (
-    <li className={cn('border-l-2 pl-3', stamp.bar)}>
+    <li data-ask-target={askTarget({ kind: 'statement', id: target })} className={cn('border-l-2 pl-3', stamp.bar)}>
       <p className="text-[13px] leading-5 text-ink">{statement.text}</p>
       <div className="mt-1 flex items-center justify-between gap-2">
         {statement.source ? (
@@ -143,7 +149,9 @@ function TurnView({
   const unanswered = turn.status === 'done' && turn.statements.length === 0
   return (
     <div className="flex flex-col gap-3">
-      <p className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">{turn.question}</p>
+      <p data-ask-target={askTarget({ kind: 'question', id: String(turn.id) })} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">
+        {turn.question}
+      </p>
       {turn.statements.length > 0 && (
         <section aria-label="Answer" className="flex flex-col gap-2.5">
           {/* The one line a screen reader hears change while the checks come in. */}
@@ -156,6 +164,7 @@ function TurnView({
               <StatementRow
                 key={statement.index}
                 statement={statement}
+                target={`${turn.id}-${statement.index}`}
                 title={titles[statement.source]}
                 answering={turn.status === 'answering'}
                 onShowSource={onShowSource}
@@ -277,6 +286,17 @@ export function AssistantPanel({
   const end = useRef<HTMLDivElement>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
+
+  // The cursor rests a moment on the last check once an answer ends, then leaves.
+  const [rested, setRested] = useState<number | null>(null)
+  const lastId = last?.id
+  const lastStatus = last?.status
+  useEffect(() => {
+    if (lastId === undefined || lastStatus === 'answering') return
+    const timer = window.setTimeout(() => setRested(lastId), CURSOR_REST_MS)
+    return () => window.clearTimeout(timer)
+  }, [lastStatus, lastId])
+  const pointing = view === 'chat' && last && last.id !== rested ? cursorFor(last) : null
 
   // Follow a new question and new statements; a verdict landing does not move the reader.
   useEffect(() => {
@@ -427,6 +447,31 @@ export function AssistantPanel({
           </div>
         </>
       )}
+      <MotionConfig reducedMotion="user">
+        <AiCursor pointing={pointing} scroll={false} />
+      </MotionConfig>
     </aside>
   )
+}
+
+const CURSOR_REST_MS = 2500
+/** The cursor's reaction to each verdict. */
+const VERDICT_TONE: Record<StatementVerdict, Pointing['tone']> = {
+  supports: 'agrees',
+  refutes: 'flags',
+  insufficient: 'asks',
+  unchecked: 'asks',
+  error: 'asks',
+}
+
+/** Where the AI cursor is during an answer: on the question while it reads, then on each
+ * statement as its check comes in, with a reaction to the verdict. */
+function cursorFor(turn: Turn): Pointing | null {
+  const checked = turn.statements.find((s) => s.index === turn.lastChecked)
+  if (checked?.verdict) return { target: { kind: 'statement', id: `${turn.id}-${checked.index}` }, tone: VERDICT_TONE[checked.verdict] }
+  if (turn.status !== 'answering') return null
+  const first = turn.statements[0]
+  return first
+    ? { target: { kind: 'statement', id: `${turn.id}-${first.index}` }, tone: 'reading' }
+    : { target: { kind: 'question', id: String(turn.id) }, tone: 'reading' }
 }

@@ -13,6 +13,7 @@ import requests
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
+from app.pipeline import verify
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -1160,6 +1161,7 @@ def test_dspy_claims_keep_what_a_person_kept_and_list_what_they_rejected(api, mo
             "annotator": "chanya",
             "claims": ["Y improves recall by 4 points."],
             "rejected": ["Y is fast."],
+            "ai_reviewed": False,
         }
     ]
 
@@ -1207,8 +1209,23 @@ def test_dspy_verdicts_are_the_level_with_the_passages_called_relevant(api):
             "verdict_name": "Clear",
             "rationale": "two controlled runs",
             "confidence": "high",
+            "ai_reviewed": False,
+            "verdict_before_review": "3",
         }
     ]
+
+
+def test_a_label_saved_after_a_review_keeps_the_persons_own_level_beside_it(api, monkeypatch):
+    client, _, _ = api
+    label = {"claim_id": C0, "reference_id": REF, "evidence": 4, "spans": ["recall rose by 4 points"]}
+    claim = {"claim_id": C0, "origin": "extracted", "status": "accepted", "claim": "x"}
+    client.post("/labeling/sessions/a1/save", json={"claims": [claim], "labels": [label]})
+    monkeypatch.setattr(verify, "judge_passages", lambda c, p: {"verdict": "insufficient", "reasoning": ""})
+    client.post("/labeling/sessions/a1/review", json={"claim_id": C0})
+    client.post("/labeling/sessions/a1/save", json={"claims": [claim], "labels": [{**label, "evidence": 2}]})
+
+    [record] = ndjson(client, "dspy_verdicts")
+    assert (record["verdict"], record["ai_reviewed"], record["verdict_before_review"]) == ("2", True, "4")
 
 
 def test_dspy_verdicts_leave_out_a_label_with_no_passage(api):
@@ -1321,3 +1338,140 @@ def test_save_keeps_a_passage_found_for_a_hand_added_claim(api):
     unknown_paper = {**passage, "reference_id": "refZ"}
     for bad in (on_extracted, unknown_paper):
         assert client.post("/labeling/sessions/a1/save", json={"candidates": [bad]}).status_code == 422
+
+
+# The AI review of a saved claim (review.py)
+
+CLAIM_0 = "paperA-0123456789ab#0"
+REF_B = "refB-aaaaaaaaaaaa"
+
+
+def _save_claim(client, evidence=4, rationale="", relevant=1):
+    session = client.get("/labeling/sessions/a1").json()
+    first, second = session["claims"][0]["candidates"]
+    body = {
+        "claims": [{"claim_id": CLAIM_0, "origin": "extracted", "status": "accepted", "claim": "x"}],
+        "candidates": [
+            {
+                "claim_id": CLAIM_0,
+                "reference_id": REF_B,
+                "origin": "retrieved",
+                "status": "relevant",
+                "cand_id": first["cand_id"],
+            },
+        ][:relevant],
+        "labels": [
+            {"claim_id": CLAIM_0, "reference_id": REF_B, "evidence": evidence, "rationale": rationale}
+        ],
+    }
+    assert client.post("/labeling/sessions/a1/save", json=body).status_code == 200
+    return first, second
+
+
+def _events(response):
+    return [json.loads(line[6:]) for line in response.text.split("\n\n") if line.startswith("data: ")]
+
+
+def test_review_needs_the_claim_saved_first(api):
+    client, _, _ = api
+    response = client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0})
+    assert response.status_code == 409
+
+
+def test_review_points_at_what_is_left_and_where_the_judge_disagrees(api, monkeypatch):
+    client, db, _ = api
+    _, second = _save_claim(client, evidence=4)
+    asked = []
+
+    def judge(claim, passages):
+        asked.append((claim, passages))
+        return {"verdict": "insufficient", "quote": "", "reasoning": "It reports recall, not why."}
+
+    monkeypatch.setattr(verify, "judge_passages", judge)
+    events = _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
+
+    findings = [e for e in events if e["type"] == "finding"]
+    # The rules: the second passage is not judged; level 4 has no reason.
+    assert findings[0]["target"] == {"kind": "passage", "id": second["cand_id"]}
+    assert findings[1]["tone"] == "asks" and findings[1]["target"]["id"] == REF_B
+    # The judge, on the one passage marked relevant, against level 4: a question, not a change.
+    assert asked == [("Method Y improves recall.", ["recall rose by 4 points"])]
+    assert findings[2]["tone"] == "asks"
+    assert "Does level 4 hold for the part this paper is cited for?" in findings[2]["text"]
+    assert "It reports recall, not why." in findings[2]["text"]
+    assert "suggestion" not in findings[2]
+    assert events[-1] == {"type": "done", "findings": 3}
+    # What the review said is kept, by claim and account.
+    [row] = db.tabs["reviews"]
+    assert (row["claim_id"], row["annotator"]) == (CLAIM_0, "chanya")
+    assert len(json.loads(row["findings"])) == 3
+
+
+def test_review_agrees_when_the_level_fits_the_verdict(api, monkeypatch):
+    client, _, _ = api
+    _save_claim(client, evidence=3, rationale="Recall rose by 4 points.")
+    monkeypatch.setattr(
+        verify, "judge_passages", lambda c, p: {"verdict": "supports", "quote": "", "reasoning": ""}
+    )
+    findings = [
+        e
+        for e in _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
+        if e["type"] == "finding"
+    ]
+    assert [f["tone"] for f in findings if f["target"]["kind"] == "reference"] == ["agrees"]
+
+
+def test_review_skips_the_judge_on_a_rejected_claim(api, monkeypatch):
+    client, _, _ = api
+    body = {"claims": [{"claim_id": CLAIM_0, "origin": "extracted", "status": "rejected", "claim": "x"}]}
+    client.post("/labeling/sessions/a1/save", json=body)
+    monkeypatch.setattr(verify, "judge_passages", lambda c, p: pytest.fail("the judge was asked"))
+    findings = _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
+    assert [f["tone"] for f in findings if f["type"] == "finding"] == ["agrees"]
+
+
+def test_a_failed_judge_call_asks_the_person_to_check_instead_of_ending_the_review(api, monkeypatch):
+    client, _, _ = api
+    _save_claim(client, evidence=3, rationale="r")
+
+    def down(claim, passages):
+        raise ConnectionError("gateway down")
+
+    monkeypatch.setattr(verify, "judge_passages", down)
+    events = _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
+    judged = [e for e in events if e["type"] == "finding" and e["target"]["kind"] == "reference"]
+    assert judged[-1]["tone"] == "asks" and "check this level yourself" in judged[-1]["text"]
+    assert events[-1]["type"] == "done"
+
+
+def test_saves_after_a_review_are_marked_ai_reviewed(api, monkeypatch):
+    client, db, _ = api
+    _save_claim(client, evidence=4)
+    assert {row["ai_reviewed"] for tab in ("claims", "candidates", "labels") for row in db.tabs[tab]} == {""}
+    monkeypatch.setattr(
+        verify, "judge_passages", lambda c, p: {"verdict": "supports", "quote": "", "reasoning": ""}
+    )
+    client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0})
+    _save_claim(client, evidence=3)
+    later = [db.tabs[tab][-1]["ai_reviewed"] for tab in ("claims", "candidates", "labels")]
+    assert later == ["1", "1", "1"]
+
+
+def test_ask_answers_from_a_reference_the_claim_cites(api, monkeypatch):
+    from app import assistant
+
+    client, _, _ = api
+    asked = []
+    monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "ok", "path": pdf})
+
+    async def answer(question, paper=None, papers=None):
+        asked.append((question, paper.as_posix()))
+        yield {"type": "done", "statements": 0}
+
+    monkeypatch.setattr(assistant, "answer", answer)
+    body = {"question": "Does B report recall?", "reference_id": REF_B}
+    events = _events(client.post("/labeling/sessions/a1/ask", json=body))
+    assert asked == [("Does B report recall?", "data/papers/refB-aaaaaaaaaaaa.pdf")]
+    assert events == [{"type": "done", "statements": 0}]
+    unknown = {"question": "q", "reference_id": "nope"}
+    assert client.post("/labeling/sessions/a1/ask", json=unknown).status_code == 422
