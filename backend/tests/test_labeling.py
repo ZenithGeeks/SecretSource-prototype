@@ -423,6 +423,17 @@ def test_sharing_a_paper_makes_it_listed_and_its_pdfs_openable_for_the_team(api,
     assert pool.pdf_names(lambda i: ANALYSIS, lambda rows: frozenset({"x"})) == frozenset()
 
 
+def test_a_paper_that_could_not_be_read_can_be_taken_back(api):
+    client, _, app = api
+    failed = {"id": "e1", "status": "error", "file": None, "owner": None}
+    app.dependency_overrides[labeling.mine_analysis] = lambda: failed
+    pool.assign("chanya", "paper", "e1", "SE", "")
+
+    assert client.put("/labeling/papers/e1/topic", json={"topic": "SE"}).status_code == 409
+    assert client.put("/labeling/papers/e1/topic", json={"topic": ""}).status_code == 200
+    assert pool.pooled() == {}
+
+
 def test_only_a_shared_analysis_opens_for_someone_else(monkeypatch):
     from app import main
     from app.auth import current_user
