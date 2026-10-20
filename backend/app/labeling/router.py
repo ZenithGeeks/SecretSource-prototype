@@ -351,7 +351,11 @@ def _pooled_dois(main) -> set[str]:
 async def scopus_search(
     topic: str, q: str = "", since: int = 2020, page: int = 0, _who: str = Depends(annotator)
 ):
-    """Open-access papers of a topic's venues, from Scopus. Each says whether it is already listed."""
+    """Open-access papers of a topic's venues, from Scopus.
+
+    Each says whether it is already listed, and whether its PDF can be downloaded: true, false,
+    or null when that could not be checked.
+    """
     from app import main
 
     if topic not in TOPICS:
@@ -362,8 +366,20 @@ async def scopus_search(
         raise HTTPException(503, f"Scopus is not set up: {error}") from error
     except Exception as error:  # a refused key, a timeout, Scopus being down
         raise HTTPException(502, "Scopus did not answer") from error
-    listed = await asyncio.to_thread(_pooled_dois, main)
-    return {"results": [{**paper, "added": paper["doi"].lower() in listed} for paper in found]}
+    listed, copies = await asyncio.gather(
+        asyncio.to_thread(_pooled_dois, main),
+        asyncio.to_thread(scopus.downloadable, [paper["doi"] for paper in found]),
+    )
+    return {
+        "results": [
+            {
+                **paper,
+                "added": paper["doi"].lower() in listed,
+                "downloadable": copies.get(paper["doi"].lower()),
+            }
+            for paper in found
+        ]
+    }
 
 
 @router.post("/scopus/add")

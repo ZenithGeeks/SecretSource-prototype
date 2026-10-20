@@ -564,6 +564,52 @@ def test_scopus_query_is_the_topics_open_access_venues_with_safe_text():
     assert 'SRCTITLE("High-Performance Parallel and Distributed Computing")' not in q  # another topic's venue
 
 
+def test_scopus_query_leaves_out_venues_that_only_start_with_a_topic_venue():
+    q = scopus.build_query("SE", "", 2020)
+    # "... Software Engineering and Computer Applications" is not ICSE (#579).
+    assert 'SRCTITLE("International Conference on Software Engineering and*")' in q
+    # Scopus applies AND NOT last, so it must close the query.
+    assert q.endswith(")") and q.rsplit(" AND NOT ", 1)[1].startswith("(SRCTITLE(")
+
+
+class S2Reply:
+    def __init__(self, papers):
+        self.papers = papers
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.papers
+
+
+def test_a_paper_is_downloadable_with_an_arxiv_copy_or_a_pdf_scripts_may_fetch(monkeypatch):
+    import requests
+
+    papers = [
+        {"externalIds": {"ArXiv": "2307.08177"}, "openAccessPdf": {"url": "https://dl.acm.org/doi/pdf/1"}},
+        {"externalIds": {}, "openAccessPdf": {"url": "https://dl.acm.org/doi/pdf/2"}},
+        {"externalIds": {}, "openAccessPdf": {"url": "https://www.example.edu/paper.pdf"}},
+        {"externalIds": {}, "openAccessPdf": None},
+        None,  # Semantic Scholar does not know this DOI
+    ]
+    monkeypatch.setattr(requests, "post", lambda *a, **k: S2Reply(papers))
+
+    found = scopus.downloadable(["10.1/A", "10.1/b", "10.1/c", "10.1/d", "10.1/e"])
+
+    assert found == {"10.1/a": True, "10.1/b": False, "10.1/c": True, "10.1/d": False}
+
+
+def test_downloadable_is_unknown_when_semantic_scholar_does_not_answer(monkeypatch):
+    import requests
+
+    def refuse(*args, **kwargs):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(requests, "post", refuse)
+    assert scopus.downloadable(["10.1/a"]) == {}
+
+
 def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
     with pytest.raises(scopus.NotConfigured):
@@ -721,6 +767,21 @@ def test_scopus_search_says_when_it_is_not_set_up(api, monkeypatch):
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
     assert client.get("/labeling/scopus/search", params={"topic": "NLP"}).status_code == 503
     assert client.get("/labeling/scopus/search", params={"topic": "Cooking"}).status_code == 422
+
+
+def test_scopus_search_says_which_papers_can_be_downloaded(api, monkeypatch):
+    client, _, _ = api
+    found = [{"doi": doi, "title": doi} for doi in ("10.1/A", "10.1/b", "10.1/c")]
+    monkeypatch.setattr(scopus, "search", lambda *args: found)
+    monkeypatch.setattr(scopus, "downloadable", lambda dois: {"10.1/a": True, "10.1/b": False})
+
+    results = client.get("/labeling/scopus/search", params={"topic": "SE"}).json()["results"]
+
+    assert [(r["doi"], r["downloadable"]) for r in results] == [
+        ("10.1/A", True),
+        ("10.1/b", False),
+        ("10.1/c", None),
+    ]
 
 
 def test_every_venue_name_is_specific_enough_to_match_only_that_venue():
