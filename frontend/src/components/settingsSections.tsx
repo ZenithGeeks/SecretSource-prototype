@@ -9,7 +9,7 @@ import type { ComponentType } from 'react'
 import { useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { Role } from '../screens/Onboarding'
+import type { Role } from '../lib/roles'
 import { accountApi } from '../lib/accountApi'
 import { avatarPhotoUrl } from '../lib/avatar'
 import { downloadText } from '../lib/csv'
@@ -24,7 +24,9 @@ import { classResultsCsv } from '../lib/teacherSelectors'
 import { useSetSetting, useSetTeacherPreference } from '../lib/useAccountSettings'
 import { useAuth } from '../lib/useAuth'
 import { authorApi } from '../lib/author'
+import { RoleChip } from './RoleChip'
 import { Avatar, Row, Section, Select, Toggle } from './settings'
+import { Button } from './ui'
 
 function Notice({ text }: { text: string }) {
   if (!text) return null
@@ -221,17 +223,10 @@ export function RoleSection({
   return (
     <Section title="Role and home screen">
       <Row label="Current role" hint="Picks your home screen and quick actions. Change it any time.">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-ink">
-          <RoleIcon className="size-4" />
-          {roleLabel}
-        </span>
-        <button
-          type="button"
-          onClick={onSwitchRole}
-          className="rounded-lg px-4 py-2 text-sm font-medium text-ink-muted hover:bg-accent-soft"
-        >
+        <RoleChip role={roleLabel} icon={RoleIcon} />
+        <Button type="button" variant="ghost" onClick={onSwitchRole}>
           Switch role
-        </button>
+        </Button>
       </Row>
     </Section>
   )

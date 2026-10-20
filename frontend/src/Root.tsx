@@ -1,6 +1,8 @@
 /**
  * App shell / temporary router. No routing library yet, so a small screen state stands in:
- * onboarding picks a role, which opens that role's home. `?role=` deep-links a screen.
+ * onboarding picks a role, which opens that role's home. `?role=` deep-links a screen, and
+ * without it the role this browser opened last (lib/lastRole.ts) opens, so the picker shows
+ * only on a first visit or from the role "change" link.
  *
  * Role teams: build your screens in src/roles/<role>/ (own folder — no collisions), export
  * a <Role>App component, then wire its case below. That one case is the only
@@ -11,14 +13,16 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 
 import { LoadingScreen } from './components/ui'
 import { authEnabled, supabase } from './lib/supabase'
+import { clearLastRole, isStoredRole, loadLastRole, saveLastRole } from './lib/lastRole'
 import { consumeTeacherGoogleReturn } from './lib/teacherGoogleReturn'
 import { useAuth } from './lib/useAuth'
 import { Auth } from './screens/auth/Auth'
-import type { Role } from './screens/Onboarding'
-import { Onboarding } from './screens/Onboarding'
+import type { Role } from './lib/roles'
 
 // Each role's screens load when that role opens, so a labeler does not download the
 // researcher's graph or the author's editor.
+// The picker too: a returning visitor opens their last role and never needs it.
+const Onboarding = lazy(() => import('./screens/Onboarding').then((m) => ({ default: m.Onboarding })))
 const App = lazy(() => import('./App'))
 const LabelerApp = lazy(() => import('./roles/labeler/LabelerApp').then((m) => ({ default: m.LabelerApp })))
 const ResearcherApp = lazy(() => import('./roles/researcher/ResearcherApp').then((m) => ({ default: m.ResearcherApp })))
@@ -36,9 +40,8 @@ function initialScreen(): Screen {
     return 'teacher'
   }
   const role = new URLSearchParams(window.location.search).get('role')
-  if (role === 'researcher' || role === 'writer' || role === 'teacher' || role === 'labeler' || role === 'app')
-    return role
-  return 'onboarding'
+  if (isStoredRole(role)) return role
+  return loadLastRole() ?? 'onboarding'
 }
 
 /** Keeps `?role=` in sync with the picked screen, so refreshing stays where you were
@@ -57,7 +60,10 @@ export function Root() {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const { session, loading } = useAuth()
 
-  useEffect(() => syncRoleParam(screen), [screen])
+  useEffect(() => {
+    syncRoleParam(screen)
+    if (screen !== 'onboarding') saveLastRole(screen)
+  }, [screen])
 
   // On sign-out, forget the previous user's place: reset to onboarding and drop the deep-link
   // params (Root's ?role plus the role screens' ?screen/?analysis). Without this the next
@@ -67,6 +73,7 @@ export function Root() {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== 'SIGNED_OUT') return
       setScreen('onboarding')
+      clearLastRole()
       const params = new URLSearchParams(window.location.search)
       for (const key of ['role', 'screen', 'analysis']) params.delete(key)
       const query = params.toString()
@@ -81,8 +88,15 @@ export function Root() {
   if (authEnabled && loading) return null
   if (authEnabled && !session) return <Auth />
 
-  if (screen === 'onboarding') return <Onboarding onContinue={setScreen} onSkip={() => setScreen('app')} />
-  return <Suspense fallback={<LoadingScreen />}>{roleScreen(screen, () => setScreen('onboarding'))}</Suspense>
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      {screen === 'onboarding' ? (
+        <Onboarding lastRole={loadLastRole()} onContinue={setScreen} onSkip={() => setScreen('app')} />
+      ) : (
+        roleScreen(screen, () => setScreen('onboarding'))
+      )}
+    </Suspense>
+  )
 }
 
 function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => void) {

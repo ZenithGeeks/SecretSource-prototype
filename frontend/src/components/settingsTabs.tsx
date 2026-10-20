@@ -5,11 +5,7 @@
 import {
   Bell,
   CircleCheck,
-  ClipboardCheck,
   Download,
-  GraduationCap,
-  Microscope,
-  Pen,
   Sparkles,
   UserCog,
   UserRound,
@@ -18,7 +14,8 @@ import {
 } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
 
-import type { Role } from '../screens/Onboarding'
+import type { Role } from '../lib/roles'
+import { ROLE_INFO } from '../lib/roles'
 import {
   AccountSection,
   AppearanceSection,
@@ -34,12 +31,12 @@ type Icon = ComponentType<{ className?: string }>
 
 export type SettingsTabDef = { id: string; label: string; icon: Icon; content: ReactNode; group: 'general' | 'role' | 'viewing' }
 
-export const ROLE_NAV: { id: Role; label: string; icon: Icon }[] = [
-  { id: 'writer', label: 'Author', icon: Pen },
-  { id: 'researcher', label: 'Researcher', icon: Microscope },
-  { id: 'teacher', label: 'Teacher', icon: GraduationCap },
-  { id: 'labeler', label: 'Labeler', icon: ClipboardCheck },
-]
+const ROLE_NAV_ORDER: Role[] = ['writer', 'researcher', 'teacher', 'labeler']
+
+export const ROLE_NAV: { id: Role; label: string; icon: Icon }[] = ROLE_NAV_ORDER.map((id) => ({
+  id,
+  ...ROLE_INFO[id],
+}))
 
 export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRole: () => void): SettingsTabDef[] {
   const current = ROLE_NAV.find((r) => r.id === currentRole) ?? ROLE_NAV[0]
