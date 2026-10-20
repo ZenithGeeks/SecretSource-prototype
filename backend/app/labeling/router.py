@@ -271,6 +271,7 @@ async def pool_state(
             if account != me:
                 name_of[account] = r.get("annotator", "")
         shared = []
+        sharers = pool.shared_by()
         for analysis_id, topic in pool.pooled().items():
             row = main.lookup(analysis_id)
             if not row:
@@ -292,6 +293,7 @@ async def pool_state(
                     "status": status,
                     "reason": reason if status == "error" else "",
                     "mine": row.get("owner") == user,
+                    "added_by": sharers.get(analysis_id, ""),
                 }
             )
         return {
@@ -327,6 +329,30 @@ async def set_paper_topic(
         pool.assign, who, "paper", analysis["id"], body.topic, analysis.get("owner") or ""
     )
     return {"analysis_id": analysis["id"], "topic": body.topic}
+
+
+@router.post("/papers/{analysis_id}/retry")
+async def retry_paper(
+    analysis: dict = Depends(mine_analysis),
+    user: str | None = Depends(current_user),
+    who: str = Depends(annotator),
+):
+    """Read one of your shared papers again after it failed: a new analysis of the same DOI
+    takes its place on the team's list, under the same topic."""
+    from app import main
+
+    if analysis.get("status") != "error":
+        raise HTTPException(409, "only a paper that could not be read can be tried again")
+    topic = (await asyncio.to_thread(pool.pooled)).get(analysis["id"])
+    if not topic:
+        raise HTTPException(404, "this paper is not on the team's list")
+    _store()
+    # On the event loop, as scopus_add does: _start schedules its save with create_task (#397).
+    started = main._start(analysis["paper"], True, user)
+    # The new analysis is listed before the failed one leaves, so the paper never disappears.
+    await asyncio.to_thread(pool.assign, who, "paper", started["id"], topic, user or "")
+    await asyncio.to_thread(pool.assign, who, "paper", analysis["id"], "", analysis.get("owner") or "")
+    return {"id": started["id"]}
 
 
 def _doi_in_pool(main, doi: str) -> str | None:

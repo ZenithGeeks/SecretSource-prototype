@@ -652,6 +652,67 @@ def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch
     assert papers["e1"]["status"] == "error" and "no open-access PDF" in papers["e1"]["reason"]
 
 
+def test_pool_says_who_added_each_paper(api, monkeypatch):
+    from app import main
+
+    client, _, _ = api
+    monkeypatch.setattr(main.analyses, "get", lambda i: {**ANALYSIS, "id": i, "status": "running"})
+    pool.assign("Nuttadon", "paper", "p1", "HPC", "nuttadon-id")
+    pool.assign("chanya", "paper", "p2", "CV", "chanya-id")
+    papers = {p["analysis_id"]: p for p in client.get("/labeling/pool").json()["papers"]}
+    assert (papers["p1"]["added_by"], papers["p2"]["added_by"]) == ("Nuttadon", "chanya")
+
+
+FAILED = {
+    "id": "e1",
+    "paper": "10.1145/3712285.3771787",
+    "owner": "nuttadon-id",
+    "status": "error",
+    "stages": [{"stage": "error", "message": "Connection broken: IncompleteRead"}],
+    "claims": [],
+}
+
+
+def _fake_start(monkeypatch, started):
+    from app import main
+
+    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None):
+        started.append((analysis_id, paper, owner))
+
+    monkeypatch.setattr(main, "enqueue_analysis", fake_enqueue)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: SimpleNamespace(publish=lambda *a: 0))
+
+
+def test_retry_puts_a_new_analysis_of_the_same_doi_in_place_of_the_failed_one(api, monkeypatch):
+    client, _, app = api
+    app.dependency_overrides[labeling.mine_analysis] = lambda: FAILED
+    app.dependency_overrides[labeling.current_user] = lambda: "nuttadon-id"
+    started = []
+    _fake_start(monkeypatch, started)
+    pool.assign("Nuttadon", "paper", "e1", "HPC", "nuttadon-id")
+
+    reply = client.post("/labeling/papers/e1/retry")
+
+    assert reply.status_code == 200
+    new_id = reply.json()["id"]
+    assert started == [(new_id, "10.1145/3712285.3771787", "nuttadon-id")]
+    assert pool.pooled() == {new_id: "HPC"}
+
+
+def test_retry_refuses_a_paper_that_did_not_fail_or_is_not_listed(api, monkeypatch):
+    client, _, app = api
+    started = []
+    _fake_start(monkeypatch, started)
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {**FAILED, "status": "done"}
+    pool.assign("Nuttadon", "paper", "e1", "HPC", "nuttadon-id")
+    assert client.post("/labeling/papers/e1/retry").status_code == 409
+
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {**FAILED, "id": "e2"}
+    assert client.post("/labeling/papers/e2/retry").status_code == 404
+    assert started == []
+
+
 def _claim(who, claim_id, paper="paperA-0123456789ab", status="accepted"):
     return {
         "annotator": who,

@@ -44,6 +44,11 @@ def pooled() -> dict[str, str]:
     return {r["key"]: r["topic"] for r in rows() if r["kind"] == "paper" and r["topic"]}
 
 
+def shared_by() -> dict[str, str]:
+    """analysis id -> name of the person who shared it, for every shared analysis."""
+    return {r["key"]: r.get("annotator", "") for r in rows() if r["kind"] == "paper" and r["topic"]}
+
+
 def people() -> dict[str, str]:
     """person name -> topic, for everyone who has one."""
     return {r["key"]: r["topic"] for r in rows() if r["kind"] == "person" and r["topic"]}

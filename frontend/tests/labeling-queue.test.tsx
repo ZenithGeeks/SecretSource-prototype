@@ -18,7 +18,7 @@ const gateway = vi.hoisted(() => ({
       { name: 'Nuttadon', topic: '' },
     ],
     papers: [
-      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, labelers: [], status: 'done', reason: '', mine: false },
+      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, labelers: [], status: 'done', reason: '', mine: false, added_by: 'Nuttadon' },
       { analysis_id: 'x2', title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
       { analysis_id: 'x3', title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, labelers: [], status: 'running', reason: '', mine: true },
       { analysis_id: 'x4', title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
@@ -34,7 +34,7 @@ vi.mock('../src/lib/api', async (original) => ({
       return {}
     }
     if (init?.method === 'POST') {
-      gateway.posts.push({ path, body: JSON.parse(String(init.body)) })
+      gateway.posts.push({ path, body: init.body ? JSON.parse(String(init.body)) : undefined })
       return { id: 'n1', existing: false }
     }
     if (path === '/labeling/status' && gateway.statusError) throw new Error(gateway.statusError)
@@ -110,6 +110,33 @@ describe('the labeler queue', () => {
     fireEvent.click(removes[0])
     expect(confirm).toHaveBeenCalledWith("Remove this paper from the team's list? Labels already saved are kept.")
     await waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/papers/x2/topic', body: { topic: '' } }]))
+  })
+
+  it('says who added a failed paper, and that only they can try again or remove it', async () => {
+    gateway.pool.papers.push({
+      analysis_id: 'x7', title: '10.1145/3712285.3771787', topic: 'HPC', claims: 0, judged: 0, labelers: [],
+      status: 'error', reason: 'Connection broken: IncompleteRead', mine: false, added_by: 'Nuttadon',
+    })
+    try {
+      renderQueue()
+      const list = await screen.findByRole('region', { name: 'Papers to label' })
+      const row = within(list).getByRole('button', { name: /3712285/ }).closest('li')!
+      expect(within(row).getByRole('alert')).toHaveTextContent('Only Nuttadon can try again or remove it.')
+      expect(within(row).queryByRole('button', { name: 'Try again' })).toBeNull()
+      expect(within(row).queryByRole('button', { name: 'Remove' })).toBeNull()
+      expect(within(list).getByText(/HPC · added by Nuttadon/)).toBeInTheDocument()
+    } finally {
+      gateway.pool.papers.pop()
+    }
+  })
+
+  it('lets the person who added a failed paper try it again', async () => {
+    renderQueue()
+    const list = await screen.findByRole('region', { name: 'Papers to label' })
+    const row = within(list).getByRole('button', { name: /10\.1\/closed/ }).closest('li')!
+    expect(within(row).getByRole('alert')).toHaveTextContent('Try again, or remove it.')
+    fireEvent.click(within(row).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(gateway.posts).toEqual([{ path: '/labeling/papers/x4/retry', body: undefined }]))
   })
 
   it('does nothing when the person declines to remove a paper', async () => {
