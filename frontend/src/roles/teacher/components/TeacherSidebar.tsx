@@ -10,7 +10,7 @@ export function TeacherSidebar({ onOpen }: { onOpen: (route: TeacherRoute) => vo
   return (
     <div className="mt-5 space-y-5">
       <section aria-labelledby="teacher-sidebar-classes">
-        <h2 id="teacher-sidebar-classes" className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">Your classes</h2>
+        <h2 id="teacher-sidebar-classes" className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Your classes</h2>
         {classes.data?.length ? (
           <nav aria-label="Your classes" className="space-y-0.5">
             {classes.data.map((course) => (
@@ -35,7 +35,7 @@ export function TeacherSidebar({ onOpen }: { onOpen: (route: TeacherRoute) => vo
       </section>
 
       <section aria-labelledby="teacher-sidebar-recent">
-        <h2 id="teacher-sidebar-recent" className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">Recently viewed</h2>
+        <h2 id="teacher-sidebar-recent" className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Recently viewed</h2>
         {history.data?.length ? (
           <nav aria-label="Recently viewed" className="space-y-0.5">
             {history.data.slice(0, 3).map((entry) => (

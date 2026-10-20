@@ -115,9 +115,9 @@ function CourseStep({ selectedCourseId, onBack, onContinue, onSelectCourse, onRe
             {filtered.length === 0 ? <Empty title="No matching classes" hint="Try another search term." /> : filtered.map((course) => <CourseChoice key={course.id} course={course} selected={course.id === selectedCourseId} onSelect={onSelectCourse} />)}
           </div>
           <Card className="space-y-3 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">You’ll import</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">You’ll import</p>
             {selected ? <>
-              <h2 className="font-serif text-[20px] font-semibold leading-6">{selected.name} · {selected.section}</h2>
+              <h2 className="font-serif text-[22px] font-semibold leading-6">{selected.name} · {selected.section}</h2>
               <p className="text-[11px] text-ink-muted">{selected.teacherName} · Section {selected.section}</p>
               <div className="space-y-2 text-[11px]"><p>{plural(selected.teacherCount ?? (selected.teacherName ? 1 : 0), 'teacher')} · {plural(selected.studentCount, 'student')}</p>{selected.assignmentCount != null && selected.topicCount != null && <p>{plural(selected.assignmentCount, 'assignment')} · {plural(selected.topicCount, 'topic')}</p>}{selected.linkedFileCount != null && <p>{plural(selected.linkedFileCount, 'file-linked item')}</p>}</div>
             </> : <p className="text-[11px] text-ink-muted">Choose a class to see its import details.</p>}

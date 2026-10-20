@@ -69,7 +69,7 @@ export function ReadingQuestions({ paperId }: { paperId?: string }) {
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle pb-5">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Built from {data.paper.verifiedClaims} checked claims</p>
-          <h1 className="mt-1 font-serif text-[30px] font-semibold leading-9 tracking-[-0.025em] text-ink">Reading questions <span className="text-ink-muted">· {data.paper.title}</span></h1>
+          <h1 className="mt-1 font-serif text-[30px] font-semibold leading-9 tracking-tight text-ink">Reading questions <span className="text-ink-muted">· {data.paper.title}</span></h1>
           <p className="mt-1 max-w-3xl text-[13px] leading-5 text-ink-muted">{data.paper.citation}. Every answer points to a page in the paper, so grading is a page check.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -95,7 +95,7 @@ export function ReadingQuestions({ paperId }: { paperId?: string }) {
           <Card className="px-4 py-4">
             <h2 className="font-serif text-[17px] font-semibold">Answer key</h2>
             <p className="mt-2 text-[13px] leading-5 text-ink-muted">Each answer is the paper's own passage, so grading is a page check, not a judgment call.</p>
-            <div className="mt-3 divide-y divide-border-subtle">{visible.map((question, index) => <div key={question.id} className="py-3 first:pt-0 last:pb-0"><p className="text-[11px] leading-[17px]"><span className="font-semibold text-accent">Q{index + 1}</span><span className="text-ink-muted"> &nbsp;{question.anchor} — {question.answer ?? 'No answer key available.'}</span></p></div>)}</div>
+            <div className="mt-3 divide-y divide-border-subtle">{visible.map((question, index) => <div key={question.id} className="py-3 first:pt-0 last:pb-0"><p className="text-[11px] leading-[18px]"><span className="font-semibold text-accent">Q{index + 1}</span><span className="text-ink-muted"> &nbsp;{question.anchor} — {question.answer ?? 'No answer key available.'}</span></p></div>)}</div>
             <Button type="button" variant="ghost" className="mt-2 px-0 text-xs" onClick={() => void copy(worksheetText({ ...data, questions: visible }, true), 'Answer key copied locally.')}><Copy className="size-4" />Copy answer key</Button>
           </Card>
         </aside>

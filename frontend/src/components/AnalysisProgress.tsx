@@ -200,7 +200,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
         aria-valuenow={running ? percent : 100}
         className="h-1.5 w-full overflow-hidden rounded bg-neutral-soft"
       >
-        <div className="h-full rounded-[3px] bg-accent transition-[width] duration-500" style={{ width: `${running ? percent : 100}%` }} />
+        <div className="h-full rounded-sm bg-accent transition-[width] duration-500" style={{ width: `${running ? percent : 100}%` }} />
       </div>
 
       <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

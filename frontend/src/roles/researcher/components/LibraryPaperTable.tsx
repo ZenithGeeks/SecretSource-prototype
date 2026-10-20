@@ -27,7 +27,7 @@ function StandingBar({ paper }: { paper: LibraryPaper }) {
     <span className="flex items-center gap-2.5">
       <span className="flex h-1.5 w-28 shrink-0 gap-0.5 overflow-hidden" aria-hidden="true">
         {parts.map((p) => (
-          <span key={p.key} className={cn('h-full rounded-[3px]', p.color)} style={{ flexGrow: p.n }} />
+          <span key={p.key} className={cn('h-full rounded-sm', p.color)} style={{ flexGrow: p.n }} />
         ))}
       </span>
       <span className={cn('text-xs', contradicted > 0 ? 'font-semibold text-refutes' : 'text-ink-muted')}>

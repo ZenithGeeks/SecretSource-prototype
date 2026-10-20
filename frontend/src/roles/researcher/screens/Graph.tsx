@@ -307,7 +307,7 @@ function InsightTile({ insight, active, onToggle }: { insight: Insight; active: 
       )}
     >
       <Icon className={cn('size-4 shrink-0', tone)} />
-      <span className={cn('font-mono text-[15px] leading-5 tracking-[-0.004em]', tone)}>{count}</span>
+      <span className={cn('font-mono text-[15px] leading-5 tracking-[-0.01em]', tone)}>{count}</span>
       <span className="min-w-0 flex-1 text-xs leading-4 text-ink-muted">{label}</span>
     </button>
   )

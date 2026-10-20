@@ -38,9 +38,9 @@ function settled(claim: Claim) {
 function SkeletonRow({ fade }: { fade: string }) {
   return (
     <div aria-hidden="true" className={`flex items-center gap-3.5 border-t border-border-subtle px-5 py-[18px] ${fade}`}>
-      <span className="size-2.5 shrink-0 rounded-[3px] bg-neutral-soft" />
+      <span className="size-2.5 shrink-0 rounded-sm bg-neutral-soft" />
       <span className="flex min-w-0 flex-1 flex-col gap-2">
-        <span className="h-2.5 w-3/4 rounded-[5px] bg-neutral-soft" />
+        <span className="h-2.5 w-3/4 rounded-md bg-neutral-soft" />
         <span className="h-2 w-36 rounded bg-neutral-soft" />
       </span>
       <span className="h-5 w-[84px] shrink-0 rounded-[10px] bg-neutral-soft" />

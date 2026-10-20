@@ -219,7 +219,7 @@ function EvidencePanel({
         <span aria-hidden="true" className={cn('h-3 w-[3px] shrink-0 rounded-sm', bar)} />
         <p className="type-label truncate text-ink-muted">{label}</p>
       </div>
-      <blockquote className="font-serif text-base leading-[25px] italic">{children}</blockquote>
+      <blockquote className="font-serif text-base leading-[26px] italic">{children}</blockquote>
       {action && onAction && (
         <button
           type="button"
@@ -565,7 +565,7 @@ export function ClaimCard({
         <ChevronDown className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       </button>
 
-      <p className="text-[17px] leading-6 font-medium tracking-[-0.006em]">{claim.claim}</p>
+      <p className="text-[17px] leading-6 font-medium tracking-[-0.01em]">{claim.claim}</p>
 
       {(claim.sentence || primary?.quote) && (
         <div className="grid gap-3 md:grid-cols-2">

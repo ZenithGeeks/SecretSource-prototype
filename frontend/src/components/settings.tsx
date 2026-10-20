@@ -21,7 +21,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
   return (
     <section className="flex w-full flex-col items-start">
       <div className="flex w-full items-center pb-3 pr-10">
-        <h2 className="text-[20px] font-semibold leading-[26px] tracking-[-0.012em] text-ink">{title}</h2>
+        <h2 className="text-[22px] font-semibold leading-[26px] tracking-[-0.01em] text-ink">{title}</h2>
       </div>
       <div className="w-full divide-y divide-border-subtle">{children}</div>
     </section>

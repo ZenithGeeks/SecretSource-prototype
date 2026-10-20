@@ -14,7 +14,7 @@ import type { ConsensusRow, FieldConsensus } from '../../../lib/researcher'
 function Tile({ value, label, tone, count }: { value: string; label: string; tone: string; count?: boolean }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-xl border border-border-subtle bg-surface px-3.5 py-3">
-      <p data-testid={count ? 'consensus-count' : undefined} className={`text-[26px] leading-8 font-semibold tracking-[-0.018em] ${tone}`}>
+      <p data-testid={count ? 'consensus-count' : undefined} className={`text-[26px] leading-8 font-semibold tracking-tight ${tone}`}>
         {value}
       </p>
       <p className="text-xs leading-4 font-medium text-ink-muted">{label}</p>
@@ -45,7 +45,7 @@ function Row({ row, onOpenAnalysis }: { row: ConsensusRow; onOpenAnalysis: (id: 
         <VerdictBadge verdict={row.verdict} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        {row.quote && <p className="font-serif text-[15px] leading-[23px] italic text-ink">“{row.quote}”</p>}
+        {row.quote && <p className="font-serif text-[15px] leading-[22px] italic text-ink">“{row.quote}”</p>}
         <p className="text-xs leading-4 text-ink-muted">On the claim: {row.claim}</p>
         <button
           type="button"

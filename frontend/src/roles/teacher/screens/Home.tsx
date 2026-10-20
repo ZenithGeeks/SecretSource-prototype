@@ -112,8 +112,8 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
   return (
     <div className="space-y-[22px]">
       <header className="space-y-1">
-        <h1 className="font-serif text-[30px] font-semibold leading-[38px] tracking-tight text-ink">Good morning, {teacherName}</h1>
-        <p className="text-[13px] leading-[20px] text-ink-muted">
+        <h1 className="font-serif text-[30px] font-semibold leading-[40px] tracking-tight text-ink">Good morning, {teacherName}</h1>
+        <p className="text-[13px] leading-5 text-ink-muted">
           {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review · {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
         </p>
       </header>

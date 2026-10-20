@@ -29,7 +29,7 @@ export function GraphSegmented<T extends string>({
             aria-checked={on}
             onClick={() => onChange(option.key)}
             className={cn(
-              'rounded-[7px] px-3.5 py-[5px] text-[13px] leading-[18px] font-medium whitespace-nowrap transition-colors',
+              'rounded-lg px-3.5 py-[5px] text-[13px] leading-[18px] font-medium whitespace-nowrap transition-colors',
               on ? 'bg-surface text-ink shadow-[0_1px_1px_rgba(31,20,36,0.04)]' : 'text-ink-muted hover:text-ink',
             )}
           >

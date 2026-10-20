@@ -17,7 +17,7 @@ const STATUS_STYLES: Record<StatusTone, string> = {
 
 export function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: StatusTone }) {
   return (
-    <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]', STATUS_STYLES[tone])}>
+    <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em]', STATUS_STYLES[tone])}>
       {label}
     </span>
   )
@@ -98,7 +98,7 @@ const WORKSPACE_TABS: { key: WorkspaceTab; label: string }[] = [
 
 export function WorkspaceTabs({ active, onChange }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {
   return (
-    <div role="tablist" aria-label="Class workspace" className="flex min-h-[44px] gap-1.5 overflow-x-auto border-b border-border-subtle py-[5px]">
+    <div role="tablist" aria-label="Class workspace" className="flex min-h-11 gap-1.5 overflow-x-auto border-b border-border-subtle py-[5px]">
       {WORKSPACE_TABS.map((tab) => (
         <button
           key={tab.key}
@@ -127,7 +127,7 @@ export function PageHeading({ eyebrow, title, description, actions }: {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        {eyebrow && <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-accent">{eyebrow}</p>}
+        {eyebrow && <p className="mb-2 text-xs font-semibold uppercase tracking-[0.1em] text-accent">{eyebrow}</p>}
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{title}</h1>
         {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{description}</p>}
       </div>
