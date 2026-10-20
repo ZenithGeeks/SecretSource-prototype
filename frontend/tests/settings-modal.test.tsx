@@ -405,6 +405,12 @@ describe('labeler settings', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), { target: { value: 'Dark' } })
     expect(document.documentElement.dataset.theme).toBe('dark')
   })
+
+  test('has no verdict badge toggle, since the labeler shows no verdicts', () => {
+    renderModal('labeler')
+    fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }))
+    expect(screen.queryByText('Colour the verdict badges')).toBeNull()
+  })
 })
 
 /** A gateway that answers DELETE /user/data and records which scope each call asked for. */

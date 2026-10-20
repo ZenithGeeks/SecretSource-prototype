@@ -23,12 +23,14 @@ import type { ComponentType, ReactNode } from 'react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import { useSettings } from '../lib/settings'
+import { avatarPhotoUrl } from '../lib/avatar'
+import { SETTINGS_DEFAULTS, useSettings } from '../lib/settings'
 import { authEnabled } from '../lib/supabase'
 import { useAuth, signOut } from '../lib/useAuth'
 import { cn } from '../lib/utils'
 import { Brand } from './Brand'
 import { RoleChip } from './RoleChip'
+import { Avatar } from './settings'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -77,16 +79,17 @@ function ProfileMenu({
   onOpenSettings?: () => void
   active?: boolean
 }) {
-  const { displayName } = useSettings()
+  const { displayName, avatarUrl } = useSettings()
   const { session } = useAuth()
-  // Prefer the signed-in identity: full_name is set on sign-up (Auth.tsx) and by Google. The
-  // settings display name is the fallback, since its default is shared across accounts. Same
-  // for the email — the session address, not the settings one, is who is actually signed in.
+  // A display name changed in Settings wins. Until then, the signed-in identity: full_name is
+  // set on sign-up (Auth.tsx) and by Google, while the settings default is shared by every
+  // account. The email is always the session's: that is who is actually signed in.
   const metaName = session?.user?.user_metadata?.full_name as string | undefined
   const email = session?.user?.email ?? 'Signed in locally'
-  // The display name can be cleared in Settings; fall back to the address rather than show
-  // an empty chip with blank initials.
-  const name = metaName?.trim() || displayName.trim() || (session?.user?.email ?? 'Your account')
+  const chosenName = displayName === SETTINGS_DEFAULTS.displayName ? '' : displayName.trim()
+  // A signed-in account with no name of its own shows its address, never the shared default.
+  // Without a session (no Supabase configured) the default name is all there is.
+  const name = chosenName || metaName?.trim() || session?.user?.email || displayName.trim() || 'Your account'
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -130,9 +133,7 @@ function ProfileMenu({
             lit ? 'border-accent' : 'border-transparent',
           )}
         >
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border-subtle bg-accent-soft text-[13px] font-semibold text-accent">
-            {initials(name).slice(0, 1)}
-          </span>
+          <Avatar initials={initials(name).slice(0, 1)} photoUrl={avatarPhotoUrl(avatarUrl)} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-[13px] leading-[18px] font-medium text-ink">{name}</span>
             <span className="truncate text-xs leading-4 text-ink-muted">{role}</span>

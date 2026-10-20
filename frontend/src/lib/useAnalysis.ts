@@ -1,9 +1,11 @@
 /** One analysis, kept current: fetch it, then follow its stage events while it runs. */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { api, type Analysis } from './api'
+import { analysisLabel } from './claims'
+import { showDoneNotice } from './desktopNotice'
 
 /** Checks that report within this long of each other share one refetch of the analysis. */
 const REFETCH_WINDOW_MS = 300
@@ -102,5 +104,32 @@ export function useAnalyses() {
     // while anything is running so the sidebar doesn't need a page reload to catch up.
     refetchInterval: (query) =>
       query.state.data?.some((analysis) => analysis.status === 'running') ? 3000 : false,
+    // Keep asking in a hidden tab too, so useAnalysisNotices can tell the reader a run ended.
+    refetchIntervalInBackground: true,
   })
+}
+
+/** A browser notice when an analysis this tab saw running is done or stopped. Only runs seen
+ * running are announced, so a reload does not repeat old news.
+ *
+ * Args:
+ *   analyses: The list from useAnalyses.
+ *   onOpen: Opens the analysis when its notice is clicked.
+ */
+export function useAnalysisNotices(analyses: Analysis[] | undefined, onOpen: (id: string) => void) {
+  const running = useRef<Set<string> | null>(null) // null until the first list
+  const open = useRef(onOpen)
+  useEffect(() => {
+    open.current = onOpen
+  })
+
+  useEffect(() => {
+    if (!analyses) return
+    for (const analysis of analyses) {
+      if (!running.current?.has(analysis.id) || analysis.status === 'running') continue
+      const title = analysis.status === 'done' ? 'Analysis finished' : 'Analysis stopped'
+      showDoneNotice(title, analysisLabel(analysis), analysis.id, () => open.current(analysis.id))
+    }
+    running.current = new Set(analyses.filter((a) => a.status === 'running').map((a) => a.id))
+  }, [analyses])
 }

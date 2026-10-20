@@ -11,8 +11,9 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import type { Role } from '../screens/Onboarding'
 import { accountApi } from '../lib/accountApi'
-import { API_BASE } from '../lib/api'
+import { avatarPhotoUrl } from '../lib/avatar'
 import { downloadText } from '../lib/csv'
+import { askNoticePermission, canNotify, noticesBlocked } from '../lib/desktopNotice'
 import { researcherApi } from '../lib/researcher'
 import { getSettings, updateSettings, useSettings } from '../lib/settings'
 import type { ThemeChoice } from '../lib/settings'
@@ -43,21 +44,6 @@ function initials(name: string): string {
 const AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
-/** `avatarUrl` round-trips through the server's freeform preferences blob (PreferencesPatch
- * accepts any JSON), so a crafted PATCH could point it at an external URL — and it feeds
- * AuthorizedImage, which attaches the signed-in user's Bearer token to whatever it's given.
- * Only ever trust our own gateway path, never fetch a stored URL as this user against
- * somewhere else. */
-function isOwnAvatarUrl(url: string): boolean {
-  return url.startsWith('/api/user/avatar/')
-}
-
-/** The stored value is the gateway's bare `/api/user/avatar/me?v=…` path; it is prefixed
- * with API_BASE only here, at render, the way figureImageUrl does, so it still reaches the
- * gateway when the frontend is served from another origin (VITE_GATEWAY_URL). */
-function avatarPhotoUrl(stored: string): string | undefined {
-  return stored && isOwnAvatarUrl(stored) ? `${API_BASE}${stored}` : undefined
-}
 
 export function AccountSection() {
   const settings = useSettings()
@@ -289,30 +275,49 @@ export function CheckingSection() {
   )
 }
 
+/** One browser notice per finished paper (lib/desktopNotice.ts). There is no weekly digest:
+ * nothing sends email yet, so its stored settings keys are kept but not shown. */
 export function NotificationsSection() {
   const s = useSettings()
   const set = useSetSetting()
+  const [refused, setRefused] = useState(false) // the prompt was just closed without allowing
+  const [asking, setAsking] = useState(false)
+  const supported = canNotify()
+  // A permission taken back in the browser later turns the toggle off here too, so it never
+  // shows on while nothing can appear.
+  const blocked = refused || noticesBlocked()
+
+  // Turning it on asks the browser first. A refused permission leaves it off and says why.
+  const turn = async (on: boolean) => {
+    if (on) {
+      setAsking(true)
+      const allowed = await askNoticePermission()
+      setAsking(false)
+      setRefused(!allowed)
+      if (!allowed) return
+    }
+    set('notifyDone', on)
+  }
+
+  let hint = 'A browser notification when a paper you started is ready or stops, while this tab is in the background.'
+  if (!supported) hint = 'This browser shows notifications only on https. Open the app at its https address to use them.'
+  else if (blocked) hint = 'The browser blocks notifications for this site. Allow them in its site settings, then turn this on.'
+
   return (
     <Section title="Notifications">
-      <Row label="Weekly digest" hint="What changed in your library, sent to your email.">
-        <Toggle on={s.weeklyDigest} onChange={(v) => set('weeklyDigest', v)} />
-      </Row>
-      <Row label="Send it on">
-        <Select
-          value={s.digestDay}
-          disabled={!s.weeklyDigest}
-          options={['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']}
-          onChange={(v) => set('digestDay', v)}
+      <Row label="When a paper finishes" hint={hint}>
+        <Toggle
+          on={supported && !blocked && s.notifyDone}
+          disabled={!supported || asking}
+          onChange={(v) => void turn(v)}
         />
-      </Row>
-      <Row label="When a check finishes" hint="Only for papers you left running.">
-        <Toggle on={s.notifyDone} onChange={(v) => set('notifyDone', v)} />
       </Row>
     </Section>
   )
 }
 
-export function AppearanceSection() {
+/** `verdictBadges`: false for a role that shows no verdict badges (the labeler). */
+export function AppearanceSection({ verdictBadges = true }: { verdictBadges?: boolean }) {
   const s = useSettings()
   const set = useSetSetting()
   return (
@@ -324,12 +329,14 @@ export function AppearanceSection() {
           onChange={(v) => set('theme', v as ThemeChoice)}
         />
       </Row>
-      <Row
-        label="Colour the verdict badges"
-        hint="Off shows verdicts as plain text, for printing and screenshots."
-      >
-        <Toggle on={s.colorBadges} onChange={(v) => set('colorBadges', v)} />
-      </Row>
+      {verdictBadges && (
+        <Row
+          label="Colour the verdict badges"
+          hint="Off shows verdicts as plain text, for printing and screenshots."
+        >
+          <Toggle on={s.colorBadges} onChange={(v) => set('colorBadges', v)} />
+        </Row>
+      )}
     </Section>
   )
 }
