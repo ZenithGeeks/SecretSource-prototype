@@ -110,6 +110,25 @@ claim the caller has saved, it never changes a label, and what it found goes to 
    tool_timeout_sec = 300  # review_claim can run past Codex's 60 s default
    ```
 
+   VS Code reads `.vscode/mcp.json` and fills in only its own variables (`${env:NAME}`,
+   `${input:id}`); `${GATEHOUSE_KEY}` there fails with "Variable `GATEHOUSE_KEY` not found". This
+   entry asks for the key the first time and keeps it in VS Code's secret storage:
+
+   ```json
+   {
+     "inputs": [
+       { "type": "promptString", "id": "gatehouse-key", "description": "Gatehouse key", "password": true }
+     ],
+     "servers": {
+       "secretsource": {
+         "type": "http",
+         "url": "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/",
+         "headers": { "apikey": "${input:gatehouse-key}" }
+       }
+     }
+   }
+   ```
+
    Keep the trailing slash: `/mcp` answers with a redirect. With sign-in off (local stack with no
    Supabase), `http://localhost:8080/mcp/` works without a key.
 

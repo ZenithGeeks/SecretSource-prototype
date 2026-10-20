@@ -71,6 +71,9 @@ describe('the connect screen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }))
     expect(screen.getByText(/\[mcp_servers\.secretsource\]/)).toBeInTheDocument()
     expect(screen.getByText(/~\/\.codex\/config\.toml/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'VS Code' }))
+    expect(screen.getByText(/\$\{input:gatehouse-key\}/)).toBeInTheDocument()
+    expect(screen.getByText(/VS Code asks for the key the first time/)).toBeInTheDocument()
   })
 
   it('closes on Escape without connecting', () => {
