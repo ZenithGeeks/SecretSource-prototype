@@ -139,6 +139,8 @@ export type ScopusPaper = {
   year: string
   first_author: string
   cited_by: number
+  // Whether the analysis can download its PDF; null when that could not be checked.
+  downloadable: boolean | null
   added: boolean
 }
 

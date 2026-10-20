@@ -75,6 +75,19 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
         <ul className="flex flex-col divide-y divide-border-subtle" aria-label="Scopus results">
           {results.map((paper) => {
             const done = paper.added || added[paper.doi]
+            // false: the only copy is on a site that refuses scripts, so the paper could never be read.
+            // null: it could not be checked, so adding stays allowed.
+            if (paper.downloadable === false && !done) {
+              return (
+                <li key={paper.doi} className="flex items-center justify-between gap-3 py-2.5 opacity-60">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-ink">{paper.title}</span>
+                    <span className="block truncate text-xs text-ink-muted">{[paper.venue, paper.year].filter(Boolean).join(' · ')}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-ink-muted">No copy we can download</span>
+                </li>
+              )
+            }
             return (
               <li key={paper.doi} className="flex items-center justify-between gap-3 py-2.5">
                 <span className="min-w-0">
