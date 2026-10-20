@@ -160,6 +160,15 @@ def _crossref_record(work: dict) -> IndexRecord:
     )
 
 
+def openalex_works(params: dict) -> list[dict]:
+    """OpenAlex works for a filter, with this gateway's key and contact address.
+
+    Raises:
+        _IndexError: OpenAlex did not answer, or not with JSON.
+    """
+    return (_get(OPENALEX_URL, params) or {}).get("results") or []
+
+
 def _openalex(doi: str) -> IndexRecord | None:
     work = _get(f"{OPENALEX_URL}/doi:{quote(doi, safe='/')}")
     if work is None:
