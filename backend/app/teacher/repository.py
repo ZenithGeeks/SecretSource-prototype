@@ -354,4 +354,5 @@ class TeacherGoogleRepository:
         return _all_pages(query)
 
     def _upsert(self, table: str, row: dict[str, Any], conflict_keys: str) -> None:
-        self._client.table(table).upsert(row, on_conflict=conflict_keys).execute()
+        # Submissions and feedback hold pasted text, which can hold NUL (#570).
+        self._client.table(table).upsert(store.postgres_safe(row), on_conflict=conflict_keys).execute()

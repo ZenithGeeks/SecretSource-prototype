@@ -58,19 +58,21 @@ def _execute_with_retry(query):
         return query.execute()
 
 
-def _without_nul(value):
-    """The same JSON value with every NUL character removed from its strings and keys.
+def postgres_safe(value):
+    """Return a copy of a JSON value that Postgres accepts: each NUL becomes U+FFFD.
 
     Postgres refuses NUL in text and jsonb (error 22P05, "\\u0000 cannot be converted to
     text"), and some PDFs put it in their extracted text. Without this, the whole row is
-    lost, not just the one character. SQLite keeps NUL, so only the Supabase writes use it.
+    lost, not just the one character. U+FFFD keeps every string the same length, so
+    character offsets into the text still point at the same place. SQLite keeps NUL, so
+    only the Supabase writes use this.
     """
     if isinstance(value, str):
-        return value.replace("\x00", "")
+        return value.replace("\x00", "�")
     if isinstance(value, dict):
-        return {_without_nul(key): _without_nul(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_without_nul(item) for item in value]
+        return {postgres_safe(key): postgres_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [postgres_safe(item) for item in value]
     return value
 
 
@@ -232,7 +234,7 @@ def _supabase_owner(query, owner: str | None):
 def save(analysis: dict) -> None:
     if _use_supabase():
         _execute_with_retry(_supabase().table("analyses").upsert(
-            {"id": analysis["id"], "data": _without_nul(analysis)}
+            {"id": analysis["id"], "data": postgres_safe(analysis)}
         ))
         return
     with _sqlite() as database:
@@ -368,7 +370,7 @@ def remember_source(key: str, resolution: dict) -> None:
     """Where a cited work's PDF lives, so a re-run does not ask a rate-limited API again."""
     if _use_supabase():
         _execute_with_retry(
-            _supabase().table("sources").upsert({"key": key, "data": _without_nul(resolution)})
+            _supabase().table("sources").upsert({"key": key, "data": postgres_safe(resolution)})
         )
         return
     with _sqlite() as database:
@@ -417,7 +419,7 @@ def remember_cache(key: str, data: dict) -> None:
         import httpx
 
         try:
-            _execute_with_retry(_supabase().table("cache").upsert({"key": key, "data": _without_nul(data)}))
+            _execute_with_retry(_supabase().table("cache").upsert({"key": key, "data": postgres_safe(data)}))
         except httpx.TransportError as error:
             logger.warning("cache write for %s failed: %r", key[:12], error)
         return
@@ -452,7 +454,7 @@ def save_project(project: dict) -> None:
     None when login is off."""
     if _use_supabase():
         _execute_with_retry(_supabase().table("projects").upsert(
-            {"id": project["id"], "owner": project.get("owner"), "data": _without_nul(project)}
+            {"id": project["id"], "owner": project.get("owner"), "data": postgres_safe(project)}
         ))
         return
     with _sqlite() as database:
@@ -511,7 +513,7 @@ def save_preferences(owner: str | None, data: dict) -> None:
     key = _pref_key(owner)
     if _use_supabase():
         _execute_with_retry(
-            _supabase().table("preferences").upsert({"owner": key, "data": _without_nul(data)})
+            _supabase().table("preferences").upsert({"owner": key, "data": postgres_safe(data)})
         )
         return
     with _sqlite() as database:
@@ -549,7 +551,7 @@ def save_author_row(table: str, row: dict) -> None:
     table = _author_table(table)
     if _use_supabase():
         _execute_with_retry(_supabase().table(table).upsert(
-            {"id": row["id"], "owner": row.get("owner"), "data": _without_nul(row)}
+            {"id": row["id"], "owner": row.get("owner"), "data": postgres_safe(row)}
         ))
         return
     with _sqlite() as database:
