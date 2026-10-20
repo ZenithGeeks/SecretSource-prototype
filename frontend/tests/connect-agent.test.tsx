@@ -67,7 +67,7 @@ describe('the connect screen', () => {
   it('shows the setup for Claude Code or for Codex', () => {
     render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={vi.fn()} />)
 
-    expect(screen.getByText(/"mcpServers"/)).toBeInTheDocument()
+    expect(screen.getByText(/claude mcp add --transport http --scope user secretsource/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }))
     expect(screen.getByText(/\[mcp_servers\.secretsource\]/)).toBeInTheDocument()
     expect(screen.getByText(/~\/\.codex\/config\.toml/)).toBeInTheDocument()

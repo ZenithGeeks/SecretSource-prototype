@@ -86,22 +86,14 @@ claim the caller has saved, it never changes a label, and what it found goes to 
 2. Get a Gatehouse key whose email is the one you sign in to SecretSource with. Gatehouse sends
    that email and `GATEHOUSE_SECRET` with each call; the gateway matches the email to a
    confirmed SecretSource account.
-3. Add the server to your agent, with the key in an environment variable. Claude Code reads
-   `.mcp.json` in the project:
+3. Add the server to your agent. Claude Code takes one command, with the key in place of
+   `YOUR_KEY`; it keeps the key in its own config, and it works in every project:
 
-   ```json
-   {
-     "mcpServers": {
-       "secretsource": {
-         "type": "http",
-         "url": "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/",
-         "headers": { "apikey": "${GATEHOUSE_KEY}" }
-       }
-     }
-   }
+   ```sh
+   claude mcp add --transport http --scope user secretsource https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/ --header "apikey: YOUR_KEY"
    ```
 
-   Codex reads `~/.codex/config.toml`:
+   Codex reads `~/.codex/config.toml`, with the key in the `GATEHOUSE_KEY` environment variable:
 
    ```toml
    [mcp_servers.secretsource]

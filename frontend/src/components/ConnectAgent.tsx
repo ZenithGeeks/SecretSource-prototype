@@ -25,27 +25,19 @@ const CANNOT = ['Save, delete or upload anything', 'Start or stop an analysis']
 const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
 
 /**
- * Where each agent reads its MCP servers, the entry that adds SecretSource, and how it gets the
- * Gatehouse key. VS Code fills in only its own variables (`${env:NAME}`, `${input:id}`), so its
- * entry asks for the key and VS Code keeps it.
+ * How each agent adds SecretSource and gets the Gatehouse key: a command for Claude Code, which
+ * keeps the key in its own config, and a file entry for the others. VS Code fills in only its own
+ * variables (`${env:NAME}`, `${input:id}`), so its entry asks for the key and VS Code keeps it.
  */
 const CLIENTS = {
   'Claude Code': {
-    file: '.mcp.json in your project',
-    key: 'set it as the GATEHOUSE_KEY environment variable',
-    after: 'then restart Claude Code',
-    config: `{
-  "mcpServers": {
-    "secretsource": {
-      "type": "http",
-      "url": "${MCP_URL}",
-      "headers": { "apikey": "\${GATEHOUSE_KEY}" }
-    }
-  }
-}`,
+    where: 'Run this in a terminal',
+    key: 'put it in place of YOUR_KEY below',
+    after: 'then start Claude Code',
+    config: `claude mcp add --transport http --scope user secretsource ${MCP_URL} --header "apikey: YOUR_KEY"`,
   },
   Codex: {
-    file: '~/.codex/config.toml',
+    where: 'Add this to ~/.codex/config.toml',
     key: 'set it as the GATEHOUSE_KEY environment variable',
     after: 'then restart Codex',
     config: `[mcp_servers.secretsource]
@@ -54,7 +46,7 @@ env_http_headers = { "apikey" = "GATEHOUSE_KEY" }
 tool_timeout_sec = 300`,
   },
   'VS Code': {
-    file: '.vscode/mcp.json in your project',
+    where: 'Add this to .vscode/mcp.json in your project',
     key: 'keep it at hand',
     after: 'VS Code asks for the key the first time and keeps it in its secret storage',
     config: `{
@@ -198,7 +190,7 @@ function SetupHelp() {
   const [wide] = useState(() => window.matchMedia?.('(min-width: 1024px)').matches ?? false)
   const [client, setClient] = useState<Client>('Claude Code')
   const [copied, setCopied] = useState(false)
-  const { file, key, after, config } = CLIENTS[client]
+  const { where, key, after, config } = CLIENTS[client]
   const copy = () => {
     void navigator.clipboard?.writeText(config).then(() => setCopied(true))
   }
@@ -230,7 +222,7 @@ function SetupHelp() {
       <ol className="mb-2 flex list-decimal flex-col gap-1 pl-4 leading-5">
         <li>Get a Gatehouse key for the email you sign in with, and {key}.</li>
         <li>
-          Add this to {file}; {after}.
+          {where}; {after}.
         </li>
       </ol>
       <div className="relative">
