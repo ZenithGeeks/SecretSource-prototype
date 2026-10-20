@@ -544,6 +544,19 @@ describe('the workspace', () => {
     })
   })
 
+  it('adds a claim on plain http, where the browser has no crypto.randomUUID', async () => {
+    const randomUUID = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+      throw new TypeError('crypto.randomUUID is not a function')
+    })
+    await open()
+    addTypedClaim('A claim typed over http')
+
+    await waitFor(() =>
+      expect(gateway.searched).toEqual([{ claim_id: expect.stringMatching(/^paperA#h-[0-9a-f]{8}$/), claim: 'A claim typed over http' }]),
+    )
+    randomUUID.mockRestore()
+  })
+
   it('says when the search for an added claim fails, and searches again on request', async () => {
     gateway.failSearch = true
     await open()
