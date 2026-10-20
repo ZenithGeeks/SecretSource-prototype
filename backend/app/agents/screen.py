@@ -74,21 +74,28 @@ async def list_papers(tool_context: ToolContext) -> list[dict]:
     "error"). Use the id with open_paper."""
     from app import main  # main imports the agent routes, so not at the top
 
+    # The session keeps "" for a signed-out person; visible_to takes None for that.
     user = tool_context.state.get("user") or None
     rows = await asyncio.to_thread(main.visible_to, user)
     return [
         {"id": row["id"], "title": row.get("title") or row.get("paper", ""), "status": row.get("status", "")}
-        for row in reversed(rows[-50:])
+        for row in reversed(rows[-50:])  # visible_to is oldest first
     ]
 
-
-# The tools the browser runs. agent_runs.py tells them apart from list_papers by this set.
-SCREEN_TOOLS = (read_screen, open_screen, open_paper, point_at, fill_field)
-SCREEN_TOOL_NAMES = frozenset(tool.__name__ for tool in SCREEN_TOOLS)
 
 screen_agent = LlmAgent(
     name="screen_agent",
     model=adk_model(),
     instruction=INSTRUCTION,
-    tools=[*(LongRunningFunctionTool(func=tool) for tool in SCREEN_TOOLS), list_papers],
+    tools=[
+        LongRunningFunctionTool(func=read_screen),
+        LongRunningFunctionTool(func=open_screen),
+        LongRunningFunctionTool(func=open_paper),
+        LongRunningFunctionTool(func=point_at),
+        LongRunningFunctionTool(func=fill_field),
+        list_papers,
+    ],
 )
+
+# The long-running tools above: the only results agent_runs.py takes from the browser.
+SCREEN_TOOL_NAMES = frozenset({"read_screen", "open_screen", "open_paper", "point_at", "fill_field"})

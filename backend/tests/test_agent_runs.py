@@ -38,12 +38,12 @@ class ScriptedModel(BaseLlm):
 def api(monkeypatch):
     model = ScriptedModel(replies=[], seen=[])
     monkeypatch.setattr(screen.screen_agent, "model", model)
-    agent_runs._agent.cache_clear()
+    agent_runs.get_runner.cache_clear()
     app = FastAPI()
     app.include_router(agent_runs.router)
     app.dependency_overrides[agent_runs.current_user] = lambda: "user-1"
     yield TestClient(app), model, app
-    agent_runs._agent.cache_clear()
+    agent_runs.get_runner.cache_clear()
 
 
 def events(response):

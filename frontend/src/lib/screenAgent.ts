@@ -20,6 +20,7 @@ export type AgentLine =
 /** A change the agent wants to make, waiting for the person. */
 export type PendingChange = { label: string; text: string; answer: (apply: boolean) => void }
 
+/** The events agent_runs.py streams; its module docstring describes each one. */
 type AgentEvent =
   | { type: 'session'; id: string }
   | ({ type: 'tool' } & ToolCall)
@@ -43,21 +44,32 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
   })
   const add = (line: AgentLine) => setLines((all) => [...all, line])
 
-  /** The events of one stream; returns the tool call it ended on, if any. */
+  /**
+   * The events of one stream; returns the tool call it ended on, if any. The "session" event
+   * keeps the id that the results route needs.
+   */
   async function stream(path: string, body: unknown, signal: AbortSignal): Promise<ToolCall | null> {
-    let call: ToolCall | null = null
-    await postEvents<AgentEvent>(
-      path,
-      body,
-      (event) => {
-        if (event.type === 'session') session.current = event.id
-        else if (event.type === 'tool') call = { id: event.id, name: event.name, args: event.args }
-        else if (event.type === 'step') add({ kind: 'step', text: SERVER_STEPS[event.name] ?? event.name })
-        else if (event.type === 'say') add({ kind: 'agent', text: event.text })
-        else if (event.type === 'error') add({ kind: 'error', text: `Stopped: ${event.message}` })
-      },
-      signal,
-    )
+    let call: ToolCall | null = null // set by the "tool" event, the last one before the stream ends
+    const onEvent = (event: AgentEvent) => {
+      switch (event.type) {
+        case 'session':
+          session.current = event.id
+          break
+        case 'tool':
+          call = { id: event.id, name: event.name, args: event.args }
+          break
+        case 'step':
+          add({ kind: 'step', text: SERVER_STEPS[event.name] ?? event.name })
+          break
+        case 'say':
+          add({ kind: 'agent', text: event.text })
+          break
+        case 'error':
+          add({ kind: 'error', text: `Stopped: ${event.message}` })
+          break
+      }
+    }
+    await postEvents<AgentEvent>(path, body, onEvent, signal)
     return call
   }
 
@@ -68,10 +80,17 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     setRunning(true)
     const confirm = ({ label, text }: { label: string; text: string }) =>
       new Promise<boolean>((resolve) =>
-        setPending({ label, text, answer: (apply) => (setPending(null), resolve(apply)) }),
+        setPending({
+          label,
+          text,
+          answer: (apply) => {
+            setPending(null)
+            resolve(apply)
+          },
+        }),
       )
     try {
-      // Each message starts a new conversation, so the agent never acts on a screen it saw messages ago.
+      // Each message starts a new agent session, so the agent never acts on a screen it saw messages ago.
       let call = await stream('/agent/runs', { message, screen: latest.current.screen }, abort.signal)
       while (call && !abort.signal.aborted) {
         add({ kind: 'step', text: describeTool(call) })
