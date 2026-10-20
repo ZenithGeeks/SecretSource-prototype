@@ -229,14 +229,23 @@ def _best_span(words: list[_Word], wanted: list[str]) -> tuple[list[int], float]
                 coverage = accounted / len(wanted)
                 if relaxed and matched and matched[-1] - matched[0] + 1 > MAX_STRETCH * len(wanted):
                     continue  # wandered too far to be one sentence
-                # Ties go to the tighter span: the same words found with less in between.
-                if coverage > best[1] or (coverage == best[1] and matched and len(matched) < len(best[0])):
+                # Ties go to the tighter span: the same words found with less in between. The
+                # width, not the count: "language models" at the end of an abstract and again at
+                # the start of the introduction match the same words, and only the width tells
+                # them apart.
+                tighter = coverage == best[1] and _width(matched) < _width(best[0])
+                if coverage > best[1] or tighter:
                     best = (matched, coverage)
             if best[1] >= 1.0:
                 break
         if best[1] >= MIN_COVERAGE:
             break  # the strict pass found it; the relaxed one is only for what it could not
     return best
+
+
+def _width(indices: list[int]) -> float:
+    """How many page words a match spans, gaps included; no match is infinitely wide."""
+    return indices[-1] - indices[0] + 1 if indices else float("inf")
 
 
 def _line_boxes(words: list[_Word], indices: list[int]) -> list[dict]:
