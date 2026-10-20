@@ -9,10 +9,8 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 
-import { askTarget, TONES, type AskTarget, type Pointing } from '../lib/askCursor'
+import { askTarget, scrollingAncestors, TONES, visibleBox, type AskTarget, type Box, type Pointing } from '../lib/askCursor'
 import { cn } from '../lib/utils'
-
-type Box = { top: number; left: number; width: number; height: number }
 
 const SPRING = { type: 'spring', stiffness: 260, damping: 28, mass: 0.8 } as const
 
@@ -79,17 +77,16 @@ function useTargetBox(target: AskTarget | null, scroll: boolean): Box | null {
     // Optional calls: jsdom, which the tests run in, has neither.
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     if (scroll) element.scrollIntoView?.({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
-    const measure = () => {
-      const rect = element.getBoundingClientRect()
-      const box = { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
-      setMeasured({ key, box: inView(element, rect) ? box : null })
-    }
+    const measure = () => setMeasured({ key, box: visibleBox(element) })
     const frame = window.requestAnimationFrame(measure)
     // Capture: the label panel scrolls by itself, and its scroll events do not reach the window.
     window.addEventListener('scroll', measure, true)
     window.addEventListener('resize', measure)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(element)
+    // A panel that shrinks around the target (the labeler's Ask opening under the passages)
+    // moves what shows of it without resizing the target itself.
+    for (const panel of scrollingAncestors(element)) observer?.observe(panel)
     return () => {
       window.cancelAnimationFrame(frame)
       window.removeEventListener('scroll', measure, true)
@@ -98,17 +95,4 @@ function useTargetBox(target: AskTarget | null, scroll: boolean): Box | null {
     }
   }, [key, scroll])
   return measured && measured.key === key ? measured.box : null
-}
-
-/** Whether the element's middle shows: inside every scrolling box around it, and the window. */
-function inView(element: HTMLElement, rect: DOMRect) {
-  const x = rect.left + rect.width / 2
-  const y = rect.top + rect.height / 2
-  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false
-  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
-    if (!/(auto|scroll|hidden)/.test(getComputedStyle(parent).overflowY)) continue
-    const clip = parent.getBoundingClientRect()
-    if (y < clip.top || y > clip.bottom || x < clip.left || x > clip.right) return false
-  }
-  return true
 }
