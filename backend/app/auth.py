@@ -17,10 +17,14 @@ gateway works as one shared space, as it did before login existed. With Supabase
 request with no token is a 401, like a token Supabase rejects. Treating it as nobody would show
 a signed-in user whose token went missing every analysis without an owner, and would let anyone
 list, open or delete those analyses (#147).
+
+MCP clients (/mcp/, app/mcp_server.py) have no Supabase session; they come through Gatehouse
+with a Gatehouse key instead. See gatehouse_user.
 """
 
 import asyncio
 import hashlib
+import hmac
 import os
 import threading
 import time
@@ -30,6 +34,7 @@ from fastapi import HTTPException, Request
 CACHE_SECONDS = 300
 
 _cache: dict[str, tuple[str, float]] = {}  # sha256(token) -> (user id, expiry)
+_ids_by_email: dict[str, tuple[str, float]] = {}  # email -> (user id, expiry)
 _cache_lock = threading.Lock()
 
 
@@ -76,3 +81,53 @@ async def current_user(request: Request) -> str | None:
     if user_id is None:
         raise HTTPException(401, "the session has expired, sign in again")
     return user_id
+
+
+async def gatehouse_user(request: Request) -> str | None:
+    """The SecretSource user behind a Gatehouse key, for /mcp/; None when login is off.
+
+    Gatehouse (APISIX) checks the caller's key, then sends the key holder's email in
+    X-Consumer-Custom-ID and a secret only Gatehouse and the gateway know in X-Gatehouse-Secret.
+    APISIX sets both headers itself, so a caller cannot choose them. The email counts only with
+    the right secret: without it, anyone who reaches the gateway could name any email.
+
+    Raises:
+        HTTPException: 401 without the secret, 403 for a key with no email or an email with no
+            SecretSource account.
+    """
+    if not _supabase_configured():
+        return None
+    secret = os.getenv("GATEHOUSE_SECRET", "")
+    sent = request.headers.get("x-gatehouse-secret", "")
+    if not secret or not hmac.compare_digest(sent.encode(), secret.encode()):
+        raise HTTPException(401, "call /mcp/ through Gatehouse, with your Gatehouse key")
+    email = request.headers.get("x-consumer-custom-id", "").strip().lower()
+    if not email:
+        raise HTTPException(403, "this Gatehouse key has no email; ask the Gatehouse admin to set one")
+    user_id = await asyncio.to_thread(_user_id_for_email, email)
+    if user_id is None:
+        raise HTTPException(403, f"no SecretSource account signs in as {email}")
+    return user_id
+
+
+def _user_id_for_email(email: str) -> str | None:
+    """The id of the Supabase user with this email, or None. Supabase's admin API has no lookup
+    by email, so this pages through the users; the team has tens of them, not thousands."""
+    now = time.monotonic()
+    with _cache_lock:
+        cached = _ids_by_email.get(email)
+        if cached and cached[1] > now:
+            return cached[0]
+
+    from app import store
+
+    page = 1
+    while users := store._supabase().auth.admin.list_users(page=page, per_page=1000):
+        for user in users:
+            # An unconfirmed sign-up could claim anyone's email, so only a confirmed one counts.
+            if (user.email or "").lower() == email and user.email_confirmed_at:
+                with _cache_lock:
+                    _ids_by_email[email] = (user.id, now + CACHE_SECONDS)
+                return user.id
+        page += 1
+    return None
