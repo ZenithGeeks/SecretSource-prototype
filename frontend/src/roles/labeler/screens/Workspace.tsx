@@ -82,7 +82,9 @@ function useMinWidth(px: number) {
 }
 
 const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
-  const c = claim.candidates[0]
+  // A hand-added claim's passages come from several references at once, so take the best one;
+  // an extracted claim's first passage is already the one retrieval ranked first.
+  const c = claim.origin === 'human_added' ? bestCandidate(claim, session.references) : claim.candidates[0]
   if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id }
   const ref = session.references[0]
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
@@ -185,18 +187,16 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   }
 
   // A claim added by hand has no passages until its search answers, so it opens on the first
-  // reference at page 1. When the passages arrive, open the best one, once per claim, unless the
-  // person has already picked a passage.
+  // reference at page 1 (a `ref:` focus). When the passages arrive, open the best one, once per
+  // claim. A passage the person opened is kept; reading that first page is not.
   const autoOpened = useRef(new Set<string>())
   useEffect(() => {
     if (claim?.origin !== 'human_added' || autoOpened.current.has(claim.claim_id)) return
-    const best = bestCandidate(claim, session.references)
-    if (!best) return
+    const first = firstFocus(claim, session)
+    if (!first?.passage) return
     autoOpened.current.add(claim.claim_id)
-    if (!focus || focus.key.startsWith('ref:')) {
-      setFocus({ file: best.reference_file, passage: best.passage, page: best.page, key: best.cand_id })
-    }
-  }, [claim, focus, session.references])
+    if (!focus || focus.key.startsWith('ref:')) setFocus(first)
+  }, [claim, focus, session])
 
   // Moving to another claim keeps the draft of the one being left: it stays marked unsaved until
   // it is saved, and nothing is written that the person did not save.
@@ -314,7 +314,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
 
   const left_: Target = {
     paper: session.paper_file,
-    role: 'under-review',
+    paperRole: 'under-review',
     label: session.title,
     quote: claim.sentence || claim.claim,
     source: claimSource,
@@ -323,7 +323,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   const shown = focus && session.references.find((r) => r.file === focus.file)
   const right: Target | null = focus && {
     paper: focus.file,
-    role: 'reference',
+    paperRole: 'reference',
     // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
     label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
     detail: shown ? byline(shown) : undefined,

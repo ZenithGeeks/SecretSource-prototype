@@ -52,7 +52,7 @@ export type Target = {
   page?: number // fall back to this when there is no source to take a page from
   error?: string // a lookup failure that should remain distinct from an unlocated passage
   section?: string // the analysed paper's section this points into, for the table of contents
-  role?: PaperRole // which of two papers on screen this is: a strip at the top says so (labeler)
+  paperRole?: PaperRole // which of two papers on screen this is: a strip at the top says so (labeler)
 }
 
 export type PaperRole = 'under-review' | 'reference'
@@ -371,10 +371,10 @@ export function PageViewer({
             : cn('rounded-xl border p-4', fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : (className ?? 'h-[calc(100vh-3rem)]')),
         )}
       >
-        {target.role && (
-          <p className={cn('-mx-4 -mt-4 border-b-2 px-4 py-1.5 text-xs', ROLE_STRIP[target.role].className, narrow && '-mx-3 -mt-3 px-3')}>
-            <span className="font-semibold uppercase tracking-wide">{ROLE_STRIP[target.role].name}</span>
-            <span className="text-ink-muted"> · {ROLE_STRIP[target.role].hint}</span>
+        {target.paperRole && (
+          <p className={cn('-mx-4 -mt-4 border-b-2 px-4 py-1.5 text-xs', ROLE_STRIP[target.paperRole].className, narrow && '-mx-3 -mt-3 px-3')}>
+            <span className="font-semibold uppercase tracking-wide">{ROLE_STRIP[target.paperRole].name}</span>
+            <span className="text-ink-muted"> · {ROLE_STRIP[target.paperRole].hint}</span>
           </p>
         )}
         <header className="flex items-start justify-between gap-3">

@@ -24,19 +24,26 @@ const shell = (foldable: boolean) => (
   </AppShell>
 )
 
-test('folds the sidebar to icons, keeps the nav working, and remembers the choice', () => {
-  const { unmount } = render(shell(true))
-  fireEvent.click(screen.getByRole('button', { name: 'Fold the sidebar' }))
+const isFolded = () => screen.getByRole('complementary', { name: 'Sidebar' }).hasAttribute('data-folded')
 
-  expect(screen.getByRole('complementary', { name: 'Sidebar, folded' })).toBeInTheDocument()
+test('folds the sidebar to icons, keeps focus on the toggle, and remembers the choice', () => {
+  const { unmount } = render(shell(true))
+  const toggle = screen.getByRole('button', { name: 'Fold the sidebar' })
+  toggle.focus()
+  fireEvent.click(toggle)
+
+  expect(isFolded()).toBe(true)
+  expect(screen.getByRole('button', { name: 'Open the sidebar' })).toBe(toggle)
+  expect(document.activeElement).toBe(toggle)
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
   expect(screen.getAllByRole('button', { name: 'Papers to label' }).some((b) => b.getAttribute('aria-current') === 'page')).toBe(true)
   expect(window.localStorage.getItem('shell.sidebarFolded')).toBe('1')
 
   unmount()
   render(shell(true))
-  expect(screen.getByRole('complementary', { name: 'Sidebar, folded' })).toBeInTheDocument()
+  expect(isFolded()).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: 'Open the sidebar' }))
-  expect(screen.queryByRole('complementary', { name: 'Sidebar, folded' })).not.toBeInTheDocument()
+  expect(isFolded()).toBe(false)
   expect(window.localStorage.getItem('shell.sidebarFolded')).toBe('0')
 })
 
@@ -44,5 +51,5 @@ test('a shell that is not foldable has no fold button and ignores a stored choic
   window.localStorage.setItem('shell.sidebarFolded', '1')
   render(shell(false))
   expect(screen.queryByRole('button', { name: 'Fold the sidebar' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('complementary', { name: 'Sidebar, folded' })).not.toBeInTheDocument()
+  expect(isFolded()).toBe(false)
 })

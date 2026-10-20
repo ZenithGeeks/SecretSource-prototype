@@ -372,21 +372,37 @@ export function AppShell<K extends string>({
       )}
 
       {/* Solid (not translucent) and viewport-tall, so the profile footer stays pinned to the
-          bottom of the screen, not the bottom of a long page. */}
-      {folded ? (
-        <aside
-          aria-label="Sidebar, folded"
-          className="hidden w-14 shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen"
-        >
-          <button
-            type="button"
-            onClick={() => fold(false)}
-            aria-label="Open the sidebar"
-            title="Open the sidebar"
-            className="flex size-10 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
-          >
-            <PanelLeftOpen className="size-4" />
-          </button>
+          bottom of the screen, not the bottom of a long page. Folded, it keeps only the nav
+          icons: the profile menu and the `sidebar` slot come back when it is opened. */}
+      <aside
+        aria-label="Sidebar"
+        data-folded={folded || undefined}
+        className={cn(
+          'hidden shrink-0 flex-col border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen',
+          folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-y-auto px-3 pb-3.5',
+        )}
+      >
+        <div className={cn('flex items-center', !folded && 'justify-between px-2')}>
+          {!folded && <Brand compact />}
+          {/* One button for both states, so keyboard focus stays on it after a click. */}
+          {foldable && (
+            <button
+              type="button"
+              onClick={() => fold(!folded)}
+              aria-label={folded ? 'Open the sidebar' : 'Fold the sidebar'}
+              aria-expanded={!folded}
+              title={folded ? 'Open the sidebar' : 'Fold the sidebar'}
+              className={cn(
+                'flex items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink',
+                'focus-visible:outline-2 focus-visible:outline-accent',
+                folded ? 'size-10' : 'size-8',
+              )}
+            >
+              {folded ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            </button>
+          )}
+        </div>
+        {folded ? (
           <nav aria-label="Main" className="flex flex-col gap-0.5">
             {nav.map(({ key, label, icon: NavIcon }) => (
               <button
@@ -397,7 +413,7 @@ export function AppShell<K extends string>({
                 title={label}
                 aria-current={active === key ? 'page' : undefined}
                 className={cn(
-                  'flex size-10 items-center justify-center rounded-lg',
+                  'flex size-10 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-accent',
                   active === key ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-accent-soft/60',
                 )}
               >
@@ -405,26 +421,10 @@ export function AppShell<K extends string>({
               </button>
             ))}
           </nav>
-        </aside>
-      ) : (
-        <aside className="hidden w-[248px] shrink-0 flex-col gap-[18px] overflow-y-auto border-r border-border-subtle bg-surface px-3 pt-[18px] pb-3.5 lg:sticky lg:top-0 lg:flex lg:h-screen">
-          <div className="flex items-center justify-between px-2">
-            <Brand compact />
-            {foldable && (
-              <button
-                type="button"
-                onClick={() => fold(true)}
-                aria-label="Fold the sidebar"
-                title="Fold the sidebar"
-                className="flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
-              >
-                <PanelLeftClose className="size-4" />
-              </button>
-            )}
-          </div>
-          {sidebarContent}
-        </aside>
-      )}
+        ) : (
+          sidebarContent
+        )}
+      </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         {breadcrumb && (

@@ -59,14 +59,14 @@ vi.mock('../src/components/PageViewer', () => ({
     target,
     onSelectText,
   }: {
-    target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; role?: string }
+    target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; paperRole?: string }
     onSelectText?: (s: { text: string; page: number | null }) => void
   }) => (
     <div>
       <div data-testid="viewer">{target.paper}|{target.quote}</div>
       <p data-testid="viewer-box">{target.paper}: {target.source ? `boxed on page ${target.source.page}` : 'no box'}</p>
       <p data-testid="viewer-heading">{target.label}{target.detail && ` / ${target.detail}`}</p>
-      <p data-testid="viewer-role">{target.role}</p>
+      <p data-testid="viewer-role">{target.paperRole}</p>
       <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
         select in {target.paper}
       </button>
@@ -600,6 +600,7 @@ describe('the workspace', () => {
     }
     expect(bestCandidate(claim, references)?.cand_id).toBe('refB-5')
     expect(bestCandidate({ ...claim, sentence: 'Y wins.' }, references)?.cand_id).toBe('refC-9')
+    expect(bestCandidate({ ...claim, sentence: 'Y wins [b2; b4].' }, references)?.cand_id).toBe('refB-5')
     expect(bestCandidate({ ...claim, candidates: [] }, references)).toBeUndefined()
   })
 
