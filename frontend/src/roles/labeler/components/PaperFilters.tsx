@@ -33,13 +33,13 @@ export function PaperFilters(props: Props & { shown: number }) {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative w-full sm:w-64">
-          <span className="sr-only">Search titles</span>
+          <span className="sr-only">Search titles and keywords</span>
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
           <Input
             type="search"
             value={filters.search}
             onChange={(event) => onChange({ ...filters, search: event.target.value })}
-            placeholder="Search titles"
+            placeholder="Search titles and keywords"
             className="min-h-11 bg-surface pl-9"
           />
         </label>

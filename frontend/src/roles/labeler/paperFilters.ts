@@ -35,10 +35,12 @@ export function valueOf(paper: Paper, facet: Facet, me: string): string {
   return progressOf(paper)
 }
 
-/** `skip` leaves one filter out, to count what each of its values would show. */
+/** `skip` leaves one filter out, to count what each of its values would show. The search words
+ * match the title, the subject or a keyword. */
 export function matches(paper: Paper, filters: Filters, me: string, skip?: Facet): boolean {
   const words = filters.search.trim().toLowerCase()
-  if (words && !paper.title.toLowerCase().includes(words)) return false
+  const text = [paper.title, paper.subject, ...paper.keywords].join('\n').toLowerCase()
+  if (words && !text.includes(words)) return false
   return FACETS.every((facet) => facet === skip || filters[facet].length === 0 || filters[facet].includes(valueOf(paper, facet, me)))
 }
 

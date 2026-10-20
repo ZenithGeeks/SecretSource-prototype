@@ -4,12 +4,15 @@ Scopus (Elsevier) answers with metadata, not PDFs: a DOI for each paper. The DOI
 same analysis the Researcher role runs, which looks for an open-access copy (Semantic Scholar,
 Unpaywall, arXiv). So a search keeps only open-access records, and `downloadable` marks the ones
 whose PDF the analysis can actually fetch. A paper whose PDF still cannot be reached fails in that
-analysis with a reason the queue shows. Scopus gives no abstracts on our key, so they come from
-OpenAlex by DOI.
+analysis with a reason the queue shows. Scopus gives no abstracts or keywords on our key, so the
+abstract, a subject and keywords come from OpenAlex by DOI.
 """
 
 import logging
+import math
 import re
+import threading
+import time
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -61,6 +64,15 @@ VENUES: dict[str, list[str]] = {
 }
 
 FIELDS = "dc:title,prism:doi,prism:publicationName,prism:coverDate,dc:creator,citedby-count"
+
+KEYWORDS = 5  # the most keywords shown for one paper
+NO_DETAILS = {"abstract": "", "subject": "", "keywords": []}  # a paper OpenAlex does not know
+OPENALEX_BATCH = 50  # DOIs per OpenAlex request; its filter takes up to 100 values
+RETRY_UNKNOWN = 600.0  # seconds before asking OpenAlex again about a paper it did not know
+
+# DOI -> ({"subject", "keywords"}, monotonic time to ask again), for subjects_of.
+_subjects: dict[str, tuple[dict, float]] = {}
+_subjects_lock = threading.Lock()
 
 # Where a search looks: the topic's venues above, or every source Scopus indexes.
 Scope = Literal["topic", "all"]
@@ -167,7 +179,7 @@ def search(
 
     Returns:
         `{"total", "results"}`. Each result has its DOI, title, venue, year, first author, citation
-        count, and the abstract from OpenAlex ("" when OpenAlex has none).
+        count, and the abstract, subject and keywords from OpenAlex (empty when it has none).
 
     Raises:
         NotConfigured: there is no SCOPUS_API_KEY.
@@ -199,9 +211,9 @@ def search(
                 "cited_by": int(entry.get("citedby-count") or 0),
             }
         )
-    abstracts = abstracts_of([paper["doi"] for paper in found])
+    details = openalex_details([paper["doi"] for paper in found])
     total = int(body.get("search-results", {}).get("opensearch:totalResults") or 0)
-    results = [{**paper, "abstract": abstracts.get(paper["doi"].lower(), "")} for paper in found]
+    results = [{**paper, **details.get(paper["doi"].lower(), NO_DETAILS)} for paper in found]
     return {"total": total, "results": results}
 
 
@@ -229,9 +241,13 @@ def _scopus_json(params: dict) -> dict:
     return response.json()
 
 
-def abstracts_of(dois: list[str]) -> dict[str, str]:
-    """The abstracts OpenAlex has for these DOIs, by lower-case DOI. Empty when OpenAlex fails:
-    a result without its abstract is still worth showing."""
+def openalex_details(dois: list[str]) -> dict[str, dict]:
+    """What OpenAlex knows about these DOIs, by lower-case DOI.
+
+    Each value has `abstract`, `subject` (OpenAlex's main research topic for the paper) and
+    `keywords`, best first; any of them can be empty. Empty when OpenAlex fails: a result
+    without them is still worth showing.
+    """
     from app.pipeline.indexes import _IndexError, openalex_works
 
     # "," and "|" separate values in an OpenAlex filter, so a DOI holding one cannot be asked for.
@@ -240,19 +256,52 @@ def abstracts_of(dois: list[str]) -> dict[str, str]:
         return {}
     params = {
         "filter": "doi:" + "|".join(wanted),
-        "select": "doi,abstract_inverted_index",
+        "select": "doi,abstract_inverted_index,primary_topic,keywords",
         "per-page": len(wanted),
     }
     try:
         works = openalex_works(params)
     except _IndexError as error:
-        log.warning("OpenAlex abstracts for a Scopus page: %s", error)
+        log.warning("OpenAlex details for %d papers: %s", len(wanted), error)
         return {}
     return {
-        work["doi"].removeprefix("https://doi.org/").lower(): _abstract_text(work["abstract_inverted_index"])
+        work["doi"].removeprefix("https://doi.org/").lower(): {
+            "abstract": _abstract_text(work.get("abstract_inverted_index") or {}),
+            "subject": (work.get("primary_topic") or {}).get("display_name", ""),
+            "keywords": _keywords(work),
+        }
         for work in works
-        if work.get("doi") and work.get("abstract_inverted_index")
+        if work.get("doi")
     }
+
+
+def _keywords(work: dict) -> list[str]:
+    ranked = sorted(work.get("keywords") or [], key=lambda keyword: keyword.get("score", 0), reverse=True)
+    return [keyword["display_name"] for keyword in ranked[:KEYWORDS] if keyword.get("display_name")]
+
+
+def subjects_of(dois: list[str]) -> dict[str, dict]:
+    """`subject` and `keywords` of each DOI, by lower-case DOI, for the paper list.
+
+    The list is asked for every few seconds, so answers are kept in this process: a paper
+    OpenAlex knows is kept for good (its topic and keywords rarely change), and one it does not
+    know, or every one when OpenAlex fails, is asked again after RETRY_UNKNOWN seconds.
+    """
+    now = time.monotonic()
+    wanted = {doi.lower() for doi in dois}
+    with _subjects_lock:
+        missing = sorted(doi for doi in wanted if _subjects.get(doi, (None, 0.0))[1] <= now)
+    for start in range(0, len(missing), OPENALEX_BATCH):
+        batch = missing[start : start + OPENALEX_BATCH]
+        found = openalex_details(batch)
+        with _subjects_lock:
+            for doi in batch:
+                if doi in found:
+                    _subjects[doi] = ({key: found[doi][key] for key in ("subject", "keywords")}, math.inf)
+                else:
+                    _subjects[doi] = ({"subject": "", "keywords": []}, now + RETRY_UNKNOWN)
+    with _subjects_lock:
+        return {doi: _subjects[doi][0] for doi in wanted if doi in _subjects}
 
 
 def _abstract_text(index: dict[str, list[int]]) -> str:

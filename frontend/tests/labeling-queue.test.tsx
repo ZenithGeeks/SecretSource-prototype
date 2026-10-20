@@ -19,10 +19,10 @@ const gateway = vi.hoisted(() => ({
       { name: 'Nuttadon', topic: '' },
     ],
     papers: [
-      { analysis_id: 'x1', title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, team_judged: 0, labelers: [], status: 'done', reason: '', mine: false, added_by: 'Nuttadon' },
-      { analysis_id: 'x2', title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, team_judged: 4, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
-      { analysis_id: 'x3', title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'running', reason: '', mine: true },
-      { analysis_id: 'x4', title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
+      { analysis_id: 'x1', subject: '', keywords: [], title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, team_judged: 0, labelers: [], status: 'done', reason: '', mine: false, added_by: 'Nuttadon' },
+      { analysis_id: 'x2', subject: 'Information Retrieval', keywords: ['ColBERT', 'dense retrieval'], title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, team_judged: 4, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
+      { analysis_id: 'x3', subject: '', keywords: [], title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'running', reason: '', mine: true },
+      { analysis_id: 'x4', subject: '', keywords: [], title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
     ],
   },
 }))
@@ -49,8 +49,8 @@ vi.mock('../src/lib/api', async (original) => ({
       gateway.searches.push(path)
       return {
         results: [
-          { doi: '10.1/a', title: 'A late interaction retriever', venue: 'NAACL 2022', year: '2022', first_author: 'Santhanam K.', cited_by: 412, added: false },
-          { doi: '10.1/b', title: 'Already listed paper', venue: 'ACL 2021', year: '2021', first_author: 'Lee J.', cited_by: 0, added: true },
+          { doi: '10.1/a', title: 'A late interaction retriever', venue: 'NAACL 2022', year: '2022', first_author: 'Santhanam K.', cited_by: 412, subject: '', keywords: [], added: false },
+          { doi: '10.1/b', title: 'Already listed paper', venue: 'ACL 2021', year: '2021', first_author: 'Lee J.', cited_by: 0, subject: '', keywords: [], added: true },
         ],
       }
     }
@@ -162,7 +162,7 @@ describe('the labeler queue', () => {
 
   it('says who added a failed paper, and that only they can try again or remove it', async () => {
     gateway.pool.papers.push({
-      analysis_id: 'x7', title: '10.1145/3712285.3771787', topic: 'HPC', claims: 0, judged: 0, team_judged: 0, labelers: [],
+      analysis_id: 'x7', subject: '', keywords: [], title: '10.1145/3712285.3771787', topic: 'HPC', claims: 0, judged: 0, team_judged: 0, labelers: [],
       status: 'error', reason: 'Connection broken: IncompleteRead', mine: false, added_by: 'Nuttadon',
     })
     try {
@@ -213,7 +213,7 @@ describe('the labeler queue', () => {
   })
 
   it('says Label, Continue or Review depending on how much is judged', async () => {
-    gateway.pool.papers.push({ analysis_id: 'x5', title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
+    gateway.pool.papers.push({ analysis_id: 'x5', subject: '', keywords: [], title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')
@@ -227,7 +227,7 @@ describe('the labeler queue', () => {
   })
 
   it('puts papers the viewer has not finished before finished ones of the same topic', async () => {
-    gateway.pool.papers.unshift({ analysis_id: 'x6', title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
+    gateway.pool.papers.unshift({ analysis_id: 'x6', subject: '', keywords: [], title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')
@@ -279,14 +279,29 @@ describe('the labeler queue', () => {
     fireEvent.click(within(screen.getByRole('group', { name: 'My progress' })).getByRole('checkbox', { name: /Started/ }))
     expect(titlesIn(table)).toEqual(['NLP paper'])
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles' }), { target: { value: 'hpc' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles and keywords' }), { target: { value: 'hpc' } })
     expect(titlesIn(table)).toEqual(['HPC paper'])
+  })
+
+  it('shows each paper’s subject and keywords, and finds a paper by a keyword', async () => {
+    renderQueue()
+    const table = await screen.findByRole('table')
+    const tags = within(rowOf(table, 'NLP paper')).getByRole('list', { name: 'Subject and keywords' })
+    expect(within(tags).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Information Retrieval',
+      'ColBERT',
+      'dense retrieval',
+    ])
+    expect(within(rowOf(table, 'HPC paper')).queryByRole('list', { name: 'Subject and keywords' })).toBeNull()
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles and keywords' }), { target: { value: 'colbert' } })
+    expect(titlesIn(table)).toEqual(['NLP paper'])
   })
 
   it('says which filters left nothing, and clears them from there', async () => {
     renderQueue()
     await screen.findByRole('table')
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles' }), { target: { value: 'nothing like this' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles and keywords' }), { target: { value: 'nothing like this' } })
     expect(screen.queryByRole('table')).toBeNull()
     expect(screen.getByText('No papers match these filters')).toBeInTheDocument()
     expect(screen.getByText('Title has "nothing like this"')).toBeInTheDocument()

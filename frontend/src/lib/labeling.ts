@@ -146,6 +146,10 @@ export type ScopusPaper = {
   cited_by: number
   /** From OpenAlex; empty when it has none. */
   abstract: string
+  /** OpenAlex's main research topic for the paper; "" when it has none. */
+  subject: string
+  /** OpenAlex's keywords, best first, at most five. */
+  keywords: string[]
   /** Whether the analysis can download its PDF; null when that could not be checked. */
   downloadable: boolean | null
   added: boolean
@@ -183,6 +187,9 @@ export type Pool = {
     mine: boolean
     /** Who shared it with the team. Only they can retry or remove it. */
     added_by: string
+    /** From OpenAlex by the paper's DOI, as in a Scopus result; empty for a paper with no DOI. */
+    subject: string
+    keywords: string[]
   }[]
 }
 

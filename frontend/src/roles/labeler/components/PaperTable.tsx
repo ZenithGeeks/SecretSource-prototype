@@ -12,6 +12,7 @@ import { Badge, Button, Progress } from '../../../components/ui'
 import { problem, useAssignTopic, useRetryPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 import { addedByOf, isFinished, type Paper } from '../paperFilters'
+import { PaperKeywords } from './PaperKeywords'
 
 const COLUMNS = ['Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by']
 
@@ -109,6 +110,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
         ) : (
           <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
         )}
+        <PaperKeywords subject={paper.subject} keywords={paper.keywords} className="mt-1.5" />
         {failed && (
           <span role="alert" className="mt-1 block text-refutes">
             Could not be read: {paper.reason || 'no open PDF was found'}.{' '}

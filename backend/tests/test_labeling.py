@@ -61,6 +61,9 @@ def api(monkeypatch):
     db = MemoryLedger()
     monkeypatch.setattr(ledger, "get_store", lambda: db)
     monkeypatch.setattr(pool, "_cache", (0.0, []))
+    # The paper list asks OpenAlex for keywords; a test that wants some stubs openalex_details.
+    monkeypatch.setattr(scopus, "_subjects", {})
+    monkeypatch.setattr(scopus, "openalex_details", lambda dois: {})
     app = FastAPI()
     app.include_router(labeling.router)
     app.dependency_overrides[labeling.owned_analysis] = lambda: ANALYSIS
@@ -683,9 +686,8 @@ def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
         scopus.search("NLP", "", 2020)
 
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
-    monkeypatch.setattr(
-        scopus, "abstracts_of", lambda dois: {"10.18653/v1/2022.naacl-main.272": "We retrieve late."}
-    )
+    details = {"abstract": "We retrieve late.", "subject": "Information Retrieval", "keywords": ["ColBERT"]}
+    monkeypatch.setattr(scopus, "openalex_details", lambda dois: {"10.18653/v1/2022.naacl-main.272": details})
     seen = {}
 
     def fake_get(url, params, headers, timeout):
@@ -709,6 +711,8 @@ def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
                 "first_author": "Santhanam K.",
                 "cited_by": 412,
                 "abstract": "We retrieve late.",
+                "subject": "Information Retrieval",
+                "keywords": ["ColBERT"],
             }
         ],
     }
@@ -718,7 +722,7 @@ def test_scopus_search_asks_again_once_after_a_timeout_but_not_after_a_refused_k
     import requests
 
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
-    monkeypatch.setattr(scopus, "abstracts_of", lambda dois: {})
+    monkeypatch.setattr(scopus, "openalex_details", lambda dois: {})
     replies = [requests.Timeout("slow"), ScopusReply()]
 
     def flaky_get(url, params, headers, timeout):
@@ -737,29 +741,39 @@ def test_scopus_search_asks_again_once_after_a_timeout_but_not_after_a_refused_k
     assert len(calls) == 1
 
 
-def test_abstracts_come_from_openalex_by_doi_and_are_skipped_when_it_fails(monkeypatch):
+def test_abstract_subject_and_keywords_come_from_openalex_by_doi_and_are_skipped_when_it_fails(monkeypatch):
     from app.pipeline import indexes
 
     asked = {}
 
     def works(params):
         asked.update(params)
+        keywords = [{"display_name": f"k{n}", "score": n / 10} for n in range(7)]
         return [
             {
                 "doi": "https://doi.org/10.1/ABC",
                 "abstract_inverted_index": {"Late": [0], "wins": [2], "interaction": [1]},
-            }
+                "primary_topic": {"display_name": "Information Retrieval"},
+                "keywords": keywords,
+            },
+            {"doi": "https://doi.org/10.1/bare"},  # OpenAlex knows the paper, nothing more
         ]
 
     monkeypatch.setattr(indexes, "openalex_works", works)
-    assert scopus.abstracts_of(["10.1/ABC", "10.1/a,b"]) == {"10.1/abc": "Late interaction wins"}
-    assert asked["filter"] == "doi:10.1/ABC"  # a DOI holding "," would break the filter
+    found = scopus.openalex_details(["10.1/ABC", "10.1/bare", "10.1/a,b"])
+    assert found["10.1/abc"] == {
+        "abstract": "Late interaction wins",
+        "subject": "Information Retrieval",
+        "keywords": ["k6", "k5", "k4", "k3", "k2"],  # the best five, best first
+    }
+    assert found["10.1/bare"] == scopus.NO_DETAILS
+    assert asked["filter"] == "doi:10.1/ABC|10.1/bare"  # a DOI holding "," would break the filter
 
     def down(params):
         raise indexes._IndexError("HTTP 503")
 
     monkeypatch.setattr(indexes, "openalex_works", down)
-    assert scopus.abstracts_of(["10.1/ABC"]) == {}
+    assert scopus.openalex_details(["10.1/ABC"]) == {}
 
 
 def test_an_abstract_loses_a_leading_heading_but_not_a_word_that_starts_like_it():
@@ -817,6 +831,47 @@ def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch
         False,
     )
     assert papers["e1"]["status"] == "error" and "no open-access PDF" in papers["e1"]["reason"]
+
+
+def test_pool_shows_each_papers_subject_and_keywords_and_asks_openalex_once(api, monkeypatch):
+    from app import main
+
+    client, _, _ = api
+    running = {"owner": "x", "status": "running", "stages": [], "claims": []}
+    rows = {
+        "d1": {"id": "d1", "paper": "10.1145/3784828.3785017", **running},
+        "u1": {"id": "u1", "paper": "upload.pdf", **running},
+    }
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    pool.assign("chanya", "paper", "d1", "HPC", "x")
+    pool.assign("chanya", "paper", "u1", "HPC", "x")
+    asked = []
+
+    def details(dois):
+        asked.append(dois)
+        found = {"abstract": "", "subject": "Parallel Computing", "keywords": ["DGEMM"]}
+        return {"10.1145/3784828.3785017": found}
+
+    monkeypatch.setattr(scopus, "openalex_details", details)
+    for _ in range(2):  # the page asks every few seconds
+        papers = {p["analysis_id"]: p for p in client.get("/labeling/pool").json()["papers"]}
+    assert (papers["d1"]["subject"], papers["d1"]["keywords"]) == ("Parallel Computing", ["DGEMM"])
+    assert (papers["u1"]["subject"], papers["u1"]["keywords"]) == ("", [])  # no DOI, nothing to ask
+    assert asked == [["10.1145/3784828.3785017"]]
+
+
+def test_a_paper_openalex_does_not_know_is_asked_about_again_later(monkeypatch):
+    monkeypatch.setattr(scopus, "_subjects", {})
+    asked = []
+    monkeypatch.setattr(scopus, "openalex_details", lambda dois: asked.append(dois) or {})
+    clock = [1000.0]
+    monkeypatch.setattr(scopus.time, "monotonic", lambda: clock[0])
+
+    assert scopus.subjects_of(["10.1/X"]) == {"10.1/x": {"subject": "", "keywords": []}}
+    scopus.subjects_of(["10.1/X"])
+    clock[0] += scopus.RETRY_UNKNOWN + 1
+    scopus.subjects_of(["10.1/X"])
+    assert asked == [["10.1/x"], ["10.1/x"]]
 
 
 def test_pool_says_who_added_each_paper(api, monkeypatch):

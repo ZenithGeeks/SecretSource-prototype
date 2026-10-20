@@ -23,6 +23,7 @@ import {
 } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 import { GraphSegmented } from '../../researcher/components/GraphSegmented'
+import { PaperKeywords } from './PaperKeywords'
 import { TopicSelect } from './TopicSelect'
 
 const THIS_YEAR = new Date().getFullYear()
@@ -316,6 +317,7 @@ function ResultRow({
           </Button>
         )}
       </div>
+      <PaperKeywords subject={paper.subject} keywords={paper.keywords} className={cn('mt-1.5 ml-6', unreachable && 'opacity-60')} />
       <AnimatePresence initial={false}>
         {open && (
           <motion.div

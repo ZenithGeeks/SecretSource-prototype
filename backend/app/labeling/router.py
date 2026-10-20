@@ -280,6 +280,7 @@ async def pool_state(
             if account != me:
                 name_of[account] = r.get("annotator", "")
         shared = []
+        doi_of: dict[str, str] = {}  # analysis id -> DOI, for the subject and keywords below
         sharers = pool.shared_by()
         for analysis_id, topic in pool.pooled().items():
             row = main.lookup(analysis_id)
@@ -292,6 +293,9 @@ async def pool_state(
             reason = next((s.get("message", "") for s in reversed(stages) if s.get("stage") == "error"), "")
             paper_id = Path(row["file"]).stem if row.get("file") else ""
             counts = by_paper.get(paper_id, {}) if paper_id else {}
+            # A paper added from Scopus was started from its DOI; an uploaded one has none.
+            if doi := scopus.doi_in(str(row.get("paper", ""))):
+                doi_of[analysis_id] = doi.lower()
             shared.append(
                 {
                     "analysis_id": analysis_id,
@@ -307,6 +311,9 @@ async def pool_state(
                     "added_by": sharers.get(analysis_id, ""),
                 }
             )
+        subjects = scopus.subjects_of(list(doi_of.values()))
+        for paper in shared:
+            paper.update(subjects.get(doi_of.get(paper["analysis_id"], ""), {"subject": "", "keywords": []}))
         return {
             "topics": TOPICS,
             "me": who,
