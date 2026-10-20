@@ -56,6 +56,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from app import chats, dependencies, researcher, store, uploads
+from app.agent_runs import router as agent_router
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
 from app.author.router import DRAFT_CHECK, author_pdfs
@@ -393,6 +394,7 @@ app.add_middleware(
 app.include_router(teacher_router)
 app.include_router(author_router)
 app.include_router(labeling_router)
+app.include_router(agent_router)
 
 
 class AnalysisRequest(BaseModel):
