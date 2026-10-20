@@ -51,6 +51,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/labeling", tags=["labeling"])
 
 ExportScope = Literal["mine", "team"]
+NEXT_PASSAGES = 8  # passages listed for the next unsaved claim
 
 
 async def mine_analysis(analysis_id: str, user: str | None = Depends(current_user)) -> dict:
@@ -675,6 +676,45 @@ async def review_for(analysis_id: str, claim_number: int, user: str | None) -> l
     row["findings"] = json.dumps(findings, ensure_ascii=False)
     await asyncio.to_thread(store.append, "reviews", [row])
     return findings
+
+
+async def progress_for(analysis_id: str, user: str | None) -> dict:
+    """Where `user` stands on one paper in the labeler, for the MCP server and the screen agent:
+    how many claims they saved and had reviewed, and the first claim they have not saved, with
+    the passages found for it. Reads only.
+
+    Raises:
+        HTTPException: 404 for an analysis the caller may not label.
+    """
+    analysis = await owned_analysis(analysis_id, user)
+    built = build_session(analysis)
+    who = await asyncio.to_thread(identity.annotator_for, user)
+    me = user or who  # as labeler_id: with login off there is one shared space
+    store = _store()
+    rows = await asyncio.to_thread(store.read, "claims", built["paper_id"])
+    saved = {row["claim_id"] for row in current("claims", rows) if row["annotator_id"] == me}
+    reviewed = await asyncio.to_thread(_reviewed_claims, store, built["paper_id"], me)
+    labels = {reference["reference_id"]: reference["label"] for reference in built["references"]}
+    next_claim = None
+    for number, claim in enumerate(built["claims"], 1):
+        if claim["claim_id"] not in saved:
+            next_claim = {
+                "number": number,
+                "claim": claim["claim"],
+                "sentence": claim["sentence"],
+                "section": claim["section"],
+                "passages": [
+                    {"paper": labels[c["reference_id"]], "page": c["page"], "text": c["passage"]}
+                    for c in claim["candidates"][:NEXT_PASSAGES]
+                ],
+            }
+            break
+    return {
+        "claims": len(built["claims"]),
+        "saved": len(saved & {c["claim_id"] for c in built["claims"]}),
+        "reviewed": len(reviewed & saved),
+        "next_unsaved": next_claim,
+    }
 
 
 def _saved_claim(store, paper_id: str, me: str, claim_id: str) -> review.Saved | None:

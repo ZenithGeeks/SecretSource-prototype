@@ -2,13 +2,14 @@
 
 The tool list comes from screen_agent's own tools through ADK's adk_to_mcp_tool_type, so an MCP
 client reads the same descriptions as the screen agent, plus review_claim, the labeler's review.
-list_papers and review_claim run here. The screen tools run in the caller's open tab
-(app/screen_bridge.py). Callers come through Gatehouse, which checks their key (app/auth.py,
-gatehouse_user). docs/agent-tools.md says how to connect.
+list_papers, the data tools (app/agents/data_tools.py) and review_claim run here. The screen
+tools run in the caller's open tab (app/screen_bridge.py). Callers come through Gatehouse, which
+checks their key (app/auth.py, gatehouse_user). docs/agent-tools.md says how to connect.
 """
 
 import contextlib
 import functools
+from types import SimpleNamespace
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -21,6 +22,11 @@ from app.auth import gatehouse_user
 from app.labeling import router as labeling
 
 server = Server("secretsource-screen")
+READ_ONLY = (
+    "read_screen", "list_papers", "get_analysis", "get_claim", "search_claims", "find_in_paper",
+    "find_support", "check_text", "ask_library", "get_gaps", "bibtex", "labeling_progress",
+)
+CHECK_DRAFT = "Check a draft against the papers in your SecretSource library."
 _sessions: StreamableHTTPSessionManager | None = None  # set while the app runs, by running()
 
 
@@ -43,9 +49,31 @@ async def list_tools() -> list[types.Tool]:
     return list(_tools().values())
 
 
+@server.list_prompts()
+async def list_prompts() -> list[types.Prompt]:
+    """One prompt, which a client such as Claude Code lists as a slash command."""
+    text = types.PromptArgument(name="text", description="The writing to check", required=True)
+    return [types.Prompt(name="check_my_draft", description=CHECK_DRAFT, arguments=[text])]
+
+
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+    """The message check_my_draft sends the agent."""
+    if name != "check_my_draft":
+        raise ValueError(f"there is no prompt named {name}")
+    message = (
+        "Check this writing against my SecretSource papers with check_text. Then list each sentence "
+        "a paper refutes or does not support, with the quote, and say which sentences hold.\n\n"
+        + (arguments or {}).get("text", "")
+    )
+    content = types.TextContent(type="text", text=message)
+    return types.GetPromptResult(messages=[types.PromptMessage(role="user", content=content)])
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> dict:
-    """Run a tool for the caller: list_papers and review_claim here, a screen tool in the caller's tab."""
+    """Run a tool for the caller: list_papers, a data tool or review_claim here, a screen tool in the tab."""
+    from app.agents.data_tools import DATA_TOOLS
     from app.agents.screen import SCREEN_TOOL_NAMES, papers_for  # see _tools for why not at the top
 
     # handle_mcp put the caller there before MCP saw the request.
@@ -58,6 +86,10 @@ async def call_tool(name: str, arguments: dict) -> dict:
         except HTTPException as error:
             raise ValueError(error.detail) from None
         return {"findings": findings}
+    for tool in DATA_TOOLS:
+        if tool.__name__ == name:
+            # The same function the screen agent runs; it reads the person from the context's state.
+            return await tool(**arguments, tool_context=SimpleNamespace(state={"user": user}))
     if name not in SCREEN_TOOL_NAMES:
         raise ValueError(f"there is no tool named {name}")
     try:
@@ -88,6 +120,9 @@ def _tools() -> dict[str, types.Tool]:
         mcp_tool.inputSchema = mcp_tool.inputSchema or {"type": "object", "properties": {}}
         tools[mcp_tool.name] = mcp_tool
     tools["review_claim"] = adk_to_mcp_tool_type(FunctionTool(review_claim))
+    for name in READ_ONLY:
+        # Lets a client run these without asking each time: they change nothing.
+        tools[name].annotations = types.ToolAnnotations(readOnlyHint=True)
     return tools
 
 

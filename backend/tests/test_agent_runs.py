@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from app import agent_runs
 from app.agents import screen
+from app.agents.data_tools import DATA_TOOLS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from google.adk.models.base_llm import BaseLlm
@@ -83,7 +84,7 @@ def test_a_server_tool_runs_here_and_shows_as_a_step(api, monkeypatch):
         return [{"id": "a1", "title": "ColBERTv2", "status": "done"}]
 
     papers.__name__ = "list_papers"
-    monkeypatch.setattr(screen.screen_agent, "tools", [*screen.screen_agent.tools[:-1], papers])
+    monkeypatch.setattr(screen.screen_agent, "tools", [*screen.screen_agent.tools[:5], papers])
     model.replies = [{"name": "list_papers"}, {"name": "open_paper", "args": {"analysis_id": "a1"}}]
     got = events(client.post("/agent/runs", json={"message": "Open ColBERT"}))
     assert [e["type"] for e in got] == ["session", "step", "tool", "done"]
@@ -121,7 +122,7 @@ def test_a_run_that_keeps_calling_server_tools_stops_at_the_cap(api, monkeypatch
         return []
 
     papers.__name__ = "list_papers"
-    monkeypatch.setattr(screen.screen_agent, "tools", [*screen.screen_agent.tools[:-1], papers])
+    monkeypatch.setattr(screen.screen_agent, "tools", [*screen.screen_agent.tools[:5], papers])
     got = events(client.post("/agent/runs", json={"message": "loop"}))
     assert any(e["type"] == "say" and "I stopped after 3 steps" in e["text"] for e in got)
     assert got[-1] == {"type": "done"}
@@ -129,6 +130,9 @@ def test_a_run_that_keeps_calling_server_tools_stops_at_the_cap(api, monkeypatch
 
 def test_the_agent_is_built_from_the_documented_tools():
     names = [getattr(tool, "name", getattr(tool, "__name__", "")) for tool in screen.screen_agent.tools]
-    assert names == ["read_screen", "open_screen", "open_paper", "point_at", "fill_field", "list_papers"]
+    assert names == [
+        "read_screen", "open_screen", "open_paper", "point_at", "fill_field", "list_papers",
+        *[tool.__name__ for tool in DATA_TOOLS],
+    ]
     text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
     assert all(f"`{name}" in text for name in names)
