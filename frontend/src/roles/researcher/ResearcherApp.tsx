@@ -95,6 +95,7 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
   }
 
   const ask = useAsk({
+    role: 'researcher',
     screen,
     analysis: screen === 'analyses' ? history.selected : null,
     analysisFile: history.selectedName,

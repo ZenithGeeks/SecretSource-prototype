@@ -13,6 +13,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 
+import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty } from '../../../components/ui'
 import { useAuth } from '../../../lib/useAuth'
 import { useSettings } from '../../../lib/settings'
@@ -111,11 +112,14 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
 
   return (
     <div className="space-y-[22px]">
-      <header className="space-y-1">
-        <h1 className="font-serif text-[30px] font-semibold leading-[40px] tracking-tight text-ink">Good morning, {teacherName}</h1>
-        <p className="text-[13px] leading-5 text-ink-muted">
-          {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review · {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
-        </p>
+      <header className="flex items-center gap-4">
+        <Mascot role="teacher" size={64} className="hidden shrink-0 sm:block" />
+        <div className="space-y-1">
+          <h1 className="font-serif text-[30px] font-semibold leading-[40px] tracking-tight text-ink">Good morning, {teacherName}</h1>
+          <p className="text-[13px] leading-5 text-ink-muted">
+            {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review · {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
+          </p>
+        </div>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-3" aria-label="Quick actions">

@@ -8,6 +8,7 @@
 import { Loader2, Sparkles, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { Mascot } from '../../../components/Mascot'
 import { Button } from '../../../components/ui'
 import type { Statement } from '../../../lib/assistant'
 import {
@@ -201,7 +202,8 @@ function Question({ analysisId, references }: { analysisId: string; references: 
 
   return (
     <section aria-labelledby="ask-question-title" className="flex flex-col gap-2 border-t border-border-subtle pt-3">
-      <h3 id="ask-question-title" className="text-sm font-semibold text-ink">
+      <h3 id="ask-question-title" className="flex items-center gap-2 text-sm font-semibold text-ink">
+        <Mascot role="labeler" size={28} />
         Ask a question
       </h3>
       <form onSubmit={ask} className="flex flex-col gap-2">

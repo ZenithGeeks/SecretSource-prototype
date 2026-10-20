@@ -11,20 +11,20 @@ describe('the Ask AI button', () => {
   beforeEach(() => window.localStorage.removeItem('ask.introSeen'))
 
   it('says what it will ask about, and explains Ask once until it is dismissed', async () => {
-    const { unmount } = render(<AskButton open={false} about={PAPER} onToggle={() => {}} />)
+    const { unmount } = render(<AskButton role="researcher" open={false} about={PAPER} onToggle={() => {}} />)
     expect(screen.getByRole('button', { name: 'Ask AI' })).toHaveTextContent('Ask AIabout this paper')
     expect(await screen.findByRole('note')).toHaveTextContent('every sentence in it is checked')
 
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
     await waitFor(() => expect(screen.queryByRole('note')).not.toBeInTheDocument())
     unmount()
-    render(<AskButton open={false} about={PAPER} onToggle={() => {}} />)
+    render(<AskButton role="researcher" open={false} about={PAPER} onToggle={() => {}} />)
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
   it('opens Ask from the bubble, and the bubble does not come back', async () => {
     const onToggle = vi.fn()
-    render(<AskButton open={false} about={PAPER} onToggle={onToggle} />)
+    render(<AskButton role="researcher" open={false} about={PAPER} onToggle={onToggle} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Try it' }))
     expect(onToggle).toHaveBeenCalledOnce()
     expect(window.localStorage.getItem('ask.introSeen')).toBe('1')

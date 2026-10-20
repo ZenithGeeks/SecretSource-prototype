@@ -12,9 +12,11 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
+import type { Role } from '../lib/roles'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
 import { AiCursor } from './AiCursor'
+import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
@@ -259,6 +261,7 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
 }
 
 export function AssistantPanel({
+  role,
   assistant,
   context,
   about,
@@ -270,6 +273,8 @@ export function AssistantPanel({
   doIt,
   className,
 }: {
+  /** Whose Quip (components/Mascot) the header and the empty chat show. */
+  role: Role
   assistant: Assistant
   context: AskContext
   about: AskAbout
@@ -344,7 +349,7 @@ export function AssistantPanel({
               <ChevronLeft className="size-4" aria-hidden="true" />
             </button>
             <h2 className="flex flex-1 items-center gap-1.5 text-[15px] font-semibold text-ink">
-              <Sparkles className="size-4 text-accent" aria-hidden="true" />
+              <Mascot role={role} size={24} />
               Ask
             </h2>
             <button type="button" onClick={() => setView('chats')} aria-label="Your chats" className={ICON_BUTTON}>
@@ -403,6 +408,7 @@ export function AssistantPanel({
                 {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
                 {turns.length === 0 && !assistant.openFailed && (
                   <div className="flex flex-col gap-2">
+                    <Mascot role={role} size={64} animated />
                     <p className="text-[15px] font-medium text-ink">
                       {about.kind === 'library' ? 'Ask about the papers in your library.' : `Ask about ${about.label}.`}
                     </p>
