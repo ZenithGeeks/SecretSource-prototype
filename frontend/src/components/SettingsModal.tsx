@@ -14,7 +14,7 @@ import { CircleCheck, Search, X } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { Role } from '../screens/Onboarding'
+import type { Role } from '../lib/roles'
 import { usePreferencesSync } from '../lib/useAccountSettings'
 import { cn } from '../lib/utils'
 import { getSettingsTabs, ROLE_NAV } from './settingsTabs'

@@ -1,19 +1,23 @@
 @import 'tailwindcss';
 
 /* Figma's Teacher screens use Geist for interface copy and Fraunces for display headings.
-   Keep these overrides role-scoped so the other role frontends retain their own typography. */
+   Keep these overrides role-scoped so the other role frontends retain their own typography.
+   The onboarding role picker sits outside every role root, so it gets its own scope. */
 .teacher-app,
-.researcher-app {
+.researcher-app,
+.onboarding-app {
   font-family: var(--font-ui);
 }
 
 .teacher-app .font-sans,
-.researcher-app .font-sans {
+.researcher-app .font-sans,
+.onboarding-app .font-sans {
   font-family: var(--font-ui);
 }
 
 .teacher-app .font-serif,
-.researcher-app .font-serif {
+.researcher-app .font-serif,
+.onboarding-app .font-serif {
   font-family: var(--font-display);
   font-optical-sizing: auto;
   font-variation-settings: 'SOFT' 0, 'WONK' 1;
