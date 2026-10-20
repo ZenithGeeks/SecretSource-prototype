@@ -5,12 +5,12 @@
  * another claim starts it afresh and stops a review still running.
  */
 
-import { Loader2, Sparkles, Wand2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { Check, CircleAlert, CircleHelp, Loader2, Sparkles, Wand2, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ComponentType } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
-import { Button } from '../../../components/ui'
-import type { Statement } from '../../../lib/assistant'
+import { Badge, Button } from '../../../components/ui'
+import type { Statement, StatementVerdict } from '../../../lib/assistant'
 import {
   askLabeling,
   problem,
@@ -25,12 +25,20 @@ import { TONES, type Pointing } from '../../../lib/askCursor'
 
 const DWELL_MS = 1100 // how long the cursor stays on each finding before the next one
 
-const VERDICTS: Record<string, string> = {
-  supports: 'Backed',
-  insufficient: 'Not backed',
-  refutes: 'Contradicted',
-  unchecked: "Can't check",
-  error: "Can't check",
+type Verdict = {
+  label: string
+  tone: 'supports' | 'insufficient' | 'refutes' | 'neutral'
+  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' }>
+}
+
+// The same words and colours as the researcher's Ask stamps, with an icon so colour is not the only cue.
+const VERDICTS: Record<StatementVerdict | 'checking', Verdict> = {
+  supports: { label: 'Backed', tone: 'supports', icon: Check },
+  insufficient: { label: 'Not backed', tone: 'insufficient', icon: CircleAlert },
+  refutes: { label: 'Contradicted', tone: 'refutes', icon: X },
+  unchecked: { label: "Can't check", tone: 'neutral', icon: CircleHelp },
+  error: { label: "Can't check", tone: 'neutral', icon: CircleHelp },
+  checking: { label: 'Checking…', tone: 'neutral', icon: Loader2 },
 }
 
 type Answer = { question: string; statements: Statement[]; status: 'answering' | 'done' | 'failed'; error?: string }
@@ -235,33 +243,81 @@ function Question({ analysisId, references }: { analysisId: string; references: 
           </Button>
         </div>
       </form>
-      {answer && (
-        <div aria-live="polite" className="flex flex-col gap-2 text-sm">
-          <p className="text-xs text-ink-muted">{answer.question}</p>
-          {answer.status === 'answering' && answer.statements.length === 0 && (
-            <p className="flex items-center gap-1.5 text-ink-muted">
-              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> Reading the paper…
-            </p>
-          )}
-          {answer.statements.map((statement) => (
-            <p key={statement.index} className="text-ink">
-              {statement.text}{' '}
-              <span className="text-xs whitespace-nowrap text-ink-muted">
-                · {statement.verdict ? VERDICTS[statement.verdict] : 'Checking…'}
-                {statement.page ? ` · p.${statement.page}` : ''}
-              </span>
-            </p>
-          ))}
-          {answer.status === 'done' && answer.statements.length === 0 && <p className="text-ink-muted">No passage in it answers that.</p>}
-          {answer.status === 'failed' && (
-            <p role="alert" className="text-refutes">
-              Could not answer: {answer.error}
-            </p>
-          )}
-        </div>
-      )}
+      {answer && <AnswerView answer={answer} />}
     </section>
   )
+}
+
+/** A question and its answer: what was asked, a count of the checks, and each statement with a
+ * badge for what the judge found in the passage it cites. */
+function AnswerView({ answer }: { answer: Answer }) {
+  const { statements } = answer
+  const answering = answer.status === 'answering'
+  return (
+    <div aria-live="polite" className="flex flex-col gap-3 text-sm">
+      <div className="rounded-lg bg-neutral-soft px-3 py-2">
+        <p className="type-label text-ink-muted">You asked</p>
+        <p className="text-ink">{answer.question}</p>
+      </div>
+      {statements.length > 0 && <p className="text-xs font-medium text-ink-muted">{answerSummary(statements, answering)}</p>}
+      {answering && statements.length === 0 && (
+        <p className="flex items-center gap-1.5 text-ink-muted">
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> Reading the paper…
+        </p>
+      )}
+      {statements.length > 0 && (
+        <ol className="flex flex-col divide-y divide-border-subtle rounded-lg border border-border-subtle">
+          {statements.map((statement) => (
+            <AnswerStatement key={statement.index} statement={statement} answering={answering} />
+          ))}
+        </ol>
+      )}
+      {answer.status === 'done' && statements.length === 0 && <p className="text-ink-muted">No passage in it answers that.</p>}
+      {answer.status === 'failed' && (
+        <p role="alert" className="text-refutes">
+          Could not answer: {answer.error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** One statement: the sentence, its verdict badge and page, and, once checked, what the passage says. */
+function AnswerStatement({ statement, answering }: { statement: Statement; answering: boolean }) {
+  // A statement left without a verdict when the answer ended (stopped or failed) was never checked.
+  const state = statement.verdict ?? (answering ? 'checking' : 'unchecked')
+  const verdict = VERDICTS[state]
+  const why = statement.quote || statement.reasoning
+  return (
+    <li className="flex flex-col gap-1.5 px-3 py-2.5">
+      <p className="text-ink">{statement.text}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={verdict.tone}>
+          <verdict.icon className={cn(state === 'checking' && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+          {verdict.label}
+        </Badge>
+        {statement.page && <span className="text-xs text-ink-muted tabular-nums">Page {statement.page}</span>}
+      </div>
+      {why && (
+        <details className="text-xs">
+          <summary className="w-fit cursor-pointer font-medium text-accent">What the passage says</summary>
+          <div className="mt-1.5 flex flex-col gap-1 rounded-lg bg-neutral-soft p-2.5">
+            {statement.quote && <p className="font-serif text-sm italic text-ink">“{statement.quote}”</p>}
+            {statement.reasoning && <p className="text-ink-muted">{statement.reasoning}</p>}
+          </div>
+        </details>
+      )}
+    </li>
+  )
+}
+
+/** "6 of 6 backed", "4 of 6 backed · 1 contradicted", or "Checking 3 of 6" while checks come in. */
+function answerSummary(statements: Statement[], answering: boolean) {
+  const checked = statements.filter((s) => s.verdict).length
+  if (answering && checked < statements.length) return `Checking ${checked + 1} of ${statements.length}`
+  const backed = statements.filter((s) => s.verdict === 'supports').length
+  const contradicted = statements.filter((s) => s.verdict === 'refutes').length
+  return [`${backed} of ${statements.length} backed`, contradicted > 0 && `${contradicted} contradicted`].filter(Boolean).join(' · ')
 }
 
 /** What a finding is about, in words: the claim, a reference's title, or a passage by rank. */
