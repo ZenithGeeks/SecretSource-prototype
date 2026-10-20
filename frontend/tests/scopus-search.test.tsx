@@ -22,6 +22,8 @@ const paper = (n: number, extra: Partial<ScopusPaper> = {}): ScopusPaper => ({
   first_author: 'Gallego G.',
   cited_by: 2442 - n,
   abstract: n === 0 ? 'Event cameras are bio-inspired sensors.' : '',
+  subject: n === 0 ? 'Advanced Vision and Imaging' : '',
+  keywords: n === 0 ? ['event cameras', 'neuromorphic vision'] : [],
   downloadable: true,
   added: false,
   ...extra,
@@ -91,6 +93,21 @@ describe('the Scopus search', () => {
 
     fireEvent.click(within(list).getByRole('button', { name: /^Paper 1/ }))
     expect(screen.getByText('OpenAlex has no abstract for this paper.')).toBeInTheDocument()
+  })
+
+  it('shows each result’s subject and keywords, and nothing for a paper OpenAlex has none for', async () => {
+    gateway([{ total: 2, results: [paper(0), paper(1)] }])
+    renderSearch()
+    search()
+
+    const list = await screen.findByRole('list', { name: 'Scopus results' })
+    const tags = within(list).getAllByRole('list', { name: 'Subject and keywords' })
+    expect(tags).toHaveLength(1)
+    expect(within(tags[0]).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Advanced Vision and Imaging',
+      'event cameras',
+      'neuromorphic vision',
+    ])
   })
 
   it('asks for best match only with words, and keeps the years in order', async () => {

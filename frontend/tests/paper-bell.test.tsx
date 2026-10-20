@@ -29,6 +29,8 @@ const paper = (id: string, extra: Partial<Paper> = {}): Paper => ({
   reason: '',
   mine: true,
   added_by: 'Chanya',
+  subject: '',
+  keywords: [],
   ...extra,
 })
 
