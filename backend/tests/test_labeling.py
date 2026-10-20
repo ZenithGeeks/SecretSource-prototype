@@ -551,7 +551,8 @@ SCOPUS_REPLY = {
                 "citedby-count": "412",
             },
             {"dc:title": "No DOI here", "prism:publicationName": "NAACL 2022"},
-        ]
+        ],
+        "opensearch:totalResults": "375",
     }
 }
 
@@ -564,40 +565,116 @@ def test_scopus_query_is_the_topics_open_access_venues_with_safe_text():
     assert 'SRCTITLE("High-Performance Parallel and Distributed Computing")' not in q  # another topic's venue
 
 
+def test_scopus_query_can_end_at_a_year():
+    q = scopus.build_query("CV", "", 2020, 2022)
+    assert "PUBYEAR > 2019" in q and "PUBYEAR < 2023" in q
+    assert "PUBYEAR <" not in scopus.build_query("CV", "", 2020)
+
+
+class ScopusReply:
+    """A requests.Response with the given status and JSON body."""
+
+    def __init__(self, body=None, status=200):
+        self.body, self.status_code = body or SCOPUS_REPLY, status
+
+    def raise_for_status(self):
+        import requests
+
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+    def json(self):
+        return self.body
+
+
 def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
     with pytest.raises(scopus.NotConfigured):
         scopus.search("NLP", "", 2020)
 
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    monkeypatch.setattr(
+        scopus, "abstracts_of", lambda dois: {"10.18653/v1/2022.naacl-main.272": "We retrieve late."}
+    )
     seen = {}
-
-    class Reply:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return SCOPUS_REPLY
 
     def fake_get(url, params, headers, timeout):
         seen.update(url=url, params=params, headers=headers)
-        return Reply()
+        return ScopusReply()
 
     import requests
 
     monkeypatch.setattr(requests, "get", fake_get)
-    found = scopus.search("NLP", "retrieval", 2020, start=15)
-    assert seen["headers"]["X-ELS-APIKey"] == "k" and seen["params"]["start"] == 15
-    assert found == [
-        {
-            "doi": "10.18653/v1/2022.naacl-main.272",
-            "title": "A late interaction retriever",
-            "venue": "NAACL 2022",
-            "year": "2022",
-            "first_author": "Santhanam K.",
-            "cited_by": 412,
-        }
-    ]
+    found = scopus.search("NLP", "retrieval", 2020, sort="oldest", start=25)
+    assert seen["headers"]["X-ELS-APIKey"] == "k" and seen["params"]["start"] == 25
+    assert seen["params"]["sort"] == "+coverDate"
+    assert found == {
+        "total": 375,
+        "results": [
+            {
+                "doi": "10.18653/v1/2022.naacl-main.272",
+                "title": "A late interaction retriever",
+                "venue": "NAACL 2022",
+                "year": "2022",
+                "first_author": "Santhanam K.",
+                "cited_by": 412,
+                "abstract": "We retrieve late.",
+            }
+        ],
+    }
+
+
+def test_scopus_search_asks_again_once_after_a_timeout_but_not_after_a_refused_key(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    monkeypatch.setattr(scopus, "abstracts_of", lambda dois: {})
+    replies = [requests.Timeout("slow"), ScopusReply()]
+
+    def flaky_get(url, params, headers, timeout):
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(requests, "get", flaky_get)
+    assert scopus.search("NLP", "", 2020)["total"] == 375
+
+    calls = []
+    monkeypatch.setattr(requests, "get", lambda *a, **k: calls.append(1) or ScopusReply(status=401))
+    with pytest.raises(requests.HTTPError):
+        scopus.search("NLP", "", 2020)
+    assert len(calls) == 1
+
+
+def test_abstracts_come_from_openalex_by_doi_and_are_skipped_when_it_fails(monkeypatch):
+    from app.pipeline import indexes
+
+    asked = {}
+
+    def works(params):
+        asked.update(params)
+        return [
+            {
+                "doi": "https://doi.org/10.1/ABC",
+                "abstract_inverted_index": {"Late": [0], "wins": [2], "interaction": [1]},
+            }
+        ]
+
+    monkeypatch.setattr(indexes, "openalex_works", works)
+    assert scopus.abstracts_of(["10.1/ABC", "10.1/a,b"]) == {"10.1/abc": "Late interaction wins"}
+    assert asked["filter"] == "doi:10.1/ABC"  # a DOI holding "," would break the filter
+
+    def down(params):
+        raise indexes._IndexError("HTTP 503")
+
+    monkeypatch.setattr(indexes, "openalex_works", down)
+    assert scopus.abstracts_of(["10.1/ABC"]) == {}
+
+
+def test_an_abstract_loses_a_leading_heading_but_not_a_word_that_starts_like_it():
+    assert scopus._abstract_text({"Abstract": [0], "Event": [1], "cameras": [2]}) == "Event cameras"
+    assert scopus._abstract_text({"Abstraction": [0], "helps": [1]}) == "Abstraction helps"
 
 
 def test_scopus_add_lists_the_paper_under_a_topic_once(api, monkeypatch):
@@ -721,6 +798,26 @@ def test_scopus_search_says_when_it_is_not_set_up(api, monkeypatch):
     monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
     assert client.get("/labeling/scopus/search", params={"topic": "NLP"}).status_code == 503
     assert client.get("/labeling/scopus/search", params={"topic": "Cooking"}).status_code == 422
+    assert client.get("/labeling/scopus/search", params={"topic": "NLP", "sort": "random"}).status_code == 422
+
+
+def test_a_failed_scopus_search_says_why(api, monkeypatch):
+    import requests
+
+    client, _, _ = api
+
+    def fail_with(error):
+        def search(*args):
+            raise error
+
+        monkeypatch.setattr(scopus, "search", search)
+        return client.get("/labeling/scopus/search", params={"topic": "NLP"})
+
+    quota = fail_with(requests.HTTPError("HTTP 429", response=ScopusReply(status=429)))
+    assert quota.status_code == 429 and "quota" in quota.json()["detail"]
+    assert fail_with(requests.Timeout("slow")).status_code == 504
+    key = fail_with(requests.HTTPError("HTTP 401", response=ScopusReply(status=401)))
+    assert key.status_code == 502 and "API key" in key.json()["detail"]
 
 
 def test_every_venue_name_is_specific_enough_to_match_only_that_venue():

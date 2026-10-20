@@ -349,21 +349,44 @@ def _pooled_dois(main) -> set[str]:
 
 @router.get("/scopus/search")
 async def scopus_search(
-    topic: str, q: str = "", since: int = 2020, page: int = 0, _who: str = Depends(annotator)
+    topic: str,
+    q: str = "",
+    since: int = 2020,
+    until: int | None = None,
+    sort: str = "cited",
+    page: int = 0,
+    _who: str = Depends(annotator),
 ):
-    """Open-access papers of a topic's venues, from Scopus. Each says whether it is already listed."""
+    """One page of a topic's open-access papers from Scopus, with the total and each abstract.
+    Each paper says whether it is already listed. A failure says why: the page shows it."""
     from app import main
 
     if topic not in TOPICS:
         raise HTTPException(422, f"no such topic: {topic}")
+    if sort not in scopus.SORTS:
+        raise HTTPException(422, f"sort must be one of {', '.join(scopus.SORTS)}")
     try:
-        found = await asyncio.to_thread(scopus.search, topic, q, since, max(page, 0) * scopus.PAGE)
+        start = max(page, 0) * scopus.PAGE
+        found = await asyncio.to_thread(scopus.search, topic, q, since, until, sort, start)
     except scopus.NotConfigured as error:
         raise HTTPException(503, f"Scopus is not set up: {error}") from error
-    except Exception as error:  # a refused key, a timeout, Scopus being down
-        raise HTTPException(502, "Scopus did not answer") from error
+    except requests.Timeout as error:
+        log.warning("Scopus search timed out twice: %s", error)
+        raise HTTPException(504, "Scopus took too long to answer") from error
+    except requests.HTTPError as error:
+        status = error.response.status_code if error.response is not None else 0
+        log.warning("Scopus search refused: HTTP %s", status)
+        if status == 429:
+            raise HTTPException(429, "the Scopus key has used its quota for now") from error
+        if status in (401, 403):
+            raise HTTPException(502, "Scopus refused the API key") from error
+        raise HTTPException(502, f"Scopus answered HTTP {status}") from error
+    except requests.RequestException as error:
+        log.warning("Scopus search failed: %s", error)
+        raise HTTPException(502, "Scopus could not be reached") from error
     listed = await asyncio.to_thread(_pooled_dois, main)
-    return {"results": [{**paper, "added": paper["doi"].lower() in listed} for paper in found]}
+    papers = [{**paper, "added": paper["doi"].lower() in listed} for paper in found["results"]]
+    return {"total": found["total"], "results": papers}
 
 
 @router.post("/scopus/add")
