@@ -124,4 +124,30 @@ describe('Ask AI in the labeler', () => {
       body: { question: 'Where does B report recall?', reference_id: 'refB' },
     })
   })
+
+  it('shows the question apart from the answer, a count, and a badge and page for each statement', async () => {
+    gateway.events = [
+      { type: 'statement', index: 0, text: 'It reports recall on MS MARCO.', source: 'paperA.pdf', page: 5 },
+      { type: 'verdict', index: 0, verdict: 'supports', quote: 'recall rose by 4 points', reasoning: 'Table 2.' },
+      { type: 'statement', index: 1, text: 'It reports speed on BEIR.', source: 'paperA.pdf', page: 7 },
+      { type: 'verdict', index: 1, verdict: 'refutes', quote: '', reasoning: 'BEIR is not measured.' },
+      { type: 'statement', index: 2, text: 'It names no baseline.', source: 'paperA.pdf' },
+      { type: 'done', statements: 3 },
+    ]
+    await openAsk()
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'What does it report?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(await screen.findByText('You asked')).toBeInTheDocument()
+    expect(screen.getByText('What does it report?')).toBeInTheDocument()
+    expect(await screen.findByText('1 of 3 backed · 1 contradicted')).toBeInTheDocument()
+    const list = screen.getByText('It reports recall on MS MARCO.').closest('ol') as HTMLElement
+    const [backed, contradicted, unchecked] = within(list).getAllByRole('listitem')
+    expect(backed).toHaveTextContent(/It reports recall on MS MARCO\.BackedPage 5/)
+    expect(contradicted).toHaveTextContent(/Contradicted.*Page 7/)
+    // The answer ended before this one was checked, so it says so instead of "Checking…".
+    expect(unchecked).toHaveTextContent("Can't check")
+    expect(within(backed).getByText('What the passage says')).toBeInTheDocument()
+    expect(within(backed).getByText('“recall rose by 4 points”')).toBeInTheDocument()
+  })
 })
