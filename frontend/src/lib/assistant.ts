@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Target } from '../components/PageViewer'
 import { postEvents, request } from './api'
-import { describeResult, type Parsed } from './askCommands'
+import { describeResult, type CommandView, type Parsed } from './askCommands'
 
 /** What the question is about: the screen it was asked on, and the analysis or graph node there. */
 export type AskContext = { screen: string; analysis?: string; node?: string }
@@ -37,7 +37,9 @@ export type Turn = {
   status: 'answering' | 'done' | 'failed' | 'stopped'
   /** The statement whose check came in last, where the AI cursor points (components/AiCursor). */
   lastChecked?: number
-  /** What a /command (lib/askCommands) answered when it is not statements. */
+  /** What a /command (lib/askCommands) answered when it is not statements, and the command's name. */
+  view?: CommandView
+  command?: string
   note?: string
 }
 
@@ -183,7 +185,7 @@ export function useAssistant() {
     const abort = new AbortController()
     controller.current = abort
     const isCurrent = () => controller.current === abort
-    const turn: Turn = { id: nextTurnId++, question, statements: [], status: 'answering' }
+    const turn: Turn = { id: nextTurnId++, question, statements: [], status: 'answering', command: `/${command.name}` }
     setTurns((all) => [...all, turn])
     try {
       const result = await request<Record<string, unknown>>(`/agent/tools/${command.name}`, {
@@ -192,18 +194,18 @@ export function useAssistant() {
         body: JSON.stringify(command.args),
         signal: abort.signal,
       })
-      if (isCurrent()) updateTurn(turn.id, (shown) => ({ ...shown, ...describeResult(command.name, result), status: 'done' }))
+      if (isCurrent()) updateTurn(turn.id, (shown) => ({ ...shown, ...describeResult(command.name, result, command.args), status: 'done' }))
     } catch (error) {
       if (!isCurrent() || (error as Error).name === 'AbortError') return
       // The reason, not "the answer failed": a command has no answer to ask again.
       const reason = error instanceof Error ? error.message : 'unknown error'
-      updateTurn(turn.id, (shown) => ({ ...shown, note: `/${command.name} could not run: ${reason}`, status: 'done' }))
+      updateTurn(turn.id, (shown) => ({ ...shown, view: { kind: 'message', text: `/${command.name} could not run: ${reason}` }, status: 'done' }))
     }
   }
 
   /** Shows a /command that cannot run, such as an unknown name, as a finished turn. */
   function refuse(question: string, note: string) {
-    setTurns((all) => [...all, { id: nextTurnId++, question, statements: [], status: 'done', note }])
+    setTurns((all) => [...all, { id: nextTurnId++, question, statements: [], status: 'done', view: { kind: 'message', text: note }, command: question.split(' ')[0] }])
   }
 
   /** Stops the answer and keeps what arrived. */

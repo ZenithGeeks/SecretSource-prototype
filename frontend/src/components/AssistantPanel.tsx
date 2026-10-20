@@ -18,6 +18,7 @@ import { askTarget, type Pointing } from '../lib/askCursor'
 import { parseCommand, type PaperRef } from '../lib/askCommands'
 import { AiCursor } from './AiCursor'
 import { AskInput } from './AskInput'
+import { CommandResult } from './CommandResult'
 import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
 
@@ -150,7 +151,7 @@ function TurnView({
   onAskAgain?: () => void
   onShowSource: (target: Target) => void
 }) {
-  const unanswered = turn.status === 'done' && turn.statements.length === 0 && !turn.note
+  const unanswered = turn.status === 'done' && turn.statements.length === 0 && !turn.note && !turn.view
   return (
     <div className="flex flex-col gap-3">
       <p data-ask-target={askTarget({ kind: 'question', id: String(turn.id) })} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">
@@ -177,7 +178,8 @@ function TurnView({
           </ul>
         </section>
       )}
-      {turn.note && <pre className="rounded-xl bg-neutral-soft p-3 font-sans text-[13px] leading-5 whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{turn.note}</pre>}
+      {turn.view && <CommandResult view={turn.view} command={turn.command ?? 'command'} />}
+      {turn.note && <p className="text-xs leading-5 text-ink-muted">{turn.note}</p>}
       {turn.status === 'answering' && turn.statements.length === 0 && (
         <p className="flex items-center gap-2 text-xs text-ink-muted">
           <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
