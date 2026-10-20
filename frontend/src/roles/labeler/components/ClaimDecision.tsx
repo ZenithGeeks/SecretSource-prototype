@@ -6,10 +6,11 @@ import type { ClaimStatus, Draft, WorkClaim } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 
 const CHOICES: { status: ClaimStatus; label: string; hint: string; key: string }[] = [
-  { status: 'accepted', label: 'Keep', hint: 'A real claim, worded right', key: 'K' },
-  { status: 'edited', label: 'Edit', hint: 'A real claim, reword it', key: 'E' },
-  { status: 'rejected', label: 'Reject', hint: 'Not a claim of this paper', key: 'X' },
+  { status: 'accepted', label: 'Keep', hint: 'Yes, and it is worded right', key: 'K' },
+  { status: 'edited', label: 'Edit', hint: 'Yes, but reword it', key: 'E' },
+  { status: 'rejected', label: 'Reject', hint: 'No, it is not a claim of this paper', key: 'X' },
 ]
+const QUESTION = 'Is this a claim the paper makes?'
 
 /** A key cap. Hidden from screen readers by default: the button carries `aria-keyshortcuts`. */
 export function Kbd({ children, hidden = true }: { children: string; hidden?: boolean }) {
@@ -62,7 +63,15 @@ export function ClaimDecision({
         </p>
       )}
 
-      <div role="radiogroup" aria-label="Decision on this claim" className="grid grid-cols-3 gap-2">
+      <p id={`${name}-question`} className="text-sm font-medium text-ink">
+        {QUESTION}
+      </p>
+      <div
+        role="radiogroup"
+        aria-label="Decision on this claim"
+        aria-describedby={`${name}-question`}
+        className="grid grid-cols-3 gap-2"
+      >
         {CHOICES.map(({ status, label, hint, key }) => (
           <button
             key={status}
@@ -72,7 +81,7 @@ export function ClaimDecision({
             aria-keyshortcuts={key}
             onClick={() => onChange({ status })}
             className={cn(
-              'flex min-h-11 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors',
+              'relative flex min-h-11 flex-col items-start rounded-lg border px-3 py-2 pr-8 text-left transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
               draft.status === status
                 ? status === 'rejected'
@@ -81,11 +90,13 @@ export function ClaimDecision({
                 : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
             )}
           >
-            <span className="flex items-center gap-1.5 text-sm font-medium">
-              {label}
+            <span className="text-sm font-medium">{label}</span>
+            <span className="text-xs">{hint}.</span>
+            {/* Last and in a corner, so copied text reads "Keep / Yes, and it is worded right",
+                not "KeepKYes...". */}
+            <span className="absolute top-2 right-2">
               <Kbd>{key}</Kbd>
             </span>
-            <span className="text-xs">{hint}</span>
           </button>
         ))}
       </div>

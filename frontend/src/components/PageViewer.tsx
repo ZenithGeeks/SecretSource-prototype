@@ -52,6 +52,15 @@ export type Target = {
   page?: number // fall back to this when there is no source to take a page from
   error?: string // a lookup failure that should remain distinct from an unlocated passage
   section?: string // the analysed paper's section this points into, for the table of contents
+  paperRole?: PaperRole // which of two papers on screen this is: a strip at the top says so (labeler)
+}
+
+export type PaperRole = 'under-review' | 'reference'
+
+// Text and colour both, so the two papers differ without relying on colour.
+const ROLE_STRIP: Record<PaperRole, { name: string; hint: string; className: string }> = {
+  'under-review': { name: 'Paper under review', hint: 'where the claim is made', className: 'border-accent bg-accent-soft text-accent' },
+  reference: { name: 'Cited reference', hint: 'does it support the claim?', className: 'border-neutral bg-neutral-soft text-ink' },
 }
 
 const ZOOMS = [1, 1.25, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
@@ -362,6 +371,12 @@ export function PageViewer({
             : cn('rounded-xl border p-4', fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : (className ?? 'h-[calc(100vh-3rem)]')),
         )}
       >
+        {target.paperRole && (
+          <p className={cn('-mx-4 -mt-4 border-b-2 px-4 py-1.5 text-xs', ROLE_STRIP[target.paperRole].className, narrow && '-mx-3 -mt-3 px-3')}>
+            <span className="font-semibold uppercase tracking-wide">{ROLE_STRIP[target.paperRole].name}</span>
+            <span className="text-ink-muted"> · {ROLE_STRIP[target.paperRole].hint}</span>
+          </p>
+        )}
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}

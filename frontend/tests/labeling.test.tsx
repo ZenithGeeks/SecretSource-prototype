@@ -59,13 +59,14 @@ vi.mock('../src/components/PageViewer', () => ({
     target,
     onSelectText,
   }: {
-    target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null }
+    target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; paperRole?: string }
     onSelectText?: (s: { text: string; page: number | null }) => void
   }) => (
     <div>
       <div data-testid="viewer">{target.paper}|{target.quote}</div>
       <p data-testid="viewer-box">{target.paper}: {target.source ? `boxed on page ${target.source.page}` : 'no box'}</p>
       <p data-testid="viewer-heading">{target.label}{target.detail && ` / ${target.detail}`}</p>
+      <p data-testid="viewer-role">{target.paperRole}</p>
       <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
         select in {target.paper}
       </button>
@@ -74,6 +75,7 @@ vi.mock('../src/components/PageViewer', () => ({
 }))
 
 import {
+  bestCandidate,
   buildSave,
   byline,
   draftFromSaved,
@@ -425,7 +427,7 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reference only' }))
     expect(screen.getAllByTestId('viewer').map((v) => v.textContent)).toEqual(['refB.pdf|recall rose by 4 points'])
     expect(window.localStorage.getItem('labeler.paperView')).toBe('reference')
-    fireEvent.click(screen.getByRole('button', { name: 'Reference + this paper' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stacked' }))
     expect(screen.getAllByTestId('viewer')).toHaveLength(2)
     window.localStorage.removeItem('labeler.paperView')
   })
@@ -434,8 +436,41 @@ describe('the workspace', () => {
     await open()
     expect(screen.getAllByTestId('viewer-heading').map((h) => h.textContent)).toEqual([
       'Reference [b4]: Ref B / Silva, Lee · 2021',
-      'This paper, where the claim is made',
+      'Paper A',
     ])
+    expect(screen.getAllByTestId('viewer-role').map((r) => r.textContent)).toEqual(['reference', 'under-review'])
+  })
+
+  it('puts the paper under review left and the reference right, side by side', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Side by side' }))
+    expect(screen.getAllByTestId('viewer').map((v) => v.textContent)).toEqual([
+      'paperA.pdf|We show Y improves recall.',
+      'refB.pdf|recall rose by 4 points',
+    ])
+    expect(screen.getAllByTestId('viewer-role').map((r) => r.textContent)).toEqual(['under-review', 'reference'])
+    expect(window.localStorage.getItem('labeler.paperView')).toBe('side')
+  })
+
+  it('offers side by side only from 1600px, and stacks a stored side-by-side choice below that', async () => {
+    window.localStorage.setItem('labeler.paperView', 'side')
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: query !== '(min-width: 1600px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+    await open()
+    expect(screen.queryByRole('button', { name: 'Side by side' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stacked' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getAllByTestId('viewer-role').map((r) => r.textContent)).toEqual(['reference', 'under-review'])
+  })
+
+  it('asks the claim question in words, apart from the key caps', async () => {
+    await open()
+    const decision = screen.getByRole('radiogroup', { name: 'Decision on this claim' })
+    expect(decision).toHaveAccessibleDescription('Is this a claim the paper makes?')
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveTextContent(/^KeepYes, and it is worded right\.K$/)
+    expect(screen.getByRole('radio', { name: /Reject/ })).toHaveTextContent('No, it is not a claim of this paper.')
   })
 
   it('lists what every level means under the picker, with the chosen one marked', async () => {
@@ -542,6 +577,31 @@ describe('the workspace', () => {
         { cand_id: 'h1', origin: 'retrieved_added', status: 'relevant', rank: 1, score: 7.5, page: 3, passage: 'Y doubles recall on Z' },
       ],
     })
+  })
+
+  it('opens the best passage the search found for a claim added by hand', async () => {
+    gateway.found = [{ ...foundForAdded, cand_id: 'h0', score: 2, page: 9, passage: 'a weak match' }, foundForAdded]
+    await open()
+    addTypedClaim('Y doubles recall')
+    await waitFor(() => expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('refB.pdf|Y doubles recall on Z'))
+  })
+
+  it('picks the reference the claim cites over a higher score elsewhere', () => {
+    const cand = (reference_id: string, score: number) => ({
+      cand_id: `${reference_id}-${score}`, reference_id, reference_file: `${reference_id}.pdf`, rank: 1, score, page: 1, passage: '',
+    })
+    const references = [
+      { reference_id: 'refB', file: 'refB.pdf', label: 'B', ref: 'b4' },
+      { reference_id: 'refC', file: 'refC.pdf', label: 'C', ref: 'b9' },
+    ]
+    const claim: WorkClaim = {
+      claim_id: 'paperA#h-1', claim: 'Y wins', sentence: 'Y wins on Z [b4].', section: '', source: null, origin: 'human_added',
+      candidates: [cand('refC', 9), cand('refB', 3), cand('refB', 5)],
+    }
+    expect(bestCandidate(claim, references)?.cand_id).toBe('refB-5')
+    expect(bestCandidate({ ...claim, sentence: 'Y wins.' }, references)?.cand_id).toBe('refC-9')
+    expect(bestCandidate({ ...claim, sentence: 'Y wins [b2; b4].' }, references)?.cand_id).toBe('refB-5')
+    expect(bestCandidate({ ...claim, candidates: [] }, references)).toBeUndefined()
   })
 
   it('adds a claim on plain http, where the browser has no crypto.randomUUID', async () => {
