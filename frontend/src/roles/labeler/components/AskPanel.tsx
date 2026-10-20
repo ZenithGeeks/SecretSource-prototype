@@ -9,11 +9,12 @@ import { Check, CircleAlert, CircleHelp, Loader2, Sparkles, Wand2, X } from 'luc
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 
 import { AskInput } from '../../../components/AskInput'
+import { CommandResult } from '../../../components/CommandResult'
 import { Mascot } from '../../../components/Mascot'
 import { Badge, Button } from '../../../components/ui'
 import type { Statement, StatementVerdict } from '../../../lib/assistant'
 import { request } from '../../../lib/api'
-import { describeResult, parseCommand } from '../../../lib/askCommands'
+import { describeResult, parseCommand, type CommandView } from '../../../lib/askCommands'
 import {
   askLabeling,
   problem,
@@ -44,7 +45,7 @@ const VERDICTS: Record<StatementVerdict | 'checking', Verdict> = {
   checking: { label: 'Checking…', tone: 'neutral', icon: Loader2 },
 }
 
-type Answer = { question: string; statements: Statement[]; status: 'answering' | 'done' | 'failed'; error?: string; note?: string }
+type Answer = { question: string; statements: Statement[]; status: 'answering' | 'done' | 'failed'; error?: string; note?: string; view?: CommandView; command?: string }
 
 export function AskPanel({
   analysisId,
@@ -229,7 +230,7 @@ function Question({ analysisId, references }: { analysisId: string; references: 
         body: JSON.stringify(parsed.args),
         signal,
       })
-      setAnswer({ question, statements: [], status: 'done', ...describeResult(parsed.name, result) })
+      setAnswer({ question, statements: [], status: 'done', command: `/${parsed.name}`, ...describeResult(parsed.name, result, parsed.args) })
     } catch (reason) {
       if ((reason as Error).name !== 'AbortError') setAnswer({ question, statements: [], status: 'failed', error: problem(reason).title })
     }
@@ -302,10 +303,9 @@ function AnswerView({ answer }: { answer: Answer }) {
           ))}
         </ol>
       )}
-      {answer.note && (
-        <pre className="rounded-lg bg-neutral-soft p-2.5 font-sans text-sm leading-5 whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{answer.note}</pre>
-      )}
-      {answer.status === 'done' && statements.length === 0 && !answer.note && <p className="text-ink-muted">No passage in it answers that.</p>}
+      {answer.view && <CommandResult view={answer.view} command={answer.command ?? 'command'} />}
+      {answer.note && <p className="text-xs leading-5 text-ink-muted">{answer.note}</p>}
+      {answer.status === 'done' && statements.length === 0 && !answer.note && !answer.view && <p className="text-ink-muted">No passage in it answers that.</p>}
       {answer.status === 'failed' && (
         <p role="alert" className="text-refutes">
           Could not answer: {answer.error}

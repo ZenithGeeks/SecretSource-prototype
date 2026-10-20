@@ -164,7 +164,8 @@ describe('Ask AI in the labeler', () => {
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: '/labeling_progress' } })
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
 
-    expect(await screen.findByText(/Saved 1 of 2 claims/)).toBeInTheDocument()
+    expect(await screen.findByRole('progressbar', { name: 'Claims saved' })).toHaveAttribute('aria-valuenow', '1')
+    expect(screen.getByText('Method Z is faster.')).toBeInTheDocument()
     expect(gateway.tools).toEqual([{ path: '/agent/tools/labeling_progress', body: { analysis_id: 'a1' } }])
 
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: '/nope' } })

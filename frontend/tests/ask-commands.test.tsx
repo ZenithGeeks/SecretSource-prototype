@@ -8,6 +8,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantPanel } from '../src/components/AssistantPanel'
+import { CommandResult } from '../src/components/CommandResult'
 import { describeResult, matchCommands, matchPapers, parseCommand, withMention } from '../src/lib/askCommands'
 import { useAssistant } from '../src/lib/assistant'
 
@@ -81,15 +82,88 @@ describe('reading a tool result', () => {
     expect(shown.note).toContain('2 more sentences were not checked')
   })
 
-  it('shows an analysis as a note with its claims, and a tool error as its message', () => {
-    const note = describeResult('get_analysis', {
+  it('shows an analysis as a view with its claims, and a tool error as a message', () => {
+    const shown = describeResult('get_analysis', {
       title: 'T',
       status: 'done',
       standing: { backed: 1 },
       claims: [{ number: 1, claim: 'C one', standing: 'backed' }],
-    }).note
-    expect(note).toContain('1. [backed] C one')
-    expect(describeResult('get_claim', { status: 'error', message: 'no analysis' })).toEqual({ note: 'no analysis' })
+    })
+    expect(shown.view).toMatchObject({ kind: 'claims', title: 'T', claims: [{ number: 1, claim: 'C one', standing: 'backed' }] })
+    expect(describeResult('get_claim', { status: 'error', message: 'no analysis' })).toEqual({
+      view: { kind: 'message', text: 'no analysis' },
+    })
+  })
+
+  it('marks the words of a search, once each, for the claims it found', () => {
+    const shown = describeResult('search_claims', { claims: [{ title: 'P', number: 2, claim: 'Late interaction', standing: 'silent' }] }, { query: 'late Interaction late' })
+
+    expect(shown.view).toMatchObject({ kind: 'claims', highlight: ['late', 'interaction'] })
+  })
+})
+
+describe('the result cards', () => {
+  it('lists claims with a standing badge each, and marks the searched words', () => {
+    const { view } = describeResult(
+      'search_claims',
+      {
+        claims: [
+          { title: 'ColBERTv2', number: 2, claim: 'Late interaction was introduced in ColBERT.', standing: 'backed' },
+          { title: 'ColPali', number: 8, claim: 'Engines scale to millions of documents.', standing: 'contradicted' },
+        ],
+      },
+      { query: 'late interaction' },
+    )
+    render(<CommandResult view={view!} command="/search_claims" />)
+
+    const rows = within(screen.getByRole('region', { name: 'Result of /search_claims' })).getAllByRole('listitem')
+    expect(within(rows[0]).getByText('Backed')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('Contradicted')).toBeInTheDocument()
+    expect(within(rows[0]).getByText('ColBERTv2')).toBeInTheDocument()
+    expect(rows[0].querySelectorAll('mark')).toHaveLength(2) // "Late" and "interaction"
+    expect(rows[1].querySelectorAll('mark')).toHaveLength(0)
+  })
+
+  it('shows an analysis with a count per standing', () => {
+    const { view } = describeResult('get_analysis', {
+      title: 'Qwen2-VL',
+      status: 'done',
+      standing: { backed: 1, silent: 16, contradicted: 0, unchecked: 1 },
+      claims: [{ number: 1, claim: 'It reads any resolution.', standing: 'silent' }],
+    })
+    render(<CommandResult view={view!} command="/get_analysis" />)
+
+    const tally = screen.getByRole('list', { name: 'Claims by standing' })
+    expect(within(tally).getByText('Not backed').parentElement).toHaveTextContent('16 Not backed')
+    expect(within(tally).queryByText('Contradicted')).not.toBeInTheDocument() // none: nothing to show
+  })
+
+  it('shows the evidence behind a claim with the quote and the verdict as a badge', () => {
+    const { view } = describeResult('get_claim', {
+      number: 3,
+      claim: 'ColBERT cuts the index by 10x.',
+      sentence: 'As shown, ColBERT cuts the index by 10x [b1].',
+      standing: 'backed',
+      verdicts: [{ cited: '2004.12832', verdict: 'supports', quote: '6-10x smaller', reasoning: 'The paper says so.' }],
+      unchecked: [{ source: 'x', reason: 'not found' }],
+    })
+    render(<CommandResult view={view!} command="/get_claim" />)
+
+    expect(screen.getByText('“6-10x smaller”')).toBeInTheDocument()
+    expect(screen.getAllByText('Backed')).toHaveLength(2) // the claim's, and the cited paper's
+    expect(screen.getByText("Can't check")).toBeInTheDocument()
+    expect(screen.getByText('not found')).toBeInTheDocument()
+  })
+
+  it('shows the gaps as three counts', () => {
+    render(<CommandResult view={{ kind: 'gaps', notBacked: 4, contradicted: 2, missing: 7 }} command="/get_gaps" />)
+
+    const tiles = screen.getAllByRole('listitem')
+    expect(tiles.map((tile) => tile.textContent)).toEqual([
+      expect.stringContaining('4Not backed'),
+      expect.stringContaining('2Contradicted'),
+      expect.stringContaining('7Not held'),
+    ])
   })
 })
 

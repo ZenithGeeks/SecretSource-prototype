@@ -86,86 +86,122 @@ export function parseCommand(draft: string, papers: PaperRef[], open?: string): 
 }
 
 type Row = Record<string, unknown>
-type Shown = { statements?: Statement[]; note?: string }
+
+export type Standing = 'backed' | 'silent' | 'contradicted' | 'unchecked'
+
+/** A claim in a list: its number in its paper, where it stands, and the paper when the list mixes several. */
+export type ClaimRow = { number: number; claim: string; standing: Standing; paper?: string }
+
+/** What a command's answer looks like in the panel (components/CommandResult). */
+export type CommandView =
+  | { kind: 'claims'; title?: string; status?: string; message?: string; tally?: Record<Standing, number>; claims: ClaimRow[]; highlight?: string[] }
+  | {
+      kind: 'claim'
+      number: number
+      claim: string
+      sentence: string
+      standing: Standing
+      verdicts: { cited: string; verdict: StatementVerdict; quote: string; reasoning: string }[]
+      unchecked: { source: string; reason: string }[]
+    }
+  | { kind: 'gaps'; notBacked: number; contradicted: number; missing: number }
+  | { kind: 'page'; page: number | null }
+  | { kind: 'progress'; saved: number; claims: number; reviewed: number; next: { number: number; claim: string } | null }
+  | { kind: 'code'; text: string }
+  | { kind: 'started'; id: string }
+  | { kind: 'message'; text: string }
+
+type Shown = { statements?: Statement[]; view?: CommandView; note?: string }
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
+const count = (value: unknown) => (Array.isArray(value) ? value.length : 0)
+const rows = (value: unknown) => (Array.isArray(value) ? (value as Row[]) : [])
+const claimRow = (row: Row, paper?: string): ClaimRow => ({
+  number: Number(row.number),
+  claim: text(row.claim),
+  standing: (text(row.standing) || 'unchecked') as Standing,
+  paper,
+})
 
-/** The tool's result as statements for the chat, or a note when it is not a list of statements. */
-export function describeResult(name: string, result: Row): Shown {
-  if (result.status === 'error') return { note: text(result.message) }
+/** The words of a search, for marking them in the claims it found. */
+const words = (query: unknown) => (text(query).toLowerCase().match(/\w{3,}/g) ?? []).filter((word, at, all) => all.indexOf(word) === at)
+
+/** The tool's result as statements for the chat, or as a view or a note when it is not a list of statements. */
+export function describeResult(name: string, result: Row, args: Record<string, string | number> = {}): Shown {
+  if (result.status === 'error') return { view: { kind: 'message', text: text(result.message) } }
   switch (name) {
     case 'check_text': {
-      const rows = (result.results as Row[]) ?? []
+      const checked = rows(result.results)
       const left = Number(result.not_checked) || 0
       return {
-        statements: rows.map((row, index) => statement(index, row, 'text', 'source')),
-        note: left ? `${left} more sentences were not checked: the limit is 6.` : rows.length ? undefined : 'No sentence long enough to check.',
+        statements: checked.map((row, index) => statement(index, row, 'text', 'source')),
+        note: left ? `${left} more sentences were not checked: the limit is 6.` : checked.length ? undefined : 'No sentence long enough to check.',
       }
     }
     case 'find_support': {
-      const rows = (result.passages as Row[]) ?? []
-      return rows.length
-        ? { statements: rows.map((row, index) => statement(index, row, 'text', 'paper')) }
-        : { note: 'No passage in your papers bears on this.' }
+      const passages = rows(result.passages)
+      return passages.length
+        ? { statements: passages.map((row, index) => statement(index, row, 'text', 'paper')) }
+        : { view: { kind: 'message', text: 'No passage in your papers bears on this.' } }
     }
-    case 'get_analysis': {
-      const claims = (result.claims as Row[]) ?? []
-      const tally = Object.entries((result.standing as Row) ?? {}).map(([standing, count]) => `${count} ${standing}`)
-      const why = text(result.message) ? `: ${text(result.message)}` : ''
+    case 'get_analysis':
       return {
-        note: [
-          `${text(result.title)} · ${text(result.status)}${why}`,
-          tally.join(' · '),
-          '',
-          ...claims.map((claim) => `${claim.number}. [${text(claim.standing)}] ${text(claim.claim)}`),
-        ].join('\n'),
+        view: {
+          kind: 'claims',
+          title: text(result.title),
+          status: text(result.status),
+          message: text(result.message),
+          tally: result.standing as Record<Standing, number>,
+          claims: rows(result.claims).map((row) => claimRow(row)),
+        },
       }
-    }
-    case 'get_claim': {
-      const verdicts = (result.verdicts as Row[]) ?? []
-      const unchecked = (result.unchecked as Row[]) ?? []
+    case 'get_claim':
       return {
-        note: [
-          `Claim ${result.number} [${text(result.standing)}] ${text(result.claim)}`,
-          text(result.sentence),
-          ...verdicts.map((v) => `\n${text(v.cited)}: ${text(v.verdict)}\n"${text(v.quote)}"\n${text(v.reasoning)}`),
-          ...unchecked.map((u) => `\n${text(u.source)}: not checked (${text(u.reason)})`),
-        ].join('\n'),
+        view: {
+          kind: 'claim',
+          number: Number(result.number),
+          claim: text(result.claim),
+          sentence: text(result.sentence),
+          standing: (text(result.standing) || 'unchecked') as Standing,
+          verdicts: rows(result.verdicts).map((v) => ({
+            cited: text(v.cited),
+            verdict: (text(v.verdict) || 'unchecked') as StatementVerdict,
+            quote: text(v.quote),
+            reasoning: text(v.reasoning),
+          })),
+          unchecked: rows(result.unchecked).map((u) => ({ source: text(u.source), reason: text(u.reason) })),
+        },
       }
-    }
     case 'search_claims': {
-      const claims = (result.claims as Row[]) ?? []
-      return {
-        note: claims.length
-          ? claims.map((c) => `${text(c.title)} #${c.number} [${text(c.standing)}] ${text(c.claim)}`).join('\n')
-          : 'No claim shares those words.',
-      }
+      const found = rows(result.claims)
+      return found.length
+        ? { view: { kind: 'claims', claims: found.map((row) => claimRow(row, text(row.title))), highlight: words(args.query) } }
+        : { view: { kind: 'message', text: 'No claim shares those words.' } }
     }
     case 'find_in_paper':
-      return { note: result.page ? `Found on page ${result.page}.` : 'That text is not in this paper.' }
+      return { view: { kind: 'page', page: typeof result.page === 'number' ? result.page : null } }
     case 'get_gaps':
-      return {
-        note: `${count(result.notBacked)} claims no cited work backs · ${count(result.contradicted)} contradicted · ${count(result.missing)} works cited but not held`,
-      }
+      return { view: { kind: 'gaps', notBacked: count(result.notBacked), contradicted: count(result.contradicted), missing: count(result.missing) } }
     case 'bibtex':
-      return { note: text(result.bibtex) }
+      return { view: { kind: 'code', text: text(result.bibtex) } }
     case 'submit_analysis':
-      return { note: `Started analysis ${text(result.id)}. It runs in the background: see Analyses.` }
+      return { view: { kind: 'started', id: text(result.id) } }
     case 'labeling_progress': {
       const next = result.next_unsaved as Row | null
       return {
-        note: [
-          `Saved ${result.saved} of ${result.claims} claims · reviewed ${result.reviewed}`,
-          next ? `Next unsaved: claim ${next.number}, ${text(next.claim)}` : 'Every claim is saved.',
-        ].join('\n'),
+        view: {
+          kind: 'progress',
+          saved: Number(result.saved),
+          claims: Number(result.claims),
+          reviewed: Number(result.reviewed),
+          next: next ? { number: Number(next.number), claim: text(next.claim) } : null,
+        },
       }
     }
     default:
       return { note: JSON.stringify(result, null, 2) }
   }
 }
-
-const count = (value: unknown) => (Array.isArray(value) ? value.length : 0)
 
 function statement(index: number, row: Row, textKey: string, sourceKey: string): Statement {
   return {
