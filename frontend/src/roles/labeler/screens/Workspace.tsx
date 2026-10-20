@@ -44,6 +44,7 @@ import {
 } from '../../../lib/labeling'
 import { AiCursor } from '../../../components/AiCursor'
 import type { Pointing } from '../../../lib/askCursor'
+import { FloatingPanel } from '../../../components/FloatingPanel'
 import { AskPanel } from '../components/AskPanel'
 import { ClaimDecision, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
@@ -477,6 +478,17 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
+  const askPanel = claim && (
+    <AskPanel
+      key={claim.claim_id}
+      analysisId={session.analysis_id}
+      claim={claim}
+      references={session.references}
+      reviewBlocked={reviewBlocked}
+      onPoint={point}
+    />
+  )
+
   const ask = claim && (
     <div className={cn('flex min-h-0 flex-col', wide ? 'border-t border-border-subtle' : 'rounded-xl border border-border-subtle bg-surface')}>
       <button
@@ -496,16 +508,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         </span>
         <ChevronDown className={cn('ml-auto size-4 text-ink-muted transition-transform duration-200 motion-reduce:transition-none', askOpen && 'rotate-180')} aria-hidden="true" />
       </button>
-      {askOpen && (
-        <div id="labeler-ask" className={cn('overflow-y-auto px-4 pb-4', wide && 'max-h-[42vh]')}>
-          <AskPanel
-            key={claim.claim_id}
-            analysisId={session.analysis_id}
-            claim={claim}
-            references={session.references}
-            reviewBlocked={reviewBlocked}
-            onPoint={point}
-          />
+      {/* On a wide screen Ask floats (below), so it can sit beside the passage it talks about. */}
+      {askOpen && !wide && (
+        <div id="labeler-ask" className="overflow-y-auto px-4 pb-4">
+          {askPanel}
         </div>
       )}
     </div>
@@ -606,6 +612,22 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
           {ask}
           {saveBar()}
         </div>
+      )}
+      {wide && (
+        <FloatingPanel
+          open={askOpen && Boolean(claim)}
+          title="Ask AI"
+          subtitle="Review this claim, or ask about its papers"
+          icon={
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas">
+              <Sparkles className="size-4" aria-hidden="true" />
+            </span>
+          }
+          storageKey="labeler.askPosition"
+          onClose={() => setAskOpen(false)}
+        >
+          <div id="labeler-ask">{askPanel}</div>
+        </FloatingPanel>
       )}
       <MotionConfig reducedMotion="user">
         <AiCursor pointing={askOpen && pointing?.claimId === currentId ? pointing.at : null} />
