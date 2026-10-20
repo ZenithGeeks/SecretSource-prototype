@@ -96,7 +96,7 @@ def test_a_screen_tool_with_no_tab_says_how_to_connect_one(app):
     )
 
     assert result["isError"] is True
-    assert "?connect=claude-code" in result["content"][0]["text"]
+    assert "?connect=agent" in result["content"][0]["text"]
 
 
 def test_list_papers_runs_on_the_server(app, monkeypatch):

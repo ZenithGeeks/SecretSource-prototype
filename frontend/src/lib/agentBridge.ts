@@ -1,7 +1,7 @@
 /**
- * Claude Code in this tab. Once the person allows it on the connect screen
- * (components/ClaudeCode), the tab holds the gateway's bridge stream open
- * (backend/app/screen_bridge.py) and runs each screen tool call that Claude Code sends over MCP,
+ * A coding agent (Claude Code or Codex) in this tab. Once the person allows it on the connect
+ * screen (components/ConnectAgent), the tab holds the gateway's bridge stream open
+ * (backend/app/screen_bridge.py) and runs each screen tool call the agent sends over MCP,
  * with the AI cursor and the Apply card (lib/agentTools). It stays connected across reloads of
  * this tab until the person disconnects.
  */
@@ -13,16 +13,16 @@ import type { Pointing } from './askCursor'
 import { describeTool, runTool, type ScreenActions, type ToolCall } from './agentTools'
 import type { PendingChange } from './screenAgent'
 
-const CONNECTED_KEY = 'claudeCode.connected'
+const CONNECTED_KEY = 'agentBridge.connected'
 const STEPS_SHOWN = 4
 const CURSOR_REST_MS = 2500 // as long as Ask's cursor rests on its last check
 
 /** The events backend/app/screen_bridge.py streams to the tab. */
 type BridgeEvent = { type: 'ready' } | ({ type: 'tool' } & ToolCall)
 
-export type ClaudeCode = ReturnType<typeof useClaudeCode>
+export type AgentBridge = ReturnType<typeof useAgentBridge>
 
-export function useClaudeCode(actions: ScreenActions | undefined) {
+export function useAgentBridge(actions: ScreenActions | undefined) {
   const [connected, setConnected] = useState(readConnected)
   const [steps, setSteps] = useState<string[]>([])
   const [working, setWorking] = useState(false)

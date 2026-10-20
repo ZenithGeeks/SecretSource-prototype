@@ -1,14 +1,15 @@
 /**
- * Connecting Claude Code to this tab (lib/claudeCode): the connect screen, where the person sees
- * what Claude Code may do here and allows it, and the toolbar pill that shows it working, holds
- * a change for Apply, and disconnects. docs/agent-tools.md covers the Claude Code side.
+ * Connecting a coding agent (Claude Code or Codex) to this tab (lib/agentBridge): the connect
+ * screen, where the person sees what the agent may do here and allows it, and the toolbar pill
+ * that shows it working, holds a change for Apply, and disconnects. docs/agent-tools.md covers
+ * the agent's side.
  */
 
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { Ban, Check, ChevronDown, Copy, Link2, Loader2, SquareTerminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import type { ClaudeCode } from '../lib/claudeCode'
+import type { AgentBridge } from '../lib/agentBridge'
 import { cn } from '../lib/utils'
 import { Button } from './ui'
 import { ApproveChange } from './DoIt'
@@ -21,18 +22,33 @@ const CAN = [
 ]
 const CANNOT = ['Save, delete or upload anything', 'Start or stop an analysis']
 
-const MCP_CONFIG = `{
+const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
+
+/** Where each agent reads its MCP servers, and the entry that adds SecretSource. */
+const CLIENTS = {
+  'Claude Code': {
+    file: '.mcp.json in your project',
+    config: `{
   "mcpServers": {
     "secretsource": {
       "type": "http",
-      "url": "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/",
+      "url": "${MCP_URL}",
       "headers": { "apikey": "\${GATEHOUSE_KEY}" }
     }
   }
-}`
+}`,
+  },
+  Codex: {
+    file: '~/.codex/config.toml',
+    config: `[mcp_servers.secretsource]
+url = "${MCP_URL}"
+env_http_headers = { "apikey" = "GATEHOUSE_KEY" }`,
+  },
+}
+type Client = keyof typeof CLIENTS
 
-/** The connect screen: who is signed in, what Claude Code can and cannot do here, Allow or Cancel. */
-export function ConnectClaudeCode({ email, onAllow, onCancel }: { email: string | null; onAllow: () => void; onCancel: () => void }) {
+/** The connect screen: who is signed in, what the agent can and cannot do here, Allow or Cancel. */
+export function ConnectAgent({ email, onAllow, onCancel }: { email: string | null; onAllow: () => void; onCancel: () => void }) {
   const dialog = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -57,10 +73,10 @@ export function ConnectClaudeCode({ email, onAllow, onCancel }: { email: string 
           <AppPair />
           <div className="text-center">
             <h2 id="connect-title" className="font-serif text-xl font-semibold text-balance text-ink">
-              Let Claude Code use this tab
+              Let your coding agent use this tab
             </h2>
             <p className="mt-1.5 text-sm text-ink-muted">
-              It works SecretSource for you from your terminal. You watch each step here, with its cursor.
+              Claude Code or Codex works SecretSource for you from your terminal. You watch each step here, with its cursor.
             </p>
           </div>
 
@@ -75,7 +91,7 @@ export function ConnectClaudeCode({ email, onAllow, onCancel }: { email: string 
           </div>
 
           <div className="flex flex-col gap-3 text-sm">
-            <Abilities title="Claude Code can" items={CAN} allowed />
+            <Abilities title="It can" items={CAN} allowed />
             <Abilities title="It cannot" items={CANNOT} allowed={false} />
           </div>
 
@@ -99,7 +115,7 @@ export function ConnectClaudeCode({ email, onAllow, onCancel }: { email: string 
   )
 }
 
-/** SecretSource and Claude Code, linked: the one moment of motion on the screen. */
+/** SecretSource and the terminal, linked: the one moment of motion on the screen. */
 function AppPair() {
   const tile = 'flex size-11 items-center justify-center rounded-xl shadow-lg'
   return (
@@ -151,25 +167,48 @@ function Abilities({ title, items, allowed }: { title: string; items: string[]; 
   )
 }
 
-/** First-time setup: the Gatehouse key and the .mcp.json entry. Open on wide screens, folded on phones. */
+/** First-time setup for the agent the person uses: the Gatehouse key and its MCP entry. Open on wide screens, folded on phones. */
 function SetupHelp() {
   const [wide] = useState(() => window.matchMedia?.('(min-width: 1024px)').matches ?? false)
+  const [client, setClient] = useState<Client>('Claude Code')
   const [copied, setCopied] = useState(false)
+  const { file, config } = CLIENTS[client]
   const copy = () => {
-    void navigator.clipboard?.writeText(MCP_CONFIG).then(() => setCopied(true))
+    void navigator.clipboard?.writeText(config).then(() => setCopied(true))
   }
   return (
     <details open={wide} className="group text-xs text-ink-muted">
       <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-medium text-ink">
-        First time? Add SecretSource to Claude Code
+        First time? Add SecretSource to your agent
         <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
       </summary>
-      <ol className="mt-1 mb-2 flex list-decimal flex-col gap-1 pl-4 leading-5">
+      <div role="group" aria-label="Your agent" className="mt-2 mb-3 grid grid-cols-2 rounded-xl border border-border-subtle bg-surface p-0.5">
+        {(Object.keys(CLIENTS) as Client[]).map((name) => (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={client === name}
+            onClick={() => {
+              setClient(name)
+              setCopied(false)
+            }}
+            className={cn(
+              'min-h-9 rounded-lg text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+              client === name ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+            )}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      <ol className="mb-2 flex list-decimal flex-col gap-1 pl-4 leading-5">
         <li>Get a Gatehouse key for the email you sign in with, and set it as GATEHOUSE_KEY.</li>
-        <li>Add this to .mcp.json in your project, then restart Claude Code.</li>
+        <li>
+          Add this to {file}, then restart {client}.
+        </li>
       </ol>
       <div className="relative">
-        <pre className="rounded-lg bg-surface p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{MCP_CONFIG}</pre>
+        <pre className="rounded-lg bg-surface p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{config}</pre>
         <button
           type="button"
           onClick={copy}
@@ -183,11 +222,11 @@ function SetupHelp() {
   )
 }
 
-/** The toolbar pill while Claude Code is connected; it opens by itself when a change waits for Apply. */
-export function ClaudeCodeStatus({ claude }: { claude: ClaudeCode }) {
+/** The toolbar pill while an agent is connected; it opens by itself when a change waits for Apply. */
+export function AgentStatus({ bridge }: { bridge: AgentBridge }) {
   const [open, setOpen] = useState(false)
-  const shown = open || claude.pending !== null
-  const last = claude.steps.at(-1)
+  const shown = open || bridge.pending !== null
+  const last = bridge.steps.at(-1)
 
   return (
     <div className="relative">
@@ -198,11 +237,11 @@ export function ClaudeCodeStatus({ claude }: { claude: ClaudeCode }) {
         className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-subtle bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9"
       >
         <span className="relative flex size-2">
-          {claude.working && <span className="absolute inset-0 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />}
-          <span className={cn('relative size-2 rounded-full', claude.working ? 'bg-accent' : 'bg-supports')} />
+          {bridge.working && <span className="absolute inset-0 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />}
+          <span className={cn('relative size-2 rounded-full', bridge.working ? 'bg-accent' : 'bg-supports')} />
         </span>
         <SquareTerminal className="size-3.5" aria-hidden="true" />
-        <span className="sr-only sm:not-sr-only">Claude Code</span>
+        <span className="sr-only sm:not-sr-only">Agent</span>
       </button>
       <MotionConfig reducedMotion="user">
         <AnimatePresence>
@@ -215,26 +254,26 @@ export function ClaudeCodeStatus({ claude }: { claude: ClaudeCode }) {
               className="absolute top-full right-0 z-40 mt-2 flex w-80 flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-3 text-left shadow-lg"
             >
               <div>
-                <p className="text-sm font-medium text-ink">Claude Code is connected</p>
+                <p className="text-sm font-medium text-ink">Your agent is connected</p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-muted" aria-live="polite">
-                  {claude.working && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-                  {claude.working && last ? last : 'Waiting for Claude Code'}
+                  {bridge.working && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+                  {bridge.working && last ? last : 'Waiting for your agent'}
                 </p>
               </div>
-              {claude.steps.length > 0 && (
+              {bridge.steps.length > 0 && (
                 <ol className="flex flex-col gap-1 border-t border-border-subtle pt-2 text-xs text-ink-muted">
-                  {claude.steps.map((step, index) => (
-                    <li key={index} className={index === claude.steps.length - 1 ? 'text-ink' : undefined}>
+                  {bridge.steps.map((step, index) => (
+                    <li key={index} className={index === bridge.steps.length - 1 ? 'text-ink' : undefined}>
                       {step}
                     </li>
                   ))}
                 </ol>
               )}
-              {claude.pending && <ApproveChange change={claude.pending} />}
+              {bridge.pending && <ApproveChange change={bridge.pending} />}
               <button
                 type="button"
                 onClick={() => {
-                  claude.connect(false)
+                  bridge.connect(false)
                   setOpen(false)
                 }}
                 className="min-h-9 rounded-lg text-sm font-medium text-refutes transition-colors hover:bg-refutes-soft"

@@ -1,4 +1,4 @@
-"""The screen agent's tools as an MCP server at /mcp/, for clients such as Claude Code.
+"""The screen agent's tools as an MCP server at /mcp/, for coding agents such as Claude Code or Codex.
 
 The tool list comes from screen_agent's own tools through ADK's adk_to_mcp_tool_type, so an MCP
 client reads the same descriptions as the screen agent. list_papers runs here. The screen tools
@@ -44,7 +44,7 @@ async def call_tool(name: str, arguments: dict) -> dict:
     # The low-level server turns an exception into a tool result with isError, which the client reads.
     except screen_bridge.NoTab:
         raise ValueError(
-            "no SecretSource tab is connected: open SecretSource with ?connect=claude-code in the "
+            "no SecretSource tab is connected: open SecretSource with ?connect=agent in the "
             "address and press Allow"
         ) from None
     except TimeoutError:

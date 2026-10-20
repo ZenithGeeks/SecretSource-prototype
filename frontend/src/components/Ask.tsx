@@ -3,7 +3,7 @@
  * open in. A role app calls useAsk with what is on its screen and places the three pieces:
  * `button` in AppShell's toolbarLead, `panel` in AppShell's panel (or a screen's own side panel,
  * as Graph does), and `viewer` anywhere inside the shell. A role with screen actions also gets
- * Claude Code (components/ClaudeCode): its pill goes with `button`, its connect screen and cursor
+ * a coding agent over MCP (components/ConnectAgent): its pill goes with `button`, its connect screen and cursor
  * with `viewer`.
  */
 
@@ -13,7 +13,7 @@ import { useState } from 'react'
 import { api, paperName } from '../lib/api'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
-import { useClaudeCode } from '../lib/claudeCode'
+import { useAgentBridge } from '../lib/agentBridge'
 import { useAnalyses } from '../lib/useAnalysis'
 import { useAuth } from '../lib/useAuth'
 import type { ScreenActions } from '../lib/agentTools'
@@ -21,7 +21,7 @@ import { AiCursor } from './AiCursor'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
-import { ClaudeCodeStatus, ConnectClaudeCode } from './ClaudeCode'
+import { AgentStatus, ConnectAgent } from './ConnectAgent'
 import { DoIt } from './DoIt'
 import { PageViewer, type Target } from './PageViewer'
 
@@ -55,10 +55,10 @@ export function useAsk({
   const [source, setSource] = useState<Target | null>(null)
   const { data: analyses = [] } = useAnalyses()
   const { session } = useAuth()
-  const claude = useClaudeCode(actions)
-  // ?connect=claude-code opens the connect screen, so docs and Claude Code can link to it.
+  const bridge = useAgentBridge(actions)
+  // ?connect=agent opens the connect screen, so docs and the agent's error can link to it.
   const [connecting, setConnecting] = useState(
-    () => new URLSearchParams(window.location.search).get('connect') === 'claude-code',
+    () => new URLSearchParams(window.location.search).get('connect') === 'agent',
   )
   const titles = Object.fromEntries(
     analyses.flatMap((a) => (a.file && a.title ? [[paperName(a.file), shortTitle(a.title)]] : [])),
@@ -89,7 +89,7 @@ export function useAsk({
 
   const button = (
     <div className="flex items-center gap-2">
-      {claude.connected && <ClaudeCodeStatus claude={claude} />}
+      {bridge.connected && <AgentStatus bridge={bridge} />}
       <AskButton open={open} about={about} onToggle={() => setOpen(!open)} />
     </div>
   )
@@ -104,7 +104,7 @@ export function useAsk({
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
       onClose={() => setOpen(false)}
       onShowSource={(target) => void showSource(target)}
-      doIt={actions && <DoIt actions={actions} onConnectClaudeCode={claude.connected ? undefined : () => setConnecting(true)} />}
+      doIt={actions && <DoIt actions={actions} onConnectAgent={bridge.connected ? undefined : () => setConnecting(true)} />}
     />
   ) : undefined
 
@@ -115,19 +115,19 @@ export function useAsk({
           <PageViewer target={source} onClose={() => setSource(null)} className="h-[90vh] w-full max-w-4xl" />
         </div>
       )}
-      {connecting && claude.canConnect && !claude.connected && (
-        <ConnectClaudeCode
+      {connecting && bridge.canConnect && !bridge.connected && (
+        <ConnectAgent
           email={session?.user?.email ?? null}
           onAllow={() => {
-            claude.connect(true)
+            bridge.connect(true)
             closeConnect()
           }}
           onCancel={closeConnect}
         />
       )}
-      {claude.connected && (
+      {bridge.connected && (
         <MotionConfig reducedMotion="user">
-          <AiCursor pointing={claude.pointing} />
+          <AiCursor pointing={bridge.pointing} />
         </MotionConfig>
       )}
     </>

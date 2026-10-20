@@ -1,7 +1,7 @@
 /**
  * Ask's Do it mode: the person says what they want done, and the screen agent does it on screen
  * with the AI cursor (lib/screenAgent). A change waits here for Apply or Cancel. The same view
- * offers to connect Claude Code instead (components/ClaudeCode).
+ * offers to connect a coding agent instead (components/ConnectAgent).
  */
 
 import { MotionConfig } from 'framer-motion'
@@ -16,7 +16,7 @@ import { AiCursor } from './AiCursor'
 
 const EXAMPLES = ['Open my most recent paper', 'Show me where to search the library', 'Take me to the graph']
 
-export function DoIt({ actions, onConnectClaudeCode }: { actions: ScreenActions; onConnectClaudeCode?: () => void }) {
+export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onConnectAgent?: () => void }) {
   const [pointing, setPointing] = useState<Pointing | null>(null)
   const agent = useScreenAgent(actions, setPointing)
   const [draft, setDraft] = useState('')
@@ -99,14 +99,14 @@ export function DoIt({ actions, onConnectClaudeCode }: { actions: ScreenActions;
             </button>
           )}
         </form>
-        {onConnectClaudeCode && (
+        {onConnectAgent && (
           <button
             type="button"
-            onClick={onConnectClaudeCode}
+            onClick={onConnectAgent}
             className="mt-2 flex min-h-9 w-full items-center justify-center gap-2 rounded-lg text-xs text-ink-muted transition-colors hover:bg-accent-soft hover:text-ink"
           >
             <SquareTerminal className="size-3.5" aria-hidden="true" />
-            Work from your terminal: connect Claude Code
+            Work from your terminal: connect Claude Code or Codex
           </button>
         )}
       </div>

@@ -1,4 +1,4 @@
-/** Connecting Claude Code to a tab: the connect screen, and the bridge that runs Claude Code's
+/** Connecting a coding agent to a tab: the connect screen, and the bridge that runs the agent's
  * tool calls in the tab, holds a change for Apply, and disconnects. */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -26,20 +26,20 @@ vi.mock('../src/lib/api', async (original) => ({
   }),
 }))
 
-import { ClaudeCodeStatus, ConnectClaudeCode } from '../src/components/ClaudeCode'
+import { AgentStatus, ConnectAgent } from '../src/components/ConnectAgent'
 import type { ScreenActions } from '../src/lib/agentTools'
-import { useClaudeCode } from '../src/lib/claudeCode'
+import { useAgentBridge } from '../src/lib/agentBridge'
 
 const actions: ScreenActions = { screen: 'library', screens: ['home', 'library'], openScreen: vi.fn(), openPaper: vi.fn() }
 
 function Tab() {
-  const claude = useClaudeCode(actions)
+  const bridge = useAgentBridge(actions)
   const [value, setValue] = useState('')
   return (
     <div>
       <input aria-label="Filter papers" data-ask-target="field:library-filter" value={value} onChange={(e) => setValue(e.target.value)} />
       <p>Filter: {value}</p>
-      {claude.connected ? <ClaudeCodeStatus claude={claude} /> : <button onClick={() => claude.connect(true)}>Allow</button>}
+      {bridge.connected ? <AgentStatus bridge={bridge} /> : <button onClick={() => bridge.connect(true)}>Allow</button>}
     </div>
   )
 }
@@ -52,11 +52,11 @@ beforeEach(() => {
 })
 
 describe('the connect screen', () => {
-  it('says who is signed in and what Claude Code can and cannot do', () => {
+  it('says who is signed in and what the agent can and cannot do', () => {
     const onAllow = vi.fn()
-    render(<ConnectClaudeCode email="ann@example.com" onAllow={onAllow} onCancel={vi.fn()} />)
+    render(<ConnectAgent email="ann@example.com" onAllow={onAllow} onCancel={vi.fn()} />)
 
-    expect(screen.getByRole('dialog', { name: 'Let Claude Code use this tab' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Let your coding agent use this tab' })).toBeInTheDocument()
     expect(screen.getByText('ann@example.com')).toBeInTheDocument()
     expect(screen.getByText('Fill in a field, after you press Apply')).toBeInTheDocument()
     expect(screen.getByText('Save, delete or upload anything')).toBeInTheDocument()
@@ -64,9 +64,18 @@ describe('the connect screen', () => {
     expect(onAllow).toHaveBeenCalled()
   })
 
+  it('shows the setup for Claude Code or for Codex', () => {
+    render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(screen.getByText(/"mcpServers"/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Codex' }))
+    expect(screen.getByText(/\[mcp_servers\.secretsource\]/)).toBeInTheDocument()
+    expect(screen.getByText(/~\/\.codex\/config\.toml/)).toBeInTheDocument()
+  })
+
   it('closes on Escape without connecting', () => {
     const onCancel = vi.fn()
-    render(<ConnectClaudeCode email={null} onAllow={vi.fn()} onCancel={onCancel} />)
+    render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={onCancel} />)
 
     expect(screen.getByText('Local workspace')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -84,11 +93,11 @@ describe('the bridge', () => {
 
     expect(actions.openScreen).toHaveBeenCalledWith('home')
     expect(gateway.posts).toEqual([{ path: '/agent/bridge/results', body: { id: 'b1', result: { status: 'done', screen: 'home' } } }])
-    expect(window.sessionStorage.getItem('claudeCode.connected')).toBe('1')
+    expect(window.sessionStorage.getItem('agentBridge.connected')).toBe('1')
   })
 
   it('shows a change in the pill and fills the field only after Apply', async () => {
-    window.sessionStorage.setItem('claudeCode.connected', '1') // connected before a reload
+    window.sessionStorage.setItem('agentBridge.connected', '1') // connected before a reload
     render(<Tab />)
 
     let done: Promise<void> | void = undefined
@@ -108,14 +117,14 @@ describe('the bridge', () => {
   })
 
   it('closes the stream and forgets the tab on Disconnect', async () => {
-    window.sessionStorage.setItem('claudeCode.connected', '1')
+    window.sessionStorage.setItem('agentBridge.connected', '1')
     render(<Tab />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Claude Code/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Agent/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
 
     await waitFor(() => expect(gateway.closed).toBe(true))
-    expect(window.sessionStorage.getItem('claudeCode.connected')).toBeNull()
+    expect(window.sessionStorage.getItem('agentBridge.connected')).toBeNull()
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument()
   })
 })

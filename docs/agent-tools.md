@@ -65,23 +65,24 @@ Conversations live in the gateway's memory for an hour.
 4. Run the eval (`backend/eval_screen_agent.py`) before and after. A new tool changes what the
    model chooses for every task, not only the new ones.
 
-## Using the tools from Claude Code (MCP)
+## Using the tools from Claude Code or Codex (MCP)
 
 The gateway serves the same tools over MCP at `/mcp/` (`backend/app/mcp_server.py`), for Claude
-Code or any other MCP client. The client takes the screen agent's place: it plans the steps,
+Code, Codex or any other MCP client. The client takes the screen agent's place: it plans the steps,
 and the person's open tab runs each screen tool with the cursor. `list_papers` runs on the
 gateway. `fill_field` still waits for Apply in the tab, up to 120 s.
 
-1. Open SecretSource with `?connect=claude-code` in the address (or open Ask, choose Do it and
-   press "Connect Claude Code"), check what Claude Code may do, and press Allow. The tab then
-   holds `/api/agent/bridge` open (`backend/app/screen_bridge.py`) and shows a Claude Code pill
+1. Open SecretSource with `?connect=agent` in the address (or open Ask, choose Do it and press
+   "Connect Claude Code or Codex"), check what the agent may do, and press Allow. The tab then
+   holds `/api/agent/bridge` open (`backend/app/screen_bridge.py`) and shows an Agent pill
    beside Ask, with the recent steps, any change waiting for Apply, and Disconnect. The tab stays
    connected across reloads until you disconnect. One tab per account: allowing a second tab
    moves the bridge there.
 2. Get a Gatehouse key whose email is the one you sign in to SecretSource with. Gatehouse sends
    that email and `GATEHOUSE_SECRET` with each call; the gateway matches the email to a
    confirmed SecretSource account.
-3. Add the server to Claude Code, with the key in an environment variable:
+3. Add the server to your agent, with the key in an environment variable. Claude Code reads
+   `.mcp.json` in the project:
 
    ```json
    {
@@ -93,6 +94,14 @@ gateway. `fill_field` still waits for Apply in the tab, up to 120 s.
        }
      }
    }
+   ```
+
+   Codex reads `~/.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.secretsource]
+   url = "https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/"
+   env_http_headers = { "apikey" = "GATEHOUSE_KEY" }
    ```
 
    Keep the trailing slash: `/mcp` answers with a redirect. With sign-in off (local stack with no

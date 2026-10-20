@@ -1,6 +1,6 @@
 """The bridge from /mcp (app/mcp_server.py) to the person's open tab.
 
-A signed-in tab with "Let Claude Code use this tab" on holds GET /agent/bridge open. Each screen
+A signed-in tab whose person allowed a coding agent holds GET /agent/bridge open. Each screen
 tool call from an MCP client goes down that stream as `{"type": "tool", "id", "name", "args"}`.
 The tab runs it with lib/agentTools and POSTs the result to /agent/bridge/results. One tab per
 user: a tab that opens the bridge later takes over. State lives in this process's memory, like
