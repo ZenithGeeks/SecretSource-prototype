@@ -23,3 +23,37 @@ export const TONES = {
   asks: { label: 'A question', icon: CircleHelp, text: 'text-insufficient', ring: 'border-insufficient', chip: 'bg-insufficient text-canvas' },
   shows: { label: 'Here', icon: MousePointer2, text: 'text-accent', ring: 'border-accent', chip: 'bg-accent text-canvas' },
 } as const
+
+/** A box on screen, in viewport pixels. */
+export type Box = { top: number; left: number; width: number; height: number }
+
+/**
+ * The part of the element that shows: its box clipped to every scrolling panel around it and to
+ * the window, or null when none of it shows. A tall passage scrolled half out of the label panel
+ * would otherwise get a ring over the tabs above the panel and the Ask panel below it.
+ */
+export function visibleBox(element: HTMLElement): Box | null {
+  const rect = element.getBoundingClientRect()
+  let top = Math.max(rect.top, 0)
+  let left = Math.max(rect.left, 0)
+  let bottom = Math.min(rect.bottom, window.innerHeight)
+  let right = Math.min(rect.right, window.innerWidth)
+  for (const panel of scrollingAncestors(element)) {
+    const clip = panel.getBoundingClientRect()
+    top = Math.max(top, clip.top)
+    left = Math.max(left, clip.left)
+    bottom = Math.min(bottom, clip.bottom)
+    right = Math.min(right, clip.right)
+  }
+  if (bottom < top || right < left) return null
+  return { top, left, width: right - left, height: bottom - top }
+}
+
+/** The element's ancestors that clip it: each scrolls or hides its overflow. */
+export function scrollingAncestors(element: HTMLElement): HTMLElement[] {
+  const panels = []
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    if (/(auto|scroll|hidden)/.test(getComputedStyle(parent).overflowY)) panels.push(parent)
+  }
+  return panels
+}
