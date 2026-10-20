@@ -50,46 +50,50 @@ export function ConnectClaudeCode({ email, onAllow, onCancel }: { email: string 
         aria-modal="true"
         aria-labelledby="connect-title"
         tabIndex={-1}
-        className="m-auto flex w-[400px] max-w-full flex-col gap-5 rounded-2xl border border-border-subtle bg-surface p-8 shadow-xl outline-none"
+        className="m-auto grid w-full max-w-3xl overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-xl outline-none lg:grid-cols-2"
       >
-        <AppPair />
-        <div className="text-center">
-          <h2 id="connect-title" className="font-serif text-xl font-semibold text-balance text-ink">
-            Let Claude Code use this tab
-          </h2>
-          <p className="mt-1.5 text-sm text-ink-muted">
-            It works SecretSource for you from your terminal. You watch each step here, with its cursor.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 rounded-xl border border-border-subtle px-3 py-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent" aria-hidden="true">
-            {(email ?? 'L')[0].toUpperCase()}
-          </span>
-          <div className="min-w-0 text-left">
-            <p className="text-xs text-ink-muted">{email ? 'Signed in as' : 'Signed in'}</p>
-            <p className="truncate text-sm font-medium text-ink">{email ?? 'Local workspace'}</p>
+        {/* Wide screens put the setup beside the consent, so opening it never makes the dialog taller. */}
+        <section className="flex flex-col gap-5 p-8">
+          <AppPair />
+          <div className="text-center">
+            <h2 id="connect-title" className="font-serif text-xl font-semibold text-balance text-ink">
+              Let Claude Code use this tab
+            </h2>
+            <p className="mt-1.5 text-sm text-ink-muted">
+              It works SecretSource for you from your terminal. You watch each step here, with its cursor.
+            </p>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-3 text-sm">
-          <Abilities title="Claude Code can" items={CAN} allowed />
-          <Abilities title="It cannot" items={CANNOT} allowed={false} />
-        </div>
-
-        <SetupHelp />
-
-        <div className="flex flex-col gap-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="ghost" onClick={onCancel} className="min-h-11 border border-border-subtle">
-              Cancel
-            </Button>
-            <Button onClick={onAllow} className="min-h-11">
-              Allow
-            </Button>
+          <div className="flex items-center gap-3 rounded-xl border border-border-subtle px-3 py-2.5">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent" aria-hidden="true">
+              {(email ?? 'L')[0].toUpperCase()}
+            </span>
+            <div className="min-w-0 text-left">
+              <p className="text-xs text-ink-muted">{email ? 'Signed in as' : 'Signed in'}</p>
+              <p className="truncate text-sm font-medium text-ink">{email ?? 'Local workspace'}</p>
+            </div>
           </div>
-          <p className="text-center text-xs text-ink-muted">Only this tab, until you disconnect or close it.</p>
-        </div>
+
+          <div className="flex flex-col gap-3 text-sm">
+            <Abilities title="Claude Code can" items={CAN} allowed />
+            <Abilities title="It cannot" items={CANNOT} allowed={false} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="ghost" onClick={onCancel} className="min-h-11 border border-border-subtle">
+                Cancel
+              </Button>
+              <Button onClick={onAllow} className="min-h-11">
+                Allow
+              </Button>
+            </div>
+            <p className="text-center text-xs text-ink-muted">Only this tab, until you disconnect or close it.</p>
+          </div>
+        </section>
+        <aside className="flex flex-col justify-center bg-neutral-soft p-8 lg:border-l border-border-subtle">
+          <SetupHelp />
+        </aside>
       </div>
     </div>
   )
@@ -147,24 +151,25 @@ function Abilities({ title, items, allowed }: { title: string; items: string[]; 
   )
 }
 
-/** First-time setup, folded away: the Gatehouse key and the .mcp.json entry. */
+/** First-time setup: the Gatehouse key and the .mcp.json entry. Open on wide screens, folded on phones. */
 function SetupHelp() {
+  const [wide] = useState(() => window.matchMedia?.('(min-width: 1024px)').matches ?? false)
   const [copied, setCopied] = useState(false)
   const copy = () => {
     void navigator.clipboard?.writeText(MCP_CONFIG).then(() => setCopied(true))
   }
   return (
-    <details className="group rounded-xl bg-neutral-soft px-3 py-2 text-xs text-ink-muted">
+    <details open={wide} className="group text-xs text-ink-muted">
       <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-medium text-ink">
         First time? Add SecretSource to Claude Code
         <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
       </summary>
       <ol className="mt-1 mb-2 flex list-decimal flex-col gap-1 pl-4 leading-5">
-        <li>Get a Gatehouse key for the email above, and set it as GATEHOUSE_KEY.</li>
+        <li>Get a Gatehouse key for the email you sign in with, and set it as GATEHOUSE_KEY.</li>
         <li>Add this to .mcp.json in your project, then restart Claude Code.</li>
       </ol>
       <div className="relative">
-        <pre className="overflow-x-auto rounded-lg bg-surface p-2.5 pt-10 font-mono text-xs text-ink">{MCP_CONFIG}</pre>
+        <pre className="rounded-lg bg-surface p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{MCP_CONFIG}</pre>
         <button
           type="button"
           onClick={copy}
