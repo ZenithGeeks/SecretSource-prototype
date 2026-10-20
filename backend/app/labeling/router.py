@@ -642,7 +642,11 @@ async def review_claim(
         "candidates": [],
     }
     stamp = {**_stamp(who, me, paper_id), "claim_id": body.claim_id}
-    return StreamingResponse(_review_events(store, stamp, claim, saved), media_type="text/event-stream")
+    from app import main
+
+    # The judges can take a while; the heartbeats keep a proxy from closing a quiet stream.
+    events = main._keep_alive(_review_events(store, stamp, claim, saved))
+    return StreamingResponse(events, media_type="text/event-stream")
 
 
 def _saved_claim(store, paper_id: str, me: str, claim_id: str) -> review.Saved | None:
@@ -661,11 +665,17 @@ def _saved_claim(store, paper_id: str, me: str, claim_id: str) -> review.Saved |
 
 
 async def _review_events(store, stamp: dict, claim: dict, saved: review.Saved):
-    """The review as server-sent events; once it ends, what it found goes to the reviews tab."""
+    """The review as server-sent events; once it ends, what it found goes to the reviews tab.
+    A failure is an error event, so the page does not show a half review as a finished one."""
     findings = []
-    async for finding in review.review(claim, saved):
-        findings.append(finding.model_dump())
-        yield f"data: {json.dumps({'type': 'finding', **findings[-1]})}\n\n"
+    try:
+        async for finding in review.review(claim, saved):
+            findings.append(finding.model_dump())
+            yield f"data: {json.dumps({'type': 'finding', **findings[-1]})}\n\n"
+    except Exception:
+        log.exception("the review of %s failed", stamp["claim_id"])
+        yield f"data: {json.dumps({'type': 'error', 'message': 'the review stopped partway; try again'})}\n\n"
+        return
     row = {**stamp, "findings": json.dumps(findings, ensure_ascii=False)}
     await asyncio.to_thread(store.append, "reviews", [row])
     yield f"data: {json.dumps({'type': 'done', 'findings': len(findings)})}\n\n"
@@ -705,16 +715,31 @@ async def _answer_events(question: str, pdf: str):
     if prepared["status"] != "ok":
         yield f"data: {json.dumps({'type': 'error', 'message': 'this paper could not be read'})}\n\n"
         return
-    async for event in assistant.answer(question, paper=Path(prepared["path"])):
-        yield f"data: {json.dumps(event)}\n\n"
+    try:
+        async for event in assistant.answer(question, paper=Path(prepared["path"])):
+            yield f"data: {json.dumps(event)}\n\n"
+    except Exception:
+        log.exception("answering a labeler's question failed")
+        yield f"data: {json.dumps({'type': 'error', 'message': 'the answer stopped partway; try again'})}\n\n"
 
 
 def _scoped(tab: str, rows: list[dict], scope: ExportScope, me: str) -> list[dict]:
     """The current rows of a tab: the account `me`'s own, or everyone's grouped by account and paper."""
-    rows = current(tab, rows)
+    return _in_scope(current(tab, rows), scope, me)
+
+
+def _in_scope(rows: list[dict], scope: ExportScope, me: str) -> list[dict]:
+    """The rows `scope` covers, in their saved order within each account and paper (a stable sort),
+    so current() still finds the latest row per key."""
     if scope == "mine":
-        return [r for r in rows if r["annotator_id"] == me]
-    return sorted(rows, key=lambda r: (r["annotator_id"], r["paper_id"]))
+        return [r for r in rows if _account(r) == me]
+    return sorted(rows, key=lambda r: (_account(r), r["paper_id"]))
+
+
+def _account(row: dict) -> str:
+    """Whose row it is. A row from before rows carried annotator_id is the person's by name,
+    as in current()."""
+    return row.get("annotator_id") or row.get("annotator", "")
 
 
 @router.get("/export")
@@ -727,7 +752,9 @@ async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Dep
     other's (#585). `scope=team` gives everyone's, for building the dataset."""
     store = _store()
     if tab in ("dspy_claims", "dspy_verdicts"):
-        rows = {name: _scoped(name, await asyncio.to_thread(store.read, name), scope, me) for name in TABS}
+        # Every saved row, not only the current ones: dspy_export reads a label's level from
+        # before the AI review out of the history.
+        rows = {name: _in_scope(await asyncio.to_thread(store.read, name), scope, me) for name in TABS}
         build = dspy_export.claims_examples if tab == "dspy_claims" else dspy_export.verdict_examples
         found = await asyncio.to_thread(build, rows)
         body = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in found)

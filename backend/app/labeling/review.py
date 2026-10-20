@@ -17,7 +17,8 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-# The LLM gateway takes at most 3 requests at once per key; leave one for everyone else.
+# Two references judged at once. The gateway's 3-at-a-time limit is kept by app/llm.py's slots,
+# which every judge call in this process waits for, so a review, an Ask and an analysis share it.
 _judges = ThreadPoolExecutor(max_workers=2, thread_name_prefix="labeling-review")
 REASONING = 400  # characters of the judge's reasoning shown with a finding
 

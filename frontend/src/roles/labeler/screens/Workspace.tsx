@@ -485,10 +485,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         aria-controls="labeler-ask"
         aria-label="Ask AI"
         onClick={() => setAskOpen(!askOpen)}
-        className="group flex min-h-14 items-center gap-3 px-4 text-left hover:bg-accent-soft/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        className="flex min-h-14 items-center gap-3 px-4 text-left hover:bg-accent-soft/60 focus-visible:outline-2 focus-visible:outline-accent"
       >
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas">
-          <Sparkles className="size-4 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-12 motion-reduce:transition-none motion-reduce:group-hover:transform-none" aria-hidden="true" />
+          <Sparkles className="size-4" aria-hidden="true" />
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="text-sm font-medium text-ink">Ask AI</span>

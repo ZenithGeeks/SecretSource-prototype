@@ -1161,6 +1161,7 @@ def test_dspy_claims_keep_what_a_person_kept_and_list_what_they_rejected(api, mo
             "annotator": "chanya",
             "claims": ["Y improves recall by 4 points."],
             "rejected": ["Y is fast."],
+            "ai_reviewed": False,
         }
     ]
 
@@ -1208,8 +1209,23 @@ def test_dspy_verdicts_are_the_level_with_the_passages_called_relevant(api):
             "verdict_name": "Clear",
             "rationale": "two controlled runs",
             "confidence": "high",
+            "ai_reviewed": False,
+            "verdict_before_review": "3",
         }
     ]
+
+
+def test_a_label_saved_after_a_review_keeps_the_persons_own_level_beside_it(api, monkeypatch):
+    client, _, _ = api
+    label = {"claim_id": C0, "reference_id": REF, "evidence": 4, "spans": ["recall rose by 4 points"]}
+    claim = {"claim_id": C0, "origin": "extracted", "status": "accepted", "claim": "x"}
+    client.post("/labeling/sessions/a1/save", json={"claims": [claim], "labels": [label]})
+    monkeypatch.setattr(verify, "judge_passages", lambda c, p: {"verdict": "insufficient", "reasoning": ""})
+    client.post("/labeling/sessions/a1/review", json={"claim_id": C0})
+    client.post("/labeling/sessions/a1/save", json={"claims": [claim], "labels": [{**label, "evidence": 2}]})
+
+    [record] = ndjson(client, "dspy_verdicts")
+    assert (record["verdict"], record["ai_reviewed"], record["verdict_before_review"]) == ("2", True, "4")
 
 
 def test_dspy_verdicts_leave_out_a_label_with_no_passage(api):

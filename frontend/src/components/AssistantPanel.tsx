@@ -448,7 +448,7 @@ export function AssistantPanel({
         </>
       )}
       <MotionConfig reducedMotion="user">
-        <AiCursor pointing={pointing} />
+        <AiCursor pointing={pointing} scroll={false} />
       </MotionConfig>
     </aside>
   )

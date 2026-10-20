@@ -7,6 +7,10 @@
 person kept counts: a rejected claim is listed apart (a hard negative for `find`) and its labels
 are left out of `verify`, the same rule as the CSV export. Records keep `paper_id`, so a split
 into train, validation and test can keep each paper whole.
+
+A label saved after the person ran the AI review is marked `ai_reviewed`, and keeps the level the
+person had before any review in `verdict_before_review` ("" when there was none). An eval can then
+score with the person's own levels, not only drop the pairs the AI may have swayed.
 """
 
 import json
@@ -37,9 +41,11 @@ def claims_examples(
     grouped: dict[tuple[str, str], dict] = {}
     for row in current("claims", rows["claims"]):
         group = grouped.setdefault(
-            (row["paper_id"], row["annotator_id"]), {"annotator": "", "claims": [], "rejected": []}
+            (row["paper_id"], row["annotator_id"]),
+            {"annotator": "", "claims": [], "rejected": [], "ai_reviewed": False},
         )
         group["annotator"] = row["annotator"]
+        group["ai_reviewed"] |= row.get("ai_reviewed") == "1"
         edited = row["status"] == "edited" and row["claim_edited"]
         text = row["claim_edited"] if edited else row["claim"]
         group["rejected" if row["status"] == "rejected" else "claims"].append(text)
@@ -59,6 +65,9 @@ def verdict_examples(rows: dict[str, list[dict]]) -> list[dict]:
         for row in current("claims", rows["claims"])
         if row["status"] == "rejected"
     }
+    # The rows saved before any review, so a reviewed label still has the person's own level.
+    unreviewed = [row for row in rows["labels"] if row.get("ai_reviewed") != "1"]
+    before_review = {_label_key(row): row["evidence"] for row in current("labels", unreviewed)}
     examples = []
     for row in current("labels", rows["labels"]):
         if (row["claim_id"], row["annotator_id"]) in rejected or row["evidence"] not in {"1", "2", "3", "4"}:
@@ -70,6 +79,7 @@ def verdict_examples(rows: dict[str, list[dict]]) -> list[dict]:
         if not spans:
             continue
         level = int(row["evidence"])
+        reviewed = row.get("ai_reviewed") == "1"
         examples.append(
             {
                 "paper_id": row["paper_id"],
@@ -83,6 +93,12 @@ def verdict_examples(rows: dict[str, list[dict]]) -> list[dict]:
                 "verdict_name": LEVEL_NAMES[level],
                 "rationale": row["rationale"],
                 "confidence": row["confidence"],
+                "ai_reviewed": reviewed,
+                "verdict_before_review": before_review.get(_label_key(row), "") if reviewed else str(level),
             }
         )
     return examples
+
+
+def _label_key(row: dict) -> tuple[str, str, str]:
+    return row["claim_id"], row["reference_id"], row.get("annotator_id") or row["annotator"]

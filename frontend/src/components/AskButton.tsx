@@ -41,26 +41,26 @@ export function AskButton({ open, about, onToggle }: { open: boolean; about: Ask
         aria-label="Ask AI"
         title="Ask a question: the answer comes from your papers, and each sentence is checked against the passage it cites."
         className={cn(
-          'group inline-flex min-h-11 items-center gap-2 rounded-full py-1 pr-3.5 pl-1.5 text-[13px] font-medium ring-1 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9',
+          'inline-flex min-h-11 items-center gap-2 rounded-full border py-1 pr-3.5 pl-1 text-[13px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9',
           open
-            ? 'bg-accent text-canvas ring-accent'
-            : 'bg-linear-to-r from-accent-soft to-surface text-ink ring-accent/35 hover:ring-accent',
+            ? 'border-accent bg-accent text-canvas'
+            : 'border-accent bg-accent-soft text-ink hover:bg-surface',
         )}
       >
         <span
           className={cn(
             'flex size-7 items-center justify-center rounded-full transition-colors lg:size-6',
-            open ? 'bg-canvas/20' : 'bg-accent text-canvas',
+            open ? 'bg-canvas text-accent' : 'bg-accent text-canvas',
           )}
         >
           <Sparkles
-            className="size-3.5 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-12 motion-reduce:transition-none motion-reduce:group-hover:transform-none"
+            className="size-3.5"
             aria-hidden="true"
           />
         </span>
         {/* On a phone only the icon shows: the toolbar also holds the breadcrumb and the screen's actions. */}
         <span className="sr-only sm:not-sr-only">Ask AI</span>
-        <span className={cn('hidden font-normal xl:inline', open ? 'text-canvas/80' : 'text-ink-muted')}>{SCOPE[about.kind]}</span>
+        <span className={cn('hidden font-normal xl:inline', open ? 'text-canvas' : 'text-ink-muted')}>{SCOPE[about.kind]}</span>
       </button>
       <MotionConfig reducedMotion="user">
         <AnimatePresence>

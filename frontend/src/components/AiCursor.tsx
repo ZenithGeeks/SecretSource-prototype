@@ -16,8 +16,10 @@ type Box = { top: number; left: number; width: number; height: number }
 
 const SPRING = { type: 'spring', stiffness: 260, damping: 28, mass: 0.8 } as const
 
-export function AiCursor({ pointing }: { pointing: Pointing | null }) {
-  const box = useTargetBox(pointing?.target ?? null)
+/** `scroll`: bring the target into view. Off where something else owns the scroll, as in the Ask
+ * panel, which follows its newest answer; the cursor then hides while its target is out of view. */
+export function AiCursor({ pointing, scroll = true }: { pointing: Pointing | null; scroll?: boolean }) {
+  const box = useTargetBox(pointing?.target ?? null, scroll)
   const reaction = pointing && TONES[pointing.tone]
   return (
     <AnimatePresence>
@@ -43,7 +45,7 @@ export function AiCursor({ pointing }: { pointing: Pointing | null }) {
             animate={{ x: box.left + Math.min(box.width - 28, 260), y: box.top + 6 }}
             transition={SPRING}
           >
-            <svg width="22" height="24" viewBox="0 0 22 24" className="drop-shadow-md">
+            <svg width="22" height="24" viewBox="0 0 22 24" style={{ filter: 'drop-shadow(0 2px 3px rgb(0 0 0 / 0.3))' }}>
               <path d="M2 2 L2 20 L7 15.5 L10.5 22.5 L13.5 21 L10 14 L17 14 Z" className="fill-accent stroke-canvas" strokeWidth="1.5" strokeLinejoin="round" />
             </svg>
             <motion.span
@@ -64,11 +66,11 @@ export function AiCursor({ pointing }: { pointing: Pointing | null }) {
 }
 
 /** The target's box on screen, kept up to date while the panel scrolls or the window resizes. */
-function useTargetBox(target: AskTarget | null): Box | null {
+function useTargetBox(target: AskTarget | null, scroll: boolean): Box | null {
   // By key, not by object: callers build a new target object on every render.
   const key = target && askTarget(target)
   // The box with the key it was measured for, so a new target never shows the old box.
-  const [measured, setMeasured] = useState<{ key: string; box: Box } | null>(null)
+  const [measured, setMeasured] = useState<{ key: string; box: Box | null } | null>(null)
   useEffect(() => {
     if (!key) return
     // A claim or passage the person has hidden (a rejected claim's passages) has no box.
@@ -76,10 +78,11 @@ function useTargetBox(target: AskTarget | null): Box | null {
     if (!element) return
     // Optional calls: jsdom, which the tests run in, has neither.
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    element.scrollIntoView?.({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
+    if (scroll) element.scrollIntoView?.({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' })
     const measure = () => {
       const rect = element.getBoundingClientRect()
-      setMeasured({ key, box: { top: rect.top, left: rect.left, width: rect.width, height: rect.height } })
+      const box = { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+      setMeasured({ key, box: inView(element, rect) ? box : null })
     }
     const frame = window.requestAnimationFrame(measure)
     // Capture: the label panel scrolls by itself, and its scroll events do not reach the window.
@@ -93,6 +96,19 @@ function useTargetBox(target: AskTarget | null): Box | null {
       window.removeEventListener('resize', measure)
       observer?.disconnect()
     }
-  }, [key])
+  }, [key, scroll])
   return measured && measured.key === key ? measured.box : null
+}
+
+/** Whether the element's middle shows: inside every scrolling box around it, and the window. */
+function inView(element: HTMLElement, rect: DOMRect) {
+  const x = rect.left + rect.width / 2
+  const y = rect.top + rect.height / 2
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    if (!/(auto|scroll|hidden)/.test(getComputedStyle(parent).overflowY)) continue
+    const clip = parent.getBoundingClientRect()
+    if (y < clip.top || y > clip.bottom || x < clip.left || x > clip.right) return false
+  }
+  return true
 }
