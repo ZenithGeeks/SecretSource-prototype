@@ -922,6 +922,80 @@ def test_retry_puts_a_new_analysis_of_the_same_doi_in_place_of_the_failed_one(ap
     assert pool.pooled() == {new_id: "HPC"}
 
 
+def _uploaded(analysis_id, owner):
+    """An analysis started from an uploaded PDF: it only knows the file."""
+    paper = f"data/papers/{analysis_id}-0123456789ab.pdf"
+    running = {"status": "running", "stages": [], "claims": []}
+    return {"id": analysis_id, "paper": paper, "owner": owner, **running}
+
+
+def test_an_uploaded_paper_is_listed_with_its_doi_once(api, monkeypatch):
+    from app import main
+
+    client, _, app = api
+    rows = {"u1": _uploaded("u1", "chanya-id"), "u2": _uploaded("u2", "chanya-id")}
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    app.dependency_overrides[labeling.current_user] = lambda: "chanya-id"
+    app.dependency_overrides[labeling.mine_analysis] = lambda: rows["u1"]
+    body = {"topic": "HPC", "doi": "https://dl.acm.org/doi/10.1145/3784828.3785017"}
+
+    assert client.post("/labeling/papers/u1/share-upload", json=body).json() == {"id": "u1"}
+    assert pool.pooled() == {"u1": "HPC"}
+    assert pool.uploaded_dois() == {"u1": "10.1145/3784828.3785017"}
+    # The same analysis twice, or a second upload of the same paper, is refused.
+    assert client.post("/labeling/papers/u1/share-upload", json=body).status_code == 409
+    app.dependency_overrides[labeling.mine_analysis] = lambda: rows["u2"]
+    again = client.post("/labeling/papers/u2/share-upload", json=body)
+    assert again.status_code == 409 and "upload its PDF from its row" in again.json()["detail"]
+    assert pool.pooled() == {"u1": "HPC"}
+
+
+def test_an_uploaded_paper_takes_the_place_of_your_failed_one_with_its_topic_and_doi(api, monkeypatch):
+    from app import main
+
+    client, _, app = api
+    rows = {"e1": FAILED, "u1": _uploaded("u1", "nuttadon-id")}
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    app.dependency_overrides[labeling.current_user] = lambda: "nuttadon-id"
+    app.dependency_overrides[labeling.mine_analysis] = lambda: rows["u1"]
+    pool.assign("Nuttadon", "paper", "e1", "HPC", "nuttadon-id")
+
+    reply = client.post("/labeling/papers/u1/share-upload", json={"replaces": "e1"})
+
+    assert reply.status_code == 200
+    assert pool.pooled() == {"u1": "HPC"}
+    assert pool.uploaded_dois() == {"u1": "10.1145/3712285.3771787"}
+
+
+def test_an_upload_can_replace_only_your_own_failed_paper_that_is_still_listed(api, monkeypatch):
+    from app import main
+
+    client, _, app = api
+    rows = {"e1": FAILED, "u1": _uploaded("u1", "nuttadon-id")}
+    monkeypatch.setattr(main.analyses, "get", lambda i: rows.get(i))
+    app.dependency_overrides[labeling.mine_analysis] = lambda: rows["u1"]
+
+    def share(**body):
+        return client.post("/labeling/papers/u1/share-upload", json=body)
+
+    pool.assign("Nuttadon", "paper", "e1", "HPC", "nuttadon-id")
+    assert share(replaces="e1").status_code == 404  # e1 is Nuttadon's; this caller is no one
+    app.dependency_overrides[labeling.current_user] = lambda: "nuttadon-id"
+    rows["e1"] = {**FAILED, "status": "done"}
+    assert share(replaces="e1").status_code == 409
+    rows["e1"] = FAILED
+    pool.assign("Nuttadon", "paper", "e1", "", "nuttadon-id")  # tried again, so off the list
+    assert share(replaces="e1").status_code == 404
+    assert share().status_code == 422  # no topic, and nothing to take one from
+    assert pool.pooled() == {}
+
+
+def test_a_topic_change_keeps_the_doi_a_paper_was_uploaded_with(api):
+    pool.assign("Chanya", "paper", "u1", "HPC", "chanya-id", "10.1/x")
+    pool.assign("Chanya", "paper", "u1", "NLP", "chanya-id")
+    assert pool.pooled() == {"u1": "NLP"} and pool.uploaded_dois() == {"u1": "10.1/x"}
+
+
 def test_retry_refuses_a_paper_that_did_not_fail_or_is_not_listed(api, monkeypatch):
     client, _, app = api
     started = []

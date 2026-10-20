@@ -183,4 +183,31 @@ describe('the Scopus search', () => {
     expect(screen.getByRole('button', { name: 'Add Paper 1' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Add Paper 2' })).toBeEnabled()
   })
+
+  it('takes the labeler’s own PDF for a paper it cannot download, under the topic and its DOI', async () => {
+    // The local gateway has no papers bucket: /uploads says so, and the PDF goes to /analyses/upload.
+    const sent: { url: string; body: unknown }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        sent.push({ url, body: init?.body })
+        if (url.includes('/api/uploads')) return Response.json({ url: null })
+        if (url.includes('/api/analyses/upload')) return Response.json({ id: 'u1' })
+        if (url.includes('/share-upload')) return Response.json({ id: 'u1' })
+        return Response.json({ total: 1, results: [paper(0, { downloadable: false })] })
+      }),
+    )
+    renderSearch()
+    search()
+    const list = await screen.findByRole('list', { name: 'Scopus results' })
+
+    const pdf = new File(['%PDF-1.7'], 'paper0.pdf', { type: 'application/pdf' })
+    fireEvent.change(list.querySelector('input[type="file"]')!, { target: { files: [pdf] } })
+
+    expect(await within(list).findByRole('button', { name: 'Add Paper 0' })).toHaveTextContent('Added')
+    const pdfSent = sent.find((s) => s.url.includes('/api/analyses/upload'))?.body as FormData
+    expect((pdfSent.get('file') as File).name).toBe('paper0.pdf')
+    const listed = sent.find((s) => s.url.includes('/api/labeling/papers/u1/share-upload'))
+    expect(JSON.parse(String(listed?.body))).toEqual({ topic: 'CV', doi: '10.1/0', replaces: '' })
+  })
 })

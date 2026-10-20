@@ -9,10 +9,11 @@ import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Tras
 import type { ReactNode } from 'react'
 
 import { Badge, Button, Progress } from '../../../components/ui'
-import { problem, useAssignTopic, useRetryPaper } from '../../../lib/labeling'
+import { problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 import { addedByOf, isFinished, type Paper } from '../paperFilters'
 import { PaperKeywords } from './PaperKeywords'
+import { UploadPdfButton } from './UploadPdfButton'
 
 const COLUMNS = ['Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by']
 
@@ -74,6 +75,7 @@ function TeamProgress({ paper }: { paper: Paper }) {
 function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; myTopic: string; onOpen: (id: string) => void }) {
   const assign = useAssignTopic()
   const retry = useRetryPaper()
+  const upload = useUploadPaper()
   const ready = paper.status === 'done'
   const failed = paper.status === 'error'
   const addedBy = addedByOf(paper, me)
@@ -114,8 +116,9 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
         {failed && (
           <span role="alert" className="mt-1 block text-refutes">
             Could not be read: {paper.reason || 'no open PDF was found'}.{' '}
-            {paper.mine ? 'Try again, or remove it.' : `Only ${adder} can try again or remove it.`}
+            {paper.mine ? 'Try again, upload its PDF, or remove it.' : `Only ${adder} can try again, upload its PDF or remove it.`}
             {retry.isError && ` Trying again failed: ${problem(retry.error).title}.`}
+            {upload.isError && ` The PDF was not added: ${problem(upload.error).title}.`}
           </span>
         )}
       </td>
@@ -152,12 +155,22 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             variant="ghost"
             className="relative z-10 min-h-11 px-3"
             aria-label={`${retry.isPending ? 'Starting' : 'Try again'} ${paper.title}`}
-            disabled={retry.isPending}
+            // Trying again while its PDF is uploading would list the paper twice.
+            disabled={retry.isPending || upload.isPending}
             onClick={() => retry.mutate(paper.analysis_id)}
           >
             <RotateCcw className="size-4" aria-hidden="true" />
             {retry.isPending ? 'Starting…' : 'Try again'}
           </Button>
+        )}
+        {paper.mine && failed && (
+          <UploadPdfButton
+            title={paper.title}
+            busy={upload.isPending}
+            disabled={retry.isPending}
+            // The gateway takes the topic and DOI from the row it replaces.
+            onFile={(file) => upload.mutate({ file, topic: '', replaces: paper.analysis_id })}
+          />
         )}
         {paper.mine && (
           <Button
@@ -165,7 +178,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             title="Remove"
             className="relative z-10 min-h-11 min-w-11 px-3 hover:text-refutes @4xl:px-0"
             aria-label={`Remove ${paper.title}`}
-            disabled={assign.isPending || retry.isPending}
+            disabled={assign.isPending || retry.isPending || upload.isPending}
             onClick={() => {
               if (!window.confirm("Remove this paper from the team's list? Labels already saved are kept.")) return
               assign.mutate({ analysisId: paper.analysis_id, topic: '' })

@@ -8,7 +8,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { API_BASE, fetchFile, request, type Source } from './api'
+import { api, API_BASE, fetchFile, request, type Source } from './api'
 
 export type Level = 1 | 2 | 3 | 4
 export type Confidence = 'low' | 'medium' | 'high'
@@ -166,6 +166,9 @@ export type ScopusQuery = { topic: string; scope: ScopusScope; q: string; since:
 
 export type ScopusPage = { total: number; results: ScopusPaper[] }
 
+/** A PDF for a paper the analysis could not download (see labelingApi.uploadPaper). */
+export type UploadedPaper = { file: File; topic: string; doi?: string; replaces?: string }
+
 export type Pool = {
   topics: string[]
   me: string
@@ -214,6 +217,18 @@ export const labelingApi = {
   /** Read one of your failed papers again; a new analysis takes its place on the list. */
   retryPaper: (analysisId: string) =>
     request<{ id: string }>(`/labeling/papers/${encodeURIComponent(analysisId)}/retry`, { method: 'POST' }),
+  /** Analyse a paper from its PDF and list it for the team. The PDF is uploaded the way the
+   * Researcher role uploads one (straight to the papers bucket where the web proxy would refuse
+   * a large file, #266), then the new analysis is listed. `doi` links it to its Scopus record;
+   * `replaces` is one of your failed papers, which it takes the place of. */
+  uploadPaper: async ({ file, topic, doi = '', replaces = '' }: UploadedPaper) => {
+    const { id } = await api.uploadAnalysis(file, true)
+    return request<{ id: string }>(`/labeling/papers/${encodeURIComponent(id)}/share-upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, doi, replaces }),
+    })
+  },
   status: () => request<LabelStatus>('/labeling/status'),
   session: (analysisId: string) => request<Session>(`/labeling/sessions/${encodeURIComponent(analysisId)}`),
   save: (analysisId: string, body: Save) =>
@@ -317,6 +332,19 @@ export function useRetryPaper() {
   return useMutation({
     mutationFn: (analysisId: string) => labelingApi.retryPaper(analysisId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
+  })
+}
+
+/** `onUploaded` runs for every upload that went through. A callback given to `mutate` runs only
+ * for the latest call, so a list that can start several uploads passes this instead. */
+export function useUploadPaper(onUploaded?: (upload: UploadedPaper) => void) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: labelingApi.uploadPaper,
+    onSuccess: (_reply, upload) => {
+      onUploaded?.(upload)
+      return queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] })
+    },
   })
 }
 
