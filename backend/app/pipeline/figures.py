@@ -1,8 +1,8 @@
 """What a paper shows instead of saying: figure crops, tables, and formulas.
 
-Docling finds all of them. Each figure is cropped and saved beside the paper with its
-caption, so a visual hit gives the judge something to quote. Tables stay markdown,
-formulas LaTeX.
+Docling finds all of them. Each figure and table is cropped and saved beside the paper with
+its caption and its box on the page, so a visual hit gives the judge something to quote and
+the reader a region to see. Tables also keep their markdown, formulas are LaTeX.
 
     python -m app.pipeline.figures data/papers/colbertv2.pdf
 """
@@ -18,6 +18,9 @@ from app.config import DOCLING_PARALLEL, PAPERS_DIR
 
 IMAGE_SCALE = 2.0  # crops rendered at twice the page's own resolution
 MANIFEST = "media.json"  # cache: Docling runs once per paper
+# Bumped when the manifest gains a field, so an older manifest is read again with Docling once.
+# Version 2 added each figure's and table's box on its page, and table crops (#554).
+MANIFEST_VERSION = 2
 FORMULAS = os.getenv("DOCLING_FORMULAS", "") == "1"  # reading formulas as LaTeX costs its own model download
 # auto: OCR only a PDF without a text layer (needs_ocr); always; never.
 OCR = os.getenv("DOCLING_OCR", "auto").strip().lower() or "auto"
@@ -88,6 +91,7 @@ def docling_converter(ocr: bool, pictures: bool = True):
             options = PdfPipelineOptions(do_ocr=ocr)
             if pictures:
                 options.generate_picture_images = True
+                options.generate_table_images = True
                 options.images_scale = IMAGE_SCALE
                 options.do_formula_enrichment = FORMULAS
             _converters[ocr, pictures] = DocumentConverter(
@@ -141,6 +145,26 @@ def _page_of(item) -> int:
     return item.prov[0].page_no if item.prov else 0
 
 
+def _region(item, document) -> dict | None:
+    """Where a Docling picture or table sits on its page, or None when Docling gave no page.
+
+    The shape is the one /find returns for a sentence, so the page viewer draws both the same
+    way: `page`, `boxes` (a list because a sentence can span lines; a crop has one box) and the
+    page size, in PDF points with a top-left origin. Docling's boxes are usually bottom-left.
+    """
+    if not item.prov or item.prov[0].page_no not in document.pages:
+        return None
+    prov = item.prov[0]
+    size = document.pages[prov.page_no].size
+    box = prov.bbox.to_top_left_origin(size.height)
+    return {
+        "page": prov.page_no,
+        "boxes": [{"x0": box.l, "y0": box.t, "x1": box.r, "y1": box.b}],
+        "page_width": size.width,
+        "page_height": size.height,
+    }
+
+
 def figures_dir(pdf: Path) -> Path:
     """Where this paper's crops live: papers/figures/<paper>/."""
     return PAPERS_DIR / "figures" / pdf.stem
@@ -164,22 +188,34 @@ def _figures(document, pdf: Path) -> list[dict]:
                 "page": _page_of(picture),
                 "caption": caption,
                 "image": path.as_posix(),
+                "region": _region(picture, document),
             }
         )
     return figures
 
 
-def _tables(document) -> list[dict]:
-    """Tables as markdown: exact numbers a judge can quote, not a picture of them."""
-    return [
-        {
+def _tables(document, pdf: Path) -> list[dict]:
+    """Tables as markdown, exact numbers a judge can quote, and as a crop the vision index can
+    match and the reader can see. A table Docling could not render keeps only its markdown."""
+    directory = figures_dir(pdf)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    tables = []
+    for index, table in enumerate(document.tables, start=1):
+        item = {
             "kind": "table",
             "page": _page_of(table),
             "caption": table.caption_text(document) or "",
             "text": table.export_to_markdown(document),
+            "region": _region(table, document),
         }
-        for table in document.tables
-    ]
+        image = table.get_image(document)
+        if image is not None:
+            path = directory / f"table-{index}.png"
+            image.save(path)
+            item["image"] = path.as_posix()
+        tables.append(item)
+    return tables
 
 
 def _formulas(document) -> list[dict]:
@@ -204,11 +240,15 @@ def _read_manifest(pdf: Path) -> dict | None:
     if not manifest.is_file():
         return None
     found = json.loads(manifest.read_text(encoding="utf-8"))
-    return found if all(Path(figure["image"]).is_file() for figure in found.get("figures", [])) else None
+    if found.get("version") != MANIFEST_VERSION:
+        return None
+    crops = [item for item in found.get("figures", []) + found.get("tables", []) if item.get("image")]
+    return found if all(Path(item["image"]).is_file() for item in crops) else None
 
 
 def paper_media(pdf_path: str, refresh: bool = False) -> dict:
-    """Every figure, table and formula in a paper: crops on disk, tables and formulas as text.
+    """Every figure, table and formula in a paper: figure and table crops on disk, tables and
+    formulas as text.
 
     Args:
         pdf_path: a local PDF path.
@@ -224,9 +264,10 @@ def paper_media(pdf_path: str, refresh: bool = False) -> dict:
 
             media = _named(
                 {
+                    "version": MANIFEST_VERSION,
                     "file": pdf.as_posix(),
                     "figures": _figures(document, pdf),
-                    "tables": _tables(document),
+                    "tables": _tables(document, pdf),
                     "formulas": _formulas(document),
                 }
             )

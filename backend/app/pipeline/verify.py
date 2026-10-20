@@ -42,15 +42,22 @@ def evidence_from(claim: str, source_name: str) -> list[dict]:
 HIT_FIELDS = ("page", "score", "kind", "label", "caption", "image")
 
 
-def _index_visually(source: Path):
-    """Put the cited paper's figures in the vision index, or its pages when it has none.
-    A cropped figure beats a rendered page: it carries a name and a caption to quote."""
+def _crops(source: Path) -> list[dict]:
+    """The cited paper's figure and table crops, as the manifest describes them."""
     from app.pipeline.figures import paper_media
 
     media = paper_media(source.as_posix())
-    figures = media.get("figures", []) if media["status"] == "ok" else []
-    if figures:
-        retrieval.colpali_add_figures(source.name, source.stem, figures)
+    if media["status"] != "ok":
+        return []
+    return [item for item in media.get("figures", []) + media.get("tables", []) if item.get("image")]
+
+
+def _index_visually(source: Path):
+    """Put the cited paper's figure and table crops in the vision index, or its pages when it
+    has none. A crop beats a rendered page: it carries a name and a caption to quote."""
+    crops = _crops(source)
+    if crops:
+        retrieval.colpali_add_figures(source.name, source.stem, crops)
     else:
         retrieval.colpali_add_pdf(source.as_posix())
 
@@ -144,18 +151,39 @@ def _visual(claim: str, source: Path) -> tuple[list[dict], str]:
         body = retrieval.colpali_search(claim, k=5, source=source.name)
         hits = [hit for hit in body["topk"] if hit.get("source") == source.name]
         found = [{field: hit.get(field, "") for field in HIT_FIELDS} for hit in hits[:PAGE_COUNT]]
-        return found, body.get("model", "")
+        return _with_regions(found, source), body.get("model", "")
     except Exception:
         return [], ""
 
 
+def _with_regions(hits: list[dict], source: Path) -> list[dict]:
+    """Each crop hit with its kind and its box on the page, from this worker's manifest.
+
+    The ColPali service returns kind "figure" for every crop, tables too, and keeps no box.
+    Its image path and the worker's share only the file name, so the name finds the crop
+    here. Page hits, and crops missing from the manifest, are returned as they are.
+    """
+    if not any(hit.get("image") for hit in hits):
+        return hits  # page hits only: no manifest to read
+    crops = {Path(crop["image"]).name: crop for crop in _crops(source)}
+    return [_with_region(hit, crops) for hit in hits]
+
+
+def _with_region(hit: dict, crops: dict[str, dict]) -> dict:
+    """The hit with its crop's kind and region, or the hit itself when no crop matches."""
+    crop = crops.get(Path(hit["image"]).name) if hit.get("image") else None
+    if crop is None:
+        return hit
+    return {**hit, "kind": crop["kind"], "region": crop.get("region")}
+
+
 def _captions(hits: list[dict]) -> list[str]:
-    """Figure captions as evidence the judge can read and quote."""
+    """Figure and table captions as evidence the judge can read and quote."""
     return [f"{hit['label']}: {hit['caption']}" for hit in hits if hit.get("caption")]
 
 
 def _figure_crop(hits: list[dict], source: Path) -> Path | None:
-    """This worker's copy of the first figure hit, for the judge to look at, or None.
+    """This worker's copy of the first figure or table hit, for the judge to look at, or None.
 
     A hit's image is the crop's path on the ColPali service. Docling wrote the same crop
     here under the same file name, so the name finds it. Page hits have no image.
@@ -233,6 +261,8 @@ def _build_judge():
         whether it means the same thing."""
 
         claim: str = dspy.InputField(desc="A claim that cites the source paper")
+        # Table crops come in here too. Naming tables in this prompt scored the same on
+        # table-claims.jsonl (32 and 33 of 36, both prompts) and was reverted (#564).
         figure: dspy.Image = dspy.InputField(desc="A figure from the cited paper")
         evidence: list[str] = dspy.InputField(desc="The figure's caption, or empty")
         verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")

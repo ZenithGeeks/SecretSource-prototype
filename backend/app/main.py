@@ -104,10 +104,10 @@ MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2MB — a square 128px+ photo, not a print
 AVATAR_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 PAGE_CACHE = Path(os.getenv("PAGE_CACHE", "/tmp/pages"))
 DEFAULT_DPI, MAX_DPI = 110, 300
-# Crops are saved as figure-1.png, figure-2.png ... by pipeline/figures.py.
+# Crops are saved as figure-1.png, table-1.png ... by pipeline/figures.py.
 # We match the whole name. This stops the route from serving any path.
 # The request only sends a number, never a directory.
-FIGURE_NAME = re.compile(r"figure-\d+")
+FIGURE_NAME = re.compile(r"(figure|table)-\d+")
 # How many of the newest analyses to hold after a restart, on top of every running one.
 # The rest stay in the store until their owner asks. Read at call time so a test can lower it.
 _STARTUP_RECENT_DEFAULT = 50
@@ -1029,10 +1029,10 @@ async def page_image(
 
 @app.get("/papers/{name}/figures/{figure}.png")
 async def figure_image(name: str, figure: str, user: str | None = Depends(current_user)):
-    """One cropped figure of a paper, the image a verdict's `pages` entry points at."""
+    """One cropped figure or table of a paper, the image a verdict's `pages` entry points at."""
     owned = await asyncio.to_thread(_paper, name, user)
     if not FIGURE_NAME.fullmatch(figure):
-        raise HTTPException(400, "a figure is named figure-<n>")
+        raise HTTPException(400, "a crop is named figure-<n> or table-<n>")
     path = figures_dir(owned) / f"{figure}.png"
     if not path.is_file():
         raise HTTPException(404, f"no such figure: {figure}")

@@ -121,6 +121,7 @@ def test_papers_are_private_to_their_owner(client, monkeypatch, tmp_path):
     figures = tmp_path / "figures" / "ada-upload"
     figures.mkdir(parents=True)
     (figures / "figure-1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (figures / "table-1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     monkeypatch.setattr(main, "PAPERS_DIR", tmp_path)
     # figures_dir() reads its own module-level PAPERS_DIR (imported separately from app.config),
     # so patching main's binding alone leaves it pointed at the real directory.
@@ -143,6 +144,8 @@ def test_papers_are_private_to_their_owner(client, monkeypatch, tmp_path):
     # (see app/main.py) — figures needs no real PDF content, so it is the one exercised here.
     assert client.get("/papers/ada-upload.pdf/figures/figure-1.png", headers=bo).status_code == 404
     assert client.get("/papers/ada-upload.pdf/figures/figure-1.png", headers=ada).status_code == 200
+    assert client.get("/papers/ada-upload.pdf/figures/table-1.png", headers=ada).status_code == 200
+    assert client.get("/papers/ada-upload.pdf/figures/page-1.png", headers=ada).status_code == 400
 
 
 def test_researcher_home_only_reflects_the_callers_own_papers(client):
