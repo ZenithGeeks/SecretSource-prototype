@@ -192,6 +192,11 @@ services:
         # "<2.4" on a CPU without SSE4.2 (ss-core); empty elsewhere. See backend/app/native.py.
         NUMPY_SPEC: ${WORKER_NUMPY_SPEC:-}
     command: python worker.py
+    # Metrics (worker.py, WORKER_METRICS_PORT 9101) for a Prometheus on the host. A range, so
+    # --scale worker=3 still starts: each replica takes the next free port, the first gets 9102.
+    # Always local, like Qdrant. Not 9101: Gatehouse's RustFS console has it on the shared machine.
+    ports:
+      - "127.0.0.1:9102-9104:9101"
     environment: *gateway-env
     volumes:
       - ${PAPERS_HOST_DIR:-./data/papers}:/app/data/papers
