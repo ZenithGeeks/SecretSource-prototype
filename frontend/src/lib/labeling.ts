@@ -6,7 +6,7 @@
  * first; every claim and every passage is judged by hand, and the person saves.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { API_BASE, fetchFile, request, type Source } from './api'
 
@@ -119,12 +119,17 @@ export const TOPIC_INFO: Record<string, { name: string; venues: string; journal:
  * setting names) is for logs, not for them: they get a sentence and what to do next.
  */
 export function problem(error: unknown): { title: string; hint: string } {
-  const status = Number(/^(\d{3}):/.exec(error instanceof Error ? error.message : '')?.[1])
+  const message = error instanceof Error ? error.message : ''
+  const status = Number(/^(\d{3}):/.exec(message)?.[1])
   if (status === 401) return { title: 'Please sign in again', hint: 'Your session has ended.' }
   if (status === 403) return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
   if (status === 404)
     return { title: 'This paper is not available', hint: 'It may have been deleted, or its owner has stopped sharing it.' }
+  if (status === 502 && message.includes('API key'))
+    return { title: 'Scopus refused the API key', hint: 'Ask whoever runs the gateway to check SCOPUS_API_KEY.' }
   if (status === 502) return { title: 'Scopus did not answer', hint: 'Try again in a moment.' }
+  if (status === 504) return { title: 'Scopus took too long to answer', hint: 'Try again, or narrow the years.' }
+  if (status === 429) return { title: 'The Scopus key has used its quota for now', hint: 'Try again in a minute.' }
   if (status === 409) return { title: 'This paper is not ready', hint: 'Its analysis has not finished. Try again in a moment.' }
   if (status === 422) return { title: 'That was not accepted', hint: 'Reload the page and try again.' }
   if (status === 503)
@@ -139,8 +144,17 @@ export type ScopusPaper = {
   year: string
   first_author: string
   cited_by: number
+  /** From OpenAlex; empty when it has none. */
+  abstract: string
   added: boolean
 }
+
+export type ScopusSort = 'cited' | 'newest' | 'oldest' | 'match'
+
+/** One Scopus search: the topic's venues, optional words, a year range, and an order. */
+export type ScopusQuery = { topic: string; q: string; since: number; until: number; sort: ScopusSort }
+
+export type ScopusPage = { total: number; results: ScopusPaper[] }
 
 export type Pool = {
   topics: string[]
@@ -167,8 +181,10 @@ const putJson = (path: string, body: unknown) =>
 
 export const labelingApi = {
   pool: () => request<Pool>('/labeling/pool'),
-  scopusSearch: (topic: string, q: string, since: number) =>
-    request<{ results: ScopusPaper[] }>(`/labeling/scopus/search?${new URLSearchParams({ topic, q, since: String(since) })}`),
+  scopusSearch: ({ topic, q, since, until, sort }: ScopusQuery, page: number) =>
+    request<ScopusPage>(
+      `/labeling/scopus/search?${new URLSearchParams({ topic, q, since: String(since), until: String(until), sort, page: String(page) })}`,
+    ),
   scopusAdd: (doi: string, topic: string) =>
     request<{ id: string; existing: boolean }>('/labeling/scopus/add', {
       method: 'POST',
@@ -205,8 +221,19 @@ export function usePool() {
   return useQuery({ queryKey: ['labeling', 'pool'], queryFn: labelingApi.pool, retry: false })
 }
 
-export function useScopusSearch() {
-  return useMutation({ mutationFn: (v: { topic: string; q: string; since: number }) => labelingApi.scopusSearch(v.topic, v.q, v.since) })
+/** The pages of one Scopus search, 25 papers each; null searches nothing yet. Each page costs
+ * Scopus quota, so a page is only fetched when the reader asks for it. */
+export function useScopusSearch(query: ScopusQuery | null) {
+  return useInfiniteQuery({
+    queryKey: ['labeling', 'scopus', query],
+    queryFn: ({ pageParam }) => labelingApi.scopusSearch(query as ScopusQuery, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) =>
+      pages.reduce((shown, page) => shown + page.results.length, 0) < last.total && last.results.length ? pages.length : undefined,
+    enabled: query !== null,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
 }
 
 export function useScopusAdd() {
