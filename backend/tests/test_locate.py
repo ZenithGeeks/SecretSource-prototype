@@ -69,3 +69,27 @@ def test_a_sentence_that_is_not_there_gets_no_box(paper):
 
 def test_a_page_out_of_range_gets_no_box(paper):
     assert locate(paper, "An alternative is late interaction", page=9) is None
+
+
+def test_a_sentence_whose_first_words_also_end_the_line_before_starts_where_it_starts(tmp_path):
+    # The abstract ends with the words the introduction starts with. Both alignments cover the
+    # same words, so the one with less in between, the introduction's, has to win.
+    text = (
+        "new evaluation protocols for future long-context language models.\n"
+        "1 Introduction\n"
+        "Language models have become an important and flexible building block in a\n"
+        "variety of user-facing language technologies.\n"
+    )
+    path = tmp_path / "abstract.pdf"
+    with pymupdf.open() as document:
+        document.new_page().insert_text((72, 100), text, fontsize=11, fontname="helv")
+        document.save(path)
+    sentence = (
+        "Language models have become an important and flexible building block in a variety "
+        "of user-facing language technologies."
+    )
+    found = locate(path.as_posix(), sentence)
+    assert found and found["coverage"] >= 0.95
+    first = found["boxes"][0]
+    assert abs(first["x0"] - 72) < 2  # from "Language" at the margin
+    assert len(found["boxes"]) == 2  # the two lines of the sentence, not the abstract's line
