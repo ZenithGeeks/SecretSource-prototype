@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source('.');
 
 /* Figma's Teacher screens use Geist for interface copy and Fraunces for display headings.
    Keep these overrides role-scoped so the other role frontends retain their own typography. */
