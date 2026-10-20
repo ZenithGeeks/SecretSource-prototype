@@ -5,7 +5,8 @@
  */
 
 import { Bell, CircleAlert, CircleCheck, Loader2, RotateCcw, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 
 import { Button } from '../../../components/ui'
 import { usePool, useRetryPaper, type Pool } from '../../../lib/labeling'
@@ -13,34 +14,62 @@ import { usePool, useRetryPaper, type Pool } from '../../../lib/labeling'
 type Paper = Pool['papers'][number]
 type Seen = Record<string, Paper['status']> // analysis id -> the status the viewer last saw
 
-const SEEN_KEY = 'labeler.seenPapers'
 const PANEL_WIDTH = 352 // px, 22rem
 const READY_SHOWN = 8 // ready papers listed, new ones first; the paper table has the rest
 
-const readSeen = (): Seen | null => {
-  try {
-    const stored = window.localStorage.getItem(SEEN_KEY)
-    return stored ? (JSON.parse(stored) as Seen) : null
-  } catch {
-    return null
+/** What the viewer has seen, shared by every bell on the page (the shell renders one in the
+ * sidebar and one in the phone top bar) and kept in localStorage. When storage is blocked it
+ * lives in memory for this page only. */
+const seenStore = (() => {
+  const KEY = 'labeler.seenPapers'
+  const listeners = new Set<() => void>()
+  let memory: Seen | null = null
+  let parsed: { raw: string; seen: Seen | null } | null = null
+  return {
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    get(): Seen | null {
+      let raw: string | null
+      try {
+        raw = window.localStorage.getItem(KEY)
+      } catch {
+        return memory
+      }
+      if (raw === null) return memory
+      if (parsed?.raw !== raw) {
+        let seen: Seen | null = null
+        try {
+          seen = JSON.parse(raw) as Seen
+        } catch {
+          // a broken value counts as nothing seen; the next write replaces it
+        }
+        parsed = { raw, seen }
+      }
+      return parsed.seen
+    },
+    set(seen: Seen) {
+      try {
+        window.localStorage.setItem(KEY, JSON.stringify(seen))
+      } catch {
+        memory = seen
+      }
+      listeners.forEach((listener) => listener())
+    },
   }
-}
-
-const writeSeen = (seen: Seen) => {
-  try {
-    window.localStorage.setItem(SEEN_KEY, JSON.stringify(seen))
-  } catch {
-    // not remembered: the count comes back after a reload
-  }
-}
+})()
 
 export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) {
   const pool = usePool()
+  const seen = useSyncExternalStore(seenStore.subscribe, seenStore.get)
   const [open, setOpen] = useState(false)
-  const [seen, setSeen] = useState<Seen | null>(readSeen)
   const [place, setPlace] = useState({ top: 0, left: 0 })
+  // What was new when the panel opened keeps its "New" tag while the panel stays open.
+  const [newAtOpen, setNewAtOpen] = useState<Set<string>>(new Set())
   const button = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
 
   const mine = (pool.data?.papers ?? []).filter((p) => p.mine)
   const reading = mine.filter((p) => p.status === 'running')
@@ -48,25 +77,29 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
   const ready = mine.filter((p) => p.status === 'done')
   const isNew = (p: Paper) => seen !== null && p.status !== 'running' && seen[p.analysis_id] !== p.status
   const unseen = mine.filter(isNew).length
-  // What was new when the panel opened keeps its "New" tag while the panel stays open.
-  const [newAtOpen, setNewAtOpen] = useState<Set<string>>(new Set())
   const wasNew = (p: Paper) => newAtOpen.has(p.analysis_id)
 
-  const markSeen = () => {
-    const next = Object.fromEntries(mine.map((p) => [p.analysis_id, p.status]))
-    setSeen(next)
-    writeSeen(next)
-  }
+  const markSeen = () => seenStore.set(Object.fromEntries(mine.map((p) => [p.analysis_id, p.status])))
 
-  // Nothing stored yet (first visit, or storage blocked): what is there now counts as seen, so a
-  // labeler with twenty finished papers does not start with a count of twenty.
+  // Nothing stored yet (first visit): what is there now counts as seen, so a labeler with twenty
+  // finished papers does not start with a count of twenty.
   useEffect(() => {
     if (seen === null && pool.data) markSeen()
   })
 
+  // Closing also marks as seen what finished while the panel was open: it was on screen.
+  const close = (refocus: boolean) => {
+    setOpen(false)
+    markSeen()
+    if (refocus) button.current?.focus()
+  }
+  const closeRef = useRef(close)
+  useEffect(() => {
+    closeRef.current = close
+  })
+
   const toggle = () => {
-    if (open) return setOpen(false)
-    // Fixed, not inside the sidebar: the sidebar scrolls and would clip the panel.
+    if (open) return close(false)
     const rect = button.current!.getBoundingClientRect()
     setPlace({ top: rect.bottom + 8, left: Math.max(16, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 16)) })
     setNewAtOpen(new Set(mine.filter(isNew).map((p) => p.analysis_id)))
@@ -74,27 +107,36 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
     markSeen()
   }
 
+  // The panel is placed once, under the bell, so anything that moves the bell closes it.
   useEffect(() => {
     if (!open) return
+    heading.current?.focus()
+    const inPanel = (node: EventTarget | null) => node instanceof Node && Boolean(panel.current?.contains(node))
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      setOpen(false)
-      button.current?.focus()
+      if (event.key === 'Escape' && (inPanel(document.activeElement) || document.activeElement === button.current)) {
+        closeRef.current(true)
+      }
     }
     const onPointer = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!panel.current?.contains(target) && !button.current?.contains(target)) setOpen(false)
+      if (!inPanel(event.target) && !button.current?.contains(event.target as Node)) closeRef.current(false)
+    }
+    const onMove = (event: Event) => {
+      if (!inPanel(event.target)) closeRef.current(false)
     }
     window.addEventListener('keydown', onKey)
     document.addEventListener('pointerdown', onPointer)
+    window.addEventListener('resize', onMove)
+    document.addEventListener('scroll', onMove, true)
     return () => {
       window.removeEventListener('keydown', onKey)
       document.removeEventListener('pointerdown', onPointer)
+      window.removeEventListener('resize', onMove)
+      document.removeEventListener('scroll', onMove, true)
     }
   }, [open])
 
   const openPaper = (id: string) => {
-    setOpen(false)
+    close(false)
     onOpen(id)
   }
 
@@ -130,20 +172,24 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
         )}
       </button>
 
-      {open && (
+      {/* In document.body: inside the sticky sidebar its z-index would only count within the
+          sidebar, and the page content would paint over it. */}
+      {open && createPortal(
         <div
           ref={panel}
           role="dialog"
           aria-label="Your papers"
           style={{ top: place.top, left: place.left, width: PANEL_WIDTH }}
-          // Below the toasts (sonner draws them on top of everything), so a toast stays readable.
-          className="fixed z-30 flex max-h-[min(70vh,32rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface shadow-xl"
+          // Over the page (the sticky bars are z-30), below the toasts, which sonner draws on top.
+          className="fixed z-40 flex max-h-[min(70vh,32rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface shadow-xl"
         >
           <header className="flex items-center justify-between border-b border-border-subtle px-4 py-2">
-            <h2 className="text-sm font-semibold text-ink">Your papers</h2>
+            <h2 ref={heading} tabIndex={-1} className="text-sm font-semibold text-ink outline-none">
+              Your papers
+            </h2>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => close(true)}
               aria-label="Close"
               className="flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
             >
@@ -174,7 +220,8 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
               )}
             </Section>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )

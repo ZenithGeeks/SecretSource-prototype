@@ -125,6 +125,39 @@ it('closes with the bell, the close button, Escape, or a click outside', async (
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
 
+it('keeps one count for the sidebar bell and the phone bell', async () => {
+  window.localStorage.setItem('labeler.seenPapers', JSON.stringify({ a1: 'running' }))
+  gateway([pool([paper('a1')])])
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <PaperBell onOpen={vi.fn()} />
+      <PaperBell onOpen={vi.fn()} />
+    </QueryClientProvider>,
+  )
+  const [first, second] = await screen.findAllByRole('button', { name: 'Your papers, 1 new' })
+  fireEvent.click(first)
+  expect(second).toHaveAccessibleName('Your papers')
+})
+
+it('closes when the window is resized, and leaves Escape alone when focus is elsewhere', async () => {
+  gateway([pool([paper('a1')])])
+  renderBell()
+  const bell = await screen.findByRole('button', { name: 'Your papers' })
+
+  fireEvent.click(bell)
+  fireEvent(window, new Event('resize'))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+  fireEvent.click(bell)
+  const elsewhere = Object.assign(document.createElement('input'), { 'aria-label': 'elsewhere' })
+  document.body.append(elsewhere)
+  elsewhere.focus()
+  fireEvent.keyDown(window, { key: 'Escape' })
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  elsewhere.remove()
+})
+
 it('says so when you have added no papers', async () => {
   gateway([pool([paper('t1', { mine: false })])])
   renderBell()
