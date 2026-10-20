@@ -271,6 +271,23 @@ def test_failure_callback_builds_a_row_when_nothing_was_stored(monkeypatch):
     assert check["finishedAt"].endswith("+00:00")
 
 
+def test_failure_callback_names_the_cause_when_the_worker_died(monkeypatch):
+    from rq.exceptions import AbandonedJobError
+
+    monkeypatch.setattr(main.store, "load", lambda check_id: None)
+    saved = []
+    monkeypatch.setattr(main.store, "save", lambda row: saved.append(row))
+    monkeypatch.setattr("app.queue.redis_connection", lambda: FakeRedis())
+    job = _FakeJob(
+        ["chk-f3", "user-ada", "draft1", "Related work", 1, "hash", [_queued()], "2026-10-19T00:00:00+00:00"]
+    )
+
+    # RQ's cleanup passes an AbandonedJobError with no text when the job's worker is gone.
+    _on_draft_check_job_failure(job, None, AbandonedJobError, AbandonedJobError(), None)
+
+    assert saved[0]["message"] == "the worker stopped before this check finished"
+
+
 class _Job:
     def __init__(self, status):
         self.status = status

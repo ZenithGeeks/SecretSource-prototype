@@ -313,6 +313,23 @@ def test_failure_callback_marks_a_stored_running_row_as_error(monkeypatch):
     assert published  # best-effort publish was attempted
 
 
+def test_failure_callback_names_the_cause_when_the_worker_died(monkeypatch):
+    from rq.exceptions import AbandonedJobError
+
+    row = {"id": "job-f3", "paper": "p.pdf", "status": "running", "owner": None, "stages": [], "claims": []}
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: copy.deepcopy(row))
+    saved = []
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(analysis))
+    monkeypatch.setattr("app.queue.redis_connection", lambda: _NullRedis())
+    job = _FakeJob("job-f3", ["job-f3", "p.pdf", True, None, []])
+
+    # RQ's cleanup passes an AbandonedJobError with no text when the job's worker is gone.
+    _on_analysis_job_failure(job, None, AbandonedJobError, AbandonedJobError(), None)
+
+    assert saved[0]["message"] == "the worker stopped before this analysis finished"
+    assert saved[0]["stages"][-1]["message"] == "the worker stopped before this analysis finished"
+
+
 def test_failure_callback_builds_from_job_args_with_no_stored_row(monkeypatch):
     monkeypatch.setattr(main.store, "load", lambda analysis_id: None)
     saved = []

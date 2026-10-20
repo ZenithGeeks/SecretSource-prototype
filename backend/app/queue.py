@@ -146,7 +146,8 @@ def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:
 
     if analysis["status"] == "running":
         _, exc_value, _ = exc_info
-        message = str(exc_value) if exc_value else "the worker stopped before this analysis finished"
+        # RQ's AbandonedJobError (its worker died) has no text, so `or` and not `if exc_value`.
+        message = str(exc_value or "") or "the worker stopped before this analysis finished"
         analysis["status"] = "error"
         analysis["message"] = message
         analysis["stages"].append({"stage": "error", "message": message, "at": round(time.time(), 1)})
@@ -517,7 +518,8 @@ def _on_draft_check_job_failure(job: Job, connection, *exc_info) -> None:
 
     if check["status"] == "running":
         _, exc_value, _ = exc_info
-        message = str(exc_value) if exc_value else "the worker stopped before this check finished"
+        # RQ's AbandonedJobError (its worker died) has no text, so `or` and not `if exc_value`.
+        message = str(exc_value or "") or "the worker stopped before this check finished"
         check["status"] = "error"
         check["message"] = message
         check["finishedAt"] = now_iso()
