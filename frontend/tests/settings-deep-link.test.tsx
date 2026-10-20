@@ -9,6 +9,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { ResearcherApp } from '../src/roles/researcher/ResearcherApp'
 import { TeacherApp } from '../src/roles/teacher/TeacherApp'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
+import { LabelerApp } from '../src/roles/labeler/LabelerApp'
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 // ResearcherApp reaches PageViewer, and react-pdf's pdf.js needs canvas globals jsdom lacks.
@@ -23,6 +24,7 @@ const APPS: [string, ComponentType<{ onChangeRole?: () => void }>][] = [
   ['writer', AuthorApp],
   ['researcher', ResearcherApp],
   ['teacher', TeacherApp],
+  ['labeler', LabelerApp],
 ]
 
 function renderApp(App: ComponentType<{ onChangeRole?: () => void }>, search: string) {

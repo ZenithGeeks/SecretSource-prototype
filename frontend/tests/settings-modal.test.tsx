@@ -23,7 +23,7 @@ function renderWithQuery(ui: ReactNode) {
   return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
-function renderModal(currentRole: 'writer' | 'researcher' | 'teacher') {
+function renderModal(currentRole: 'writer' | 'researcher' | 'teacher' | 'labeler') {
   return renderWithQuery(<SettingsModal open onClose={vi.fn()} currentRole={currentRole} onSwitchRole={vi.fn()} />)
 }
 
@@ -360,11 +360,11 @@ describe('roles group keyboard travel', () => {
     expect(document.activeElement).toBe(author)
     expect(author).toHaveAttribute('aria-selected', 'true')
 
-    const teacher = roleTabs().getByRole('tab', { name: 'Teacher' })
+    const labeler = roleTabs().getByRole('tab', { name: 'Labeler' })
     fireEvent.keyDown(author, { key: 'ArrowUp' })
-    expect(document.activeElement).toBe(teacher)
-    expect(screen.getByRole('tab', { name: 'Class and marking' })).toBeInTheDocument()
-    fireEvent.keyDown(teacher, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(labeler)
+    expect(screen.queryByRole('tab', { name: 'Checking' })).toBeNull() // the labeler's tab set
+    fireEvent.keyDown(labeler, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(author)
   })
 
@@ -374,14 +374,36 @@ describe('roles group keyboard travel', () => {
     researcher.focus()
 
     fireEvent.keyDown(researcher, { key: 'End' })
-    const teacher = roleTabs().getByRole('tab', { name: 'Teacher' })
-    expect(document.activeElement).toBe(teacher)
-    expect(teacher).toHaveAttribute('aria-selected', 'true')
+    const labeler = roleTabs().getByRole('tab', { name: 'Labeler' })
+    expect(document.activeElement).toBe(labeler)
+    expect(labeler).toHaveAttribute('aria-selected', 'true')
 
-    fireEvent.keyDown(teacher, { key: 'Home' })
+    fireEvent.keyDown(labeler, { key: 'Home' })
     expect(document.activeElement).toBe(roleTabs().getByRole('tab', { name: 'Author' }))
     // Settings tabs keep their own selection: still Account.
     expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+describe('labeler settings', () => {
+  test('has the shared tabs without Your data and Checking, and names the Labeler role', () => {
+    renderModal('labeler')
+    const settingsTabs = within(screen.getByRole('tablist', { name: 'Settings sections' }))
+    expect(settingsTabs.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Account',
+      'Appearance',
+      'Notifications',
+      'Role and home',
+    ])
+    fireEvent.click(settingsTabs.getByRole('tab', { name: 'Role and home' }))
+    expect(screen.getByText('Labeler', { selector: 'span' })).toBeInTheDocument()
+  })
+
+  test('turns on the dark theme from Appearance', () => {
+    renderModal('labeler')
+    fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), { target: { value: 'Dark' } })
+    expect(document.documentElement.dataset.theme).toBe('dark')
   })
 })
 
