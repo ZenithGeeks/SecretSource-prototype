@@ -93,6 +93,20 @@ describe('reading a tool result', () => {
   })
 })
 
+describe('a command that fails', () => {
+  it('says why in its own turn, with no Ask again', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"detail":"no such paper: x.pdf"}', { status: 404 })))
+    render(<Panel />)
+
+    fireEvent.change(field(), { target: { value: '/find_in_paper @ColBERTv2 late interaction' } })
+    await act(async () => fireEvent.submit(field().closest('form')!))
+
+    expect(await screen.findByText(/\/find_in_paper could not run: 404/)).toBeInTheDocument()
+    expect(screen.queryByText(/The answer failed/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ask again' })).not.toBeInTheDocument()
+  })
+})
+
 function Panel() {
   const assistant = useAssistant()
   return (

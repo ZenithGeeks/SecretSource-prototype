@@ -193,8 +193,11 @@ export function useAssistant() {
         signal: abort.signal,
       })
       if (isCurrent()) updateTurn(turn.id, (shown) => ({ ...shown, ...describeResult(command.name, result), status: 'done' }))
-    } catch {
-      if (isCurrent()) updateTurn(turn.id, (shown) => ({ ...shown, status: 'failed' }))
+    } catch (error) {
+      if (!isCurrent() || (error as Error).name === 'AbortError') return
+      // The reason, not "the answer failed": a command has no answer to ask again.
+      const reason = error instanceof Error ? error.message : 'unknown error'
+      updateTurn(turn.id, (shown) => ({ ...shown, note: `/${command.name} could not run: ${reason}`, status: 'done' }))
     }
   }
 

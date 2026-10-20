@@ -92,6 +92,17 @@ def test_get_claim_with_a_number_the_paper_lacks_names_the_range(library):
     assert "1 to 3, not 9" in run(data_tools.get_claim, "a1", 9)["message"]
 
 
+def test_find_in_paper_says_when_the_pdf_is_not_on_the_server(library, monkeypatch):
+    def missing(name, user):
+        raise HTTPException(404, f"no such paper: {name}")
+
+    monkeypatch.setattr(main, "_paper", missing)
+
+    result = run(data_tools.find_in_paper, "a1", "late interaction")
+
+    assert result == {"status": "error", "message": "no such paper: survey.pdf"}
+
+
 def test_search_claims_ranks_by_shared_words(library):
     found = run(data_tools.search_claims, "colbert index size")["claims"]
 
