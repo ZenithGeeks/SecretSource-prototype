@@ -286,7 +286,8 @@ async def submit_analysis(paper: str, tool_context: ToolContext) -> dict:
     from app import main
 
     started = main._start(paper, True, _user(tool_context))
-    return {"id": started["id"], "status": started["status"]}
+    # _start returns only the id. The new analysis is "running" from the moment it is queued.
+    return {"id": started["id"], "status": "running"}
 
 
 async def labeling_progress(analysis_id: str, tool_context: ToolContext) -> dict:
