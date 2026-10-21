@@ -56,6 +56,8 @@ def pairs_from_labels(rows: list[dict]) -> list[Pair]:
 def judge_scores(gold: list[bool], predicted: list[bool]) -> dict[str, float]:
     """Accuracy, balanced accuracy, macro-F1 and Cohen's kappa of `predicted` against `gold`.
 
+    `precision`, `recall` and `f1` are for the "supported" class alone.
+
     Balanced accuracy is reported because "not supported" is likely most of the labels, and a
     judge that always says so would look good on plain accuracy. As in scikit-learn, it averages
     the recall of the classes that appear in `gold` only.
@@ -74,6 +76,9 @@ def judge_scores(gold: list[bool], predicted: list[bool]) -> dict[str, float]:
         "pairs": total,
         "accuracy": (tp + tn) / total,
         "balanced_accuracy": sum(recalls) / len(recalls),
+        "precision": _ratio(tp, tp + fp),
+        "recall": _ratio(tp, tp + fn),
+        "f1": f1_true,
         "macro_f1": (f1_true + f1_false) / 2,
         "kappa": cohen_kappa([int(g) for g in gold], [int(p) for p in predicted], levels=2),
         "true_positive": tp,

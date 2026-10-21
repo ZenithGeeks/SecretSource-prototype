@@ -22,6 +22,9 @@ def test_judge_scores_match_scikit_learn():
     assert scores["accuracy"] == pytest.approx(0.75)
     assert scores["balanced_accuracy"] == pytest.approx(0.7333333)
     assert scores["macro_f1"] == pytest.approx(0.7333333)
+    assert scores["precision"] == pytest.approx(2 / 3)
+    assert scores["recall"] == pytest.approx(2 / 3)
+    assert scores["f1"] == pytest.approx(2 / 3)
     assert scores["kappa"] == pytest.approx(0.4666667)
     assert (scores["true_positive"], scores["false_positive"], scores["false_negative"]) == (2, 1, 1)
 
@@ -106,7 +109,11 @@ def test_the_runner_scores_the_split_and_writes_one_row_per_pair(monkeypatch, tm
 
     def verify_claim(claim, source):
         asked.append((claim, source.rsplit("/", 1)[-1]))
-        return {"status": "ok", "verdict": "supports"}
+        return {
+            "status": "ok",
+            "verdict": "supports",
+            "verdict_from": "figure" if claim == "claim c2" else "text",
+        }
 
     monkeypatch.setattr(eval_verdicts.verify, "verify_claim", verify_claim)
     out = tmp_path / "verdicts.csv"
@@ -118,5 +125,10 @@ def test_the_runner_scores_the_split_and_writes_one_row_per_pair(monkeypatch, tm
     report = json.loads(capsys.readouterr().out)
     assert report["judge"]["pairs"] == 2 and report["judge"]["accuracy"] == pytest.approx(0.5)
     assert report["settings"]["evidence_count"] == eval_verdicts.verify.EVIDENCE_COUNT
+    # c1 (gold supported) came from the text judge, c2 (gold not supported) from the figure judge.
+    assert report["judge_by_source"]["text"]["true_positive"] == 1
+    assert report["judge_by_source"]["figure"]["false_positive"] == 1
     with out.open(newline="", encoding="utf-8") as file:
-        assert [r["verdict"] for r in csv.DictReader(file)] == ["supports", "supports"]
+        rows = list(csv.DictReader(file))
+    assert [r["verdict"] for r in rows] == ["supports", "supports"]
+    assert [r["verdict_from"] for r in rows] == ["text", "figure"]

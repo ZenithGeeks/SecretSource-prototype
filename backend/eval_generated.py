@@ -25,6 +25,7 @@ from typing import NamedTuple
 
 import dspy
 from app import store
+from app.evaluation import judge_scores
 from app.pipeline import verify
 
 PAPERS = Path("data/papers")
@@ -59,7 +60,8 @@ def judge(claim: dict, prepared: dict) -> Judged:
 
 
 def report(claims: list[dict], runs: list[dict[str, Judged]]) -> None:
-    """Accuracy per run and kind, the confusion counts, and the claims that changed verdict."""
+    """Accuracy per run and kind, the confusion counts, the claims that changed verdict, and
+    precision, recall and F1 per run, split by the judge call that gave the verdict."""
     for kind in ("supports", "refutes", "all"):
         chosen = [c for c in claims if kind in ("all", c["kind"])]
         scores = [sum(run[c["id"]].verdict == c["kind"] for c in chosen) / len(chosen) for run in runs]
@@ -74,6 +76,33 @@ def report(claims: list[dict], runs: list[dict[str, Judged]]) -> None:
         print(f"expected {kind:<8} -> " + ", ".join(f"{v} {counts[v]}" for v in VERDICTS if counts[v]))
     flipped = [c["id"] for c in claims if len({run[c["id"]].verdict for run in runs}) > 1]
     print(f"{len(flipped)} claims changed verdict between runs")
+    for number, run in enumerate(runs, 1):
+        for source, scores in scores_by_source(claims, run).items():
+            print(
+                f"run {number} {source:<6} n={scores['pairs']:<4} precision {scores['precision']:.3f}"
+                f", recall {scores['recall']:.3f}, F1 {scores['f1']:.3f}, macro F1 {scores['macro_f1']:.3f}"
+            )
+
+
+def scores_by_source(claims: list[dict], run: dict[str, Judged]) -> dict[str, dict]:
+    """One run's scores on "supports", for all verdicts and for each judge call (text, figure).
+
+    Errors are left out, as in eval_verdicts.py. A claim's source can differ between runs, so the
+    split is made per run.
+    """
+    pairs: dict[str, list[tuple[bool, bool]]] = {"all": []}
+    for claim in claims:
+        judged = run[claim["id"]]
+        if judged.verdict == "error":
+            continue
+        pair = (claim["kind"] == "supports", judged.verdict == "supports")
+        pairs["all"].append(pair)
+        pairs.setdefault(judged.verdict_from, []).append(pair)
+    return {
+        source: judge_scores([gold for gold, _ in found], [said for _, said in found])
+        for source, found in pairs.items()
+        if found
+    }
 
 
 def main() -> None:
