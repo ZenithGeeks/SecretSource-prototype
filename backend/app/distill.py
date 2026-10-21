@@ -53,6 +53,7 @@ def distill(lines: list[str]) -> list[Fact]:
     numbered = [f"[{number}] {line}" for number, line in enumerate(lines, 1)]
     with dspy.context(lm=dspy_lm(temperature=0.0, max_tokens=800)):
         facts = dspy.Predict(DistillFacts)(lines=numbered).facts
+    # The prompt asks for at most MAX_FACTS, but the model can return more.
     return [fact for fact in facts if keepable(fact, len(lines))][:MAX_FACTS]
 
 
