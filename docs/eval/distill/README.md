@@ -27,4 +27,4 @@ Tokens per call: 488 prompt, 79 completion. At Gemini 2.5 Flash list prices that
 ## Caveats
 
 - The chats are hand-written and short, so they are easier than real chats. Recall counts a keyword anywhere in a fact's subject or summary, which is lenient. Real transcripts should replace these once the assistant has users who agree to it. Other users' chats are not read for this.
-- An unbacked statement never reaches the prompt (`distill.chat_lines`), so 0 unbacked facts mostly measures that filter. The model could still restate a trap in its own words, which the phrase match would miss.
+- An unbacked statement never reaches the prompt (`chats.distill_lines`), so 0 unbacked facts mostly measures that filter. The model could still restate a trap in its own words, which the phrase match would miss.
