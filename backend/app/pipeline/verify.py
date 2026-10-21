@@ -14,14 +14,19 @@ from pathlib import Path
 
 from app import store
 from app.clients import retrieval
-from app.config import FIGURE_WAIT, PARALLEL_SOURCES, VISUAL_EVIDENCE, VLLM_MODEL
+from app.config import FIGURE_WAIT, PARALLEL_SOURCES, PARTIAL_VERDICT, VISUAL_EVIDENCE, VLLM_MODEL
 from app.metrics import record_llm_usage
 
 logger = logging.getLogger(__name__)
 
 EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
-LABELS = ("supports", "refutes", "insufficient")
+LABELS = ("supports", "refutes", "insufficient", *(("partially supports",) if PARTIAL_VERDICT else ()))
+# SCRUM-71 spike, added to the text judge's instructions when PARTIAL_VERDICT is on.
+PARTIAL_RULE = (
+    ' Answer "partially supports" if the passages state part of the claim and contradict none'
+    " of it, but leave another part unsettled."
+)
 CITED_MARK = "[cited]"  # app.author.logic.cited_text puts it where the citation stands
 
 _judge = None  # built on first use: needs dspy and a running LM
@@ -268,6 +273,11 @@ def _build_judge():
         verdict: str = dspy.OutputField(desc="supports, refutes, or insufficient")
         quote: str = dspy.OutputField(desc="The value or label in the figure that decides it, or empty")
         reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
+
+    if PARTIAL_VERDICT:
+        JudgeClaim = JudgeClaim.with_instructions(
+            JudgeClaim.instructions + PARTIAL_RULE
+        ).with_updated_fields("verdict", desc="supports, partially supports, refutes, or insufficient")
 
     # Only the Author check marks the citation (#437). A paper analysis keeps the first
     # judge until labeled data (#423) can score the second one on its claims.

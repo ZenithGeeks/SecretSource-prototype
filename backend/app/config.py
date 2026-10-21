@@ -148,6 +148,8 @@ DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
 # an L4 GPU awake for about $0.75 of the $1.11 an analysis cost. ColBERT already indexes the
 # caption text with the rest of each page.
 VISUAL_EVIDENCE = _env_flag("VISUAL_EVIDENCE")
+# SCRUM-71 spike: the text judge may also answer "partially supports". Off by default.
+PARTIAL_VERDICT = _env_flag("PARTIAL_VERDICT")
 # With VISUAL_EVIDENCE on: how long a cited paper's checks wait for its figures. Empty: until they are, so
 # every verdict can use the figure captions. A number of seconds is a fast mode: after that the
 # check is judged on the text alone, and a later run of the paper gets the figures. On the same
