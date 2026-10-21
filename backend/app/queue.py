@@ -558,6 +558,18 @@ def enqueue_draft_check(
     )
 
 
+DISTILL_JOB = "app.distill.run_distill_job"
+DISTILL_TIMEOUT = 5 * 60  # one LLM call; a stuck one should not hold the worker for long
+
+
+def enqueue_distill(owner: str, chat_id: str, lines: list[str]):
+    """Queue the distilling of one chat's lines into facts (app/distill.py). The job id is per
+    chat, so a chat queued twice before the worker reaches it runs once."""
+    return analysis_queue().enqueue(
+        DISTILL_JOB, owner, chat_id, lines, job_id=f"distill-{chat_id}", job_timeout=DISTILL_TIMEOUT
+    )
+
+
 ANALYSIS_JOB = f"{__name__}.run_analysis_job"
 FAILURE_CALLBACK = f"{__name__}._on_analysis_job_failure"
 DRAFT_CHECK_JOB = f"{__name__}.run_draft_check_job"
@@ -568,6 +580,7 @@ DRAFT_FAILURE_CALLBACK = f"{__name__}._on_draft_check_job_failure"
 _ALLOWED_FAILURE = {
     ANALYSIS_JOB: {None, FAILURE_CALLBACK},
     DRAFT_CHECK_JOB: {None, DRAFT_FAILURE_CALLBACK},
+    DISTILL_JOB: {None},
 }
 
 
@@ -576,7 +589,8 @@ class AnalysisWorker(SimpleWorker):
 
     Anyone who can write to Redis can queue a job that names any importable function, and RQ
     would call it. JSON (not pickle) keeps reading a job from running code; this check keeps the
-    worker from calling anything but an analysis, a draft check, and that job's own failure callback.
+    worker from calling anything but an analysis, a draft check, a chat distill, and the first two
+    jobs' own failure callbacks.
     """
 
     def perform_job(self, job: Job, queue: Queue) -> bool:
