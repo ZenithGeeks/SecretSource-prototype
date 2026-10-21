@@ -1,23 +1,22 @@
 """Distill a finished assistant chat into a few facts to remember (SPEC.md "Distilling").
 
-The gateway picks the chats to distill (chats.due_for_distill) and queues run_distill_job. The worker
-reads the chat, asks the LLM for at most MAX_FACTS facts, keeps the ones the guard allows, and
-saves them with store.save_fact. Nothing here runs inside a request.
+The gateway picks the chats to distill (chats.due_for_distill), turns each into lines
+(chats.distill_lines) and queues run_distill_job with them. The chats can live in the gateway's
+memory, so the worker gets the lines and never reads a chat. The job asks the LLM for at most
+MAX_FACTS facts, keeps the ones the guard allows, and saves them with store.save_fact.
 
-The LLM sees only the user's questions and the statements the judge backed. A statement that
+The lines hold only the user's questions and the statements the judge backed. A statement that
 was not backed never reaches the prompt, and keepable() checks every fact against the lines it
 names. A fact built from an unbacked statement would come back as truth in later chats.
 """
 
-import asyncio
 import logging
-import time
 from typing import Literal
 
 import dspy
 from pydantic import BaseModel, Field
 
-from app import chats, store
+from app import store
 from app.llm import dspy_lm
 
 log = logging.getLogger(__name__)
@@ -42,19 +41,6 @@ class DistillFacts(dspy.Signature):
     facts: list[Fact] = dspy.OutputField(desc=f"At most {MAX_FACTS} facts")
 
 
-def chat_lines(messages: list[dict]) -> list[str]:
-    """The chat as the LLM sees it: each question, and each statement the judge backed."""
-    lines = []
-    for message in messages:
-        if message["role"] == "user":
-            lines.append(f"user asked: {message['text']}")
-            continue
-        for statement in message.get("statements", []):
-            if statement.get("verdict") == "supports":
-                lines.append(f"assistant said, backed by {statement['source']}: {statement['text']}")
-    return lines
-
-
 def keepable(fact: Fact, line_count: int) -> bool:
     """A fact needs at least one real line behind it. Every line shown is a question or a backed
     statement, so a fact that names none, or only numbers past the end, rests on nothing."""
@@ -70,13 +56,9 @@ def distill(lines: list[str]) -> list[Fact]:
     return [fact for fact in facts if keepable(fact, len(lines))][:MAX_FACTS]
 
 
-async def distill_chat(owner: str, chat_id: str) -> int:
-    """Distill one of the owner's chats into facts. Returns how many facts were saved."""
-    session = await chats.find(owner, chat_id)
-    if session is None:
-        return 0
-    lines = chat_lines(chats.messages(session))
-    facts = await asyncio.to_thread(distill, lines) if lines else []
+def run_distill_job(owner: str, chat_id: str, lines: list[str]) -> int:
+    """The RQ job: save the facts in one chat's lines. Returns how many were saved."""
+    facts = distill(lines)
     for fact in facts:
         store.save_fact(
             owner,
@@ -87,11 +69,5 @@ async def distill_chat(owner: str, chat_id: str) -> int:
                 "session_id": chat_id,
             },
         )
-    await chats.mark_distilled(owner, chat_id, time.time())
     log.info("distilled chat %s: %d lines, %d facts", chat_id, len(lines), len(facts))
     return len(facts)
-
-
-def run_distill_job(owner: str, chat_id: str) -> int:
-    """The RQ job: distill one chat. Signed-out chats have no owner and are never queued."""
-    return asyncio.run(distill_chat(owner, chat_id))

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import dspy
 from app import distill
+from app.chats import distill_lines
 from dspy.clients.base_lm import GLOBAL_HISTORY
 
 
@@ -76,7 +77,7 @@ def main() -> None:
     for run in range(1, args.runs + 1):
         kept = {}
         for chat in chats:
-            lines = distill.chat_lines(chat["messages"])
+            lines = distill_lines(chat["messages"])
             kept[chat["id"]] = distill.distill(lines) if lines else []
         runs.append(score(chats, kept))
         result = runs[-1]

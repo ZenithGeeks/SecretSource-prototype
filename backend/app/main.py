@@ -1364,9 +1364,14 @@ async def _queue_distills(user: str, mine: list, leaving: str | None = None) -> 
 
     Best-effort: with Redis down the chat still opens, and the chats stay due for next time.
     """
+    now = time.time()
     try:
-        for chat_id in chats.due_for_distill(mine, time.time(), leaving):
-            await asyncio.to_thread(enqueue_distill, user, chat_id)
+        for chat_id in chats.due_for_distill(mine, now, leaving):
+            chat = await chats.find(user, chat_id)  # mine() has no events
+            lines = chats.distill_lines(chats.messages(chat)) if chat else []
+            if lines:
+                await asyncio.to_thread(enqueue_distill, user, chat_id, lines)
+            await chats.mark_distilled(user, chat_id, now)
     except RedisError as error:
         logger.warning("queueing chat distills for %s failed: %s", user, error)
 

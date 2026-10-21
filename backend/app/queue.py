@@ -562,11 +562,11 @@ DISTILL_JOB = "app.distill.run_distill_job"
 DISTILL_TIMEOUT = 5 * 60  # one LLM call; a stuck one should not hold the worker for long
 
 
-def enqueue_distill(owner: str, chat_id: str):
-    """Queue the distilling of one chat into facts (app/distill.py). The job id is per chat, so
-    a chat queued twice before the worker reaches it runs once."""
+def enqueue_distill(owner: str, chat_id: str, lines: list[str]):
+    """Queue the distilling of one chat's lines into facts (app/distill.py). The job id is per
+    chat, so a chat queued twice before the worker reaches it runs once."""
     return analysis_queue().enqueue(
-        DISTILL_JOB, owner, chat_id, job_id=f"distill-{chat_id}", job_timeout=DISTILL_TIMEOUT
+        DISTILL_JOB, owner, chat_id, lines, job_id=f"distill-{chat_id}", job_timeout=DISTILL_TIMEOUT
     )
 
 

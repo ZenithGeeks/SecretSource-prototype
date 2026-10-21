@@ -1,6 +1,6 @@
 """Distilling a chat into facts (SPEC.md): only questions and backed statements reach the LLM,
-the guard drops facts with no real line behind them, and the gateway queues the right chats.
-No LLM and no Redis: distill.distill and main.enqueue_distill are replaced."""
+the guard drops facts with no real line behind them, and the gateway queues the right chats
+with their lines. No LLM and no Redis: distill.distill and main.enqueue_distill are replaced."""
 
 import asyncio
 from types import SimpleNamespace
@@ -26,7 +26,7 @@ def test_only_questions_and_backed_statements_become_lines():
         {"role": "assistant", "statements": [BACKED, NOT_BACKED]},
     ]
 
-    lines = distill.chat_lines(messages)
+    lines = chats.distill_lines(messages)
 
     assert lines == [
         "user asked: How does ColBERT score passages?",
@@ -82,49 +82,46 @@ def sqlite_and_chats(monkeypatch, tmp_path):
     monkeypatch.setattr(chats, "_service", InMemorySessionService())
 
 
-def test_a_distilled_chat_saves_its_facts_and_is_marked(sqlite_and_chats, monkeypatch):
-    seen = []
+def test_the_job_saves_the_facts_for_the_chat(sqlite_and_chats, monkeypatch):
+    monkeypatch.setattr(distill, "distill", lambda lines: [fact([1])])
 
-    def fake_distill(lines):
-        seen.append(lines)
-        return [fact([1])]
-
-    monkeypatch.setattr(distill, "distill", fake_distill)
-
-    async def run():
-        chat = await chats.start("user-ada", {})
-        turn = await chats.add_question("user-ada", chat.id, "How does ColBERT score passages?", {})
-        await chats.add_reply("user-ada", chat.id, turn, [BACKED, NOT_BACKED])
-        saved = await distill.distill_chat("user-ada", chat.id)
-        return chat.id, saved, await chats.find("user-ada", chat.id)
-
-    chat_id, saved, chat = asyncio.run(run())
-
-    assert saved == 1
-    assert len(seen[0]) == 2 and "every dataset" not in " ".join(seen[0])
-    assert [f["session_id"] for f in store.load_facts("user-ada")] == [chat_id]
-    assert chat.state["distilled_at"] > 0
-    assert chats.due_for_distill([chat], chat.state["distilled_at"] + 1, leaving=chat.id) == []
+    assert distill.run_distill_job("user-ada", "chat-1", ["user asked: How does ColBERT work?"]) == 1
+    assert [f["session_id"] for f in store.load_facts("user-ada")] == ["chat-1"]
+    assert store.load_facts("user-bo") == []
 
 
-def test_another_users_chat_is_never_distilled(sqlite_and_chats):
-    async def run():
-        chat = await chats.start("user-bo", {})
-        return await distill.distill_chat("user-ada", chat.id)
-
-    assert asyncio.run(run()) == 0
-    assert store.load_facts("user-ada") == []
-
-
-def test_starting_a_chat_queues_the_one_being_left(sqlite_and_chats, monkeypatch):
+@pytest.fixture
+def signed_in(sqlite_and_chats, monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role")
     monkeypatch.setattr(auth, "_user_id_for", {"token-ada": "user-ada"}.get)
     queued = []
-    monkeypatch.setattr(main, "enqueue_distill", lambda owner, chat_id: queued.append((owner, chat_id)))
-    client = TestClient(main.app)
+    monkeypatch.setattr(main, "enqueue_distill", lambda *job: queued.append(job))
+    return TestClient(main.app), queued
 
+
+def test_starting_a_chat_queues_the_one_being_left_with_its_backed_lines(signed_in):
+    client, queued = signed_in
     first = client.post("/assistant/chats", json={}, headers=ADA).json()["id"]
+
+    async def converse():
+        turn = await chats.add_question("user-ada", first, "How does ColBERT score passages?", {})
+        await chats.add_reply("user-ada", first, turn, [BACKED, NOT_BACKED])
+
+    asyncio.run(converse())
     client.post("/assistant/chats", json={}, headers=ADA)
 
-    assert queued == [("user-ada", first)]
+    [(owner, chat_id, lines)] = queued
+    assert (owner, chat_id) == ("user-ada", first)
+    assert len(lines) == 2 and "every dataset" not in " ".join(lines)
+
+
+def test_a_queued_chat_is_marked_and_not_queued_again(signed_in):
+    client, queued = signed_in
+    client.post("/assistant/chats", json={}, headers=ADA)
+    client.post("/assistant/chats", json={}, headers=ADA)  # leaves the first (empty) chat
+    client.get("/assistant/chats", headers=ADA)  # nothing has changed since
+
+    marked = [chat for chat in asyncio.run(chats.mine("user-ada")) if "distilled_at" in chat.state]
+    assert len(marked) == 1
+    assert queued == []  # an empty chat has no lines, so nothing goes to the worker

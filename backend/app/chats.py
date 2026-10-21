@@ -66,6 +66,20 @@ def messages(session: "Session") -> list[dict]:
     return shown
 
 
+def distill_lines(messages_: list[dict]) -> list[str]:
+    """The chat as the distill step sees it (app/distill.py): each question, and each statement
+    the judge backed. A statement that was not backed is left out, so it can never become a fact."""
+    lines = []
+    for message in messages_:
+        if message["role"] == "user":
+            lines.append(f"user asked: {message['text']}")
+            continue
+        for statement in message.get("statements", []):
+            if statement.get("verdict") == "supports":
+                lines.append(f"assistant said, backed by {statement['source']}: {statement['text']}")
+    return lines
+
+
 async def start(user: str | None, context: dict) -> "Session":
     """A new chat of this user's, opened from the screen in `context`."""
     return await service().create_session(
