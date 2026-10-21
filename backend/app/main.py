@@ -55,6 +55,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
+from redis.exceptions import RedisError
 
 from app import chats, dependencies, mcp_server, researcher, store, uploads
 from app.agent_runs import get_runner
@@ -97,7 +98,14 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
-from app.queue import cancel_if_queued, enqueue_analysis, job_is_alive, pubsub_client, redis_connection
+from app.queue import (
+    cancel_if_queued,
+    enqueue_analysis,
+    enqueue_distill,
+    job_is_alive,
+    pubsub_client,
+    redis_connection,
+)
 from app.screen_bridge import router as bridge_router
 from app.teacher.router import router as teacher_router
 from app.tracing import setup_tracing
@@ -1336,12 +1344,31 @@ async def _reply(user: str | None, chat_id: str, turn: str, question: str, paper
 @app.post("/assistant/chats")
 async def start_chat(body: ChatStart | None = None, user: str | None = Depends(current_user)):
     context = (body or ChatStart()).context.model_dump()
+    if user is not None:
+        mine = await chats.mine(user)
+        # A new chat means the user left their newest one, so it is distilled now (SPEC.md).
+        await _queue_distills(user, mine, leaving=mine[0].id if mine else None)
     return chats.summary(await chats.start(user, context))
 
 
 @app.get("/assistant/chats")
 async def list_chats(user: str | None = Depends(current_user)):
-    return [chats.summary(chat) for chat in await chats.mine(user)]
+    mine = await chats.mine(user)
+    if user is not None:
+        await _queue_distills(user, mine)
+    return [chats.summary(chat) for chat in mine]
+
+
+async def _queue_distills(user: str, mine: list, leaving: str | None = None) -> None:
+    """Queue the user's chats that are due for distilling into facts (app/distill.py).
+
+    Best-effort: with Redis down the chat still opens, and the chats stay due for next time.
+    """
+    try:
+        for chat_id in chats.due_for_distill(mine, time.time(), leaving):
+            await asyncio.to_thread(enqueue_distill, user, chat_id)
+    except RedisError as error:
+        logger.warning("queueing chat distills for %s failed: %s", user, error)
 
 
 @app.get("/assistant/chats/{chat_id}")
