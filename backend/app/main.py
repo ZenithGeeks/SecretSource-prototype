@@ -22,6 +22,7 @@ POST /assistant/chats                 {"context"} -> a new chat of the caller's
 GET  /assistant/chats                 -> the caller's chats, newest first
 GET  /assistant/chats/{id}            -> one chat with its questions and checked replies
 POST /assistant/chats/{id}/messages   {"question", "context"} -> SSE: statements, then verdicts
+/memories               what the assistant remembers about the caller: list, delete (app/memories.py)
 /author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 GET  /health
 
@@ -73,6 +74,7 @@ from app.config import (
 )
 from app.labeling import pool as labeling_pool
 from app.labeling.router import router as labeling_router
+from app.memories import router as memories_router
 from app.metrics import (
     ANALYSES_FINISHED,
     ANALYSES_STARTED,
@@ -408,6 +410,7 @@ app.include_router(author_router)
 app.include_router(labeling_router)
 app.include_router(agent_router)
 app.include_router(bridge_router)
+app.include_router(memories_router)
 app.mount("/mcp", mcp_server.handle_mcp)  # MCP clients use /mcp/: Starlette redirects /mcp
 
 
@@ -1407,10 +1410,11 @@ DELETE_SCOPES = ("all", "researcher", "author")
 @app.delete("/user/data")
 async def delete_all_data(scope: str = "all", user: str | None = Depends(current_user)):
     """Settings → Your data → Delete all. `scope` says whose data: `researcher` is the paper
-    analyses and researcher projects, `author` the draft checks and the Author role's projects,
-    drafts and saved sources, `all` (the default) both. Each role's Settings tab sends its own
-    scope, so a Researcher clearing papers keeps their Author drafts and the other way round
-    (PR #291 review). The confirm dialog is the UI's job; this call is unconditional.
+    analyses, researcher projects and what the assistant remembers, `author` the draft checks
+    and the Author role's projects, drafts and saved sources, `all` (the default) both. Each
+    role's Settings tab sends its own scope, so a Researcher clearing papers keeps their Author
+    drafts and the other way round (PR #291 review). The confirm dialog is the UI's job; this
+    call is unconditional.
 
     An analysis or draft check still running is skipped and counted in `skipped`: its worker
     keeps saving it, so a deleted row would come back on the next restart (same reason as
@@ -1431,6 +1435,8 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         await _delete_one(analysis_id)
     if researcher:
         await asyncio.to_thread(store.delete_projects, user)
+        if user is not None:  # with login off there is no user, so there are no facts
+            await asyncio.to_thread(store.delete_facts, user)
     if author:
         await asyncio.to_thread(store.delete_author_rows, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
