@@ -12,7 +12,9 @@ import logging
 import os
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -131,6 +133,24 @@ CREATE TABLE IF NOT EXISTS preferences (
 )
 """
 
+# What the assistant remembers about each signed-in user (SPEC.md). The same columns as
+# supabase/migrations/*_learned_facts.sql.
+LEARNED_FACTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS learned_facts (
+    id          TEXT PRIMARY KEY,
+    owner       TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    summary     TEXT NOT NULL,
+    analysis_id TEXT,
+    session_id  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE (owner, kind, subject_key)
+)
+"""
+
 _db: sqlite3.Connection | None = None
 _db_path: str | None = None
 # One connection for the whole process, used by one thread at a time. check_same_thread=False
@@ -155,6 +175,7 @@ def _connect() -> sqlite3.Connection:
         _db.execute(CACHE_SCHEMA)
         _db.execute(PROJECTS_SCHEMA)
         _db.execute(PREFERENCES_SCHEMA)
+        _db.execute(LEARNED_FACTS_SCHEMA)
         for table in AUTHOR_TABLES:
             _db.execute(AUTHOR_SCHEMA.format(table=table))
         # One owner's rows, and the running ones, without a scan of every JSON blob (#314).
@@ -534,6 +555,87 @@ def load_preferences(owner: str | None) -> dict | None:
     with _sqlite() as database:
         row = database.execute("SELECT data FROM preferences WHERE owner = ?", (key,)).fetchone()
     return json.loads(row["data"]) if row else None
+
+
+# --- what the assistant remembers about each signed-in user (SPEC.md) ---
+
+FACT_COLUMNS = "id, kind, subject, summary, analysis_id, session_id, created_at, updated_at"
+
+
+def save_fact(owner: str, fact: dict) -> None:
+    """Insert one remembered fact, or replace the owner's fact with the same kind and subject.
+
+    Subjects match with case and outer spaces ignored, so a subject never gets a second row.
+    `fact` has kind, subject, summary, session_id and optionally analysis_id.
+    """
+    row = {
+        "owner": owner,
+        "kind": fact["kind"],
+        "subject": fact["subject"],
+        "subject_key": fact["subject"].strip().lower(),
+        "summary": fact["summary"],
+        "analysis_id": fact.get("analysis_id"),
+        "session_id": fact["session_id"],
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    if _use_supabase():
+        query = _supabase().table("learned_facts").upsert(row, on_conflict="owner,kind,subject_key")
+        _execute_with_retry(query)
+        return
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO learned_facts (id, owner, kind, subject, subject_key, summary, analysis_id, "
+            "session_id, created_at, updated_at) VALUES (:id, :owner, :kind, :subject, :subject_key, "
+            ":summary, :analysis_id, :session_id, :updated_at, :updated_at) "
+            "ON CONFLICT(owner, kind, subject_key) DO UPDATE SET subject = excluded.subject, "
+            "summary = excluded.summary, analysis_id = excluded.analysis_id, "
+            "session_id = excluded.session_id, updated_at = excluded.updated_at",
+            {"id": str(uuid.uuid4()), **row},
+        )
+        database.commit()
+
+
+def load_facts(owner: str) -> list[dict]:
+    """The owner's remembered facts, the most recently updated first."""
+    if _use_supabase():
+        query = (
+            _supabase()
+            .table("learned_facts")
+            .select(FACT_COLUMNS)
+            .eq("owner", owner)
+            .order("updated_at", desc=True)
+        )
+        return _execute_with_retry(query).data
+    with _sqlite() as database:
+        rows = database.execute(
+            f"SELECT {FACT_COLUMNS} FROM learned_facts WHERE owner = ? ORDER BY updated_at DESC",
+            (owner,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_fact(owner: str, fact_id: str) -> bool:
+    """Delete one of the owner's facts. False when no fact with that id is theirs."""
+    if _use_supabase():
+        query = _supabase().table("learned_facts").delete().eq("owner", owner).eq("id", fact_id)
+        return bool(_execute_with_retry(query).data)
+    with _sqlite() as database:
+        cursor = database.execute(
+            "DELETE FROM learned_facts WHERE owner = ? AND id = ?", (owner, fact_id)
+        )
+        database.commit()
+    return cursor.rowcount > 0
+
+
+def delete_facts(owner: str) -> int:
+    """Delete all of the owner's facts and return how many there were."""
+    if _use_supabase():
+        query = _supabase().table("learned_facts").delete().eq("owner", owner)
+        return len(_execute_with_retry(query).data)
+    with _sqlite() as database:
+        cursor = database.execute("DELETE FROM learned_facts WHERE owner = ?", (owner,))
+        database.commit()
+    return cursor.rowcount
 
 
 # --- the Author role's rows: projects, drafts and saved sources, one JSON blob each ---
