@@ -46,3 +46,27 @@ def test_the_name_keeps_the_original_stem_and_drops_any_directory(uploads):
     name = main.Path(uploads("../../etc/paper.pdf", b"%PDF-1.4")).name
     assert name.startswith("paper-") and name.endswith(".pdf")
     assert main.Path(uploads(".hidden.pdf", b"%PDF-1.4 h")).name.startswith("hidden-")
+
+
+def test_any_upload_is_saved_as_pdf(uploads):
+    assert main.Path(uploads("paper.PDF", b"%PDF-1.4 x")).suffix == ".pdf"
+
+
+def test_a_file_that_is_not_a_pdf_is_refused_and_not_saved(client_and_dir):
+    client, papers_dir = client_and_dir
+    response = client.post("/analyses/upload", files={"file": ("x.html", b"<html></html>")})
+    assert response.status_code == 422
+    assert list(papers_dir.iterdir()) == []
+
+
+def test_an_oversized_file_is_refused_and_not_saved(client_and_dir, monkeypatch):
+    client, papers_dir = client_and_dir
+    monkeypatch.setattr(main.uploads, "MAX_UPLOAD_BYTES", 10)
+    response = client.post("/analyses/upload", files={"file": ("big.pdf", b"%PDF-1.4 " + b"x" * 10)})
+    assert response.status_code == 413
+    assert list(papers_dir.iterdir()) == []
+
+
+@pytest.fixture
+def client_and_dir(uploads, tmp_path):
+    return TestClient(main.app), tmp_path

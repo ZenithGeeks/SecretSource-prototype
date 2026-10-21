@@ -816,7 +816,7 @@ def save_upload(content: bytes, filename: str | None) -> Path:
     original = Path(Path(filename or "").name)
     stem = original.stem.lstrip(".") or "paper"
     digest = hashlib.sha256(content).hexdigest()[:12]
-    path = PAPERS_DIR / f"{stem}-{digest}{original.suffix or '.pdf'}"
+    path = PAPERS_DIR / f"{stem}-{digest}.pdf"
     if not path.is_file():
         PAPERS_DIR.mkdir(parents=True, exist_ok=True)
         # Written aside, then renamed: a run that opens this name never reads half a file.
@@ -830,7 +830,13 @@ def save_upload(content: bytes, filename: str | None) -> Path:
 async def upload_analysis(
     file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
 ):
-    path = save_upload(await file.read(), file.filename)
+    # Read one byte past the limit to tell a full-size file from an oversized one.
+    content = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
+    if len(content) > uploads.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "the PDF must be 100 MB or smaller")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(422, "the file is not a PDF")
+    path = save_upload(content, file.filename)
     return _start(path.as_posix(), verify, user)
 
 
