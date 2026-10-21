@@ -157,7 +157,7 @@ def test_submit_analysis_starts_a_run_for_the_caller(monkeypatch):
 
     def start(paper, verify, owner):
         started.append((paper, verify, owner))
-        return {"id": "n1", "status": "running"}
+        return {"id": "n1"}  # what main._start returns
 
     monkeypatch.setattr(main, "_start", start)
 
