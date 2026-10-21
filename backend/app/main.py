@@ -1345,28 +1345,30 @@ async def _reply(user: str | None, chat_id: str, turn: str, question: str, paper
 async def start_chat(body: ChatStart | None = None, user: str | None = Depends(current_user)):
     context = (body or ChatStart()).context.model_dump()
     if user is not None:
-        mine = await chats.mine(user)
+        sessions = await chats.mine(user)
         # A new chat means the user left their newest one, so it is distilled now (SPEC.md).
-        await _queue_distills(user, mine, leaving=mine[0].id if mine else None)
+        await _queue_distills(user, sessions, leaving=sessions[0].id if sessions else None)
     return chats.summary(await chats.start(user, context))
 
 
 @app.get("/assistant/chats")
 async def list_chats(user: str | None = Depends(current_user)):
-    mine = await chats.mine(user)
+    sessions = await chats.mine(user)
     if user is not None:
-        await _queue_distills(user, mine)
-    return [chats.summary(chat) for chat in mine]
+        await _queue_distills(user, sessions)
+    return [chats.summary(chat) for chat in sessions]
 
 
-async def _queue_distills(user: str, mine: list, leaving: str | None = None) -> None:
+async def _queue_distills(user: str, sessions: list, leaving: str | None = None) -> None:
     """Queue the user's chats that are due for distilling into facts (app/distill.py).
 
-    Best-effort: with Redis down the chat still opens, and the chats stay due for next time.
+    A due chat is marked even when it has no lines to send, such as a chat with no questions,
+    so it is not looked at again until it changes. Best-effort: with Redis down the chat still
+    opens, and the chat that could not be queued, and those after it, stay due for next time.
     """
     now = time.time()
     try:
-        for chat_id in chats.due_for_distill(mine, now, leaving):
+        for chat_id in chats.due_for_distill(sessions, now, leaving):
             chat = await chats.find(user, chat_id)  # mine() has no events
             lines = chats.distill_lines(chats.messages(chat)) if chat else []
             if lines:

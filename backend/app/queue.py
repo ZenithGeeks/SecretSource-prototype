@@ -558,6 +558,7 @@ def enqueue_draft_check(
     )
 
 
+# A dotted name, not a function: importing app.distill would load DSPy into the gateway.
 DISTILL_JOB = "app.distill.run_distill_job"
 DISTILL_TIMEOUT = 5 * 60  # one LLM call; a stuck one should not hold the worker for long
 

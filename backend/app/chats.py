@@ -66,11 +66,12 @@ def messages(session: "Session") -> list[dict]:
     return shown
 
 
-def distill_lines(messages_: list[dict]) -> list[str]:
+def distill_lines(chat_messages: list[dict]) -> list[str]:
     """The chat as the distill step sees it (app/distill.py): each question, and each statement
-    the judge backed. A statement that was not backed is left out, so it can never become a fact."""
+    the judge backed, meaning its verdict is "supports". Any other statement is left out, so it
+    can never become a fact."""
     lines = []
-    for message in messages_:
+    for message in chat_messages:
         if message["role"] == "user":
             lines.append(f"user asked: {message['text']}")
             continue
@@ -138,7 +139,8 @@ async def add_reply(user: str | None, chat_id: str, turn: str, statements: list[
 
 
 async def mark_distilled(user: str, chat_id: str, at: float) -> None:
-    """Record in the chat's state when it was distilled (app/distill.py)."""
+    """Record `at`, the time the chat was queued for distilling, as distilled_at in its state.
+    due_for_distill compares it with the chat's last update."""
     from google.adk.events import Event, EventActions
 
     marker = Event(
