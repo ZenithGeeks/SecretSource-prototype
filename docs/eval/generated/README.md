@@ -155,6 +155,27 @@ The figure judge on its own (`backend/eval_figure_judge.py --runs 2`), 20 Oct 20
 
 Main's prompt stays. The false "supports" on tables came from three claims, all row swaps: ColBERT Table 4 (143 against 154 GiB) and RocketQA Table 2 twice (ME-BERT's 33.8 given to ANCE, doc2query's 89.1 given to DeepCT).
 
+## Precision, recall and F1 per judge call (SCRUM-80)
+
+`eval_generated.py` prints precision, recall and F1 on "supports" for each claim file, for all verdicts and split by `verdict_from`: the text call or the figure call. Errors are left out. One `--fresh` run, `VISUAL_EVIDENCE=1`, ColPali colqwen2-v1.0, judge `qwen3.8-27b-fp8` (deployment id `d7099677…`), 21 Oct 2026, 13 minutes:
+
+```
+python eval_generated.py figure-claims.jsonl table-claims.jsonl --runs 1 --fresh
+```
+
+| Claims | Judge call | n | Precision | Recall | F1 | Macro F1 |
+|---|---|---|---|---|---|---|
+| figure (52) | all | 50 | 0.833 | 0.769 | 0.800 | 0.800 |
+| figure (52) | figure | 37 | 0.864 | 0.905 | 0.884 | 0.861 |
+| figure (52) | text | 13 | 0.500 | 0.200 | 0.286 | 0.511 |
+| table (36) | all | 20 | 0.909 | 1.000 | 0.952 | 0.950 |
+| table (36) | text | 16 | 0.889 | 1.000 | 0.941 | 0.937 |
+| table (36) | figure | 4 | 1.000 | 1.000 | 1.000 | 1.000 |
+
+- Two papers failed to index in this run (`10.18653-v1-2020.emnlp-main.550.pdf`, `10.18653-v1-2021.naacl-main.466.pdf`). Their 18 claims (16 table, 2 figure) are errors and are left out, so the table row covers 20 of 36 claims.
+- The text row on figure claims covers the 13 claims the text call decided, so the figure call was never asked. 4 of its 5 "supports" claims got "refutes" from the text: the figure call only runs when the text says insufficient. The figure judge does not get a second look at a claim the text refutes. This is one run, so the spread between runs is not measured.
+- Prose and caption claims were not rerun. Their verdicts come almost all from the text call (427 of 432 above).
+
 ## Tried and not adopted
 
 | Idea | Result | Why not |
