@@ -1,4 +1,4 @@
-"""Eval for the screen agent (app/agents/screen.py): 12 tasks against a scripted screen.
+"""Eval for the screen agent (app/agents/screen.py): 13 tasks against a scripted screen.
 
 Runs the real agent and model through an ADK Runner, answers each browser tool from a fake screen
 (the Researcher's screens, three papers, a filter field), and checks what the agent did:
@@ -18,10 +18,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from app import memory
 from app.agent_runs import MAX_LLM_CALLS
 from app.agents import data_tools, screen
 from google.adk.agents.invocation_context import LlmCallsLimitExceededError
 from google.adk.agents.run_config import RunConfig
+from google.adk.memory import BaseMemoryService
+from google.adk.memory.base_memory_service import SearchMemoryResponse
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -36,6 +39,16 @@ PAPERS = [
     },
 ]
 SCREENS = ["home", "analyses", "library", "graph"]
+# What load_memory finds for the eval user: one fact from an earlier chat (app/distill.py).
+REMEMBERED = [
+    {
+        "id": "f1",
+        "kind": "paper",
+        "subject": "ColBERTv2",
+        "summary": "asked why BEIR results disagree with ColBERTv2's MS MARCO results",
+        "updated_at": "2026-10-20T10:00:00+00:00",
+    }
+]
 MAX_TURNS = 10  # browser round trips per task; past that the task fails as a loop
 
 
@@ -94,6 +107,7 @@ def both(*checks):
 
 TASKS = [
     Task("Open my ColBERTv2 paper.", opened("a1")),
+    Task("What did I ask about ColBERTv2 in an earlier chat?", lambda run: "beir" in run.reply.lower()),
     Task("Take me to the graph.", called("open_screen", screen="graph")),
     Task(
         "Where can I filter my papers?",
@@ -250,6 +264,16 @@ async def run_task(runner: Runner, sessions: InMemorySessionService, task: Task)
     return run, time.perf_counter() - start
 
 
+class FakeMemory(BaseMemoryService):
+    """load_memory's answers from REMEMBERED, matched the way AssistantMemory matches facts."""
+
+    async def add_session_to_memory(self, session) -> None:
+        return None
+
+    async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
+        return SearchMemoryResponse(memories=memory.search_facts(query, REMEMBERED))
+
+
 async def main(runs: int) -> None:
     # The same agent, with the server's list_papers swapped for the fake papers.
     tools = [list_papers if tool is screen.list_papers else tool for tool in screen.screen_agent.tools]
@@ -258,7 +282,7 @@ async def main(runs: int) -> None:
     ]
     agent = screen.screen_agent.clone(update={"tools": tools})
     sessions = InMemorySessionService()
-    runner = Runner(agent=agent, app_name="eval", session_service=sessions)
+    runner = Runner(agent=agent, app_name="eval", session_service=sessions, memory_service=FakeMemory())
     results: list[Result] = []
     for run_number in range(1, runs + 1):
         for task in TASKS:

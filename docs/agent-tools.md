@@ -25,6 +25,7 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `get_gaps` | server, `data_agent` | Claims no cited work backs, claims one contradicts, works cited but not held; up to 10 of each | none | `{notBacked, contradicted, missing}` |
 | `bibtex` | server, `data_agent` | BibTeX entries for a paper and the works its claims cite | `analysis_id` | `{bibtex}` |
 | `submit_analysis` | server, `data_agent` | Starts an analysis of a DOI, arXiv ID or URL in the background | `paper` | `{id, status}`; poll `get_analysis` |
+| `load_memory` | server, `data_agent` only | What the person studied or asked in earlier chats (SPEC.md), then findings from their own analyses, at most 5. Not on MCP or `/commands` | `query` | `{memories: [{content, timestamp}]}` |
 | `labeling_progress` | server, `data_agent` | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
 
 The agent cannot save labels, delete or upload anything. There is no tool for it, and the

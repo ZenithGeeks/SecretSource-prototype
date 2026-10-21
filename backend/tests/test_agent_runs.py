@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_response import LlmResponse
+from google.adk.tools import load_memory
 from google.genai import types
 
 
@@ -134,9 +135,10 @@ def test_the_agent_is_built_from_the_documented_tools():
     # The data tools belong to the specialist the screen agent hands work to; ADK lists it as a tool.
     assert [agent.name for agent in screen.screen_agent.sub_agents] == ["data_agent"]
     assert screen.screen_agent.tools[-1].name == "data_agent"
-    assert screen.data_agent.tools == DATA_TOOLS
+    # load_memory is data_agent's own ADK tool, not one the MCP server or /commands list.
+    assert screen.data_agent.tools == [*DATA_TOOLS, load_memory]
     text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
-    listed = [*names, "data_agent", *[tool.__name__ for tool in DATA_TOOLS]]
+    listed = [*names, "data_agent", *[tool.__name__ for tool in DATA_TOOLS], "load_memory"]
     assert all(f"`{name}" in text for name in listed)
 
 

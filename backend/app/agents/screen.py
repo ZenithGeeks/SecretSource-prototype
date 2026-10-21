@@ -12,7 +12,7 @@ The docstrings are what the model reads; docs/agent-tools.md lists every tool fo
 import asyncio
 
 from google.adk.agents import LlmAgent
-from google.adk.tools import LongRunningFunctionTool, ToolContext
+from google.adk.tools import LongRunningFunctionTool, ToolContext, load_memory
 from pydantic import BaseModel, Field
 
 from app.agents.data_tools import DATA_TOOLS
@@ -99,6 +99,7 @@ DATA_INSTRUCTION = """You read the person's SecretSource papers with your tools 
 you were given.
 
 - Use the tools to get facts. Do not answer from memory.
+- For what the person studied or asked in earlier chats, call load_memory with the paper or topic.
 - Answer in a few short sentences. Give claim numbers, verdicts and quotes when you have them.
 - Start an analysis with submit_analysis only if the request asks for one, then give its id.
 - If a tool returns an error, say what it said. Do not guess ids: list_papers is not yours, so ask
@@ -116,11 +117,14 @@ data_agent = LlmAgent(
     name="data_agent",
     description=(
         "Reads the person's analysed papers: their claims, verdicts and evidence, search, gaps, BibTeX, "
-        "checking some text against their papers, and starting an analysis. Give it one request."
+        "checking some text against their papers, starting an analysis, and what they studied in "
+        "earlier chats. Give it one request."
     ),
     model=adk_model(),
     instruction=DATA_INSTRUCTION,
-    tools=DATA_TOOLS,
+    # load_memory is the agent's own: DATA_TOOLS are plain functions that the MCP server and the
+    # /commands route also list, and load_memory is an ADK tool that needs the runner's memory.
+    tools=[*DATA_TOOLS, load_memory],
     mode="single_turn",
     input_schema=DataTask,
 )
