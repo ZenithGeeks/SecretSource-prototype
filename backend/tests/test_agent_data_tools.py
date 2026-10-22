@@ -63,6 +63,22 @@ def test_get_analysis_gives_status_standing_and_numbered_claims(library):
     ]
 
 
+def test_get_analysis_lists_a_names_only_claim_but_leaves_it_out_of_the_counts(library, monkeypatch):
+    names_only = {
+        "claim": "We train on MS MARCO",
+        "citations": [{"title": "MS MARCO"}],
+        "named": ["MS MARCO"],
+    }
+    paper = {**PAPER, "claims": [*PAPER["claims"], names_only]}
+    monkeypatch.setattr(main, "_owned", lambda *args, **kwargs: paper)
+
+    result = run(data_tools.get_analysis, "a1")
+
+    assert result["standing"] == {"backed": 1, "silent": 0, "contradicted": 1, "unchecked": 1}
+    assert [c["standing"] for c in result["claims"]] == ["backed", "contradicted", "unchecked", "names only"]
+    assert run(data_tools.get_claim, "a1", 4)["standing"] == "names only"
+
+
 def test_get_analysis_of_a_failed_run_says_why(library, monkeypatch):
     failed = {**PAPER, "status": "error", "message": "GROBID could not read the PDF"}
     monkeypatch.setattr(main, "_owned", lambda *args, **kwargs: failed)
