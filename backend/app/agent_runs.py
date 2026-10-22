@@ -146,8 +146,14 @@ def get_runner() -> Runner:
     """The screen agent's runner, built on first use: app.agents.screen imports DSPy and
     LiteLLM, which take seconds, so the gateway does not import it at start."""
     from app.agents.screen import screen_agent
+    from app.memory import AssistantMemory
 
-    return Runner(agent=screen_agent, app_name=APP_NAME, session_service=_sessions)
+    return Runner(
+        agent=screen_agent,
+        app_name=APP_NAME,
+        session_service=_sessions,
+        memory_service=AssistantMemory(),  # load_memory reads the owner's facts, then their analyses
+    )
 
 
 async def _forget_old_sessions() -> None:

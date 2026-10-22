@@ -376,7 +376,8 @@ Errors: `503` when the queue (Redis) cannot be reached; nothing is created.
 #### `POST /analyses/upload`
 
 Starts an analysis of an uploaded PDF, the same way as `POST /analyses`. The file is saved in
-`PAPERS_DIR` under its own file name.
+`PAPERS_DIR` as `<stem>-<first 12 hex of its sha256>.pdf`, so two users' `paper.pdf` stay two
+files (#168).
 
 | Parameter | In | Required | Meaning |
 | --- | --- | --- | --- |
@@ -385,7 +386,10 @@ Starts an analysis of an uploaded PDF, the same way as `POST /analyses`. The fil
 
 Response: `{"id": "<analysis id>"}`.
 
-Errors: `503` when the queue (Redis) cannot be reached; nothing is created.
+Errors, and nothing is saved or created for any of them:
+- `413` when the file is over 100 MB (`uploads.MAX_UPLOAD_BYTES`).
+- `422` when the file does not start with `%PDF-`.
+- `503` when the queue (Redis) cannot be reached.
 
 #### `GET /analyses`
 

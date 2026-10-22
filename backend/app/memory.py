@@ -12,6 +12,9 @@ user id, and one with login off passes SIGNED_OUT, which reads only analyses wit
 A Supabase user id is never empty, so a signed-in user never reads the ownerless ones.
 cli.py has no login and uses SIGNED_OUT. a2a_server.py has none either, and ADK names its
 callers A2A_USER_<context id>, so it builds the service with as_user=SIGNED_OUT.
+
+AssistantMemory (SPEC.md) also reads what the assistant remembers about the user, the facts
+in store.load_facts, and returns those first.
 """
 
 import asyncio
@@ -117,3 +120,45 @@ class AnalysisMemory(BaseMemoryService):
         # Only this user's rows are read, not the whole table (#314).
         analyses = await asyncio.to_thread(store.load_owned, owner_of(user_id))  # oldest first
         return SearchMemoryResponse(memories=search(query, analyses, user_id))
+
+
+def search_facts(query: str, facts: list[dict], limit: int = RESULTS) -> list[MemoryEntry]:
+    """The remembered facts that share the most words with the query, best first. Ties keep
+    the order of `facts`, which load_facts gives newest first. Nothing is returned when no word
+    matches."""
+    wanted = _words(query)
+    scored = []
+    for order, fact in enumerate(facts):
+        score = len(wanted & _words(f"{fact['subject']} {fact['summary']}"))
+        if score:
+            scored.append((-score, order, fact))
+    scored.sort(key=lambda item: item[:2])
+    return [
+        MemoryEntry(
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text=f"Remembered {fact['kind']}, {fact['subject']}: {fact['summary']}")],
+            ),
+            author="secretsource",
+            timestamp=fact["updated_at"][:10],
+            custom_metadata={"fact": fact["id"]},
+        )
+        for _, _, fact in scored[:limit]
+    ]
+
+
+class AssistantMemory(BaseMemoryService):
+    """ADK memory for the signed-in assistant: the user's remembered facts first, then findings
+    from their own analyses, RESULTS in all. A signed-out user has no facts."""
+
+    async def add_session_to_memory(self, session) -> None:
+        return None  # facts come from the distill job (SPEC.md "Distilling"), not from a request
+
+    async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
+        owner = owner_of(user_id)
+        facts = await asyncio.to_thread(store.load_facts, owner) if owner else []
+        found = search_facts(query, facts)
+        if len(found) < RESULTS:
+            analyses = await asyncio.to_thread(store.load_owned, owner)  # oldest first
+            found += search(query, analyses, user_id, limit=RESULTS - len(found))
+        return SearchMemoryResponse(memories=found)

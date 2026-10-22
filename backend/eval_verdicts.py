@@ -45,18 +45,22 @@ def main() -> None:
         source = PAPERS_DIR / f"{pair.reference_id}.pdf"
         result = verify.verify_claim(pair.claim, source.as_posix())
         verdict = result.get("verdict") if result.get("status") == "ok" else "error"
+        verdict_from = result.get("verdict_from", "none") if verdict != "error" else "none"
         results.append(
             {
                 "claim_id": pair.claim_id,
                 "reference_id": pair.reference_id,
                 "gold": pair.gold(),
                 "verdict": verdict,
+                "verdict_from": verdict_from,
             }
         )
         print(f"{number}/{len(scored)} {pair.claim_id} {verdict}", file=sys.stderr)
 
     with args.out.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=["claim_id", "reference_id", "gold", "verdict"])
+        writer = csv.DictWriter(
+            file, fieldnames=["claim_id", "reference_id", "gold", "verdict", "verdict_from"]
+        )
         writer.writeheader()
         writer.writerows(results)
 
@@ -65,6 +69,14 @@ def main() -> None:
         "settings": settings(),
         "errors": len(results) - len(judged),
         "judge": judge_scores([r["gold"] for r in judged], [r["verdict"] == "supports" for r in judged]),
+        # The text judge and the figure judge are scored apart (SCRUM-80).
+        "judge_by_source": {
+            source: judge_scores(
+                [r["gold"] for r in judged if r["verdict_from"] == source],
+                [r["verdict"] == "supports" for r in judged if r["verdict_from"] == source],
+            )
+            for source in sorted({r["verdict_from"] for r in judged})
+        },
         "humans": human_agreement(pairs),
     }
     print(json.dumps(report, indent=2))

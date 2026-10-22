@@ -22,6 +22,7 @@ POST /assistant/chats                 {"context"} -> a new chat of the caller's
 GET  /assistant/chats                 -> the caller's chats, newest first
 GET  /assistant/chats/{id}            -> one chat with its questions and checked replies
 POST /assistant/chats/{id}/messages   {"question", "context"} -> SSE: statements, then verdicts
+/memories               what the assistant remembers about the caller: list, delete (app/memories.py)
 /author/...             the Author role: drafts, projects, sources, checks, search (app/author/router.py)
 GET  /health
 
@@ -54,6 +55,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
+from redis.exceptions import RedisError
 
 from app import chats, dependencies, mcp_server, researcher, store, uploads
 from app.agent_runs import get_runner
@@ -73,6 +75,7 @@ from app.config import (
 )
 from app.labeling import pool as labeling_pool
 from app.labeling.router import router as labeling_router
+from app.memories import router as memories_router
 from app.metrics import (
     ANALYSES_FINISHED,
     ANALYSES_STARTED,
@@ -95,7 +98,14 @@ from app.pipeline.verify import (
     unchecked_reason,
     verify_claim,
 )
-from app.queue import cancel_if_queued, enqueue_analysis, job_is_alive, pubsub_client, redis_connection
+from app.queue import (
+    cancel_if_queued,
+    enqueue_analysis,
+    enqueue_distill,
+    job_is_alive,
+    pubsub_client,
+    redis_connection,
+)
 from app.screen_bridge import router as bridge_router
 from app.teacher.router import router as teacher_router
 from app.tracing import setup_tracing
@@ -408,6 +418,7 @@ app.include_router(author_router)
 app.include_router(labeling_router)
 app.include_router(agent_router)
 app.include_router(bridge_router)
+app.include_router(memories_router)
 app.mount("/mcp", mcp_server.handle_mcp)  # MCP clients use /mcp/: Starlette redirects /mcp
 
 
@@ -816,7 +827,7 @@ def save_upload(content: bytes, filename: str | None) -> Path:
     original = Path(Path(filename or "").name)
     stem = original.stem.lstrip(".") or "paper"
     digest = hashlib.sha256(content).hexdigest()[:12]
-    path = PAPERS_DIR / f"{stem}-{digest}{original.suffix or '.pdf'}"
+    path = PAPERS_DIR / f"{stem}-{digest}.pdf"
     if not path.is_file():
         PAPERS_DIR.mkdir(parents=True, exist_ok=True)
         # Written aside, then renamed: a run that opens this name never reads half a file.
@@ -830,7 +841,13 @@ def save_upload(content: bytes, filename: str | None) -> Path:
 async def upload_analysis(
     file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
 ):
-    path = save_upload(await file.read(), file.filename)
+    # Read one byte past the limit to tell a full-size file from an oversized one.
+    content = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
+    if len(content) > uploads.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "the PDF must be 100 MB or smaller")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(422, "the file is not a PDF")
+    path = save_upload(content, file.filename)
     return _start(path.as_posix(), verify, user)
 
 
@@ -1327,12 +1344,38 @@ async def _reply(user: str | None, chat_id: str, turn: str, question: str, paper
 @app.post("/assistant/chats")
 async def start_chat(body: ChatStart | None = None, user: str | None = Depends(current_user)):
     context = (body or ChatStart()).context.model_dump()
+    if user is not None:
+        sessions = await chats.mine(user)
+        # A new chat means the user left their newest one, so it is distilled now (SPEC.md).
+        await _queue_distills(user, sessions, leaving=sessions[0].id if sessions else None)
     return chats.summary(await chats.start(user, context))
 
 
 @app.get("/assistant/chats")
 async def list_chats(user: str | None = Depends(current_user)):
-    return [chats.summary(chat) for chat in await chats.mine(user)]
+    sessions = await chats.mine(user)
+    if user is not None:
+        await _queue_distills(user, sessions)
+    return [chats.summary(chat) for chat in sessions]
+
+
+async def _queue_distills(user: str, sessions: list, leaving: str | None = None) -> None:
+    """Queue the user's chats that are due for distilling into facts (app/distill.py).
+
+    A due chat is marked even when it has no lines to send, such as a chat with no questions,
+    so it is not looked at again until it changes. Best-effort: with Redis down the chat still
+    opens, and the chat that could not be queued, and those after it, stay due for next time.
+    """
+    now = time.time()
+    try:
+        for chat_id in chats.due_for_distill(sessions, now, leaving):
+            chat = await chats.find(user, chat_id)  # mine() has no events
+            lines = chats.distill_lines(chats.messages(chat)) if chat else []
+            if lines:
+                await asyncio.to_thread(enqueue_distill, user, chat_id, lines)
+            await chats.mark_distilled(user, chat_id, now)
+    except RedisError as error:
+        logger.warning("queueing chat distills for %s failed: %s", user, error)
 
 
 @app.get("/assistant/chats/{chat_id}")
@@ -1401,10 +1444,11 @@ DELETE_SCOPES = ("all", "researcher", "author")
 @app.delete("/user/data")
 async def delete_all_data(scope: str = "all", user: str | None = Depends(current_user)):
     """Settings → Your data → Delete all. `scope` says whose data: `researcher` is the paper
-    analyses and researcher projects, `author` the draft checks and the Author role's projects,
-    drafts and saved sources, `all` (the default) both. Each role's Settings tab sends its own
-    scope, so a Researcher clearing papers keeps their Author drafts and the other way round
-    (PR #291 review). The confirm dialog is the UI's job; this call is unconditional.
+    analyses, researcher projects and what the assistant remembers, `author` the draft checks
+    and the Author role's projects, drafts and saved sources, `all` (the default) both. Each
+    role's Settings tab sends its own scope, so a Researcher clearing papers keeps their Author
+    drafts and the other way round (PR #291 review). The confirm dialog is the UI's job; this
+    call is unconditional.
 
     An analysis or draft check still running is skipped and counted in `skipped`: its worker
     keeps saving it, so a deleted row would come back on the next restart (same reason as
@@ -1425,6 +1469,8 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         await _delete_one(analysis_id)
     if researcher:
         await asyncio.to_thread(store.delete_projects, user)
+        if user is not None:  # with login off there is no user, so there are no facts
+            await asyncio.to_thread(store.delete_facts, user)
     if author:
         await asyncio.to_thread(store.delete_author_rows, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}

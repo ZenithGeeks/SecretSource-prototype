@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 APP_NAME = "secretsource-assistant"
 TITLE_LENGTH = 80  # a chat's title is its first question, cut to this many characters
 APPEND_ATTEMPTS = 3
+IDLE_SECONDS = 30 * 60  # a chat untouched this long is finished, and its facts can be distilled
+# Writing the distilled_at marker is itself an event, which moves the chat's last update to
+# about distilled_at. A later question moves it well past this.
+MARKER_SLACK_SECONDS = 5
 
 _service = None  # built on first use: a database service opens its engine when built
 
@@ -60,6 +64,21 @@ def messages(session: "Session") -> list[dict]:
         elif event.author == "assistant" and event.custom_metadata:
             shown.append({"role": "assistant", **event.custom_metadata, "at": event.timestamp})
     return shown
+
+
+def distill_lines(chat_messages: list[dict]) -> list[str]:
+    """The chat as the distill step sees it (app/distill.py): each question, and each statement
+    the judge backed, meaning its verdict is "supports". Any other statement is left out, so it
+    can never become a fact."""
+    lines = []
+    for message in chat_messages:
+        if message["role"] == "user":
+            lines.append(f"user asked: {message['text']}")
+            continue
+        for statement in message.get("statements", []):
+            if statement.get("verdict") == "supports":
+                lines.append(f"assistant said, backed by {statement['source']}: {statement['text']}")
+    return lines
 
 
 async def start(user: str | None, context: dict) -> "Session":
@@ -117,6 +136,33 @@ async def add_reply(user: str | None, chat_id: str, turn: str, statements: list[
         timestamp=time.time(),
     )
     await _append(user, chat_id, lambda session: reply)
+
+
+async def mark_distilled(user: str, chat_id: str, at: float) -> None:
+    """Record `at`, the time the chat was queued for distilling, as distilled_at in its state.
+    due_for_distill compares it with the chat's last update."""
+    from google.adk.events import Event, EventActions
+
+    marker = Event(
+        invocation_id=f"e-{uuid.uuid4()}",
+        author="distill",
+        actions=EventActions(state_delta={"distilled_at": at}),
+        timestamp=at,
+    )
+    await _append(user, chat_id, lambda session: marker)
+
+
+def due_for_distill(sessions: list["Session"], now: float, leaving: str | None = None) -> list[str]:
+    """The chats to distill: changed since their last distill, and either idle for IDLE_SECONDS
+    or the one the user is leaving. `sessions` come from mine(), which carries their state."""
+    due = []
+    for session in sessions:
+        distilled_at = session.state.get("distilled_at", 0)
+        if session.last_update_time <= distilled_at + MARKER_SLACK_SECONDS:
+            continue
+        if session.id == leaving or now - session.last_update_time > IDLE_SECONDS:
+            due.append(session.id)
+    return due
 
 
 async def _append(user: str | None, chat_id: str, build_event) -> bool:

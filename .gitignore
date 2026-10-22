@@ -17,3 +17,6 @@ dist/
 # TLS material for the optional gateway-tls proxy (deploy/tls-proxy/); certs live on the
 # deployment host only, never in git
 deploy/tls-proxy/certs/
+
+# Supabase CLI link state (supabase link): project ref and pooler URL, per machine
+supabase/.temp/
