@@ -393,6 +393,7 @@ describe('labeler settings', () => {
       'Account',
       'Appearance',
       'Notifications',
+      'Agents',
       'Role and home',
     ])
     fireEvent.click(settingsTabs.getByRole('tab', { name: 'Role and home' }))

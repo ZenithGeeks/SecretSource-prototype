@@ -1,10 +1,11 @@
-/** Config for the Settings modal's tabs: the 6 shared ones (Figma 22a–22f) plus each role's
+/** Config for the Settings modal's tabs: the shared ones (Figma 22a–22f, and Agents) plus each role's
  * one extra tab. `getSettingsTabs` is the single place a role's tab set is assembled, so
  * SettingsModal itself never needs to know which role it's showing. */
 
 import {
   Bell,
   CircleCheck,
+  SquareTerminal,
   Download,
   Sparkles,
   UserCog,
@@ -16,6 +17,7 @@ import type { ComponentType, ReactNode } from 'react'
 
 import type { Role } from '../lib/roles'
 import { ROLE_INFO } from '../lib/roles'
+import { AgentsSection } from './AgentsSection'
 import {
   AccountSection,
   AppearanceSection,
@@ -63,6 +65,7 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
       content: <YourDataSection role={viewingRole} isPreview={isPreview} />,
       group: 'general',
     },
+    { id: 'agents', label: 'Agents', icon: SquareTerminal, content: <AgentsSection role={currentRole} />, group: 'general' },
     {
       id: 'role',
       label: 'Role and home',
