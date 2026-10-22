@@ -65,6 +65,7 @@ export function getSettingsTabs(viewingRole: Role, currentRole: Role, onSwitchRo
       content: <YourDataSection role={viewingRole} isPreview={isPreview} />,
       group: 'general',
     },
+    // currentRole, not viewingRole: the connect link works only in the app the person is signed in to.
     { id: 'agents', label: 'Agents', icon: SquareTerminal, content: <AgentsSection role={currentRole} />, group: 'general' },
     {
       id: 'role',

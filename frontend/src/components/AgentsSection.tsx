@@ -9,7 +9,7 @@ import { useState, type ReactNode } from 'react'
 
 import type { Role } from '../lib/roles'
 import { cn } from '../lib/utils'
-import { AgentAbilities } from './ConnectAgent'
+import { AgentAbilities } from './AgentAbilities'
 import { Section } from './settings'
 
 const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
