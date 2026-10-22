@@ -406,7 +406,7 @@ export function AssistantPanel({
         <>
           <div className="flex items-center gap-2 px-5 pt-4 pb-3">
             {/* On a phone the panel covers the screen, so Back is how the reader returns to it. */}
-            <IconButton onClick={onClose} aria-label="Back to the screen" className="lg:hidden lg:size-7">
+            <IconButton onClick={onClose} aria-label="Back to the screen" className="lg:hidden">
               <ChevronLeft className="size-4" aria-hidden="true" />
             </IconButton>
             <h2 className="flex flex-1 items-center gap-1.5 text-[15px] font-semibold text-ink">

@@ -601,7 +601,6 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
       }))}
       value={view}
       onChange={choosePaperView}
-      className="rounded-lg"
     />
   )
 

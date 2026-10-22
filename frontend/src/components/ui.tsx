@@ -36,7 +36,7 @@ export function Button({ className, variant = 'solid', ...props }: ButtonProps) 
   )
 }
 
-/** A square button holding one icon: 44 px on a phone, 32 px on a desktop. Give it an aria-label. */
+/** A square button holding one icon: 44 px on a phone, 32 px on a desktop unless className sets a size. */
 export function IconButton({ className, type = 'button', ...props }: ComponentProps<'button'> & { 'aria-label': string }) {
   return (
     <button
@@ -65,7 +65,7 @@ export function TextButton({ className, type = 'button', ...props }: ComponentPr
   )
 }
 
-/** One row of a dropdown menu. */
+/** One row of a dropdown menu. Pass role="menuitem" when the menu is a role="menu". */
 export function MenuItem({ className, type = 'button', ...props }: ComponentProps<'button'>) {
   return (
     <button
@@ -80,7 +80,8 @@ export function MenuItem({ className, type = 'button', ...props }: ComponentProp
   )
 }
 
-/** A row of buttons of which one is chosen, such as Ask's Answer and Do it. */
+/** A row of buttons of which one is chosen, such as Ask's Answer and Do it. `label` names the group
+ * for screen readers; each button says whether it is the chosen one with aria-pressed. */
 export function Segmented<T extends string>({
   label,
   options,
@@ -114,31 +115,17 @@ export function Segmented<T extends string>({
   )
 }
 
+const FIELD =
+  'w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent'
+
+/** A one-line text field. */
 export function Input({ className, ...props }: ComponentProps<'input'>) {
-  return (
-    <input
-      className={cn(
-        'w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm',
-        'placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent',
-        className,
-      )}
-      {...props}
-    />
-  )
+  return <input className={cn(FIELD, className)} {...props} />
 }
 
-/** The multi-line twin of Input. */
+/** A multi-line text field, styled like Input. */
 export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
-  return (
-    <textarea
-      className={cn(
-        'w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm',
-        'placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent',
-        className,
-      )}
-      {...props}
-    />
-  )
+  return <textarea className={cn(FIELD, className)} {...props} />
 }
 
 /**
