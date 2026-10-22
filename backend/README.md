@@ -1003,8 +1003,10 @@ A successful check returns:
 | `quote` | the sentence from the cited paper the verdict rests on |
 | `reasoning` | one sentence from the model |
 | `evidence` | the passages it read: `text`, `page`, `start`, `end`, `score` |
-| `pages` | figures or pages ColPali matched: `page`, `score`, `kind`, `label`, `caption`, `image` |
-| `page_model` | the ColPali model that matched them; empty when ColPali is down |
+| `pages` | figures, tables or pages ColPali matched. Each has `page`, `score`, `kind` (`figure`, `table` or `page`), `label`, `caption`, `image`, and `region`. `region` is the crop's box on its page, same shape as `/find` (`page`, `boxes`, `page_width`, `page_height`; PDF points, top-left origin), or null when there is no box. Analyses from before that field have no `region`. A whole page has an empty `image` |
+| `page_model` | the ColPali checkpoint that matched them, for example `vidore/colqwen2-v1.0`; empty when ColPali did not run |
+| `verdict_from` | which judge call decided it: `text`, `figure` or `none`. `figure` covers a table crop too |
+| `judged_figure` | file name of the crop that call saw (`figure-<n>.png` or `table-<n>.png`) when `verdict_from` is `figure`; otherwise empty |
 | `indexed_in` | which public index found the cited paper, and the ids it gave |
 | `claim`, `source` | what was checked |
 
