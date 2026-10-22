@@ -26,7 +26,10 @@ export function ClaimNav({
   current,
   onSelect,
   onAdd,
+  className,
 }: {
+  /** How the strip sits in its parent: the workspace puts it in the header row. */
+  className?: string
   claims: WorkClaim[]
   drafts: Record<string, Draft>
   /** Each claim as last written, to tell which drafts are not saved yet. */
@@ -40,6 +43,13 @@ export function ClaimNav({
   const [text, setText] = useState('')
   const field = useId()
   const strip = useRef<HTMLOListElement>(null)
+  const addButton = useRef<HTMLButtonElement>(null)
+
+  // Closing the form puts the keyboard back on the button that opened it.
+  const closeForm = () => {
+    setAdding(false)
+    addButton.current?.focus()
+  }
 
   // Keep the current chip in view when the strip scrolls sideways.
   useEffect(() => {
@@ -48,10 +58,10 @@ export function ClaimNav({
   }, [current])
 
   return (
-    <nav aria-label="Claims of this paper" className="flex flex-col gap-2">
-      {/* On a phone the add button gets its own row, so the strip shows seven chips, not three. */}
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
-        <ol ref={strip} className="flex w-full min-w-0 flex-1 gap-1.5 overflow-x-auto py-1">
+    <nav aria-label="Claims of this paper" className={cn('relative', className)}>
+      <div className="flex items-center gap-1.5">
+        {/* The scrollbar is hidden: it added a row of height, and the current chip scrolls into view. */}
+        <ol ref={strip} className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {claims.map((claim, index) => {
             const draft = drafts[claim.claim_id] ?? emptyDraft()
             const text = draft.status === 'edited' && draft.edited ? draft.edited : claim.claim
@@ -67,7 +77,8 @@ export function ClaimNav({
                   aria-label={`Claim ${index + 1}, ${stateWord(finished, draft)}${unsaved ? ', unsaved' : ''}: ${text}`}
                   title={text}
                   className={cn(
-                    'flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border px-2 text-sm tabular-nums transition-colors',
+                    // 32px with a mouse, 44px under a finger.
+                    'flex h-8 min-w-7 items-center justify-center gap-0.5 rounded-lg border px-1 text-sm tabular-nums transition-colors pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-2',
                     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                     here
                       ? 'border-accent bg-accent-soft font-semibold text-ink'
@@ -82,21 +93,32 @@ export function ClaimNav({
             )
           })}
         </ol>
-        <Button variant="ghost" className="shrink-0" aria-expanded={adding} onClick={() => setAdding(!adding)}>
-          <Plus className="size-4" />
-          Add a missed claim
-        </Button>
+        <button
+          ref={addButton}
+          type="button"
+          aria-expanded={adding}
+          aria-label="Add a missed claim"
+          title="Add a missed claim"
+          onClick={() => setAdding(!adding)}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-dashed border-border-subtle text-ink-muted hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+        >
+          <Plus className="size-4" aria-hidden="true" />
+        </button>
       </div>
 
       {adding && (
+        // Opens over the page below, so adding a claim does not push the workspace down.
         <form
-          className="flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3"
+          className="absolute left-0 top-full z-20 mt-1 flex w-[min(32rem,100%)] flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3 shadow-lg"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') closeForm()
+          }}
           onSubmit={(event) => {
             event.preventDefault()
             if (!text.trim()) return
             onAdd(text.trim())
             setText('')
-            setAdding(false)
+            closeForm()
           }}
         >
           <label htmlFor={field} className="text-sm font-medium text-ink">
@@ -115,7 +137,7 @@ export function ClaimNav({
             <Button type="submit" disabled={!text.trim()}>
               Add claim
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
+            <Button type="button" variant="ghost" onClick={closeForm}>
               Cancel
             </Button>
           </div>

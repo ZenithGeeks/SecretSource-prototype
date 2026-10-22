@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { Editor } from '../src/roles/author/screens/Editor'
-import { SplitPane } from '../src/roles/author/components/editor/SplitPane'
+import { SplitPane } from '../src/components/SplitPane'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
