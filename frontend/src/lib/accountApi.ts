@@ -8,6 +8,21 @@ import { request } from './api'
 
 export type DeleteScope = 'researcher' | 'author'
 
+/** One fact the assistant remembers about the signed-in user (backend/app/memories.py). */
+export type Memory = {
+  id: string
+  kind: 'paper' | 'concept' | 'question'
+  subject: string
+  summary: string
+  analysis_id: string | null
+  session_id: string
+  created_at: string
+  updated_at: string
+}
+
+/** The query key of the remembered facts. "Delete all" forgets them too and refreshes this list. */
+export const MEMORIES_KEY = ['memories'] as const
+
 export const accountApi = {
   getPreferences: () => request<Record<string, unknown>>('/user/preferences'),
 
@@ -34,4 +49,18 @@ export const accountApi = {
    * so its own "Delete all" clears that local store instead of calling this. */
   deleteAllData: (scope: DeleteScope) =>
     request<{ deleted: number; skipped: number }>(`/user/data?scope=${scope}`, { method: 'DELETE' }),
+
+  /** What the assistant remembers, most recently updated first. With login off there is no user,
+   * so the list is empty. An answer that is not a list is treated as empty. */
+  listMemories: async () => {
+    const facts = await request<Memory[]>('/memories')
+    return Array.isArray(facts) ? facts : []
+  },
+
+  /** Forgets one fact. The gateway answers 404 for an id that is not the caller's. */
+  deleteMemory: (id: string) =>
+    request<{ deleted: number }>(`/memories/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /** Forgets every fact. "Delete all" for the researcher scope does this too. */
+  deleteAllMemories: () => request<{ deleted: number }>('/memories', { method: 'DELETE' }),
 }
