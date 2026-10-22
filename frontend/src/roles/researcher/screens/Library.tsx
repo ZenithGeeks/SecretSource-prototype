@@ -10,7 +10,7 @@ import { Check, ChevronRight, MoreVertical, Pencil, Plus, Trash2, X } from 'luci
 import { useEffect, useRef, useState } from 'react'
 
 import { ToolbarActions } from '../../../components/AppShell'
-import { Button, Empty, FadeIn, Input, LoadingScreen } from '../../../components/ui'
+import { Button, Empty, FadeIn, IconButton, Input, LoadingScreen, MenuItem } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
@@ -88,45 +88,42 @@ function ProjectMenu({
 
   return (
     <div ref={root} className="pointer-events-auto relative">
-      <button
-        type="button"
+      <IconButton
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Project actions"
-        className="flex size-7 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
+        className="size-7 lg:size-7"
       >
         <MoreVertical className="size-4" />
-      </button>
+      </IconButton>
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-[0_8px_12px_rgba(31,20,36,0.08),0_1px_1px_rgba(31,20,36,0.04)]"
+          className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-card"
         >
-          <button
-            type="button"
+          <MenuItem
             role="menuitem"
             onClick={() => {
               setOpen(false)
               onRename()
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-ink hover:bg-accent-soft"
+            className="px-3 font-normal"
           >
             <Pencil className="size-4" />
             Rename
-          </button>
-          <button
-            type="button"
+          </MenuItem>
+          <MenuItem
             role="menuitem"
             onClick={() => {
               setOpen(false)
               onDelete()
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-refutes hover:bg-refutes-soft"
+            className="px-3 font-normal text-refutes hover:bg-refutes-soft"
           >
             <Trash2 className="size-4" />
             Delete project
-          </button>
+          </MenuItem>
         </div>
       )}
     </div>
@@ -198,15 +195,9 @@ function ProjectCard({
             >
               <Check className="size-4" />
             </button>
-            <button
-              type="button"
-              onClick={cancelRename}
-              disabled={saving}
-              aria-label="Cancel renaming"
-              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft"
-            >
+            <IconButton onClick={cancelRename} disabled={saving} aria-label="Cancel renaming" className="size-7 lg:size-7">
               <X className="size-4" />
-            </button>
+            </IconButton>
           </form>
         ) : (
           <p className="font-serif text-base font-semibold text-ink">{project.name}</p>

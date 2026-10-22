@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import type { Stage } from '../lib/api'
 import { reasonText } from '../lib/api'
+import { TextButton } from './ui'
 
 const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
   queued: (stage) => stage.message ?? 'Waiting for a free worker',
@@ -57,13 +58,9 @@ export function PipelineStages({
   return (
     <>
     {folded && (
-      <button
-        type="button"
-        onClick={() => setShowAll(true)}
-        className="mb-2 rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-      >
+      <TextButton onClick={() => setShowAll(true)} className="mb-2 text-xs">
         Show all {stages.length} steps
-      </button>
+      </TextButton>
     )}
     <ol className="space-y-1.5 text-sm" aria-live="polite" aria-busy={running}>
       {shown.map((stage, shownIndex) => {

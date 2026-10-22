@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ComponentProps, ReactNode } from 'react'
 
 import type { Standing } from '../lib/claims'
 import { STANDING_LABELS } from '../lib/claims'
@@ -36,17 +36,96 @@ export function Button({ className, variant = 'solid', ...props }: ButtonProps) 
   )
 }
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+/** A square button holding one icon: 44 px on a phone, 32 px on a desktop unless className sets a size. */
+export function IconButton({ className, type = 'button', ...props }: ComponentProps<'button'> & { 'aria-label': string }) {
   return (
-    <input
+    <button
+      type={type}
       className={cn(
-        'w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm',
-        'placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent',
+        'flex size-11 shrink-0 items-center justify-center rounded-lg text-ink-muted transition-colors lg:size-8',
+        'hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent',
         className,
       )}
       {...props}
     />
   )
+}
+
+/** A button that reads as a link: accent text, underlined on hover. The text size comes from the caller. */
+export function TextButton({ className, type = 'button', ...props }: ComponentProps<'button'>) {
+  return (
+    <button
+      type={type}
+      className={cn(
+        'rounded font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** One row of a dropdown menu. Pass role="menuitem" when the menu is a role="menu". */
+export function MenuItem({ className, type = 'button', ...props }: ComponentProps<'button'>) {
+  return (
+    <button
+      type={type}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink',
+        'hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A row of buttons of which one is chosen, such as Ask's Answer and Do it. `label` names the group
+ * for screen readers; each button says whether it is the chosen one with aria-pressed. */
+export function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  className,
+}: {
+  label: string
+  options: readonly { value: T; label: ReactNode }[]
+  value: T
+  onChange: (value: T) => void
+  className?: string
+}) {
+  return (
+    <div role="group" aria-label={label} className={cn('flex rounded-xl border border-border-subtle p-0.5', className)}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            'min-h-9 flex-1 rounded-lg px-3 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11',
+            value === option.value ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const FIELD =
+  'w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent'
+
+/** A one-line text field. */
+export function Input({ className, ...props }: ComponentProps<'input'>) {
+  return <input className={cn(FIELD, className)} {...props} />
+}
+
+/** A multi-line text field, styled like Input. */
+export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
+  return <textarea className={cn(FIELD, className)} {...props} />
 }
 
 /**

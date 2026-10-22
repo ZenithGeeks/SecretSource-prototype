@@ -14,7 +14,7 @@ import { ChevronDown, Keyboard, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
-import { Empty, LoadingScreen } from '../../../components/ui'
+import { Empty, LoadingScreen, Segmented } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import {
@@ -593,22 +593,15 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   )
 
   const viewToggle = (
-    <div role="group" aria-label="Which papers to show" className="flex rounded-lg border border-border-subtle p-0.5">
-      {(roomy ? (['side', 'both', 'reference'] as const) : (['both', 'reference'] as const)).map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={view === option}
-          onClick={() => choosePaperView(option)}
-          className={cn(
-            'min-h-8 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11',
-            view === option ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
-          )}
-        >
-          {VIEW_NAMES[option]}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      label="Which papers to show"
+      options={(roomy ? (['side', 'both', 'reference'] as const) : (['both', 'reference'] as const)).map((option) => ({
+        value: option,
+        label: VIEW_NAMES[option],
+      }))}
+      value={view}
+      onChange={choosePaperView}
+    />
   )
 
   const papers = (

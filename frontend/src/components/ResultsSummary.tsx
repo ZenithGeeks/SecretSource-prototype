@@ -171,7 +171,7 @@ function ResearcherSummary({
       ) : (
         <div className="flex items-center justify-end gap-1">{actions}</div>
       )}
-      <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]">
+      <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-card">
         <p className="text-[15px] leading-5 font-semibold tracking-[-0.01em]" aria-live="polite">
           {headline(counts)}
         </p>

@@ -5,6 +5,7 @@ import { useEffect, useId, useRef } from 'react'
 import type { ClaimStatus, Draft, WorkClaim } from '../../../lib/labeling'
 import { askTarget } from '../../../lib/askCursor'
 import { cn } from '../../../lib/utils'
+import { Textarea } from '../../../components/ui'
 
 const CHOICES: { status: ClaimStatus; label: string; hint: string; key: string }[] = [
   { status: 'accepted', label: 'Keep', hint: 'Yes, and it is worded right', key: 'K' },
@@ -107,14 +108,13 @@ export function ClaimDecision({
           <label htmlFor={edit} className="text-sm font-medium text-ink">
             The claim, as it should read
           </label>
-          <textarea
+          <Textarea
             id={edit}
             ref={box}
             value={draft.edited}
             onChange={(event) => onChange({ edited: event.target.value })}
             rows={3}
             maxLength={4000}
-            className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-accent"
           />
         </div>
       )}

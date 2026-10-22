@@ -12,7 +12,7 @@ import type { Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
 import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
-import { StandingBadge, VerdictBadge } from './ui'
+import { StandingBadge, TextButton, VerdictBadge } from './ui'
 
 /** The verdict colour, as the short rule before an evidence panel's label. */
 const VERDICT_BAR = {
@@ -144,12 +144,9 @@ function PageLink({
   children?: React.ReactNode
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="rounded bg-canvas px-1.5 py-0.5 font-medium tabular-nums text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-    >
+    <TextButton onClick={onClick} className="bg-canvas px-1.5 py-0.5 tabular-nums">
       {children ?? `p. ${page}`}
-    </button>
+    </TextButton>
   )
 }
 
@@ -221,14 +218,13 @@ function EvidencePanel({
       </div>
       <blockquote className="font-serif text-base leading-[26px] italic">{children}</blockquote>
       {action && onAction && (
-        <button
-          type="button"
+        <TextButton
           onClick={onAction}
-          className="mt-auto inline-flex items-center gap-1 self-start rounded text-[13px] leading-[18px] font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+          className="mt-auto inline-flex items-center gap-1 self-start text-[13px] leading-[18px]"
         >
           {action}
           <ChevronRight className="size-4" aria-hidden="true" />
-        </button>
+        </TextButton>
       )}
     </div>
   )
@@ -394,14 +390,13 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
       <div className="flex flex-wrap items-center gap-2">
         <PageChips verdict={verdict} onShow={onShow} />
         {verdict.evidence.length > 0 && (
-          <button
-            type="button"
+          <TextButton
             onClick={() => setShowEvidence(!showEvidence)}
             aria-expanded={showEvidence}
-            className="rounded text-[13px] font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+            className="text-[13px]"
           >
             {showEvidence ? 'Hide passages' : `${verdict.evidence.length} more passages`}
-          </button>
+          </TextButton>
         )}
       </div>
       {showEvidence && verdict.evidence.length > 0 && <Passages verdict={verdict} onShow={onShow} />}
@@ -517,7 +512,7 @@ export function ClaimCard({
     onSelect?.()
   }
   const surface =
-    'rounded-2xl border border-border-subtle bg-surface shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]'
+    'rounded-2xl border border-border-subtle bg-surface shadow-card'
   const number = (
     <span className="shrink-0 font-mono text-[13px] leading-[18px] text-ink-muted tabular-nums">{index + 1}</span>
   )
@@ -552,7 +547,7 @@ export function ClaimCard({
   ].filter(Boolean).join(' · ')
 
   return (
-    <div className={cn(surface, 'flex flex-col gap-[18px] pt-5 pr-[22px] pb-[22px] pl-[22px]')}>
+    <div className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
       <button
         type="button"
         onClick={toggle}
@@ -643,14 +638,13 @@ export function ClaimCard({
         <div className="flex flex-wrap items-center gap-2">
           <PageChips verdict={primary} onShow={onShow} />
           {primary.evidence.length > 0 && (
-            <button
-              type="button"
+            <TextButton
               onClick={() => setShowEvidence(!showEvidence)}
               aria-expanded={showEvidence}
-              className="rounded text-[13px] leading-[18px] font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+              className="text-[13px] leading-[18px]"
             >
               {showEvidence ? 'Hide passages' : `${primary.evidence.length} more passages`}
-            </button>
+            </TextButton>
           )}
         </div>
       ) : null}

@@ -8,9 +8,9 @@ import { Check, Copy } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
 import type { Role } from '../lib/roles'
-import { cn } from '../lib/utils'
 import { AgentAccessCard } from './AgentAccessCard'
 import { Section } from './settings'
+import { Segmented } from './ui'
 
 const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
 
@@ -75,25 +75,16 @@ export function AgentsSection({ role }: { role: Role }) {
         </p>
 
         <Step number={1} title="Add SecretSource to your agent">
-          <div role="group" aria-label="Your agent" className="mb-3 grid grid-cols-3 rounded-xl border border-border-subtle p-0.5">
-            {(Object.keys(CLIENTS) as Client[]).map((name) => (
-              <button
-                key={name}
-                type="button"
-                aria-pressed={client === name}
-                onClick={() => {
-                  setClient(name)
-                  setCopied(false)
-                }}
-                className={cn(
-                  'min-h-9 rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-                  client === name ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
-                )}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Your agent"
+            options={(Object.keys(CLIENTS) as Client[]).map((name) => ({ value: name, label: name }))}
+            value={client}
+            onChange={(name) => {
+              setClient(name)
+              setCopied(false)
+            }}
+            className="mb-3"
+          />
           <ol className="mb-2 flex list-decimal flex-col gap-1 pl-4 text-xs leading-5 text-ink-muted">
             <li>Get a Gatehouse key for the email you sign in with, and {key}.</li>
             <li>

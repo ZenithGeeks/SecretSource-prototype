@@ -12,7 +12,7 @@ import { ChevronRight, PencilLine, RotateCcw, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import type { Target } from '../../../components/PageViewer'
-import { Button, Card, Empty } from '../../../components/ui'
+import { Button, Card, Empty, Textarea } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import { referenceNote } from '../../../lib/referenceCheck'
 import type { Citation } from '../../../types/draftCheck'
@@ -183,14 +183,13 @@ export function EvidencePanel({
               <label htmlFor="override-note" className="text-xs font-medium text-ink">
                 Why you are keeping this citation
               </label>
-              <textarea
+              <Textarea
                 id="override-note"
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 rows={2}
                 autoFocus
                 placeholder="e.g. Table 3 of the cited paper shows exactly this"
-                className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm placeholder:text-ink-muted"
               />
               <div className="flex gap-2">
                 <Button type="submit">Keep mine</Button>

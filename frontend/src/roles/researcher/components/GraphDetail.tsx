@@ -8,7 +8,7 @@
 import { Copy, ExternalLink, X } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
-import { VerdictBadge } from '../../../components/ui'
+import { IconButton, VerdictBadge } from '../../../components/ui'
 import type { Standing } from '../../../lib/claims'
 import { reasonText } from '../../../lib/api'
 import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
@@ -22,10 +22,7 @@ const RELATION_STANDING: Record<GraphRelation, Standing> = {
 }
 
 const PANEL =
-  'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)] lg:w-[360px] lg:shrink-0'
-
-const ICON_BUTTON =
-  'flex size-8 shrink-0 items-center justify-center rounded-[9px] text-ink-muted hover:bg-accent-soft hover:text-ink'
+  'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-card lg:w-[360px] lg:shrink-0'
 
 /** The overall standing of a claim, from the edges that cite it: contradicted, then silent, then backed. */
 function standingOf(edges: GraphEdge[]): Standing {
@@ -86,12 +83,12 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
       <div className="flex items-center gap-2">
         <VerdictBadge verdict={standingOf(edges)} />
         <span className="flex-1" />
-        <button type="button" onClick={copyEvidence} aria-label="Copy evidence" title={copied ? 'Copied' : 'Copy evidence'} className={ICON_BUTTON}>
+        <IconButton onClick={copyEvidence} aria-label="Copy evidence" title={copied ? 'Copied' : 'Copy evidence'} className="size-8 rounded-[9px]">
           <Copy className="size-4" />
-        </button>
-        <button type="button" onClick={onClose} aria-label="Close" title="Close" className={ICON_BUTTON}>
+        </IconButton>
+        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px]">
           <X className="size-4" />
-        </button>
+        </IconButton>
       </div>
       <h2 className="text-[17px] leading-6 font-medium text-ink">{claim.label}</h2>
 
@@ -156,9 +153,9 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
         <h2 className="min-w-0 flex-1 text-[15px] leading-[22px] font-semibold text-ink">
           {label(edge.a)} <span className="font-normal text-ink-muted">↔</span> {label(edge.b)}
         </h2>
-        <button type="button" onClick={onClose} aria-label="Close" title="Close" className={ICON_BUTTON}>
+        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px]">
           <X className="size-4" />
-        </button>
+        </IconButton>
       </div>
       <p className="text-[13px] leading-[18px] text-ink-muted">{relation}</p>
       {outside.map((id) => (

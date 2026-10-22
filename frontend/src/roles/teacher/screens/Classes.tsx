@@ -72,7 +72,7 @@ export function Classes({ onOpenClass, onConnectGoogle, connectionError }: {
 
 function CourseCard({ course, pendingReviews, onOpen }: { course: TeacherClass; pendingReviews: number; onOpen: () => void }) {
   return (
-    <button type="button" onClick={onOpen} className="group flex min-h-[184px] w-full flex-col rounded-[14px] border border-border-subtle bg-surface p-4 text-left shadow-[0_5px_18px_rgba(35,24,38,0.05)] transition hover:-translate-y-0.5 hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+    <button type="button" onClick={onOpen} className="group flex min-h-[184px] w-full flex-col rounded-[14px] border border-border-subtle bg-surface p-4 text-left shadow-md transition hover:-translate-y-0.5 hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
       <div className="flex w-full items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">
         <span>{course.section}</span><ChevronRight className="size-3.5 text-ink-muted transition group-hover:translate-x-0.5" />
       </div>
