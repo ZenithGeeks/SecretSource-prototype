@@ -4,7 +4,7 @@
  * empty, no-answer, failed and chat-list states.
  */
 
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantPanel, type AskAbout } from '../src/components/AssistantPanel'
@@ -219,8 +219,18 @@ describe('the Ask panel', () => {
     unmount()
 
     render(<Panel />)
-    expect(screen.getByText('Ask about the papers in your library.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ask about the papers in your library' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Ask about your whole library instead' })).not.toBeInTheDocument()
+  })
+
+  it('asks a starter question from the empty panel', async () => {
+    const calls = gateway(controlledStream())
+    render(<Panel about={PAPER} />)
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'What are its main results?' })))
+
+    await waitFor(() => expect(calls.some((call) => JSON.stringify(call.body ?? '').includes('What are its main results?'))).toBe(true))
+    expect(screen.queryByRole('button', { name: 'What limits does it admit?' })).not.toBeInTheDocument()
   })
 
   it('lists earlier chats and opens one with its checked reply', async () => {
