@@ -18,6 +18,7 @@ import { askTarget, type Pointing } from '../lib/askCursor'
 import { parseCommand, type PaperRef } from '../lib/askCommands'
 import { AiCursor } from './AiCursor'
 import { AskInput } from './AskInput'
+import { AskWelcome } from './AskWelcome'
 import { CommandResult } from './CommandResult'
 import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
@@ -418,19 +419,19 @@ export function AssistantPanel({
                 )}
               </div>
 
-              <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-4">
+              <div className="flex flex-1 flex-col gap-6 overflow-y-auto bg-[radial-gradient(var(--color-border-subtle)_1px,transparent_1px)] bg-size-[16px_16px] px-5 py-4">
                 {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
                 {turns.length === 0 && !assistant.openFailed && (
-                  <div className="flex flex-col gap-2">
-                    <Mascot role={role} size={64} animated />
-                    <p className="text-[15px] font-medium text-ink">
-                      {about.kind === 'library' ? 'Ask about the papers in your library.' : `Ask about ${about.label}.`}
-                    </p>
-                    <p className="text-[13px] leading-5 text-ink-muted">
-                      Answers come back as short statements. Each one cites a passage and is checked by the judge before it
-                      counts.{about.kind === 'library' && canNarrow && ' Open a paper or select a graph node first to ask about that one only.'}
-                    </p>
-                  </div>
+                  <MotionConfig reducedMotion="user">
+                    <AskWelcome
+                      role={role}
+                      about={about}
+                      canNarrow={canNarrow}
+                      onAsk={(question) => {
+                        if (!answering) void assistant.ask(question, context)
+                      }}
+                    />
+                  </MotionConfig>
                 )}
                 {turns.map((turn) => (
                   <TurnView
