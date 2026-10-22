@@ -89,6 +89,15 @@
   --font-ui: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Fraunces', Georgia, serif;
   --font-paper: 'Crimson Pro', Georgia, serif;
+
+  /* The soft lift under cards and menus (Figma "card" effect). */
+  --shadow-card: 0 8px 12px rgba(31, 20, 36, 0.05), 0 1px 1px rgba(31, 20, 36, 0.04);
+}
+
+/* Dots behind the Ask chat and the connect screen, in the border colour so dark mode follows. */
+@utility dot-grid {
+  background-image: radial-gradient(var(--color-border-subtle) 1px, transparent 1px);
+  background-size: 16px 16px;
 }
 
 /* Dark values live in one place, applied two ways: automatically when the OS is dark AND no
