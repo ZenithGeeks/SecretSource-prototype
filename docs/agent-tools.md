@@ -117,7 +117,14 @@ claim the caller has saved, it never changes a label, and what it found goes to 
 (`docs/labeling.md`). It needs no tab, and it can take over a minute.
 
 The tools that only read are marked `readOnlyHint`, so a client can run them without asking each
-time. The server also offers one prompt, `check_my_draft`, which Claude Code lists as a slash
+time.
+
+The person chooses which tools an agent gets: full access (the default), read only (the
+`readOnlyHint` tools), or a list of tools. The choice is the `agentAccess` preference, and
+`allowed_tools` in `mcp_server.py` applies it to both `tools/list` and `tools/call`. An unreadable
+value counts as read only.
+
+The server also offers one prompt, `check_my_draft`, which Claude Code lists as a slash
 command: it asks the agent to run `check_text` on the writing you give it.
 
 Settings, Agents in the web app shows steps 2 and 3 with a copy button, and links to step 1.

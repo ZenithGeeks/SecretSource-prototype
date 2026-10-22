@@ -4,9 +4,11 @@ The tool list comes from screen_agent's own tools through ADK's adk_to_mcp_tool_
 client reads the same descriptions as the screen agent, plus review_claim, the labeler's review.
 list_papers, the data tools (app/agents/data_tools.py) and review_claim run here. The screen
 tools run in the caller's open tab (app/screen_bridge.py). Callers come through Gatehouse, which
-checks their key (app/auth.py, gatehouse_user). docs/agent-tools.md says how to connect.
+checks their key (app/auth.py, gatehouse_user). The person picks which tools an agent may use in
+Settings, Agents (allowed_tools). docs/agent-tools.md says how to connect.
 """
 
+import asyncio
 import contextlib
 import functools
 from types import SimpleNamespace
@@ -17,7 +19,7 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-from app import screen_bridge
+from app import screen_bridge, store
 from app.auth import gatehouse_user
 from app.labeling import router as labeling
 
@@ -26,6 +28,8 @@ READ_ONLY = (
     "read_screen", "list_papers", "get_analysis", "get_claim", "search_claims", "find_in_paper",
     "find_support", "check_text", "ask_library", "get_gaps", "bibtex", "labeling_progress",
 )
+# The preference Settings, Agents writes: {"level": "full" | "read" | "custom", "tools": [...]}.
+ACCESS = "agentAccess"
 CHECK_DRAFT = "Check a draft against the papers in your SecretSource library."
 _sessions: StreamableHTTPSessionManager | None = None  # set while the app runs, by running()
 
@@ -45,8 +49,9 @@ async def review_claim(analysis_id: str, claim_number: int) -> dict:
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
-    """The screen agent's tools and review_claim, with the descriptions and arguments they declare."""
-    return list(_tools().values())
+    """The screen agent's tools and review_claim that the person allows, as they declare themselves."""
+    allowed = await allowed_tools(server.request_context.request.state.user)
+    return [tool for name, tool in _tools().items() if allowed is None or name in allowed]
 
 
 @server.list_prompts()
@@ -78,6 +83,9 @@ async def call_tool(name: str, arguments: dict) -> dict:
 
     # handle_mcp put the caller there before MCP saw the request.
     user = server.request_context.request.state.user
+    allowed = await allowed_tools(user)
+    if allowed is not None and name not in allowed:
+        raise ValueError(f"{name} is turned off for agents; the person can allow it in Settings, Agents")
     if name == "list_papers":
         return {"papers": await papers_for(user)}
     if name == "review_claim":
@@ -102,6 +110,23 @@ async def call_tool(name: str, arguments: dict) -> dict:
         ) from None
     except TimeoutError:
         raise ValueError(f"the tab gave no answer in {screen_bridge.CALL_SECONDS} s") from None
+
+
+async def allowed_tools(user: str | None) -> set[str] | None:
+    """The tool names the person lets an agent use, or None for all of them (the default).
+
+    The level comes from their own preferences, which the browser writes, so anything other than
+    "full" or a list of names reads as read only rather than as full access.
+    """
+    preferences = await asyncio.to_thread(store.load_preferences, user) or {}
+    access = preferences.get(ACCESS) or {"level": "full"}
+    level = access.get("level") if isinstance(access, dict) else None
+    if level == "full":
+        return None
+    tools = access.get("tools") if level == "custom" else None
+    if isinstance(tools, list):
+        return {name for name in tools if isinstance(name, str)}
+    return set(READ_ONLY)
 
 
 @functools.cache
