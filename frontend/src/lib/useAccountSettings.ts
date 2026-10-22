@@ -19,7 +19,7 @@ import type { TeacherPreferences } from './teacherPreferences'
 import { getTeacherPreferences, TEACHER_PREFERENCES_DEFAULTS, updateTeacherPreferences } from './teacherPreferences'
 import { pickMatching } from './utils'
 
-const PREFERENCES_KEY = ['account', 'preferences']
+export const PREFERENCES_KEY = ['account', 'preferences']
 
 function hydrate(data: Record<string, unknown>): void {
   const settingsPatch = pickMatching(SETTINGS_DEFAULTS, data)

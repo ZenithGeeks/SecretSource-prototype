@@ -9,7 +9,7 @@ import { useState, type ReactNode } from 'react'
 
 import type { Role } from '../lib/roles'
 import { cn } from '../lib/utils'
-import { AgentAbilities } from './AgentAbilities'
+import { AgentAccessCard } from './AgentAccessCard'
 import { Section } from './settings'
 
 const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
@@ -132,7 +132,9 @@ export function AgentsSection({ role }: { role: Role }) {
           )}
         </Step>
 
-        <AgentAbilities />
+        <Step number={3} title="Choose what it may do">
+          <AgentAccessCard />
+        </Step>
       </div>
     </Section>
   )
