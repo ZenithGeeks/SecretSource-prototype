@@ -26,6 +26,7 @@ vi.mock('../src/lib/api', async (original) => ({
   }),
 }))
 
+import { AgentsSection } from '../src/components/AgentsSection'
 import { AgentStatus, ConnectAgent } from '../src/components/ConnectAgent'
 import type { ScreenActions } from '../src/lib/agentTools'
 import { useAgentBridge } from '../src/lib/agentBridge'
@@ -64,8 +65,26 @@ describe('the connect screen', () => {
     expect(onAllow).toHaveBeenCalled()
   })
 
-  it('shows the setup for Claude Code or for Codex', () => {
+  it('sends a first-time setup to Settings instead of showing it', () => {
     render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(screen.getByText(/Settings, Agents shows how/)).toBeInTheDocument()
+    expect(screen.queryByText(/claude mcp add/)).not.toBeInTheDocument()
+  })
+
+  it('closes on Escape without connecting', () => {
+    const onCancel = vi.fn()
+    render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={onCancel} />)
+
+    expect(screen.getByText('Local workspace')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onCancel).toHaveBeenCalled()
+  })
+})
+
+describe('Settings, Agents', () => {
+  it('shows the setup for Claude Code, Codex or VS Code', () => {
+    render(<AgentsSection role="researcher" />)
 
     expect(screen.getByText(/claude mcp add --transport http --scope user secretsource/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }))
@@ -76,13 +95,17 @@ describe('the connect screen', () => {
     expect(screen.getByText(/VS Code asks for the key the first time/)).toBeInTheDocument()
   })
 
-  it('closes on Escape without connecting', () => {
-    const onCancel = vi.fn()
-    render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={onCancel} />)
+  it('links to the connect screen only in a role that can connect', () => {
+    const { unmount } = render(<AgentsSection role="labeler" />)
+    expect(screen.getByRole('link', { name: 'Connect this tab' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('connect=agent'),
+    )
+    unmount()
 
-    expect(screen.getByText('Local workspace')).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(onCancel).toHaveBeenCalled()
+    render(<AgentsSection role="teacher" />)
+    expect(screen.queryByRole('link', { name: 'Connect this tab' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Switch to Researcher or Labeler/)).toBeInTheDocument()
   })
 })
 
