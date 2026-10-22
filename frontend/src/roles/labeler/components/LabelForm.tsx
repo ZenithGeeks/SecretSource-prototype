@@ -2,6 +2,7 @@
 
 import { useId } from 'react'
 
+import { Textarea } from '../../../components/ui'
 import { emptyLabel, LEVELS, type Confidence, type LabelDraft, type Level } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 
@@ -77,13 +78,12 @@ export function LabelForm({
         <label htmlFor={why} className="text-sm font-medium text-ink">
           Why this level? (the deciding fact: sample size, control, replication…)
         </label>
-        <textarea
+        <Textarea
           id={why}
           value={value.rationale}
           onChange={(event) => onChange({ ...value, rationale: event.target.value })}
           rows={2}
           maxLength={2000}
-          className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-accent"
         />
       </div>
       <div className="flex items-center gap-2">

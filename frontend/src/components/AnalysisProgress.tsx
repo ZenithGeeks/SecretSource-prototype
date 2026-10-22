@@ -15,6 +15,7 @@ import type { Progress, StepState } from '../lib/progress'
 import { duration, summarise } from '../lib/progress'
 import { cn } from '../lib/utils'
 import { PipelineStages } from './PipelineStages'
+import { TextButton } from './ui'
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
@@ -157,14 +158,10 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
             </span>
           ))}
         </p>
-        <button
-          type="button"
-          onClick={() => setDetails(true)}
-          className="flex items-center gap-1 rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-        >
+        <TextButton onClick={() => setDetails(true)} className="flex items-center gap-1 text-xs">
           Details
           <ChevronRight className="size-3.5" />
-        </button>
+        </TextButton>
       </div>
     )
   }
@@ -186,9 +183,9 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
         {running ? (
           <p className="text-[13px] text-ink-muted tabular-nums">{percent}%</p>
         ) : (
-          <button type="button" onClick={() => setDetails(false)} className="text-xs font-medium text-accent hover:underline">
+          <TextButton onClick={() => setDetails(false)} className="text-xs">
             Hide details
-          </button>
+          </TextButton>
         )}
       </header>
 
@@ -234,14 +231,9 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
       <Failures progress={progress} />
 
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => setAllSteps(!allSteps)}
-          aria-expanded={allSteps}
-          className="rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-        >
+        <TextButton onClick={() => setAllSteps(!allSteps)} aria-expanded={allSteps} className="text-xs">
           {allSteps ? 'Hide the steps' : `Show all ${count(stages.length, 'step')}`}
-        </button>
+        </TextButton>
       </div>
       {allSteps && (
         <div className="max-h-80 overflow-y-auto rounded-lg border border-border-subtle p-3">

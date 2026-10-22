@@ -2,7 +2,7 @@ import { AlertCircle, ArrowUpRight, FileText } from 'lucide-react'
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { Button, Card, Empty } from '../../../components/ui'
+import { Button, Card, Empty, TextButton } from '../../../components/ui'
 import { useTeacherGoogleConnection, useTeacherWorkspace } from '../../../lib/useTeacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
 import type { TeacherWorkspace } from '../../../lib/teacher'
@@ -83,7 +83,7 @@ function OverviewTab({ workspace, onOpenAssignment, onCheckEssays, onOpenClasswo
         </Card>
 
         <Card className="overflow-hidden p-0">
-          <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3"><h2 className="text-[13px] font-semibold">Recent classwork</h2><button type="button" onClick={onOpenClasswork} className="text-[11px] font-medium text-accent hover:underline">See all</button></div>
+          <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3"><h2 className="text-[13px] font-semibold">Recent classwork</h2><TextButton onClick={onOpenClasswork} className="text-[11px]">See all</TextButton></div>
           {recent.length ? <div className="divide-y divide-border-subtle">{recent.map((assignment) => <button key={assignment.id} type="button" onClick={() => onOpenAssignment(assignment.id)} className="flex min-h-[61px] w-full items-center gap-3 px-4 py-2 text-left hover:bg-canvas">
             <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium">{assignment.title}</span><span className="mt-1 block text-[10px] text-ink-muted">Due {assignment.dueAt}</span></span>
             <span className="text-right text-[10px] text-ink-muted">{assignment.submittedCount} of {assignment.enrolledCount} submitted</span><ArrowUpRight className="size-3.5 shrink-0 text-ink-muted" />
@@ -100,7 +100,7 @@ function OverviewTab({ workspace, onOpenAssignment, onCheckEssays, onOpenClasswo
         <Card className="space-y-2.5 p-4">
           <div className="flex items-center justify-between"><h2 className="text-[13px] font-semibold">People</h2><span className="text-[10px] text-ink-muted">{workspace.course.studentCount} students</span></div>
           <div className="flex items-center gap-1">{people.map((person) => <InitialAvatar key={person.id} initials={person.initials} className="size-7 text-[10px]" />)}{workspace.course.studentCount > people.length && <span className="flex size-7 items-center justify-center rounded-full bg-accent-soft text-[10px] text-accent">+{workspace.course.studentCount - people.length}</span>}</div>
-          <button type="button" onClick={onOpenPeople} className="text-[10px] font-medium text-accent hover:underline">Full roster in People →</button>
+          <TextButton onClick={onOpenPeople} className="text-[10px]">Full roster in People →</TextButton>
         </Card>
 
         <Card className="space-y-2.5 p-4">

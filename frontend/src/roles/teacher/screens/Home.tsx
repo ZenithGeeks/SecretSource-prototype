@@ -14,7 +14,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
-import { Button, Card, Empty } from '../../../components/ui'
+import { Button, Card, Empty, TextButton } from '../../../components/ui'
 import { useAuth } from '../../../lib/useAuth'
 import { useSettings } from '../../../lib/settings'
 import type { MostMisusedSource, TeacherHomeAssignment, TeacherHomeSubmission } from '../../../lib/teacher'
@@ -164,16 +164,15 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
                 <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
                   <h2 className="min-w-0 truncate text-[14px] font-semibold">{group.courseName}</h2>
                   {group.submissions.length > COLLAPSED_REVIEW_LIMIT ? (
-                    <button
-                      type="button"
+                    <TextButton
                       aria-expanded={expanded}
                       aria-controls={listId}
                       onClick={() => toggleCourse(group.id, !expanded)}
-                      className="inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                      className="inline-flex shrink-0 items-center gap-1 text-[11px] focus-visible:outline-offset-2"
                     >
                       {expanded ? 'Show less' : `See all ${group.submissions.length}`}
                       {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                    </button>
+                    </TextButton>
                   ) : (
                     <span className="shrink-0 text-[11px] text-accent">
                       {group.submissions.length} {group.submissions.length === 1 ? 'submission' : 'submissions'}

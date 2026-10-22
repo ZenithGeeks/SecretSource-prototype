@@ -9,6 +9,7 @@ import { Fragment, type ReactNode } from 'react'
 import { api, type Analysis } from '../lib/api'
 import { analysisLabel, standingOf, STANDINGS, type Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
+import { TextButton } from './ui'
 
 const DOT: Record<Standing, string> = {
   refutes: 'bg-refutes',
@@ -54,14 +55,9 @@ export function HistoryList({
       <p className="type-label text-ink-muted">Recent analyses</p>
       <span className="flex-1" />
       {onNew && (
-        <button
-          type="button"
-          data-closes-menu
-          onClick={onNew}
-          className="text-xs font-medium text-accent hover:underline"
-        >
+        <TextButton data-closes-menu onClick={onNew} className="text-xs">
           + New
-        </button>
+        </TextButton>
       )}
     </div>
   )

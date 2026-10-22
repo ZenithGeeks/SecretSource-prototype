@@ -8,7 +8,7 @@ import { Bell, CircleAlert, CircleCheck, Loader2, RotateCcw, X } from 'lucide-re
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { Button } from '../../../components/ui'
+import { Button, IconButton } from '../../../components/ui'
 import { usePool, useRetryPaper, type Pool } from '../../../lib/labeling'
 
 type Paper = Pool['papers'][number]
@@ -148,15 +148,14 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
 
   return (
     <>
-      <button
+      <IconButton
         ref={button}
-        type="button"
         onClick={toggle}
         aria-label={label}
         title={label}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="relative flex size-10 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        className="relative size-10 lg:size-10"
       >
         <Bell className="size-4" aria-hidden="true" />
         {unseen > 0 && (
@@ -170,7 +169,7 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
         {unseen === 0 && reading.length > 0 && (
           <Loader2 aria-hidden="true" className="absolute right-0.5 bottom-0.5 size-3 animate-spin text-accent motion-reduce:animate-none" />
         )}
-      </button>
+      </IconButton>
 
       {/* In document.body: inside the sticky sidebar its z-index would only count within the
           sidebar, and the page content would paint over it. */}
@@ -187,14 +186,9 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
             <h2 ref={heading} tabIndex={-1} className="text-sm font-semibold text-ink outline-none">
               Your papers
             </h2>
-            <button
-              type="button"
-              onClick={() => close(true)}
-              aria-label="Close"
-              className="flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
-            >
+            <IconButton onClick={() => close(true)} aria-label="Close" className="size-8">
               <X className="size-4" />
-            </button>
+            </IconButton>
           </header>
           <div className="flex flex-col gap-4 overflow-y-auto p-4">
             {mine.length === 0 && (

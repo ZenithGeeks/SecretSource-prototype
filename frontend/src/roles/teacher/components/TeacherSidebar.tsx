@@ -1,5 +1,6 @@
 import { ChevronRight } from 'lucide-react'
 
+import { TextButton } from '../../../components/ui'
 import { useTeacherClasses, useTeacherHistory } from '../../../lib/useTeacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
 
@@ -68,14 +69,13 @@ export function TeacherSidebar({ onOpen }: { onOpen: (route: TeacherRoute) => vo
           <p className="px-2 text-[11px] text-ink-muted">No recent work yet</p>
         )}
         {history.data && history.data.length > 3 && (
-          <button
-            type="button"
+          <TextButton
             data-closes-menu
             onClick={() => onOpen({ screen: 'history' })}
-            className="mt-1 px-2 text-[10px] font-medium text-accent hover:underline"
+            className="mt-1 px-2 text-[10px]"
           >
             View all recently checked
-          </button>
+          </TextButton>
         )}
       </section>
     </div>

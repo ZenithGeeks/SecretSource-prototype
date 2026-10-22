@@ -3,7 +3,7 @@
 import { Check, CircleDot, Plus } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { Button } from '../../../components/ui'
+import { Button, Textarea } from '../../../components/ui'
 import { emptyDraft, isDone, sameDraft, type Draft, type Reference, type WorkClaim } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 
@@ -124,14 +124,13 @@ export function ClaimNav({
           <label htmlFor={field} className="text-sm font-medium text-ink">
             A claim extraction missed
           </label>
-          <textarea
+          <Textarea
             id={field}
             value={text}
             onChange={(event) => setText(event.target.value)}
             rows={2}
             maxLength={4000}
             autoFocus
-            className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-accent"
           />
           <div className="flex gap-2">
             <Button type="submit" disabled={!text.trim()}>

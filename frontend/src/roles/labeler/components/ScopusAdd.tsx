@@ -9,7 +9,7 @@ import { ChevronDown, ExternalLink, Loader2, Plus, RotateCcw, SearchX } from 'lu
 import { useState, type FormEvent } from 'react'
 
 import { SearchField } from '../../../components/SearchField'
-import { Button, Card, Input } from '../../../components/ui'
+import { Button, Card, Input, TextButton } from '../../../components/ui'
 import {
   problem,
   TOPIC_INFO,
@@ -380,14 +380,9 @@ function Abstract({ text }: { text: string }) {
     <div className="flex flex-col items-start gap-1">
       <p className={cn('font-paper text-[15px] leading-relaxed text-ink', long && !whole && 'line-clamp-4')}>{text}</p>
       {long && (
-        <button
-          type="button"
-          onClick={() => setWhole(!whole)}
-          aria-expanded={whole}
-          className="min-h-6 text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-        >
+        <TextButton onClick={() => setWhole(!whole)} aria-expanded={whole} className="min-h-6 text-xs">
           {whole ? 'Show less' : 'Read the whole abstract'}
-        </button>
+        </TextButton>
       )}
     </div>
   )

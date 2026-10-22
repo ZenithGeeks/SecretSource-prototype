@@ -8,7 +8,7 @@
 import { Mail } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-import { Button, Input } from '../../components/ui'
+import { Button, Input, TextButton } from '../../components/ui'
 import { supabase } from '../../lib/supabase'
 
 type View = 'signin' | 'signup' | 'forgot' | 'check' | 'reset'
@@ -193,9 +193,9 @@ export function Auth() {
         </Button>
         <p className="text-[13px] text-ink-muted">
           Already have an account?{' '}
-          <button type="button" onClick={() => go('signin')} className="font-medium text-accent hover:underline">
+          <TextButton onClick={() => go('signin')}>
             Sign in
-          </button>
+          </TextButton>
         </p>
       </Card>
     )
@@ -277,9 +277,9 @@ export function Auth() {
       </Button>
       <p className="text-[13px] text-ink-muted">
         New to SecretSource?{' '}
-        <button type="button" onClick={() => go('signup')} className="font-medium text-accent hover:underline">
+        <TextButton onClick={() => go('signup')}>
           Create account
-        </button>
+        </TextButton>
       </p>
     </Card>
   )

@@ -1,6 +1,6 @@
 import { ArrowUpRight, FileText, Link2 } from 'lucide-react'
 
-import { Button, Card, Empty } from '../../../components/ui'
+import { Button, Card, Empty, TextButton } from '../../../components/ui'
 import { useTeacherAssignmentDetail, useTeacherWorkspace } from '../../../lib/useTeacher'
 import type { TeacherSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
@@ -43,7 +43,7 @@ export function AssignmentDetail({ courseId, assignmentId, onOpenEssay, onNaviga
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="overflow-hidden p-0">
-          <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4"><div><h2 className="text-[13px] font-semibold">Submissions</h2><p className="mt-1 text-[10px] text-ink-muted">{submissions.length} student records from Google Classroom</p></div><button type="button" onClick={() => onNavigate({ screen: 'classwork', courseId })} className="text-[11px] font-medium text-accent hover:underline">All classwork</button></div>
+          <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4"><div><h2 className="text-[13px] font-semibold">Submissions</h2><p className="mt-1 text-[10px] text-ink-muted">{submissions.length} student records from Google Classroom</p></div><TextButton onClick={() => onNavigate({ screen: 'classwork', courseId })} className="text-[11px]">All classwork</TextButton></div>
           {submissions.length === 0 ? <div className="p-5"><Empty title="No submission records" hint="Classroom has not returned submission details." /></div> : <div className="divide-y divide-border-subtle">{submissions.map((submission) => <SubmissionRow key={submission.id} submission={submission} onOpenEssay={onOpenEssay} />)}</div>}
         </Card>
 
@@ -71,6 +71,6 @@ function SubmissionRow({ submission, onOpenEssay }: { submission: TeacherSubmiss
     <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[10px] font-semibold text-accent">{submission.studentName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span>
     <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium">{submission.studentName}</p><p className="mt-1 truncate text-[10px] text-ink-muted">{submission.attachments.length ? `${submission.fileName} · ${submission.attachments.length} attachment${submission.attachments.length === 1 ? '' : 's'}` : 'No attachment submitted'}</p></div>
     <StatusPill label={submission.state} tone={tone} />
-    {canReview && <button type="button" onClick={() => onOpenEssay(submission.studentId)} className="shrink-0 text-[10px] font-medium text-accent hover:underline">Review</button>}
+    {canReview && <TextButton onClick={() => onOpenEssay(submission.studentId)} className="shrink-0 text-[10px]">Review</TextButton>}
   </div>
 }

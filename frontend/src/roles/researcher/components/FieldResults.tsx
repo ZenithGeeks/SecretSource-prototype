@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 
-import { VerdictBadge } from '../../../components/ui'
+import { TextButton, VerdictBadge } from '../../../components/ui'
 import { verdictCountWord } from '../../../lib/claims'
 import type { ConsensusRow, FieldConsensus } from '../../../lib/researcher'
 
@@ -47,13 +47,12 @@ function Row({ row, onOpenAnalysis }: { row: ConsensusRow; onOpenAnalysis: (id: 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {row.quote && <p className="font-serif text-[15px] leading-[22px] italic text-ink">“{row.quote}”</p>}
         <p className="text-xs leading-4 text-ink-muted">On the claim: {row.claim}</p>
-        <button
-          type="button"
+        <TextButton
           onClick={() => onOpenAnalysis(row.analysis)}
-          className="self-start text-[13px] leading-[18px] font-medium text-accent hover:underline"
+          className="self-start text-[13px] leading-[18px]"
         >
           Open the analysis
-        </button>
+        </TextButton>
       </div>
     </div>
   )
@@ -88,9 +87,9 @@ export function FieldVerdictTable({
           <span className="text-ink-muted">
             {silent.length} {silent.length === 1 ? 'paper is' : 'papers are'} silent or not checked
           </span>
-          <button type="button" onClick={() => setShowSilent((v) => !v)} className="font-medium text-accent hover:underline">
+          <TextButton onClick={() => setShowSilent((v) => !v)}>
             {showSilent ? 'Hide them' : 'Show them'}
-          </button>
+          </TextButton>
         </div>
       )}
       {consensus.unlisted > 0 && (

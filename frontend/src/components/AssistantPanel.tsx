@@ -24,6 +24,7 @@ import { CommandResult } from './CommandResult'
 import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
 import { ThinkingState } from './ThinkingState'
+import { IconButton, Segmented } from './ui'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
 export type AskAbout = { kind: 'paper' | 'node' | 'library'; label: string }
@@ -38,10 +39,6 @@ const STAMPS: Record<StatementVerdict | 'checking', Stamp> = {
   error: { label: 'Can’t check', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
   checking: { label: 'Checking…', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
 }
-
-// 24 px hit areas on desktop, 44 px on a phone (the design's decisions note).
-const ICON_BUTTON =
-  'flex size-11 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:size-7'
 
 function ComposerChip({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
   return (
@@ -275,13 +272,13 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
   return (
     <>
       <div className="flex items-center gap-2 px-5 pt-4 pb-2">
-        <button type="button" onClick={onBack} aria-label="Back to the chat" className={ICON_BUTTON}>
+        <IconButton onClick={onBack} aria-label="Back to the chat" className="lg:size-7">
           <ChevronLeft className="size-4" aria-hidden="true" />
-        </button>
+        </IconButton>
         <h2 className="flex-1 text-[15px] font-semibold text-ink">Your chats</h2>
-        <button type="button" onClick={onNew} aria-label="New chat" className={ICON_BUTTON}>
+        <IconButton onClick={onNew} aria-label="New chat" className="lg:size-7">
           <Plus className="size-4" aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
       <div className="flex-1 overflow-y-auto px-5">
         {failed && <p className="py-3 text-[13px] text-ink-muted">Your chats could not be loaded.</p>}
@@ -409,41 +406,35 @@ export function AssistantPanel({
         <>
           <div className="flex items-center gap-2 px-5 pt-4 pb-3">
             {/* On a phone the panel covers the screen, so Back is how the reader returns to it. */}
-            <button type="button" onClick={onClose} aria-label="Back to the screen" className={cn(ICON_BUTTON, 'lg:hidden')}>
+            <IconButton onClick={onClose} aria-label="Back to the screen" className="lg:hidden lg:size-7">
               <ChevronLeft className="size-4" aria-hidden="true" />
-            </button>
+            </IconButton>
             <h2 className="flex flex-1 items-center gap-1.5 text-[15px] font-semibold text-ink">
               <Mascot role={role} size={24} />
               Ask
             </h2>
-            <button type="button" onClick={() => setView('chats')} aria-label="Your chats" className={ICON_BUTTON}>
+            <IconButton onClick={() => setView('chats')} aria-label="Your chats" className="lg:size-7">
               <Clock className="size-4" aria-hidden="true" />
-            </button>
-            <button type="button" onClick={newChat} aria-label="New chat" className={ICON_BUTTON}>
+            </IconButton>
+            <IconButton onClick={newChat} aria-label="New chat" className="lg:size-7">
               <Plus className="size-4" aria-hidden="true" />
-            </button>
-            <button type="button" onClick={onClose} aria-label="Close Ask" className={cn(ICON_BUTTON, 'hidden lg:flex')}>
+            </IconButton>
+            <IconButton onClick={onClose} aria-label="Close Ask" className="hidden lg:flex lg:size-7">
               <X className="size-4" aria-hidden="true" />
-            </button>
+            </IconButton>
           </div>
 
           {doIt && (
-            <div role="group" aria-label="What Ask does" className="mx-5 mb-3 grid grid-cols-2 rounded-xl border border-border-subtle p-0.5">
-              {(['answer', 'do'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={mode === option}
-                  onClick={() => setMode(option)}
-                  className={cn(
-                    'min-h-9 rounded-lg text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-                    mode === option ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
-                  )}
-                >
-                  {option === 'answer' ? 'Answer' : 'Do it'}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="What Ask does"
+              options={[
+                { value: 'answer', label: 'Answer' },
+                { value: 'do', label: 'Do it' },
+              ]}
+              value={mode}
+              onChange={setMode}
+              className="mx-5 mb-3"
+            />
           )}
           {mode === 'do' && doIt ? (
             doIt
