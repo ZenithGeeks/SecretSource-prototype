@@ -144,7 +144,7 @@ function ToolRow({ tool, on, onToggle }: { tool: AgentTool; on: boolean; onToggl
     return (
       <li>
         <label className="flex min-h-10 cursor-pointer items-center gap-2.5 px-3 text-[13px] text-ink hover:bg-accent-soft/50">
-          <input type="checkbox" checked={on} onChange={onToggle} className="size-4 accent-[var(--color-accent)]" />
+          <input type="checkbox" checked={on} onChange={onToggle} className="size-4 accent-accent" />
           <span className="flex-1">{tool.label}</span>
           {badge}
         </label>

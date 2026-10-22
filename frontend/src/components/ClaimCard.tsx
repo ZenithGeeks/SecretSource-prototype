@@ -517,7 +517,7 @@ export function ClaimCard({
     onSelect?.()
   }
   const surface =
-    'rounded-2xl border border-border-subtle bg-surface shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]'
+    'rounded-2xl border border-border-subtle bg-surface shadow-card'
   const number = (
     <span className="shrink-0 font-mono text-[13px] leading-[18px] text-ink-muted tabular-nums">{index + 1}</span>
   )
@@ -552,7 +552,7 @@ export function ClaimCard({
   ].filter(Boolean).join(' · ')
 
   return (
-    <div className={cn(surface, 'flex flex-col gap-[18px] pt-5 pr-[22px] pb-[22px] pl-[22px]')}>
+    <div className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
       <button
         type="button"
         onClick={toggle}

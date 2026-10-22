@@ -42,7 +42,7 @@ function StepBar({ active }: { active: number }) {
         const complete = index < active
         const current = index === active
         return <li key={step} className="flex shrink-0 items-center gap-2">
-          <span className={`flex size-6 items-center justify-center rounded-full text-[10px] font-semibold ${complete ? 'bg-supports-soft text-supports' : current ? 'bg-accent text-white' : 'bg-[#ece9e3] text-ink-muted'}`} aria-current={current ? 'step' : undefined}>{complete ? <Check className="size-3.5" /> : index + 1}</span>
+          <span className={`flex size-6 items-center justify-center rounded-full text-[10px] font-semibold ${complete ? 'bg-supports-soft text-supports' : current ? 'bg-accent text-white' : 'bg-neutral-soft text-ink-muted'}`} aria-current={current ? 'step' : undefined}>{complete ? <Check className="size-3.5" /> : index + 1}</span>
           <span className={current ? 'font-medium text-ink' : 'text-ink-muted'}>{step}</span>
           {index < steps.length - 1 && <span className="mx-2 h-px w-8 bg-border-subtle sm:w-12" />}
         </li>

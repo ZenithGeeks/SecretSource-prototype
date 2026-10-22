@@ -22,7 +22,7 @@ const RELATION_STANDING: Record<GraphRelation, Standing> = {
 }
 
 const PANEL =
-  'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)] lg:w-[360px] lg:shrink-0'
+  'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-card lg:w-[360px] lg:shrink-0'
 
 const ICON_BUTTON =
   'flex size-8 shrink-0 items-center justify-center rounded-[9px] text-ink-muted hover:bg-accent-soft hover:text-ink'

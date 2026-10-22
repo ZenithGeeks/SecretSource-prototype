@@ -101,7 +101,7 @@ function ProjectMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-[0_8px_12px_rgba(31,20,36,0.08),0_1px_1px_rgba(31,20,36,0.04)]"
+          className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-card"
         >
           <button
             type="button"

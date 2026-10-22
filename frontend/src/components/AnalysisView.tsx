@@ -37,7 +37,7 @@ function settled(claim: Claim) {
 /** A claim row that has not been answered yet, in the shape the answer will take. */
 function SkeletonRow({ fade }: { fade: string }) {
   return (
-    <div aria-hidden="true" className={`flex items-center gap-3.5 border-t border-border-subtle px-5 py-[18px] ${fade}`}>
+    <div aria-hidden="true" className={`flex items-center gap-3.5 border-t border-border-subtle px-5 py-4 ${fade}`}>
       <span className="size-2.5 shrink-0 rounded-sm bg-neutral-soft" />
       <span className="flex min-w-0 flex-1 flex-col gap-2">
         <span className="h-2.5 w-3/4 rounded-md bg-neutral-soft" />
@@ -213,7 +213,7 @@ export function AnalysisView({
                 </p>
               </div>
               {/* Answers appear as they finish, in the paper's order; the rest are placeholders. */}
-              <div className="overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]">
+              <div className="overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-card">
                 {analysis.data.claims.flatMap((claim, index) =>
                   settled(claim)
                     ? [

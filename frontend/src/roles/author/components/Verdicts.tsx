@@ -76,7 +76,7 @@ export function VerdictLegend({
     <ul className={cn('flex flex-wrap items-center text-xs text-ink-muted', gap, className)}>
       {VERDICT_ORDER.map((v) => (
         <li key={v} className="flex items-center gap-1.5 whitespace-nowrap">
-          <span aria-hidden="true" className={cn('inline-block size-[7px] rounded-full', VERDICTS[v].fill)} />
+          <span aria-hidden="true" className={cn('inline-block size-2 rounded-full', VERDICTS[v].fill)} />
           {counts[v]} {VERDICTS[v].legend}
         </li>
       ))}

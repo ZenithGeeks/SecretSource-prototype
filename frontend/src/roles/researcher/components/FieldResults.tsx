@@ -74,7 +74,7 @@ export function FieldVerdictTable({
   const shown = folded ? decisive : consensus.rows
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]">
+    <div className="overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-card">
       <div className="hidden gap-5 px-5 py-3 sm:flex">
         <span className="type-label w-[220px] shrink-0 text-ink-muted">Paper</span>
         <span className="type-label w-[150px] shrink-0 text-ink-muted">Verdict</span>

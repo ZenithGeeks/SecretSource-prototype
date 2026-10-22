@@ -34,7 +34,7 @@ export function ConnectAgent({ email, onAllow, onCancel }: { email: string | nul
         aria-modal="true"
         aria-labelledby="connect-title"
         tabIndex={-1}
-        className="m-auto flex w-full max-w-md flex-col gap-6 rounded-2xl border border-border-subtle bg-canvas bg-[radial-gradient(var(--color-border-subtle)_1px,transparent_1px)] bg-size-[16px_16px] px-4 pt-8 pb-4 shadow-xl outline-none sm:px-6"
+        className="m-auto flex w-full max-w-md flex-col gap-6 rounded-2xl border border-border-subtle bg-canvas dot-grid px-4 pt-8 pb-4 shadow-xl outline-none sm:px-6"
       >
         <AppPair />
         <section className="flex flex-col gap-5 rounded-2xl border border-border-subtle bg-surface p-6 shadow-md">

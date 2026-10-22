@@ -125,7 +125,7 @@ export function CitationCheckCard({
             onClick={() => setFilter(f.id)}
             aria-pressed={filter === f.id}
             className={cn(
-              'rounded-full px-2.5 py-[3px] text-xs transition-colors',
+              'rounded-full px-2.5 py-1 text-xs transition-colors',
               filter === f.id ? 'bg-accent-soft font-medium text-accent' : 'bg-canvas text-ink-muted hover:text-ink',
             )}
           >

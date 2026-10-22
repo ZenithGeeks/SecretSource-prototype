@@ -40,7 +40,7 @@ export function Classwork({ workspace, onOpenAssignment }: {
         </table>
       </Card>
 
-      {selected.length > 0 && <div className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-surface shadow-[0_8px_32px_rgba(30,26,34,0.22)]">
+      {selected.length > 0 && <div className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-surface shadow-xl">
         <p className="text-[11px]">{selected.length} {selected.length === 1 ? 'assignment' : 'assignments'} selected · {selectedEssayCount} essays</p>
         <div className="flex items-center gap-3"><button type="button" onClick={() => setSelected([])} className="text-[11px] text-surface/80 hover:text-white">Clear</button><Button type="button" onClick={checkEssays} disabled={preparation.isPending}>{preparation.isPending ? 'Checking…' : `Check ${selectedEssayCount} essays`}</Button></div>
       </div>}

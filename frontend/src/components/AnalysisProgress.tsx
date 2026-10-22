@@ -178,7 +178,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
   )
 
   return (
-    <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-[0_8px_12px_rgba(31,20,36,0.05),0_1px_1px_rgba(31,20,36,0.04)]">
+    <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-card">
       <header className="flex items-center gap-2">
         <p className="flex-1 text-[15px] leading-5 font-semibold" aria-live="polite">
           {running ? HEADLINE[Math.max(0, current)] : progress.error ? 'Stopped' : 'Finished'}
