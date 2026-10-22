@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { AgentBridge } from '../lib/agentBridge'
 import { cn } from '../lib/utils'
-import { AgentAbilities } from './AgentAbilities'
+import { AccessSummary } from './AgentAccessCard'
 import { Button } from './ui'
 import { ApproveChange } from './DoIt'
 
@@ -57,7 +57,7 @@ export function ConnectAgent({ email, onAllow, onCancel }: { email: string | nul
             </div>
           </div>
 
-          <AgentAbilities className="text-sm" />
+          <AccessSummary />
 
           <div className="flex flex-col gap-2">
             <div className="grid grid-cols-2 gap-2">
