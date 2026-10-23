@@ -32,6 +32,7 @@ import { askTarget } from '../lib/askCursor'
 import { Brand } from './Brand'
 import { RoleChip } from './RoleChip'
 import { Avatar } from './settings'
+import { IconButton, MenuItem } from './ui'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -141,14 +142,9 @@ function ProfileMenu({
           </span>
         </button>
         {onOpenSettings && (
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            aria-label="Settings"
-            className="mr-1 flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink"
-          >
+          <IconButton onClick={onOpenSettings} aria-label="Settings" className="mr-1 size-8">
             <SettingsIcon className="size-4" aria-hidden="true" />
-          </button>
+          </IconButton>
         )}
       </div>
       {/* Rendered after the button so Tab reaches Settings/Sign out; bottom-full keeps it above. */}
@@ -169,32 +165,29 @@ function ProfileMenu({
           </div>
           <div className="my-1 h-px bg-border-subtle" />
           {onOpenSettings && (
-            <button
-              type="button"
+            <MenuItem
               role="menuitem"
               onClick={() => {
                 setOpen(false)
                 onOpenSettings()
               }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink hover:bg-accent-soft"
             >
               <SettingsIcon className="size-4" />
               Settings
-            </button>
+            </MenuItem>
           )}
           {authEnabled && (
-            <button
-              type="button"
+            <MenuItem
               role="menuitem"
               onClick={() => {
                 setOpen(false)
                 void signOut()
               }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-refutes hover:bg-refutes-soft"
+              className="text-refutes hover:bg-refutes-soft"
             >
               <LogOut className="size-4" />
               Sign out
-            </button>
+            </MenuItem>
           )}
         </div>
       )}
@@ -349,15 +342,9 @@ export function AppShell<K extends string>({
         <Brand compact />
         <div className="flex items-center gap-1">
           {notifications}
-          <button
-          type="button"
-          onClick={() => setMenuOpen(true)}
-          aria-label="Open the menu"
-          aria-expanded={menuOpen}
-          className="flex size-11 items-center justify-center rounded-lg text-ink hover:bg-accent-soft"
-        >
-          <Menu className="size-5" />
-          </button>
+          <IconButton onClick={() => setMenuOpen(true)} aria-label="Open the menu" aria-expanded={menuOpen} className="text-ink">
+            <Menu className="size-5" />
+          </IconButton>
         </div>
       </header>
 
@@ -367,14 +354,9 @@ export function AppShell<K extends string>({
           <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col gap-4 overflow-y-auto bg-surface p-4 shadow-xl">
             <div className="flex items-center justify-between">
               <Brand compact />
-              <button
-                type="button"
-                onClick={() => setMenuOpen(false)}
-                aria-label="Close the menu"
-                className="flex size-11 items-center justify-center rounded-lg text-ink hover:bg-accent-soft"
-              >
+              <IconButton onClick={() => setMenuOpen(false)} aria-label="Close the menu" className="text-ink">
                 <X className="size-5" />
-              </button>
+              </IconButton>
             </div>
             {sidebarContent}
           </aside>
@@ -400,20 +382,15 @@ export function AppShell<K extends string>({
           )}
           {/* One button for both states, so keyboard focus stays on it after a click. */}
           {foldable && (
-            <button
-              type="button"
+            <IconButton
               onClick={() => fold(!folded)}
               aria-label={folded ? 'Open the sidebar' : 'Fold the sidebar'}
               aria-expanded={!folded}
               title={folded ? 'Open the sidebar' : 'Fold the sidebar'}
-              className={cn(
-                'flex items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink',
-                'focus-visible:outline-2 focus-visible:outline-accent',
-                folded ? 'size-10' : 'size-8',
-              )}
+              className={folded ? 'size-10 lg:size-10' : 'size-8'}
             >
               {folded ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-            </button>
+            </IconButton>
           )}
           {notifications}
         </div>

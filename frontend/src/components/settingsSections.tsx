@@ -10,7 +10,7 @@ import { useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { Role } from '../lib/roles'
-import { accountApi } from '../lib/accountApi'
+import { accountApi, MEMORIES_KEY } from '../lib/accountApi'
 import { avatarPhotoUrl } from '../lib/avatar'
 import { downloadText } from '../lib/csv'
 import { askNoticePermission, canNotify, noticesBlocked } from '../lib/desktopNotice'
@@ -24,6 +24,7 @@ import { classResultsCsv } from '../lib/teacherSelectors'
 import { useSetSetting, useSetTeacherPreference } from '../lib/useAccountSettings'
 import { useAuth } from '../lib/useAuth'
 import { authorApi } from '../lib/author'
+import { RememberedSection } from './RememberedSection'
 import { RoleChip } from './RoleChip'
 import { Avatar, Row, Section, Select, Toggle } from './settings'
 import { Button } from './ui'
@@ -366,12 +367,13 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
   }
 
   const deleteAll = async () => {
-    if (!window.confirm('Delete all uploaded papers? This removes the files and every check made on them. This cannot be undone.')) return
+    if (!window.confirm('Delete all uploaded papers? This removes the files, every check made on them and what the assistant remembers about you. This cannot be undone.')) return
     setBusy(true)
     try {
       const { deleted, skipped } = await accountApi.deleteAllData('researcher')
       await queryClient.invalidateQueries({ queryKey: ['researcher'] })
       await queryClient.invalidateQueries({ queryKey: ['analyses'] })
+      await queryClient.invalidateQueries({ queryKey: MEMORIES_KEY })
       setNotice(
         skipped > 0
           ? `${papers(deleted)} deleted. ${papers(skipped)} still being checked ${skipped === 1 ? 'was' : 'were'} kept; delete again once ${skipped === 1 ? 'it finishes' : 'they finish'}.`
@@ -401,8 +403,8 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
         label="Delete all uploaded papers"
         hint={
           isPreview
-            ? 'Removes the files and every check made on them. Switch to Researcher to delete.'
-            : 'Removes the files and every check made on them. This cannot be undone.'
+            ? 'Removes the files, every check made on them and what the assistant remembers. Switch to Researcher to delete.'
+            : 'Removes the files, every check made on them and what the assistant remembers. This cannot be undone.'
         }
       >
         <button
@@ -543,7 +545,16 @@ function TeacherYourData({ isPreview }: { isPreview: boolean }) {
 }
 
 export function YourDataSection({ role, isPreview }: { role: Role; isPreview: boolean }) {
-  if (role === 'researcher') return <ResearcherYourData isPreview={isPreview} />
+  // What the assistant remembers comes first: "Delete all" below forgets it too. The Author and
+  // Teacher roles do not use these facts, and the Author scope does not delete them.
+  if (role === 'researcher') {
+    return (
+      <div className="flex w-full flex-col gap-10">
+        <RememberedSection isPreview={isPreview} />
+        <ResearcherYourData isPreview={isPreview} />
+      </div>
+    )
+  }
   if (role === 'writer') return <AuthorYourData isPreview={isPreview} />
   return <TeacherYourData isPreview={isPreview} />
 }

@@ -48,6 +48,23 @@ def test_a_region_is_in_top_left_points_with_the_page_size():
     }
 
 
+def test_a_region_near_the_bottom_of_the_page_stays_low():
+    # Bottom-left top=120, bottom=40 on a 792-pt page. After the flip the box is still
+    # near the bottom, and y0 < y1 so the page viewer gives it a positive height.
+    region = figures._region(docling_table(1, 80, 120, 400, 40), document_with())
+
+    assert region["boxes"] == [{"x0": 80, "y0": 672, "x1": 400, "y1": 752}]
+
+
+def test_a_box_that_is_already_top_left_is_not_flipped():
+    box = BoundingBox(l=100, t=92, r=300, b=192, coord_origin=CoordOrigin.TOPLEFT)
+    item = SimpleNamespace(prov=[SimpleNamespace(page_no=1, bbox=box)])
+
+    region = figures._region(item, document_with())
+
+    assert region["boxes"] == [{"x0": 100, "y0": 92, "x1": 300, "y1": 192}]
+
+
 def test_an_item_without_a_page_has_no_region():
     no_prov = SimpleNamespace(prov=[])
     assert figures._region(no_prov, document_with()) is None
@@ -86,6 +103,35 @@ def test_a_manifest_from_before_regions_is_read_again(monkeypatch, tmp_path):
 
     manifest.write_text(json.dumps({"version": figures.MANIFEST_VERSION, "figures": [], "tables": []}))
     assert figures._read_manifest(pdf) is not None
+
+
+def test_an_unreadable_manifest_is_read_again(monkeypatch, tmp_path):
+    monkeypatch.setattr(figures, "PAPERS_DIR", tmp_path)
+    pdf = tmp_path / "paper.pdf"
+    directory = figures.figures_dir(pdf)
+    directory.mkdir(parents=True)
+    manifest = directory / figures.MANIFEST
+
+    manifest.write_text("{", encoding="utf-8")
+    assert figures._read_manifest(pdf) is None
+    manifest.write_text("[]", encoding="utf-8")
+    assert figures._read_manifest(pdf) is None
+
+    calls = []
+
+    def convert(converter, path):
+        calls.append(path)
+        raise RuntimeError("stop after the cache miss")
+
+    monkeypatch.setattr(figures, "convert", convert)
+    monkeypatch.setattr(figures, "docling_converter", lambda ocr, pictures=True: object())
+    monkeypatch.setattr(figures, "needs_ocr", lambda path: False)
+    manifest.write_text("{", encoding="utf-8")
+
+    result = figures.paper_media(str(pdf))
+
+    assert calls == [pdf]
+    assert result["status"] == "error"
 
 
 def test_a_manifest_whose_table_crop_is_gone_is_read_again(monkeypatch, tmp_path):

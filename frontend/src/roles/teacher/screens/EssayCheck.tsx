@@ -367,7 +367,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-accent">Student feedback</p>
-              <h2 id="teacher-feedback-heading" className="mt-1 font-serif text-2xl font-semibold leading-[30px] text-ink">Write to {data.student.name}</h2>
+              <h2 id="teacher-feedback-heading" className="mt-1 font-serif text-2xl font-semibold text-ink">Write to {data.student.name}</h2>
               <p className="mt-1 text-sm leading-6 text-ink-muted">Add a personal note and choose which reviewed citations to include.</p>
             </div>
             <MessageSquarePlus className="mt-1 size-5 shrink-0 text-accent" aria-hidden="true" />

@@ -9,7 +9,7 @@ import { cn } from '../../../lib/utils'
 import { count } from './LibraryCount'
 
 const MARKER =
-  'shrink-0 rounded-full border border-dashed border-insufficient px-[7px] py-px text-xs font-medium text-insufficient'
+  'shrink-0 rounded-full border border-dashed border-insufficient px-2 py-px text-xs font-medium text-insufficient'
 
 /** Backed / silent-or-unchecked / contradicted as one thin bar. The words sit beside it, so
  * colour is never the only signal. */
@@ -80,7 +80,7 @@ export function LibraryPaperTable({
         >
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium text-ink">{paper.title}</p>
-            <p className="mt-[3px] flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
               <span>{paper.cite}</span>
               {paper.indexed === 'no' && (
                 <span className={MARKER} title="This paper was not found in Semantic Scholar, arXiv, or Unpaywall.">

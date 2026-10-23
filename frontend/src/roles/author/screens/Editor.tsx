@@ -45,7 +45,7 @@ import { EditorTopBar, type EditorTab, type SaveStatus } from '../components/edi
 import { ExportMenu, type ExportKind } from '../components/editor/ExportMenu'
 import { FileTabs } from '../components/editor/FileTabs'
 import { PreviewPane } from '../components/editor/PreviewPane'
-import { SplitPane } from '../components/editor/SplitPane'
+import { SplitPane } from '../../../components/SplitPane'
 import { StatusBar } from '../components/editor/StatusBar'
 import { Toast } from '../components/Toast'
 import type { EditorTarget } from '../editorTarget'
@@ -432,6 +432,7 @@ export function Editor({
       <SplitPane
         leftLabel="Source"
         rightLabel="Preview"
+        separatorLabel="Resize the editor and the preview"
         left={
           <div className="flex min-h-0 flex-1 flex-col bg-surface">
             <FileTabs

@@ -236,14 +236,36 @@ def _formulas(document) -> list[dict]:
 
 
 def _read_manifest(pdf: Path) -> dict | None:
+    """The cached media, or None when it is missing, from before regions, or not usable.
+
+    A write that stopped halfway is not JSON. Leaving that file in place would make every
+    later read of the paper fail, so it is treated as a cache miss and Docling runs again.
+    """
     manifest = figures_dir(pdf) / MANIFEST
     if not manifest.is_file():
         return None
-    found = json.loads(manifest.read_text(encoding="utf-8"))
-    if found.get("version") != MANIFEST_VERSION:
+    try:
+        found = json.loads(manifest.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
         return None
-    crops = [item for item in found.get("figures", []) + found.get("tables", []) if item.get("image")]
-    return found if all(Path(item["image"]).is_file() for item in crops) else None
+    if not isinstance(found, dict) or found.get("version") != MANIFEST_VERSION:
+        return None
+    crops: list[str] = []
+    for key in ("figures", "tables", "formulas"):
+        items = found.get(key, [])
+        # _named reads every item. A shape we did not write is a miss, not a stuck error.
+        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+            return None
+        if key == "formulas":
+            continue
+        for item in items:
+            image = item.get("image")
+            if not image:
+                continue
+            if not isinstance(image, str):
+                return None
+            crops.append(image)
+    return found if all(Path(image).is_file() for image in crops) else None
 
 
 def paper_media(pdf_path: str, refresh: bool = False) -> dict:

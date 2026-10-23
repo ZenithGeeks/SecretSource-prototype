@@ -21,6 +21,8 @@ def app(monkeypatch):
         return "user-1"
 
     monkeypatch.setattr(mcp_server, "gatehouse_user", caller)
+    # No Settings, Agents choice yet, so full access.
+    monkeypatch.setattr(store, "load_preferences", lambda user: None)
     app = FastAPI()
     app.include_router(screen_bridge.router)
     app.mount("/mcp", mcp_server.handle_mcp)
@@ -69,6 +71,50 @@ def test_tool_list_is_the_screen_agents(app):
     assert "tool_context" not in by_name["get_claim"]["inputSchema"]["properties"]
     assert by_name["get_analysis"]["annotations"]["readOnlyHint"] is True
     assert by_name["submit_analysis"].get("annotations") is None
+
+
+def allow(monkeypatch, access):
+    """Store `access` as user-1's Settings, Agents choice."""
+    preferences = {"user-1": {"agentAccess": access}}
+    monkeypatch.setattr(store, "load_preferences", preferences.get)
+
+
+def listed_and_called(app, name, arguments):
+    async def steps(client):
+        tools = (await rpc(client, "tools/list"))["tools"]
+        result = await rpc(client, "tools/call", {"name": name, "arguments": arguments})
+        return [tool["name"] for tool in tools], result
+
+    return run_with_client(app, steps)
+
+
+def test_read_only_lists_and_runs_only_the_tools_that_change_nothing(app, monkeypatch):
+    allow(monkeypatch, {"level": "read"})
+
+    names, result = listed_and_called(app, "review_claim", {"analysis_id": "a1", "claim_number": 1})
+
+    assert set(names) == set(mcp_server.READ_ONLY)
+    assert result["isError"] is True
+    assert "Settings, Agents" in result["content"][0]["text"]
+
+
+def test_custom_access_lists_only_the_chosen_tools(app, monkeypatch):
+    allow(monkeypatch, {"level": "custom", "tools": ["list_papers", "point_at"]})
+
+    names, result = listed_and_called(app, "fill_field", {"target": "field:x", "value": "y"})
+
+    assert names == ["point_at", "list_papers"]
+    assert result["isError"] is True
+
+
+@pytest.mark.parametrize("access", ["everything", {"level": "admin"}, {"level": "custom", "tools": "all"}])
+def test_an_unreadable_access_choice_counts_as_read_only(app, monkeypatch, access):
+    allow(monkeypatch, access)
+
+    names, result = listed_and_called(app, "review_claim", {"analysis_id": "a1", "claim_number": 1})
+
+    assert set(names) == set(mcp_server.READ_ONLY)
+    assert result["isError"] is True
 
 
 def test_a_screen_tool_runs_in_the_callers_tab(app):

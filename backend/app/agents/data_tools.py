@@ -49,8 +49,10 @@ def _missing(analysis_id: str) -> dict:
 
 async def get_analysis(analysis_id: str, tool_context: ToolContext) -> dict:
     """One analysis: its status and, if it failed, why; how many claims are backed, silent,
-    contradicted or unchecked; and each claim with its number and standing. Use get_claim for the
-    evidence behind one claim.
+    contradicted or unchecked; and each claim with its number and standing. A claim whose
+    citations only name a dataset, benchmark, model or method the paper used has the standing
+    "names only": nothing was checked, and it is not in the counts. Use get_claim for the evidence
+    behind one claim.
 
     Args:
         analysis_id: the id list_papers gives for the paper.
@@ -81,7 +83,8 @@ async def get_analysis(analysis_id: str, tool_context: ToolContext) -> dict:
 async def get_claim(analysis_id: str, claim_number: int, tool_context: ToolContext) -> dict:
     """The evidence behind one claim: the sentence it came from, and for each cited paper the
     verdict (supports, refutes or insufficient), the quote the judge relied on and its reasoning.
-    Citations that could not be checked are listed with the reason.
+    Citations that could not be checked are listed with the reason. A "names only" claim has no
+    verdicts: its citations only name something the paper used, so they were not checked.
 
     Args:
         analysis_id: the id list_papers gives for the paper.

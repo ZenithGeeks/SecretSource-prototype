@@ -42,8 +42,10 @@ def library_papers(analyses: list[dict]) -> list[dict]:
 
 
 def standing(claim: dict) -> str:
-    """backed, contradicted, silent or unchecked. The worst answer wins, as in the web app's
-    claim cards: one contradicting source outweighs three supporting ones."""
+    """backed, contradicted, silent, unchecked or names only. The worst answer wins, as in the
+    web app's claim cards: one contradicting source outweighs three supporting ones. "names only"
+    is a claim whose citations only name what the paper used (#475), so there was nothing to check.
+    """
     verdicts = [verdict.get("verdict") for verdict in claim.get("verdicts", [])]
     if "refutes" in verdicts:
         return "contradicted"
@@ -51,18 +53,14 @@ def standing(claim: dict) -> str:
         return "silent"
     if verdicts:
         return "backed"
+    if not claim.get("unchecked") and _only_names(claim):
+        return "names only"
     return "unchecked"
 
 
 def tally(papers: list[dict]) -> dict:
-    """Claims per standing. A claim whose citations only name what the paper used (#475) had
-    nothing to check, so it is left out rather than counted as unchecked."""
-    counts = Counter(
-        standing(claim)
-        for paper in papers
-        for claim in paper.get("claims", [])
-        if claim.get("verdicts") or claim.get("unchecked") or not _only_names(claim)
-    )
+    """Claims per standing. Claims that only name what the paper used are not counted."""
+    counts = Counter(standing(claim) for paper in papers for claim in paper.get("claims", []))
     return {name: counts.get(name, 0) for name in ("backed", "silent", "contradicted", "unchecked")}
 
 

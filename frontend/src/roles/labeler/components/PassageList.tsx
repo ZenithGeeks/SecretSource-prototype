@@ -8,7 +8,7 @@
 import { Loader2, Plus, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
-import { Button, Input } from '../../../components/ui'
+import { Button, IconButton, Input, Textarea } from '../../../components/ui'
 import {
   referencesOf,
   type AddedPassage,
@@ -138,14 +138,13 @@ function AddedCard({
           {a.passage}
         </span>
       </button>
-      <button
-        type="button"
+      <IconButton
         onClick={onRemove}
         aria-label="Remove this passage"
-        className="flex size-11 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-refutes-soft hover:text-refutes focus-visible:outline-2 focus-visible:outline-accent"
+        className="lg:size-11 hover:bg-refutes-soft hover:text-refutes"
       >
         <X className="size-4" />
-      </button>
+      </IconButton>
     </li>
   )
 }
@@ -310,13 +309,12 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
       <label htmlFor={ids.text} className="text-sm font-medium text-ink">
         The passage
       </label>
-      <textarea
+      <Textarea
         id={ids.text}
         value={passage}
         onChange={(event) => setPassage(event.target.value)}
         rows={3}
         maxLength={4000}
-        className="w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-accent"
       />
       <div className="flex gap-2">
         <Button type="submit" disabled={!passage.trim()}>

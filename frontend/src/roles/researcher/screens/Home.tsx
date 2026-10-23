@@ -8,7 +8,7 @@
 import { useRef, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
-import { Card, Empty, FadeIn, LoadingScreen, VerdictBadge } from '../../../components/ui'
+import { Card, Empty, FadeIn, LoadingScreen, TextButton, VerdictBadge } from '../../../components/ui'
 import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
@@ -95,9 +95,9 @@ export function Home({
           <div className="flex items-center px-5 pb-2.5">
             <h2 className={cn(CARD_TITLE, 'flex-1')}>Conflicts in your library</h2>
             {home.conflicts.length > 0 && (
-              <button type="button" onClick={() => onOpen('library')} className="text-[13px] font-medium text-accent hover:underline">
+              <TextButton onClick={() => onOpen('library')} className="text-[13px]">
                 See all {home.conflicts.length}
-              </button>
+              </TextButton>
             )}
           </div>
           {home.conflicts.length === 0 && (
@@ -175,9 +175,9 @@ export function Home({
           <span className="text-[13px] text-ink-muted">
             {home.library.papers} papers · {home.library.claims} claims · {home.library.verified} verified
           </span>
-          <button type="button" onClick={() => onOpen('library')} className="text-[13px] font-medium text-accent hover:underline">
+          <TextButton onClick={() => onOpen('library')} className="text-[13px]">
             Open library
-          </button>
+          </TextButton>
         </div>
         <TallyBar tally={home.library.tally} />
       </section>

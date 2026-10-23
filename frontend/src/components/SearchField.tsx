@@ -8,6 +8,7 @@ import { Loader2, Search, X } from 'lucide-react'
 import { useId } from 'react'
 
 import { cn } from '../lib/utils'
+import { IconButton } from './ui'
 
 export function SearchField({
   label,
@@ -53,14 +54,9 @@ export function SearchField({
             <Loader2 className="m-2 size-4 animate-spin text-ink-muted" aria-label="Searching" />
           ) : (
             value && (
-              <button
-                type="button"
-                onClick={() => onChange('')}
-                aria-label={`Clear ${label.toLowerCase()}`}
-                className="flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-              >
+              <IconButton onClick={() => onChange('')} aria-label={`Clear ${label.toLowerCase()}`} className="size-8">
                 <X className="size-4" aria-hidden="true" />
-              </button>
+              </IconButton>
             )
           )}
         </span>

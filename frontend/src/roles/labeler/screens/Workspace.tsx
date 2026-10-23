@@ -10,11 +10,11 @@
 
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
-import { ChevronDown, Sparkles } from 'lucide-react'
+import { ChevronDown, Keyboard, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
-import { Empty, LoadingScreen } from '../../../components/ui'
+import { Empty, LoadingScreen, Segmented } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import {
@@ -45,6 +45,7 @@ import {
 import { AiCursor } from '../../../components/AiCursor'
 import type { Pointing } from '../../../lib/askCursor'
 import { FloatingPanel } from '../../../components/FloatingPanel'
+import { SplitPane } from '../../../components/SplitPane'
 import { AskPanel } from '../components/AskPanel'
 import { ClaimDecision, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
@@ -56,6 +57,18 @@ import { SelectionBar, type Picked } from '../components/SelectionBar'
 const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
+const SHORTCUTS_KEY = 'labeler.shortcuts' // "hidden" once the person closes the list
+const SPLIT_KEY = 'labeler.panelRatio' // the paper's share of the width, kept by SplitPane
+// The claim panel never gets narrower than this: it was a fixed 27rem before it could be resized.
+const PANEL_MIN_PX = 432
+const GUTTER_PX = 12 // the space between the handle and the panel (ml-3), outside the panel's box
+const shortcutsShown = () => {
+  try {
+    return window.localStorage.getItem(SHORTCUTS_KEY) !== 'hidden'
+  } catch {
+    return true // no stored choice: show them, new labelers need them
+  }
+}
 type PaperView = 'both' | 'reference' | 'side'
 const VIEW_NAMES: Record<PaperView, string> = {
   side: 'Side by side',
@@ -224,6 +237,15 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
 
   const [askOpen, setAskOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(shortcutsShown)
+  const toggleShortcuts = () => {
+    setShortcutsOpen(!shortcutsOpen)
+    try {
+      window.localStorage.setItem(SHORTCUTS_KEY, shortcutsOpen ? 'hidden' : 'shown')
+    } catch {
+      // the choice just is not remembered
+    }
+  }
   // Kept with the claim it was for, so moving to another claim drops the cursor at once.
   const [pointing, setPointing] = useState<{ claimId: string; at: Pointing } | null>(null)
   const point = useCallback((at: Pointing | null) => setPointing(at && { claimId: currentId, at }), [currentId])
@@ -287,6 +309,10 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         if (to) select(to.claim_id)
       }
 
+      if (key === '?') {
+        toggleShortcuts()
+        return
+      }
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
       if (['k', 'e', 'x', 'r', 'n', '1', '2', '3', '4'].includes(key)) event.preventDefault()
       if (key === 'k') patch({ status: 'accepted' })
@@ -415,10 +441,11 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
       <p className="text-sm text-ink-muted">Mark a passage relevant to grade this reference</p>
     )
 
-  const legend = (
+  const legend = shortcutsOpen && (
     // Shortcuts need a keyboard, so a touch screen does not list them.
-    <ul aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
+    <ul id="labeler-shortcuts" aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
       {[
+        ['?', 'hide this list'],
         ['K', 'keep'],
         ['E', 'edit'],
         ['X', 'reject'],
@@ -489,8 +516,9 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
+  // The stacked layout's Ask row. On a wide screen the header's Ask button opens the floating panel.
   const ask = claim && (
-    <div className={cn('flex min-h-0 flex-col', wide ? 'border-t border-border-subtle' : 'rounded-xl border border-border-subtle bg-surface')}>
+    <div className="flex min-h-0 flex-col rounded-xl border border-border-subtle bg-surface">
       <button
         type="button"
         aria-expanded={askOpen}
@@ -508,8 +536,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
         </span>
         <ChevronDown className={cn('ml-auto size-4 text-ink-muted transition-transform duration-200 motion-reduce:transition-none', askOpen && 'rotate-180')} aria-hidden="true" />
       </button>
-      {/* On a wide screen Ask floats (below), so it can sit beside the passage it talks about. */}
-      {askOpen && !wide && (
+      {askOpen && (
         <div id="labeler-ask" className="overflow-y-auto px-4 pb-4">
           {askPanel}
         </div>
@@ -531,70 +558,123 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
+  const iconButton =
+    'flex size-8 items-center justify-center rounded-lg border border-border-subtle text-ink-muted hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11'
+
+  const shortcutsButton = (
+    // A touch screen has no keyboard, so it gets no list and no button.
+    <button
+      type="button"
+      aria-expanded={shortcutsOpen}
+      aria-controls="labeler-shortcuts"
+      aria-keyshortcuts="?"
+      aria-label="Keyboard shortcuts"
+      title="Keyboard shortcuts (?)"
+      onClick={toggleShortcuts}
+      className={cn(iconButton, 'pointer-coarse:hidden', shortcutsOpen && 'border-accent bg-accent-soft text-ink')}
+    >
+      <Keyboard className="size-4" aria-hidden="true" />
+    </button>
+  )
+
+  // On a wide screen Ask is a floating panel, so it can sit beside the passage it talks about.
+  const askButton = wide && claim && (
+    <button
+      type="button"
+      aria-expanded={askOpen}
+      aria-controls="labeler-ask"
+      aria-label="Ask AI"
+      title="Ask AI: review this claim, or ask about its papers"
+      onClick={() => setAskOpen(!askOpen)}
+      className={cn(iconButton, 'text-accent', askOpen && 'border-accent bg-accent-soft')}
+    >
+      <Sparkles className="size-4" aria-hidden="true" />
+    </button>
+  )
+
   const viewToggle = (
-    <div role="group" aria-label="Which papers to show" className="flex rounded-lg border border-border-subtle p-0.5">
-      {(roomy ? (['side', 'both', 'reference'] as const) : (['both', 'reference'] as const)).map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={view === option}
-          onClick={() => choosePaperView(option)}
-          className={cn(
-            'min-h-11 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-            view === option ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
-          )}
-        >
-          {VIEW_NAMES[option]}
-        </button>
-      ))}
+    <Segmented
+      label="Which papers to show"
+      options={(roomy ? (['side', 'both', 'reference'] as const) : (['both', 'reference'] as const)).map((option) => ({
+        value: option,
+        label: VIEW_NAMES[option],
+      }))}
+      value={view}
+      onChange={choosePaperView}
+    />
+  )
+
+  const papers = (
+    <div className="mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+      {selection}
+      {/* Side by side: the paper under review left, the reference right, as they are read.
+          Stacked: the reference on top, since it is the paper being judged. */}
+      <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
+        {side && viewer(left_, 'paper')}
+        {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
+        {both && viewer(left_, 'paper')}
+      </div>
+    </div>
+  )
+
+  const labelPanel = (
+    <div className="ml-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
+      <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
+        {legend}
+        {saveBar('border-0 p-0')}
+      </div>
     </div>
   )
 
   return (
     <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem)]')}>
-      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-        <div className="min-w-0">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="min-w-0 xl:w-52 xl:shrink-0">
           <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">
             {session.title}
           </h1>
           <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
         </div>
-        <div className="flex items-center gap-4">
+        {/* On a wide screen the strip shares this row; below it, the strip gets a row of its own. */}
+        <ClaimNav
+          className="order-last w-full xl:order-none xl:w-auto xl:min-w-0 xl:flex-1"
+          claims={claims}
+          drafts={drafts}
+          saved={saved}
+          references={session.references}
+          current={currentId}
+          onSelect={select}
+          onAdd={addClaim}
+        />
+        <div className="ml-auto flex items-center gap-3 xl:ml-0">
           {wide && viewToggle}
-          <div className="w-44">
-            <p className="mb-1 text-xs text-ink-muted tabular-nums">
+          <div className="w-36">
+            <p className="mb-1 whitespace-nowrap text-xs text-ink-muted tabular-nums">
               {done} of {total} claims finished
             </p>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
               <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
           </div>
+          <div className="flex items-center gap-1.5">
+            {shortcutsButton}
+            {askButton}
+          </div>
         </div>
       </header>
 
-      <ClaimNav claims={claims} drafts={drafts} saved={saved} references={session.references} current={currentId} onSelect={select} onAdd={addClaim} />
-
       {wide ? (
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_27rem] gap-4">
-          <div className="flex min-h-0 min-w-0 flex-col gap-3">
-            {selection}
-            {/* Side by side: the paper under review left, the reference right, as they are read.
-                Stacked: the reference on top, since it is the paper being judged. */}
-            <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
-              {side && viewer(left_, 'paper')}
-              {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
-              {both && viewer(left_, 'paper')}
-            </div>
-          </div>
-          <aside aria-label="Label this claim" className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
-            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
-            {ask}
-            <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
-              {legend}
-              {saveBar('border-0 p-0')}
-            </div>
-          </aside>
-        </div>
+        <SplitPane
+          leftLabel="Paper and reference"
+          rightLabel="Label this claim"
+          separatorLabel="Resize the papers and the label panel"
+          initialRatio={0.7}
+          minRight={PANEL_MIN_PX + GUTTER_PX}
+          storageKey={SPLIT_KEY}
+          left={papers}
+          right={labelPanel}
+        />
       ) : (
         <div className="flex min-w-0 flex-col gap-4">
           <div className="flex gap-2">

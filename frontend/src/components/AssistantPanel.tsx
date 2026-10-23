@@ -8,7 +8,7 @@
 
 import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Loader2, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
 import { MotionConfig } from 'framer-motion'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
@@ -17,10 +17,14 @@ import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
 import { parseCommand, type PaperRef } from '../lib/askCommands'
 import { AiCursor } from './AiCursor'
+import { AnswerActions } from './AnswerActions'
 import { AskInput } from './AskInput'
+import { AskWelcome } from './AskWelcome'
 import { CommandResult } from './CommandResult'
 import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
+import { ThinkingState } from './ThinkingState'
+import { IconButton, Segmented } from './ui'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
 export type AskAbout = { kind: 'paper' | 'node' | 'library'; label: string }
@@ -36,9 +40,18 @@ const STAMPS: Record<StatementVerdict | 'checking', Stamp> = {
   checking: { label: 'Checking…', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
 }
 
-// 24 px hit areas on desktop, 44 px on a phone (the design's decisions note).
-const ICON_BUTTON =
-  'flex size-11 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:size-7'
+function ComposerChip({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="min-h-11 rounded-full border border-border-subtle px-2.5 text-xs text-ink-muted hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 lg:min-h-7"
+    >
+      {label}
+    </button>
+  )
+}
 
 const NOTE = 'Each statement is checked against the passage it cites. A statement no passage backs is marked, not hidden.'
 
@@ -51,6 +64,15 @@ function answerSummary(turn: Turn) {
   const parts = [`${backed} of ${turn.statements.length} backed`]
   if (contradicted) parts.push(`${contradicted} contradicted`)
   return parts.join(' · ')
+}
+
+/** The answer as plain text for Copy: one line per statement, with its source and stamp. */
+function answerText(turn: Turn, titles: Record<string, string>) {
+  const lines = turn.statements.map((statement) => {
+    const source = statement.source ? ` (${sourceLabel(statement, titles[statement.source])})` : ''
+    return `- ${statement.text}${source} [${STAMPS[statement.verdict ?? 'unchecked'].label}]`
+  })
+  return [turn.question, '', ...lines].join('\n')
 }
 
 /** The judge's passage and reasoning behind a stamp (A/Why). */
@@ -89,6 +111,7 @@ function StatementRow({
   onShowSource: (target: Target) => void
 }) {
   const [open, setOpen] = useState(false)
+  const previewId = useId()
   const stamp = STAMPS[statement.verdict ?? (answering ? 'checking' : 'unchecked')]
   const explained = Boolean(statement.verdict && (statement.quote || statement.reasoning))
   const pill = cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold', stamp.pill)
@@ -97,13 +120,30 @@ function StatementRow({
       <p className="text-[13px] leading-5 text-ink">{statement.text}</p>
       <div className="mt-1 flex items-center justify-between gap-2">
         {statement.source ? (
-          <button
-            type="button"
-            onClick={() => onShowSource(sourceTarget(statement, title))}
-            className="min-h-11 truncate text-left text-xs text-ink-muted underline hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:min-h-6"
-          >
-            {sourceLabel(statement, title)}
-          </button>
+          // Hover or focus shows the quoted passage once the judge has read it.
+          <span className="group/source relative flex min-w-0">
+            <button
+              type="button"
+              onClick={() => onShowSource(sourceTarget(statement, title))}
+              aria-describedby={statement.quote ? previewId : undefined}
+              className="min-h-11 truncate text-left text-xs text-ink-muted underline hover:text-ink focus-visible:outline-2 focus-visible:outline-accent lg:min-h-6"
+            >
+              {sourceLabel(statement, title)}
+            </button>
+            {statement.quote && (
+              <span
+                id={previewId}
+                role="tooltip"
+                className="pointer-events-none absolute bottom-full left-0 z-30 mb-1 hidden w-64 rounded-xl border border-border-subtle bg-surface p-3 shadow-lg group-focus-within/source:block group-hover/source:block"
+              >
+                <span className="type-label block text-ink-muted">
+                  {sourceLabel(statement, title)}
+                  {statement.page ? ` · page ${statement.page}` : ''}
+                </span>
+                <span className="mt-1 line-clamp-4 block font-serif text-[13px] leading-5 italic text-ink">“{statement.quote}”</span>
+              </span>
+            )}
+          </span>
         ) : (
           <span className="text-xs text-ink-muted">No passage named</span>
         )}
@@ -143,12 +183,16 @@ function TurnView({
   about,
   titles,
   onAskAgain,
+  onRegenerate,
   onShowSource,
 }: {
   turn: Turn
   about: AskAbout
   titles: Record<string, string>
+  /** Replaces a failed turn with a new try. */
   onAskAgain?: () => void
+  /** Asks a finished turn's question again, as a new turn. Only the last turn gets it. */
+  onRegenerate?: () => void
   onShowSource: (target: Target) => void
 }) {
   const unanswered = turn.status === 'done' && turn.statements.length === 0 && !turn.note && !turn.view
@@ -158,7 +202,7 @@ function TurnView({
         {turn.question}
       </p>
       {turn.statements.length > 0 && (
-        <section aria-label="Answer" className="flex flex-col gap-2.5">
+        <section aria-label="Answer" className="group flex flex-col gap-2.5">
           {/* The one line a screen reader hears change while the checks come in. */}
           <p role="status" className="type-label flex items-center gap-1.5 text-ink-muted">
             <Sparkles className="size-3.5" aria-hidden="true" />
@@ -176,16 +220,12 @@ function TurnView({
               />
             ))}
           </ul>
+          {turn.status === 'done' && <AnswerActions text={answerText(turn, titles)} onAskAgain={onRegenerate} />}
         </section>
       )}
       {turn.view && <CommandResult view={turn.view} command={turn.command ?? 'command'} />}
       {turn.note && <p className="text-xs leading-5 text-ink-muted">{turn.note}</p>}
-      {turn.status === 'answering' && turn.statements.length === 0 && (
-        <p className="flex items-center gap-2 text-xs text-ink-muted">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-          Reading the papers…
-        </p>
-      )}
+      {turn.status === 'answering' && turn.statements.length === 0 && <ThinkingState label="Reading your papers…" />}
       {unanswered && (
         <div className="flex gap-2.5 rounded-xl bg-neutral-soft p-3">
           <SearchX className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
@@ -232,13 +272,13 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
   return (
     <>
       <div className="flex items-center gap-2 px-5 pt-4 pb-2">
-        <button type="button" onClick={onBack} aria-label="Back to the chat" className={ICON_BUTTON}>
+        <IconButton onClick={onBack} aria-label="Back to the chat" className="lg:size-7">
           <ChevronLeft className="size-4" aria-hidden="true" />
-        </button>
+        </IconButton>
         <h2 className="flex-1 text-[15px] font-semibold text-ink">Your chats</h2>
-        <button type="button" onClick={onNew} aria-label="New chat" className={ICON_BUTTON}>
+        <IconButton onClick={onNew} aria-label="New chat" className="lg:size-7">
           <Plus className="size-4" aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
       <div className="flex-1 overflow-y-auto px-5">
         {failed && <p className="py-3 text-[13px] text-ink-muted">Your chats could not be loaded.</p>}
@@ -301,6 +341,7 @@ export function AssistantPanel({
   const [view, setView] = useState<'chat' | 'chats'>('chat')
   const [mode, setMode] = useState<'answer' | 'do'>('answer')
   const end = useRef<HTMLDivElement>(null)
+  const composer = useRef<HTMLFormElement>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
 
@@ -333,6 +374,12 @@ export function AssistantPanel({
     else void assistant.run(question, parsed)
   }
 
+  /** Types `@` after the draft, or `/` into an empty one, and puts the cursor back in the field. */
+  const insert = (sign: '@' | '/') => {
+    setDraft(sign === '/' ? '/' : `${draft}${draft && !draft.endsWith(' ') ? ' ' : ''}@`)
+    composer.current?.querySelector('input')?.focus()
+  }
+
   const newChat = () => {
     assistant.newChat()
     setView('chat')
@@ -359,41 +406,35 @@ export function AssistantPanel({
         <>
           <div className="flex items-center gap-2 px-5 pt-4 pb-3">
             {/* On a phone the panel covers the screen, so Back is how the reader returns to it. */}
-            <button type="button" onClick={onClose} aria-label="Back to the screen" className={cn(ICON_BUTTON, 'lg:hidden')}>
+            <IconButton onClick={onClose} aria-label="Back to the screen" className="lg:hidden">
               <ChevronLeft className="size-4" aria-hidden="true" />
-            </button>
+            </IconButton>
             <h2 className="flex flex-1 items-center gap-1.5 text-[15px] font-semibold text-ink">
               <Mascot role={role} size={24} />
               Ask
             </h2>
-            <button type="button" onClick={() => setView('chats')} aria-label="Your chats" className={ICON_BUTTON}>
+            <IconButton onClick={() => setView('chats')} aria-label="Your chats" className="lg:size-7">
               <Clock className="size-4" aria-hidden="true" />
-            </button>
-            <button type="button" onClick={newChat} aria-label="New chat" className={ICON_BUTTON}>
+            </IconButton>
+            <IconButton onClick={newChat} aria-label="New chat" className="lg:size-7">
               <Plus className="size-4" aria-hidden="true" />
-            </button>
-            <button type="button" onClick={onClose} aria-label="Close Ask" className={cn(ICON_BUTTON, 'hidden lg:flex')}>
+            </IconButton>
+            <IconButton onClick={onClose} aria-label="Close Ask" className="hidden lg:flex lg:size-7">
               <X className="size-4" aria-hidden="true" />
-            </button>
+            </IconButton>
           </div>
 
           {doIt && (
-            <div role="group" aria-label="What Ask does" className="mx-5 mb-3 grid grid-cols-2 rounded-xl border border-border-subtle p-0.5">
-              {(['answer', 'do'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={mode === option}
-                  onClick={() => setMode(option)}
-                  className={cn(
-                    'min-h-9 rounded-lg text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-accent',
-                    mode === option ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
-                  )}
-                >
-                  {option === 'answer' ? 'Answer' : 'Do it'}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="What Ask does"
+              options={[
+                { value: 'answer', label: 'Answer' },
+                { value: 'do', label: 'Do it' },
+              ]}
+              value={mode}
+              onChange={setMode}
+              className="mx-5 mb-3"
+            />
           )}
           {mode === 'do' && doIt ? (
             doIt
@@ -418,19 +459,19 @@ export function AssistantPanel({
                 )}
               </div>
 
-              <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-5 py-4">
+              <div className="flex flex-1 flex-col gap-6 overflow-y-auto dot-grid px-5 py-4">
                 {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
                 {turns.length === 0 && !assistant.openFailed && (
-                  <div className="flex flex-col gap-2">
-                    <Mascot role={role} size={64} animated />
-                    <p className="text-[15px] font-medium text-ink">
-                      {about.kind === 'library' ? 'Ask about the papers in your library.' : `Ask about ${about.label}.`}
-                    </p>
-                    <p className="text-[13px] leading-5 text-ink-muted">
-                      Answers come back as short statements. Each one cites a passage and is checked by the judge before it
-                      counts.{about.kind === 'library' && canNarrow && ' Open a paper or select a graph node first to ask about that one only.'}
-                    </p>
-                  </div>
+                  <MotionConfig reducedMotion="user">
+                    <AskWelcome
+                      role={role}
+                      about={about}
+                      canNarrow={canNarrow}
+                      onAsk={(question) => {
+                        if (!answering) void assistant.ask(question, context)
+                      }}
+                    />
+                  </MotionConfig>
                 )}
                 {turns.map((turn) => (
                   <TurnView
@@ -440,6 +481,7 @@ export function AssistantPanel({
                     titles={titles}
                     onShowSource={onShowSource}
                     onAskAgain={turn === last && !answering ? () => void assistant.ask(turn.question, context, true) : undefined}
+                    onRegenerate={turn === last && !answering ? () => void assistant.ask(turn.question, context) : undefined}
                   />
                 ))}
                 <div ref={end} />
@@ -447,11 +489,12 @@ export function AssistantPanel({
 
               <div className="px-5 pb-4">
                 <form
+                  ref={composer}
                   onSubmit={(event) => {
                     event.preventDefault()
                     send()
                   }}
-                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-neutral-soft py-1.5 pr-1.5 pl-3"
+                  className="flex flex-col gap-1 rounded-2xl border border-border-subtle bg-surface px-3 pt-1.5 pb-2 shadow-sm transition-shadow focus-within:border-accent focus-within:shadow-md"
                 >
                   <AskInput
                     draft={draft}
@@ -468,25 +511,31 @@ export function AssistantPanel({
                             : 'Ask about this node, / for commands…'
                     }
                   />
-                  {answering ? (
-                    <button
-                      type="button"
-                      onClick={assistant.stop}
-                      className="flex min-h-11 items-center gap-1.5 rounded-lg border border-accent px-3 text-[13px] font-medium text-accent hover:bg-accent-soft lg:min-h-8"
-                    >
-                      <Square className="size-3 fill-current" aria-hidden="true" />
-                      Stop
-                    </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={!draft.trim()}
-                      aria-label="Send"
-                      className="flex size-11 items-center justify-center rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-50 lg:size-8"
-                    >
-                      <ArrowUp className="size-4" aria-hidden="true" />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {/* Shortcuts into the field's own @ and / menus. */}
+                    <ComposerChip label="@ Paper" disabled={answering} onClick={() => insert('@')} />
+                    {/* A command must start the question, so this one waits for an empty field. */}
+                    <ComposerChip label="/ Commands" disabled={answering || draft !== ''} onClick={() => insert('/')} />
+                    {answering ? (
+                      <button
+                        type="button"
+                        onClick={assistant.stop}
+                        className="ml-auto flex min-h-11 items-center gap-1.5 rounded-full border border-accent px-3 text-[13px] font-medium text-accent hover:bg-accent-soft lg:min-h-8"
+                      >
+                        <Square className="size-3 fill-current" aria-hidden="true" />
+                        Stop
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={!draft.trim()}
+                        aria-label="Send"
+                        className="ml-auto flex size-11 items-center justify-center rounded-full bg-linear-to-br from-accent to-accent/70 text-white shadow-md disabled:opacity-40 lg:size-8"
+                      >
+                        <ArrowUp className="size-4" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
                 </form>
                 <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
               </div>

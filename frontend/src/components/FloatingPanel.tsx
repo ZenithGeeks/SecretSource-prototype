@@ -9,6 +9,8 @@ import { AnimatePresence, motion, MotionConfig, useDragControls, useMotionValue 
 import { GripHorizontal, X } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
 
+import { IconButton } from './ui'
+
 const MARGIN = 24 // the default gap from the window's bottom right corner
 const STEP = 24 // one arrow key press; Shift moves four steps
 
@@ -107,24 +109,22 @@ export function FloatingPanel({
                   <span className="text-sm font-medium text-ink">{title}</span>
                   {subtitle && <span className="truncate text-xs text-ink-muted">{subtitle}</span>}
                 </span>
-                <button
-                  type="button"
+                <IconButton
                   onKeyDown={moveWithKeys}
                   aria-label={`Move ${title}: use the arrow keys`}
                   title="Drag to move, or focus and use the arrow keys"
-                  className="ml-auto flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                  className="ml-auto size-8"
                 >
                   <GripHorizontal className="size-4" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
+                </IconButton>
+                <IconButton
                   onClick={onClose}
                   onPointerDown={(event) => event.stopPropagation()}
                   aria-label={`Close ${title}`}
-                  className="flex size-8 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                  className="size-8"
                 >
                   <X className="size-4" aria-hidden="true" />
-                </button>
+                </IconButton>
               </header>
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{children}</div>
             </motion.section>

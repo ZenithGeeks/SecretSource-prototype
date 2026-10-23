@@ -189,7 +189,7 @@ export function SettingsModal({
         aria-modal="true"
         aria-label="Settings"
         tabIndex={-1}
-        className="relative flex h-full w-full flex-col overflow-hidden border border-border-subtle bg-surface shadow-[0_24px_60px_-12px_rgba(0,0,0,0.22)] outline-none sm:h-[620px] sm:max-h-full sm:max-w-[900px] sm:flex-row sm:rounded-[20px]"
+        className="relative flex h-full w-full flex-col overflow-hidden border border-border-subtle bg-surface shadow-2xl outline-none sm:h-[620px] sm:max-h-full sm:max-w-[900px] sm:flex-row sm:rounded-[20px]"
       >
         <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border-subtle bg-canvas px-3 py-4 sm:h-full sm:max-h-none sm:w-[240px] sm:border-b-0 sm:border-r">
           <div className="relative">

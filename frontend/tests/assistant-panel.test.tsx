@@ -4,7 +4,7 @@
  * empty, no-answer, failed and chat-list states.
  */
 
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantPanel, type AskAbout } from '../src/components/AssistantPanel'
@@ -151,12 +151,50 @@ describe('the Ask panel', () => {
     await stream.send({ type: 'verdict', index: 0, verdict: 'refutes', quote: 'GN error stays stable.', reasoning: 'BN still trains at 8.' })
     fireEvent.click(screen.getByRole('button', { name: 'Contradicted: why' }))
 
-    expect(screen.getByText('What the passage says · page 6')).toBeInTheDocument()
-    expect(screen.getByText('“GN error stays stable.”')).toBeInTheDocument()
-    expect(screen.getByText('BN still trains at 8.')).toBeInTheDocument()
+    const why = screen.getByText('What the passage says · page 6').parentElement
+    expect(why).toHaveTextContent('“GN error stays stable.”')
+    expect(why).toHaveTextContent('BN still trains at 8.')
 
     fireEvent.click(screen.getByRole('button', { name: 'Open passage' }))
     expect(onShowSource).toHaveBeenCalledWith(expect.objectContaining({ paper: 'group-norm-2018.pdf', page: 6 }))
+  })
+
+  it('shows the thinking state, then previews a quote on its source and copies or re-asks the answer', async () => {
+    const stream = controlledStream()
+    const calls = gateway(stream)
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(<Panel />)
+
+    await ask('q')
+    expect(screen.getByText('Reading your papers…')).toHaveAttribute('role', 'status')
+    await stream.send(statement(0, 'BN stops working below 8 images.'))
+    await stream.send({ type: 'verdict', index: 0, verdict: 'refutes', quote: 'GN error stays stable.', reasoning: 'r' })
+    await stream.send({ type: 'done', statements: 1 })
+    await stream.end()
+
+    expect(screen.getByRole('button', { name: 'group-norm-2018 · p. 6' })).toHaveAccessibleDescription(/GN error stays stable/)
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy' })))
+    expect(writeText).toHaveBeenCalledWith('q\n\n- BN stops working below 8 images. (group-norm-2018 · p. 6) [Contradicted]')
+    expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument()
+
+    const again = gateway(controlledStream())
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Ask again' })))
+    expect(screen.getAllByText('q')).toHaveLength(2)
+    expect(calls.filter((call) => call.url.endsWith('/messages'))).toHaveLength(1)
+    expect(again.find((call) => call.url.endsWith('/messages'))?.body).toMatchObject({ question: 'q' })
+  })
+
+  it('puts @ or / in the field from the composer chips', () => {
+    render(<Panel />)
+    const field = screen.getByRole('textbox', { name: 'Your question' })
+
+    fireEvent.change(field, { target: { value: 'compare' } })
+    expect(screen.getByRole('button', { name: '/ Commands' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '@ Paper' }))
+
+    expect(field).toHaveValue('compare @')
+    expect(field).toHaveFocus()
   })
 
   it('turns Send into Stop while answering, and Stop keeps what arrived', async () => {
@@ -219,8 +257,18 @@ describe('the Ask panel', () => {
     unmount()
 
     render(<Panel />)
-    expect(screen.getByText('Ask about the papers in your library.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ask about the papers in your library' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Ask about your whole library instead' })).not.toBeInTheDocument()
+  })
+
+  it('asks a starter question from the empty panel', async () => {
+    const calls = gateway(controlledStream())
+    render(<Panel about={PAPER} />)
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'What are its main results?' })))
+
+    await waitFor(() => expect(calls.some((call) => JSON.stringify(call.body ?? '').includes('What are its main results?'))).toBe(true))
+    expect(screen.queryByRole('button', { name: 'What limits does it admit?' })).not.toBeInTheDocument()
   })
 
   it('lists earlier chats and opens one with its checked reply', async () => {

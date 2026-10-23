@@ -1,7 +1,7 @@
 import { Copy, Download, Edit3, ExternalLink, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Card, Empty } from '../../../components/ui'
+import { Button, Card, Empty, TextButton, Textarea } from '../../../components/ui'
 import { downloadText } from '../../../lib/csv'
 import { filterReadingQuestions, worksheetText } from '../../../lib/teacherSelectors'
 import type { ReadingQuestionLevel, ReadingQuestionType, TeacherReadingQuestion } from '../../../lib/teacher'
@@ -102,7 +102,7 @@ export function ReadingQuestions({ paperId }: { paperId?: string }) {
       </div>
 
       <TeacherDialog open={Boolean(editing)} title="Edit reading question" description="Only this local question's prompt and answer key will change." onClose={() => setEditing(null)}>
-        <div className="space-y-4"><label className="block text-sm font-medium">Question<textarea value={draft.prompt} onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))} rows={4} className="mt-2 w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm leading-6" /></label><label className="block text-sm font-medium">Answer key<textarea value={draft.answer} onChange={(event) => setDraft((current) => ({ ...current, answer: event.target.value }))} rows={3} className="mt-2 w-full rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm leading-6" /></label><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" onClick={save} disabled={update.isPending || !draft.prompt.trim()}>{update.isPending ? 'Saving...' : 'Save question'}</Button></div></div>
+        <div className="space-y-4"><label className="block text-sm font-medium">Question<Textarea value={draft.prompt} onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))} rows={4} className="mt-2 leading-6" /></label><label className="block text-sm font-medium">Answer key<Textarea value={draft.answer} onChange={(event) => setDraft((current) => ({ ...current, answer: event.target.value }))} rows={3} className="mt-2 leading-6" /></label><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button><Button type="button" onClick={save} disabled={update.isPending || !draft.prompt.trim()}>{update.isPending ? 'Saving...' : 'Save question'}</Button></div></div>
       </TeacherDialog>
       <TeacherDialog open={Boolean(removing)} title="Remove this question?" description="The question will be removed from the local worksheet and answer key." onClose={() => setRemoving(null)}>
         <div className="rounded-lg bg-canvas p-3 text-sm leading-6 text-ink-muted">{removing?.prompt}</div><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setRemoving(null)} disabled={remove.isPending}>Keep question</Button><Button type="button" className="bg-refutes hover:opacity-90" onClick={confirmRemove} disabled={remove.isPending}><Trash2 className="size-4" />{remove.isPending ? 'Removing...' : 'Remove'}</Button></div>
@@ -121,7 +121,7 @@ function QuestionCard({ question, number, onEdit, onRemove, onShow }: { question
       <div className="flex items-center gap-2"><span className="w-3 shrink-0 text-xs font-medium text-ink-muted">{number}</span><StatusPill label={question.type} tone={question.type === 'critique' ? 'warning' : question.type === 'discussion' ? 'warning' : 'success'} /><span className="text-[11px] text-accent">anchored to {question.anchor}</span></div>
       <h3 className="pl-5 text-sm leading-[22px] text-ink">{question.prompt}</h3>
       {question.excerpt && <p className="border-l border-border-subtle pl-3 font-serif text-[12px] italic leading-5 text-ink-muted">“{question.excerpt}”</p>}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3"><button type="button" onClick={onShow} className="inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"><ExternalLink className="size-3.5" />Show in paper</button><div className="flex gap-1"><Button type="button" variant="ghost" onClick={onEdit}><Edit3 className="size-4" />Edit</Button><Button type="button" variant="ghost" className="text-refutes hover:bg-refutes-soft" onClick={onRemove}><Trash2 className="size-4" />Remove</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3"><TextButton onClick={onShow} className="inline-flex items-center gap-1.5 text-xs"><ExternalLink className="size-3.5" />Show in paper</TextButton><div className="flex gap-1"><Button type="button" variant="ghost" onClick={onEdit}><Edit3 className="size-4" />Edit</Button><Button type="button" variant="ghost" className="text-refutes hover:bg-refutes-soft" onClick={onRemove}><Trash2 className="size-4" />Remove</Button></div></div>
     </Card>
   )
 }

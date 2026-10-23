@@ -1,8 +1,10 @@
-/** Connecting a coding agent to a tab: the connect screen, and the bridge that runs the agent's
- * tool calls in the tab, holds a change for Apply, and disconnects. */
+/** Connecting a coding agent to a tab: the connect screen, Settings, Agents with its access card,
+ * and the bridge that runs the agent's tool calls in the tab, holds a change for Apply, and
+ * disconnects. */
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
@@ -10,6 +12,10 @@ const gateway = vi.hoisted(() => ({
   // The bridge stream's handler while connected, and whether the stream was closed.
   bridge: null as ((event: object) => Promise<void> | void) | null,
   closed: false,
+  // /user/preferences: what the server holds, and each PATCH it got.
+  preferences: {} as Record<string, unknown>,
+  patches: [] as Record<string, unknown>[],
+  failPatches: false,
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
@@ -20,15 +26,31 @@ vi.mock('../src/lib/api', async (original) => ({
       gateway.closed = true
     }
   }),
-  request: vi.fn(async (path: string, init: RequestInit) => {
-    gateway.posts.push({ path, body: JSON.parse(String(init.body)) })
+  request: vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/user/preferences') {
+      if (init?.method === 'PATCH') {
+        if (gateway.failPatches) throw new Error('gateway down')
+        const { patch } = JSON.parse(String(init.body)) as { patch: Record<string, unknown> }
+        gateway.patches.push(patch)
+        gateway.preferences = { ...gateway.preferences, ...patch }
+      }
+      return gateway.preferences
+    }
+    gateway.posts.push({ path, body: JSON.parse(String(init?.body)) })
     return { status: 'ok' }
   }),
 }))
 
+import { AgentsSection } from '../src/components/AgentsSection'
 import { AgentStatus, ConnectAgent } from '../src/components/ConnectAgent'
+import { readAccess } from '../src/lib/agentAccess'
 import type { ScreenActions } from '../src/lib/agentTools'
 import { useAgentBridge } from '../src/lib/agentBridge'
+
+function renderWithQuery(ui: ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
 
 const actions: ScreenActions = { screen: 'library', screens: ['home', 'library'], openScreen: vi.fn(), openPaper: vi.fn() }
 
@@ -48,24 +70,45 @@ beforeEach(() => {
   gateway.posts = []
   gateway.bridge = null
   gateway.closed = false
+  gateway.preferences = {}
+  gateway.patches = []
+  gateway.failPatches = false
   window.sessionStorage.clear()
 })
 
 describe('the connect screen', () => {
-  it('says who is signed in and what the agent can and cannot do', () => {
+  it('says who is signed in and what the agent may do', async () => {
+    gateway.preferences = { agentAccess: { level: 'read' } }
     const onAllow = vi.fn()
-    render(<ConnectAgent email="ann@example.com" onAllow={onAllow} onCancel={vi.fn()} />)
+    renderWithQuery(<ConnectAgent email="ann@example.com" onAllow={onAllow} onCancel={vi.fn()} />)
 
     expect(screen.getByRole('dialog', { name: 'Let your coding agent use this tab' })).toBeInTheDocument()
     expect(screen.getByText('ann@example.com')).toBeInTheDocument()
-    expect(screen.getByText('Fill in a field, after you press Apply')).toBeInTheDocument()
-    expect(screen.getByText('Save labels, delete or upload anything')).toBeInTheDocument()
+    expect(await screen.findByText(/Read only · 12 tools/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }))
     expect(onAllow).toHaveBeenCalled()
   })
 
-  it('shows the setup for Claude Code or for Codex', () => {
-    render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={vi.fn()} />)
+  it('sends a first-time setup to Settings instead of showing it', () => {
+    renderWithQuery(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(screen.getByText(/Settings, Agents shows how/)).toBeInTheDocument()
+    expect(screen.queryByText(/claude mcp add/)).not.toBeInTheDocument()
+  })
+
+  it('closes on Escape without connecting', () => {
+    const onCancel = vi.fn()
+    renderWithQuery(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={onCancel} />)
+
+    expect(screen.getByText('Local workspace')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onCancel).toHaveBeenCalled()
+  })
+})
+
+describe('Settings, Agents', () => {
+  it('shows the setup for Claude Code, Codex or VS Code', () => {
+    renderWithQuery(<AgentsSection role="researcher" />)
 
     expect(screen.getByText(/claude mcp add --transport http --scope user secretsource/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }))
@@ -76,13 +119,73 @@ describe('the connect screen', () => {
     expect(screen.getByText(/VS Code asks for the key the first time/)).toBeInTheDocument()
   })
 
-  it('closes on Escape without connecting', () => {
-    const onCancel = vi.fn()
-    render(<ConnectAgent email={null} onAllow={vi.fn()} onCancel={onCancel} />)
+  it('links to the connect screen only in a role that can connect', () => {
+    const { unmount } = renderWithQuery(<AgentsSection role="labeler" />)
+    expect(screen.getByRole('link', { name: 'Connect this tab' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('connect=agent'),
+    )
+    unmount()
 
-    expect(screen.getByText('Local workspace')).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(onCancel).toHaveBeenCalled()
+    renderWithQuery(<AgentsSection role="teacher" />)
+    expect(screen.queryByRole('link', { name: 'Connect this tab' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Switch to Researcher or Labeler/)).toBeInTheDocument()
+  })
+})
+
+describe('the access card', () => {
+  it('starts at full access and saves Read only', async () => {
+    renderWithQuery(<AgentsSection role="researcher" />)
+
+    expect(await screen.findByRole('radio', { name: 'Full access' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('18 tools')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Read only' }))
+
+    expect(await screen.findByText('12 tools')).toBeInTheDocument()
+    await waitFor(() => expect(gateway.patches).toEqual([{ agentAccess: { level: 'read' } }]))
+  })
+
+  it('starts Custom from the current tools and saves each tick', async () => {
+    gateway.preferences = { agentAccess: { level: 'read' } }
+    renderWithQuery(<AgentsSection role="researcher" />)
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Custom' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search tools' }), { target: { value: 'checking' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Start checking a paper/ }))
+
+    await waitFor(() => expect(gateway.patches).toHaveLength(2))
+    const tools = (gateway.patches[1].agentAccess as { tools: string[] }).tools
+    expect(tools).toHaveLength(13)
+    expect(tools).toContain('submit_analysis')
+  })
+
+  it('keeps both of two quick ticks', async () => {
+    gateway.preferences = { agentAccess: { level: 'custom', tools: [] } }
+    renderWithQuery(<AgentsSection role="researcher" />)
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /List your papers/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Make BibTeX entries/ }))
+
+    await waitFor(() => expect(gateway.patches).toHaveLength(2))
+    expect(gateway.patches[1]).toEqual({ agentAccess: { level: 'custom', tools: ['list_papers', 'bibtex'] } })
+  })
+
+  it('puts the saved level back when saving fails', async () => {
+    gateway.failPatches = true
+    renderWithQuery(<AgentsSection role="researcher" />)
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Read only' }))
+
+    expect(await screen.findByText(/Not saved, try again/)).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Full access' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('reads a value it does not understand as read only, as the server does', () => {
+    expect(readAccess(undefined)).toEqual({ level: 'full' })
+    expect(readAccess('everything')).toEqual({ level: 'read' })
+    expect(readAccess({ level: 'admin' })).toEqual({ level: 'read' })
+    expect(readAccess({ level: 'custom', tools: 'all' })).toEqual({ level: 'read' })
+    expect(readAccess({ level: 'custom', tools: ['bibtex', 3] })).toEqual({ level: 'custom', tools: ['bibtex'] })
   })
 })
 

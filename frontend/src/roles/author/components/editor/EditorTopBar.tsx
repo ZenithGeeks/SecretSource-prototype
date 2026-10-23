@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 
 import { Brand } from '../../../../components/Brand'
 import { RoleChip } from '../../../../components/RoleChip'
-import { Button } from '../../../../components/ui'
+import { Button, TextButton } from '../../../../components/ui'
 import { cn } from '../../../../lib/utils'
 
 export type EditorTab = 'editor' | 'history'
@@ -81,9 +81,9 @@ export function EditorTopBar({
             ) : status === 'error' ? (
               <>
                 not saved
-                <button type="button" onClick={onRetry} className="ml-1 rounded font-medium text-accent hover:underline">
+                <TextButton onClick={onRetry} className="ml-1">
                   Retry
-                </button>
+                </TextButton>
               </>
             ) : (
               'saved'

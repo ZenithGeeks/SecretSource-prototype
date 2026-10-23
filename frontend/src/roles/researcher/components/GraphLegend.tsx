@@ -27,7 +27,7 @@ function Item({ children, mark }: { children: string; mark: ReactNode }) {
   )
 }
 
-function Dot({ color, className = 'size-[9px]' }: { color: string; className?: string }) {
+function Dot({ color, className = 'size-2' }: { color: string; className?: string }) {
   return <span aria-hidden="true" className={cn('rounded-full', className)} style={{ backgroundColor: color }} />
 }
 
