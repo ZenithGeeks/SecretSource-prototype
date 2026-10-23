@@ -7,12 +7,15 @@
 import { Check, Copy } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
+import { GATEHOUSE_URL } from '../lib/agentAccess'
 import type { Role } from '../lib/roles'
 import { AgentAccessCard } from './AgentAccessCard'
 import { Section } from './settings'
 import { Segmented } from './ui'
 
-const MCP_URL = 'https://wttw-1.tailcf73b7.ts.net:8443/secretsource/mcp/'
+const MCP_URL = `${GATEHOUSE_URL}/secretsource/mcp/`
+// Gatehouse's self-service page: a listed email gets its first key when it signs in with Google.
+const KEY_URL = `${GATEHOUSE_URL}/me/`
 
 /**
  * How each agent adds SecretSource and gets the Gatehouse key: a command for Claude Code, which
@@ -59,13 +62,6 @@ type Client = keyof typeof CLIENTS
 const CAN_CONNECT: Role[] = ['researcher', 'labeler']
 
 export function AgentsSection({ role }: { role: Role }) {
-  const [client, setClient] = useState<Client>('Claude Code')
-  const [copied, setCopied] = useState(false)
-  const { where, key, after, config } = CLIENTS[client]
-  const copy = () => {
-    void navigator.clipboard?.writeText(config).then(() => setCopied(true))
-  }
-
   return (
     <Section title="Agents">
       <div className="flex w-full flex-col gap-5 border-t border-border-subtle py-3.5 text-[13px] text-ink">
@@ -75,35 +71,13 @@ export function AgentsSection({ role }: { role: Role }) {
         </p>
 
         <Step number={1} title="Add SecretSource to your agent">
-          <Segmented
-            label="Your agent"
-            options={(Object.keys(CLIENTS) as Client[]).map((name) => ({ value: name, label: name }))}
-            value={client}
-            onChange={(name) => {
-              setClient(name)
-              setCopied(false)
-            }}
-            className="mb-3"
-          />
-          <ol className="mb-2 flex list-decimal flex-col gap-1 pl-4 text-xs leading-5 text-ink-muted">
-            <li>Get a Gatehouse key for the email you sign in with, and {key}.</li>
-            <li>
-              {where}; {after}.
-            </li>
-          </ol>
-          <div className="relative">
-            <pre className="rounded-lg bg-neutral-soft p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">
-              {config}
-            </pre>
-            <button
-              type="button"
-              onClick={copy}
-              className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded-md border border-border-subtle bg-surface px-2 py-1 text-xs text-ink hover:border-accent"
-            >
-              {copied ? <Check className="size-3" aria-hidden="true" /> : <Copy className="size-3" aria-hidden="true" />}
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
+          {GATEHOUSE_URL ? (
+            <AddToAgent />
+          ) : (
+            <p className="text-xs leading-5 text-ink-muted">
+              This server has no agent gateway yet. Set VITE_GATEHOUSE_URL and rebuild the web app.
+            </p>
+          )}
         </Step>
 
         <Step number={2} title="Connect a tab">
@@ -131,11 +105,69 @@ export function AgentsSection({ role }: { role: Role }) {
   )
 }
 
+/** Step 1: the setup snippet for the chosen agent, with where to get the key. */
+function AddToAgent() {
+  const [client, setClient] = useState<Client>('Claude Code')
+  const [copied, setCopied] = useState(false)
+  const { where, key, after, config } = CLIENTS[client]
+  const copy = () => {
+    void navigator.clipboard?.writeText(config).then(() => setCopied(true))
+  }
+
+  return (
+    <>
+      <Segmented
+        label="Your agent"
+        options={(Object.keys(CLIENTS) as Client[]).map((name) => ({ value: name, label: name }))}
+        value={client}
+        onChange={(name) => {
+          setClient(name)
+          setCopied(false)
+        }}
+        className="mb-3"
+      />
+      <ol className="mb-2 flex list-decimal flex-col gap-1 pl-4 text-xs leading-5 text-ink-muted">
+        <li>
+          Get your key at{' '}
+          <a
+            href={KEY_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {KEY_URL}
+          </a>
+          , signing in with Google as the email you use here, and {key}.
+        </li>
+        <li>
+          {where}; {after}.
+        </li>
+      </ol>
+      <div className="relative">
+        <pre className="rounded-lg bg-neutral-soft p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">
+          {config}
+        </pre>
+        <button
+          type="button"
+          onClick={copy}
+          className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded-md border border-border-subtle bg-surface px-2 py-1 text-xs text-ink hover:border-accent"
+        >
+          {copied ? <Check className="size-3" aria-hidden="true" /> : <Copy className="size-3" aria-hidden="true" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+    </>
+  )
+}
+
 function Step({ number, title, children }: { number: number; title: string; children: ReactNode }) {
   return (
     <div>
       <p className="mb-2 flex items-center gap-2 font-medium">
-        <span className="flex size-5 items-center justify-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent" aria-hidden="true">
+        <span
+          className="flex size-5 items-center justify-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent"
+          aria-hidden="true"
+        >
           {number}
         </span>
         {title}

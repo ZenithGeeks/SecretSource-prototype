@@ -9,6 +9,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { accountApi } from './accountApi'
 import { PREFERENCES_KEY, usePreferencesSync } from './useAccountSettings'
 
+/** The team gateway (Gatehouse) in front of /secretsource/mcp/ and the /me/ key page. */
+export const GATEHOUSE_URL = import.meta.env.VITE_GATEHOUSE_URL ?? ''
+
 export type AgentAccess = { level: 'full' } | { level: 'read' } | { level: 'custom'; tools: string[] }
 export type AccessLevel = AgentAccess['level']
 
