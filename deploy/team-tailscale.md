@@ -92,6 +92,8 @@ Docker Desktop to start when you sign in.
 
 - `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` must be set before the web image is
   built. Without them, login is off and every label is saved under the name `local`.
+- `VITE_GATEHOUSE_URL=https://wttw-1.tailcf73b7.ts.net:8443`, also set before the build, gives
+  Settings -> Agents its MCP URL and the `/me/` page where people get their key.
 - `SCOPUS_API_KEY` turns on the Labeler's paper search.
 - `REDIS_URL` stays empty, so the queue is the local redis container.
 - `PAPERS_BUCKET` and `UPLOAD_ORIGINS` stay empty, so PDF uploads go through the gateway.
