@@ -364,15 +364,18 @@ async def _subscribe_forever() -> None:
                     await client.aclose()
 
 
-@asynccontextmanager
 def _warm_agents() -> None:
     """Import the agent modules and build what they need, before the first request. They pull in
     DSPy and LiteLLM, and importing those on the first /agent call while another request logged
     an error hung the gateway: LiteLLM's logging filter imported a part of a half-loaded package."""
     mcp_server._tools()
     get_runner()
+    # DSPy and ADK load LiteLLM only on the first LLM call. A chat answer made that call in a
+    # thread while the event loop logged, the two imports deadlocked, and the gateway hung.
+    import litellm  # noqa: F401  about 3 s
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     global _loop
     _loop = asyncio.get_running_loop()
