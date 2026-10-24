@@ -7,6 +7,7 @@ Visual evidence (ColPali) is optional and skipped when that service is down.
 
 import hashlib
 import logging
+import re
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -269,8 +270,8 @@ def _build_judge():
         quote: str = dspy.OutputField(desc="The value or label in the figure that decides it, or empty")
         reasoning: str = dspy.OutputField(desc="One sentence explaining the verdict")
 
-    # Only the Author check marks the citation (#437). A paper analysis keeps the first
-    # judge until labeled data (#423) can score the second one on its claims.
+    # Only the Author check marks the citation (#437). A paper analysis uses the second judge
+    # only to recheck a refutes (check_prepared, #672).
     signatures = {"judge": JudgeClaim, "judge-cited": JudgeCitedClaim, "judge-figure": JudgeFigure}
     # Predict for "judge": ChainOfThought puts its reasoning before every other output, and
     # claim_says only helps if it comes first.
@@ -344,6 +345,20 @@ def checked_citations(claim: dict) -> list[tuple[dict, str]]:
     ]
 
 
+def judged_text(claim: dict, citation: dict) -> str:
+    """What the judge reads for one citation of `claim`: the paper's sentence with "[cited]"
+    where this citation stands, so it checks only what the citation is for (#672). Without
+    it, "Existing language models are generally implemented with Transformers [b37]" was
+    judged against the whole 2017 Transformer paper and refuted. The claim itself when the
+    sentence does not carry the citation's marker."""
+    ref = citation.get("ref")
+    sentence = claim.get("sentence") or ""
+    if not ref or f"[{ref}]" not in sentence:
+        return claim["claim"]
+    marked = re.sub(r"\s*\[b\d+\]", "", sentence.replace(f"[{ref}]", f" {CITED_MARK}"))
+    return re.sub(r"\s+", " ", marked).strip()
+
+
 def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
     """Add the result of one check to its claim. The gateway and the graph both use this.
 
@@ -412,8 +427,13 @@ def judge_passages(claim: str, passages: list[str]) -> dict:
     return _judge(claim, passages)
 
 
-def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
-    """Judge a claim against a paper that prepare_source already made ready."""
+def check_prepared(claim: str, source_pdf_path: str, source: Path, judged: str = "") -> dict:
+    """Judge a claim against a paper that prepare_source already made ready.
+
+    `judged` is the claim's sentence with the citation marked (judged_text). It is read
+    only to recheck a "refutes", the costly verdict; retrieval and the first judge keep the
+    claim.
+    """
     global _judge
     try:
         from app.pipeline.sources import known_index, version_of
@@ -441,6 +461,15 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path) -> dict:
         verdict = _judge(claim, passages)
         # Which judge call gave the verdict, so an eval can tell a text flip from a figure one (#514).
         verdict_from, judged_figure = "text", ""
+        # A wrong "refutes" accuses the authors, so ask again knowing what the citation is for.
+        # "Existing language models are generally Transformers" was refuted by the 2017
+        # Transformer paper calling RNNs established (#672). Judging every claim this way
+        # turned supported claims insufficient on the decisive rows, so only a refutes is
+        # rechecked, and the second judge wins when it disagrees.
+        if verdict["verdict"] == "refutes" and judged and judged != claim:
+            recheck = _judge(judged, passages)
+            if recheck["verdict"] != "refutes":
+                verdict, verdict_from = recheck, "cited"
         # Numbers read off a chart are often in no passage, so a claim the text cannot settle
         # is asked again about the top figure, with only its caption. With the passages next
         # to a figure, the judge read the text worse, and turned text it had found

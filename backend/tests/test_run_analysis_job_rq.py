@@ -44,7 +44,9 @@ def stubbed_pipeline(monkeypatch):
     monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path: {"status": "ok", "claim": claim, "source": source, "verdict": "supports"},
+        lambda claim, source, path, judged="": {
+            "status": "ok", "claim": claim, "source": source, "verdict": "supports"
+        },
     )
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "audit", lambda analysis: [])
