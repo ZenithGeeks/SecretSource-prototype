@@ -74,7 +74,9 @@ def test_a_successful_run_records_lifecycle_verdict_and_audit_metrics(stub_pipel
     )
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path: {"status": "ok", "claim": claim, "source": source, "verdict": "supports"},
+        lambda claim, source, path, judged="": {
+            "status": "ok", "claim": claim, "source": source, "verdict": "supports"
+        },
     )
 
     before_finished = _value(ANALYSES_FINISHED, status="done")
@@ -107,7 +109,7 @@ def test_an_analysis_records_the_tokens_of_its_own_llm_calls(stub_pipeline, monk
         return {"status": "ok", "file": f"{paper}.pdf", "title": "T",
                 "claims": [{"claim": "c1", "citations": [{"key": "s1"}, {"key": "s2"}]}]}
 
-    def check(claim, source, path):
+    def check(claim, source, path, judged=""):
         record_llm_usage("judge", _Tracker(1000, 100))
         return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
 
@@ -145,7 +147,7 @@ def test_a_failed_check_is_counted_by_reason_not_as_a_verdict(stub_pipeline, mon
     )
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path: {
+        lambda claim, source, path, judged="": {
             "status": "error", "message": "not found", "reason": "unresolvable",
             "claim": claim, "source": source,
         },

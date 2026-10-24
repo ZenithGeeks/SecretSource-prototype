@@ -36,7 +36,13 @@ from app.config import PARALLEL_CHECKS, PARALLEL_SOURCES
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations
 from app.pipeline.figures import paper_figures
-from app.pipeline.verify import check_prepared, checked_citations, fold_check, prepare_source
+from app.pipeline.verify import (
+    check_prepared,
+    checked_citations,
+    fold_check,
+    judged_text,
+    prepare_source,
+)
 
 
 @node
@@ -80,7 +86,10 @@ def plan_checks(ctx: Context, claims: list[dict], verify: bool = True) -> list[s
         for index, claim in enumerate(claims):
             for citation, source in checked_citations(claim):
                 url = citation.get("url", "")
-                jobs.append({"claim": index, "text": claim["claim"], "source": source, "url": url})
+                jobs.append({
+                    "claim": index, "text": claim["claim"], "judged": judged_text(claim, citation),
+                    "source": source, "url": url,
+                })
     ctx.state["jobs"] = jobs
     return list(dict.fromkeys(job["source"] for job in jobs))
 
@@ -121,7 +130,9 @@ async def check_source(node_input: dict) -> dict:
     if prepared["status"] == "error":
         verdict = {**prepared, "claim": job["text"], "source": job["source"]}
     else:
-        verdict = await asyncio.to_thread(check_prepared, job["text"], job["source"], Path(prepared["path"]))
+        verdict = await asyncio.to_thread(
+            check_prepared, job["text"], job["source"], Path(prepared["path"]), job["judged"]
+        )
     return {**job, "verdict": verdict}
 
 

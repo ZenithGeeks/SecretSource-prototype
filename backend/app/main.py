@@ -94,6 +94,7 @@ from app.pipeline.verify import (
     check_prepared,
     checked_citations,
     fold_check,
+    judged_text,
     prepare_source,
     unchecked_reason,
     verify_claim,
@@ -596,7 +597,8 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                         verdict = {**ready, "claim": claim["claim"], "source": source}
                     else:
                         verdict = await asyncio.to_thread(
-                            check_prepared, claim["claim"], source, Path(ready["path"])
+                            check_prepared, claim["claim"], source, Path(ready["path"]),
+                            judged_text(claim, citation),
                         )
                 fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":

@@ -25,7 +25,9 @@ from app.pipeline import verify
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("cases", type=Path, help="CSV with paper, claim, source, expected")
+    parser.add_argument(
+        "cases", type=Path, help="CSV with paper, claim, source, expected, and the claim's sentence and ref"
+    )
     parser.add_argument("--runs", type=int, default=3, help="how many times to judge every row")
     parser.add_argument(
         "--fresh", action="store_true",
@@ -53,7 +55,10 @@ def main() -> None:
             if prepared["status"] == "error":
                 verdict = "error: " + prepared.get("reason", "failed")
             else:
-                result = verify.check_prepared(case["claim"], case["source"], Path(prepared["path"]))
+                # The judge reads what an analysis would send it: the sentence with the citation
+                # marked, when the row carries them.
+                judged = verify.judged_text(case, {"ref": case.get("ref")})
+                result = verify.check_prepared(case["claim"], case["source"], Path(prepared["path"]), judged)
                 if result["status"] == "ok":
                     verdict = result.get("verdict", "error")
                 else:

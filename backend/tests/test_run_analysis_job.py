@@ -39,7 +39,9 @@ def stubbed_pipeline(monkeypatch):
     monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path: {"status": "ok", "claim": claim, "source": source, "verdict": "supports"},
+        lambda claim, source, path, judged="": {
+            "status": "ok", "claim": claim, "source": source, "verdict": "supports"
+        },
     )
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "audit", lambda analysis: [])
@@ -106,7 +108,7 @@ def test_run_analysis_job_runs_twice_in_one_process(stubbed_pipeline, monkeypatc
         time.sleep(0.02)
         return {"status": "ok", "path": source}
 
-    def check(claim, source, path):
+    def check(claim, source, path, judged=""):
         time.sleep(0.02)
         return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
 
