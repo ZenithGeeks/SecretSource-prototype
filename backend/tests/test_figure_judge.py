@@ -1,4 +1,5 @@
-"""The judge sees the top figure only when the text alone leaves the claim insufficient (#501).
+"""The judge sees the top figure only when the text alone leaves the claim insufficient (#501),
+or refutes it (SCRUM-80); a refutes changes only when the figure supports the claim.
 
 No services: retrieval, the figure lookup and the judge are fakes. The fake judge answers
 from a table keyed on whether it got a figure, and records the figure and evidence of each call.
@@ -54,14 +55,34 @@ def test_the_figure_is_judged_with_its_caption_and_not_the_passages(judge):
     ]
 
 
-@pytest.mark.parametrize("text_verdict", ["supports", "refutes"])
-def test_a_text_verdict_that_settles_the_claim_is_kept_without_the_figure(judge, text_verdict):
-    judge.answers[False] = text_verdict
+def test_a_supports_from_the_text_is_kept_without_the_figure(judge):
+    judge.answers[False] = "supports"
 
     result = verify.check_prepared("The model scores 71.0.", "2112.01488", PAPER)
 
     assert judge.figures == [None]
-    assert result["verdict"] == text_verdict
+    assert result["verdict"] == "supports"
+    assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
+
+
+def test_a_refutes_the_figure_supports_becomes_supports(judge):
+    judge.answers[False] = "refutes"
+
+    result = verify.check_prepared("The model scores 71.0.", "2112.01488", PAPER)
+
+    assert judge.figures == [None, CROP]
+    assert result["verdict"] == "supports"
+    assert (result["verdict_from"], result["judged_figure"]) == ("figure", "figure-2.png")
+
+
+@pytest.mark.parametrize("figure_verdict", ["refutes", "insufficient"])
+def test_a_refutes_stays_when_the_figure_does_not_support_the_claim(judge, figure_verdict):
+    judge.answers.update({False: "refutes", True: figure_verdict})
+
+    result = verify.check_prepared("The model scores 71.0.", "2112.01488", PAPER)
+
+    assert judge.figures == [None, CROP]
+    assert result["verdict"] == "refutes"
     assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
 
 

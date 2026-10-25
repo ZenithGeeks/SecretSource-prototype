@@ -41,6 +41,11 @@ vi.mock('../src/lib/api', async (original) => ({
   }),
 }))
 
+vi.mock('../src/lib/agentAccess', async (original) => ({
+  ...(await original<typeof import('../src/lib/agentAccess')>()),
+  GATEHOUSE_URL: 'https://gatehouse.example',
+}))
+
 import { AgentsSection } from '../src/components/AgentsSection'
 import { AgentStatus, ConnectAgent } from '../src/components/ConnectAgent'
 import { readAccess } from '../src/lib/agentAccess'
@@ -110,7 +115,13 @@ describe('Settings, Agents', () => {
   it('shows the setup for Claude Code, Codex or VS Code', () => {
     renderWithQuery(<AgentsSection role="researcher" />)
 
-    expect(screen.getByText(/claude mcp add --transport http --scope user secretsource/)).toBeInTheDocument()
+    expect(screen.getByText(/claude mcp add --transport http --scope user secretsource/)).toHaveTextContent(
+      'https://gatehouse.example/secretsource/mcp/',
+    )
+    expect(screen.getByRole('link', { name: 'https://gatehouse.example/me/' })).toHaveAttribute(
+      'href',
+      'https://gatehouse.example/me/',
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Codex' }))
     expect(screen.getByText(/\[mcp_servers\.secretsource\]/)).toBeInTheDocument()
     expect(screen.getByText(/~\/\.codex\/config\.toml/)).toBeInTheDocument()

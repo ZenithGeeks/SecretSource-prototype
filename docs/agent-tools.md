@@ -18,7 +18,7 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `get_analysis` | server, `data_agent` | One analysis: status, why it failed, claims per standing, each claim with its number | `analysis_id` | `{id, title, status, stage, message, standing, claims: [{number, claim, section, standing}]}` |
 | `get_claim` | server, `data_agent` | The evidence behind one claim: verdict, quote and reasoning per cited paper, and citations that could not be checked | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, standing, verdicts, unchecked}` |
 | `search_claims` | server, `data_agent` | Claims in the person's papers that share words with the query, best first, at most 10 | `query` | `{claims: [{analysis_id, title, number, claim, standing}]}` |
-| `find_in_paper` | server, `data_agent` | The page of a paper's PDF where some text sits | `analysis_id`, `text` | `{page}`, `page` is null when the text is not there |
+| `find_in_paper` | server, `data_agent` | The page of a paper's PDF where words copied from it sit; for a topic, `find_support` | `analysis_id`, `text` | `{page}`, `page` is null when the text is not there |
 | `find_support` | server, `data_agent` | Passages in the person's papers that bear on a claim (search only, no judge) | `claim` | `{passages: [{paper, page, text}]}` |
 | `check_text` | server, `data_agent` | Judges each of the first 6 sentences of some writing against the paper whose passage fits it best | `text` | `{results: [{text, source, page, verdict, quote, reasoning}], not_checked}` |
 | `ask_library` | server, `data_agent` | Answers a question from the person's papers, as the Ask panel does, each statement judged | `question` | `{statements: [{text, source, page, verdict, quote, reasoning}]}` |
@@ -136,9 +136,11 @@ Settings, Agents in the web app shows steps 2 and 3 with a copy button, and link
    beside Ask, with the recent steps, any change waiting for Apply, and Disconnect. The tab stays
    connected across reloads until you disconnect. One tab per account: allowing a second tab
    moves the bridge there.
-2. Get a Gatehouse key whose email is the one you sign in to SecretSource with. Gatehouse sends
-   that email and `GATEHOUSE_SECRET` with each call; the gateway matches the email to a
-   confirmed SecretSource account.
+2. Get your key at https://wttw-1.tailcf73b7.ts.net:8443/me/, signing in with Google as the
+   email you sign in to SecretSource with. An email on Gatehouse's `SELF_SIGNUP_EMAILS` list
+   gets its first key there; anyone else asks an admin. Gatehouse sends that email and
+   `GATEHOUSE_SECRET` with each call; the gateway matches the email to a confirmed
+   SecretSource account.
 3. Add the server to your agent. Claude Code takes one command, with the key in place of
    `YOUR_KEY`; it keeps the key in its own config, and it works in every project:
 

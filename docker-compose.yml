@@ -280,6 +280,7 @@ services:
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
         # Vite reads this only while compiling the browser bundle.
         VITE_TEACHER_BACKEND: ${VITE_TEACHER_BACKEND:-mock}
+        VITE_GATEHOUSE_URL: ${VITE_GATEHOUSE_URL:-}
     environment:
       GATEWAY_URL: http://gateway:8080
     ports:

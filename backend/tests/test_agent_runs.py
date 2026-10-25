@@ -2,6 +2,7 @@
 browser, the browser's result goes on with the run, and a session belongs to its owner."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -189,7 +190,8 @@ def test_the_gateway_builds_the_agents_before_its_first_request():
     agent_runs.get_runner.cache_clear()
     mcp_server._tools.cache_clear()
 
-    main._warm_agents()
-
+    # A decorator left above it once made this return a context manager that never ran.
+    assert main._warm_agents() is None
     assert agent_runs.get_runner.cache_info().currsize == 1
     assert mcp_server._tools.cache_info().currsize == 1
+    assert "litellm.types.secret_managers.main" in sys.modules

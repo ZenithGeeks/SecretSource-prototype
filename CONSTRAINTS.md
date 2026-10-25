@@ -86,6 +86,11 @@ from a staging host), and nothing on our side recorded when. A count out of 13 t
 as much about the model that day as about the change under test. A row that flips between
 main's own runs is noise and does not count against the PR. `eval_decisive.py` prints the
 gateway's model id before the first run, so the next change of model has a date.
+SCRUM-416 changed the MTEB check to refutes. Once passages end at sentence ends, the judge
+gets the abstract's whole sentence "We find there to be no single best solution, with different
+models dominating different tasks" and says refutes in all 3 runs, as production did. The claim
+says LLM-based models top the leaderboards and the cited paper says no model dominates, so
+refutes holds.
 
 This rule blocks a merge. Raise the number when a change keeps more; lowering it needs its own
 pull request with the reason.

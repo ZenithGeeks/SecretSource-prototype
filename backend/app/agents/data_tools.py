@@ -24,6 +24,9 @@ SEARCH_RESULTS = 10
 LISTED = 10  # entries per list in get_gaps
 
 
+MISSED_FIND = "temp:find_in_paper_missed"
+
+
 def _user(tool_context: ToolContext) -> str | None:
     """The person the tool works for. The session keeps "" for a signed-out person."""
     return tool_context.state.get("user") or None
@@ -144,8 +147,10 @@ async def search_claims(query: str, tool_context: ToolContext) -> dict:
 
 
 async def find_in_paper(analysis_id: str, text: str, tool_context: ToolContext) -> dict:
-    """Find where some text sits in an analysed paper's PDF: the page, or no page if it is not
-    there. Runs on the server; to show it to the person, open the paper and point at it.
+    """Find the page of words copied from an analysed paper's PDF, such as a quote get_claim gave:
+    the page, or no page if the words are not there. It matches the words as printed, so do not
+    guess them; to find what a paper says about a topic, use find_support or ask_library. Runs on
+    the server; to show it to the person, open the paper and point at it.
 
     Args:
         analysis_id: the id list_papers gives for the paper.
@@ -155,6 +160,10 @@ async def find_in_paper(analysis_id: str, text: str, tool_context: ToolContext) 
 
     from app import main
 
+    # After a miss the agent guessed another wording, and another, until the step limit (#701).
+    # "temp:" state lasts one request, so the next request may look up words again.
+    if tool_context.state.get(MISSED_FIND):
+        return _error("find_in_paper found no page for these words already; use find_support for a topic")
     user = _user(tool_context)
     analysis = await _analysis(analysis_id, user)
     if analysis is None:
@@ -166,7 +175,10 @@ async def find_in_paper(analysis_id: str, text: str, tool_context: ToolContext) 
     except HTTPException as error:  # the analysis names a PDF this server does not have
         return _error(str(error.detail))
     found = await asyncio.to_thread(locate, path.as_posix(), text, None)
-    return {"page": (found or {}).get("page")}
+    page = (found or {}).get("page")
+    if page is None:
+        tool_context.state[MISSED_FIND] = True
+    return {"page": page}
 
 
 async def find_support(claim: str, tool_context: ToolContext) -> dict:

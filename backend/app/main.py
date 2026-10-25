@@ -94,6 +94,7 @@ from app.pipeline.verify import (
     check_prepared,
     checked_citations,
     fold_check,
+    judged_text,
     prepare_source,
     unchecked_reason,
     verify_claim,
@@ -364,15 +365,18 @@ async def _subscribe_forever() -> None:
                     await client.aclose()
 
 
-@asynccontextmanager
 def _warm_agents() -> None:
     """Import the agent modules and build what they need, before the first request. They pull in
     DSPy and LiteLLM, and importing those on the first /agent call while another request logged
     an error hung the gateway: LiteLLM's logging filter imported a part of a half-loaded package."""
     mcp_server._tools()
     get_runner()
+    # DSPy and ADK load LiteLLM only on the first LLM call. A chat answer made that call in a
+    # thread while the event loop logged, the two imports deadlocked, and the gateway hung.
+    import litellm  # noqa: F401  about 3 s
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     global _loop
     _loop = asyncio.get_running_loop()
@@ -593,7 +597,8 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                         verdict = {**ready, "claim": claim["claim"], "source": source}
                     else:
                         verdict = await asyncio.to_thread(
-                            check_prepared, claim["claim"], source, Path(ready["path"])
+                            check_prepared, claim["claim"], source, Path(ready["path"]),
+                            judged_text(claim, citation),
                         )
                 fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":
