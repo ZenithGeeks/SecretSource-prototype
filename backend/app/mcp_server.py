@@ -11,6 +11,7 @@ Settings, Agents (allowed_tools). docs/agent-tools.md says how to connect.
 import asyncio
 import contextlib
 import functools
+import json
 from types import SimpleNamespace
 
 from fastapi import HTTPException, Request
@@ -18,6 +19,8 @@ from fastapi.responses import JSONResponse
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
+from opentelemetry import trace
 
 from app import screen_bridge, store
 from app.auth import gatehouse_user
@@ -32,6 +35,8 @@ READ_ONLY = (
 ACCESS = "agentAccess"
 CHECK_DRAFT = "Check a draft against the papers in your SecretSource library."
 _sessions: StreamableHTTPSessionManager | None = None  # set while the app runs, by running()
+# A no-op until app/tracing.py registers Phoenix in this process.
+tracer = trace.get_tracer(__name__)
 
 
 async def review_claim(analysis_id: str, claim_number: int) -> dict:
@@ -77,7 +82,24 @@ async def get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPr
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> dict:
-    """Run a tool for the caller: list_papers, a data tool or review_claim here, a screen tool in the tab."""
+    """Run a tool for the caller inside one Phoenix TOOL span, so the tool's searches and LLM
+    calls share its trace (asyncio.to_thread copies the span into the tool's threads)."""
+    attributes = {
+        SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.TOOL.value,
+        SpanAttributes.TOOL_NAME: name,
+        SpanAttributes.INPUT_VALUE: json.dumps(arguments),
+        SpanAttributes.INPUT_MIME_TYPE: "application/json",
+    }
+    # An exception leaves the span marked as an error, with the message.
+    with tracer.start_as_current_span(f"mcp {name}", attributes=attributes) as span:
+        result = await _run_tool(name, arguments)
+        span.set_attribute(SpanAttributes.OUTPUT_VALUE, json.dumps(result, default=str))
+        span.set_attribute(SpanAttributes.OUTPUT_MIME_TYPE, "application/json")
+    return result
+
+
+async def _run_tool(name: str, arguments: dict) -> dict:
+    """Run list_papers, a data tool or review_claim here, or a screen tool in the caller's tab."""
     from app.agents.data_tools import DATA_TOOLS
     from app.agents.screen import SCREEN_TOOL_NAMES, papers_for  # see _tools for why not at the top
 

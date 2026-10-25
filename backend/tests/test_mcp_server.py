@@ -2,6 +2,7 @@
 runs in the caller's tab, and Gatehouse callers map to SecretSource users by email."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -11,6 +12,10 @@ from app.agents import data_tools, screen
 from app.agents.data_tools import DATA_TOOLS
 from fastapi import FastAPI, HTTPException, Request
 from google.adk.tools import FunctionTool
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 
@@ -321,6 +326,56 @@ def test_a_data_tool_runs_for_the_caller(app, monkeypatch):
     result = run_with_client(app, lambda client: rpc(client, "tools/call", call))
 
     assert result["structuredContent"] == {"id": "a1", "user": "user-1"}
+
+
+@pytest.fixture
+def traced(monkeypatch):
+    """The MCP server's tracer, writing spans to memory instead of Phoenix."""
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    monkeypatch.setattr(mcp_server, "tracer", tracer)
+    return tracer, exporter
+
+
+def test_a_tool_call_is_one_tool_span_with_what_ran_inside_it(app, monkeypatch, traced):
+    tracer, exporter = traced
+
+    async def find_support(claim, tool_context):
+        def search():  # in a thread, like the real search
+            with tracer.start_as_current_span("colbert_search"):
+                return {"passages": []}
+
+        return await asyncio.to_thread(search)
+
+    monkeypatch.setattr(data_tools, "DATA_TOOLS", [find_support])
+    call = {"name": "find_support", "arguments": {"claim": "late interaction"}}
+    run_with_client(app, lambda client: rpc(client, "tools/call", call))
+
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    tool = spans["mcp find_support"]
+    assert tool.attributes["openinference.span.kind"] == "TOOL"
+    assert tool.attributes["tool.name"] == "find_support"
+    assert json.loads(tool.attributes["input.value"]) == {"claim": "late interaction"}
+    assert json.loads(tool.attributes["output.value"]) == {"passages": []}
+    assert spans["colbert_search"].parent.span_id == tool.context.span_id
+
+
+def test_a_failed_tool_call_marks_its_span_as_an_error(app, monkeypatch, traced):
+    _, exporter = traced
+
+    async def get_analysis(analysis_id, tool_context):
+        raise ValueError("no analysis a1")
+
+    monkeypatch.setattr(data_tools, "DATA_TOOLS", [get_analysis])
+    call = {"name": "get_analysis", "arguments": {"analysis_id": "a1"}}
+    result = run_with_client(app, lambda client: rpc(client, "tools/call", call))
+
+    assert result["isError"] is True
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code == StatusCode.ERROR
+    assert "no analysis a1" in span.status.description
 
 
 def test_the_check_my_draft_prompt_asks_for_check_text(app):

@@ -143,6 +143,7 @@ def test_run_analysis_job_keeps_the_queued_stage_and_tracks_analyses_running(mon
         lambda paper: {"status": "ok", "file": f"{paper}.pdf", "title": "T", "claims": []},
     )
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     monkeypatch.setattr(main, "audit", lambda analysis: [])
     monkeypatch.setattr(main, "index_paper", lambda title: f"indexed:{title}")
 

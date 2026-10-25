@@ -27,14 +27,34 @@ def events_of(question, **kwargs):
     return asyncio.run(collect())
 
 
+def test_an_empty_library_is_not_searched(monkeypatch):
+    monkeypatch.setattr(assistant, "colbert_search", refuse)
+    assert assistant.library_passages("late interaction", frozenset()) == []
+
+
+def test_library_passages_search_names_the_callers_papers(monkeypatch):
+    seen = {}
+
+    def search(question, k, **kwargs):
+        seen.update(question=question, k=k, **kwargs)
+        return HITS
+
+    monkeypatch.setattr(assistant, "colbert_search", search)
+    assistant.library_passages("late interaction", frozenset({"ada.pdf", "ada-2.pdf"}))
+
+    assert seen["k"] == assistant.LIBRARY_SEARCH
+    assert set(seen["sources"]) == {"ada.pdf", "ada-2.pdf"}
+    assert set(seen["visible"]) == {"ada.pdf", "ada-2.pdf"}
+
+
 def test_library_passages_keep_only_the_callers_papers(monkeypatch):
-    monkeypatch.setattr(assistant, "colbert_search", lambda question, k: HITS)
+    monkeypatch.setattr(assistant, "colbert_search", lambda question, k, **kwargs: HITS)
     kept = assistant.library_passages("late interaction", frozenset({"ada.pdf", "ada-2.pdf"}))
     assert [hit["source"] for hit in kept] == ["ada.pdf", "ada-2.pdf"]
 
 
 def test_a_library_with_no_matching_passage_asks_no_llm(monkeypatch):
-    monkeypatch.setattr(assistant, "colbert_search", lambda question, k: HITS)
+    monkeypatch.setattr(assistant, "colbert_search", lambda question, k, **kwargs: HITS)
     monkeypatch.setattr(assistant, "_answer_model", refuse)
     assert assistant.answer_from_library("late interaction", frozenset({"carol.pdf"})) == []
 

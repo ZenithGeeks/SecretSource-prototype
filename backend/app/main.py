@@ -53,6 +53,8 @@ import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
+from opentelemetry import trace
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 from redis.exceptions import RedisError
@@ -89,6 +91,7 @@ from app.ownership import require_owner
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
+from app.pipeline.rag import add_paper
 from app.pipeline.sources import index_paper
 from app.pipeline.verify import (
     check_prepared,
@@ -527,6 +530,30 @@ async def _index_self(analysis_id: str, title: str) -> None:
     _save_soon(analysis_id)
 
 
+# A no-op until app/tracing.py registers Phoenix in this process.
+tracer = trace.get_tracer(__name__)
+
+
+def _step_span(name: str, value: str, attributes: dict | None = None):
+    """A Phoenix AGENT span for one step of a run, named as the step in app/workflow.py, so a
+    trace shows which step made each search and LLM call."""
+    return tracer.start_as_current_span(
+        name,
+        attributes={
+            SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.AGENT.value,
+            SpanAttributes.AGENT_NAME: name,
+            SpanAttributes.INPUT_VALUE: value,
+            **(attributes or {}),
+        },
+    )
+
+
+async def _in_step(name: str, value: str, fn, *args):
+    """Run fn(*args) in a thread inside its step's span."""
+    with _step_span(name, value):
+        return await asyncio.to_thread(fn, *args)
+
+
 async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool):
     started_at = time.monotonic()
     # Filled by every LLM call this run makes, so the saved record says what it cost.
@@ -534,7 +561,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
     current_analysis_tokens.set(analysis["llm_tokens"])
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
-        extracted = await asyncio.to_thread(extract_claims_with_citations, paper)
+        extracted = await _in_step("read_paper", paper, extract_claims_with_citations, paper)
         if extracted["status"] == "error":
             raise RuntimeError(extracted["message"])
 
@@ -556,7 +583,11 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
 
         # The paper's own figures, so "Figure 2" in a claim can show that crop.
         # Docling takes minutes, so this runs while the claims are checked.
-        figures = asyncio.create_task(asyncio.to_thread(paper_figures, analysis["file"]))
+        file = analysis["file"]
+        figures = asyncio.create_task(_in_step("read_figures", file, paper_figures, file))
+        # The paper itself goes into ColBERT too. Checks only index the works it cites, so a
+        # search of the person's papers could never find the papers they analysed.
+        indexed = asyncio.create_task(_in_step("add_paper", file, add_paper, file))
 
         if verify:
             # One job per claim and cited work, the way app/workflow.py plans them.
@@ -579,7 +610,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                 # This run's limit first: a run then has at most PARALLEL_SOURCES jobs waiting
                 # on the shared limit, so a second run's first paper goes before this run's tenth.
                 async with source_limit, all_sources:
-                    return await asyncio.to_thread(prepare_source, source)
+                    return await _in_step("prepare_source", source, prepare_source, source)
 
             ready_sources = {}
             for _, _, _, source in jobs:
@@ -593,13 +624,18 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                 ready = await ready_sources[source]
                 async with check_limit, all_checks:  # in this order, as in prepare
                     await _publish(analysis_id, "verifying", claim=index, source=source)
-                    if ready["status"] == "error":
-                        verdict = {**ready, "claim": claim["claim"], "source": source}
-                    else:
-                        verdict = await asyncio.to_thread(
-                            check_prepared, claim["claim"], source, Path(ready["path"]),
-                            judged_text(claim, citation),
-                        )
+                    # Claims are numbered from 1 in the app and in get_analysis.
+                    numbered = {"claim.number": index + 1, "claim.source": source}
+                    with _step_span("check_source", claim["claim"], numbered) as span:
+                        if ready["status"] == "error":
+                            verdict = {**ready, "claim": claim["claim"], "source": source}
+                        else:
+                            verdict = await asyncio.to_thread(
+                                check_prepared, claim["claim"], source, Path(ready["path"]),
+                                judged_text(claim, citation),
+                            )
+                        outcome = verdict.get("verdict") or verdict.get("message", "")
+                        span.set_attribute(SpanAttributes.OUTPUT_VALUE, outcome)
                 fold_check(claim, source, citation, verdict)
                 if verdict["status"] == "ok":
                     CLAIM_VERDICTS.labels(verdict=verdict["verdict"]).inc()
@@ -618,10 +654,14 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
 
         analysis["figures"] = await figures
         await _publish(analysis_id, "figures", figures=len(analysis["figures"]))
+        # Search is not part of the verdicts, so a paper that failed to index still finishes.
+        if (result := await indexed)["status"] == "error":
+            logger.warning("could not index %s for search: %s", analysis["file"], result.get("message"))
 
         # We check the run itself before anyone reads it.
         # We only report the findings; we do not fix them.
-        analysis["audit"] = audit(analysis)
+        with _step_span("audit_analysis", analysis_id):
+            analysis["audit"] = audit(analysis)
         AUDIT_FINDINGS.inc(len(analysis["audit"]))
         await _publish(analysis_id, "audited", findings=len(analysis["audit"]))
 
