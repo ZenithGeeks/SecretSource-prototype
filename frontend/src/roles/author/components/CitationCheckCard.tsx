@@ -7,7 +7,7 @@ import { Card, Empty } from '../../../components/ui'
 import { checkedLabel } from '../../../lib/author'
 import { preprintNote } from '../../../lib/citations'
 import { cn } from '../../../lib/utils'
-import { isLowConfidence, isOpenIssue } from '../../../lib/verdict'
+import { isLowConfidence, isOpenIssue, settledHint } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { CardHead } from './CardHead'
 import { CitationBadge, VerdictBar, VerdictLegend } from './Verdicts'
@@ -94,7 +94,7 @@ export function CitationCheckCard({
   const rows = rowsFor(filter, citations)
 
   const emptyHint: Record<Filter, [string, string]> = {
-    'needs-work': ['Nothing needs work', draft.status.checked ? 'Every checked citation holds up.' : 'Re-check to verify every \\cite against its source.'],
+    'needs-work': ['Nothing needs work', settledHint(draft.status)],
     all: ['No citations yet', 'Add a \\cite to your draft and re-check.'],
     'by-section': ['No citations yet', 'Add a \\cite to your draft and re-check.'],
     'low-confidence': ['No low-confidence verdicts', 'Every verdict points at a passage in its source.'],

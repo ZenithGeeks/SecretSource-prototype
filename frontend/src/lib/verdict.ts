@@ -108,9 +108,44 @@ export function summarize(citations: Pick<Citation, 'verdict' | 'resolution'>[])
   return { checked: citations.length - counts.unchecked, counts, open }
 }
 
-/** "3 issues" · "all supported" · "not checked" — the word next to a draft in "Your drafts". */
+/** "3 issues" · "2 unavailable" · "all supported" · "no open issues" · "not checked" — the
+ * word next to a draft in "Your drafts". "all supported" only when every checked citation is
+ * (#727): an unread source or a contradiction the author kept is never called supported.
+ * Same rule as status_label in backend/app/author/logic.py. */
 export function statusLabel(status: DraftStatus): string {
   if (status.checked === 0) return 'not checked'
-  if (status.open === 0) return 'all supported'
-  return `${status.open} issue${status.open === 1 ? '' : 's'}`
+  if (status.open) return `${status.open} issue${status.open === 1 ? '' : 's'}`
+  if (status.counts.unavailable) return `${status.counts.unavailable} unavailable`
+  if (status.counts.supports === status.checked) return 'all supported'
+  return 'no open issues'
+}
+
+/** The colour of that label, by the same counts: red while something needs work, green only
+ * when every checked citation is supported, neutral otherwise (#727). */
+export function statusTone(status: DraftStatus): string {
+  if (status.open) return 'text-refutes'
+  if (status.checked && status.counts.supports === status.checked) return 'text-supports'
+  return 'text-ink-muted'
+}
+
+/** The sentence under "Nothing needs work" / "No open issues": what the counts say, never
+ * more. */
+export function settledHint(status: DraftStatus): string {
+  if (status.checked === 0) return 'Re-check to verify every \\cite against its source.'
+  const unavailable = status.counts.unavailable
+  if (unavailable) return `${unavailable} citation${unavailable === 1 ? '' : 's'} could not be checked.`
+  if (status.counts.supports === status.checked) return 'Every checked citation holds up.'
+  return 'Every citation that needed work is resolved.'
+}
+
+/** Whether statusLabel would only repeat the counts line beside it ("· 2 unavailable ·
+ * 2 unavailable"): nothing is open and the label is the unavailable count. */
+export function labelRepeatsCounts(status: DraftStatus): boolean {
+  return !status.open && status.counts.unavailable > 0
+}
+
+/** A project card's tally as one draft status, so a project is labelled by the same rule. */
+export function projectStatus(project: { tally: Record<Verdict, number>; needWork: number }): DraftStatus {
+  const checked = Object.values(project.tally).reduce((sum, n) => sum + n, 0) - project.tally.unchecked
+  return { checked, counts: project.tally, open: project.needWork }
 }

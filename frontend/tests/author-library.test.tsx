@@ -134,7 +134,8 @@ describe('Author Library', () => {
 
     const { onOpenEditor } = renderLibrary('proj1')
     expect(await screen.findByRole('heading', { name: 'Related work — thesis ch.2' })).toBeInTheDocument()
-    expect(screen.getByText('main.bib · 7 entries · 0 cited · all supported')).toBeInTheDocument()
+    // nguyen2016 has no free copy, so it is unavailable: not "all supported" (#727)
+    expect(screen.getByText('main.bib · 7 entries · 0 cited · 1 unavailable')).toBeInTheDocument()
     const drafts = within(screen.getByRole('list', { name: 'Drafts in this project' })).getAllByRole('button')
     expect(drafts).toHaveLength(1)
     expect(drafts[0]).toHaveTextContent('v4')

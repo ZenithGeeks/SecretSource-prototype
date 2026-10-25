@@ -230,6 +230,17 @@ def test_report_html_lists_every_citation_with_its_verdict_and_passage():
     assert "no free copy published" in html
 
 
+def test_the_report_header_says_the_status_once():
+    """#727: the header ends with the label unless the label is the unavailable count the
+    counts line already ends with."""
+    row = {"key": "a2020", "file": "main.tex", "line": 1, "claim": "A claim."}
+    unread = {**row, "verdict": "unavailable", "message": "no free copy"}
+    html = logic.report_html({"title": "T"}, {"version": 1, "citations": [unread, unread]})
+    assert "<p>2 citations · 2 unavailable</p>" in html and "all supported" not in html
+    html = logic.report_html({"title": "T"}, {"version": 1, "citations": [{**row, "verdict": "supports"}]})
+    assert "<p>1 citation · 1 supported · all supported</p>" in html
+
+
 def test_plain_text_unwraps_two_levels_of_formatting():
     """plain_text runs its unwrap twice on purpose (PR #291 review): each pass reaches only an
     innermost {...}, so nested formatting needs the second."""
@@ -300,3 +311,32 @@ def test_cited_text_marks_where_the_key_is_cited():
 
     assert logic.cited_text(sentence, "adamw") == "We use AdamW [cited] with weight decay 0.1 in PyTorch."
     assert logic.cited_text(sentence, "jax") == "We use AdamW with weight decay 0.1 in PyTorch [cited]."
+
+
+KEPT = {"kind": "overridden", "note": "kept as written"}
+
+
+@pytest.mark.parametrize(
+    ("verdicts", "label"),
+    [
+        (["supports", "supports"], "all supported"),
+        (["unavailable", "unavailable"], "2 unavailable"),  # #727: was "all supported"
+        (["refutes", "insufficient"], "2 issues"),
+        ([("refutes", KEPT)], "no open issues"),  # nothing supported, nothing left to do
+        (["supports", "unavailable"], "1 unavailable"),
+        (["supports", ("refutes", KEPT), "unavailable"], "1 unavailable"),
+        (["supports", "refutes", "unavailable"], "1 issue"),
+        (["supports", ("refutes", KEPT)], "no open issues"),
+        (["unchecked"], "not checked"),
+        ([], "not checked"),
+    ],
+)
+def test_the_status_label_follows_the_counts(verdicts, label):
+    """#727: "all supported" only when every checked citation is; an unread source or a
+    contradiction the author kept is never called supported."""
+    def citation(item: str | tuple[str, dict]) -> dict:
+        if isinstance(item, tuple):
+            return {"verdict": item[0], "resolution": item[1]}
+        return {"verdict": item}
+
+    assert logic.status_label(logic.summarize([citation(v) for v in verdicts])) == label

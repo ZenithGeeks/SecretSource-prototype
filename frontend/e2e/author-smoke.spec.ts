@@ -32,7 +32,6 @@ Distillation helps~\cite{gamma2019}.
 const ISSUES = 'https://github.com/ZenithGeeks/SecretSource-prototype/issues'
 const BUG_TIP_COVERS_NEW_DRAFT = `The first-run "Ask AI about your papers" tip covers New draft: ${ISSUES}/724`
 const BUG_NONE_LOWER = `An entry with nothing to look up fails with "'NoneType' object has no attribute 'lower'": ${ISSUES}/726`
-const BUG_ALL_SUPPORTED = `A run with no supported citation is labelled "all supported": ${ISSUES}/727`
 const NO_REPLACE = `No "Replace with \\cite{…}" control on main since #291 removed Find a source: ${ISSUES}/721`
 
 /** A project name no earlier run used, so a stack reused across runs never matches an older one. */
@@ -242,7 +241,8 @@ test.describe('Bugs found on main', () => {
     await page.goto(projectUrl(projectId))
     await expect(page.getByRole('heading', { name })).toBeVisible()
     await expect(page.getByText(/checked just now/).first()).toBeVisible()
-    test.fail(true, BUG_ALL_SUPPORTED)
+    // #727, fixed: the label follows the counts.
     await expect(page.getByText('all supported')).toHaveCount(0, { timeout: 3_000 })
+    await expect(page.getByRole('list', { name: 'Drafts in this project' })).toContainText(/\d+ unavailable/)
   })
 })

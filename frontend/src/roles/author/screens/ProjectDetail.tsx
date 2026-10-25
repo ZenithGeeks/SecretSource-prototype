@@ -12,13 +12,12 @@ import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/
 import { checkedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
-import { statusLabel, VERDICTS } from '../../../lib/verdict'
+import { labelRepeatsCounts, projectStatus, statusLabel, statusTone, VERDICTS } from '../../../lib/verdict'
 import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { CitationBadge } from '../components/Verdicts'
-import { issues } from '../labels'
 
 export const UNSORTED = 'unsorted'
 
@@ -29,11 +28,6 @@ function countsLine(run: CheckRun): string {
     if (c[verdict]) parts.push(`${c[verdict]} ${VERDICTS[verdict].legend}`)
   }
   return parts.join(' · ')
-}
-
-function tone(draft: Draft): string {
-  if (draft.status.checked === 0) return 'text-ink-muted'
-  return draft.status.open > 0 ? 'text-refutes' : 'text-supports'
 }
 
 function CompareTable({ checkId, onClose }: { checkId: string; onClose: () => void }) {
@@ -95,9 +89,9 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
                   </p>
                   <p className="text-xs text-ink-muted">{countsLine(run)}</p>
                 </div>
-                <span className={cn('shrink-0 text-xs', run.summary.open ? 'text-refutes' : run.summary.checked ? 'text-supports' : 'text-ink-muted')}>
-                  {statusLabel(run.summary)}
-                </span>
+                {!labelRepeatsCounts(run.summary) && (
+                  <span className={cn('shrink-0 text-xs', statusTone(run.summary))}>{statusLabel(run.summary)}</span>
+                )}
               </div>
               {run.sinceLastCheck && run.previousVersion !== null && (
                 <div className="my-2 flex flex-col gap-1 rounded-lg bg-canvas px-3 py-2.5">
@@ -256,11 +250,18 @@ export function ProjectDetail({
 
   const detail = project.data
   const current = detail.draftList.find((d) => d.id === selectedDraft) ?? detail.draftList[0]
+  const status = projectStatus(detail)
   const meta = [
     detail.bibName ?? 'no .bib yet',
     `${detail.entries} entr${detail.entries === 1 ? 'y' : 'ies'}`,
     `${detail.cited} cited`,
-    detail.needWork ? `${detail.needWork} need work` : detail.checkedAt ? 'all supported' : 'not checked yet',
+    detail.needWork
+      ? `${detail.needWork} need work`
+      : status.checked
+        ? statusLabel(status)
+        : detail.checkedAt
+          ? 'checked, no citations'
+          : 'not checked yet',
   ].join(' · ')
 
   return (
@@ -328,8 +329,8 @@ function DraftList({
                     v{draft.version} · {checkedLabel(draft.lastCheckedAt)}
                   </span>
                 </span>
-                <span className={cn('shrink-0 whitespace-nowrap text-xs', tone(draft))}>
-                  {draft.status.open ? issues(draft.status.open) : statusLabel(draft.status)}
+                <span className={cn('shrink-0 whitespace-nowrap text-xs', statusTone(draft.status))}>
+                  {statusLabel(draft.status)}
                 </span>
               </button>
             </li>

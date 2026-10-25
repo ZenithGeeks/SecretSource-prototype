@@ -509,12 +509,18 @@ def summarize(citations: list[dict]) -> dict:
 
 
 def status_label(status: dict) -> str:
-    """ "3 issues", "all supported", "not checked" — the words a draft row ends with."""
+    """ "3 issues", "2 unavailable", "all supported", "no open issues", "not checked" — the
+    words a draft row ends with. "all supported" only when every checked citation is (#727):
+    an unread source or a contradiction the author kept is never called supported."""
     if status["checked"] == 0:
         return "not checked"
-    if status["open"] == 0:
+    if status["open"]:
+        return f"{status['open']} issue{'' if status['open'] == 1 else 's'}"
+    if unavailable := status["counts"].get("unavailable", 0):
+        return f"{unavailable} unavailable"
+    if status["counts"].get("supports", 0) == status["checked"]:
         return "all supported"
-    return f"{status['open']} issue{'' if status['open'] == 1 else 's'}"
+    return "no open issues"
 
 
 def counts_line(status: dict) -> str:
@@ -693,12 +699,15 @@ def report_html(draft: dict, check: dict) -> str:
                 else ""
             )
         )
+    # "· 2 unavailable" is already the end of the counts line (#727).
+    repeats = not status["open"] and status["counts"].get("unavailable", 0)
+    label = "" if repeats else f" · {_esc(status_label(status))}"
     return (
         "<html><body>"
         f"<h1>SecretSource verification report</h1>"
         f"<p>{_esc(draft.get('title', ''))} · v{_esc(check.get('version', draft.get('version', 1)))}"
         f" · {_esc(when)}</p>"
-        f"<p>{_esc(counts_line(status))} · {_esc(status_label(status))}</p>"
+        f"<p>{_esc(counts_line(status))}{label}</p>"
         + "".join(rows)
         + "</body></html>"
     )

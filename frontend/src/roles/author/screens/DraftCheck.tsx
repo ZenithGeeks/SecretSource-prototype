@@ -278,6 +278,7 @@ function DraftCheckBody({
           <EvidencePanel
             citation={selected}
             issues={issues}
+            status={current.status}
             onNext={nextIssue}
             onOverride={(c, note) => void override(c, note)}
             onReopen={(c) => {

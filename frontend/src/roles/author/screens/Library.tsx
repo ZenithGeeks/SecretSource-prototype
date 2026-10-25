@@ -12,6 +12,7 @@ import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
+import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
 import { copiedMessage, copyText } from '../clipboard'
@@ -25,11 +26,16 @@ function count(n: number, noun: string): string {
 }
 
 function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
+  const status = projectStatus(project)
   const meta = [
     project.bibName ?? 'no .bib yet',
     count(project.entries, 'entry').replace('entrys', 'entries'),
     `${project.cited} cited`,
-    project.needWork ? `${project.needWork} need work` : project.checkedAt ? 'all supported' : `${count(project.drafts, 'draft')}`,
+    project.needWork
+      ? `${project.needWork} need work`
+      : status.checked
+        ? statusLabel(status)
+        : `${count(project.drafts, 'draft')}`,
   ]
   return (
     <button

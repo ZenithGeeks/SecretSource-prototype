@@ -7,14 +7,9 @@ import { FileText } from 'lucide-react'
 import { Card, Empty } from '../../../components/ui'
 import { checkedLabel } from '../../../lib/author'
 import { cn } from '../../../lib/utils'
-import { statusLabel } from '../../../lib/verdict'
+import { statusLabel, statusTone } from '../../../lib/verdict'
 import type { Draft } from '../../../types/draftCheck'
 import { CardHead, TextLink } from './CardHead'
-
-function tone(draft: Draft): string {
-  if (draft.status.checked === 0) return 'text-ink-muted'
-  return draft.status.open > 0 ? 'text-refutes' : 'text-supports'
-}
 
 export function YourDraftsCard({
   drafts,
@@ -57,7 +52,7 @@ export function YourDraftsCard({
                     v{draft.version} · {draft.runningCheckId ? 'checking…' : checkedLabel(draft.lastCheckedAt)}
                   </span>
                 </span>
-                <span className={cn('shrink-0 whitespace-nowrap text-xs', tone(draft))}>{statusLabel(draft.status)}</span>
+                <span className={cn('shrink-0 whitespace-nowrap text-xs', statusTone(draft.status))}>{statusLabel(draft.status)}</span>
               </button>
             </li>
           ))}
