@@ -13,6 +13,8 @@ import hashlib
 import os
 import re
 import sys
+from bisect import bisect_left
+from functools import cache
 from itertools import pairwise
 from pathlib import Path
 
@@ -24,10 +26,13 @@ WORDS_PER_PASSAGE = 120
 # A last window shorter than this joins the one before it, so a break at a caption leaves no
 # scrap of a few words. At most 159 words, about 255 tokens: inside the encoder's DOC_LEN of 300.
 MIN_TAIL_WORDS = 40
+# A passage runs past 120 words to the end of its sentence, up to the same 159 words.
+MAX_WORDS_PER_PASSAGE = WORDS_PER_PASSAGE + MIN_TAIL_WORDS - 1
 # Part of the content hash, so a PDF indexed before a change to how passages are cut is
 # indexed again the next time it is asked for. 2: reference lists are left out (#476).
-# 3: a figure or table caption starts a new passage (#491).
-PASSAGES_VERSION = "3"
+# 3: a figure or table caption starts a new passage (#491). 4: passages end at a sentence
+# end, and a word hyphenated across a line break is joined again.
+PASSAGES_VERSION = "4"
 
 REFERENCES_HEADING = re.compile(
     r"^\s*(?:\d+\.?\s*)?(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.M
@@ -40,17 +45,47 @@ YEAR = re.compile(r"\b(19[5-9]\d|20[0-3]\d)[a-z]?\b")
 PROSE_WORDS = frozenset(
     {"the", "is", "are", "we", "this", "that", "which", "our", "it", "was", "be", "can", "these", "its", "as"}
 )
+# Punkt's form: lowercase, no final period.
+PAPER_ABBREVIATIONS = {"al", "fig", "figs", "eq", "eqs", "sec", "tab", "e.g", "i.e", "cf", "vs", "approx"}
 
 
-def _word_spans(text: str) -> list[tuple[int, int]]:
-    """(start, end) of every whitespace-separated word. It walks forward, so repeated
-    words keep their own positions."""
-    spans, cursor = [], 0
+def _words(text: str) -> tuple[list[str], list[tuple[int, int]]]:
+    """The page's words and the (start, end) of each in the text. It walks forward, so
+    repeated words keep their own positions.
+
+    A word hyphenated at a line end ("la-" then "beling" on the next line) is joined into one,
+    spanning both parts. Only before a lowercase letter, so "BLIP-" + "2" stays as it is.
+    shortcut: a compound broken at its own hyphen ("state-of-the-" + "art") is joined too.
+    """
+    words, spans, cursor = [], [], 0
     for word in text.split():
         start = text.index(word, cursor)
         cursor = start + len(word)
-        spans.append((start, cursor))
-    return spans
+        previous = words[-1] if words else ""
+        if previous.endswith("-") and previous[:-1][-1:].isalpha() and word[0].islower() and (
+            "\n" in text[spans[-1][1] : start]
+        ):
+            words[-1], spans[-1] = previous[:-1] + word, (spans[-1][0], cursor)
+        else:
+            words.append(word)
+            spans.append((start, cursor))
+    return words, spans
+
+
+@cache
+def _punkt():
+    """NLTK's English Punkt sentence splitter. The image downloads its punkt_tab data."""
+    from nltk.tokenize import PunktTokenizer  # here, so the server tests run without NLTK
+
+    tokenizer = PunktTokenizer("english")
+    # The English model is trained on news, so it splits after these, which papers use a lot.
+    tokenizer._params.abbrev_types.update(PAPER_ABBREVIATIONS)
+    return tokenizer
+
+
+def _sentence_ends(text: str, starts: list[int]) -> list[int]:
+    """Word positions a passage can end before: the first word after each sentence."""
+    return [bisect_left(starts, end) for _, end in _punkt().span_tokenize(text)]
 
 
 def _is_bibliography(words: list[str]) -> bool:
@@ -65,11 +100,20 @@ def _is_bibliography(words: list[str]) -> bool:
     return prose < 0.03 and years >= 0.015
 
 
-def _windows(start: int, stop: int) -> list[tuple[int, int]]:
-    """(first, end) word positions of the 120-word windows over [start, stop)."""
-    cuts = list(range(start, stop, WORDS_PER_PASSAGE))
-    if len(cuts) > 1 and stop - cuts[-1] < MIN_TAIL_WORDS:
-        cuts.pop()
+def _windows(start: int, stop: int, ends: list[int]) -> list[tuple[int, int]]:
+    """(first, end) word positions of the passages over [start, stop).
+
+    Each passage ends at the first sentence end from word 120 to word 159, else at the last
+    one from word 40, else at word 120. A piece of 159 words or fewer stays whole, and no cut
+    leaves fewer than MIN_TAIL_WORDS after it.
+    """
+    cuts = [start]
+    while stop - cuts[-1] > MAX_WORDS_PER_PASSAGE:
+        first = cuts[-1]
+        usable = [end for end in ends if first + MIN_TAIL_WORDS <= end <= stop - MIN_TAIL_WORDS]
+        after = [end for end in usable if first + WORDS_PER_PASSAGE <= end <= first + MAX_WORDS_PER_PASSAGE]
+        before = [end for end in usable if end < first + WORDS_PER_PASSAGE]
+        cuts.append(after[0] if after else before[-1] if before else first + WORDS_PER_PASSAGE)
     return list(pairwise([*cuts, stop]))
 
 
@@ -83,22 +127,27 @@ def pdf_passages(path: Path) -> list[dict]:
 
     A figure or table caption starts a new passage, so a caption is never split between two
     passages and its passage begins with the label (#491).
+
+    A passage ends at a sentence end where one is near, so the judge does not get a claim's
+    evidence cut in half.
     """
     passages = []
     in_references = False
     for number, page in enumerate(PdfReader(path).pages, start=1):
         text = page.extract_text() or ""
-        words, spans = text.split(), _word_spans(text)
+        words, spans = _words(text)
+        starts = [start for start, _ in spans]
         references_from = len(words)  # the first word of the reference list on this page
         if in_references:
             references_from = 0
         elif heading := REFERENCES_HEADING.search(text):
-            in_references, references_from = True, len(text[: heading.end()].split())
+            in_references, references_from = True, bisect_left(starts, heading.end())
         # A passage starts at the heading, so none holds both body text and reference entries,
-        # and at every caption. Each piece between two breaks is cut into 120-word passages.
-        captions = [len(text[: match.start()].split()) for match in CAPTION.finditer(text)]
+        # and at every caption. Each piece between two breaks is cut into ~120-word passages.
+        captions = [bisect_left(starts, match.start()) for match in CAPTION.finditer(text)]
         breaks = sorted({0, references_from, len(words), *captions})
-        pieces = [window for start, stop in pairwise(breaks) for window in _windows(start, stop)]
+        ends = _sentence_ends(text, starts)
+        pieces = [window for start, stop in pairwise(breaks) for window in _windows(start, stop, ends)]
         for i, stop in pieces:
             chunk = words[i:stop]
             if i >= references_from and _is_bibliography(chunk):
