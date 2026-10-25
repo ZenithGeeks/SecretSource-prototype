@@ -1,5 +1,5 @@
 """The judge sees the top figure only when the text alone leaves the claim insufficient (#501),
-or refutes it (SCRUM-80); a refutes changes only when the figure supports the claim.
+or refutes it (SCRUM-80); the verdict changes only when the figure supports the claim (#734).
 
 No services: retrieval, the figure lookup and the judge are fakes. The fake judge answers
 from a table keyed on whether it got a figure, and records the figure and evidence of each call.
@@ -83,6 +83,17 @@ def test_a_refutes_stays_when_the_figure_does_not_support_the_claim(judge, figur
 
     assert judge.figures == [None, CROP]
     assert result["verdict"] == "refutes"
+    assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
+
+
+@pytest.mark.parametrize("figure_verdict", ["refutes", "insufficient"])
+def test_an_insufficient_stays_when_the_figure_does_not_support_the_claim(judge, figure_verdict):
+    judge.answers[True] = figure_verdict
+
+    result = verify.check_prepared("The model scores 71.0.", "2112.01488", PAPER)
+
+    assert judge.figures == [None, CROP]
+    assert result["verdict"] == "insufficient"
     assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
 
 
