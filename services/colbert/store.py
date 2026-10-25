@@ -212,14 +212,34 @@ class Store:
         self.files.write(path.name, rows, kept_vectors, content_hash)
         return len(rows)
 
-    def search(self, query: str, k: int = 10, source: str | None = None) -> list[dict]:
-        """Top-k passages by MaxSim, optionally restricted to one source paper. Each query
-        token finds its best-matching doc token, and the scores are added up."""
+    def search(
+        self,
+        query: str,
+        k: int = 10,
+        source: str | None = None,
+        sources: list[str] | None = None,
+    ) -> list[dict]:
+        """Top-k passages by MaxSim, optionally restricted to one paper or a list of them.
+
+        `sources` empty, or a `source` that is not in `sources`, searches nothing: the caller
+        named a scope that contains no paper, and the alternative would be the whole index.
+        Each query token finds its best-matching doc token, and the scores are added up.
+        """
+        if sources is not None and source is not None:
+            names = [source] if source in sources else []
+        elif sources is not None:
+            names = list(sources)
+        elif source is not None:
+            names = [source]
+        else:
+            names = self.files.sources()
+        if not names:
+            return []
+
         vector = self.encoder.query(query)
-        sources = [source] if source is not None else self.files.sources()
 
         scored = []
-        for name in sources:
+        for name in names:
             paper = self.files.load(name)
             if paper is None or not paper.rows:
                 continue

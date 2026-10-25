@@ -127,6 +127,18 @@ def test_search_with_source_returns_only_that_paper_ranked(tmp_path, fresh_store
     assert results[0]["rank"] == 1
 
 
+def test_search_with_sources_returns_only_those_papers(tmp_path, fresh_store):
+    for name, text in (("a.pdf", "alpha"), ("b.pdf", "beta"), ("c.pdf", "gamma")):
+        _write_pdf(tmp_path, name, text)
+        fresh_store.add_pdf(tmp_path / name)
+
+    results = fresh_store.search("query", k=5, sources=["c.pdf", "a.pdf"])
+
+    assert {result["source"] for result in results} == {"a.pdf", "c.pdf"}
+    assert fresh_store.search("query", sources=[]) == []
+    assert fresh_store.search("query", source="b.pdf", sources=["a.pdf"]) == []
+
+
 def test_search_without_source_ranks_across_papers(tmp_path, fresh_store):
     for name, text in (("a.pdf", "alpha"), ("b.pdf", "beta")):
         _write_pdf(tmp_path, name, text)

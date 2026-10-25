@@ -5,9 +5,11 @@ dspy.ColBERTv2 expects) and MCP under /mcp. Run with `python server.py`
 (http://0.0.0.0:8893, COLBERT_PORT to change).
 """
 
+import json
 import os
 import re
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated
 
@@ -53,6 +55,12 @@ def float_env(name: str, default: float) -> float:
 
 LOW_CONFIDENCE_BELOW = float_env("COLBERT_LOW_CONFIDENCE_BELOW", DEFAULT_LOW_CONFIDENCE_BELOW)
 
+# Set by the HTTP middleware from the X-Paper-Scope header: the file names the caller may
+# read. None means the header was absent. The MCP tool searches only this set. It has no
+# account of its own, so a call with no scope returns nothing rather than every paper.
+paper_scope: ContextVar[frozenset[str] | None] = ContextVar("paper_scope", default=None)
+SCOPE_HEADER = "x-paper-scope"
+
 _store: Store | None = None
 
 
@@ -92,7 +100,11 @@ def search_passages(
         k: How many passages to return. The default is 5. Values below 1 are refused.
             Values above 100 are cut to 100.
         source: The file name of one indexed paper, for example "2112.01488.pdf", to
-            search only that paper. Leave it out to search every indexed paper.
+            search only that paper. It has to be one of the papers named in the
+            X-Paper-Scope header. Leave source out to search every paper in that
+            header. With no header, or a header that does not list the paper, the
+            tool returns no passages: this service cannot tell callers apart, so it
+            does not search the whole index.
         snippet_chars: Cut each passage's text to at most this many characters, at the
             end of a word. The default is 280. Pass null to keep that default. Ignored
             when full_text is true.
@@ -113,7 +125,12 @@ def search_passages(
         replaces it. Do not quote a hit as support then. A false value only means the
         match is not that weak.
     """
-    hits = store().search(query, min(k, MAX_K), source)
+    allowed = paper_scope.get()
+    if not allowed or (source is not None and source not in allowed):
+        # No scope, an empty scope, or a paper the caller did not name: nothing, not the index.
+        return {"topk": [], "low_confidence": True}
+    names = [source] if source is not None else sorted(allowed)
+    hits = store().search(query, min(k, MAX_K), sources=names)
     if full_text:
         limit = None
     elif snippet_chars is None:
@@ -170,6 +187,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ColBERTv2 retrieval", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def read_paper_scope(request, call_next):
+    """Remember X-Paper-Scope for the MCP tool. A missing or unreadable header is no scope."""
+    raw = request.headers.get(SCOPE_HEADER)
+    names: frozenset[str] | None
+    if raw is None:
+        names = None
+    else:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = []
+        if isinstance(parsed, list):
+            names = frozenset(name for name in parsed if isinstance(name, str))
+        else:
+            names = frozenset()
+    token = paper_scope.set(names)
+    try:
+        return await call_next(request)
+    finally:
+        paper_scope.reset(token)
+
+
 app.mount("/mcp", mcp.streamable_http_app())
 
 
@@ -177,6 +219,9 @@ class SearchBody(BaseModel):
     query: str
     k: int = 10
     source: str | None = None
+    # The caller's papers. Empty searches nothing. Absent searches the whole index, which
+    # only the pipeline's own callers do, and they filter or name one source.
+    sources: list[str] | None = None
 
 
 class AddBody(BaseModel):
@@ -190,6 +235,8 @@ def search(query: str, k: int = 10, source: str | None = None):
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
+    if body.sources is not None:
+        return {"topk": store().search(body.query, min(body.k, MAX_K), body.source, body.sources)}
     return search(body.query, body.k, body.source)
 
 
