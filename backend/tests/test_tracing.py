@@ -40,6 +40,7 @@ def phoenix(monkeypatch):
     # happen once per process, so give the queue this provider's tracer instead.
     monkeypatch.setattr(queue, "tracer", tracer_provider.get_tracer("app.queue"))
     monkeypatch.setattr(retrieval, "tracer", tracer_provider.get_tracer("app.clients.retrieval"))
+    monkeypatch.setattr(main, "tracer", tracer_provider.get_tracer("app.main"))
     yield exporter, registered
     DSPyInstrumentor().uninstrument()
     GoogleADKInstrumentor().uninstrument()
@@ -220,3 +221,48 @@ def test_a_retriever_span_records_at_most_ten_documents(phoenix, monkeypatch):
     assert span.attributes["retrieval.documents.9.document.id"] == "ada.pdf p9"
     assert "retrieval.documents.10.document.id" not in span.attributes
     assert "passage 10 of the caller" not in _span_text(span)
+
+
+class _NullRedis:
+    def publish(self, channel, message):
+        pass
+
+
+def test_each_step_of_a_queued_analysis_is_an_agent_span(phoenix, monkeypatch):
+    exporter, _ = phoenix
+    tracing.setup_tracing()
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: _NullRedis())
+    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr(main, "index_paper", lambda title: "indexed")
+    extracted = {
+        "status": "ok",
+        "file": "paper.pdf",
+        "title": "T",
+        "claims": [{"claim": "Hard negatives help.", "citations": [{"key": "ance.pdf"}]}],
+    }
+    monkeypatch.setattr(main, "extract_claims_with_citations", lambda paper: extracted)
+    monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
+    monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
+    monkeypatch.setattr(main, "audit", lambda analysis: [])
+
+    def check_prepared(claim, source, path, judged=""):
+        with retrieval.tracer.start_as_current_span("colbert_search"):
+            return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+
+    monkeypatch.setattr(main, "check_prepared", check_prepared)
+
+    queue.run_analysis_job("job-steps", "paper.pdf", True, None)
+
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    steps = ["read_paper", "prepare_source", "check_source", "read_figures", "add_paper", "audit_analysis"]
+    for name in steps:
+        assert spans[name].attributes["openinference.span.kind"] == "AGENT", name
+        assert spans[name].attributes["agent.name"] == name
+        assert spans[name].parent.span_id == spans["analysis"].context.span_id, name
+    check = spans["check_source"]
+    assert check.attributes["claim.number"] == 1
+    assert check.attributes["claim.source"] == "ance.pdf"
+    assert check.attributes["output.value"] == "supports"
+    assert spans["colbert_search"].parent.span_id == check.context.span_id
