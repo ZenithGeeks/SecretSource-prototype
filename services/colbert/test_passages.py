@@ -72,10 +72,17 @@ def test_a_short_last_window_joins_the_one_before_it():
     assert store._windows(0, 20, []) == [(0, 20)]  # a short piece on its own stays
 
 
-def test_a_passage_ends_at_the_nearest_sentence_end():
-    assert store._windows(0, 300, [90, 131, 200]) == [(0, 131), (131, 200), (200, 300)]
-    assert store._windows(0, 300, [90, 170]) == [(0, 90), (90, 170), (170, 300)]  # none after 120
+def test_a_passage_ends_at_the_last_sentence_end_before_word_120():
+    assert store._windows(0, 300, [90, 131, 200]) == [(0, 90), (90, 200), (200, 300)]
+    assert store._windows(0, 300, [131, 200]) == [(0, 131), (131, 200), (200, 300)]  # none before
     assert store._windows(0, 300, [10, 280]) == [(0, 120), (120, 240), (240, 300)]  # none usable
+
+
+def test_a_passage_starts_with_the_last_sentence_before_its_cut():
+    # The sentences at 70-90 and 180-200 are 20 words, so each is repeated in the next passage.
+    assert store._windows(0, 300, [70, 90, 180, 200]) == [(0, 90), (70, 200), (180, 300)]
+    # A 41-word sentence is too long to repeat.
+    assert store._windows(0, 300, [49, 90, 200]) == [(0, 90), (90, 200), (200, 300)]
 
 
 def test_sentence_ends_skip_abbreviations():

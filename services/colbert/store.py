@@ -26,13 +26,17 @@ WORDS_PER_PASSAGE = 120
 # A last window shorter than this joins the one before it, so a break at a caption leaves no
 # scrap of a few words. At most 159 words, about 255 tokens: inside the encoder's DOC_LEN of 300.
 MIN_TAIL_WORDS = 40
-# A passage runs past 120 words to the end of its sentence, up to the same 159 words.
+# With no sentence end in its first 120 words, a passage runs on to one, up to the same 159.
 MAX_WORDS_PER_PASSAGE = WORDS_PER_PASSAGE + MIN_TAIL_WORDS - 1
+# A passage also starts with the last sentence of the one before when that sentence is at most
+# this long, so evidence that spans a cut is whole in one passage.
+OVERLAP_WORDS = 40
 # Part of the content hash, so a PDF indexed before a change to how passages are cut is
 # indexed again the next time it is asked for. 2: reference lists are left out (#476).
-# 3: a figure or table caption starts a new passage (#491). 4: passages end at a sentence
-# end, and a word hyphenated across a line break is joined again.
-PASSAGES_VERSION = "4"
+# 3: a figure or table caption starts a new passage (#491). 6: passages end at a sentence
+# end and overlap by one sentence, and a word hyphenated across a line break is joined again
+# (4 and 5 were first tries, indexed only on a development machine).
+PASSAGES_VERSION = "6"
 
 REFERENCES_HEADING = re.compile(
     r"^\s*(?:\d+\.?\s*)?(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.M
@@ -103,18 +107,30 @@ def _is_bibliography(words: list[str]) -> bool:
 def _windows(start: int, stop: int, ends: list[int]) -> list[tuple[int, int]]:
     """(first, end) word positions of the passages over [start, stop).
 
-    Each passage ends at the first sentence end from word 120 to word 159, else at the last
-    one from word 40, else at word 120. A piece of 159 words or fewer stays whole, and no cut
-    leaves fewer than MIN_TAIL_WORDS after it.
+    Each passage ends at the last sentence end from word 40 to word 120, else at the first one
+    up to word 159, else at word 120. Ending before word 120 keeps a sentence that crosses it
+    whole at the start of the next passage: run past it, and on ColBERT's paper the abstract's
+    "ColBERT introduces a late interaction architecture" joined the title and author list, and
+    fell to rank 13, out of the passages the judge reads. A piece of 159 words or fewer stays
+    whole, and no cut leaves fewer than MIN_TAIL_WORDS after it.
+
+    Each passage after the first in the piece also starts with the last sentence before its
+    cut, when that sentence has at most OVERLAP_WORDS words and the passage stays within 159.
     """
     cuts = [start]
     while stop - cuts[-1] > MAX_WORDS_PER_PASSAGE:
         first = cuts[-1]
         usable = [end for end in ends if first + MIN_TAIL_WORDS <= end <= stop - MIN_TAIL_WORDS]
-        after = [end for end in usable if first + WORDS_PER_PASSAGE <= end <= first + MAX_WORDS_PER_PASSAGE]
-        before = [end for end in usable if end < first + WORDS_PER_PASSAGE]
-        cuts.append(after[0] if after else before[-1] if before else first + WORDS_PER_PASSAGE)
-    return list(pairwise([*cuts, stop]))
+        before = [end for end in usable if end <= first + WORDS_PER_PASSAGE]
+        after = [end for end in usable if first + WORDS_PER_PASSAGE < end <= first + MAX_WORDS_PER_PASSAGE]
+        cuts.append(before[-1] if before else after[0] if after else first + WORDS_PER_PASSAGE)
+    windows = []
+    for first, end in pairwise([*cuts, stop]):
+        earlier = [e for e in ends if start <= e < first and first - e <= OVERLAP_WORDS]
+        if first != start and earlier and end - earlier[-1] <= MAX_WORDS_PER_PASSAGE:
+            first = earlier[-1]
+        windows.append((first, end))
+    return windows
 
 
 def pdf_passages(path: Path) -> list[dict]:
