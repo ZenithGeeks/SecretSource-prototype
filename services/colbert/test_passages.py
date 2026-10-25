@@ -67,13 +67,56 @@ def test_a_caption_starts_its_own_passage_and_stays_whole(tmp_path):
 
 
 def test_a_short_last_window_joins_the_one_before_it():
-    assert store._windows(0, 150) == [(0, 150)]  # 30 words left over is under MIN_TAIL_WORDS
-    assert store._windows(0, 170) == [(0, 120), (120, 170)]
-    assert store._windows(0, 20) == [(0, 20)]  # a short piece on its own stays
+    assert store._windows(0, 150, []) == [(0, 150)]  # 30 words left over is under MIN_TAIL_WORDS
+    assert store._windows(0, 170, []) == [(0, 120), (120, 170)]
+    assert store._windows(0, 20, []) == [(0, 20)]  # a short piece on its own stays
+
+
+def test_a_passage_ends_at_the_last_sentence_end_before_word_120():
+    assert store._windows(0, 300, [90, 131, 200]) == [(0, 90), (90, 200), (200, 300)]
+    assert store._windows(0, 300, [131, 200]) == [(0, 131), (131, 200), (200, 300)]  # none before
+    assert store._windows(0, 300, [10, 280]) == [(0, 120), (120, 240), (240, 300)]  # none usable
+
+
+def test_a_passage_starts_with_the_last_sentence_before_its_cut():
+    # The sentences at 70-90 and 180-200 are 20 words, so each is repeated in the next passage.
+    assert store._windows(0, 300, [70, 90, 180, 200]) == [(0, 90), (70, 200), (180, 300)]
+    # A 41-word sentence is too long to repeat.
+    assert store._windows(0, 300, [49, 90, 200]) == [(0, 90), (90, 200), (200, 300)]
+
+
+def test_sentence_ends_skip_abbreviations():
+    text = "As shown by Smith et al. in Fig. 2, the score drops, e.g. on BEIR. Then it ends. [3] says so."
+    words, spans = store._words(text)
+
+    ends = [words[end - 1] for end in store._sentence_ends(text, [start for start, _ in spans])]
+
+    assert ends == ["BEIR.", "ends.", "so."]
+
+
+def test_a_word_hyphenated_across_lines_is_joined_and_keeps_its_span():
+    text = "the best accuracy on la-\nbeling a claim with BLIP-\n2 and more"
+
+    words, spans = store._words(text)
+
+    assert "labeling" in words and "BLIP-" in words
+    start, end = spans[words.index("labeling")]
+    assert text[start:end] == "la-\nbeling"
+
+
+def test_passages_of_a_paper_end_with_whole_sentences(tmp_path):
+    pdf = _pdf(tmp_path / "paper.pdf", BODY * 4)
+
+    texts = [passage["text"] for passage in store.pdf_passages(pdf)]
+
+    assert len(texts) > 1
+    assert all(text.endswith(".") for text in texts)
 
 
 def test_a_sentence_that_mentions_a_table_does_not_start_a_passage(tmp_path):
-    pdf = _pdf(tmp_path / "paper.pdf", f"{BODY}\nTable 3 presents the results on BEIR.\n{BODY}")
+    # Under 159 words, so only a caption break could start a passage at the sentence.
+    body = BODY[: len(BODY) // 3]
+    pdf = _pdf(tmp_path / "paper.pdf", f"{body}\nTable 3 presents the results on BEIR.\n{body}")
 
     texts = [passage["text"] for passage in store.pdf_passages(pdf)]
 
