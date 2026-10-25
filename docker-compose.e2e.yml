@@ -1,0 +1,36 @@
+# The stack the frontend's Playwright tests run against (frontend/e2e/README.md):
+#   docker compose -p secretsource-e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d --build gateway worker redis grobid
+# Its own project name, Redis, papers and database, so it never touches the everyday stack's
+# analyses, queue or papers. Login is off (no Supabase), so every request is the same
+# anonymous owner and the browser needs no account.
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:8090:8080"
+    environment: &e2e-env
+      # This stack's own Redis, never the shared queue .env may name: another stack's worker
+      # would take these jobs and not find the drafts, which live in this stack's SQLite.
+      REDIS_URL: redis://redis:6379/0
+      SUPABASE_URL: ""
+      SUPABASE_SERVICE_ROLE_KEY: ""
+      TEACHER_GOOGLE_ENABLED: "false"
+      # Nothing from a test run goes to the team's session database, traces or agent server.
+      SESSION_DB_URL: ""
+      DIRECT_URL: ""
+      PHOENIX_COLLECTOR_ENDPOINT: ""
+      GATEHOUSE_SECRET: ""
+    volumes: &e2e-volumes !override
+      - papers:/app/data/papers # not ./data/papers, which the everyday stack shares with the host
+      - ./backend/secrets:/app/secrets:ro
+      - analyses:/app/data/db
+      - hf-cache:/root/.cache/huggingface
+  worker:
+    ports: !reset []
+    environment: *e2e-env
+    volumes: *e2e-volumes
+  grobid:
+    # Not published: only the gateway and worker reach it, and 8070 is often taken on the host.
+    ports: !reset []
+
+volumes:
+  papers:

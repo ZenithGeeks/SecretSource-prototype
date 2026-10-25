@@ -1,0 +1,15 @@
+% Fixture for e2e/author-smoke.spec.ts. No title, DOI, URL or eprint on purpose: with no
+% title there is no title search or index lookup (verify._lookup_kind), so a check needs no
+% GROBID, ColBERT, LLM or network and finishes in seconds. Today these entries hit #726 on
+% the way; once that is fixed they should still look nothing up.
+@misc{alpha2020,
+  author = {Ada Alpha},
+  year = {2020},
+  note = {SecretSource e2e fixture}
+}
+
+@misc{beta2021,
+  author = {Ben Beta},
+  year = {2021},
+  note = {SecretSource e2e fixture}
+}
