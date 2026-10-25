@@ -135,6 +135,52 @@ def test_parse_reports_warnings_against_the_project_bib(client):
     assert [f["name"] for f in files] == ["ch2.tex", "refs.bib"] and files[1]["shared"] is True
 
 
+def test_every_draft_answer_carries_the_project_bib_like_a_read_does(client):
+    """#725: the editor keeps the files a write answers with, so an answer without the
+    project's .bib took it out of the editor after the first autosave."""
+    project = client.post(
+        "/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB, "bibName": "refs.bib"}
+    ).json()
+    attached = client.post(
+        f"/author/projects/{project['id']}/bib/khattab2020/pdf",
+        headers=ADA,
+        files={"file": ("colbert.pdf", b"%PDF-1.4 fake", "application/pdf")},
+    )
+    assert attached.status_code == 200, attached.text
+    draft = client.post(
+        "/author/drafts",
+        headers=ADA,
+        json={"title": "ch2", "projectId": project["id"], "files": [{"name": "ch2.tex", "content": TEX}]},
+    ).json()
+    url = f"/author/drafts/{draft['id']}"
+    uploaded = client.post(
+        f"/author/drafts/upload?projectId={project['id']}",
+        headers=ADA,
+        files={"file": ("ch3.tex", TEX.encode(), "text/plain")},
+    ).json()
+
+    def names(answer: dict) -> list[str]:
+        return [f["name"] for f in answer["files"]]
+
+    answers = {
+        "create": draft,
+        "upload": uploaded,
+        "write": client.put(f"{url}/files/ch2.tex", headers=ADA, json={"content": TEX + "%"}).json(),
+        "add file": client.put(f"{url}/files/extra.tex", headers=ADA, json={"content": "x"}).json(),
+        "remove file": client.delete(f"{url}/files/extra.tex", headers=ADA).json(),
+        "save": client.post(f"{url}/save", headers=ADA).json(),
+        "rename": client.patch(url, headers=ADA, json={"title": "Chapter 2"}).json(),
+    }
+    read = client.get(url, headers=ADA).json()
+    assert names(read) == ["ch2.tex", "refs.bib"] and set(read["pdfs"]) == {"khattab2020"}
+    for route, answer in answers.items():
+        assert "refs.bib" in names(answer), route
+        shared = next(f for f in answer["files"] if f["name"] == "refs.bib")
+        assert shared["shared"] is True and shared["content"] == BIB, route
+        assert set(answer["pdfs"]) == {"khattab2020"}, route  # the project's PDF, as a read lists it
+    assert answers["rename"]["files"] == read["files"]
+
+
 def test_uploading_a_zip_makes_a_draft_from_its_tex_and_bib_files(client):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
