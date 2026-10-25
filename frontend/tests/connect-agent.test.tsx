@@ -193,7 +193,12 @@ describe('the access card', () => {
 
   it('reads a value it does not understand as read only, as the server does', () => {
     expect(readAccess(undefined)).toEqual({ level: 'full' })
+    expect(readAccess(null)).toEqual({ level: 'full' })
     expect(readAccess('everything')).toEqual({ level: 'read' })
+    expect(readAccess(false)).toEqual({ level: 'read' })
+    expect(readAccess(0)).toEqual({ level: 'read' })
+    expect(readAccess('')).toEqual({ level: 'read' })
+    expect(readAccess([])).toEqual({ level: 'read' })
     expect(readAccess({ level: 'admin' })).toEqual({ level: 'read' })
     expect(readAccess({ level: 'custom', tools: 'all' })).toEqual({ level: 'read' })
     expect(readAccess({ level: 'custom', tools: ['bibtex', 3] })).toEqual({ level: 'custom', tools: ['bibtex'] })

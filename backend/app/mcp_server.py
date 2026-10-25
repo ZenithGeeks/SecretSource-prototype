@@ -137,15 +137,22 @@ async def _run_tool(name: str, arguments: dict) -> dict:
 async def allowed_tools(user: str | None) -> set[str] | None:
     """The tool names the person lets an agent use, or None for all of them (the default).
 
-    The level comes from their own preferences, which the browser writes, so anything other than
-    "full" or a list of names reads as read only rather than as full access.
+    The level comes from their own preferences, which the browser writes. A missing value or
+    JSON null is full access, as before this setting existed. Any other shape that is not
+    {"level": "full"} or {"level": "custom", "tools": [...]} reads as read only, never as full.
     """
     preferences = await asyncio.to_thread(store.load_preferences, user) or {}
-    access = preferences.get(ACCESS) or {"level": "full"}
+    if not isinstance(preferences, dict):
+        return set(READ_ONLY)
+    # Missing, or JSON null, is full access. false, 0, "" and [] are present but unreadable:
+    # `or {"level": "full"}` would treat them as missing and grant every tool, while Settings
+    # shows Read only (frontend readAccess).
+    missing = ACCESS not in preferences or preferences[ACCESS] is None
+    access = {"level": "full"} if missing else preferences[ACCESS]
     level = access.get("level") if isinstance(access, dict) else None
     if level == "full":
         return None
-    tools = access.get("tools") if level == "custom" else None
+    tools = access.get("tools") if isinstance(access, dict) and level == "custom" else None
     if isinstance(tools, list):
         return {name for name in tools if isinstance(name, str)}
     return set(READ_ONLY)

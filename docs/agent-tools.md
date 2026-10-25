@@ -121,8 +121,9 @@ time.
 
 The person chooses which tools an agent gets: full access (the default), read only (the
 `readOnlyHint` tools), or a list of tools. The choice is the `agentAccess` preference, and
-`allowed_tools` in `mcp_server.py` applies it to both `tools/list` and `tools/call`. An unreadable
-value counts as read only.
+`allowed_tools` in `mcp_server.py` applies it to both `tools/list` and `tools/call`. A missing
+value, or JSON null, is full access. Any other unreadable value counts as read only, including
+`false`, `0`, `""` and `[]`: those must not be treated as "no choice".
 
 The server also offers one prompt, `check_my_draft`, which Claude Code lists as a slash
 command: it asks the agent to run `check_text` on the writing you give it.
