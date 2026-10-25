@@ -16,12 +16,17 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import requests
+from openinference.semconv.trace import DocumentAttributes, OpenInferenceSpanKindValues, SpanAttributes
+from opentelemetry import trace
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.clients.cloud_run import uploadable
 from app.clients.service_auth import auth_headers
 from app.config import COLBERT_URL, COLPALI_URL
+
+# A no-op until app/tracing.py registers Phoenix in this process.
+tracer = trace.get_tracer(__name__)
 
 # One session for every call, so connections to Cloud Run are reused instead of a new TLS
 # handshake each time. One retry for a refused connection or a 502/503/504, which is what a
@@ -49,18 +54,46 @@ def _pdf(path: str, handle) -> dict:
     return {"file": (Path(path).name, handle, "application/pdf")}
 
 
+def _retriever_span(name: str, query: str, source: str | None):
+    """A Phoenix RETRIEVER span for one search, so a trace shows the query and what came back."""
+    attributes = {
+        SpanAttributes.OPENINFERENCE_SPAN_KIND: OpenInferenceSpanKindValues.RETRIEVER.value,
+        SpanAttributes.INPUT_VALUE: query,
+        "retrieval.source": source or "",
+    }
+    return tracer.start_as_current_span(name, attributes=attributes)
+
+
+def _record_hits(span: trace.Span, hits: list[dict]) -> None:
+    """Put the hits on the span as retrieval documents, which Phoenix lists in rank order."""
+    if not span.is_recording():
+        return
+    for i, hit in enumerate(hits):
+        prefix = f"{SpanAttributes.RETRIEVAL_DOCUMENTS}.{i}."
+        where = f"{hit.get('source', '')} p{hit.get('page', '')}"
+        # ColPali hits are figures and pages: their text is the caption, when there is one.
+        text = hit.get("text") or hit.get("caption") or ""
+        span.set_attribute(prefix + DocumentAttributes.DOCUMENT_ID, where)
+        span.set_attribute(prefix + DocumentAttributes.DOCUMENT_CONTENT, text)
+        if "score" in hit:
+            span.set_attribute(prefix + DocumentAttributes.DOCUMENT_SCORE, float(hit["score"]))
+
+
 def colbert_search(query: str, k: int = 10, source: str | None = None) -> list[dict]:
     body = {"query": query, "k": k}
     if source is not None:
         body["source"] = source
-    response = _session.post(
-        f"{COLBERT_URL}/api/search",
-        json=body,
-        headers=auth_headers(COLBERT_URL),
-        timeout=120,
-    )
-    response.raise_for_status()
-    return response.json()["topk"]
+    with _retriever_span("colbert_search", query, source) as span:
+        response = _session.post(
+            f"{COLBERT_URL}/api/search",
+            json=body,
+            headers=auth_headers(COLBERT_URL),
+            timeout=120,
+        )
+        response.raise_for_status()
+        hits = response.json()["topk"]
+        _record_hits(span, hits)
+    return hits
 
 
 def colbert_add(path: str) -> dict:
@@ -126,11 +159,14 @@ def colpali_search(query: str, k: int = 20, source: str | None = None) -> dict:
     body = {"query": query, "k": k}
     if source is not None:
         body["source"] = source
-    response = _session.post(
-        f"{COLPALI_URL}/api/search",
-        json=body,
-        headers=auth_headers(COLPALI_URL),
-        timeout=60,
-    )
-    response.raise_for_status()
-    return response.json()
+    with _retriever_span("colpali_search", query, source) as span:
+        response = _session.post(
+            f"{COLPALI_URL}/api/search",
+            json=body,
+            headers=auth_headers(COLPALI_URL),
+            timeout=60,
+        )
+        response.raise_for_status()
+        result = response.json()
+        _record_hits(span, result["topk"])
+    return result

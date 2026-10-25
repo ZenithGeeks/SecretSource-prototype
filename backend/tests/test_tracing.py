@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import dspy
 import pytest
 from app import main, queue, tracing
+from app.clients import retrieval
 from dspy.utils import DummyLM
 from openinference.instrumentation.dspy import DSPyInstrumentor
 from openinference.instrumentation.google_adk import GoogleADKInstrumentor
@@ -38,6 +39,7 @@ def phoenix(monkeypatch):
     # The real register() sets the global provider, which app.queue's tracer reads. That can
     # happen once per process, so give the queue this provider's tracer instead.
     monkeypatch.setattr(queue, "tracer", tracer_provider.get_tracer("app.queue"))
+    monkeypatch.setattr(retrieval, "tracer", tracer_provider.get_tracer("app.clients.retrieval"))
     yield exporter, registered
     DSPyInstrumentor().uninstrument()
     GoogleADKInstrumentor().uninstrument()
@@ -91,3 +93,27 @@ def test_the_llm_calls_of_one_queued_analysis_share_one_trace(phoenix, monkeypat
     predicts = [span for span in spans if span.name == "Predict(StringSignature).forward"]
     assert len(predicts) == 2
     assert {span.context.trace_id for span in predicts} == {analysis.context.trace_id}
+
+
+def test_a_colbert_search_becomes_a_retriever_span_with_its_passages(phoenix, monkeypatch):
+    exporter, _ = phoenix
+    text = "ColBERT introduces late interaction."
+    hits = [{"text": text, "source": "colbert.pdf", "page": 1, "score": 45.0}]
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"topk": hits}
+
+    monkeypatch.setattr(retrieval._session, "post", lambda *args, **kwargs: Response())
+
+    assert retrieval.colbert_search("Who introduced late interaction?", source="colbert.pdf") == hits
+
+    span = next(span for span in exporter.get_finished_spans() if span.name == "colbert_search")
+    assert span.attributes["openinference.span.kind"] == "RETRIEVER"
+    assert span.attributes["input.value"] == "Who introduced late interaction?"
+    assert span.attributes["retrieval.documents.0.document.content"] == text
+    assert span.attributes["retrieval.documents.0.document.id"] == "colbert.pdf p1"
+    assert span.attributes["retrieval.documents.0.document.score"] == 45.0
