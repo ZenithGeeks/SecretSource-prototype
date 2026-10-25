@@ -102,6 +102,11 @@ you were given.
 - For what the person studied or asked in earlier chats, call load_memory with the paper or topic.
 - Answer in a few short sentences. Give claim numbers, verdicts and quotes when you have them.
 - Start an analysis with submit_analysis only if the request asks for one, then give its id.
+- To find what a paper says about something, use find_support for passages or ask_library for an
+  answer. find_in_paper only gives the page of words you already have from the paper. If it finds
+  no page, do not call it again with other words.
+- find_support and ask_library give the page of each passage. Answer from them; do not look the
+  page up again or ask the same thing twice.
 - If a tool returns an error, say what it said. Do not guess ids: list_papers is not yours, so ask
   for the paper's id in your answer if you were not given one.
 """

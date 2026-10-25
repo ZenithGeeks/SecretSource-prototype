@@ -2,6 +2,7 @@
 analyses, answer from the stored verdicts, and the MCP server lists them as read only."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -117,6 +118,20 @@ def test_find_in_paper_says_when_the_pdf_is_not_on_the_server(library, monkeypat
     result = run(data_tools.find_in_paper, "a1", "late interaction")
 
     assert result == {"status": "error", "message": "no such paper: survey.pdf"}
+
+
+def test_find_in_paper_after_a_miss_points_at_find_support_instead_of_looking_again(library, monkeypatch):
+    looked = []
+    monkeypatch.setattr(main, "_paper", lambda name, user: Path(name))
+    monkeypatch.setattr(data_tools, "locate", lambda path, text, page: looked.append(text))
+    request = SimpleNamespace(state={"user": "user-1"})  # one request's state, not the shared ME
+
+    first = asyncio.run(data_tools.find_in_paper("a1", "dropout as noise", tool_context=request))
+    second = asyncio.run(data_tools.find_in_paper("a1", "dropout noise", tool_context=request))
+
+    assert first == {"page": None}
+    assert "find_support" in second["message"]
+    assert looked == ["dropout as noise"]
 
 
 def test_search_claims_ranks_by_shared_words(library):
