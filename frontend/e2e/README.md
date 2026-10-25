@@ -35,7 +35,7 @@ The smoke fixture's .bib entries have no title, DOI, URL or eprint. With no titl
 
 ## Bugs found on main
 
-Each bug the smoke test found on `main` has its own test under "Known bugs on main", marked `test.fail()` with a link to its issue. The test checks its preconditions first, so a broken precondition still fails the run. While the bug is there the test passes as an expected failure. Once the bug is fixed the test fails, so the fix's pull request should drop the `test.fail()`.
+Each bug the smoke test found on `main` has its own test under "Bugs found on main". While the bug is open, the test is marked `test.fail()` with a link to its issue. The test checks its preconditions first, so a broken precondition still fails the run. While the bug is there the test passes as an expected failure. Once the bug is fixed the test fails, so the fix's pull request should drop the `test.fail()`. The test then stays as a regression test.
 
 Nothing enforces that: these tests are not in CI, because the shared runner has no Docker stack for them (the same reason `eval_decisive.py` runs by hand, see CONSTRAINTS.md). A pull request that fixes one of these bugs should run `npm run test:e2e` by hand and say so.
 

@@ -239,6 +239,17 @@ def _pdfs_for(draft: dict, project: dict | None) -> dict[str, str]:
     return {**(project or {}).get("pdfs", {}), **draft.get("pdfs", {})}
 
 
+async def _draft_answer(draft: dict, user: str | None) -> dict:
+    """What every draft route answers with: the draft as the editor sees it, including its
+    project's .bib and PDFs. The editor keeps the files a write answers with, so an answer
+    without the project's .bib took it out of the editor (#725)."""
+    project = await asyncio.to_thread(_project_of, draft, user)
+    view = draft_view(draft, await asyncio.to_thread(_checks_of, draft["id"], user))
+    view["files"] = _draft_files(draft, project)
+    view["pdfs"] = _pdfs_for(draft, project)
+    return view
+
+
 class DraftIn(BaseModel):
     title: str | None = None
     projectId: str | None = None
@@ -327,7 +338,7 @@ async def create_draft(request: DraftIn, user: str | None = Depends(current_user
     draft = await asyncio.to_thread(
         _new_draft, user, request.title or "Untitled draft", request.projectId, files
     )
-    return draft_view(draft)
+    return await _draft_answer(draft, user)
 
 
 @router.post("/drafts/upload")
@@ -339,17 +350,13 @@ async def upload_draft(
     files = _text_files_from_upload(file.filename or "draft.tex", await file.read())
     title = re.sub(r"\.(tex|bib|zip)$", "", Path(file.filename or "draft").name, flags=re.I)
     draft = await asyncio.to_thread(_new_draft, user, title, projectId, files)
-    return draft_view(draft)
+    return await _draft_answer(draft, user)
 
 
 @router.get("/drafts/{draft_id}")
 async def get_draft(draft_id: str, user: str | None = Depends(current_user)):
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    project = await asyncio.to_thread(_project_of, draft, user)
-    view = draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
-    view["files"] = _draft_files(draft, project)
-    view["pdfs"] = _pdfs_for(draft, project)
-    return view
+    return await _draft_answer(draft, user)
 
 
 @router.patch("/drafts/{draft_id}")
@@ -362,7 +369,7 @@ async def update_draft(draft_id: str, request: DraftIn, user: str | None = Depen
             await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
         draft["projectId"] = request.projectId or None
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
+    return await _draft_answer(draft, user)
 
 
 @router.delete("/drafts/{draft_id}")
@@ -392,7 +399,7 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
     else:
         draft["files"].append({"name": name, "kind": _kind_of(name), "content": request.content})
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
+    return await _draft_answer(draft, user)
 
 
 @router.delete("/drafts/{draft_id}/files/{name:path}")
@@ -405,7 +412,7 @@ async def delete_file(draft_id: str, name: str, user: str | None = Depends(curre
     if not draft["files"]:
         raise HTTPException(400, "a draft keeps at least one file")
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
+    return await _draft_answer(draft, user)
 
 
 @router.post("/drafts/{draft_id}/save")
@@ -414,7 +421,7 @@ async def save_draft(draft_id: str, user: str | None = Depends(current_user)):
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
     _bump_version(draft)
     await asyncio.to_thread(_save, DRAFTS, draft)
-    return draft_view(draft, await asyncio.to_thread(_checks_of, draft_id, user))
+    return await _draft_answer(draft, user)
 
 
 def _bump_version(draft: dict) -> None:

@@ -5,10 +5,11 @@
  * Re-check → Replace with \cite → Compare. Its steps are serial tests on one page, so the
  * report names the step that broke; the steps after it are skipped, as they depend on it.
  *
- * "Known bugs on main" holds one independent test per bug found on main, each with its own
- * project. Each checks its preconditions first and only then calls test.fail() with the bug's
- * issue, so a broken precondition is a real failure, the bug itself is an expected one, and
- * the test fails once the bug is fixed (then drop its test.fail()).
+ * "Bugs found on main" holds one independent test per bug the smoke run found on main, each
+ * with its own project. While a bug is open its test checks its preconditions first and only
+ * then calls test.fail() with the bug's issue, so a broken precondition is a real failure, the
+ * bug itself is an expected one, and the test fails once the bug is fixed. The fix drops the
+ * test.fail(), and the test stays as a regression test.
  */
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -30,7 +31,6 @@ Distillation helps~\cite{gamma2019}.
 
 const ISSUES = 'https://github.com/ZenithGeeks/SecretSource-prototype/issues'
 const BUG_TIP_COVERS_NEW_DRAFT = `The first-run "Ask AI about your papers" tip covers New draft: ${ISSUES}/724`
-const BUG_BIB_DROPPED_ON_SAVE = `The project's .bib leaves the editor after the first autosave: ${ISSUES}/725`
 const BUG_NONE_LOWER = `An entry with nothing to look up fails with "'NoneType' object has no attribute 'lower'": ${ISSUES}/726`
 const BUG_ALL_SUPPORTED = `A run with no supported citation is labelled "all supported": ${ISSUES}/727`
 const NO_REPLACE = `No "Replace with \\cite{…}" control on main since #291 removed Find a source: ${ISSUES}/721`
@@ -200,7 +200,7 @@ test.describe('Author flow', () => {
   })
 })
 
-test.describe('Known bugs on main', () => {
+test.describe('Bugs found on main', () => {
   test('the project page opens with New draft clickable', async ({ page }) => {
     const name = uniqueName('tip')
     const projectId = await importBib(page.request, name)
@@ -219,7 +219,7 @@ test.describe('Known bugs on main', () => {
     await page.goto(`/?role=writer&screen=editor&draft=${draftId}`)
     await expect(fileTabs(page)).toContainText(`${name}.bib`)
     await setEditorText(page, DRAFT.replace('Smoke', 'Smoke, edited'))
-    test.fail(true, BUG_BIB_DROPPED_ON_SAVE)
+    // #725, fixed: an autosave's answer carries the project's .bib.
     await expect(fileTabs(page)).toContainText(`${name}.bib`, { timeout: 5_000 })
   })
 
