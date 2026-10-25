@@ -105,9 +105,43 @@ def test_custom_access_lists_only_the_chosen_tools(app, monkeypatch):
 
     assert names == ["point_at", "list_papers"]
     assert result["isError"] is True
+    assert "Settings, Agents" in result["content"][0]["text"]
 
 
-@pytest.mark.parametrize("access", ["everything", {"level": "admin"}, {"level": "custom", "tools": "all"}])
+def test_custom_access_runs_a_tool_it_lists(app, monkeypatch):
+    allow(monkeypatch, {"level": "custom", "tools": ["open_screen"]})
+
+    names, result = listed_and_called(app, "open_screen", {"screen": "library"})
+
+    assert names == ["open_screen"]
+    assert "?connect=agent" in result["content"][0]["text"]
+
+
+def test_custom_with_no_tools_allows_nothing(app, monkeypatch):
+    allow(monkeypatch, {"level": "custom", "tools": []})
+
+    names, result = listed_and_called(app, "list_papers", {})
+
+    assert names == []
+    assert result["isError"] is True
+    assert "Settings, Agents" in result["content"][0]["text"]
+
+
+def test_a_null_access_choice_is_full_access(app, monkeypatch):
+    """JSON null is no choice, the same as a missing preference: every tool, not read only."""
+    allow(monkeypatch, None)
+
+    names, result = listed_and_called(app, "open_screen", {"screen": "library"})
+
+    assert "open_screen" in names
+    assert "submit_analysis" in names
+    assert "?connect=agent" in result["content"][0]["text"]
+
+
+@pytest.mark.parametrize(
+    "access",
+    ["everything", {"level": "admin"}, {"level": "custom", "tools": "all"}, False, 0, "", []],
+)
 def test_an_unreadable_access_choice_counts_as_read_only(app, monkeypatch, access):
     allow(monkeypatch, access)
 
@@ -115,6 +149,7 @@ def test_an_unreadable_access_choice_counts_as_read_only(app, monkeypatch, acces
 
     assert set(names) == set(mcp_server.READ_ONLY)
     assert result["isError"] is True
+    assert "Settings, Agents" in result["content"][0]["text"]
 
 
 def test_a_screen_tool_runs_in_the_callers_tab(app):
