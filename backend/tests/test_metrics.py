@@ -39,6 +39,7 @@ def stub_pipeline(monkeypatch):
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(main, "prepare_source", lambda s: {"status": "ok", "path": s})
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     findings = [{"kind": "claim-limit"}, {"kind": "ungrounded-quote"}]
     monkeypatch.setattr(main, "audit", lambda analysis: findings)
     monkeypatch.setattr(main, "redis_connection", lambda: _NullRedis())

@@ -89,6 +89,7 @@ from app.ownership import require_owner
 from app.pipeline.audit import audit
 from app.pipeline.claims import extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
+from app.pipeline.rag import add_paper
 from app.pipeline.sources import index_paper
 from app.pipeline.verify import (
     check_prepared,
@@ -557,6 +558,9 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         # The paper's own figures, so "Figure 2" in a claim can show that crop.
         # Docling takes minutes, so this runs while the claims are checked.
         figures = asyncio.create_task(asyncio.to_thread(paper_figures, analysis["file"]))
+        # The paper itself goes into ColBERT too. Checks only index the works it cites, so a
+        # search of the person's papers could never find the papers they analysed.
+        indexed = asyncio.create_task(asyncio.to_thread(add_paper, analysis["file"]))
 
         if verify:
             # One job per claim and cited work, the way app/workflow.py plans them.
@@ -618,6 +622,9 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
 
         analysis["figures"] = await figures
         await _publish(analysis_id, "figures", figures=len(analysis["figures"]))
+        # Search is not part of the verdicts, so a paper that failed to index still finishes.
+        if (result := await indexed)["status"] == "error":
+            logger.warning("could not index %s for search: %s", analysis["file"], result.get("message"))
 
         # We check the run itself before anyone reads it.
         # We only report the findings; we do not fix them.

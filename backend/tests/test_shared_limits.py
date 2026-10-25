@@ -45,6 +45,7 @@ def two_runs(monkeypatch):
     monkeypatch.setattr(main, "prepare_source", lambda s: counted("prepare", {"status": "ok", "path": s}))
     monkeypatch.setattr(main, "check_prepared", check)
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     monkeypatch.setattr(main, "audit", lambda analysis: [])
     monkeypatch.setattr(main, "PARALLEL_SOURCES", 2)
     monkeypatch.setattr(main, "PARALLEL_CHECKS", 2)

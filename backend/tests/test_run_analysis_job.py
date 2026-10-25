@@ -44,6 +44,7 @@ def stubbed_pipeline(monkeypatch):
         },
     )
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     monkeypatch.setattr(main, "audit", lambda analysis: [])
     # A slight delay: without it, the detached _index_self task can happen to finish during
     # some other await inside _run_queued's own finally (e.g. _saved()'s polling loop) even
@@ -165,3 +166,18 @@ def test_a_stale_done_task_in_the_background_set_does_not_block_the_drain(stubbe
         main._background.discard(stale_task)
 
     assert result == {"id": "job-stale-bg", "status": "done"}
+
+def test_the_analysed_paper_is_indexed_for_search(stubbed_pipeline, monkeypatch):
+    indexed = []
+    monkeypatch.setattr(main, "add_paper", lambda file: indexed.append(file) or {"status": "ok"})
+
+    run_analysis_job("job-own", "paper.pdf", True, "owner-1")
+
+    assert indexed == ["paper.pdf.pdf"]  # the stub's extract names the file f"{paper}.pdf"
+
+
+def test_a_paper_that_fails_to_index_still_finishes(stubbed_pipeline, monkeypatch):
+    failed = {"status": "error", "message": "ColBERT is down", "reason": "indexing-failed"}
+    monkeypatch.setattr(main, "add_paper", lambda file: failed)
+
+    assert run_analysis_job("job-down", "paper.pdf", True, "owner-1") == {"id": "job-down", "status": "done"}
