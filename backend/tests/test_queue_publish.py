@@ -48,6 +48,7 @@ def stubbed_pipeline(monkeypatch):
         },
     )
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
+    monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     monkeypatch.setattr(main, "audit", lambda analysis: [])
     main.analyses.clear()
     main.streams.clear()
