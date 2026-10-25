@@ -30,8 +30,8 @@ from app.pipeline import verify
 
 MAX_STATEMENTS = 6
 LIBRARY_PASSAGES = 8  # several papers can share the answer, so more than one paper's EVIDENCE_COUNT
-# The index holds every user's papers. Search this many passages (the most the ColBERT service
-# returns), then keep the caller's. A user with few papers in a large index can get none back.
+# How many of the caller's own passages to rank before keeping LIBRARY_PASSAGES. The search
+# names those papers, so other people's passages are not in the result.
 LIBRARY_SEARCH = 100
 
 # Checks for every answer in this process share these threads, so answers at once queue here
@@ -93,10 +93,13 @@ def answer_about_paper(question: str, paper: str, path: Path) -> list[Cited]:
 
 def library_passages(question: str, papers: frozenset[str] | None = None) -> list[dict]:
     """The passages most relevant to the question, from `papers` only, or from the whole index
-    when `papers` is None (the eval scripts)."""
+    when `papers` is None (the eval scripts). An empty set searches nothing: that caller has
+    no papers, and an unscoped search would read everyone else's."""
     if papers is None:
         return colbert_search(question, k=LIBRARY_PASSAGES)
-    hits = colbert_search(question, k=LIBRARY_SEARCH)
+    if not papers:
+        return []
+    hits = colbert_search(question, k=LIBRARY_SEARCH, sources=papers, visible=papers)
     return [hit for hit in hits if hit["source"] in papers][:LIBRARY_PASSAGES]
 
 

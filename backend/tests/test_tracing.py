@@ -117,3 +117,106 @@ def test_a_colbert_search_becomes_a_retriever_span_with_its_passages(phoenix, mo
     assert span.attributes["retrieval.documents.0.document.content"] == text
     assert span.attributes["retrieval.documents.0.document.id"] == "colbert.pdf p1"
     assert span.attributes["retrieval.documents.0.document.score"] == 45.0
+
+
+def _span_text(span) -> str:
+    return " ".join(str(value) for value in span.attributes.values())
+
+
+def test_an_unscoped_search_records_neither_passage_text_nor_file_names(phoenix, monkeypatch):
+    """A search that names no papers still opens a span. The file name is hashed and the
+    passage text is left off, so another user's paper cannot be read back from the trace."""
+    exporter, _ = phoenix
+    secret = "Bo secret token 91337"
+    filename = "bo-private-91337.pdf"
+    hits = [{"text": secret, "source": filename, "page": 2, "score": 5.0}]
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"topk": hits}
+
+    monkeypatch.setattr(retrieval._session, "post", lambda *args, **kwargs: Response())
+
+    assert retrieval.colbert_search("shared index") == hits
+
+    span = next(span for span in exporter.get_finished_spans() if span.name == "colbert_search")
+    assert secret not in _span_text(span)
+    assert filename not in _span_text(span)
+    assert not any(key.endswith("document.content") for key in span.attributes)
+    assert span.attributes["retrieval.documents.0.document.id"].startswith("sha256:")
+    assert span.attributes["retrieval.documents.0.document.id"].endswith(" p2")
+    assert span.attributes["retrieval.documents.0.document.score"] == 5.0
+
+
+def test_a_scoped_search_drops_another_users_passage_from_the_span(phoenix, monkeypatch):
+    exporter, _ = phoenix
+    secret = "Bo secret token 91337"
+    filename = "bo-private-91337.pdf"
+    own = "Ada late interaction token 4242"
+    hits = [
+        {"text": secret, "source": filename, "page": 4, "score": 90.0},
+        {"text": own, "source": "ada.pdf", "page": 1, "score": 20.0},
+    ]
+    sent = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"topk": hits}
+
+    def post(url, json=None, **kwargs):
+        sent["body"] = json
+        return Response()
+
+    monkeypatch.setattr(retrieval._session, "post", post)
+
+    kept = retrieval.colbert_search("late interaction", sources=["ada.pdf"], visible=["ada.pdf"])
+
+    assert [hit["source"] for hit in kept] == ["ada.pdf"]
+    assert sent["body"]["sources"] == ["ada.pdf"]
+    assert "source" not in sent["body"]
+    span = next(span for span in exporter.get_finished_spans() if span.name == "colbert_search")
+    text = _span_text(span)
+    assert secret not in text
+    assert filename not in text
+    assert span.attributes["retrieval.documents.0.document.content"] == own
+    assert span.attributes["retrieval.documents.0.document.id"] == "ada.pdf p1"
+    assert "retrieval.documents.1.document.id" not in span.attributes
+
+
+def test_an_empty_source_list_does_not_search(monkeypatch):
+    def post(*args, **kwargs):
+        raise AssertionError("an empty scope must not search the index")
+
+    monkeypatch.setattr(retrieval._session, "post", post)
+
+    assert retrieval.colbert_search("late interaction", sources=[]) == []
+
+
+def test_a_retriever_span_records_at_most_ten_documents(phoenix, monkeypatch):
+    exporter, _ = phoenix
+    hits = [
+        {"text": f"passage {i} of the caller", "source": "ada.pdf", "page": i, "score": float(i)}
+        for i in range(15)
+    ]
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"topk": hits}
+
+    monkeypatch.setattr(retrieval._session, "post", lambda *args, **kwargs: Response())
+
+    retrieval.colbert_search("late interaction", sources=["ada.pdf"])
+
+    span = next(span for span in exporter.get_finished_spans() if span.name == "colbert_search")
+    assert span.attributes["retrieval.documents.9.document.id"] == "ada.pdf p9"
+    assert "retrieval.documents.10.document.id" not in span.attributes
+    assert "passage 10 of the caller" not in _span_text(span)

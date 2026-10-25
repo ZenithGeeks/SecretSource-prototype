@@ -27,3 +27,8 @@ arize-phoenix-otel>=0.17  # LLM traces to Phoenix (app/tracing.py), only used wh
 openinference-instrumentation-dspy>=0.1.48
 openinference-instrumentation-google-adk>=1.0
 opentelemetry-instrumentation-threading  # carries a trace into ThreadPoolExecutor threads
+# openinference.semconv. The distribution name is openinference-semantic-conventions.
+# 0.2 may rename the retriever-span attributes. google-adk allows opentelemetry-api up to
+# 1.44; arize-phoenix-otel 0.17.2 needs 1.45, which does not install beside that cap.
+openinference-semantic-conventions>=0.1.42,<0.2
+opentelemetry-api>=1.44,<1.45

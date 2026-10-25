@@ -37,7 +37,7 @@ class FakeStore:
         self.encoder = FakeEncoder()
         self.added: list[str] = []
 
-    def search(self, query, k=10, source=None):
+    def search(self, query, k=10, source=None, sources=None):
         self.last_k = k
         # The query can ask for a long passage, several hits, or a chosen top score.
         # "index size" stays the one strong hit the older tests expect.
@@ -65,7 +65,17 @@ class FakeStore:
             }
             for i in range(count)
         ]
-        return [hit for hit in hits if source in (None, hit["source"])][:k]
+        if sources is not None and source is not None:
+            allowed = {source} if source in sources else set()
+        elif sources is not None:
+            allowed = set(sources)
+        elif source is not None:
+            allowed = {source}
+        else:
+            allowed = None
+        if allowed is not None:
+            hits = [hit for hit in hits if hit["source"] in allowed]
+        return hits[:k]
 
     def add_pdf(self, path):
         self.added.append(str(path))
@@ -76,18 +86,27 @@ class FakeStore:
 
 
 class McpClient:
-    """Sends JSON-RPC requests to /mcp/, the way an agent's McpToolset does."""
+    """Sends JSON-RPC requests to /mcp/, the way an agent's McpToolset does.
 
-    def __init__(self, http: TestClient):
+    `scope` is the X-Paper-Scope header: the file names this caller may read. The fixture
+    names the one paper the fake store holds, which is what the older tests search. A client
+    built with scope None sends no header, and the tool then returns nothing.
+    """
+
+    def __init__(self, http: TestClient, scope: list[str] | None = None):
         self.http = http
+        self.scope = scope
         self.next_id = 0
 
     def request(self, method: str, params: dict | None = None) -> dict:
         self.next_id += 1
+        headers = {"Accept": "application/json, text/event-stream"}
+        if self.scope is not None:
+            headers["x-paper-scope"] = json.dumps(self.scope)
         response = self.http.post(
             "/mcp/",
             json={"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params or {}},
-            headers={"Accept": "application/json, text/event-stream"},
+            headers=headers,
         )
         response.raise_for_status()
         return response.json()["result"]
@@ -123,4 +142,4 @@ def client(server):
 
 @pytest.fixture(scope="module")
 def mcp(client):
-    return McpClient(client)
+    return McpClient(client, scope=["colbertv2.pdf"])

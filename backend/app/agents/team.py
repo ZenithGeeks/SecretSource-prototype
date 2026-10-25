@@ -2,9 +2,10 @@
 
 A coordinator sends requests to three specialists: rag_agent (answers from indexed
 papers, adds new PDFs), paper_agent (claims, citations, fetching cited papers), and
-verify_agent (checks whether a cited paper supports a claim). The ColBERT/ColPali
-services also offer MCP at /mcp. We attach it to rag_agent, so external MCP clients
-and this tree share one set of tools.
+verify_agent (checks whether a cited paper supports a claim). rag_agent answers and
+searches only the papers the caller may open. ColBERT's own MCP endpoint does not know
+who is calling, so the agent does not use it: an unscoped search there would return
+other people's passages.
 
 A request that one specialist owns is handed over whole with transfer_to_agent. A claim to
 check against several papers is not: the coordinator calls check_claim once per paper in
@@ -20,14 +21,8 @@ import functools
 
 from google.adk.agents import LlmAgent
 from google.adk.tools import load_memory
-from google.adk.tools.mcp_tool import (
-    McpToolset,
-    StreamableHTTPConnectionParams,
-)
 from pydantic import BaseModel, Field
 
-from app.clients.service_auth import mcp_http_client_factory
-from app.config import COLBERT_URL
 from app.llm import adk_model
 from app.pipeline import claims, rag, sources, verify
 
@@ -49,21 +44,9 @@ extract_claims = off_the_loop(claims.extract_claims)
 extract_claims_with_citations = off_the_loop(claims.extract_claims_with_citations)
 add_paper = off_the_loop(rag.add_paper)
 answer_from_docs = off_the_loop(rag.answer_from_docs)
+search_passages = off_the_loop(rag.search_passages)
 fetch_source = off_the_loop(sources.fetch_source)
 verify_claim = off_the_loop(verify.verify_claim)
-
-# The retrieval service's own MCP endpoint. The HTTP client uses the same tools.
-# The agent calls them directly, so the agent and external MCP clients share one set.
-colbert_mcp = McpToolset(
-    # Trailing slash on purpose: /mcp gives a 307 redirect. The MCP client does not
-    # follow it. The redirect drops the Authorization header.
-    connection_params=StreamableHTTPConnectionParams(
-        url=f"{COLBERT_URL}/mcp/",
-        # Signs each request, including tool listing with no context (A2A agent card, adk web).
-        httpx_client_factory=mcp_http_client_factory(COLBERT_URL),
-    ),
-    tool_filter=["search_passages"],
-)
 
 rag_agent = LlmAgent(
     name="rag_agent",
@@ -71,13 +54,14 @@ rag_agent = LlmAgent(
     model=adk_model(),
     instruction=(
         "For questions: use answer_from_docs, reply with its answer in 1-2 sentences.\n"
-        "To inspect raw passages: use search_passages. It returns short snippets; pass full_text "
-        "true only when you need a whole passage.\n"
+        "It reads only this person's papers. If sources is empty, say their papers do not answer.\n"
+        "To inspect raw passages: use search_passages. It searches only this person's papers "
+        "and returns short snippets; pass full_text true only when you need a whole passage.\n"
         "If low_confidence is true, the best match is weak: say so, and do not quote it as support.\n"
         "To add a paper: use add_paper with the PDF path, then confirm how many passages were added.\n"
         "If status is error, say so briefly."
     ),
-    tools=[answer_from_docs, add_paper, colbert_mcp],
+    tools=[answer_from_docs, add_paper, search_passages],
 )
 
 paper_agent = LlmAgent(

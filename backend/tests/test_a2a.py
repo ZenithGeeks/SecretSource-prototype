@@ -1,7 +1,6 @@
 """The A2A server publishes the coordinator: its agent card names it and its specialists.
 
-The card lists every agent's tools, which for rag_agent means asking ColBERT's MCP endpoint.
-The test gives that toolset no tools, so it makes no network call.
+rag_agent's tools are local functions, so building the card makes no call to ColBERT.
 """
 
 import a2a_server
@@ -11,11 +10,7 @@ from starlette.testclient import TestClient
 
 
 @pytest.fixture
-def card(monkeypatch):
-    async def no_tools(readonly_context=None):
-        return []
-
-    monkeypatch.setattr(team.colbert_mcp, "get_tools", no_tools)
+def card():
     with TestClient(a2a_server.app) as client:
         response = client.get("/.well-known/agent-card.json")
     response.raise_for_status()

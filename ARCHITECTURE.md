@@ -246,7 +246,7 @@ flowchart TD
     C -.->|"transfer_to_agent"| PA["paper_agent"]
     C -.->|"transfer_to_agent"| VA["verify_agent"]
     C -->|"one call per paper,<br/>same turn"| CC["check_claim<br/>single_turn"]
-    RA --> RT["answer_from_docs, add_paper,<br/>search_passages (ColBERT over MCP)"]
+    RA --> RT["answer_from_docs, add_paper,<br/>search_passages (this person's papers)"]
     PA --> PT["extract_claims, extract_citations,<br/>extract_claims_with_citations, fetch_source"]
     VA --> VT["verify_claim"]
     CC --> VT
@@ -311,7 +311,7 @@ flowchart LR
 | A coordinator that routes to sub-agents | `team.py` |
 | A single-turn sub-agent called as a tool, several at once | `team.py`: `check_claim` |
 | Shared session state | `workflow.py` |
-| MCP tools | `team.py`: ColBERT's `search_passages` over MCP |
+| Scoped passage search | `team.py`: `search_passages` reads `papers_of`, not ColBERT's MCP tool |
 | Parallel workers in a graph | `workflow.py`: `prepare_sources`, `check_sources` |
 | A2A server | `backend/a2a_server.py` |
 
@@ -475,9 +475,11 @@ what each dashboard shows.
 
 There are two ways for other programs to use SecretSource.
 
-- **MCP** gives access to single tools. ColBERT and ColPali serve MCP at `/mcp/`. A client
-  calls a tool such as `search_passages` and gets the result. Keep the trailing slash:
-  `/mcp` without it redirects and fails.
+- **MCP** gives access to single tools. ColBERT and ColPali serve MCP at `/mcp/`. ColBERT's
+  `search_passages` returns passages only for the file names in the `X-Paper-Scope` header
+  (a JSON list). With no header it returns nothing. Keep the trailing slash: `/mcp` without
+  it redirects and fails. `rag_agent` does not call this endpoint. Its own `search_passages`
+  uses `papers_of`.
 - **A2A** gives access to the whole agent team. A client sends a task in normal language,
   and the coordinator picks the specialist.
 
