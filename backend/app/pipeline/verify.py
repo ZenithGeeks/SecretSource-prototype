@@ -475,11 +475,15 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path, judged: str =
         # to a figure, the judge read the text worse, and turned text it had found
         # insufficient into a verdict (#501). Pages are empty with VISUAL_EVIDENCE off, and
         # the Author check's judge has no figure input.
+        # A refutes is asked again too: the text refuted 4 of the 5 figure claims the chart
+        # supports (SCRUM-80). The figure can only lift a refutes to supports, so a figure call
+        # never adds a refutes.
         figure = _figure_crop(pages, source)
-        if verdict["verdict"] == "insufficient" and figure and CITED_MARK not in claim:
+        if verdict["verdict"] in ("insufficient", "refutes") and figure and CITED_MARK not in claim:
             caption = _captions([hit for hit in pages if hit.get("image")][:1])
-            verdict = _judge(claim, caption, figure)
-            verdict_from, judged_figure = "figure", figure.name
+            seen = _judge(claim, caption, figure)
+            if verdict["verdict"] == "insufficient" or seen["verdict"] == "supports":
+                verdict, verdict_from, judged_figure = seen, "figure", figure.name
         return {"status": "ok", "claim": claim, "source": source.name,
                 **verdict, "verdict_from": verdict_from, "judged_figure": judged_figure,
                 "evidence": evidence, "pages": pages,
