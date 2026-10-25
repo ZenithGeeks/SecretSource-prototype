@@ -93,10 +93,15 @@ def answer_about_paper(question: str, paper: str, path: Path) -> list[Cited]:
 
 def library_passages(question: str, papers: frozenset[str] | None = None) -> list[dict]:
     """The passages most relevant to the question, from `papers` only, or from the whole index
-    when `papers` is None (the eval scripts)."""
+    when `papers` is None (the eval scripts).
+
+    The shared index holds every user's papers, and this search is unscoped so a caller with
+    few papers can still find them. `visible` is the set the retriever span may copy text from.
+    The filter below is what the answer keeps.
+    """
     if papers is None:
         return colbert_search(question, k=LIBRARY_PASSAGES)
-    hits = colbert_search(question, k=LIBRARY_SEARCH)
+    hits = colbert_search(question, k=LIBRARY_SEARCH, visible=papers)
     return [hit for hit in hits if hit["source"] in papers][:LIBRARY_PASSAGES]
 
 

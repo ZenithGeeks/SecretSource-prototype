@@ -28,13 +28,13 @@ def events_of(question, **kwargs):
 
 
 def test_library_passages_keep_only_the_callers_papers(monkeypatch):
-    monkeypatch.setattr(assistant, "colbert_search", lambda question, k: HITS)
+    monkeypatch.setattr(assistant, "colbert_search", lambda question, k, visible=None: HITS)
     kept = assistant.library_passages("late interaction", frozenset({"ada.pdf", "ada-2.pdf"}))
     assert [hit["source"] for hit in kept] == ["ada.pdf", "ada-2.pdf"]
 
 
 def test_a_library_with_no_matching_passage_asks_no_llm(monkeypatch):
-    monkeypatch.setattr(assistant, "colbert_search", lambda question, k: HITS)
+    monkeypatch.setattr(assistant, "colbert_search", lambda question, k, visible=None: HITS)
     monkeypatch.setattr(assistant, "_answer_model", refuse)
     assert assistant.answer_from_library("late interaction", frozenset({"carol.pdf"})) == []
 

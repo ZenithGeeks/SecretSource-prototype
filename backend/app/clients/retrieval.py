@@ -12,6 +12,7 @@ be on another machine or on Cloud Run.
 import json
 import threading
 import time
+from collections.abc import Collection
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -27,6 +28,11 @@ from app.config import COLBERT_URL, COLPALI_URL
 
 # A no-op until app/tracing.py registers Phoenix in this process.
 tracer = trace.get_tracer(__name__)
+
+# A library search asks the shared index for 100 hits and only then keeps the caller's
+# papers. Copying every hit onto the span would put other people's passages on the trace,
+# and a Phoenix Cloud endpoint sends that span off-box. Ten covers what an answer keeps.
+MAX_TRACED_DOCUMENTS = 10
 
 # One session for every call, so connections to Cloud Run are reused instead of a new TLS
 # handshake each time. One retry for a refused connection or a 502/503/504, which is what a
@@ -64,22 +70,50 @@ def _retriever_span(name: str, query: str, source: str | None):
     return tracer.start_as_current_span(name, attributes=attributes)
 
 
-def _record_hits(span: trace.Span, hits: list[dict]) -> None:
-    """Put the hits on the span as retrieval documents, which Phoenix lists in rank order."""
+def _papers_we_may_trace(source: str | None, visible: Collection[str] | None) -> frozenset[str] | None:
+    """Papers whose text may be copied onto a span, or None when the caller named none.
+
+    A search limited to `source` may record that paper. `visible` is the caller's own papers,
+    for a search of the shared index. With neither, the caller has not said which papers they
+    may read, so no passage text is recorded.
+    """
+    if source is not None:
+        return frozenset({source})
+    if visible is not None:
+        return frozenset(visible)
+    return None
+
+
+def _record_hits(span: trace.Span, hits: list[dict], allowed: frozenset[str] | None) -> None:
+    """Put the hits the caller may read on the span, at most MAX_TRACED_DOCUMENTS of them.
+
+    Phoenix lists retrieval documents in rank order. Passage text and figure captions are
+    copied only for `allowed` papers; any other hit stays off the span. When `allowed` is
+    None, the span gets ids and scores only.
+    """
     if not span.is_recording():
         return
-    for i, hit in enumerate(hits):
-        prefix = f"{SpanAttributes.RETRIEVAL_DOCUMENTS}.{i}."
-        where = f"{hit.get('source', '')} p{hit.get('page', '')}"
-        # ColPali hits are figures and pages: their text is the caption, when there is one.
-        text = hit.get("text") or hit.get("caption") or ""
-        span.set_attribute(prefix + DocumentAttributes.DOCUMENT_ID, where)
-        span.set_attribute(prefix + DocumentAttributes.DOCUMENT_CONTENT, text)
+    recorded = 0
+    for hit in hits:
+        if recorded >= MAX_TRACED_DOCUMENTS:
+            break
+        name = hit.get("source") or ""
+        if allowed is not None and name not in allowed:
+            continue
+        prefix = f"{SpanAttributes.RETRIEVAL_DOCUMENTS}.{recorded}."
+        span.set_attribute(prefix + DocumentAttributes.DOCUMENT_ID, f"{name} p{hit.get('page', '')}")
+        if allowed is not None:
+            # ColPali hits are figures and pages: their text is the caption, when there is one.
+            text = hit.get("text") or hit.get("caption") or ""
+            span.set_attribute(prefix + DocumentAttributes.DOCUMENT_CONTENT, text)
         if "score" in hit:
             span.set_attribute(prefix + DocumentAttributes.DOCUMENT_SCORE, float(hit["score"]))
+        recorded += 1
 
 
-def colbert_search(query: str, k: int = 10, source: str | None = None) -> list[dict]:
+def colbert_search(
+    query: str, k: int = 10, source: str | None = None, *, visible: Collection[str] | None = None
+) -> list[dict]:
     body = {"query": query, "k": k}
     if source is not None:
         body["source"] = source
@@ -92,7 +126,7 @@ def colbert_search(query: str, k: int = 10, source: str | None = None) -> list[d
         )
         response.raise_for_status()
         hits = response.json()["topk"]
-        _record_hits(span, hits)
+        _record_hits(span, hits, _papers_we_may_trace(source, visible))
     return hits
 
 
@@ -155,7 +189,9 @@ def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
     response.raise_for_status()
 
 
-def colpali_search(query: str, k: int = 20, source: str | None = None) -> dict:
+def colpali_search(
+    query: str, k: int = 20, source: str | None = None, *, visible: Collection[str] | None = None
+) -> dict:
     body = {"query": query, "k": k}
     if source is not None:
         body["source"] = source
@@ -168,5 +204,5 @@ def colpali_search(query: str, k: int = 20, source: str | None = None) -> dict:
         )
         response.raise_for_status()
         result = response.json()
-        _record_hits(span, result["topk"])
+        _record_hits(span, result["topk"], _papers_we_may_trace(source, visible))
     return result
