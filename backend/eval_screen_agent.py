@@ -559,4 +559,8 @@ async def main(runs: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--runs", type=int, default=2)
-    asyncio.run(main(parser.parse_args().runs))
+    parser.add_argument("--role", choices=sorted(screen.ROLE_AGENTS), help="run only this role's tasks")
+    args = parser.parse_args()
+    if args.role:
+        TASKS[:] = [task for task in TASKS if task.role == args.role]
+    asyncio.run(main(args.runs))
