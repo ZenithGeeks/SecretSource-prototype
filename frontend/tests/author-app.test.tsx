@@ -187,9 +187,10 @@ describe('AuthorApp', () => {
 
     fireEvent.click(within(approve).getByRole('button', { name: 'Switch' }))
     await waitFor(() => expect(onSwitchRole).toHaveBeenCalledWith('researcher'))
-    await waitFor(() =>
-      expect(agent.posts[2].body).toEqual({ id: 'c2', name: 'switch_role', result: { status: 'switched', role: 'researcher' }, role: 'writer' }),
-    )
+    // The Author's run ends at the switch: nothing more is sent to the Author's agent.
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Approve this change' })).toBeNull())
+    expect(agent.posts).toHaveLength(2)
+    expect(agent.streams).toHaveLength(1)
   })
 
   test('read_screen sees the drafts, citations, projects and buttons on Home, the Library and a project', async () => {

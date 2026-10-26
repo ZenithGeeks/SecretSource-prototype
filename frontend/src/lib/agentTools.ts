@@ -38,6 +38,9 @@ export type ToolContext = {
 // app's id for the Author role is "writer".
 const AGENT_ROLES: Record<string, AgentRole> = { researcher: 'researcher', labeler: 'labeler', author: 'writer' }
 
+/** The app's role for a name the agent gave; own keys only, so "constructor" is not a role. */
+const agentRole = (name: string): AgentRole | undefined => (Object.hasOwn(AGENT_ROLES, name) ? AGENT_ROLES[name] : undefined)
+
 export type ToolCall = { id: string; name: string; args: Record<string, unknown> }
 export type ToolResult = Record<string, unknown>
 
@@ -81,7 +84,7 @@ export function describeTool(call: ToolCall): string {
     case 'fill_field':
       return `Filling in: “${args.text}”`
     case 'switch_role': {
-      const role = AGENT_ROLES[args.role]
+      const role = agentRole(args.role)
       return `Switching to ${role ? ROLE_INFO[role].label : args.role}`
     }
     default:
@@ -129,7 +132,7 @@ async function fillField(target: string, text: string, { point, confirm }: ToolC
 /** Opens another role's app after the person presses Switch. The current role's app, and this
  * Do it conversation with it, close. */
 async function switchRole(name: string, reason: string, { actions, confirm }: ToolContext): Promise<ToolResult> {
-  const role = AGENT_ROLES[name]
+  const role = agentRole(name)
   if (!role) return { status: 'error', message: `there is no role ${name}; roles: ${Object.keys(AGENT_ROLES).join(', ')}` }
   if (role === (actions.role ?? 'researcher')) return { status: 'error', message: `the person is already in the ${name} role` }
   if (!actions.switchRole) return { status: 'error', message: 'this screen cannot switch roles; tell the person to use the role menu' }

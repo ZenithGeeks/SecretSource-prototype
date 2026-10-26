@@ -69,7 +69,19 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
   useEffect(() => {
     latest.current = actions
   })
-  const add = (line: AgentLine) => setLines((all) => [...all, line])
+  // Leaving the screen (a role switch closes the whole role app) stops the run: no more tool
+  // calls, no more posts, and a change waiting for Apply is cancelled.
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+      controller.current?.abort()
+    }
+  }, [])
+  const add = (line: AgentLine) => {
+    if (alive.current) setLines((all) => [...all, line])
+  }
 
   /**
    * The events of one stream; returns the tool call it ended on, if any. The "session" event
@@ -90,7 +102,7 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
           break
         case 'agent':
           if (event.state === 'working') add({ kind: 'delegation', name: event.name, task: event.task ?? '', state: 'working' })
-          else setLines((all) => settle(all, event.name, event.state))
+          else if (alive.current) setLines((all) => settle(all, event.name, event.state))
           break
         case 'say':
           add({ kind: 'agent', text: event.text })
@@ -109,18 +121,20 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     const abort = (controller.current = new AbortController())
     add({ kind: 'person', text: message })
     setRunning(true)
+    // A change waits for the person until they answer, or until Stop or leaving the screen
+    // aborts the run, which answers Cancel.
     const confirm = ({ kind, label, text }: Change) =>
-      new Promise<boolean>((resolve) =>
-        setPending({
-          kind,
-          label,
-          text,
-          answer: (apply) => {
-            setPending(null)
-            resolve(apply)
-          },
-        }),
-      )
+      new Promise<boolean>((resolve) => {
+        if (abort.signal.aborted) return resolve(false)
+        const answer = (apply: boolean) => {
+          abort.signal.removeEventListener('abort', cancel)
+          if (alive.current) setPending(null)
+          resolve(apply)
+        }
+        const cancel = () => answer(false)
+        abort.signal.addEventListener('abort', cancel, { once: true })
+        setPending({ kind, label, text, answer })
+      })
     try {
       // Each message starts a new agent session, so the agent never acts on a screen it saw messages ago.
       const { role, screen } = latest.current
@@ -128,6 +142,9 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
       while (call && !abort.signal.aborted) {
         add({ kind: 'step', text: describeTool(call) })
         const result = await runTool(call, { actions: latest.current, point, confirm })
+        // After a switch this role's agent is done: the person's next message goes to the new
+        // role's agent in a new session, so the result is not sent back for another turn here.
+        if (abort.signal.aborted || result.status === 'switched') break
         // The role whose agent made the call, so its result goes back to that agent.
         const body = { id: call.id, name: call.name, result, role }
         call = await stream(`/agent/runs/${encodeURIComponent(session.current ?? '')}/results`, body, abort.signal)
@@ -135,16 +152,17 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     } catch (error) {
       if ((error as Error).name !== 'AbortError') add({ kind: 'error', text: 'The agent could not be reached. Try again.' })
     } finally {
-      setRunning(false)
-      setPending(null)
-      // A hand-over still open when the run ends was cut off by Stop or a lost connection.
-      setLines((all) => settle(all, null, 'stopped'))
+      if (alive.current) {
+        setRunning(false)
+        setPending(null)
+        // A hand-over still open when the run ends was cut off by Stop or a lost connection.
+        setLines((all) => settle(all, null, 'stopped'))
+      }
     }
   }
 
   function stop() {
-    controller.current?.abort()
-    pending?.answer(false)
+    controller.current?.abort() // also answers Cancel to a change waiting for the person
   }
 
   return { lines, running, pending, send, stop }
