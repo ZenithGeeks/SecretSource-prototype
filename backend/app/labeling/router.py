@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from app import auth, config
@@ -42,6 +42,7 @@ from app.labeling.schema import (
     ScopusAddIn,
     TopicIn,
     UploadShareIn,
+    VenueRank,
     current,
 )
 from app.pipeline import verify
@@ -289,6 +290,7 @@ async def pool_state(
         doi_of: dict[str, str] = {}  # analysis id -> DOI, for the subject and keywords below
         uploaded = pool.uploaded_dois()
         sharers = pool.shared_by()
+        ranks = pool.venue_ranks()
         for analysis_id, topic in pool.pooled().items():
             row = main.lookup(analysis_id)
             if not row:
@@ -317,6 +319,8 @@ async def pool_state(
                     "reason": reason if status == "error" else "",
                     "mine": row.get("owner") == user,
                     "added_by": sharers.get(analysis_id, ""),
+                    "venue_rank": ranks.get(analysis_id, ("", ""))[0],
+                    "venue_rank_source": ranks.get(analysis_id, ("", ""))[1],
                 }
             )
         subjects = scopus.subjects_of(list(doi_of.values()))
@@ -351,8 +355,12 @@ async def set_paper_topic(
     if body.topic:
         _paper_id(analysis)
     _store()
+    rank = None  # keeps the rank it was listed with before
+    doi = scopus.doi_in(str(analysis.get("paper", "")))
+    if body.topic and doi and analysis["id"] not in await asyncio.to_thread(pool.venue_ranks):
+        rank = await asyncio.to_thread(_venue_rank, doi)
     await asyncio.to_thread(
-        pool.assign, who, "paper", analysis["id"], body.topic, analysis.get("owner") or ""
+        pool.assign, who, "paper", analysis["id"], body.topic, analysis.get("owner") or "", "", rank
     )
     return {"analysis_id": analysis["id"], "topic": body.topic}
 
@@ -377,8 +385,10 @@ async def retry_paper(
     started = main._start(analysis["paper"], True, user)
     # An uploaded paper's analysis only knows its file, so its DOI moves to the new one.
     doi = (await asyncio.to_thread(pool.uploaded_dois)).get(analysis["id"], "")
+    venue_rank, source = (await asyncio.to_thread(pool.venue_ranks)).get(analysis["id"], ("", ""))
+    rank = {"venue_rank": venue_rank, "venue_rank_source": source}
     # The new analysis is listed before the failed one leaves, so the paper never disappears.
-    await asyncio.to_thread(pool.assign, who, "paper", started["id"], topic, user or "", doi)
+    await asyncio.to_thread(pool.assign, who, "paper", started["id"], topic, user or "", doi, rank)
     await asyncio.to_thread(pool.assign, who, "paper", analysis["id"], "", analysis.get("owner") or "")
     return {"id": started["id"]}
 
@@ -420,7 +430,8 @@ async def share_upload(
     if listed and listed != body.replaces:
         raise HTTPException(409, "that paper is already on the list; upload its PDF from its row there")
     _store()
-    await asyncio.to_thread(pool.assign, who, "paper", analysis["id"], topic, user or "", doi)
+    rank = await asyncio.to_thread(_venue_rank, doi) if doi else None
+    await asyncio.to_thread(pool.assign, who, "paper", analysis["id"], topic, user or "", doi, rank)
     if body.replaces:
         await asyncio.to_thread(pool.assign, who, "paper", body.replaces, "", user or "")
     return {"id": analysis["id"]}
@@ -432,6 +443,16 @@ def _paper_doi(main, analysis_id: str, uploaded: dict[str, str]) -> str:
     which can read the store, so callers run this off the event loop."""
     paper = str((main.lookup(analysis_id) or {}).get("paper", ""))
     return (uploaded.get(analysis_id) or scopus.doi_in(paper) or "").lower()
+
+
+def _venue_rank(doi: str) -> dict[str, str]:
+    """The rank columns of a paper being listed; empty when Scopus is not set up or fails, so a
+    missing rank never stops a paper being listed."""
+    try:
+        return pool.rank_columns(scopus.rank_of(doi))
+    except (scopus.NotConfigured, requests.RequestException) as error:
+        log.warning("no venue rank for %s: %s", doi, type(error).__name__)
+        return pool.rank_columns(None)
 
 
 def _doi_in_pool(main, doi: str) -> str | None:
@@ -455,14 +476,17 @@ async def scopus_search(
     sort: str = "cited",
     page: int = 0,
     scope: scopus.Scope = "topic",
+    rank: list[VenueRank] = Query([]),
     _who: str = Depends(annotator),
 ):
     """One page of open-access papers from Scopus, with the total and each abstract.
 
     `scope` is "topic" for the topic's venues or "all" for every venue; a DOI or paper link in
     `q` finds that paper. The topic is still checked: an added paper is filed under it. Each
-    paper says whether it is already listed, and whether its PDF can be downloaded: true,
-    false, or null when that could not be checked. A failure says why: the page shows it.
+    paper says whether it is already listed, whether its PDF can be downloaded (true, false, or
+    null when that could not be checked) and its venue `rank` (null when that could not be looked
+    up). `rank`, given once or more, keeps only papers with one of those venue ranks; `hidden`
+    is how many on this page it left out. A failure says why: the page shows it.
     """
     from app import main
 
@@ -472,7 +496,9 @@ async def scopus_search(
         raise HTTPException(422, f"sort must be one of {', '.join(scopus.SORTS)}")
     try:
         start = max(page, 0) * scopus.PAGE
-        found = await asyncio.to_thread(scopus.search, topic, q, since, until, sort, start, scope)
+        found = await asyncio.to_thread(
+            scopus.search, topic, q, since, until, sort, start, scope, frozenset(rank)
+        )
     except scopus.NotConfigured as error:
         raise HTTPException(503, f"Scopus is not set up: {error}") from error
     except requests.Timeout as error:
@@ -501,7 +527,7 @@ async def scopus_search(
         }
         for paper in found["results"]
     ]
-    return {"total": found["total"], "results": papers}
+    return {"total": found["total"], "results": papers, "hidden": found["hidden"]}
 
 
 @router.post("/scopus/add")
@@ -515,9 +541,10 @@ async def scopus_add(
     existing = await asyncio.to_thread(_doi_in_pool, main, body.doi)
     if existing:
         return {"id": existing, "existing": True}
+    rank = await asyncio.to_thread(_venue_rank, body.doi)
     # On the event loop, as POST /analyses does: _start schedules its save with create_task (#397).
     started = main._start(body.doi, True, user)
-    await asyncio.to_thread(pool.assign, who, "paper", started["id"], body.topic, user or "")
+    await asyncio.to_thread(pool.assign, who, "paper", started["id"], body.topic, user or "", "", rank)
     return {"id": started["id"], "existing": False}
 
 
@@ -810,6 +837,18 @@ def _account(row: dict) -> str:
     return row.get("annotator_id") or row.get("annotator", "")
 
 
+def _venue_ranks_by_paper() -> dict[str, tuple[str, str]]:
+    """paper_id -> (venue_rank, venue_rank_source) of every listed paper with a rank."""
+    from app import main
+
+    found = {}
+    for analysis_id, rank in pool.venue_ranks().items():
+        row = main.lookup(analysis_id)
+        if row and row.get("file"):
+            found[Path(row["file"]).stem] = rank
+    return found
+
+
 @router.get("/export")
 async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Depends(labeler_id)):
     """The current rows of one tab as CSV: the latest row per key, without what a person later
@@ -842,8 +881,16 @@ async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Dep
         rows = [r for r in rows if (r["claim_id"], r["annotator_id"]) not in rejected]
     if tab == "candidates":
         rows = [r for r in rows if not (r["origin"] == "human_added" and r["status"] == "rejected")]
+    columns = TABS[tab]
+    if tab == "labels":
+        # The paper's venue rank from when it was listed, for the thesis table (SCRUM-445).
+        ranks = await asyncio.to_thread(_venue_ranks_by_paper)
+        columns = [*columns, "venue_rank", "venue_rank_source"]
+        rows = [
+            {**r, **dict(zip(columns[-2:], ranks.get(r["paper_id"], ("", "")), strict=True))} for r in rows
+        ]
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=TABS[tab], extrasaction="ignore")
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
     writer.writerows(rows)
     return Response(

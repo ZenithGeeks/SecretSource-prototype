@@ -59,15 +59,42 @@ def uploaded_dois() -> dict[str, str]:
     return {r["key"]: r["doi"] for r in rows() if r["kind"] == "paper" and r["topic"] and r.get("doi")}
 
 
-def assign(who: str, kind: str, key: str, topic: str, owner: str = "", doi: str = "") -> None:
+def venue_ranks() -> dict[str, tuple[str, str]]:
+    """analysis id -> (venue_rank, venue_rank_source), for every paper listed with a rank."""
+    return {
+        r["key"]: (r["venue_rank"], r.get("venue_rank_source", ""))
+        for r in rows()
+        if r["kind"] == "paper" and r.get("venue_rank")
+    }
+
+
+def rank_columns(rank: dict | None) -> dict[str, str]:
+    """A venue rank from scopus.venue_rank as the two assignment columns."""
+    if not rank:
+        return {"venue_rank": "", "venue_rank_source": ""}
+    source = f"{rank['system']} {rank['year']}" if rank["system"] else ""
+    return {"venue_rank": rank["value"], "venue_rank_source": source}
+
+
+def assign(
+    who: str,
+    kind: str,
+    key: str,
+    topic: str,
+    owner: str = "",
+    doi: str = "",
+    rank: dict[str, str] | None = None,
+) -> None:
     """Record `who` giving a person or a paper a topic; "" takes it back.
 
     A later row replaces an earlier one for the same key, so a row without a DOI would lose the
     one the paper was uploaded with: when none is given, the earlier row's DOI is copied over.
+    The venue rank (`rank`, from rank_columns) is copied over the same way.
     """
     global _cache
-    if kind == "paper" and not doi:
-        doi = next((r.get("doi", "") for r in rows() if r["kind"] == "paper" and r["key"] == key), "")
+    earlier = (
+        next((r for r in rows() if r["kind"] == "paper" and r["key"] == key), {}) if kind == "paper" else {}
+    )
     row = {
         "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "annotator": who,
@@ -75,7 +102,10 @@ def assign(who: str, kind: str, key: str, topic: str, owner: str = "", doi: str 
         "key": key,
         "topic": topic,
         "owner": owner,
-        "doi": doi,
+        "doi": doi or earlier.get("doi", ""),
+        "venue_rank": "",
+        "venue_rank_source": "",
+        **(rank or {k: earlier[k] for k in ("venue_rank", "venue_rank_source") if earlier.get(k)}),
     }
     ledger.get_store().append("assignments", [row])
     with _lock:

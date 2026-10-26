@@ -24,6 +24,16 @@ removed. Needs `SCOPUS_API_KEY` in the gateway's `.env` (a key from https://dev.
 page says the search is not set up. Scopus gives metadata, not PDFs, which is why the PDF is looked for
 elsewhere.
 
+Each result shows how strong its venue is. A journal gets its CiteScore quartile: the best subject
+percentile in the latest complete CiteScore year, looked up by ISSN from Elsevier's Serial Title API with the
+same key (Scopus counts the 75th-99th percentile as Q1). A conference gets its CORE rank (A*, A, B, C) from
+the ICORE2026 table at https://portal.core.edu.au/conf-ranks, written by hand next to the topic venues in
+`VENUES`; any other conference shows "unranked", because matching a proceedings title to a CORE row by
+similar words can pick the wrong conference. SJR quartiles are not used: SCImago's legal notice asks for
+written permission to reproduce its data. The rank is saved with a paper when it is listed and goes into
+the labels CSV as `venue_rank` and `venue_rank_source` (for example `Q1`, `CiteScore 2025`), so a table of
+the labeled papers by venue rank can be made from the export. Papers listed before 26 Oct 2026 have no rank.
+
 ## Working a paper
 
 1. Add the paper from Scopus (above). Its claims and the passages found for them are what the page starts

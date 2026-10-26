@@ -67,8 +67,10 @@ TABS: dict[str, list[str]] = {
 
 # Who labels which topic, and which analyses are shared with the labeling team. Not in TABS: its
 # rows have no paper_id, and the labeling flow reads every tab in TABS per paper. `doi` is set
-# for a paper whose PDF was uploaded by hand: its analysis only knows the file.
-ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner", "doi"]
+# for a paper whose PDF was uploaded by hand: its analysis only knows the file. `venue_rank`
+# ("Q1", "A*", "unranked") and `venue_rank_source` ("CiteScore 2025", "CORE 2026") are the rank of
+# the paper's venue when it was listed, empty when it could not be looked up (SCRUM-445).
+ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner", "doi", "venue_rank", "venue_rank_source"]
 # One row per AI review of a saved claim, with what it said (JSON). Not in TABS: the page never
 # shows it again; it is there so an eval can see which labels the AI may have swayed.
 REVIEWS = ["ts", "annotator", "annotator_id", "paper_id", "claim_id", "findings"]
@@ -83,6 +85,8 @@ KEYS: dict[str, tuple[str, ...]] = {
 }
 
 Topic = Literal["CV", "NLP", "SE", "HPC", ""]  # "" takes the topic back
+# A venue's rank: a journal's CiteScore quartile or a conference's CORE rank (scopus.venue_rank).
+VenueRank = Literal["Q1", "Q2", "Q3", "Q4", "A*", "A", "B", "C", "unranked"]
 TOPICS = [t for t in get_args(Topic) if t]
 
 
