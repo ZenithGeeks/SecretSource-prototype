@@ -1,0 +1,11 @@
+earlier,question,expected,kind
+How does ColBERTv2 compress its index?,How big is its index on MS MARCO?,2112.01488.pdf|2205.09707.pdf,follow-up
+What is RocketQA?,How does it choose hard negatives?,2010.08191.pdf|10.18653-v1-2021.naacl-main.466.pdf,follow-up
+What does the SciFact dataset contain?,Who wrote those claims?,2004.14974.pdf|arXiv-2004.14974.pdf,follow-up
+How does Qwen2-VL encode the positions of image tokens?,How many frames per second does it sample from a video?,2409.12191.pdf,follow-up
+What loss does SigLIP use?,Why does it need less memory than the softmax one?,10.48550-ARXIV.2303.15343.pdf,follow-up
+What benchmark does BEIR propose?,Which model does best on it?,2104.08663.pdf,follow-up
+How does ColBERT score a passage?,What does the SciFact dataset contain?,2004.14974.pdf|arXiv-2004.14974.pdf,topic change
+What is RocketQA?,How does Qwen2-VL handle video input?,2409.12191.pdf,topic change
+How does ColBERTv2 compress its index?,What about the index size on MS MARCO?,2112.01488.pdf|2205.09707.pdf,follow-up
+What is RocketQA?,Why does SigLIP say its sigmoid loss needs less memory?,10.48550-ARXIV.2303.15343.pdf,topic change
