@@ -490,7 +490,8 @@ export function AssistantPanel({
                     Opening this chat…
                   </p>
                 )}
-                {turns.length === 0 && !assistant.opening && (
+                {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
+                {turns.length === 0 && !assistant.opening && !assistant.openFailed && (
                   <MotionConfig reducedMotion="user">
                     <AskWelcome
                       role={role}

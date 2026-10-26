@@ -211,6 +211,19 @@ describe('reopening Ask after a refresh', () => {
     expect(loadAskChat('someone-else')).toBe('their-chat')
   })
 
+  it('keeps the saved chat and says so when the gateway does not answer', async () => {
+    saveAskChat('user-a', 'chat-a')
+    saveAskOpen('user-a', true)
+    const answer = vi.mocked(fetch).getMockImplementation() ?? (() => Promise.reject(new Error('no fetch stub')))
+    vi.mocked(fetch).mockImplementation(async (input, init) =>
+      String(input).endsWith('/assistant/chats/chat-a') ? new Response('asleep', { status: 503 }) : answer(input, init),
+    )
+    renderAsk()
+
+    expect(await screen.findByText('This chat could not be opened.')).toBeInTheDocument()
+    expect(loadAskChat('user-a')).toBe('chat-a')
+  })
+
   it('does not open the previous account’s chat for the next person', async () => {
     saved.set('chat-a', [
       { role: 'user', text: 'How much smaller is the ColBERTv2 index?' },

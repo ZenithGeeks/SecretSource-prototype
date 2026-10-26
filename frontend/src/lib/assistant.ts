@@ -140,6 +140,7 @@ export function useAssistant() {
   const [turns, setTurns] = useState<Turn[]>([])
   // True while a saved chat is being read, so the empty welcome does not flash first.
   const [opening, setOpening] = useState(() => loadAskChat(userId) !== null)
+  const [openFailed, setOpenFailed] = useState(false)
   // Kept here, not in the panel, so a half-typed question survives the panel remounting
   // (Graph's Details | Ask tabs).
   const [draft, setDraft] = useState('')
@@ -240,6 +241,7 @@ export function useAssistant() {
       setChatId(id)
       setTurns([])
       setOpening(false)
+      setOpenFailed(false)
       if (hydrated.current) saveAskChat(userId, id)
     },
     [stop, userId],
@@ -258,11 +260,12 @@ export function useAssistant() {
         const loaded = await loadChat(id)
         if (generation.current !== mine || chat.current !== id) return
         setTurns(loaded)
-      } catch {
-        // A 404 or any failed load: forget the id and show a new chat. The reader's other
-        // account, if one is stored beside this one, is left as it is.
+      } catch (error) {
         if (generation.current !== mine || chat.current !== id) return
-        showChat(null)
+        // A chat the server no longer has is forgotten, and a new chat shows. Any other failure
+        // (the gateway asleep, the network) keeps the id, so the next refresh tries it again.
+        if ((error as Error).message.startsWith('404')) showChat(null)
+        else setOpenFailed(true)
       } finally {
         if (generation.current === mine && chat.current === id) setOpening(false)
       }
@@ -283,7 +286,7 @@ export function useAssistant() {
     }
   }, [openChat, showChat, userId])
 
-  return { chatId, turns, answering, opening, draft, setDraft, ask, run, refuse, stop, newChat, openChat }
+  return { chatId, turns, answering, opening, openFailed, draft, setDraft, ask, run, refuse, stop, newChat, openChat }
 }
 
 export type Assistant = ReturnType<typeof useAssistant>
