@@ -8,7 +8,7 @@
 # See deploy/ss-core/README.md. No checkout: nothing from this job's workspace is deployed.
 #
 # Self-hosted, so it uses no GitHub-hosted minutes. It can wait up to 45 minutes for a running
-# analysis to finish, and CI jobs queue behind it on the one runner while it does.
+# analysis to finish, and CI jobs queue behind it on ss-core's runner while it does (nas-ci takes them meanwhile).
 name: deploy-worker
 
 on:
@@ -27,7 +27,8 @@ concurrency:
 
 jobs:
   worker:
-    runs-on: [self-hosted, ci]
+    # ss-core only: the NAS runner (nas-ci) also has the ci label but has no deploy script.
+    runs-on: [self-hosted, ss-core]
     timeout-minutes: 75
     steps:
       - name: Deploy this commit to the worker
