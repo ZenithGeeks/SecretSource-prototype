@@ -17,6 +17,7 @@ import {
   useScopusSearch,
   useUploadPaper,
   type Pool,
+  type RankFilter,
   type ScopusPaper,
   type ScopusQuery,
   type ScopusScope,
@@ -27,6 +28,7 @@ import { GraphSegmented } from '../../researcher/components/GraphSegmented'
 import { PaperKeywords } from './PaperKeywords'
 import { TopicSelect } from './TopicSelect'
 import { UploadPdfButton } from './UploadPdfButton'
+import { VenueRankBadge } from './VenueRankBadge'
 
 const THIS_YEAR = new Date().getFullYear()
 const FIRST_YEAR = 1990
@@ -41,6 +43,12 @@ const SORTS: { key: ScopusSort; label: string }[] = [
 const SCOPES: { key: ScopusScope; label: string }[] = [
   { key: 'topic', label: 'Topic venues' },
   { key: 'all', label: 'All of Scopus' },
+]
+
+const RANKS: { key: RankFilter; label: string }[] = [
+  { key: 'any', label: 'Any' },
+  { key: 'top', label: 'Q1 / A*' },
+  { key: 'upper', label: 'Q1–Q2 / A*–A' },
 ]
 
 /** A DOI on its own or inside a paper link; the gateway then looks up only that paper. */
@@ -64,6 +72,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
     since: '2020',
     until: String(THIS_YEAR),
     sort: 'cited',
+    rank: 'any',
   })
   // The search that is showing. The form can change without searching again.
   const [query, setQuery] = useState<ScopusQuery | null>(null)
@@ -74,6 +83,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
 
   const papers = search.data?.pages.flatMap((page) => page.results) ?? []
   const total = search.data?.pages[0]?.total ?? 0
+  const hidden = search.data?.pages.reduce((sum, page) => sum + (page.hidden ?? 0), 0) ?? 0
   const set = (change: Partial<Form>) => setForm((current) => ({ ...current, ...change }))
   // A DOI search ignores words, years and venues, so the empty state's suggestions do not apply.
   const byDoi = query ? DOI.test(query.q) : false
@@ -86,7 +96,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
     // "Best match" means nothing without words, so an empty search falls back to most cited.
     const sort = next.sort === 'match' && !next.q.trim() ? 'cited' : next.sort
     setForm({ ...next, since: String(since), until: String(until) })
-    setQuery({ topic: next.topic, scope: next.scope, q: next.q.trim(), since, until, sort })
+    setQuery({ topic: next.topic, scope: next.scope, q: next.q.trim(), since, until, sort, rank: next.rank })
   }
   /** Changes the form and searches with it at once, for the empty state's suggestions. */
   const retryWith = (change: Partial<Form>) => {
@@ -173,6 +183,14 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
                 <GraphSegmented label="Order" value={form.sort} options={SORTS} onChange={(sort) => set({ sort })} />
               </div>
             </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-ink" title="Journals by CiteScore quartile, conferences by CORE rank">
+                Venue rank
+              </span>
+              <div className="flex min-h-11 items-center">
+                <GraphSegmented label="Venue rank" value={form.rank} options={RANKS} onChange={(rank) => set({ rank })} />
+              </div>
+            </div>
           </div>
         </form>
 
@@ -204,9 +222,23 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-subtle px-4 py-8 text-center">
             <SearchX className="size-5 text-ink-muted" aria-hidden="true" />
             <p className="text-sm font-medium text-ink">
-              {byDoi ? 'Scopus has no paper with that DOI.' : 'Scopus has no open-access papers for that.'}
+              {hidden > 0
+                ? `The venue rank filter hid all ${hidden} papers Scopus sent so far.`
+                : byDoi
+                  ? 'Scopus has no paper with that DOI.'
+                  : 'Scopus has no open-access papers for that.'}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
+              {hidden > 0 && search.hasNextPage && (
+                <Button variant="ghost" onClick={() => search.fetchNextPage()} disabled={search.isFetchingNextPage} className="min-h-9">
+                  Look at the next 25
+                </Button>
+              )}
+              {query && query.rank !== 'any' && (
+                <Button variant="ghost" onClick={() => retryWith({ rank: 'any' })} className="min-h-9">
+                  Any venue rank
+                </Button>
+              )}
               {query?.scope === 'topic' && !byDoi && (
                 <Button variant="ghost" onClick={() => retryWith({ scope: 'all' })} className="min-h-9">
                   Search all of Scopus
@@ -230,6 +262,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
           <section className="flex flex-col gap-2">
             <p className="text-xs text-ink-muted tabular-nums" role="status">
               {total.toLocaleString()} papers · showing {papers.length}
+              {hidden > 0 && ` · ${hidden} hidden by the venue rank filter`}
             </p>
             <ul aria-label="Scopus results" className="flex flex-col divide-y divide-border-subtle">
               {papers.map((paper, index) => (
@@ -339,7 +372,15 @@ function ResultRow({
           </Button>
         )}
       </div>
-      <PaperKeywords subject={paper.subject} keywords={paper.keywords} className={cn('mt-1.5 ml-6', unreachable && 'opacity-60')} />
+      <div className={cn('mt-1.5 ml-6 flex flex-wrap items-center gap-1', unreachable && 'opacity-60')}>
+        {paper.rank && (
+          <VenueRankBadge
+            value={paper.rank.value}
+            source={paper.rank.system ? `${paper.rank.system} ${paper.rank.year}` : ''}
+          />
+        )}
+        <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
+      </div>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div

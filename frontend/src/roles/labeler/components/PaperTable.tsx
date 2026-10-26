@@ -14,6 +14,7 @@ import { cn } from '../../../lib/utils'
 import { addedByOf, isFinished, type Paper } from '../paperFilters'
 import { PaperKeywords } from './PaperKeywords'
 import { UploadPdfButton } from './UploadPdfButton'
+import { VenueRankBadge } from './VenueRankBadge'
 
 const COLUMNS = ['Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by']
 
@@ -112,7 +113,10 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
         ) : (
           <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
         )}
-        <PaperKeywords subject={paper.subject} keywords={paper.keywords} className="mt-1.5" />
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <VenueRankBadge value={paper.venue_rank} source={paper.venue_rank_source} />
+          <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
+        </div>
         {failed && (
           <span role="alert" className="mt-1 block text-refutes">
             Could not be read: {paper.reason || 'no open PDF was found'}.{' '}

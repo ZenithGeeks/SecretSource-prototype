@@ -26,6 +26,7 @@ const paper = (n: number, extra: Partial<ScopusPaper> = {}): ScopusPaper => ({
   keywords: n === 0 ? ['event cameras', 'neuromorphic vision'] : [],
   downloadable: true,
   added: false,
+  rank: null,
   ...extra,
 })
 
@@ -135,6 +136,49 @@ describe('the Scopus search', () => {
 
     expect(await screen.findByText('1 papers · showing 1')).toBeInTheDocument()
     expect(asked[1].get('q')).toBe('')
+  })
+
+  it('tags each result with its venue rank, and nothing when the rank is not known', async () => {
+    gateway([
+      {
+        total: 3,
+        hidden: 0,
+        results: [
+          paper(0, { rank: { system: 'CiteScore', value: 'Q1', year: 2025 } }),
+          paper(1, { rank: { system: null, value: 'unranked', year: null } }),
+          paper(2),
+        ],
+      },
+    ])
+    renderSearch()
+    search()
+
+    await screen.findByText('Paper 0')
+    const rows = [0, 1, 2].map((n) => screen.getByText(`Paper ${n}`).closest('li') as HTMLElement)
+    expect(within(rows[0]).getByTitle('Venue rank Q1, CiteScore 2025')).toHaveTextContent('Q1· CiteScore 2025')
+    expect(within(rows[1]).getByText('Venue unranked')).toBeInTheDocument()
+    expect(within(rows[2]).queryByTitle(/Venue rank/)).not.toBeInTheDocument()
+  })
+
+  it('limits a search to a venue rank, says how many it hid, and offers any rank when it hid them all', async () => {
+    const asked = gateway([
+      { total: 50, hidden: 2, results: Array.from({ length: 23 }, (_, n) => paper(n)) },
+      { total: 50, hidden: 25, results: [] },
+    ])
+    renderSearch()
+    fireEvent.click(screen.getByRole('radio', { name: 'Q1 / A*' }))
+    search()
+
+    expect(await screen.findByText('50 papers · showing 23 · 2 hidden by the venue rank filter')).toBeInTheDocument()
+    expect(asked[0].getAll('rank')).toEqual(['Q1', 'A*'])
+
+    gateway([{ total: 50, hidden: 25, results: [] }, { total: 50, hidden: 0, results: [paper(0)] }])
+    fireEvent.click(screen.getByRole('radio', { name: 'Q1–Q2 / A*–A' }))
+    search()
+    expect(await screen.findByText('The venue rank filter hid all 25 papers Scopus sent so far.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Any venue rank' }))
+    expect(await screen.findByText('50 papers · showing 1')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Any' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('searches the topic venues unless asked for all of Scopus, and offers that when nothing matches', async () => {
