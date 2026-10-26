@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { Toaster } from './components/Toaster.tsx'
+import { watchForNewVersion } from './lib/newVersion.ts'
 import { applyTheme, resetSettings, updateSettings } from './lib/settings.ts'
 import { supabase } from './lib/supabase.ts'
 import { Root } from './Root.tsx'
@@ -30,6 +31,9 @@ supabase?.auth.onAuthStateChange((event) => {
     resetSettings()
   }
 })
+
+// The dev server reloads on its own; built tabs need telling about a new deploy.
+if (import.meta.env.PROD) watchForNewVersion()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
