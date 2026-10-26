@@ -1606,21 +1606,28 @@ async def verify(request: VerifyRequest, user: str | None = Depends(current_user
 
 
 @app.get("/health")
-async def health():
+async def health(request: Request):
     """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
     check at most 30 s old. `degraded` is true when a required one did not answer. `analyses` is
     how many this process is holding (running, the newest at startup, and owners loaded since),
-    not how many the store has."""
-    return {"ok": True, "analyses": len(analyses), **await asyncio.to_thread(dependencies.report)}
+    not how many the store has. A request from the internet gets only `ok` and `degraded`."""
+    report = await asyncio.to_thread(dependencies.report)
+    # Cloudflare adds this header to every request through the tunnel; LAN and tailnet callers have none.
+    if "cf-connecting-ip" in request.headers:
+        return {"ok": True, "degraded": report["degraded"]}
+    return {"ok": True, "analyses": len(analyses), **report}
 
 
 @app.get("/metrics")
-async def metrics():
+async def metrics(request: Request):
     """Prometheus text format: analysis success rate, duration, queueing, verdicts, audit
     findings, LLM token usage (app/metrics.py). Scraped by the `gateway` job in
     deploy/monitoring/prometheus.yml, behind the opt-in `monitoring` compose profile. Reads an
-    in-memory registry only, so unlike /health this needs no thread hop.
+    in-memory registry only, so unlike /health this needs no thread hop. Not served to the
+    internet (see /health).
     """
+    if "cf-connecting-ip" in request.headers:
+        raise HTTPException(404)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
