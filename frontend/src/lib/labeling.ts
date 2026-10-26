@@ -138,6 +138,56 @@ export function problem(error: unknown): { title: string; hint: string } {
   return { title: 'Something went wrong', hint: 'Try again in a moment. If it keeps happening, tell the team.' }
 }
 
+/** A venue's rank on a Scopus result (`backend/app/labeling/scopus.py` `venue_rank`).
+ *
+ * A journal is `{ system: "CiteScore", value: "Q1".."Q4", year }`. A conference in the topic
+ * list is `{ system: "CORE", value: "A*" | "A" | "B" | "C", year }` (ICORE2026). Any other
+ * conference, or a journal Scopus has no CiteScore for, is `{ system: null, value: "unranked" }`.
+ * `null` means the lookup failed, which is not the same as unranked. Missing on an older gateway. */
+export type VenueRank = {
+  system: string | null
+  value: string
+  year?: number | null
+} | null
+
+/** Values `GET /labeling/scopus/search` accepts, repeated once per `rank` parameter. */
+export type VenueRankValue = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'A*' | 'A' | 'B' | 'C' | 'unranked'
+
+export type RankFilter = 'any' | 'q1' | 'q1q2' | 'core'
+
+/** The rank filter beside the venue scope. An empty `ranks` sends no `rank` parameter. */
+export const RANK_FILTERS: { key: RankFilter; label: string; ranks: VenueRankValue[] }[] = [
+  { key: 'any', label: 'Any', ranks: [] },
+  { key: 'q1', label: 'Q1', ranks: ['Q1'] },
+  { key: 'q1q2', label: 'Q1-Q2', ranks: ['Q1', 'Q2'] },
+  { key: 'core', label: 'A*/A', ranks: ['A*', 'A'] },
+]
+
+export function ranksOf(filter: RankFilter): VenueRankValue[] {
+  return RANK_FILTERS.find((option) => option.key === filter)?.ranks ?? []
+}
+
+/** Chip text for one Scopus result. `undefined` (no field) draws nothing; `null` is a failed lookup. */
+export function venueRankLabel(rank: VenueRank | undefined): string | null {
+  if (rank === undefined) return null
+  if (rank === null) return 'Rank unavailable'
+  if (rank.value === 'unranked' || rank.system == null) return 'Conference, unranked'
+  if (rank.system === 'CORE') return `${rank.value} · CORE`
+  if (rank.system === 'CiteScore') return rank.year ? `${rank.value} · CiteScore ${rank.year}` : `${rank.value} · CiteScore`
+  return `${rank.value} · ${rank.system}`
+}
+
+/** Chip text for a pool paper. `venue_rank` is "Q1", "A*", "unranked" or "" (not stored).
+ * `source` is "CiteScore 2025" or "CORE 2026"; the chip keeps the CiteScore year and names CORE. */
+export function poolVenueRankLabel(rank: string | undefined, source: string | undefined): string | null {
+  if (!rank) return null
+  if (rank === 'unranked') return 'Conference, unranked'
+  const citeScore = /^CiteScore(?:\s+(\d{4}))?$/.exec(source ?? '')
+  if (citeScore) return venueRankLabel({ system: 'CiteScore', value: rank, year: citeScore[1] ? Number(citeScore[1]) : null })
+  if (source?.startsWith('CORE')) return venueRankLabel({ system: 'CORE', value: rank })
+  return source ? `${rank} · ${source}` : rank
+}
+
 export type ScopusPaper = {
   doi: string
   title: string
@@ -154,6 +204,8 @@ export type ScopusPaper = {
   /** Whether the analysis can download its PDF; null when that could not be checked. */
   downloadable: boolean | null
   added: boolean
+  /** How strong the venue is. Null when that could not be looked up. */
+  rank?: VenueRank
 }
 
 export type ScopusSort = 'cited' | 'newest' | 'oldest' | 'match'
@@ -161,11 +213,41 @@ export type ScopusSort = 'cited' | 'newest' | 'oldest' | 'match'
 /** Where a search looks: the topic's venues, or every venue in Scopus. */
 export type ScopusScope = 'topic' | 'all'
 
-/** One Scopus search: where it looks, optional words (or a DOI or paper link), a year range, and
- * an order. The topic is where an added paper is filed, whatever the scope. */
-export type ScopusQuery = { topic: string; scope: ScopusScope; q: string; since: number; until: number; sort: ScopusSort }
+/** One Scopus search: where it looks, optional words (or a DOI or paper link), a year range, an
+ * order, and the venue ranks to keep. The topic is where an added paper is filed, whatever the scope.
+ * An empty `ranks` does not filter. */
+export type ScopusQuery = {
+  topic: string
+  scope: ScopusScope
+  q: string
+  since: number
+  until: number
+  sort: ScopusSort
+  ranks: VenueRankValue[]
+}
 
-export type ScopusPage = { total: number; results: ScopusPaper[] }
+export type ScopusPage = {
+  total: number
+  results: ScopusPaper[]
+  /** How many papers on this page a rank filter left out. Missing on an older gateway. */
+  hidden?: number
+}
+
+/** The line under the results. A rank filter on all of Scopus only hides papers after the page
+ * comes back, so the line says how many of that page are still showing (`hidden` is the rest). */
+export function scopusResultLine(
+  total: number,
+  pages: { results: readonly unknown[]; hidden?: number }[],
+  scope: ScopusScope,
+  ranks: readonly string[],
+): string {
+  const shown = pages.reduce((count, page) => count + page.results.length, 0)
+  const count = `${total.toLocaleString()} papers · showing ${shown.toLocaleString()}`
+  if (scope !== 'all' || ranks.length === 0) return count
+  const hidden = pages.reduce((count, page) => count + (page.hidden ?? 0), 0)
+  const where = pages.length > 1 ? 'on these pages' : 'on this page'
+  return `${total.toLocaleString()} papers · showing ${shown.toLocaleString()} of ${(shown + hidden).toLocaleString()} ${where}`
+}
 
 /** A PDF for a paper the analysis could not download (see labelingApi.uploadPaper). */
 export type UploadedPaper = { file: File; topic: string; doi?: string; replaces?: string }
@@ -194,6 +276,10 @@ export type Pool = {
     /** From OpenAlex by the paper's DOI, as in a Scopus result; empty for a paper with no DOI. */
     subject: string
     keywords: string[]
+    /** "Q1", "A*", "unranked", or "" when the rank was not stored. Missing on an older gateway. */
+    venue_rank?: string
+    /** "CiteScore 2025", "CORE 2026", or "". */
+    venue_rank_source?: string
   }[]
 }
 
@@ -202,10 +288,19 @@ const putJson = (path: string, body: unknown) =>
 
 export const labelingApi = {
   pool: () => request<Pool>('/labeling/pool'),
-  scopusSearch: ({ topic, scope, q, since, until, sort }: ScopusQuery, page: number) =>
-    request<ScopusPage>(
-      `/labeling/scopus/search?${new URLSearchParams({ topic, scope, q, since: String(since), until: String(until), sort, page: String(page) })}`,
-    ),
+  scopusSearch: ({ topic, scope, q, since, until, sort, ranks }: ScopusQuery, page: number) => {
+    const params = new URLSearchParams({
+      topic,
+      scope,
+      q,
+      since: String(since),
+      until: String(until),
+      sort,
+      page: String(page),
+    })
+    for (const rank of ranks) params.append('rank', rank)
+    return request<ScopusPage>(`/labeling/scopus/search?${params}`)
+  },
   scopusAdd: (doi: string, topic: string) =>
     request<{ id: string; existing: boolean }>('/labeling/scopus/add', {
       method: 'POST',
@@ -278,8 +373,13 @@ export function useScopusSearch(query: ScopusQuery | null) {
     queryKey: ['labeling', 'scopus', query],
     queryFn: ({ pageParam }) => labelingApi.scopusSearch(query as ScopusQuery, pageParam),
     initialPageParam: 0,
-    getNextPageParam: (last, pages) =>
-      pages.reduce((shown, page) => shown + page.results.length, 0) < last.total && last.results.length ? pages.length : undefined,
+    getNextPageParam: (last, pages) => {
+      // `total` counts every Scopus hit. A rank filter on all venues hides some after the page
+      // arrives (`hidden`), and a page can come back empty when every paper on it was hidden.
+      const fetched = pages.reduce((count, page) => count + page.results.length + (page.hidden ?? 0), 0)
+      if (fetched >= last.total || (last.results.length === 0 && !(last.hidden ?? 0))) return undefined
+      return pages.length
+    },
     enabled: query !== null,
     retry: false,
     staleTime: 5 * 60_000,

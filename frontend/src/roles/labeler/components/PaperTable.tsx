@@ -9,11 +9,12 @@ import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Tras
 import type { ReactNode } from 'react'
 
 import { Badge, Button, Progress } from '../../../components/ui'
-import { problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
+import { poolVenueRankLabel, problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 import { addedByOf, isFinished, type Paper } from '../paperFilters'
 import { PaperKeywords } from './PaperKeywords'
 import { UploadPdfButton } from './UploadPdfButton'
+import { VenueRankChip } from './VenueRankChip'
 
 const COLUMNS = ['Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by']
 
@@ -83,6 +84,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   const adder = paper.added_by || 'the person who added it'
   const others = paper.labelers.filter((name) => name !== me)
   const action = isFinished(paper) ? 'Review' : paper.judged > 0 ? 'Continue' : 'Label'
+  const rankLabel = poolVenueRankLabel(paper.venue_rank, paper.venue_rank_source)
   const cell = '@4xl:table-cell @4xl:px-3 @4xl:py-3 @4xl:align-middle'
 
   return (
@@ -98,29 +100,32 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
       )}
     >
       <td className={cn(cell, 'w-full @4xl:w-auto @4xl:min-w-56 @4xl:pl-4')}>
-        {ready ? (
-          // The ::after layer stretches this button over the whole row, so a click anywhere opens it,
-          // and it draws the focus ring around the row instead of the global one around the title.
-          <button
-            type="button"
-            aria-label={`${paper.title} (${action})`}
-            onClick={() => onOpen(paper.analysis_id)}
-            className="text-left font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
-          >
-            <span className="line-clamp-2 break-words">{paper.title}</span>
-          </button>
-        ) : (
-          <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
-        )}
-        <PaperKeywords subject={paper.subject} keywords={paper.keywords} className="mt-1.5" />
-        {failed && (
-          <span role="alert" className="mt-1 block text-refutes">
-            Could not be read: {paper.reason || 'no open PDF was found'}.{' '}
-            {paper.mine ? 'Try again, upload its PDF, or remove it.' : `Only ${adder} can try again, upload its PDF or remove it.`}
-            {retry.isError && ` Trying again failed: ${problem(retry.error).title}.`}
-            {upload.isError && ` The PDF was not added: ${problem(upload.error).title}.`}
-          </span>
-        )}
+        <div className="flex min-w-0 flex-col items-start gap-1.5">
+          {ready ? (
+            // The ::after layer stretches this button over the whole row, so a click anywhere opens it,
+            // and it draws the focus ring around the row instead of the global one around the title.
+            <button
+              type="button"
+              aria-label={rankLabel ? `${paper.title}, ${rankLabel} (${action})` : `${paper.title} (${action})`}
+              onClick={() => onOpen(paper.analysis_id)}
+              className="text-left font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
+            >
+              <span className="line-clamp-2 break-words">{paper.title}</span>
+            </button>
+          ) : (
+            <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
+          )}
+          <VenueRankChip label={rankLabel} />
+          <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
+          {failed && (
+            <span role="alert" className="text-refutes">
+              Could not be read: {paper.reason || 'no open PDF was found'}.{' '}
+              {paper.mine ? 'Try again, upload its PDF, or remove it.' : `Only ${adder} can try again, upload its PDF or remove it.`}
+              {retry.isError && ` Trying again failed: ${problem(retry.error).title}.`}
+              {upload.isError && ` The PDF was not added: ${problem(upload.error).title}.`}
+            </span>
+          )}
+        </div>
       </td>
       <td className={cell}>
         <Badge tone={paper.topic === myTopic ? 'accent' : 'neutral'} title={paper.topic === myTopic ? 'Your topic' : undefined}>
