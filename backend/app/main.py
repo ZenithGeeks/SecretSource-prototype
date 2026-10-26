@@ -1619,12 +1619,15 @@ async def health(request: Request):
 
 
 @app.get("/metrics")
-async def metrics():
+async def metrics(request: Request):
     """Prometheus text format: analysis success rate, duration, queueing, verdicts, audit
     findings, LLM token usage (app/metrics.py). Scraped by the `gateway` job in
     deploy/monitoring/prometheus.yml, behind the opt-in `monitoring` compose profile. Reads an
-    in-memory registry only, so unlike /health this needs no thread hop.
+    in-memory registry only, so unlike /health this needs no thread hop. Not served to the
+    internet (see /health).
     """
+    if "cf-connecting-ip" in request.headers:
+        raise HTTPException(404)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
