@@ -12,6 +12,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
+import { loadAskMode, saveAskMode, useAskUserId, type AskPanelMode } from '../lib/askSession'
 import type { Role } from '../lib/roles'
 import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
@@ -342,10 +343,22 @@ export function AssistantPanel({
   extra?: { label: string; content: ReactNode }
   className?: string
 }) {
+  const userId = useAskUserId()
   const [view, setView] = useState<'chat' | 'chats'>('chat')
-  const [chosen, setMode] = useState<'answer' | 'extra' | 'do'>(extra ? 'extra' : 'answer')
-  // A mode whose view went away (the screen that added it was left) falls back to Answer.
+  // Answer, Do it, or the screen's own mode, as last chosen by this user. A mode whose view
+  // went away (the screen that added it was left) falls back to Answer without forgetting it.
+  // A later screen that adds or removes its own mode does not rewrite a mode they already chose.
+  const [chosen, setChosen] = useState<AskPanelMode>(() => loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  const [modeFor, setModeFor] = useState(userId)
+  if (modeFor !== userId) {
+    setModeFor(userId)
+    setChosen(loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  }
   const mode = (chosen === 'extra' && !extra) || (chosen === 'do' && !doIt) ? 'answer' : chosen
+  function chooseMode(next: AskPanelMode) {
+    setChosen(next)
+    saveAskMode(userId, next)
+  }
   const end = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLFormElement>(null)
   const { turns, answering, draft, setDraft } = assistant
@@ -442,7 +455,7 @@ export function AssistantPanel({
                 ...(doIt ? [{ value: 'do' as const, label: 'Do it' }] : []),
               ]}
               value={mode}
-              onChange={setMode}
+              onChange={chooseMode}
               className="mx-5 mb-3"
             />
           )}
@@ -472,8 +485,12 @@ export function AssistantPanel({
               </div>
 
               <div className="flex flex-1 flex-col gap-6 overflow-y-auto dot-grid px-5 py-4">
-                {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
-                {turns.length === 0 && !assistant.openFailed && (
+                {assistant.opening && turns.length === 0 && (
+                  <p role="status" className="text-[13px] text-ink-muted">
+                    Opening this chat…
+                  </p>
+                )}
+                {turns.length === 0 && !assistant.opening && (
                   <MotionConfig reducedMotion="user">
                     <AskWelcome
                       role={role}
