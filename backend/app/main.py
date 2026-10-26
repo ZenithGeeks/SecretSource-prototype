@@ -1610,11 +1610,12 @@ async def health(request: Request):
     """The gateway is up (`ok`), and each dependency's URL, auth and whether it answered, from a
     check at most 30 s old. `degraded` is true when a required one did not answer. `analyses` is
     how many this process is holding (running, the newest at startup, and owners loaded since),
-    not how many the store has. A request from the internet gets only `ok` and `degraded`."""
+    not how many the store has. `features` says which features work now; the web app reads it to
+    turn off what would fail. A request from the internet gets only `ok`, `degraded` and `features`."""
     report = await asyncio.to_thread(dependencies.report)
     # Cloudflare adds this header to every request through the tunnel; LAN and tailnet callers have none.
     if "cf-connecting-ip" in request.headers:
-        return {"ok": True, "degraded": report["degraded"]}
+        return {"ok": True, "degraded": report["degraded"], "features": report["features"]}
     return {"ok": True, "analyses": len(analyses), **report}
 
 

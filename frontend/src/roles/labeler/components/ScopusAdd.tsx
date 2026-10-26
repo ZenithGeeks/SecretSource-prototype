@@ -23,6 +23,7 @@ import {
   type ScopusScope,
   type ScopusSort,
 } from '../../../lib/labeling'
+import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { cn } from '../../../lib/utils'
 import { GraphSegmented } from '../../researcher/components/GraphSegmented'
 import { PaperKeywords } from './PaperKeywords'
@@ -80,6 +81,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
   const search = useScopusSearch(query)
   const add = useScopusAdd()
   const upload = useUploadPaper(({ doi }) => doi && setAdded((all) => ({ ...all, [doi]: true })))
+  const online = useFeature('analyses')
 
   const papers = search.data?.pages.flatMap((page) => page.results) ?? []
   const total = search.data?.pages[0]?.total ?? 0
@@ -205,6 +207,11 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
             </Button>
           </div>
         )}
+        {!online && (
+          <p role="status" className="text-sm text-refutes">
+            {OFFLINE_REASON.analyses}
+          </p>
+        )}
         {add.isError && (
           <p role="alert" className="text-sm text-refutes">
             {problem(add.error).title}. {problem(add.error).hint}
@@ -276,6 +283,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
                   uploading={upload.isPending && upload.variables?.doi === paper.doi}
                   // One upload at a time: the progress shown is the latest upload's only.
                   uploadBlocked={upload.isPending}
+                  online={online}
                   onAdd={() =>
                     add.mutate(
                       { doi: paper.doi, topic: query?.topic ?? form.topic },
@@ -312,6 +320,7 @@ function ResultRow({
   adding,
   uploading,
   uploadBlocked,
+  online,
   onAdd,
   onUpload,
 }: {
@@ -321,6 +330,8 @@ function ResultRow({
   adding: boolean
   uploading: boolean
   uploadBlocked: boolean
+  /** An analysis can start now; when not, neither Add nor an upload is offered. */
+  online: boolean
   onAdd: () => void
   /** For a paper whose PDF the analysis cannot download: the labeler's own copy instead. */
   onUpload: (file: File) => void
@@ -356,14 +367,14 @@ function ResultRow({
         </button>
         {unreachable ? (
           <span className="flex shrink-0 flex-col items-end">
-            <UploadPdfButton title={paper.title} busy={uploading} disabled={uploadBlocked} onFile={onUpload} />
+            <UploadPdfButton title={paper.title} busy={uploading} disabled={uploadBlocked || !online} onFile={onUpload} />
             <span className="text-xs text-ink-muted">No copy we can download</span>
           </span>
         ) : (
           <Button
             variant="ghost"
             className="min-h-11 shrink-0"
-            disabled={done || adding}
+            disabled={done || adding || !online}
             aria-label={`Add ${paper.title}`}
             onClick={onAdd}
           >

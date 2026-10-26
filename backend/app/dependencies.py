@@ -32,6 +32,14 @@ from app.queue import worker_status
 TIMEOUT = 5  # seconds per check; a service slower than this to say it is alive is a problem too
 CACHE_SECONDS = 30  # /health answers from the last report this recent, so polling it stays cheap
 
+# What each feature the web app offers needs. An analysis runs on the worker, which reads the
+# paper with GROBID and checks it with ColBERT and the LLM; Ask runs in the gateway itself.
+# Each name is a dependency's "name" in check() below.
+FEATURE_NEEDS = {
+    "analyses": ("worker", "grobid", "colbert", "llm"),
+    "ask": ("colbert", "llm"),
+}
+
 # uvicorn sets up this logger at INFO; the app configures no logging of its own.
 log = logging.getLogger("uvicorn.error")
 
@@ -196,8 +204,9 @@ def _not_probed(name: str, url: str) -> dict:
 
 
 def check() -> dict:
-    """Ask every dependency at once. `degraded` is true when a required one failed. One that
-    is still starting (`ok` None) does not count."""
+    """Ask every dependency at once. `degraded` is true when a required one failed, and
+    `features` says which features have everything they need. One that is still starting
+    (`ok` None) does not count as failed."""
     checks = (
         _llm,
         lambda: _service("grobid", GROBID_URL, "/api/isalive", required=True),
@@ -210,8 +219,11 @@ def check() -> dict:
     )
     with ThreadPoolExecutor(max_workers=len(checks)) as pool:
         dependencies = list(pool.map(lambda run: run(), checks))
+    down = {d["name"] for d in dependencies if d["ok"] is False}
+    # A feature is on when none of the dependencies it needs is down.
     return {
         "degraded": any(d["required"] and d["ok"] is False for d in dependencies),
+        "features": {feature: down.isdisjoint(needs) for feature, needs in FEATURE_NEEDS.items()},
         "service_auth": SERVICE_AUTH,
         "checked_at": time.time(),
         "dependencies": dependencies,

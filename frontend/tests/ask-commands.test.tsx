@@ -4,7 +4,9 @@
  * a command runs the tool through POST /agent/tools/{name}.
  */
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantPanel } from '../src/components/AssistantPanel'
@@ -183,17 +185,20 @@ describe('a command that fails', () => {
 
 function Panel() {
   const assistant = useAssistant()
+  const [client] = useState(() => new QueryClient())
   return (
-    <AssistantPanel
-      role="researcher"
-      assistant={assistant}
-      context={{ screen: 'library' }}
-      about={{ kind: 'library', label: 'your library' }}
-      papers={PAPERS}
-      onClearAbout={() => {}}
-      onClose={() => {}}
-      onShowSource={() => {}}
-    />
+    <QueryClientProvider client={client}>
+      <AssistantPanel
+        role="researcher"
+        assistant={assistant}
+        context={{ screen: 'library' }}
+        about={{ kind: 'library', label: 'your library' }}
+        papers={PAPERS}
+        onClearAbout={() => {}}
+        onClose={() => {}}
+        onShowSource={() => {}}
+      />
+    </QueryClientProvider>
   )
 }
 
@@ -231,6 +236,7 @@ describe('the Ask input', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/health')) return Response.json({})
         calls.push({ url, body: JSON.parse(String(init?.body)) })
         return Response.json({ page: 4 })
       }),

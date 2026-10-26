@@ -9,6 +9,7 @@ import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Tras
 import type { ReactNode } from 'react'
 
 import { Badge, Button, Progress } from '../../../components/ui'
+import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
 import { addedByOf, isFinished, type Paper } from '../paperFilters'
@@ -77,6 +78,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   const assign = useAssignTopic()
   const retry = useRetryPaper()
   const upload = useUploadPaper()
+  const online = useFeature('analyses')
   const ready = paper.status === 'done'
   const failed = paper.status === 'error'
   const addedBy = addedByOf(paper, me)
@@ -123,6 +125,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             {paper.mine ? 'Try again, upload its PDF, or remove it.' : `Only ${adder} can try again, upload its PDF or remove it.`}
             {retry.isError && ` Trying again failed: ${problem(retry.error).title}.`}
             {upload.isError && ` The PDF was not added: ${problem(upload.error).title}.`}
+            {paper.mine && !online && ` ${OFFLINE_REASON.analyses}`}
           </span>
         )}
       </td>
@@ -160,7 +163,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
             className="relative z-10 min-h-11 px-3"
             aria-label={`${retry.isPending ? 'Starting' : 'Try again'} ${paper.title}`}
             // Trying again while its PDF is uploading would list the paper twice.
-            disabled={retry.isPending || upload.isPending}
+            disabled={!online || retry.isPending || upload.isPending}
             onClick={() => retry.mutate(paper.analysis_id)}
           >
             <RotateCcw className="size-4" aria-hidden="true" />
@@ -171,7 +174,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
           <UploadPdfButton
             title={paper.title}
             busy={upload.isPending}
-            disabled={retry.isPending}
+            disabled={!online || retry.isPending}
             // The gateway takes the topic and DOI from the row it replaces.
             onFile={(file) => upload.mutate({ file, topic: '', replaces: paper.analysis_id })}
           />
