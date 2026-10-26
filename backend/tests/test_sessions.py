@@ -4,11 +4,12 @@ from app import sessions
 from google.adk.sessions import DatabaseSessionService, InMemorySessionService
 
 
-def test_no_setting_keeps_sessions_in_memory(monkeypatch):
+def test_no_setting_keeps_sessions_in_memory_and_says_so(monkeypatch, caplog):
     monkeypatch.delenv("SESSION_DB_URL", raising=False)
     monkeypatch.delenv("DIRECT_URL", raising=False)
     assert sessions.session_db_url() == ""
     assert isinstance(sessions.session_service(), InMemorySessionService)
+    assert "SESSION_DB_URL is not set" in caplog.text
 
 
 def test_a_plain_postgres_url_gets_the_async_driver(monkeypatch):

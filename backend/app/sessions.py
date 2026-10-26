@@ -9,9 +9,12 @@ ADK creates its own tables (sessions, events, app_states, user_states). We put t
 browser's anon key could read every chat.
 """
 
+import logging
 import os
 
 from sqlalchemy import event
+
+log = logging.getLogger(__name__)
 
 SCHEMA = "adk"
 SIGNED_OUT = ""  # the ADK user id of a caller with no login; it owns the analyses with no owner
@@ -32,6 +35,9 @@ def session_service():
 
     url = session_db_url()
     if not url:
+        # Said once per process: a gateway deployed without the URL otherwise loses every chat on
+        # restart with no sign of why.
+        log.warning("SESSION_DB_URL is not set: chats are kept in memory and lost on restart")
         return InMemorySessionService()
     service = DatabaseSessionService(
         db_url=url, connect_args={"server_settings": {"search_path": SCHEMA}}

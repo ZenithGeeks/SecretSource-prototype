@@ -19,7 +19,7 @@ from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttribu
 from opentelemetry import trace
 from rq import Queue, SimpleWorker, Worker
 from rq.exceptions import InvalidJobOperation, NoSuchJobError
-from rq.job import Callback, Job, JobStatus
+from rq.job import Callback, Job, JobStatus, Retry
 from rq.serializers import JSONSerializer
 
 from app.config import REDIS_URL
@@ -561,13 +561,23 @@ def enqueue_draft_check(
 # A dotted name, not a function: importing app.distill would load DSPy into the gateway.
 DISTILL_JOB = "app.distill.run_distill_job"
 DISTILL_TIMEOUT = 5 * 60  # one LLM call; a stuck one should not hold the worker for long
+# The gateway marks a chat distilled when it queues it, so a failed job is not queued again until
+# the chat changes. A busy or refused LLM is the usual failure, so the job tries again after 1, 5
+# and 15 minutes before its facts are given up. The intervals need the worker's scheduler.
+DISTILL_RETRY = Retry(max=3, interval=[60, 300, 900])
 
 
 def enqueue_distill(owner: str, chat_id: str, lines: list[str]):
     """Queue the distilling of one chat's lines into facts (app/distill.py). The job id is per
     chat, so a chat queued twice before the worker reaches it runs once."""
     return analysis_queue().enqueue(
-        DISTILL_JOB, owner, chat_id, lines, job_id=f"distill-{chat_id}", job_timeout=DISTILL_TIMEOUT
+        DISTILL_JOB,
+        owner,
+        chat_id,
+        lines,
+        job_id=f"distill-{chat_id}",
+        job_timeout=DISTILL_TIMEOUT,
+        retry=DISTILL_RETRY,
     )
 
 
