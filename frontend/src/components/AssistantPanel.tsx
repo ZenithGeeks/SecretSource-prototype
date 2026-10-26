@@ -320,6 +320,7 @@ export function AssistantPanel({
   onShowSource,
   doIt,
   extra,
+  initialMode,
   className,
 }: {
   /** Whose Quip (components/Mascot) the header and the empty chat show. */
@@ -341,14 +342,17 @@ export function AssistantPanel({
   doIt?: ReactNode
   /** A mode a screen adds for what it shows, such as the Labeler's "This claim"; gone when the screen is left. */
   extra?: { label: string; content: ReactNode }
+  /** Which mode to open on. A role switch lands on Do it so the conversation is still there. */
+  initialMode?: 'answer' | 'extra' | 'do'
   className?: string
 }) {
   const userId = useAskUserId()
   const [view, setView] = useState<'chat' | 'chats'>('chat')
-  // Answer, Do it, or the screen's own mode, as last chosen by this user. A mode whose view
-  // went away (the screen that added it was left) falls back to Answer without forgetting it.
-  // A later screen that adds or removes its own mode does not rewrite a mode they already chose.
-  const [chosen, setChosen] = useState<AskPanelMode>(() => loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  // Answer, Do it, or the screen's own mode, as last chosen by this user, unless a role switch
+  // carried a Do it conversation here (initialMode). A mode whose view went away (the screen that
+  // added it was left) falls back to Answer without forgetting it. A later screen that adds or
+  // removes its own mode does not rewrite a mode they already chose.
+  const [chosen, setChosen] = useState<AskPanelMode>(() => initialMode ?? loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
   const [modeFor, setModeFor] = useState(userId)
   if (modeFor !== userId) {
     setModeFor(userId)

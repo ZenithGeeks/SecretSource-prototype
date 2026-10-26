@@ -17,6 +17,7 @@ import { loadAskOpen, saveAskOpen, useAskUserId } from '../lib/askSession'
 import type { PaperRef } from '../lib/askCommands'
 import { useAnalyses } from '../lib/useAnalysis'
 import type { ScreenActions } from '../lib/agentTools'
+import { peekDoItConversation } from '../lib/doItConversation'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
@@ -56,9 +57,10 @@ export function useAsk({
 }) {
   const assistant = useAssistant()
   const userId = useAskUserId()
-  // Open or closed as it was for this user, including after a refresh. Another account on
-  // this browser has its own value; applying it here does not write.
-  const [open, setOpen] = useState(() => loadAskOpen(userId))
+  // Open or closed as it was for this user, including after a refresh, and always open when a
+  // role switch carried a Do it conversation here. Another account on this browser has its own
+  // value; applying it here does not write.
+  const [open, setOpen] = useState(() => peekDoItConversation() !== null || loadAskOpen(userId))
   const [openFor, setOpenFor] = useState(userId)
   if (openFor !== userId) {
     setOpenFor(userId)
@@ -115,6 +117,7 @@ export function useAsk({
       onClose={() => setOpenSaved(false)}
       onShowSource={(target) => void showSource(target)}
       doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
+      initialMode={peekDoItConversation() ? 'do' : undefined}
       extra={extra}
     />
   ) : undefined

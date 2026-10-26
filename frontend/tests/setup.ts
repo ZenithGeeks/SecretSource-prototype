@@ -2,6 +2,8 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 
+import { clearDoItConversation } from '../src/lib/doItConversation'
+
 // Ask remembers the open chat, panel and mode per user (src/lib/askSession.ts). Drop those
 // keys before each test so one file's Ask does not reopen inside the next test.
 const ASK_STORAGE_PREFIX = 'secretsource.ask.'
@@ -32,4 +34,12 @@ Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: vi.fn().mockResolvedValue(undefined) },
 })
 
-afterEach(() => cleanup())
+beforeEach(() => {
+  clearDoItConversation()
+  window.sessionStorage.removeItem('agentBridge.connected')
+})
+
+afterEach(() => {
+  cleanup()
+  clearDoItConversation()
+})

@@ -9,6 +9,7 @@ import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Tras
 import type { ReactNode } from 'react'
 
 import { Badge, Button, Progress } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
@@ -92,6 +93,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
     // A row the list gains (a paper just added, one a filter brings back) fades in instead of
     // popping in. No exit fade: a removed row would stay readable until it ended.
     <motion.tr
+      data-ask-target={askTarget({ kind: 'paper', id: paper.analysis_id })}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.15 }}
