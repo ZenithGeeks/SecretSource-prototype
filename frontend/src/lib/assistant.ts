@@ -2,14 +2,16 @@
  * The assistant's chats (backend/README.md "Assistant"): questions about the reader's papers,
  * answered as short statements that the judge checks one by one. `useAssistant` holds the open
  * chat for the whole researcher app, so it survives a screen change and an answer keeps
- * streaming while the reader moves around.
+ * streaming while the reader moves around. The open chat id is also kept for this signed-in
+ * user (lib/askSession), so a refresh reopens it.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { Target } from '../components/PageViewer'
 import { postEvents, request } from './api'
 import { describeResult, type CommandView, type Parsed } from './askCommands'
+import { loadAskChat, saveAskChat, useAskUserId } from './askSession'
 
 /** What the question is about: the screen it was asked on, and the analysis or graph node there. */
 export type AskContext = { screen: string; analysis?: string; node?: string }
@@ -126,8 +128,18 @@ function startOfDay(date: Date) {
 }
 
 export function useAssistant() {
+  const userId = useAskUserId()
+  // Saves start only after the stored chat has been read, so the first empty state cannot
+  // wipe it. A private window, or a load that fails, leaves the reader on a new chat.
+  const hydrated = useRef(false)
+  // Bumped when the open chat changes, so a load the reader has already left cannot clear
+  // the chat they moved to. Strict mode runs the restore effect twice; the first load is
+  // dropped the same way.
+  const generation = useRef(0)
   const [chatId, setChatId] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
+  // True while a saved chat is being read, so the empty welcome does not flash first.
+  const [opening, setOpening] = useState(() => loadAskChat(userId) !== null)
   const [openFailed, setOpenFailed] = useState(false)
   // Kept here, not in the panel, so a half-typed question survives the panel remounting
   // (Graph's Details | Ask tabs).
@@ -139,6 +151,11 @@ export function useAssistant() {
   const answering = turns.at(-1)?.status === 'answering'
 
   useEffect(() => () => controller.current?.abort(), [])
+
+  function remember(id: string | null) {
+    if (!hydrated.current) return
+    saveAskChat(userId, id)
+  }
 
   const updateTurn = (id: number, change: (turn: Turn) => Turn) =>
     setTurns((all) => all.map((turn) => (turn.id === id ? change(turn) : turn)))
@@ -165,6 +182,7 @@ export function useAssistant() {
         id = created.id
         chat.current = id
         setChatId(id)
+        remember(id)
       }
       await postEvents<AnswerEvent>(
         `/assistant/chats/${encodeURIComponent(id)}/messages`,
@@ -209,35 +227,66 @@ export function useAssistant() {
   }
 
   /** Stops the answer and keeps what arrived. */
-  function stop() {
+  const stop = useCallback(() => {
     controller.current?.abort()
     controller.current = null
     setTurns((all) => all.map((turn) => (turn.status === 'answering' ? { ...turn, status: 'stopped' } : turn)))
-  }
+  }, [])
 
-  function showChat(id: string | null) {
-    stop()
-    chat.current = id
-    setChatId(id)
-    setTurns([])
-    setOpenFailed(false)
-  }
+  const showChat = useCallback(
+    (id: string | null) => {
+      generation.current += 1
+      stop()
+      chat.current = id
+      setChatId(id)
+      setTurns([])
+      setOpening(false)
+      setOpenFailed(false)
+      if (hydrated.current) saveAskChat(userId, id)
+    },
+    [stop, userId],
+  )
 
   function newChat() {
     showChat(null)
   }
 
-  async function openChat(id: string) {
-    showChat(id)
-    try {
-      const loaded = await loadChat(id)
-      if (chat.current === id) setTurns(loaded)
-    } catch {
-      if (chat.current === id) setOpenFailed(true)
-    }
-  }
+  const openChat = useCallback(
+    async (id: string) => {
+      showChat(id)
+      const mine = generation.current
+      setOpening(true)
+      try {
+        const loaded = await loadChat(id)
+        if (generation.current !== mine || chat.current !== id) return
+        setTurns(loaded)
+      } catch (error) {
+        if (generation.current !== mine || chat.current !== id) return
+        // A chat the server no longer has is forgotten, and a new chat shows. Any other failure
+        // (the gateway asleep, the network) keeps the id, so the next refresh tries it again.
+        if ((error as Error).message.startsWith('404')) showChat(null)
+        else setOpenFailed(true)
+      } finally {
+        if (generation.current === mine && chat.current === id) setOpening(false)
+      }
+    },
+    [showChat],
+  )
 
-  return { chatId, turns, answering, openFailed, draft, setDraft, ask, run, refuse, stop, newChat, openChat }
+  // Reopen the chat this user had, including after a refresh. A different signed-in user
+  // reads their own id, so they do not land in the previous account's chat. An account with
+  // nothing stored only clears the screen when another account's chat is still showing.
+  useEffect(() => {
+    hydrated.current = true
+    const stored = loadAskChat(userId)
+    if (stored) void openChat(stored)
+    else if (chat.current !== null) showChat(null)
+    return () => {
+      generation.current += 1
+    }
+  }, [openChat, showChat, userId])
+
+  return { chatId, turns, answering, opening, openFailed, draft, setDraft, ask, run, refuse, stop, newChat, openChat }
 }
 
 export type Assistant = ReturnType<typeof useAssistant>

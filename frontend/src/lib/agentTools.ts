@@ -1,45 +1,45 @@
 /**
  * The screen agent's browser tools (backend/app/agents/screen.py, docs/agent-tools.md): what each
  * tool call from the agent does on this page. Each moves the AI cursor first, then acts, and
- * returns a small result the agent reads. Only fill_field and switch_role change anything, and
- * only after the person approves it.
+ * returns a small result the agent reads. Anything that changes data, and a role switch, waits
+ * for the person: one approval step, then Apply or Switch. Cancel changes nothing.
  */
 
 import { askTarget, type AskTarget, type Pointing } from './askCursor'
-import { ROLE_INFO, type Role } from './roles'
+import type { Role } from './roles'
 
-type AgentRole = 'researcher' | 'labeler' | 'writer'
-
-/** What the role's app lets the agent do: open its screens and papers, and move to another role. */
+/** What the role's app lets the agent do: open its screens and papers, and change role. */
 export type ScreenActions = {
   /** Which role's screen agent answers (backend/app/agent_runs.py); the Researcher's when left out. */
-  role?: AgentRole
+  role?: 'researcher' | 'labeler' | 'writer'
   screen: string
   screens: string[]
   openScreen: (screen: string) => void
   openPaper: (analysisId: string) => void
-  /** Opens another role's app; without it, switch_role tells the agent it cannot. */
+  /** Moves to that role the way the role menu does. The caller performs it after the result is sent. */
   switchRole?: (role: Role) => void
+  /** False when the person still has unsaved work and declines to leave it. */
+  confirmLeave?: () => boolean
   /** What Do it offers to try before the first message; the Researcher's when left out. */
   examples?: string[]
 }
 
-/** A change waiting for the person: text for a field, or a move to another role. */
-export type Change = { kind: 'fill' | 'switch'; target: string; label: string; text: string }
+/** What an approval step tells the person. The same card covers every change; the button word differs. */
+export type ConfirmRequest = {
+  /** What will happen, in plain words, if the person approves. */
+  summary: string
+  /** Apply for a change to data. Switch for a role change (the tool's contract). */
+  action: 'Apply' | 'Switch'
+}
 
 export type ToolContext = {
   actions: ScreenActions
   point: (pointing: Pointing | null) => void
-  /** Shows the change and waits for the person's Apply or Switch (true) or Cancel (false). */
-  confirm: (change: Change) => Promise<boolean>
+  /** Shows `summary` and waits for the person to approve (true) or Cancel (false). */
+  confirm: (change: ConfirmRequest) => Promise<boolean>
+  /** Records a role switch. The caller performs it only after this tool's result is sent. */
+  onSwitched?: (role: Role) => void
 }
-
-// The agent names roles as the person sees them (backend/app/agents/screen.py switch_role); the
-// app's id for the Author role is "writer".
-const AGENT_ROLES: Record<string, AgentRole> = { researcher: 'researcher', labeler: 'labeler', author: 'writer' }
-
-/** The app's role for a name the agent gave; own keys only, so "constructor" is not a role. */
-const agentRole = (name: string): AgentRole | undefined => (Object.hasOwn(AGENT_ROLES, name) ? AGENT_ROLES[name] : undefined)
 
 export type ToolCall = { id: string; name: string; args: Record<string, unknown> }
 export type ToolResult = Record<string, unknown>
@@ -69,6 +69,13 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
   }
 }
 
+/** The agent's role word, and the app's id for it. The agent says "author"; the app says "writer". */
+const AGENT_ROLE: Record<string, Role> = { researcher: 'researcher', labeler: 'labeler', author: 'writer' }
+const AGENT_ROLE_LABEL: Record<string, string> = { researcher: 'Researcher', labeler: 'Labeler', author: 'Author' }
+
+/** The app's role for the agent's word; own keys only, so "constructor" or "toString" is not a role. */
+const agentRole = (role: string): Role | undefined => (Object.hasOwn(AGENT_ROLE, role) ? AGENT_ROLE[role] : undefined)
+
 /** One line for the Do it view, saying what a tool call does. */
 export function describeTool(call: ToolCall): string {
   const args = call.args as Record<string, string>
@@ -83,10 +90,8 @@ export function describeTool(call: ToolCall): string {
       return `Pointing: ${args.note || args.target}`
     case 'fill_field':
       return `Filling in: “${args.text}”`
-    case 'switch_role': {
-      const role = agentRole(args.role)
-      return `Switching to ${role ? ROLE_INFO[role].label : args.role}`
-    }
+    case 'switch_role':
+      return `Switching to the ${agentRole(args.role) ? AGENT_ROLE_LABEL[args.role] : args.role} role`
     default:
       return call.name
   }
@@ -123,23 +128,26 @@ async function fillField(target: string, text: string, { point, confirm }: ToolC
     return { status: 'error', message: `${target} is not a field on the screen; call read_screen` }
   }
   point({ target: parsed, tone: 'asks', label: 'Fill this in?' })
-  if (!(await confirm({ kind: 'fill', target, label: labelOf(field), text }))) return { status: 'cancelled' }
+  const label = labelOf(field) || 'this field'
+  if (!(await confirm({ summary: `Type “${text}” into ${label}.`, action: 'Apply' }))) return { status: 'cancelled' }
   typeInto(field, text)
   point({ target: parsed, tone: 'agrees', label: 'Filled in' })
   return { status: 'applied' }
 }
 
-/** Opens another role's app after the person presses Switch. The current role's app, and this
- * Do it conversation with it, close. */
-async function switchRole(name: string, reason: string, { actions, confirm }: ToolContext): Promise<ToolResult> {
-  const role = agentRole(name)
-  if (!role) return { status: 'error', message: `there is no role ${name}; roles: ${Object.keys(AGENT_ROLES).join(', ')}` }
-  if (role === (actions.role ?? 'researcher')) return { status: 'error', message: `the person is already in the ${name} role` }
-  if (!actions.switchRole) return { status: 'error', message: 'this screen cannot switch roles; tell the person to use the role menu' }
-  const label = ROLE_INFO[role].label
-  if (!(await confirm({ kind: 'switch', target: `role:${name}`, label, text: reason }))) return { status: 'cancelled' }
-  actions.switchRole(role)
-  return { status: 'switched', role: name }
+/** Asks, then records the switch. Navigating here would unmount the page before the result is sent. */
+async function switchRole(role: string, reason: string, { actions, confirm, onSwitched }: ToolContext): Promise<ToolResult> {
+  const next = agentRole(role)
+  if (!next) return { status: 'error', message: `no role ${role || '(none)'}; roles: researcher, labeler, author` }
+  if (!actions.switchRole || !onSwitched) return { status: 'error', message: 'this screen cannot change role; use the role menu' }
+  if (next === (actions.role ?? 'researcher')) return { status: 'error', message: `already in the ${role} role` }
+  const why = (reason ?? '').trim()
+  const summary = why ? `Switch to the ${AGENT_ROLE_LABEL[role]} role. ${why}` : `Switch to the ${AGENT_ROLE_LABEL[role]} role.`
+  if (!(await confirm({ summary, action: 'Switch' }))) return { status: 'cancelled' }
+  // After Switch, the unsaved-work prompt can still refuse. The agent hears cancelled and stays.
+  if (actions.confirmLeave && !actions.confirmLeave()) return { status: 'cancelled' }
+  onSwitched(next)
+  return { status: 'switched' }
 }
 
 /** Sets a field's value the way typing does, so React's onChange sees it. */

@@ -10,6 +10,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { runTool } from '../src/lib/agentTools'
+import { clearDoItConversation } from '../src/lib/doItConversation'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
@@ -91,6 +92,7 @@ beforeEach(() => {
   gateway = installFakeGateway({ files: THESIS_FILES })
   agent.posts = []
   agent.streams = []
+  clearDoItConversation() // a switch carries the Do it conversation outside React
 })
 
 afterEach(() => {
@@ -181,16 +183,20 @@ describe('AuthorApp', () => {
     const approve = await screen.findByRole('group', { name: 'Approve this change' })
     expect(nav().getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page')
     expect(agent.posts[1].body).toEqual({ id: 'c1', name: 'open_screen', result: { status: 'done', screen: 'history' }, role: 'writer' })
-    expect(approve).toHaveTextContent('Switch to the Researcher role?')
-    expect(approve).toHaveTextContent('Analyses are in the Researcher role')
+    expect(approve).toHaveTextContent('Switch to the Researcher role. Analyses are in the Researcher role')
+    expect(within(approve).getByRole('button', { name: 'Switch' })).toBeInTheDocument()
     expect(onSwitchRole).not.toHaveBeenCalled()
 
     fireEvent.click(within(approve).getByRole('button', { name: 'Switch' }))
+    // The result goes to the Author's agent, which has its last word, and only then does the
+    // app move to the Researcher role, carrying the conversation.
     await waitFor(() => expect(onSwitchRole).toHaveBeenCalledWith('researcher'))
-    // The Author's run ends at the switch: nothing more is sent to the Author's agent.
-    await waitFor(() => expect(screen.queryByRole('group', { name: 'Approve this change' })).toBeNull())
-    expect(agent.posts).toHaveLength(2)
-    expect(agent.streams).toHaveLength(1)
+    expect(agent.posts[2]).toEqual({
+      path: '/agent/runs/s1/results',
+      body: { id: 'c2', name: 'switch_role', result: { status: 'switched' }, role: 'writer' },
+    })
+    expect(screen.getByText('You are in the Researcher role now.')).toBeInTheDocument()
+    expect(agent.streams).toHaveLength(0)
   })
 
   test('read_screen sees the drafts, citations, projects and buttons on Home, the Library and a project', async () => {

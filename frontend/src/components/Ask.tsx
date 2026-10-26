@@ -13,9 +13,11 @@ import { api, paperName } from '../lib/api'
 import type { Role } from '../lib/roles'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
+import { loadAskOpen, saveAskOpen, useAskUserId } from '../lib/askSession'
 import type { PaperRef } from '../lib/askCommands'
 import { useAnalyses } from '../lib/useAnalysis'
 import type { ScreenActions } from '../lib/agentTools'
+import { peekDoItConversation } from '../lib/doItConversation'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
@@ -54,7 +56,20 @@ export function useAsk({
   extra?: AssistantPanelProps['extra']
 }) {
   const assistant = useAssistant()
-  const [open, setOpen] = useState(false)
+  const userId = useAskUserId()
+  // Open or closed as it was for this user, including after a refresh, and always open when a
+  // role switch carried a Do it conversation here. Another account on this browser has its own
+  // value; applying it here does not write.
+  const [open, setOpen] = useState(() => peekDoItConversation() !== null || loadAskOpen(userId))
+  const [openFor, setOpenFor] = useState(userId)
+  if (openFor !== userId) {
+    setOpenFor(userId)
+    setOpen(loadAskOpen(userId))
+  }
+  function setOpenSaved(next: boolean) {
+    setOpen(next)
+    saveAskOpen(userId, next)
+  }
   // The paper or node whose chip the reader removed: questions about it go to the whole
   // library. Opening a different paper or node brings the chip back.
   const [cleared, setCleared] = useState<string | null>(null)
@@ -85,7 +100,7 @@ export function useAsk({
   const button = (
     <div className="flex items-center gap-2">
       {agent.pill}
-      <AskButton role={role} open={open} about={about} onToggle={() => setOpen(!open)} />
+      <AskButton role={role} open={open} about={about} onToggle={() => setOpenSaved(!open)} />
     </div>
   )
 
@@ -99,9 +114,10 @@ export function useAsk({
       papers={papers}
       canNarrow={canNarrow}
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
-      onClose={() => setOpen(false)}
+      onClose={() => setOpenSaved(false)}
       onShowSource={(target) => void showSource(target)}
       doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
+      initialMode={peekDoItConversation() ? 'do' : undefined}
       extra={extra}
     />
   ) : undefined

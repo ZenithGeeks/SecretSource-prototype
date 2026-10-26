@@ -238,20 +238,24 @@ def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
     response.raise_for_status()
 
 
-def colpali_search(
-    query: str, k: int = 20, source: str | None = None, *, visible: Collection[str] | None = None
-) -> dict:
-    body = {"query": query, "k": k}
-    if source is not None:
-        body["source"] = source
+def colpali_search(query: str, k: int = 20, *, source: str) -> dict:
+    """Figures and pages of the paper `source` for `query`.
+
+    Hits whose file name is not `source` are dropped before the answer and before the span,
+    so a service that ignores `source` and answers from the whole index cannot put another
+    user's caption or file name in either.
+    """
+    scope = frozenset({source})
     with _retriever_span("colpali_search", query, source) as span:
         response = _session.post(
             f"{COLPALI_URL}/api/search",
-            json=body,
+            json={"query": query, "k": k, "source": source},
             headers=auth_headers(COLPALI_URL),
             timeout=60,
         )
         response.raise_for_status()
         result = response.json()
-        _record_hits(span, result["topk"], _papers_we_may_trace(source, None, visible))
+        hits = _kept(result["topk"], scope)
+        _record_hits(span, hits, scope)
+        result = {**result, "topk": hits}
     return result

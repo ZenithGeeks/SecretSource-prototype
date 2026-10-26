@@ -190,6 +190,46 @@ def test_a_scoped_search_drops_another_users_passage_from_the_span(phoenix, monk
     assert "retrieval.documents.1.document.id" not in span.attributes
 
 
+def test_a_colpali_search_drops_another_users_figure(phoenix, monkeypatch):
+    """The visual service is asked for one paper. A hit from any other paper is left out of
+    the answer and out of the span, caption and file name included."""
+    exporter, _ = phoenix
+    secret = "Bo secret caption 91337"
+    filename = "bo-private-91337.pdf"
+    own = "Ada chart of index size"
+    hits = [
+        {
+            "caption": secret, "source": filename, "page": 4, "score": 90.0,
+            "kind": "figure", "label": "Figure 1", "image": "bo/figure-1.png", "title": "bo",
+        },
+        {
+            "caption": own, "source": "ada.pdf", "page": 1, "score": 20.0,
+            "kind": "figure", "label": "Figure 2", "image": "ada/figure-2.png", "title": "ada",
+        },
+    ]
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"model": "colqwen", "topk": hits}
+
+    monkeypatch.setattr(retrieval._session, "post", lambda *args, **kwargs: Response())
+
+    result = retrieval.colpali_search("index size chart", source="ada.pdf")
+
+    assert [hit["source"] for hit in result["topk"]] == ["ada.pdf"]
+    assert result["topk"][0]["caption"] == own
+    span = next(span for span in exporter.get_finished_spans() if span.name == "colpali_search")
+    text = _span_text(span)
+    assert secret not in text
+    assert filename not in text
+    assert span.attributes["retrieval.documents.0.document.content"] == own
+    assert span.attributes["retrieval.documents.0.document.id"] == "ada.pdf p1"
+    assert "retrieval.documents.1.document.id" not in span.attributes
+
+
 def test_an_empty_source_list_does_not_search(monkeypatch):
     def post(*args, **kwargs):
         raise AssertionError("an empty scope must not search the index")

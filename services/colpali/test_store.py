@@ -145,6 +145,20 @@ def test_search_with_source_returns_only_that_paper_ranked(tmp_path, monkeypatch
     assert results[0]["rank"] == 1
 
 
+def test_search_with_sources_returns_only_those_papers(tmp_path, monkeypatch, fresh_store):
+    monkeypatch.setattr(store, "pdf_pages", lambda path, dpi=150: [object()])
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        pdf = tmp_path / name
+        pdf.write_bytes(name.encode())
+        fresh_store.add_pdf(pdf)
+
+    results = fresh_store.search("query", k=5, sources=["c.pdf", "a.pdf"])
+
+    assert {result["source"] for result in results} == {"a.pdf", "c.pdf"}
+    assert fresh_store.search("query", sources=[]) == []
+    assert fresh_store.search("query", source="b.pdf", sources=["a.pdf"]) == []
+
+
 def test_search_without_source_ranks_across_papers(tmp_path, monkeypatch, fresh_store):
     monkeypatch.setattr(store, "pdf_pages", lambda path, dpi=150: [object()])
     for name in ("a.pdf", "b.pdf"):

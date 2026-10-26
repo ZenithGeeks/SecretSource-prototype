@@ -89,14 +89,7 @@ function syncParams(state: Params, analysis: string | null) {
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
-export function AuthorApp({
-  onChangeRole,
-  onSwitchRole,
-}: {
-  onChangeRole?: () => void
-  /** Opens another role's app directly, for Do it's switch_role. */
-  onSwitchRole?: (role: Role) => void
-}) {
+export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [initial] = useState(readParams)
   const [screen, setScreen] = useState<AuthorScreen>(initial.screen)
   const [draftId, setDraftId] = useState<string | null>(initial.draftId)
@@ -144,21 +137,21 @@ export function AuthorApp({
     history.open(id)
     navigate('history')
   }
-
-  // What is on screen to ask about: the open analysis on History, or the selected graph node.
+  // Do it for the Author's screen agent, so a role switch can land here and the chat can go on.
   const ask = useAsk({
     role: 'writer',
     screen,
     analysis: screen === 'history' ? history.selected : null,
     analysisFile: history.selectedName,
     node: screen === 'graph' ? graphNode : null,
-    // Do it with the Author's screen agent: the sidebar's screens (not the editor, which needs a
-    // draft), and another role when the request belongs there.
     actions: {
       role: 'writer',
       screen,
-      screens: NAV.map((entry) => entry.key),
-      openScreen: (next) => navigate(next as AuthorScreen),
+      // Not the editor: it renders without Ask, so opening it would end this Do it run midway.
+      screens: ['home', 'library', 'graph', 'history'],
+      openScreen: (next) => {
+        if (next === 'home' || next === 'library' || next === 'graph' || next === 'history') navigate(next)
+      },
       openPaper: openAnalysis,
       switchRole: onSwitchRole,
       examples: DO_IT_EXAMPLES,

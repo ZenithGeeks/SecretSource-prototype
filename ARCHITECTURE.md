@@ -476,10 +476,11 @@ what each dashboard shows.
 There are two ways for other programs to use SecretSource.
 
 - **MCP** gives access to single tools. ColBERT and ColPali serve MCP at `/mcp/`. ColBERT's
-  `search_passages` returns passages only for the file names in the `X-Paper-Scope` header
-  (a JSON list). With no header it returns nothing. Keep the trailing slash: `/mcp` without
-  it redirects and fails. `rag_agent` does not call this endpoint. Its own `search_passages`
-  uses `papers_of`.
+  `search_passages` and ColPali's `search_media` return hits only for the file names in the
+  `X-Paper-Scope` header (a JSON list). With no header each returns nothing. Keep the trailing
+  slash: `/mcp` without it redirects and fails. `rag_agent` does not call the ColBERT endpoint.
+  Its own `search_passages` uses `papers_of`. The gateway's figure search calls ColPali over
+  HTTP with one paper's file name, not over MCP.
 - **A2A** gives access to the whole agent team. A client sends a task in normal language,
   and the coordinator picks the specialist.
 

@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 
 import { Toaster } from './components/Toaster.tsx'
 import { watchForNewVersion } from './lib/newVersion.ts'
+import { clearDoItConversation } from './lib/doItConversation.ts'
 import { applyTheme, resetSettings, updateSettings } from './lib/settings.ts'
 import { supabase } from './lib/supabase.ts'
 import { Root } from './Root.tsx'
@@ -29,6 +30,7 @@ supabase?.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT') {
     queryClient.clear()
     resetSettings()
+    clearDoItConversation()
   }
 })
 

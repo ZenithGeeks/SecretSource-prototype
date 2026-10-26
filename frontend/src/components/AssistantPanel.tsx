@@ -12,7 +12,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
+import { loadAskMode, saveAskMode, useAskUserId, type AskPanelMode } from '../lib/askSession'
 import type { Role } from '../lib/roles'
+import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
 import { parseCommand, type PaperRef } from '../lib/askCommands'
@@ -318,6 +320,7 @@ export function AssistantPanel({
   onShowSource,
   doIt,
   extra,
+  initialMode,
   className,
 }: {
   /** Whose Quip (components/Mascot) the header and the empty chat show. */
@@ -339,16 +342,34 @@ export function AssistantPanel({
   doIt?: ReactNode
   /** A mode a screen adds for what it shows, such as the Labeler's "This claim"; gone when the screen is left. */
   extra?: { label: string; content: ReactNode }
+  /** Which mode to open on. A role switch lands on Do it so the conversation is still there. */
+  initialMode?: 'answer' | 'extra' | 'do'
   className?: string
 }) {
+  const userId = useAskUserId()
   const [view, setView] = useState<'chat' | 'chats'>('chat')
-  const [chosen, setMode] = useState<'answer' | 'extra' | 'do'>(extra ? 'extra' : 'answer')
-  // A mode whose view went away (the screen that added it was left) falls back to Answer.
+  // Answer, Do it, or the screen's own mode, as last chosen by this user, unless a role switch
+  // carried a Do it conversation here (initialMode). A mode whose view went away (the screen that
+  // added it was left) falls back to Answer without forgetting it. A later screen that adds or
+  // removes its own mode does not rewrite a mode they already chose.
+  const [chosen, setChosen] = useState<AskPanelMode>(() => initialMode ?? loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  const [modeFor, setModeFor] = useState(userId)
+  if (modeFor !== userId) {
+    setModeFor(userId)
+    setChosen(loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  }
   const mode = (chosen === 'extra' && !extra) || (chosen === 'do' && !doIt) ? 'answer' : chosen
+  function chooseMode(next: AskPanelMode) {
+    setChosen(next)
+    saveAskMode(userId, next)
+  }
   const end = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLFormElement>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
+  const askOnline = useFeature('ask')
+  // A /command does not ask the model, so it still runs while Ask is offline.
+  const canSend = draft.trim() !== '' && (askOnline || draft.trim().startsWith('/'))
 
   // The cursor rests a moment on the last check once an answer ends, then leaves.
   const [rested, setRested] = useState<number | null>(null)
@@ -368,7 +389,7 @@ export function AssistantPanel({
 
   const send = () => {
     const question = draft.trim()
-    if (!question || answering) return
+    if (!canSend || answering) return
     setDraft('')
     if (!question.startsWith('/')) {
       void assistant.ask(question, context)
@@ -438,7 +459,7 @@ export function AssistantPanel({
                 ...(doIt ? [{ value: 'do' as const, label: 'Do it' }] : []),
               ]}
               value={mode}
-              onChange={setMode}
+              onChange={chooseMode}
               className="mx-5 mb-3"
             />
           )}
@@ -468,15 +489,20 @@ export function AssistantPanel({
               </div>
 
               <div className="flex flex-1 flex-col gap-6 overflow-y-auto dot-grid px-5 py-4">
+                {assistant.opening && turns.length === 0 && (
+                  <p role="status" className="text-[13px] text-ink-muted">
+                    Opening this chat…
+                  </p>
+                )}
                 {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
-                {turns.length === 0 && !assistant.openFailed && (
+                {turns.length === 0 && !assistant.opening && !assistant.openFailed && (
                   <MotionConfig reducedMotion="user">
                     <AskWelcome
                       role={role}
                       about={about}
                       canNarrow={canNarrow}
                       onAsk={(question) => {
-                        if (!answering) void assistant.ask(question, context)
+                        if (!answering && askOnline) void assistant.ask(question, context)
                       }}
                     />
                   </MotionConfig>
@@ -488,8 +514,8 @@ export function AssistantPanel({
                     about={about}
                     titles={titles}
                     onShowSource={onShowSource}
-                    onAskAgain={turn === last && !answering ? () => void assistant.ask(turn.question, context, true) : undefined}
-                    onRegenerate={turn === last && !answering ? () => void assistant.ask(turn.question, context) : undefined}
+                    onAskAgain={turn === last && !answering && askOnline ? () => void assistant.ask(turn.question, context, true) : undefined}
+                    onRegenerate={turn === last && !answering && askOnline ? () => void assistant.ask(turn.question, context) : undefined}
                   />
                 ))}
                 <div ref={end} />
@@ -536,7 +562,7 @@ export function AssistantPanel({
                     ) : (
                       <button
                         type="submit"
-                        disabled={!draft.trim()}
+                        disabled={!canSend}
                         aria-label="Send"
                         className="ml-auto flex size-11 items-center justify-center rounded-full bg-linear-to-br from-accent to-accent/70 text-white shadow-md disabled:opacity-40 lg:size-8"
                       >
@@ -545,7 +571,13 @@ export function AssistantPanel({
                     )}
                   </div>
                 </form>
-                <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+                {askOnline ? (
+                  <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+                ) : (
+                  <p role="status" className="mt-2 text-[11px] leading-4 text-refutes">
+                    {OFFLINE_REASON.ask}
+                  </p>
+                )}
               </div>
             </>
           )}

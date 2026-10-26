@@ -10,6 +10,7 @@ import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { useAsk } from '../../components/Ask'
 import { SettingsModal } from '../../components/SettingsModal'
+import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
 import { Queue } from './screens/Queue'
@@ -18,7 +19,7 @@ import { usePaperNotices } from './usePaperNotices'
 
 const NAV: NavEntry<'papers'>[] = [{ key: 'papers', label: 'Papers to label', icon: Tags }]
 
-export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
+export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [analysis, setAnalysis] = useState<string | null>(() => new URLSearchParams(window.location.search).get('analysis'))
   const [unsaved, setUnsaved] = useState(false) // the open workspace holds drafts that are not saved
   // A modal over the current screen, as in the other roles, so unsaved labels stay open under it.
@@ -39,12 +40,17 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
     // about the open paper go through "This claim".
     canNarrow: false,
     // Do it with the Labeler's screen agent; the coding agent over MCP gets the same actions.
+    // The workspace opens through open_paper, which needs a paper. It is a screen only once one is open.
     actions: {
       role: 'labeler',
       screen: analysis ? 'workspace' : 'papers',
-      screens: ['papers'],
-      openScreen: () => leave(() => setAnalysis(null))(),
+      screens: analysis ? ['papers', 'workspace'] : ['papers'],
+      openScreen: (next) => {
+        if (next === 'papers') leave(() => setAnalysis(null))()
+      },
       openPaper,
+      switchRole: onSwitchRole,
+      confirmLeave: () => !unsaved || window.confirm('You have unsaved labels. Leave without saving?'),
     },
     extra: analysis ? { label: 'This claim', content: <div ref={setClaimSlot} /> } : undefined,
   })

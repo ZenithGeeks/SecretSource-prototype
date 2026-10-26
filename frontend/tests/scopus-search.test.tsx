@@ -36,6 +36,7 @@ function gateway(pages: (object | Response)[]) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
+      if (url.endsWith('/health')) return Response.json({})
       asked.push(new URL(url, 'http://x').searchParams)
       const next = pages.shift() ?? { total: 0, results: [] }
       return next instanceof Response ? next : Response.json(next)

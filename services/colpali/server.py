@@ -5,7 +5,9 @@
 HTTP:
     GET  /api/search?query=...&k=5&source=...  -> {"topk": [{"rank", "score", "page", "kind",
                                                     "label", "caption", "image", "title", "source"}, ...]}
-    POST /api/search {"query", "k", "source"}  -> same. source (optional) restricts to one paper
+    POST /api/search {"query", "k", "source"}  -> same. source is required: the route searches
+        that one paper only, so it never returns another user's pages. The gateway's figure
+        judge is its only caller and always names the cited paper.
     POST /api/add    {"path": "x.pdf"}   -> {"added": pages, "total": rows}   whole pages
     POST /api/add_figures {"source", "title", "figures": [{"label", "page", "caption", "image"}]}
     POST /api/upload          multipart "file"                        -> like /api/add
@@ -15,12 +17,15 @@ HTTP:
     or on Cloud Run).
     GET  /health
 
-MCP (streamable HTTP at /mcp): tool search_media — same store, same results.
+MCP (streamable HTTP at /mcp): tool search_media. It returns figures only for the file
+names in the X-Paper-Scope header. With no header it returns nothing: this service cannot
+tell callers apart, so it does not search the whole index.
 """
 
 import json
 import os
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import uvicorn
@@ -41,6 +46,12 @@ TITLE_FORM = Form("")
 FIGURES_FORM = Form(...)
 
 _store: Store | None = None
+
+# Set by the HTTP middleware from the X-Paper-Scope header: the file names the caller may
+# read. None means the header was absent. search_media searches only this set. The service
+# has no account of its own, so a call with no scope returns nothing rather than every paper.
+paper_scope: ContextVar[frozenset[str] | None] = ContextVar("paper_scope", default=None)
+SCOPE_HEADER = "x-paper-scope"
 
 
 def store() -> Store:
@@ -71,7 +82,11 @@ def search_media(query: str, k: int = 5, source: str | None = None) -> dict:
         query: What to look for, for example "bar chart of accuracy per dataset".
         k: How many hits to return. Values above 50 are cut to 50.
         source: The file name of one indexed paper, for example "2112.01488.pdf", to
-            search only that paper. Leave it out to search every indexed paper.
+            search only that paper. It has to be one of the papers named in the
+            X-Paper-Scope header. Leave source out to search every paper in that
+            header. With no header, or a header that does not list the paper, the
+            tool returns no figures: this service cannot tell callers apart, so it
+            does not search the whole index.
 
     Returns:
         {"model": the ColPali checkpoint, "topk": [hit, ...]}, best first. Each hit has
@@ -82,7 +97,12 @@ def search_media(query: str, k: int = 5, source: str | None = None) -> dict:
         higher is a closer match. It has no fixed range, so compare scores only within
         one answer.
     """
-    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
+    allowed = paper_scope.get()
+    if not allowed or (source is not None and source not in allowed):
+        # No scope, an empty scope, or a paper the caller did not name: nothing, not the index.
+        return {"model": CHECKPOINT, "topk": []}
+    names = [source] if source is not None else sorted(allowed)
+    return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), sources=names)}
 
 
 @asynccontextmanager
@@ -95,13 +115,38 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ColPali page retrieval", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def read_paper_scope(request, call_next):
+    """Remember X-Paper-Scope for the MCP tool. A missing or unreadable header is no scope."""
+    raw = request.headers.get(SCOPE_HEADER)
+    names: frozenset[str] | None
+    if raw is None:
+        names = None
+    else:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = []
+        if isinstance(parsed, list):
+            names = frozenset(name for name in parsed if isinstance(name, str))
+        else:
+            names = frozenset()
+    token = paper_scope.set(names)
+    try:
+        return await call_next(request)
+    finally:
+        paper_scope.reset(token)
+
+
 app.mount("/mcp", mcp.streamable_http_app())
 
 
 class SearchBody(BaseModel):
     query: str
+    source: str
     k: int = 5
-    source: str | None = None
 
 
 class AddBody(BaseModel):
@@ -122,13 +167,13 @@ class AddFiguresBody(BaseModel):
 
 
 @app.get("/api/search")
-def search(query: str, k: int = 5, source: str | None = None):
+def search(query: str, source: str, k: int = 5):
     return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
-    return search(body.query, body.k, body.source)
+    return search(body.query, body.source, body.k)
 
 
 @app.post("/api/add")

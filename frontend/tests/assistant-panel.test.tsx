@@ -4,7 +4,9 @@
  * empty, no-answer, failed and chat-list states.
  */
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantPanel, type AskAbout } from '../src/components/AssistantPanel'
@@ -34,6 +36,7 @@ function gateway(stream: ReturnType<typeof controlledStream>, chats: object[] = 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/health')) return Response.json({ features: { ask: true } })
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined })
       if (url.endsWith('/messages')) return stream.response
       if (url.endsWith('/assistant/chats') && init?.method === 'POST') return Response.json({ id: 'chat1', title: '', updated: 0 })
@@ -54,16 +57,19 @@ function Panel({ about = LIBRARY, context = { screen: 'library' }, onShowSource 
   onClearAbout?: () => void
 }) {
   const assistant = useAssistant()
+  const [client] = useState(() => new QueryClient())
   return (
-    <AssistantPanel
-      role="researcher"
-      assistant={assistant}
-      context={context}
-      about={about}
-      onClearAbout={onClearAbout}
-      onClose={() => {}}
-      onShowSource={onShowSource}
-    />
+    <QueryClientProvider client={client}>
+      <AssistantPanel
+        role="researcher"
+        assistant={assistant}
+        context={context}
+        about={about}
+        onClearAbout={onClearAbout}
+        onClose={() => {}}
+        onShowSource={onShowSource}
+      />
+    </QueryClientProvider>
   )
 }
 
