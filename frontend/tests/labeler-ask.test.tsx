@@ -53,8 +53,9 @@ vi.mock('../src/lib/api', async (original) => ({
   api: { findInPaper: vi.fn(async () => ({ page: null, boxes: [] })) },
 }))
 vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => null }))
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 
-import { Workspace } from '../src/roles/labeler/screens/Workspace'
+import { LabelerApp } from '../src/roles/labeler/LabelerApp'
 
 const SAVED = {
   claims: [{ claim_id: 'paperA#0', origin: 'extracted', status: 'accepted', claim_edited: '' }],
@@ -72,13 +73,17 @@ const QUESTION = {
   text: 'The judge reads these passages as not settling the claim, for the whole claim. Does level 4 hold for the part this paper is cited for?',
 }
 
+/** Opens the paper's workspace and the toolbar's Ask, which starts on "This claim" there. */
 async function openAsk() {
+  window.history.replaceState(null, '', '?role=labeler&analysis=a1')
   render(
-    <QueryClientProvider client={new QueryClient()}>
-      <Workspace analysisId="a1" />
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <LabelerApp />
     </QueryClientProvider>,
   )
-  fireEvent.click(await screen.findByRole('button', { name: 'Ask AI' }))
+  await screen.findByText('Method Y improves recall.')
+  fireEvent.click(screen.getByRole('button', { name: 'Ask AI', pressed: false }))
+  await screen.findByRole('button', { name: 'Review' })
 }
 
 describe('Ask AI in the labeler', () => {
@@ -88,6 +93,20 @@ describe('Ask AI in the labeler', () => {
     gateway.tools = []
     gateway.events = []
     window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  })
+
+  it('is the toolbar’s Ask, with this claim, Answer and Do it, and Do it asks the Labeler’s agent', async () => {
+    await openAsk()
+    const modes = screen.getByRole('group', { name: 'What Ask does' })
+    expect(within(modes).getAllByRole('button').map((button) => button.textContent)).toEqual(['Answer', 'This claim', 'Do it'])
+    expect(within(modes).getByRole('button', { name: 'This claim' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(modes).getByRole('button', { name: 'Do it' }))
+    const field = screen.getByRole('textbox', { name: 'What should the AI do?' })
+    fireEvent.change(field, { target: { value: 'Open the papers list' } })
+    fireEvent.submit(field.closest('form') as HTMLFormElement)
+
+    await waitFor(() => expect(gateway.streamed.at(-1)).toMatchObject({ path: '/agent/runs', body: { role: 'labeler', screen: 'workspace' } }))
   })
 
   it('reviews only a claim that is saved, with no unsaved changes', async () => {

@@ -317,6 +317,7 @@ export function AssistantPanel({
   onClose,
   onShowSource,
   doIt,
+  extra,
   className,
 }: {
   /** Whose Quip (components/Mascot) the header and the empty chat show. */
@@ -336,10 +337,14 @@ export function AssistantPanel({
   onShowSource: (target: Target) => void
   /** The Do it view (components/DoIt) for a role whose screens the agent can work; none hides the switch. */
   doIt?: ReactNode
+  /** A mode a screen adds for what it shows, such as the Labeler's "This claim"; gone when the screen is left. */
+  extra?: { label: string; content: ReactNode }
   className?: string
 }) {
   const [view, setView] = useState<'chat' | 'chats'>('chat')
-  const [mode, setMode] = useState<'answer' | 'do'>('answer')
+  const [chosen, setMode] = useState<'answer' | 'extra' | 'do'>(extra ? 'extra' : 'answer')
+  // A mode whose view went away (the screen that added it was left) falls back to Answer.
+  const mode = (chosen === 'extra' && !extra) || (chosen === 'do' && !doIt) ? 'answer' : chosen
   const end = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLFormElement>(null)
   const { turns, answering, draft, setDraft } = assistant
@@ -424,20 +429,23 @@ export function AssistantPanel({
             </IconButton>
           </div>
 
-          {doIt && (
+          {(doIt || extra) && (
             <Segmented
               label="What Ask does"
               options={[
-                { value: 'answer', label: 'Answer' },
-                { value: 'do', label: 'Do it' },
+                { value: 'answer' as const, label: 'Answer' },
+                ...(extra ? [{ value: 'extra' as const, label: extra.label }] : []),
+                ...(doIt ? [{ value: 'do' as const, label: 'Do it' }] : []),
               ]}
               value={mode}
               onChange={setMode}
               className="mx-5 mb-3"
             />
           )}
-          {mode === 'do' && doIt ? (
+          {mode === 'do' ? (
             doIt
+          ) : mode === 'extra' ? (
+            <div className="flex-1 overflow-y-auto px-5 pb-4">{extra?.content}</div>
           ) : (
             <>
               <div className="mx-5 flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent">

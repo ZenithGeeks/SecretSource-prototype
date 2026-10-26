@@ -1,9 +1,9 @@
 /** The labeler workspace gives the claim panel its room back (SCRUM-405): the claim strip shares
- * the header row, the shortcut list and Ask AI can be put away and stay away, and the width of
+ * the header row, the shortcut list can be put away and stays away, and the width of
  * the claim panel is the person's to change. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/lib/api', async (original) => ({
@@ -98,21 +98,6 @@ describe('the labeler workspace layout', () => {
 
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(add).toHaveFocus()
-  })
-
-  it('opens and closes Ask AI from the header', async () => {
-    renderWorkspace()
-    const ask = await screen.findByRole('button', { name: 'Ask AI' })
-    expect(ask.closest('header')).not.toBeNull()
-    expect(ask).toHaveAttribute('aria-expanded', 'false')
-
-    fireEvent.click(ask)
-    expect(await screen.findByRole('dialog', { name: 'Ask AI' })).toBeInTheDocument()
-    expect(ask).toHaveAttribute('aria-expanded', 'true')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close Ask AI' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Ask AI' })).not.toBeInTheDocument())
-    expect(ask).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('keeps the width the person gave the claim panel after a reload', async () => {

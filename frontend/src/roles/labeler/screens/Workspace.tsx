@@ -10,8 +10,9 @@
 
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
-import { ChevronDown, Keyboard, Sparkles } from 'lucide-react'
+import { Keyboard } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Empty, LoadingScreen, Segmented } from '../../../components/ui'
@@ -44,7 +45,6 @@ import {
 } from '../../../lib/labeling'
 import { AiCursor } from '../../../components/AiCursor'
 import type { Pointing } from '../../../lib/askCursor'
-import { FloatingPanel } from '../../../components/FloatingPanel'
 import { SplitPane } from '../../../components/SplitPane'
 import { AskPanel } from '../components/AskPanel'
 import { ClaimDecision, Kbd } from '../components/ClaimDecision'
@@ -110,12 +110,19 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
 }
 
-export function Workspace({ analysisId, onDirtyChange }: { analysisId: string; onDirtyChange?: (unsaved: boolean) => void }) {
+type WorkspaceProps = {
+  analysisId: string
+  onDirtyChange?: (unsaved: boolean) => void
+  /** The Ask panel's "This claim" view (LabelerApp), while it shows; the claim tools are drawn there. */
+  askSlot?: HTMLElement | null
+}
+
+export function Workspace({ analysisId, onDirtyChange, askSlot = null }: WorkspaceProps) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
   if (query.error || !query.data)
     return <Empty {...problem(query.error)} />
-  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} />
+  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} askSlot={askSlot} />
 }
 
 /** Search the references for each claim added by hand, and add what is found to its passages (#404).
@@ -150,7 +157,15 @@ function useAddedClaimSearch(analysisId: string, listed: WorkClaim[], currentId:
 }
 
 
-function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (unsaved: boolean) => void }) {
+function Body({
+  session,
+  onDirtyChange,
+  askSlot,
+}: {
+  session: Session
+  onDirtyChange?: (unsaved: boolean) => void
+  askSlot: HTMLElement | null
+}) {
   const base = useMemo(() => workClaims(session), [session])
   const [extra, setExtra] = useState<WorkClaim[]>([])
   const listed = useMemo(
@@ -236,7 +251,6 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
 
-  const [askOpen, setAskOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(shortcutsShown)
   const toggleShortcuts = () => {
     setShortcutsOpen(!shortcutsOpen)
@@ -516,34 +530,6 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
     />
   )
 
-  // The stacked layout's Ask row. On a wide screen the header's Ask button opens the floating panel.
-  const ask = claim && (
-    <div className="flex min-h-0 flex-col rounded-xl border border-border-subtle bg-surface">
-      <button
-        type="button"
-        aria-expanded={askOpen}
-        aria-controls="labeler-ask"
-        aria-label="Ask AI"
-        onClick={() => setAskOpen(!askOpen)}
-        className="flex min-h-14 items-center gap-3 px-4 text-left hover:bg-accent-soft/60 focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas">
-          <Sparkles className="size-4" aria-hidden="true" />
-        </span>
-        <span className="flex min-w-0 flex-col">
-          <span className="text-sm font-medium text-ink">Ask AI</span>
-          <span className="text-xs text-ink-muted">Review this claim, or ask about its papers</span>
-        </span>
-        <ChevronDown className={cn('ml-auto size-4 text-ink-muted transition-transform duration-200 motion-reduce:transition-none', askOpen && 'rotate-180')} aria-hidden="true" />
-      </button>
-      {askOpen && (
-        <div id="labeler-ask" className="overflow-y-auto px-4 pb-4">
-          {askPanel}
-        </div>
-      )}
-    </div>
-  )
-
   const selection = picked && (
     <SelectionBar
       picked={picked}
@@ -574,21 +560,6 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
       className={cn(iconButton, 'pointer-coarse:hidden', shortcutsOpen && 'border-accent bg-accent-soft text-ink')}
     >
       <Keyboard className="size-4" aria-hidden="true" />
-    </button>
-  )
-
-  // On a wide screen Ask is a floating panel, so it can sit beside the passage it talks about.
-  const askButton = wide && claim && (
-    <button
-      type="button"
-      aria-expanded={askOpen}
-      aria-controls="labeler-ask"
-      aria-label="Ask AI"
-      title="Ask AI: review this claim, or ask about its papers"
-      onClick={() => setAskOpen(!askOpen)}
-      className={cn(iconButton, 'text-accent', askOpen && 'border-accent bg-accent-soft')}
-    >
-      <Sparkles className="size-4" aria-hidden="true" />
     </button>
   )
 
@@ -628,7 +599,8 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
   )
 
   return (
-    <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem)]')}>
+    // The window less the shell's padding and its 52px toolbar.
+    <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem-52px)]')}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 xl:w-52 xl:shrink-0">
           <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">
@@ -657,10 +629,7 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
               <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            {shortcutsButton}
-            {askButton}
-          </div>
+          {shortcutsButton}
         </div>
       </header>
 
@@ -689,28 +658,13 @@ function Body({ session, onDirtyChange }: { session: Session; onDirtyChange?: (u
           {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
           {selection}
           <div className="flex flex-col gap-5">{panel}</div>
-          {ask}
           {saveBar()}
         </div>
       )}
-      {wide && (
-        <FloatingPanel
-          open={askOpen && Boolean(claim)}
-          title="Ask AI"
-          subtitle="Review this claim, or ask about its papers"
-          icon={
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas">
-              <Sparkles className="size-4" aria-hidden="true" />
-            </span>
-          }
-          storageKey="labeler.askPosition"
-          onClose={() => setAskOpen(false)}
-        >
-          <div id="labeler-ask">{askPanel}</div>
-        </FloatingPanel>
-      )}
+      {/* Drawn in the Ask panel's "This claim" view, but kept here with the claim's state. */}
+      {askSlot && askPanel && createPortal(askPanel, askSlot)}
       <MotionConfig reducedMotion="user">
-        <AiCursor pointing={askOpen && pointing?.claimId === currentId ? pointing.at : null} />
+        <AiCursor pointing={askSlot && pointing?.claimId === currentId ? pointing.at : null} />
       </MotionConfig>
     </div>
   )
