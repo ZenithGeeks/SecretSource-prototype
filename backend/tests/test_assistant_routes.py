@@ -27,6 +27,7 @@ def asked(monkeypatch):
         yield {"type": "done", "statements": 1}
 
     monkeypatch.setattr(assistant, "answer", answer)
+    monkeypatch.setattr(assistant, "standalone_question", lambda question, earlier: question)
     return calls
 
 
@@ -82,6 +83,43 @@ def test_a_question_brings_the_askers_matching_facts_and_no_one_elses(client, as
     chat = client.post("/assistant/chats", headers=ADA).json()
     ask(client, chat["id"], "What does ColBERT do?")
     assert asked[0]["remembered"] == ["Remembered paper, ColBERT '20: asked why BEIR disagrees"]
+
+
+def test_a_follow_up_is_answered_as_rewritten_from_the_chat_and_saved_as_typed(client, asked, monkeypatch):
+    rewrites = []
+
+    def standalone(question, earlier):
+        rewrites.append(earlier)
+        return "How big is ColBERT's index?" if earlier else question
+
+    monkeypatch.setattr(assistant, "standalone_question", standalone)
+    chat = client.post("/assistant/chats", headers=ADA).json()
+    ask(client, chat["id"], "What does ColBERT do?")
+    ask(client, chat["id"], "How big is its index?")
+
+    first_turn = [
+        "user asked: What does ColBERT do?",
+        "assistant said, backed by a1.pdf: ColBERT uses late interaction.",
+    ]
+    assert rewrites == [[], first_turn]
+    assert [call["question"] for call in asked] == ["What does ColBERT do?", "How big is ColBERT's index?"]
+    saved = client.get(f"/assistant/chats/{chat['id']}", headers=ADA).json()["messages"]
+    assert [message["text"] for message in saved if message["role"] == "user"] == [
+        "What does ColBERT do?",
+        "How big is its index?",
+    ]
+
+
+def test_a_question_about_the_paper_on_screen_is_not_rewritten(client, asked, monkeypatch):
+    def refuse(question, earlier):
+        raise AssertionError("must not be called")
+
+    chat = client.post("/assistant/chats", headers=ADA).json()
+    ask(client, chat["id"], "What does ColBERT do?")
+    monkeypatch.setattr(assistant, "standalone_question", refuse)
+    response = ask(client, chat["id"], "What does it propose?", {"screen": "graph", "node": "c:a1:3"})
+    assert [event["type"] for event in events(response)] == ["statement", "verdict", "done"]
+    assert asked[1]["question"] == "What does it propose?"
 
 
 def test_another_users_chat_is_a_404(client, asked):

@@ -1355,14 +1355,23 @@ async def _keep_alive(events):
         task.cancel()  # the reader left: stop answering
 
 
-async def _reply(user: str | None, chat_id: str, turn: str, question: str, paper: str | None):
+async def _reply(
+    user: str | None, chat_id: str, turn: str, question: str, earlier: list[str], paper: str | None
+):
     """Server-sent events for one answer (assistant.answer), then the reply is saved to the chat.
+    `earlier` is the chat before this question (chats.distill_lines): a library follow-up is
+    rewritten against it, and the rewrite is what is searched and answered. The chat keeps what
+    was typed.
     Only a finished answer is saved. After an error, or a reader who left, the question stays in
     the chat with no reply."""
     from app import assistant, memory  # import dspy and ADK, seconds, so not at start-up
 
     statements: list[dict] = []
     try:
+        if paper is None:
+            # A question about the paper on screen is not rewritten: the screen already says
+            # what "it" is, and the chat before it may be about another paper.
+            question = await asyncio.to_thread(assistant.standalone_question, question, earlier)
         remembered = await asyncio.to_thread(memory.remembered_for, question, user)
         if paper is None:
             events = assistant.answer(question, papers=papers_of(user), remembered=remembered)
@@ -1438,11 +1447,12 @@ async def ask(chat_id: str, body: ChatQuestion, user: str | None = Depends(curre
     verdict as its check ends, then "done" (assistant.answer). The web app reads them with
     fetch(), so the token travels in the Authorization header."""
     paper = _paper_on_screen(body.context, user)  # before streaming, so a 404 is still a 404
-    turn = await chats.add_question(user, chat_id, body.question, body.context.model_dump())
-    if turn is None:
+    asked = await chats.add_question(user, chat_id, body.question, body.context.model_dump())
+    if asked is None:
         raise HTTPException(404, "no such chat")
     return StreamingResponse(
-        _keep_alive(_reply(user, chat_id, turn, body.question, paper)), media_type="text/event-stream"
+        _keep_alive(_reply(user, chat_id, asked.turn, body.question, asked.earlier, paper)),
+        media_type="text/event-stream",
     )
 
 

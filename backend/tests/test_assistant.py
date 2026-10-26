@@ -60,6 +60,42 @@ def test_a_library_with_no_matching_passage_asks_no_llm(monkeypatch):
     assert assistant.answer_from_library("late interaction", frozenset({"carol.pdf"})) == []
 
 
+def test_a_first_question_is_not_rewritten_and_asks_no_llm(monkeypatch):
+    monkeypatch.setattr(assistant, "_answer_model", refuse)
+    assert assistant.standalone_question("What is ColBERT?", []) == "What is ColBERT?"
+
+
+def test_a_follow_up_is_rewritten_from_the_chats_last_lines(monkeypatch):
+    inputs = {}
+
+    class Predict:
+        def __init__(self, signature):
+            pass
+
+        def __call__(self, **given):
+            inputs.update(given)
+            return SimpleNamespace(standalone=" How big is ColBERTv2's index? ")
+
+    monkeypatch.setattr(assistant, "_answer_model", lambda: None)
+    monkeypatch.setattr(assistant.dspy, "Predict", Predict)
+    chat = [f"user asked: question {number}" for number in range(20)]
+    assert assistant.standalone_question("How big is its index?", chat) == "How big is ColBERTv2's index?"
+    assert inputs["chat"] == chat[-assistant.CHAT_LINES :]
+
+
+def test_an_empty_rewrite_keeps_the_question(monkeypatch):
+    class Predict:
+        def __init__(self, signature):
+            pass
+
+        def __call__(self, **given):
+            return SimpleNamespace(standalone="  ")
+
+    monkeypatch.setattr(assistant, "_answer_model", lambda: None)
+    monkeypatch.setattr(assistant.dspy, "Predict", Predict)
+    assert assistant.standalone_question("How big is it?", ["user asked: x"]) == "How big is it?"
+
+
 def test_remembered_facts_go_to_the_answer_step_beside_the_passages(monkeypatch):
     inputs = {}
 

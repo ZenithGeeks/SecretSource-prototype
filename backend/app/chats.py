@@ -14,7 +14,7 @@ ADK is imported on first use, not with the gateway: it adds about 0.6 s to a col
 
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from app.sessions import SIGNED_OUT, session_service
 
@@ -67,9 +67,10 @@ def messages(session: "Session") -> list[dict]:
 
 
 def distill_lines(chat_messages: list[dict]) -> list[str]:
-    """The chat as the distill step sees it (app/distill.py): each question, and each statement
-    the judge backed, meaning its verdict is "supports". Any other statement is left out, so it
-    can never become a fact."""
+    """The chat as the distill step (app/distill.py) and the follow-up rewrite
+    (assistant.standalone_question) see it: each question, and each statement the judge backed,
+    meaning its verdict is "supports". Any other statement is left out, so it can never become
+    a fact or change what a follow-up means."""
     lines = []
     for message in chat_messages:
         if message["role"] == "user":
@@ -99,15 +100,26 @@ async def mine(user: str | None) -> list["Session"]:
     return sorted(listed.sessions, key=lambda session: session.last_update_time, reverse=True)
 
 
-async def add_question(user: str | None, chat_id: str, question: str, context: dict) -> str | None:
-    """Record a question and the screen it came from. Returns the turn's invocation id, or None
-    if this user has no chat with this id."""
+class Asked(NamedTuple):
+    """A recorded question: its turn's invocation id, and the chat before it (distill_lines)."""
+
+    turn: str
+    earlier: list[str]
+
+
+async def add_question(user: str | None, chat_id: str, question: str, context: dict) -> Asked | None:
+    """Record a question and the screen it came from. Returns its turn and the chat before it,
+    or None if this user has no chat with this id."""
     from google.adk.events import Event, EventActions
     from google.genai import types
 
     turn = f"e-{uuid.uuid4()}"
+    earlier: list[str] = []
 
     def question_event(session: "Session") -> Event:
+        # _append has just read the chat, so the lines before this question cost no extra read.
+        nonlocal earlier
+        earlier = distill_lines(messages(session))
         state = dict(context)
         if not session.state.get("title"):
             state["title"] = question[:TITLE_LENGTH]
@@ -119,7 +131,7 @@ async def add_question(user: str | None, chat_id: str, question: str, context: d
             timestamp=time.time(),
         )
 
-    return turn if await _append(user, chat_id, question_event) else None
+    return Asked(turn, earlier) if await _append(user, chat_id, question_event) else None
 
 
 async def add_reply(user: str | None, chat_id: str, turn: str, statements: list[dict]) -> None:

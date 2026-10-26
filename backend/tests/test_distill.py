@@ -105,8 +105,8 @@ def test_starting_a_chat_queues_the_one_being_left_with_its_backed_lines(signed_
     first = client.post("/assistant/chats", json={}, headers=ADA).json()["id"]
 
     async def converse():
-        turn = await chats.add_question("user-ada", first, "How does ColBERT score passages?", {})
-        await chats.add_reply("user-ada", first, turn, [BACKED, NOT_BACKED])
+        asked = await chats.add_question("user-ada", first, "How does ColBERT score passages?", {})
+        await chats.add_reply("user-ada", first, asked.turn, [BACKED, NOT_BACKED])
 
     asyncio.run(converse())
     client.post("/assistant/chats", json={}, headers=ADA)
