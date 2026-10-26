@@ -5,9 +5,9 @@
 HTTP:
     GET  /api/search?query=...&k=5&source=...  -> {"topk": [{"rank", "score", "page", "kind",
                                                     "label", "caption", "image", "title", "source"}, ...]}
-    POST /api/search {"query", "k", "source"}  -> same. source (optional) restricts to one paper.
-        With no source the route searches the whole index. The gateway always names one paper
-        and drops any other hit. This route has no user of its own.
+    POST /api/search {"query", "k", "source"}  -> same. source is required: the route searches
+        that one paper only, so it never returns another user's pages. The gateway's figure
+        judge is its only caller and always names the cited paper.
     POST /api/add    {"path": "x.pdf"}   -> {"added": pages, "total": rows}   whole pages
     POST /api/add_figures {"source", "title", "figures": [{"label", "page", "caption", "image"}]}
     POST /api/upload          multipart "file"                        -> like /api/add
@@ -145,8 +145,8 @@ app.mount("/mcp", mcp.streamable_http_app())
 
 class SearchBody(BaseModel):
     query: str
+    source: str
     k: int = 5
-    source: str | None = None
 
 
 class AddBody(BaseModel):
@@ -167,13 +167,13 @@ class AddFiguresBody(BaseModel):
 
 
 @app.get("/api/search")
-def search(query: str, k: int = 5, source: str | None = None):
+def search(query: str, source: str, k: int = 5):
     return {"model": CHECKPOINT, "topk": store().search(query, min(k, 50), source)}
 
 
 @app.post("/api/search")
 def search_post(body: SearchBody):
-    return search(body.query, body.k, body.source)
+    return search(body.query, body.source, body.k)
 
 
 @app.post("/api/add")

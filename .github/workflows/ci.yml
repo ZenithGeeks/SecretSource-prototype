@@ -127,7 +127,6 @@ jobs:
           REDIS_URL: redis://127.0.0.1:1/0
         run: |
           "$VENV/bin/python" -m pytest -q
-          "$VENV/bin/pip" install -q "pypdf>=5"
           (cd ../services/colbert && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
           (cd ../services/colpali && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
 
