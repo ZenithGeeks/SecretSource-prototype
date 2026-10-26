@@ -1,9 +1,12 @@
 """Routes for the screen agent (app/agents/screen.py), as server-sent events.
 
 POST /agent/tools/{name} runs one data tool for the Ask panel's /commands.
-POST /agent/runs starts a conversation with the person's message. Whenever the agent calls a
-screen tool the stream sends `{"type": "tool", "id", "name", "args"}` and ends. The browser does
-it and POSTs the result to /agent/runs/{session_id}/results, which goes on with a new stream.
+POST /agent/runs starts a conversation with the person's message, or goes on in one when the body
+names its `session_id`. `role` picks the role's agent (agents/screen.py ROLE_AGENTS). Whenever the
+agent calls a screen tool the stream sends `{"type": "tool", "id", "name", "args"}` and ends. The
+browser does it and POSTs the result, with the same `role`, to /agent/runs/{session_id}/results,
+which goes on with a new stream. After switch_role says "switched", the browser sends the next
+message with the new role and the same session_id.
 Other events: `{"type": "session", "id"}` first, `{"type": "step", "name"}` for a server tool,
 `{"type": "agent", "name", "state", "task"}` when the agent hands work to a specialist
 (`state` is "working", then "done" or "failed"), `{"type": "say", "text"}` for the agent's words,
@@ -18,6 +21,7 @@ import json
 import logging
 import time
 from types import SimpleNamespace
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -43,45 +47,60 @@ _sessions = InMemorySessionService()
 _started: dict[str, tuple[float, str]] = {}  # session id -> (when it began, user id)
 
 
+# The web app's role ids with a screen agent (agents/screen.py ROLE_AGENTS). The Teacher has none.
+Role = Literal["researcher", "labeler", "writer"]
+
+
 class RunStart(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     screen: str = Field(default="", max_length=40)  # the screen the person is on, for the agent
+    role: Role = "researcher"  # whose agent answers; after switch_role the browser sends the new one
+    # Go on in this conversation instead of starting one: after switch_role, the new role's agent
+    # reads what was said before (one session service for every role, see get_runner).
+    session_id: str | None = Field(default=None, max_length=200)
 
 
 class ToolResult(BaseModel):
     id: str = Field(min_length=1, max_length=200)  # the function call's id from the "tool" event
     name: str = Field(min_length=1, max_length=40)
     result: dict
+    # The role whose agent made the call: ADK hands the result back to the agent that asked for it.
+    role: Role = "researcher"
 
 
 @router.post("/runs")
 async def start_run(body: RunStart, user: str | None = Depends(current_user)):
-    """Start a conversation with the screen agent and stream its first turn."""
+    """Start a conversation with the role's screen agent, or go on in one, and stream the turn."""
     await _forget_old_sessions()
     owner = user or ""  # "" is the signed-out space, as in app/sessions.py
-    session = await _sessions.create_session(app_name=APP_NAME, user_id=owner, state={"user": owner})
-    _started[session.id] = (time.monotonic(), owner)
+    if body.session_id:
+        session = await _sessions.get_session(app_name=APP_NAME, user_id=owner, session_id=body.session_id)
+        if session is None:
+            raise HTTPException(404, "no such conversation, or it ended an hour after it began")
+    else:
+        session = await _sessions.create_session(app_name=APP_NAME, user_id=owner, state={"user": owner})
+        _started[session.id] = (time.monotonic(), owner)
     text = f"[On the {body.screen} screen] {body.message}" if body.screen else body.message
     message = types.Content(role="user", parts=[types.Part(text=text)])
-    return _stream(session.id, owner, message, session_event={"type": "session", "id": session.id})
+    return _stream(body.role, session.id, owner, message, session_event={"type": "session", "id": session.id})
 
 
 @router.post("/runs/{session_id}/results")
 async def send_result(session_id: str, body: ToolResult, user: str | None = Depends(current_user)):
     """Give the agent what a screen tool did in the browser, and stream what it does next."""
-    from app.agents.screen import SCREEN_TOOL_NAMES  # see get_runner for why not at the top
+    from app.agents.screen import BROWSER_TOOL_NAMES  # see get_runner for why not at the top
 
     owner = user or ""
     session = await _sessions.get_session(app_name=APP_NAME, user_id=owner, session_id=session_id)
     if session is None:
         raise HTTPException(404, "no such conversation, or it ended an hour after it began")
-    if body.name not in SCREEN_TOOL_NAMES:
+    if body.name not in BROWSER_TOOL_NAMES:
         raise HTTPException(
-            422, f"{body.name} is not a screen tool; expected one of {sorted(SCREEN_TOOL_NAMES)}"
+            422, f"{body.name} is not a screen tool; expected one of {sorted(BROWSER_TOOL_NAMES)}"
         )
     response = types.FunctionResponse(id=body.id, name=body.name, response=body.result)
     message = types.Content(role="user", parts=[types.Part(function_response=response)])
-    return _stream(session_id, owner, message)
+    return _stream(body.role, session_id, owner, message)
 
 
 @router.post("/tools/{name}")
@@ -99,20 +118,24 @@ async def run_tool(name: str, args: dict, user: str | None = Depends(current_use
         raise HTTPException(422, f"{name}: {error}") from None
 
 
-def _stream(session_id: str, user_id: str, message: types.Content, session_event: dict | None = None):
+def _stream(
+    role: Role, session_id: str, user_id: str, message: types.Content, session_event: dict | None = None
+):
     from app import main  # main includes this router, so not at the top
 
-    events = _events(session_id, user_id, message, session_event)
+    events = _events(role, session_id, user_id, message, session_event)
     return StreamingResponse(main._keep_alive(events), media_type="text/event-stream")
 
 
-async def _events(session_id: str, user_id: str, message: types.Content, session_event: dict | None):
+async def _events(
+    role: Role, session_id: str, user_id: str, message: types.Content, session_event: dict | None
+):
     """One request's run, as server-sent events; it ends at a screen tool or at the agent's reply."""
     if session_event:
         yield _sse(session_event)
     run_config = RunConfig(max_llm_calls=MAX_LLM_CALLS)
     try:
-        async for event in get_runner().run_async(
+        async for event in get_runner(role).run_async(
             user_id=user_id, session_id=session_id, new_message=message, run_config=run_config
         ):
             calls = event.get_function_calls()
@@ -142,14 +165,16 @@ async def _events(session_id: str, user_id: str, message: types.Content, session
 
 
 @functools.cache
-def get_runner() -> Runner:
-    """The screen agent's runner, built on first use: app.agents.screen imports DSPy and
-    LiteLLM, which take seconds, so the gateway does not import it at start."""
-    from app.agents.screen import screen_agent
+def get_runner(role: Role = "researcher") -> Runner:
+    """The runner for one role's screen agent, built on first use: app.agents.screen imports DSPy
+    and LiteLLM, which take seconds, so the gateway does not import it at start. Every role's
+    runner shares one session service and app name, so a conversation keeps its history when the
+    person switches role."""
+    from app.agents.screen import ROLE_AGENTS
     from app.memory import AssistantMemory
 
     return Runner(
-        agent=screen_agent,
+        agent=ROLE_AGENTS[role],
         app_name=APP_NAME,
         session_service=_sessions,
         memory_service=AssistantMemory(),  # load_memory reads the owner's facts, then their analyses

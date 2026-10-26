@@ -195,3 +195,61 @@ def test_the_gateway_builds_the_agents_before_its_first_request():
     assert agent_runs.get_runner.cache_info().currsize == 1
     assert mcp_server._tools.cache_info().currsize == 1
     assert "litellm.types.secret_managers.main" in sys.modules
+
+
+def tool_names(agent) -> list[str]:
+    return [getattr(tool, "name", getattr(tool, "__name__", "")) for tool in agent.tools]
+
+
+def test_each_role_has_its_own_agent_and_each_can_ask_to_switch_role():
+    assert set(screen.ROLE_AGENTS) == {"researcher", "labeler", "writer"}
+    assert all("switch_role" in tool_names(agent) for agent in screen.ROLE_AGENTS.values())
+    # The MCP server lists SCREEN_TOOLS and takes SCREEN_TOOL_NAMES: a coding agent has no role.
+    assert "switch_role" not in screen.SCREEN_TOOL_NAMES
+    assert "switch_role" in screen.BROWSER_TOOL_NAMES
+
+
+def test_the_labeler_agent_cannot_write_or_see_a_verdict():
+    names = set(tool_names(screen.labeler_agent))
+    verdicts = {"get_claim", "get_analysis", "check_text", "ask_library", "search_claims", "get_gaps"}
+    assert not names & ({"fill_field", "submit_analysis", "data_agent"} | verdicts)
+    assert screen.labeler_agent.sub_agents == []
+
+
+def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api, monkeypatch):
+    client, model, _ = api
+    labeler_model = ScriptedModel(replies=["Claim 4 is next."], seen=[])
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+    model.replies = [
+        {"name": "switch_role", "args": {"role": "labeler", "reason": "Labeling is in the Labeler role"}},
+        "Switched to the Labeler role.",
+    ]
+
+    first = events(client.post("/agent/runs", json={"message": "Which claim do I label next?"}))
+    session = first[0]["id"]
+    [tool] = [e for e in first if e["type"] == "tool"]
+    assert tool["name"] == "switch_role"
+    result = {"id": tool["id"], "name": "switch_role", "result": {"status": "switched"}, "role": "researcher"}
+    second = events(client.post(f"/agent/runs/{session}/results", json=result))
+    assert {"type": "say", "text": "Switched to the Labeler role."} in second
+
+    body = {"message": "Go on", "role": "labeler", "session_id": session}
+    third = events(client.post("/agent/runs", json=body))
+    assert third[0] == {"type": "session", "id": session}
+    assert {"type": "say", "text": "Claim 4 is next."} in third
+    # The Labeler's agent read the conversation the Researcher's agent started.
+    assert "Which claim do I label next?" in str(labeler_model.seen[0].contents)
+
+
+def test_going_on_in_someone_elses_conversation_is_a_404(api):
+    client, model, app = api
+    model.replies = ["Hello."]
+    session = events(client.post("/agent/runs", json={"message": "hi"}))[0]["id"]
+    app.dependency_overrides[agent_runs.current_user] = lambda: "user-2"
+    body = {"message": "hi", "role": "labeler", "session_id": session}
+    assert client.post("/agent/runs", json=body).status_code == 404
+
+
+def test_a_role_without_an_agent_is_refused(api):
+    client, _, _ = api
+    assert client.post("/agent/runs", json={"message": "hi", "role": "teacher"}).status_code == 422

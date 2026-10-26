@@ -1,11 +1,14 @@
-"""The screen agent: Ask's "Do it" mode, which works the app for the person while they watch.
+"""The screen agents: Ask's "Do it" mode, which works the app for the person while they watch.
 
-It is a coordinator. Its screen tools run in the person's browser: each is an ADK long-running
-tool that returns nothing here, so the run pauses at the call; the browser does it with the AI
-cursor and sends the result back as a function response (app/agent_runs.py). list_papers runs on
-the server. Anything that needs the contents of the person's papers goes to data_agent, a
-specialist with the data tools (app/agents/data_tools.py), which answers in one turn. The
-stream tells the browser about each hand-over (agent_runs.DELEGATES), and the chat shows it as a badge.
+There is one agent per role: screen_agent for the Researcher, labeler_agent and author_agent
+(ROLE_AGENTS). Their screen tools run in the person's browser: each is an ADK long-running tool
+that returns nothing here, so the run pauses at the call; the browser does it with the AI cursor
+and sends the result back as a function response (app/agent_runs.py). switch_role is one of them,
+so moving to another role waits for the person's approval. list_papers and the role tools
+(app/agents/role_tools.py) run on the server. The Researcher's questions about the contents of
+the person's papers go to data_agent, a specialist with the data tools (app/agents/data_tools.py),
+which answers in one turn. The stream tells the browser about each hand-over
+(agent_runs.DELEGATES), and the chat shows it as a badge.
 The docstrings are what the model reads; docs/agent-tools.md lists every tool for people.
 """
 
@@ -15,16 +18,27 @@ from google.adk.agents import LlmAgent
 from google.adk.tools import LongRunningFunctionTool, ToolContext, load_memory
 from pydantic import BaseModel, Field
 
-from app.agents.data_tools import DATA_TOOLS
+from app.agents.data_tools import DATA_TOOLS, find_support, labeling_progress
+from app.agents.role_tools import AUTHOR_TOOLS, LABELER_TOOLS
 from app.llm import adk_model
 
-INSTRUCTION = """You work the SecretSource app for the person, on their screen, while they watch.
+# What every role's agent is told first; each role adds its own part below.
+WORK = """You work the SecretSource app for the person, on their screen, while they watch.
 SecretSource checks whether the papers a paper cites back up its claims.
 
 How to work:
 - Use the tools to show and do; reply in at most two short sentences.
 - Before pointing at or filling in something, call read_screen unless an earlier read_screen in
   this conversation already listed its target. Use targets exactly as read_screen gives them.
+- If something is not on the screen or not in their papers, say that plainly. Do not guess ids.
+- The app has three roles: Researcher (analysed papers, the library, the graph), Labeler (papers
+  shared for labeling) and Author (drafts and their citation checks). If the request belongs to
+  another role, call switch_role; the person must approve it. When the result says "switched",
+  say so in one sentence and stop: the agent of that role goes on. If it says "cancelled", stop.
+"""
+
+RESEARCHER_ROLE = """
+You are in the Researcher role. Its screens: home, analyses, library, graph.
 - To open a paper, call list_papers for its id, then open_paper. Open a screen with open_screen.
 - You may only change something with fill_field, and the person must approve it. If the result
   says it was cancelled, say so and stop. Never say a change was made unless a result says so.
@@ -32,8 +46,30 @@ How to work:
   checking some text, starting an analysis), call data_agent with the request in plain words.
   Do not answer from memory, and do not call data_agent just to open or point at something.
 - You cannot save labels, delete or upload anything. Point at the button and tell the person.
-- If something is not on the screen or not in their papers, say that plainly. Do not guess ids.
 """
+
+LABELER_ROLE = """
+You are in the Labeler role. Its screens: papers, workspace.
+- labeling_papers lists the papers shared for labeling and how far the person is on each.
+  labeling_progress gives a paper's next claim to label with its passages; claim_passages gives
+  any claim's passages; find_support searches the person's papers. Open a paper with open_paper.
+- Never say whether a passage supports, refutes or does not back a claim, and never suggest a
+  label or a rationale. The person's labels are the answer key the checker is scored against.
+  If asked, say the person decides, and point at the passage.
+- You cannot save labels or change anything. Point at the button and tell the person.
+"""
+
+AUTHOR_ROLE = """
+You are in the Author role. Its screens: home, library, graph, history, editor.
+- list_drafts lists the person's drafts. draft_issues gives what needs work in one: citations
+  its last check did not back, and problems in its .bib file and cite commands. find_support
+  finds passages in the person's papers for a sentence.
+- You may only change something with fill_field, and the person must approve it. If the result
+  says it was cancelled, say so and stop. Never say a change was made unless a result says so.
+- You cannot start a check, save, delete or upload. Point at the button and tell the person.
+"""
+
+INSTRUCTION = WORK + RESEARCHER_ROLE
 
 
 def read_screen() -> None:
@@ -45,15 +81,16 @@ def open_screen(screen: str) -> None:
     """Open one of the app's screens. Runs in the browser.
 
     Args:
-        screen: "home", "analyses", "library" or "graph".
+        screen: one of your role's screens, as your instructions list them, such as "library".
     """
 
 
 def open_paper(analysis_id: str) -> None:
-    """Open one of the person's analysed papers on the analyses screen. Runs in the browser.
+    """Open one of the person's papers: its analysis for a Researcher, its labeling workspace for
+    a Labeler. Runs in the browser.
 
     Args:
-        analysis_id: the id list_papers gives for the paper.
+        analysis_id: the paper's id, from list_papers or labeling_papers.
     """
 
 
@@ -74,6 +111,17 @@ def fill_field(target: str, text: str) -> None:
     Args:
         target: a field, as "field:id" from read_screen.
         text: what to type into it.
+    """
+
+
+def switch_role(role: str, reason: str) -> None:
+    """Move the person to another role of the app, after they approve it. The person sees the
+    reason and presses Switch or Cancel; the result says "switched" or "cancelled". Runs in the
+    browser.
+
+    Args:
+        role: "researcher", "labeler" or "author".
+        reason: a few words shown to the person, such as "Your drafts are in the Author role".
     """
 
 
@@ -144,13 +192,54 @@ SCREEN_TOOLS = [
     list_papers,
 ]
 
+read_screen_tool, open_screen_tool, open_paper_tool, point_at_tool, fill_field_tool = SCREEN_TOOLS[:5]
+# Not in SCREEN_TOOLS: the MCP server lists those, and a coding agent has no role to switch.
+switch_role_tool = LongRunningFunctionTool(func=switch_role)
+
 screen_agent = LlmAgent(
     name="screen_agent",
     model=adk_model(),
     instruction=INSTRUCTION,
-    tools=list(SCREEN_TOOLS),
+    tools=[*SCREEN_TOOLS, switch_role_tool],
     sub_agents=[data_agent],
 )
 
+# No fill_field and no tool that gives a verdict (get_claim, get_analysis, check_text, ask_library):
+# the agent must not write or hint at the labels the checker is scored against.
+labeler_agent = LlmAgent(
+    name="labeler_agent",
+    model=adk_model(),
+    instruction=WORK + LABELER_ROLE,
+    tools=[
+        read_screen_tool,
+        open_screen_tool,
+        open_paper_tool,
+        point_at_tool,
+        switch_role_tool,
+        labeling_progress,
+        find_support,
+        *LABELER_TOOLS,
+    ],
+)
+
+author_agent = LlmAgent(
+    name="author_agent",
+    model=adk_model(),
+    instruction=WORK + AUTHOR_ROLE,
+    tools=[
+        read_screen_tool,
+        open_screen_tool,
+        point_at_tool,
+        fill_field_tool,
+        switch_role_tool,
+        find_support,
+        *AUTHOR_TOOLS,
+    ],
+)
+
+# The web app's role ids (frontend/src/lib/roles.ts; the Author role is "writer" there).
+ROLE_AGENTS = {"researcher": screen_agent, "labeler": labeler_agent, "writer": author_agent}
+
 # The long-running tools above: the only results agent_runs.py takes from the browser.
 SCREEN_TOOL_NAMES = frozenset({"read_screen", "open_screen", "open_paper", "point_at", "fill_field"})
+BROWSER_TOOL_NAMES = SCREEN_TOOL_NAMES | {"switch_role"}  # SCREEN_TOOL_NAMES is the MCP server's
