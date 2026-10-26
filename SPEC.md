@@ -83,9 +83,12 @@ ADK has no end-of-session event, so the gateway decides:
    and not yet distilled is enqueued. This needs no scheduler and nothing that bills with
    no traffic (CONSTRAINTS.md).
 
-The marker is session state `distilled_at`, set by the job. A session that changes after
-it was distilled is distilled again on the same rules, and its facts are upserted, not
-duplicated.
+The marker is session state `distilled_at`. The gateway sets it when it queues the job, so a
+chat is not queued again on every request while the job waits. The worker may not be able to
+reach the chat, so the job cannot set it. A failed job is tried again after 1, 5 and 15
+minutes (`DISTILL_RETRY` in `app/queue.py`); one that fails all four times stays in RQ's failed
+jobs, and its chat is distilled again only after it changes. A session that changes after it
+was distilled is distilled again on the same rules, and its facts are upserted, not duplicated.
 
 ### Distilling
 
@@ -109,7 +112,10 @@ One DSPy step on 9arm reads a session's events and returns 0 to 5 facts.
 - Matching uses the same word overlap as `app/memory.py` today (shared `_words`). Vector
   search waits until the eval shows word matching misses facts.
 - With login off (`user_id` empty), it returns only analyses without an owner, as today.
-- `add_session_to_memory` enqueues the distill job; it does no LLM work in the request.
+- `add_session_to_memory` does nothing. ADK calls it only from an agent callback or the ADK
+  web server's memory route, and the assistant uses neither, so the chat routes queue
+  the distill job themselves (`_queue_distills` in `app/main.py`, on New chat and on listing
+  chats), with no LLM work in the request.
 - The A2A server and `cli.py` keep `AnalysisMemory`. They have no login, so they read only
   analyses without an owner.
 

@@ -32,4 +32,7 @@ if __name__ == "__main__":
     # Queue depth, ages and worker count, read from Redis on each scrape. Only here, not in the gateway.
     prometheus_client.REGISTRY.register(RQCollector())
     setup_tracing()
-    AnalysisWorker([QUEUE_NAME], connection=redis_connection(), serializer=JSONSerializer).work()
+    # The scheduler puts a failed chat distill back on the queue after its retry interval
+    # (queue.DISTILL_RETRY). It runs in its own process, and only one worker holds its lock.
+    worker = AnalysisWorker([QUEUE_NAME], connection=redis_connection(), serializer=JSONSerializer)
+    worker.work(with_scheduler=True)

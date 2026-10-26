@@ -90,6 +90,19 @@ def test_the_job_saves_the_facts_for_the_chat(sqlite_and_chats, monkeypatch):
     assert store.load_facts("user-bo") == []
 
 
+def test_a_failed_distill_is_tried_again_later_not_given_up(monkeypatch):
+    # The gateway marks the chat when it queues it, so a failed job would otherwise lose its facts.
+    from app import queue
+
+    enqueued = {}
+    fake_queue = SimpleNamespace(enqueue=lambda *args, **options: enqueued.update(options))
+    monkeypatch.setattr(queue, "analysis_queue", lambda: fake_queue)
+    queue.enqueue_distill("user-ada", "chat-1", ["user asked: How does ColBERT work?"])
+
+    assert enqueued["job_id"] == "distill-chat-1"
+    assert enqueued["retry"].max == 3 and enqueued["retry"].intervals == [60, 300, 900]
+
+
 @pytest.fixture
 def signed_in(sqlite_and_chats, monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
