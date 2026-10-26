@@ -14,7 +14,8 @@ cli.py has no login and uses SIGNED_OUT. a2a_server.py has none either, and ADK 
 callers A2A_USER_<context id>, so it builds the service with as_user=SIGNED_OUT.
 
 AssistantMemory (SPEC.md) also reads what the assistant remembers about the user, the facts
-in store.load_facts, and returns those first.
+in store.load_facts, and returns those first. Ask's Answer mode has no load_memory tool, so
+remembered_for gives it the same matching facts.
 """
 
 import asyncio
@@ -145,6 +146,15 @@ def search_facts(query: str, facts: list[dict], limit: int = RESULTS) -> list[Me
         )
         for _, _, fact in scored[:limit]
     ]
+
+
+def remembered_for(question: str, owner: str | None) -> list[str]:
+    """The owner's remembered facts that share words with the question, as Ask's answer step
+    reads them (app/assistant.py). Empty for a signed-out caller, who has no facts."""
+    if owner is None:
+        return []
+    found = search_facts(question, store.load_facts(owner))
+    return [entry.content.parts[0].text for entry in found]
 
 
 class AssistantMemory(BaseMemoryService):

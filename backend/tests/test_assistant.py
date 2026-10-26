@@ -5,6 +5,7 @@ import asyncio
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from app import assistant
 from app.assistant import Cited, Statement
@@ -59,6 +60,26 @@ def test_a_library_with_no_matching_passage_asks_no_llm(monkeypatch):
     assert assistant.answer_from_library("late interaction", frozenset({"carol.pdf"})) == []
 
 
+def test_remembered_facts_go_to_the_answer_step_beside_the_passages(monkeypatch):
+    inputs = {}
+
+    class Predict:
+        def __init__(self, signature):
+            pass
+
+        def __call__(self, **given):
+            inputs.update(given)
+            return SimpleNamespace(statements=[])
+
+    monkeypatch.setattr(assistant, "colbert_search", lambda question, k, **kwargs: HITS)
+    monkeypatch.setattr(assistant, "_answer_model", lambda: None)
+    monkeypatch.setattr(assistant.dspy, "Predict", Predict)
+    remembered = ["Remembered paper, ColBERT '20: asked why BEIR disagrees with it"]
+    assistant.answer_from_library("late interaction", frozenset({"ada.pdf"}), remembered)
+    assert inputs["remembered"] == remembered
+    assert inputs["passages"] == ["[1] ColBERT scores by late interaction."]
+
+
 def test_a_statement_cites_the_paper_and_page_of_its_passage():
     cited = assistant.cite(Statement(text="PLAID prunes centroids.", passage=3), HITS)
     assert (cited.source, cited.path.name, cited.page) == ("ada-2.pdf", "ada-2.pdf", 5)
@@ -68,7 +89,7 @@ def test_a_statement_cites_the_paper_and_page_of_its_passage():
 
 def test_statements_come_first_then_each_verdict_as_its_check_ends(monkeypatch):
     cited = [Cited("slow", "a.pdf", Path("a.pdf")), Cited("fast", "b.pdf", Path("b.pdf"))]
-    monkeypatch.setattr(assistant, "answer_from_library", lambda question, papers: cited)
+    monkeypatch.setattr(assistant, "answer_from_library", lambda question, papers, remembered: cited)
     fast_done = threading.Event()
 
     def check(item):
@@ -91,7 +112,7 @@ def test_statements_come_first_then_each_verdict_as_its_check_ends(monkeypatch):
 def test_a_question_about_one_paper_is_answered_from_that_paper(monkeypatch):
     asked = {}
 
-    def about_paper(question, paper, path):
+    def about_paper(question, paper, path, remembered):
         asked.update(question=question, paper=paper, path=path)
         return []
 

@@ -1359,18 +1359,19 @@ async def _reply(user: str | None, chat_id: str, turn: str, question: str, paper
     """Server-sent events for one answer (assistant.answer), then the reply is saved to the chat.
     Only a finished answer is saved. After an error, or a reader who left, the question stays in
     the chat with no reply."""
-    from app import assistant  # imports dspy, about 0.6 s, so not at start-up
+    from app import assistant, memory  # import dspy and ADK, seconds, so not at start-up
 
     statements: list[dict] = []
     try:
+        remembered = await asyncio.to_thread(memory.remembered_for, question, user)
         if paper is None:
-            events = assistant.answer(question, papers=papers_of(user))
+            events = assistant.answer(question, papers=papers_of(user), remembered=remembered)
         else:
             prepared = await asyncio.to_thread(prepare_source, paper)
             if prepared["status"] != "ok":
                 yield f"data: {json.dumps({'type': 'error', 'message': 'this paper could not be read'})}\n\n"
                 return
-            events = assistant.answer(question, paper=Path(prepared["path"]))
+            events = assistant.answer(question, paper=Path(prepared["path"]), remembered=remembered)
         async for event in events:
             if event["type"] == "statement":
                 statements.append({"text": event["text"], "source": event["source"], "page": event["page"]})

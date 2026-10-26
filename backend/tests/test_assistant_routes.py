@@ -20,8 +20,8 @@ def asked(monkeypatch):
     """Every call to assistant.answer. Each streams one statement and its verdict."""
     calls = []
 
-    async def answer(question, paper=None, papers=None):
-        calls.append({"question": question, "paper": paper, "papers": papers})
+    async def answer(question, paper=None, papers=None, remembered=None):
+        calls.append({"question": question, "paper": paper, "papers": papers, "remembered": remembered})
         yield {"type": "statement", "index": 0, **STATEMENT}
         yield {"type": "verdict", "index": 0, **VERDICT}
         yield {"type": "done", "statements": 1}
@@ -72,6 +72,16 @@ def test_a_question_streams_statements_then_verdicts_and_is_saved(client, asked)
     assert [message["role"] for message in saved["messages"]] == ["user", "assistant"]
     assert saved["messages"][1]["statements"] == [{**STATEMENT, **VERDICT}]
     assert [listed["id"] for listed in client.get("/assistant/chats", headers=ADA).json()] == [chat["id"]]
+
+
+def test_a_question_brings_the_askers_matching_facts_and_no_one_elses(client, asked):
+    fact = {"kind": "paper", "subject": "ColBERT '20", "summary": "asked why BEIR disagrees"}
+    fact["session_id"] = "s1"
+    main.store.save_fact("user-ada", fact)
+    main.store.save_fact("user-bo", {**fact, "summary": "compared it with SPLADE"})
+    chat = client.post("/assistant/chats", headers=ADA).json()
+    ask(client, chat["id"], "What does ColBERT do?")
+    assert asked[0]["remembered"] == ["Remembered paper, ColBERT '20: asked why BEIR disagrees"]
 
 
 def test_another_users_chat_is_a_404(client, asked):
