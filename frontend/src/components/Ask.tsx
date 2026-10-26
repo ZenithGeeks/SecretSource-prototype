@@ -7,7 +7,7 @@
  * with `viewer`.
  */
 
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 
 import { api, paperName } from '../lib/api'
 import type { Role } from '../lib/roles'
@@ -19,6 +19,8 @@ import type { ScreenActions } from '../lib/agentTools'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
+
+type AssistantPanelProps = ComponentProps<typeof AssistantPanel>
 import { DoIt } from './DoIt'
 import { PageViewer, type Target } from './PageViewer'
 import { useAgentConnection } from './useAgentConnection'
@@ -34,6 +36,7 @@ export function useAsk({
   node = null,
   canNarrow = true,
   actions,
+  extra,
 }: {
   /** Whose Quip (components/Mascot) the button and panel show. */
   role: Role
@@ -47,6 +50,8 @@ export function useAsk({
   canNarrow?: boolean
   /** What the screen agent may do in this role; with it, Ask gets the Do it mode. */
   actions?: ScreenActions
+  /** A mode for what the screen shows (AssistantPanel's `extra`). */
+  extra?: AssistantPanelProps['extra']
 }) {
   const assistant = useAssistant()
   const [open, setOpen] = useState(false)
@@ -97,6 +102,7 @@ export function useAsk({
       onClose={() => setOpen(false)}
       onShowSource={(target) => void showSource(target)}
       doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
+      extra={extra}
     />
   ) : undefined
 

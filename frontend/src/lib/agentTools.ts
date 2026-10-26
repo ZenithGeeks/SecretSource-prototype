@@ -9,6 +9,8 @@ import { askTarget, type AskTarget, type Pointing } from './askCursor'
 
 /** What the role's app lets the agent do: open its screens and papers. */
 export type ScreenActions = {
+  /** Which role's screen agent answers (backend/app/agent_runs.py); the Researcher's when left out. */
+  role?: 'researcher' | 'labeler' | 'writer'
   screen: string
   screens: string[]
   openScreen: (screen: string) => void

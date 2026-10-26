@@ -8,8 +8,8 @@ import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
+import { useAsk } from '../../components/Ask'
 import { SettingsModal } from '../../components/SettingsModal'
-import { useAgentConnection } from '../../components/useAgentConnection'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
 import { Queue } from './screens/Queue'
@@ -29,12 +29,24 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
   }
   const openPaper = (id: string) => leave(() => setAnalysis(id))()
   usePaperNotices(openPaper)
-  // A coding agent over MCP (docs/agent-tools.md) can open the queue or a paper and point at claims.
-  const agent = useAgentConnection({
+  // Where the workspace draws its claim tools (review, questions about the paper and its
+  // references) inside the Ask panel's "This claim" mode.
+  const [claimSlot, setClaimSlot] = useState<HTMLDivElement | null>(null)
+  const ask = useAsk({
+    role: 'labeler',
     screen: analysis ? 'workspace' : 'papers',
-    screens: ['papers'],
-    openScreen: () => leave(() => setAnalysis(null))(),
-    openPaper,
+    // No paper chip: a pool paper is often a teammate's, which the chat cannot read. Questions
+    // about the open paper go through "This claim".
+    canNarrow: false,
+    // Do it with the Labeler's screen agent; the coding agent over MCP gets the same actions.
+    actions: {
+      role: 'labeler',
+      screen: analysis ? 'workspace' : 'papers',
+      screens: ['papers'],
+      openScreen: () => leave(() => setAnalysis(null))(),
+      openPaper,
+    },
+    extra: analysis ? { label: 'This claim', content: <div ref={setClaimSlot} /> } : undefined,
   })
 
   useEffect(() => {
@@ -58,13 +70,17 @@ export function LabelerApp({ onChangeRole }: { onChangeRole?: () => void }) {
       // The workspace shows two PDFs and a label panel, so it takes the whole window.
       wide={analysis ? 'full' : true}
       foldable
-      // The labeler has no toolbar of its own; one shows while an agent is connected, to hold its pill.
-      breadcrumb={agent.pill ? ['Papers to label'] : undefined}
-      toolbarLead={agent.pill}
+      breadcrumb={['Papers to label']}
+      toolbarLead={ask.button}
+      panel={ask.panel}
       notifications={<PaperBell onOpen={openPaper} />}
     >
-      {analysis ? <Workspace analysisId={analysis} onDirtyChange={setUnsaved} /> : <Queue onOpen={setAnalysis} />}
-      {agent.overlay}
+      {analysis ? (
+        <Workspace analysisId={analysis} onDirtyChange={setUnsaved} askSlot={claimSlot} />
+      ) : (
+        <Queue onOpen={setAnalysis} />
+      )}
+      {ask.viewer}
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

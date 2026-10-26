@@ -120,11 +120,13 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
       )
     try {
       // Each message starts a new agent session, so the agent never acts on a screen it saw messages ago.
-      let call = await stream('/agent/runs', { message, screen: latest.current.screen }, abort.signal)
+      const { role, screen } = latest.current
+      let call = await stream('/agent/runs', { message, screen, role }, abort.signal)
       while (call && !abort.signal.aborted) {
         add({ kind: 'step', text: describeTool(call) })
         const result = await runTool(call, { actions: latest.current, point, confirm })
-        const body = { id: call.id, name: call.name, result }
+        // The role whose agent made the call, so its result goes back to that agent.
+        const body = { id: call.id, name: call.name, result, role }
         call = await stream(`/agent/runs/${encodeURIComponent(session.current ?? '')}/results`, body, abort.signal)
       }
     } catch (error) {
