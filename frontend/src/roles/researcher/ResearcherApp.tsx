@@ -21,6 +21,7 @@ import { AppShell } from '../../components/AppShell'
 import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
+import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { Graph } from './screens/Graph'
 import { Home } from './screens/Home'
@@ -70,7 +71,7 @@ function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
-export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
+export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [screen, setScreen] = useState<ResearcherScreen>(initialScreen)
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
@@ -102,10 +103,12 @@ export function ResearcherApp({ onChangeRole }: { onChangeRole?: () => void }) {
     node: onGraph ? graphNode : null,
     // What Ask's Do it mode may do here: the sidebar's screens, and opening a paper.
     actions: {
+      role: 'researcher',
       screen,
       screens: NAV.map((entry) => entry.key),
       openScreen: (next) => navigate(next as ResearcherScreen),
       openPaper: openAnalysis,
+      switchRole: onSwitchRole,
     },
   })
 

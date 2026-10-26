@@ -16,6 +16,7 @@ import { shortTitle, useAssistant } from '../lib/assistant'
 import type { PaperRef } from '../lib/askCommands'
 import { useAnalyses } from '../lib/useAnalysis'
 import type { ScreenActions } from '../lib/agentTools'
+import { peekDoItConversation } from '../lib/doItConversation'
 import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
@@ -54,7 +55,8 @@ export function useAsk({
   extra?: AssistantPanelProps['extra']
 }) {
   const assistant = useAssistant()
-  const [open, setOpen] = useState(false)
+  // A role switch leaves the Do it conversation here, so the new role opens on it.
+  const [open, setOpen] = useState(() => peekDoItConversation() !== null)
   // The paper or node whose chip the reader removed: questions about it go to the whole
   // library. Opening a different paper or node brings the chip back.
   const [cleared, setCleared] = useState<string | null>(null)
@@ -102,6 +104,7 @@ export function useAsk({
       onClose={() => setOpen(false)}
       onShowSource={(target) => void showSource(target)}
       doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
+      initialMode={peekDoItConversation() ? 'do' : undefined}
       extra={extra}
     />
   ) : undefined

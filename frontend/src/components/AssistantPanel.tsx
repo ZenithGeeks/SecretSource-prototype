@@ -319,6 +319,7 @@ export function AssistantPanel({
   onShowSource,
   doIt,
   extra,
+  initialMode,
   className,
 }: {
   /** Whose Quip (components/Mascot) the header and the empty chat show. */
@@ -340,10 +341,12 @@ export function AssistantPanel({
   doIt?: ReactNode
   /** A mode a screen adds for what it shows, such as the Labeler's "This claim"; gone when the screen is left. */
   extra?: { label: string; content: ReactNode }
+  /** Which mode to open on. A role switch lands on Do it so the conversation is still there. */
+  initialMode?: 'answer' | 'extra' | 'do'
   className?: string
 }) {
   const [view, setView] = useState<'chat' | 'chats'>('chat')
-  const [chosen, setMode] = useState<'answer' | 'extra' | 'do'>(extra ? 'extra' : 'answer')
+  const [chosen, setMode] = useState<'answer' | 'extra' | 'do'>(initialMode ?? (extra ? 'extra' : 'answer'))
   // A mode whose view went away (the screen that added it was left) falls back to Answer.
   const mode = (chosen === 'extra' && !extra) || (chosen === 'do' && !doIt) ? 'answer' : chosen
   const end = useRef<HTMLDivElement>(null)

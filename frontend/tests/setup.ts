@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
+
+import { clearDoItConversation } from '../src/lib/doItConversation'
 
 Object.defineProperty(URL, 'createObjectURL', {
   configurable: true,
@@ -19,4 +21,12 @@ Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: vi.fn().mockResolvedValue(undefined) },
 })
 
-afterEach(() => cleanup())
+beforeEach(() => {
+  clearDoItConversation()
+  window.sessionStorage.removeItem('agentBridge.connected')
+})
+
+afterEach(() => {
+  cleanup()
+  clearDoItConversation()
+})
