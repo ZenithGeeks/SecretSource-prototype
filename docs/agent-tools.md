@@ -10,10 +10,11 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | Tool | Runs in | Does | Arguments | Result the agent gets |
 |---|---|---|---|---|
 | `read_screen` | browser | Lists the screen's name and everything the agent can point at, open or fill in | none | `{screen, targets: [{target, label}]}` |
-| `open_screen` | browser | Opens a screen through the app's own navigation | `screen`: `home`, `analyses`, `library` or `graph` | `{status: "done", screen}` or `{status: "error", message}` |
-| `open_paper` | browser | Opens an analysed paper on the analyses screen | `analysis_id` from `list_papers` | `{status: "done"}` or `{status: "error", message}` |
+| `open_screen` | browser | Opens a screen through the app's own navigation | `screen`: one of the role's screens (see Roles) | `{status: "done", screen}` or `{status: "error", message}` |
+| `open_paper` | browser | Opens a paper: its analysis for a Researcher, its labeling workspace for a Labeler | `analysis_id` from `list_papers` or `labeling_papers` | `{status: "done"}` or `{status: "error", message}` |
 | `point_at` | browser | Moves the AI cursor to a target, rings it, shows a note | `target` (`kind:id`), `note` | `{status: "done"}`, or `{status: "error", message: "not on the screen"}` |
 | `fill_field` | browser, after the person approves | Shows the text, waits for Apply or Cancel, then types it into the field | `target` (`field:id`), `text` | `{status: "applied"}` or `{status: "cancelled"}` |
+| `switch_role` | browser, after the person approves | Shows the reason, waits for Switch or Cancel, then moves the person to that role. Not on MCP | `role`: `researcher`, `labeler` or `author`; `reason` | `{status: "switched"}` or `{status: "cancelled"}` |
 | `list_papers` | server | The person's analysed papers, newest first, at most 50 | none | `[{id, title, status}]` |
 | `get_analysis` | server, `data_agent` | One analysis: status, why it failed, claims per standing, each claim with its number | `analysis_id` | `{id, title, status, stage, message, standing, claims: [{number, claim, section, standing}]}` |
 | `get_claim` | server, `data_agent` | The evidence behind one claim: verdict, quote and reasoning per cited paper, and citations that could not be checked | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, standing, verdicts, unchecked}` |
@@ -26,11 +27,15 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `bibtex` | server, `data_agent` | BibTeX entries for a paper and the works its claims cite | `analysis_id` | `{bibtex}` |
 | `submit_analysis` | server, `data_agent` | Starts an analysis of a DOI, arXiv ID or URL in the background | `paper` | `{id, status}`; poll `get_analysis` |
 | `load_memory` | server, `data_agent` only | What the person studied or asked in earlier chats (SPEC.md), then findings from their own analyses, at most 5. Not on MCP or `/commands` | `query` | `{memories: [{content, timestamp}]}` |
-| `labeling_progress` | server, `data_agent` | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
+| `labeling_progress` | server, `data_agent`, `labeler_agent` | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
+| `labeling_papers` | server, `labeler_agent` | The papers shared for labeling, at most 30, and how many claims the person saved on each | none | `{papers: [{id, title, topic, claims, saved}]}` |
+| `claim_passages` | server, `labeler_agent` | One claim's retrieved passages, best first, at most 8. No verdict and no score | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, passages: [{paper, page, rank, text}]}` |
+| `list_drafts` | server, `author_agent` | The person's drafts, most recently changed first, at most 30 | none | `{drafts: [{id, title, last_checked, checking_now}]}` |
+| `draft_issues` | server, `author_agent` | A draft's open citations from its last check (refuted, not backed, missing key) and its .bib and cite warnings, at most 20 each | `draft_id` | `{checked, citations: [{key, file, line, sentence, verdict, why}], warnings}` |
 
-The agent cannot save labels, delete or upload anything. There is no tool for it, and the
-instructions tell it to point at the button and let the person press it. It can start an
-analysis with `submit_analysis`, which only queues a run the person sees in their list.
+The agent cannot save labels, start a draft check, delete or upload anything. There is no tool
+for it, and the instructions tell it to point at the button and let the person press it. It can
+start an analysis with `submit_analysis`, which only queues a run the person sees in their list.
 
 The screen agent is a coordinator. It keeps the browser tools and `list_papers`, and hands anything
 that needs the contents of the person's papers to `data_agent`, a specialist with the server tools
@@ -42,6 +47,23 @@ shows in the chat as a badge: working, then done or failed.
 The server tools are in `backend/app/agents/data_tools.py`. They read only the caller's own
 analyses; an id that is not theirs comes back as "no analysis ... among your papers", the same as
 a missing one.
+
+## Roles
+
+Each role has its own agent (`ROLE_AGENTS` in `backend/app/agents/screen.py`). The browser names
+the role in every request; `POST /agent/runs` with a `session_id` goes on in the same
+conversation, so after `switch_role` the next role's agent reads what was said before.
+
+| Role (`role` in the request) | Agent | Screens | Its own tools |
+|---|---|---|---|
+| `researcher` | `screen_agent` | `home`, `analyses`, `library`, `graph` | `list_papers`, `fill_field`, and `data_agent` with the server tools above |
+| `labeler` | `labeler_agent` | `papers`, `workspace` | `labeling_papers`, `labeling_progress`, `claim_passages`, `find_support` |
+| `writer` (Author) | `author_agent` | `home`, `library`, `graph`, `history`, `editor` | `list_drafts`, `draft_issues`, `find_support`, `fill_field` |
+
+Every role also has `read_screen`, `open_screen`, `point_at` and `switch_role`. The Labeler's agent
+has no `fill_field` and no tool that returns a verdict (`get_claim`, `get_analysis`, `check_text`,
+`ask_library`): the person's labels are the answer key the checker is scored against, so the
+agent must not write them or hint at them. The Teacher role has no agent yet.
 
 ## Commands in the Ask input
 
@@ -73,15 +95,19 @@ so React sees the change.
 
 ## How a turn runs
 
-1. The browser POSTs the person's message to `/api/agent/runs` with the screen they are on.
+1. The browser POSTs the person's message to `/api/agent/runs` with the screen they are on and
+   its `role`, plus `session_id` to go on in a conversation.
 2. The stream sends `{"type": "session", "id"}`, then the agent's steps: `{"type": "step", "name"}`
    for a server tool, `{"type": "agent", "name", "state", "task"}` when it hands work to a specialist
    (`state` is `working`, then `done` or `failed`; `task` comes with `working`), `{"type": "say", "text"}`
    for its words.
 3. A browser tool arrives as `{"type": "tool", "id", "name", "args"}` and the stream ends with
    `{"type": "done"}`. The browser runs it from the registry in `frontend/src/lib/agentTools.ts`
-   with the cursor, then POSTs `{id, name, result}` to `/api/agent/runs/{session}/results`. That
-   answer is a new stream, and the loop goes on until a `done` with no tool before it.
+   with the cursor, then POSTs `{id, name, result, role}` to `/api/agent/runs/{session}/results`,
+   with the role whose agent asked. That answer is a new stream, and the loop goes on until a
+   `done` with no tool before it.
+4. After `switch_role` comes back `switched`, the agent says so and stops. The browser switches the
+   role and sends the next message with the new `role` and the same `session_id`.
 
 A request makes at most 8 model calls (`MAX_LLM_CALLS`); past that the agent says it stopped.
 Conversations live in the gateway's memory for an hour.
