@@ -66,6 +66,7 @@ def api(monkeypatch):
     # The paper list asks OpenAlex for keywords; a test that wants some stubs openalex_details.
     monkeypatch.setattr(scopus, "_subjects", {})
     monkeypatch.setattr(scopus, "openalex_details", lambda dois: {})
+    monkeypatch.setattr(scopus, "rank_of", lambda doi: None)  # listing a paper looks up its venue
     app = FastAPI()
     app.include_router(labeling.router)
     app.dependency_overrides[labeling.owned_analysis] = lambda: ANALYSIS
@@ -712,11 +713,13 @@ def test_scopus_search_needs_a_key_and_reads_records_with_a_doi(monkeypatch):
                 "year": "2022",
                 "first_author": "Santhanam K.",
                 "cited_by": 412,
+                "rank": scopus.UNRANKED,  # no ISSN and no source type in this record
                 "abstract": "We retrieve late.",
                 "subject": "Information Retrieval",
                 "keywords": ["ColBERT"],
             }
         ],
+        "hidden": 0,
     }
 
 
@@ -741,6 +744,127 @@ def test_scopus_search_asks_again_once_after_a_timeout_but_not_after_a_refused_k
     with pytest.raises(requests.HTTPError):
         scopus.search("NLP", "", 2020)
     assert len(calls) == 1
+
+
+def serial(issn, e_issn, years):
+    """A Serial Title entry: years maps "2025" to (status, [percentile per subject])."""
+    return {
+        "prism:issn": issn,
+        "prism:eIssn": e_issn,
+        "citeScoreYearInfoList": {
+            "citeScoreYearInfo": [
+                {
+                    "@year": year,
+                    "@status": status,
+                    "citeScoreInformationList": [
+                        {"citeScoreInfo": [{"citeScoreSubjectRank": [{"percentile": str(p)} for p in ps]}]}
+                    ],
+                }
+                for year, (status, ps) in years.items()
+            ]
+        },
+    }
+
+
+def test_citescore_quartile_is_the_best_subject_in_the_latest_complete_year_and_is_kept(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    monkeypatch.setattr(scopus, "_citescores", {})
+    reply = {
+        "serial-metadata-response": {
+            "entry": [
+                # 2026 is still being counted, so 2025 counts: best subject 80 -> Q1.
+                serial(
+                    "0162-8828", "1939-3539", {"2026": ("In-Progress", [10]), "2025": ("Complete", [40, 80])}
+                ),
+                serial("1111-1111", None, {"2024": ("Complete", [74]), "2023": ("Complete", [99])}),
+                serial(None, "2222-2222", {"2025": ("Complete", [24])}),
+                serial("3333-3333", None, {"2026": ("In-Progress", [99])}),  # no complete year yet
+            ]
+        }
+    }
+    asked = []
+    monkeypatch.setattr(
+        requests, "get", lambda url, params, headers, timeout: asked.append(params) or ScopusReply(reply)
+    )
+    found = scopus.citescore_ranks(["01628828", "19393539", "11111111", "22222222", "33333333", "44444444"])
+    assert asked[0]["view"] == "CITESCORE" and asked[0]["count"] == 6
+    assert found == {
+        "01628828": {"system": "CiteScore", "value": "Q1", "year": 2025},
+        "19393539": {"system": "CiteScore", "value": "Q1", "year": 2025},
+        "11111111": {"system": "CiteScore", "value": "Q2", "year": 2024},
+        "22222222": {"system": "CiteScore", "value": "Q4", "year": 2025},
+        "33333333": None,
+        "44444444": None,  # Scopus does not know it
+    }
+    assert scopus.citescore_ranks(["01628828"]) == {"01628828": found["01628828"]} and len(asked) == 1
+
+
+def test_citescore_lookup_that_fails_is_left_out_and_tried_again_later(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    monkeypatch.setattr(scopus, "_citescores", {})
+    monkeypatch.setattr(requests, "get", lambda *a, **k: ScopusReply(status=500))
+    assert scopus.citescore_ranks(["01628828"]) == {}
+    entry = {"prism:aggregationType": "Journal", "prism:issn": "01628828"}
+    assert scopus.venue_rank(entry, {}) is None  # not checked, which is not "unranked"
+    monkeypatch.setattr(scopus, "_citescores", {"01628828": (None, 0.0)})  # the retry time has come
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda *a, **k: ScopusReply({"serial-metadata-response": {"error": "No results found"}}),
+    )
+    assert scopus.citescore_ranks(["01628828"]) == {"01628828": None}
+
+
+def test_conference_rank_is_the_one_written_for_its_venue_and_nothing_is_guessed():
+    def rank(venue, kind="Conference Proceeding", **issns):
+        return scopus.venue_rank({"prism:publicationName": venue, "prism:aggregationType": kind, **issns}, {})
+
+    icse = "Proceedings 2026 IEEE ACM 48th International Conference on Software Engineering ICSE 2026"
+    assert rank(icse) == {"system": "CORE", "value": "A*", "year": 2026}
+    hpdc = "35th ACM International Symposium on High Performance Parallel and Distributed Computing"
+    assert rank(hpdc)["value"] == "A"
+    unranked = [
+        # Workshops and companion volumes carry the name but are not the ranked main track.
+        "Proceedings of the IEEE International Conference on Computer Vision Workshops",
+        "Proceedings ICSE Companion: International Conference on Software Engineering",
+        # The same "and" rule as the query (#579), and a conference not in VENUES.
+        "International Conference on Software Engineering and Computer Applications",
+        "Proceedings of the ACM SIGIR Conference",
+    ]
+    assert [rank(venue) for venue in unranked] == [scopus.UNRANKED] * 4
+    # A journal named in VENUES still gets its quartile from CiteScore, not from the hand list.
+    tpami = "IEEE Transactions on Pattern Analysis and Machine Intelligence"
+    assert rank(tpami, "Journal") == scopus.UNRANKED  # no ISSN in the record
+    q2 = {"system": "CiteScore", "value": "Q2", "year": 2025}
+    entry = {"prism:publicationName": tpami, "prism:aggregationType": "Journal", "prism:eIssn": "1939-3539"}
+    assert scopus.venue_rank(entry, {"19393539": q2}) == q2
+    assert scopus.venue_rank(entry, {"19393539": None}) == scopus.UNRANKED
+
+
+def test_rank_filter_leaves_topic_venues_out_of_the_query_and_hides_the_rest_of_a_page(monkeypatch):
+    q = scopus.build_query("NLP", "", 2020, ranks=frozenset({"A"}))
+    assert 'SRCTITLE("North American Chapter' in q and "Empirical Methods" not in q
+    assert scopus.build_query("NLP", "", 2020, ranks=frozenset({"Q4"})) is None
+    assert "SRCTITLE" not in scopus.build_query("NLP", "", 2020, scope="all", ranks=frozenset({"Q1"}))
+
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    monkeypatch.setattr(scopus, "openalex_details", lambda dois: {})
+    monkeypatch.setattr(requests, "get", lambda *a, **k: pytest.fail("no query to send"))
+    assert scopus.search("NLP", "", 2020, ranks=frozenset({"Q4"})) == {"total": 0, "results": [], "hidden": 0}
+
+    acl = {"prism:publicationName": "Annual Meeting of the Association for Computational Linguistics"}
+    entries = [
+        {"prism:doi": "10.1/acl", "prism:aggregationType": "Conference Proceeding", **acl},
+        {
+            "prism:doi": "10.1/sigir",
+            "prism:aggregationType": "Conference Proceeding",
+            "prism:publicationName": "SIGIR",
+        },
+    ]
+    reply = {"search-results": {"entry": entries, "opensearch:totalResults": "2"}}
+    monkeypatch.setattr(requests, "get", lambda *a, **k: ScopusReply(reply))
+    found = scopus.search("NLP", "", 2020, scope="all", ranks=frozenset({"A*"}))
+    assert [p["doi"] for p in found["results"]] == ["10.1/acl"] and found["hidden"] == 1
 
 
 def test_abstract_subject_and_keywords_come_from_openalex_by_doi_and_are_skipped_when_it_fails(monkeypatch):
@@ -806,6 +930,55 @@ def test_scopus_add_lists_the_paper_under_a_topic_once(api, monkeypatch):
     again = client.post("/labeling/scopus/add", json={"doi": doi.upper(), "topic": "CV"})
     assert again.json() == {"id": analysis_id, "existing": True} and len(started) == 1
     assert client.post("/labeling/scopus/add", json={"doi": "not a doi", "topic": "NLP"}).status_code == 422
+
+
+def test_a_listed_paper_keeps_its_venue_rank_into_the_labels_csv(api, monkeypatch):
+    from app import main
+
+    client, db, _ = api
+    monkeypatch.setattr(main, "enqueue_analysis", lambda *a, **k: None)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: SimpleNamespace(publish=lambda *a: 0))
+    monkeypatch.setattr(scopus, "rank_of", lambda doi: {"system": "CORE", "value": "A*", "year": 2026})
+    analysis_id = client.post("/labeling/scopus/add", json={"doi": "10.1234/x", "topic": "NLP"}).json()["id"]
+    assert db.tabs["assignments"][-1]["venue_rank"] == "A*"
+    assert db.tabs["assignments"][-1]["venue_rank_source"] == "CORE 2026"
+
+    # Taking the paper back and sharing it again keeps the rank it was listed with.
+    monkeypatch.setattr(scopus, "rank_of", lambda doi: pytest.fail("ranked already"))
+    monkeypatch.setattr(main, "lookup", lambda i: {**ANALYSIS, "id": i, "paper": "10.1234/x"})
+    app = api[2]
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {
+        **ANALYSIS,
+        "id": analysis_id,
+        "paper": "10.1234/x",
+    }
+    client.put(f"/labeling/papers/{analysis_id}/topic", json={"topic": ""})
+    client.put(f"/labeling/papers/{analysis_id}/topic", json={"topic": "CV"})
+    assert db.tabs["assignments"][-1]["venue_rank"] == "A*"
+    paper = client.get("/labeling/pool").json()["papers"][0]
+    assert (paper["venue_rank"], paper["venue_rank_source"]) == ("A*", "CORE 2026")
+
+    label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 2}
+    client.post("/labeling/sessions/a1/save", json={"labels": [label]})
+    header, row = client.get("/labeling/export?tab=labels").text.splitlines()
+    assert header.endswith(",venue_rank,venue_rank_source") and row.endswith(",A*,CORE 2026")
+
+
+def test_a_paper_is_listed_without_a_rank_when_scopus_fails(api, monkeypatch):
+    from app import main
+
+    client, db, _ = api
+    monkeypatch.setattr(main, "enqueue_analysis", lambda *a, **k: None)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: SimpleNamespace(publish=lambda *a: 0))
+
+    def refused(doi):
+        raise requests.HTTPError("HTTP 429")
+
+    monkeypatch.setattr(scopus, "rank_of", refused)
+    assert client.post("/labeling/scopus/add", json={"doi": "10.1234/x", "topic": "NLP"}).status_code == 200
+    assert db.tabs["assignments"][-1]["venue_rank"] == ""
 
 
 def test_pool_shows_a_paper_still_processing_and_why_one_failed(api, monkeypatch):
@@ -1108,7 +1281,7 @@ def test_a_failed_scopus_search_says_why(api, monkeypatch):
 def test_scopus_search_says_which_papers_can_be_downloaded(api, monkeypatch):
     client, _, _ = api
     found = [{"doi": doi, "title": doi} for doi in ("10.1/A", "10.1/b", "10.1/c")]
-    monkeypatch.setattr(scopus, "search", lambda *args: {"total": 3, "results": found})
+    monkeypatch.setattr(scopus, "search", lambda *args: {"total": 3, "results": found, "hidden": 0})
     monkeypatch.setattr(scopus, "downloadable", lambda dois: {"10.1/a": True, "10.1/b": False})
 
     results = client.get("/labeling/scopus/search", params={"topic": "SE"}).json()["results"]

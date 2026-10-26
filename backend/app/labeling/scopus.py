@@ -37,33 +37,53 @@ SORTS = {"cited": "citedby-count", "newest": "-coverDate", "oldest": "+coverDate
 # Recognition" is also a Springer book series). ECCV is left out: Scopus files it under a generic book
 # series, so it cannot be searched by name. Scopus flags few CVPR papers as open access, so CV is
 # mostly TPAMI and ICCV. Edit the lists if a venue is missing.
-VENUES: dict[str, list[str]] = {
-    "CV": [
-        "Conference on Computer Vision and Pattern Recognition",
-        "IEEE International Conference on Computer Vision",
-        "IEEE Transactions on Pattern Analysis and Machine Intelligence",
-    ],
-    "NLP": [
-        "Annual Meeting of the Association for Computational Linguistics",
-        "Empirical Methods in Natural Language Processing",
-        "North American Chapter of the Association for Computational Linguistics",
-        "Transactions of the Association for Computational Linguistics",
-    ],
-    "SE": [
-        "International Conference on Software Engineering",
-        "Foundations of Software Engineering",
-        "International Conference on Automated Software Engineering",
-        "IEEE Transactions on Software Engineering",
-    ],
-    "HPC": [
-        "High Performance Computing, Networking, Storage and Analysis",
-        "International Parallel and Distributed Processing Symposium",
-        "High-Performance Parallel and Distributed Computing",
-        "IEEE Transactions on Parallel and Distributed Systems",
-    ],
+#
+# Each venue's rank, checked by hand on 2026-10-26: a conference's CORE rank from the ICORE2026
+# table (portal.core.edu.au/conf-ranks), a journal's CiteScore 2025 quartile. A search result shows
+# the conference rank written here, but a journal's quartile looked up from Scopus (venue_rank), so
+# the journal ranks here only decide which venues a rank filter leaves out of the query.
+VENUES: dict[str, dict[str, str]] = {
+    "CV": {
+        "Conference on Computer Vision and Pattern Recognition": "A*",
+        "IEEE International Conference on Computer Vision": "A*",
+        "IEEE Transactions on Pattern Analysis and Machine Intelligence": "Q1",
+    },
+    "NLP": {
+        "Annual Meeting of the Association for Computational Linguistics": "A*",
+        "Empirical Methods in Natural Language Processing": "A*",
+        "North American Chapter of the Association for Computational Linguistics": "A",
+        "Transactions of the Association for Computational Linguistics": "Q1",
+    },
+    "SE": {
+        "International Conference on Software Engineering": "A*",
+        "Foundations of Software Engineering": "A*",
+        "International Conference on Automated Software Engineering": "A*",
+        "IEEE Transactions on Software Engineering": "Q1",
+    },
+    "HPC": {
+        "High Performance Computing, Networking, Storage and Analysis": "A",
+        "International Parallel and Distributed Processing Symposium": "A",
+        "High-Performance Parallel and Distributed Computing": "A",
+        "IEEE Transactions on Parallel and Distributed Systems": "Q1",
+    },
 }
+CORE_YEAR = 2026  # the ICORE round the conference ranks above come from
+# Proceedings that carry a ranked conference's name but are not its main track: CORE ranks the main
+# conference only. Scopus names them like "Proceedings of the IEEE International Conference on
+# Computer Vision Workshops", which SRCTITLE also matches.
+NOT_MAIN_TRACK = re.compile(r"\b(workshops?|companion|findings|demos?|doctoral|students?|tutorials?)\b", re.I)
 
-FIELDS = "dc:title,prism:doi,prism:publicationName,prism:coverDate,dc:creator,citedby-count"
+FIELDS = (
+    "dc:title,prism:doi,prism:publicationName,prism:coverDate,dc:creator,citedby-count,"
+    "prism:issn,prism:eIssn,prism:aggregationType"
+)
+SERIAL_URL = "https://api.elsevier.com/content/serial/title"
+ISSN_BATCH = 25  # ISSNs per Serial Title request; one page of results has at most 50
+UNRANKED = {"system": None, "value": "unranked", "year": None}
+
+# ISSN (no hyphen) -> (its CiteScore rank or None, monotonic time to ask again), for citescore_ranks.
+_citescores: dict[str, tuple[dict | None, float]] = {}
+_citescores_lock = threading.Lock()
 
 KEYWORDS = 5  # the most keywords shown for one paper
 NO_DETAILS = {"abstract": "", "subject": "", "keywords": []}  # a paper OpenAlex does not know
@@ -102,11 +122,19 @@ def doi_in(text: str) -> str | None:
     return doi
 
 
-def build_query(topic: str, text: str, since: int, until: int | None = None, scope: Scope = "topic") -> str:
+def build_query(
+    topic: str,
+    text: str,
+    since: int,
+    until: int | None = None,
+    scope: Scope = "topic",
+    ranks: frozenset[str] = frozenset(),
+) -> str | None:
     """Open-access records from `since` to `until`, optionally matching `text`.
 
     `scope="topic"` keeps the topic's venues; `"all"` searches every venue. A DOI or paper link
     in `text` finds that one paper whatever the venue, year or access, so it can always be found.
+    `ranks` keeps only the topic venues with one of these ranks; None when that leaves none.
     """
     doi = doi_in(text)
     if doi:
@@ -119,11 +147,14 @@ def build_query(topic: str, text: str, since: int, until: int | None = None, sco
         parts.append(f'TITLE-ABS-KEY("{words}")')
     if scope == "all":
         return " AND ".join(parts)
-    venues = " OR ".join(f'SRCTITLE("{venue}")' for venue in VENUES[topic])
+    kept = [venue for venue, rank in VENUES[topic].items() if not ranks or rank in ranks]
+    if not kept:
+        return None
+    venues = " OR ".join(f'SRCTITLE("{venue}")' for venue in kept)
     # SRCTITLE matches the words anywhere in a title, so "International Conference on Software
     # Engineering" also matches "... Software Engineering and Computer Applications" (#579).
     # Scopus applies AND NOT last, so it has to come at the end.
-    others = " OR ".join(f'SRCTITLE("{venue} and*")' for venue in VENUES[topic])
+    others = " OR ".join(f'SRCTITLE("{venue} and*")' for venue in kept)
     return f"({venues}) AND " + " AND ".join(parts) + f" AND NOT ({others})"
 
 
@@ -174,12 +205,18 @@ def search(
     sort: str = "cited",
     start: int = 0,
     scope: Scope = "topic",
+    ranks: frozenset[str] = frozenset(),
 ) -> dict:
     """One page of open-access papers (see `build_query`), with how many Scopus has in all.
 
+    `ranks` keeps only papers whose venue rank is one of these values ("Q1", "A*", "unranked"...).
+    Scopus cannot filter by rank, so outside the topic venues the page is filtered after it comes
+    back and `hidden` says how many it left out.
+
     Returns:
-        `{"total", "results"}`. Each result has its DOI, title, venue, year, first author, citation
-        count, and the abstract, subject and keywords from OpenAlex (empty when it has none).
+        `{"total", "results", "hidden"}`. Each result has its DOI, title, venue, year, first author,
+        citation count, venue `rank` (see `venue_rank`), and the abstract, subject and keywords
+        from OpenAlex (empty when it has none).
 
     Raises:
         NotConfigured: there is no SCOPUS_API_KEY.
@@ -188,33 +225,164 @@ def search(
     """
     if not config.SCOPUS_API_KEY:
         raise NotConfigured("set SCOPUS_API_KEY")
-    params = {
-        "query": build_query(topic, text, since, until, scope),
-        "start": start,
-        "count": PAGE,
-        "field": FIELDS,
-        "sort": SORTS[sort],
-    }
-    body = _ask_scopus(params)
-    found = []
+    query = build_query(topic, text, since, until, scope, ranks)
+    if query is None:
+        return {"total": 0, "results": [], "hidden": 0}
+    entries = _entries({"query": query, "start": start, "count": PAGE, "sort": SORTS[sort]})
+    found = [
+        {
+            "doi": entry["prism:doi"],
+            "title": entry.get("dc:title", ""),
+            "venue": entry.get("prism:publicationName", ""),
+            "year": (entry.get("prism:coverDate") or "")[:4],
+            "first_author": entry.get("dc:creator", ""),
+            "cited_by": int(entry.get("citedby-count") or 0),
+            "rank": rank,
+        }
+        for entry, rank in zip(entries["entries"], _ranks(entries["entries"]), strict=True)
+    ]
+    shown = [paper for paper in found if not ranks or (paper["rank"] or {}).get("value") in ranks]
+    details = openalex_details([paper["doi"] for paper in shown])
+    results = [{**paper, **details.get(paper["doi"].lower(), NO_DETAILS)} for paper in shown]
+    return {"total": entries["total"], "results": results, "hidden": len(found) - len(shown)}
+
+
+def rank_of(doi: str) -> dict | None:
+    """The venue rank of one paper (see `venue_rank`); None when Scopus does not know the DOI.
+
+    Raises the same errors as `search`.
+    """
+    if not config.SCOPUS_API_KEY:
+        raise NotConfigured("set SCOPUS_API_KEY")
+    entries = _entries({"query": f'DOI("{doi}")', "count": 1})["entries"]
+    return _ranks(entries)[0] if entries else None
+
+
+def _entries(params: dict) -> dict:
+    """`{"total", "entries"}`: Scopus's records that have a DOI, asked for with FIELDS."""
+    body = _ask_scopus({**params, "field": FIELDS}).get("search-results", {})
     # An empty result is one entry that only has an "error" key, so it has no DOI and is skipped.
-    for entry in body.get("search-results", {}).get("entry", []):
-        if not entry.get("prism:doi"):
-            continue
-        found.append(
-            {
-                "doi": entry["prism:doi"],
-                "title": entry.get("dc:title", ""),
-                "venue": entry.get("prism:publicationName", ""),
-                "year": (entry.get("prism:coverDate") or "")[:4],
-                "first_author": entry.get("dc:creator", ""),
-                "cited_by": int(entry.get("citedby-count") or 0),
-            }
-        )
-    details = openalex_details([paper["doi"] for paper in found])
-    total = int(body.get("search-results", {}).get("opensearch:totalResults") or 0)
-    results = [{**paper, **details.get(paper["doi"].lower(), NO_DETAILS)} for paper in found]
-    return {"total": total, "results": results}
+    entries = [entry for entry in body.get("entry", []) if entry.get("prism:doi")]
+    return {"total": int(body.get("opensearch:totalResults") or 0), "entries": entries}
+
+
+def _ranks(entries: list[dict]) -> list[dict | None]:
+    """The venue rank of each record, in order, with one CiteScore request for the whole list."""
+    citescores = citescore_ranks([issn for entry in entries for issn in _issns(entry)])
+    return [venue_rank(entry, citescores) for entry in entries]
+
+
+def _issns(entry: dict) -> list[str]:
+    return [issn.replace("-", "") for issn in (entry.get("prism:issn"), entry.get("prism:eIssn")) if issn]
+
+
+def venue_rank(entry: dict, citescores: dict[str, dict | None]) -> dict | None:
+    """How strong a Scopus record's venue is: `{"system", "value", "year"}`.
+
+    A conference gets the CORE rank written in VENUES when its proceedings carry one of those
+    names, and is unranked otherwise: matching any other proceedings title to a CORE row by
+    similar words can pick the wrong conference, and a wrong rank is worse than none. A journal
+    (or book series) gets its CiteScore quartile by ISSN from `citescores`, and is unranked when
+    Scopus has none for it. None when the quartile could not be looked up.
+    """
+    venue = entry.get("prism:publicationName", "")
+    if entry.get("prism:aggregationType") == "Conference Proceeding":
+        rank = _core_rank(venue)
+        return {"system": "CORE", "value": rank, "year": CORE_YEAR} if rank else UNRANKED
+    issns = _issns(entry)
+    if not issns:
+        return UNRANKED
+    found = [citescores[issn] for issn in issns if issn in citescores]
+    if not found:
+        return None  # the lookup failed
+    return next((rank for rank in found if rank), UNRANKED)
+
+
+def _core_rank(venue: str) -> str | None:
+    """The CORE rank in VENUES of the conference these proceedings belong to, if any."""
+    if NOT_MAIN_TRACK.search(venue):
+        return None
+    name = _words(venue)
+    for venues in VENUES.values():
+        for known, rank in venues.items():
+            # Same rule as the query: the venue's words in a row, not followed by "and" (#579).
+            if not rank.startswith("Q") and re.search(rf"\b{_words(known)}\b(?! and\b)", name):
+                return rank
+    return None
+
+
+def _words(text: str) -> str:
+    """Lower-case words separated by single spaces, as SRCTITLE compares them."""
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def citescore_ranks(issns: list[str]) -> dict[str, dict | None]:
+    """The CiteScore quartile of each ISSN, by ISSN without a hyphen.
+
+    The value is `{"system": "CiteScore", "value": "Q1"..."Q4", "year"}` from the best subject
+    percentile in the latest complete CiteScore year (Scopus's quartiles: Q1 is the 75th-99th
+    percentile), or None for an ISSN Scopus has no CiteScore for. An ISSN missing from the answer
+    could not be looked up. Answers are kept in this process: a quartile changes once a year; a
+    failed lookup is tried again after RETRY_UNKNOWN seconds.
+    """
+    now = time.monotonic()
+    wanted = set(issns)
+    with _citescores_lock:
+        missing = sorted(issn for issn in wanted if _citescores.get(issn, (None, 0.0))[1] <= now)
+    for start in range(0, len(missing), ISSN_BATCH):
+        batch = missing[start : start + ISSN_BATCH]
+        found = _ask_citescores(batch)
+        with _citescores_lock:
+            for issn in batch:
+                _citescores[issn] = (
+                    (None, now + RETRY_UNKNOWN) if found is None else (found.get(issn), math.inf)
+                )
+    with _citescores_lock:
+        return {
+            issn: _citescores[issn][0] for issn in wanted if _citescores.get(issn, (None, 0.0))[1] == math.inf
+        }
+
+
+def _ask_citescores(issns: list[str]) -> dict[str, dict] | None:
+    """One Serial Title request: ISSN -> CiteScore rank for the ISSNs that have one; None on failure."""
+    import requests
+
+    headers = {"X-ELS-APIKey": config.SCOPUS_API_KEY, "Accept": "application/json"}
+    params = {"issn": ",".join(issns), "view": "CITESCORE", "count": len(issns)}
+    try:
+        response = requests.get(SERIAL_URL, params=params, headers=headers, timeout=TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException as error:
+        # Not the response: its links repeat the API key.
+        log.warning("could not look up the CiteScore of %d ISSNs: %s", len(issns), type(error).__name__)
+        return None
+    found: dict[str, dict] = {}
+    # No match at all is a reply with "error": "No results found" and no entries.
+    for serial in response.json().get("serial-metadata-response", {}).get("entry", []):
+        rank = _citescore_quartile(serial)
+        for issn in (serial.get("prism:issn"), serial.get("prism:eIssn")):
+            if issn and rank:
+                found[issn.replace("-", "")] = rank
+    return found
+
+
+def _citescore_quartile(serial: dict) -> dict | None:
+    years = (serial.get("citeScoreYearInfoList") or {}).get("citeScoreYearInfo") or []
+    complete = [year for year in years if year.get("@status") == "Complete"]
+    if not complete:
+        return None
+    latest = max(complete, key=lambda year: int(year["@year"]))
+    percentiles = [
+        int(subject["percentile"])
+        for info in latest.get("citeScoreInformationList") or []
+        for score in info.get("citeScoreInfo") or []
+        for subject in score.get("citeScoreSubjectRank") or []
+        if subject.get("percentile")
+    ]
+    if not percentiles:
+        return None
+    quartile = 4 - min(max(percentiles) // 25, 3)  # 75-99 -> Q1, 50-74 -> Q2, 25-49 -> Q3, 0-24 -> Q4
+    return {"system": "CiteScore", "value": f"Q{quartile}", "year": int(latest["@year"])}
 
 
 def _ask_scopus(params: dict) -> dict:
