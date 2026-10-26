@@ -1,28 +1,42 @@
 /**
  * The screen agent's browser tools (backend/app/agents/screen.py, docs/agent-tools.md): what each
  * tool call from the agent does on this page. Each moves the AI cursor first, then acts, and
- * returns a small result the agent reads. Only fill_field changes anything, and only after the
- * person approves it.
+ * returns a small result the agent reads. Only fill_field and switch_role change anything, and
+ * only after the person approves it.
  */
 
 import { askTarget, type AskTarget, type Pointing } from './askCursor'
+import { ROLE_INFO, type Role } from './roles'
 
-/** What the role's app lets the agent do: open its screens and papers. */
+type AgentRole = 'researcher' | 'labeler' | 'writer'
+
+/** What the role's app lets the agent do: open its screens and papers, and move to another role. */
 export type ScreenActions = {
   /** Which role's screen agent answers (backend/app/agent_runs.py); the Researcher's when left out. */
-  role?: 'researcher' | 'labeler' | 'writer'
+  role?: AgentRole
   screen: string
   screens: string[]
   openScreen: (screen: string) => void
   openPaper: (analysisId: string) => void
+  /** Opens another role's app; without it, switch_role tells the agent it cannot. */
+  switchRole?: (role: Role) => void
+  /** What Do it offers to try before the first message; the Researcher's when left out. */
+  examples?: string[]
 }
+
+/** A change waiting for the person: text for a field, or a move to another role. */
+export type Change = { kind: 'fill' | 'switch'; target: string; label: string; text: string }
 
 export type ToolContext = {
   actions: ScreenActions
   point: (pointing: Pointing | null) => void
-  /** Shows the change and waits for the person's Apply (true) or Cancel (false). */
-  confirm: (change: { target: string; label: string; text: string }) => Promise<boolean>
+  /** Shows the change and waits for the person's Apply or Switch (true) or Cancel (false). */
+  confirm: (change: Change) => Promise<boolean>
 }
+
+// The agent names roles as the person sees them (backend/app/agents/screen.py switch_role); the
+// app's id for the Author role is "writer".
+const AGENT_ROLES: Record<string, AgentRole> = { researcher: 'researcher', labeler: 'labeler', author: 'writer' }
 
 export type ToolCall = { id: string; name: string; args: Record<string, unknown> }
 export type ToolResult = Record<string, unknown>
@@ -45,6 +59,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       return pointAt(args.target, args.note, context)
     case 'fill_field':
       return fillField(args.target, args.text, context)
+    case 'switch_role':
+      return switchRole(args.role, args.reason, context)
     default:
       return { status: 'error', message: `there is no tool named ${call.name} in this app` }
   }
@@ -64,6 +80,10 @@ export function describeTool(call: ToolCall): string {
       return `Pointing: ${args.note || args.target}`
     case 'fill_field':
       return `Filling in: “${args.text}”`
+    case 'switch_role': {
+      const role = AGENT_ROLES[args.role]
+      return `Switching to ${role ? ROLE_INFO[role].label : args.role}`
+    }
     default:
       return call.name
   }
@@ -100,10 +120,23 @@ async function fillField(target: string, text: string, { point, confirm }: ToolC
     return { status: 'error', message: `${target} is not a field on the screen; call read_screen` }
   }
   point({ target: parsed, tone: 'asks', label: 'Fill this in?' })
-  if (!(await confirm({ target, label: labelOf(field), text }))) return { status: 'cancelled' }
+  if (!(await confirm({ kind: 'fill', target, label: labelOf(field), text }))) return { status: 'cancelled' }
   typeInto(field, text)
   point({ target: parsed, tone: 'agrees', label: 'Filled in' })
   return { status: 'applied' }
+}
+
+/** Opens another role's app after the person presses Switch. The current role's app, and this
+ * Do it conversation with it, close. */
+async function switchRole(name: string, reason: string, { actions, confirm }: ToolContext): Promise<ToolResult> {
+  const role = AGENT_ROLES[name]
+  if (!role) return { status: 'error', message: `there is no role ${name}; roles: ${Object.keys(AGENT_ROLES).join(', ')}` }
+  if (role === (actions.role ?? 'researcher')) return { status: 'error', message: `the person is already in the ${name} role` }
+  if (!actions.switchRole) return { status: 'error', message: 'this screen cannot switch roles; tell the person to use the role menu' }
+  const label = ROLE_INFO[role].label
+  if (!(await confirm({ kind: 'switch', target: `role:${name}`, label, text: reason }))) return { status: 'cancelled' }
+  actions.switchRole(role)
+  return { status: 'switched', role: name }
 }
 
 /** Sets a field's value the way typing does, so React's onChange sees it. */

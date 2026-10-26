@@ -4,6 +4,7 @@
 import { Fragment, useState } from 'react'
 
 import { Card, Empty } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { checkedLabel } from '../../../lib/author'
 import { preprintNote } from '../../../lib/citations'
 import { cn } from '../../../lib/utils'
@@ -63,6 +64,7 @@ function CitationRow({ citation, selected, onSelect }: { citation: Citation; sel
         type="button"
         onClick={onSelect}
         aria-current={selected ? 'true' : undefined}
+        data-ask-target={askTarget({ kind: 'citation', id: citation.id })}
         className={cn(
           'flex w-full flex-col items-start gap-1 rounded px-1 py-2 text-left transition-colors hover:bg-accent-soft/40',
           selected && 'bg-accent-soft/60',

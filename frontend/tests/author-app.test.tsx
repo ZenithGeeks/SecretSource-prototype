@@ -9,10 +9,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { runTool } from '../src/lib/agentTools'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
+// Ask's Do it streams: each POST gets the next list of agent events.
+const agent = vi.hoisted(() => ({
+  posts: [] as { path: string; body: Record<string, unknown> }[],
+  streams: [] as object[][],
+}))
+vi.mock('../src/lib/api', async (original) => ({
+  ...(await original<typeof import('../src/lib/api')>()),
+  postEvents: vi.fn(async (path: string, body: Record<string, unknown>, onEvent: (event: object) => void) => {
+    agent.posts.push({ path, body })
+    for (const event of agent.streams.shift() ?? []) onEvent(event)
+  }),
+}))
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
@@ -37,12 +50,22 @@ function renderApp(search = '') {
   window.history.replaceState(null, '', search || window.location.pathname)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const onChangeRole = vi.fn()
+  const onSwitchRole = vi.fn()
   render(
     <QueryClientProvider client={queryClient}>
-      <AuthorApp onChangeRole={onChangeRole} />
+      <AuthorApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     </QueryClientProvider>,
   )
-  return { onChangeRole }
+  return { onChangeRole, onSwitchRole }
+}
+
+/** Opens the toolbar's Ask on its Do it mode and sends `message` to the agent. */
+function doIt(message: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Ask AI', pressed: false }))
+  fireEvent.click(within(screen.getByRole('group', { name: 'What Ask does' })).getByRole('button', { name: 'Do it' }))
+  const field = screen.getByRole('textbox', { name: 'What should the AI do?' })
+  fireEvent.change(field, { target: { value: message } })
+  fireEvent.submit(field.closest('form') as HTMLFormElement)
 }
 
 /** The sidebar nav — screens have their own buttons too. */
@@ -66,6 +89,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   gateway = installFakeGateway({ files: THESIS_FILES })
+  agent.posts = []
+  agent.streams = []
 })
 
 afterEach(() => {
@@ -122,6 +147,82 @@ describe('AuthorApp', () => {
     expect(await screen.findByRole('heading', { name: 'Check a draft' })).toBeInTheDocument()
     expect(await screen.findByText('Your last edits to related-work.tex were not saved: the gateway is down')).toBeInTheDocument()
     expect(gateway.drafts.get('d1')!.files.find((f) => f.name === 'related-work.tex')!.content.startsWith('% leaving')).toBe(false)
+  })
+
+  test('Ask has Do it, and Do it asks the Author’s screen agent about the screen showing', async () => {
+    renderApp('?screen=library')
+    await screen.findAllByRole('navigation')
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI', pressed: false }))
+    const modes = screen.getByRole('group', { name: 'What Ask does' })
+    expect(within(modes).getAllByRole('button').map((button) => button.textContent)).toEqual(['Answer', 'Do it'])
+    // Do it offers the Author's own examples, not the Researcher's papers.
+    fireEvent.click(within(modes).getByRole('button', { name: 'Do it' }))
+    expect(screen.getByRole('button', { name: 'What drafts do I have?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Which citations in my latest draft aren’t supported?' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open my most recent paper' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI', pressed: true }))
+
+    doIt('What drafts do I have?')
+    await waitFor(() =>
+      expect(agent.posts[0]).toEqual({ path: '/agent/runs', body: { message: 'What drafts do I have?', screen: 'library', role: 'writer' } }),
+    )
+  })
+
+  test('the agent opens an Author screen, and moves to another role only after Switch', async () => {
+    agent.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_screen', args: { screen: 'history' } }],
+      [{ type: 'tool', id: 'c2', name: 'switch_role', args: { role: 'researcher', reason: 'Analyses are in the Researcher role' } }],
+      [{ type: 'say', text: 'You are in the Researcher role now.' }, { type: 'done' }],
+    ]
+    const { onSwitchRole } = renderApp('?screen=library')
+    await screen.findAllByRole('navigation')
+    doIt('Open my analyses')
+
+    const approve = await screen.findByRole('group', { name: 'Approve this change' })
+    expect(nav().getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page')
+    expect(agent.posts[1].body).toEqual({ id: 'c1', name: 'open_screen', result: { status: 'done', screen: 'history' }, role: 'writer' })
+    expect(approve).toHaveTextContent('Switch to the Researcher role?')
+    expect(approve).toHaveTextContent('Analyses are in the Researcher role')
+    expect(onSwitchRole).not.toHaveBeenCalled()
+
+    fireEvent.click(within(approve).getByRole('button', { name: 'Switch' }))
+    await waitFor(() => expect(onSwitchRole).toHaveBeenCalledWith('researcher'))
+    await waitFor(() =>
+      expect(agent.posts[2].body).toEqual({ id: 'c2', name: 'switch_role', result: { status: 'switched', role: 'researcher' }, role: 'writer' }),
+    )
+  })
+
+  test('read_screen sees the drafts, citations, projects and buttons on Home, the Library and a project', async () => {
+    gateway = installFakeGateway({ files: THESIS_FILES, prechecked: true })
+    // jsdom has no layout, so give every element a box the way a browser would.
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
+    const read = async () => {
+      const actions = { screen: 'any', screens: [], openScreen: vi.fn(), openPaper: vi.fn() }
+      const result = await runTool({ id: '1', name: 'read_screen', args: {} }, { actions, point: vi.fn(), confirm: vi.fn() })
+      return result.targets as { target: string; label: string }[]
+    }
+    const targets = async () => (await read()).map((t) => t.target)
+
+    renderApp('?screen=home&draft=d1')
+    await screen.findByRole('list', { name: 'Drafts' })
+    fireEvent.click(await screen.findByRole('button', { name: 'All' }))
+    await waitFor(async () => expect((await targets()).some((t) => t.startsWith('citation:'))).toBe(true))
+    expect(await targets()).toEqual(
+      expect.arrayContaining(['screen:home', 'action:check', 'action:upload', 'action:write-draft', 'action:add-bibliography', 'draft:d1', 'draft:d2', 'action:new-draft']),
+    )
+    expect((await read()).find((t) => t.target === 'draft:d2')?.label).toContain('Seminar paper (CPE)')
+
+    fireEvent.click(nav().getByRole('button', { name: 'Library' }))
+    await screen.findByRole('button', { name: /Unsorted sources/ })
+    await waitFor(async () =>
+      expect(await targets()).toEqual(expect.arrayContaining(['project:proj1', 'project:unsorted', 'action:import-bib', 'action:new-project'])),
+    )
+
+    fireEvent.click((await screen.findAllByRole('button', { name: /Related work — thesis ch.2/ }))[0])
+    await waitFor(async () =>
+      expect(await targets()).toEqual(expect.arrayContaining(['action:back-to-library', 'action:new-draft', 'draft:d1', 'draft:d2', 'action:open-draft'])),
+    )
+    vi.restoreAllMocks()
   })
 
   test('a bookmarked ?screen=find-source (the removed tab) lands on Home', async () => {

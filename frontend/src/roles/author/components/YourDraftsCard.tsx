@@ -5,6 +5,7 @@
 import { FileText } from 'lucide-react'
 
 import { Card, Empty } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { checkedLabel } from '../../../lib/author'
 import { cn } from '../../../lib/utils'
 import { statusLabel } from '../../../lib/verdict'
@@ -34,7 +35,15 @@ export function YourDraftsCard({
 
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="your-drafts-title">
-      <CardHead id="your-drafts-title" title="Your drafts" aside={<TextLink onClick={onNew}>+ New draft</TextLink>} />
+      <CardHead
+        id="your-drafts-title"
+        title="Your drafts"
+        aside={
+          <TextLink onClick={onNew} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
+            + New draft
+          </TextLink>
+        }
+      />
       {drafts.length === 0 ? (
         <Empty title="No drafts yet" hint="Upload a .tex file or paste LaTeX to start." />
       ) : (
@@ -45,6 +54,7 @@ export function YourDraftsCard({
                 type="button"
                 onClick={() => onSelect(draft.id)}
                 aria-current={draft.id === currentId ? 'true' : undefined}
+                data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn(
                   'flex w-full items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40',
                   draft.id === currentId && 'bg-accent-soft/60',
@@ -77,7 +87,7 @@ export function YourDraftsCard({
           ) : (
             <p className="text-xs text-ink-muted">Checked once so far.</p>
           )}
-          <TextLink onClick={() => onHistory(current)} className="self-start">
+          <TextLink onClick={() => onHistory(current)} className="self-start" data-ask-target={askTarget({ kind: 'action', id: 'check-history' })}>
             View check history
           </TextLink>
         </div>

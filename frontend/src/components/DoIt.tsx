@@ -44,7 +44,7 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
               a field only after you press Apply, and it never saves labels, deletes or uploads anything. For questions about what is inside your papers it asks a specialist, and you see that here.
             </p>
             <div className="flex flex-wrap gap-2">
-              {EXAMPLES.map((example) => (
+              {(actions.examples ?? EXAMPLES).map((example) => (
                 <button
                   key={example}
                   type="button"
@@ -184,12 +184,23 @@ function Delegation({ line }: { line: Extract<AgentLine, { kind: 'delegation' }>
   )
 }
 
-/** A change waiting for the person: what goes in which field, with Apply and Cancel. */
+/** A change waiting for the person: what goes in which field, or which role to move to and why,
+ * with Apply (Switch) and Cancel. */
 export function ApproveChange({ change }: { change: PendingChange }) {
+  const switching = change.kind === 'switch'
   return (
     <div role="group" aria-label="Approve this change" className="flex flex-col gap-2 rounded-xl border border-insufficient bg-insufficient-soft p-3">
-      <p className="text-xs font-medium text-ink">Fill in “{change.label || 'this field'}” with:</p>
-      <p className="rounded-lg bg-surface px-2.5 py-1.5 font-mono text-[13px] text-ink [overflow-wrap:anywhere]">{change.text}</p>
+      {switching ? (
+        <>
+          <p className="text-xs font-medium text-ink">Switch to the {change.label} role?</p>
+          {change.text && <p className="text-[13px] leading-5 text-ink-muted [overflow-wrap:anywhere]">{change.text}</p>}
+        </>
+      ) : (
+        <>
+          <p className="text-xs font-medium text-ink">Fill in “{change.label || 'this field'}” with:</p>
+          <p className="rounded-lg bg-surface px-2.5 py-1.5 font-mono text-[13px] text-ink [overflow-wrap:anywhere]">{change.text}</p>
+        </>
+      )}
       <div className="flex justify-end gap-2">
         <button
           type="button"
@@ -203,7 +214,7 @@ export function ApproveChange({ change }: { change: PendingChange }) {
           onClick={() => change.answer(true)}
           className="min-h-9 rounded-lg bg-accent px-3 text-sm font-medium text-canvas hover:opacity-90"
         >
-          Apply
+          {switching ? 'Switch' : 'Apply'}
         </button>
       </div>
     </div>

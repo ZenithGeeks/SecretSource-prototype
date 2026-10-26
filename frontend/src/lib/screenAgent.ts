@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { postEvents } from './api'
 import type { Pointing } from './askCursor'
-import { describeTool, runTool, type ScreenActions, type ToolCall } from './agentTools'
+import { describeTool, runTool, type Change, type ScreenActions, type ToolCall } from './agentTools'
 
 export type AgentLine =
   | { kind: 'person'; text: string }
@@ -21,8 +21,8 @@ export type AgentLine =
 /** A specialist the agent handed work to: working until it answers, stopped if the person pressed Stop. */
 export type DelegationState = 'working' | 'done' | 'failed' | 'stopped'
 
-/** A change the agent wants to make, waiting for the person. */
-export type PendingChange = { label: string; text: string; answer: (apply: boolean) => void }
+/** A change the agent wants to make, waiting for the person; a field's text unless `kind` says otherwise. */
+export type PendingChange = { kind?: Change['kind']; label: string; text: string; answer: (apply: boolean) => void }
 
 /** The events agent_runs.py streams; its module docstring describes each one. */
 type AgentEvent =
@@ -47,6 +47,8 @@ const SERVER_STEPS: Record<string, string> = {
   bibtex: 'Writing BibTeX',
   submit_analysis: 'Starting an analysis',
   labeling_progress: 'Reading your labeling progress',
+  list_drafts: 'Looking through your drafts',
+  draft_issues: 'Reading what needs work in a draft',
 }
 
 /** The open hand-overs (to `name`, or any) set to `state`. */
@@ -107,9 +109,10 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     const abort = (controller.current = new AbortController())
     add({ kind: 'person', text: message })
     setRunning(true)
-    const confirm = ({ label, text }: { label: string; text: string }) =>
+    const confirm = ({ kind, label, text }: Change) =>
       new Promise<boolean>((resolve) =>
         setPending({
+          kind,
           label,
           text,
           answer: (apply) => {

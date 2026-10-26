@@ -92,18 +92,18 @@ export function Root() {
       {screen === 'onboarding' ? (
         <Onboarding lastRole={loadLastRole()} onContinue={setScreen} />
       ) : (
-        roleScreen(screen, () => setScreen('onboarding'))
+        roleScreen(screen, () => setScreen('onboarding'), setScreen)
       )}
     </Suspense>
   )
 }
 
-function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => void) {
+function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => void, onSwitchRole: (role: Role) => void) {
   switch (screen) {
     case 'researcher':
       return <ResearcherApp onChangeRole={onChangeRole} />
     case 'writer':
-      return <AuthorApp onChangeRole={onChangeRole} />
+      return <AuthorApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     case 'teacher':
       return <TeacherApp onChangeRole={onChangeRole} />
     case 'labeler':

@@ -19,6 +19,7 @@ import { AppShell } from '../../components/AppShell'
 import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
+import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { Graph } from '../researcher/screens/Graph'
 import { Toast } from './components/Toast'
@@ -36,6 +37,9 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'graph', label: 'Graph', icon: Waypoints },
   { key: 'history', label: 'History', icon: HistoryIcon },
 ]
+
+// What Ask's Do it mode offers to try here: the Author's own work, not the Researcher's papers.
+const DO_IT_EXAMPLES = ['What drafts do I have?', 'Open my library', 'Which citations in my latest draft aren’t supported?']
 
 // The editor is reached from Check a draft and counts as the Home section in the nav.
 const NAV_FOR: Record<AuthorScreen, NavKey> = {
@@ -85,7 +89,14 @@ function syncParams(state: Params, analysis: string | null) {
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
-export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
+export function AuthorApp({
+  onChangeRole,
+  onSwitchRole,
+}: {
+  onChangeRole?: () => void
+  /** Opens another role's app directly, for Do it's switch_role. */
+  onSwitchRole?: (role: Role) => void
+}) {
   const [initial] = useState(readParams)
   const [screen, setScreen] = useState<AuthorScreen>(initial.screen)
   const [draftId, setDraftId] = useState<string | null>(initial.draftId)
@@ -99,14 +110,6 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const closeNotice = useCallback(() => setNotice(null), [])
   const history = useHistoryWorkspace()
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
-  // What is on screen to ask about: the open analysis on History, or the selected graph node.
-  const ask = useAsk({
-    role: 'writer',
-    screen,
-    analysis: screen === 'history' ? history.selected : null,
-    analysisFile: history.selectedName,
-    node: screen === 'graph' ? graphNode : null,
-  })
 
   useEffect(
     () => syncParams({ screen, draftId, target: editorTarget, projectId }, history.selected),
@@ -141,6 +144,26 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
     history.open(id)
     navigate('history')
   }
+
+  // What is on screen to ask about: the open analysis on History, or the selected graph node.
+  const ask = useAsk({
+    role: 'writer',
+    screen,
+    analysis: screen === 'history' ? history.selected : null,
+    analysisFile: history.selectedName,
+    node: screen === 'graph' ? graphNode : null,
+    // Do it with the Author's screen agent: the sidebar's screens (not the editor, which needs a
+    // draft), and another role when the request belongs there.
+    actions: {
+      role: 'writer',
+      screen,
+      screens: NAV.map((entry) => entry.key),
+      openScreen: (next) => navigate(next as AuthorScreen),
+      openPaper: openAnalysis,
+      switchRole: onSwitchRole,
+      examples: DO_IT_EXAMPLES,
+    },
+  })
 
   // The editor is full-bleed with its own top bar, so it renders outside the sidebar shell.
   if (screen === 'editor' && draftId) {

@@ -10,6 +10,7 @@ import { useCallback, useRef, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
@@ -35,6 +36,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
     <button
       type="button"
       onClick={onOpen}
+      data-ask-target={askTarget({ kind: 'project', id: project.id })}
       className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
     >
       <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
@@ -201,7 +203,12 @@ export function Library({
             <p className="text-sm text-ink-muted">The sources behind your drafts. Each project keeps its own .bib, PDFs and check results.</p>
           </div>
         </div>
-        <Button onClick={() => importInput.current?.click()} disabled={busy === 'import'} className="self-start sm:self-auto">
+        <Button
+          onClick={() => importInput.current?.click()}
+          disabled={busy === 'import'}
+          className="self-start sm:self-auto"
+          data-ask-target={askTarget({ kind: 'action', id: 'import-bib' })}
+        >
           <Upload className="size-4" aria-hidden="true" />
           {busy === 'import' ? 'Importing…' : 'Import .bib'}
         </Button>
@@ -240,6 +247,7 @@ export function Library({
         <button
           type="button"
           onClick={() => onOpenProject(UNSORTED)}
+          data-ask-target={askTarget({ kind: 'project', id: UNSORTED })}
           className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
         >
           <p className="font-serif text-base font-semibold text-ink">Unsorted sources</p>
@@ -261,6 +269,7 @@ export function Library({
         <button
           type="button"
           onClick={() => importInput.current?.click()}
+          data-ask-target={askTarget({ kind: 'action', id: 'new-project' })}
           className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
         >
           <span className="font-serif text-base font-semibold text-accent">+ New project</span>
@@ -278,7 +287,11 @@ export function Library({
               {rows.map((row) => {
                 const Icon = ATTENTION_ICON[row.kind]
                 return (
-                  <li key={`${row.kind}-${row.projectId ?? row.draftId}-${row.key}`} className="flex items-center gap-3 border-b border-border-subtle py-2">
+                  <li
+                    key={`${row.kind}-${row.projectId ?? row.draftId}-${row.key}`}
+                    data-ask-target={askTarget({ kind: 'source', id: `attention-${row.kind}-${row.projectId ?? row.draftId}-${row.key}` })}
+                    className="flex items-center gap-3 border-b border-border-subtle py-2"
+                  >
                     <Icon className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-ink">{row.title}</p>
@@ -301,7 +314,7 @@ export function Library({
           ) : (
             <ul>
               {saved.map((source) => (
-                <li key={source.id} className="flex items-center gap-3 border-b border-border-subtle py-2">
+                <li key={source.id} data-ask-target={askTarget({ kind: 'source', id: source.id })} className="flex items-center gap-3 border-b border-border-subtle py-2">
                   <Bookmark className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium text-ink">

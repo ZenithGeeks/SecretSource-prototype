@@ -7,6 +7,7 @@ import { Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode } from 'react'
 
 import { api, type Analysis } from '../lib/api'
+import { askTarget } from '../lib/askCursor'
 import { analysisLabel, standingOf, STANDINGS, type Standing } from '../lib/claims'
 import { cn } from '../lib/utils'
 import { TextButton } from './ui'
@@ -91,6 +92,7 @@ export function HistoryList({
                   data-closes-menu
                   onClick={() => onSelect(analysis.id)}
                   aria-current={isSelected ? 'true' : undefined}
+                  data-ask-target={askTarget({ kind: 'paper', id: analysis.id })}
                   className={cn(
                     'flex min-h-11 min-w-0 flex-1 items-center gap-2.5 px-2.5 text-left text-[13px] leading-[18px] font-medium lg:min-h-8',
                     isSelected ? 'text-accent' : 'text-ink',

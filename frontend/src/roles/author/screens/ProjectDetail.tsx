@@ -9,6 +9,7 @@ import { Clock, FileText, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { checkedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
@@ -80,14 +81,22 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
   const done = runs.filter((r) => r.status === 'done')
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="check-history-title">
-      <CardHead id="check-history-title" title={`Check history · ${draft.title}`} aside={<TextLink onClick={onOpenEditor}>Open in editor</TextLink>} />
+      <CardHead
+        id="check-history-title"
+        title={`Check history · ${draft.title}`}
+        aside={
+          <TextLink onClick={onOpenEditor} data-ask-target={askTarget({ kind: 'action', id: 'open-editor' })}>
+            Open in editor
+          </TextLink>
+        }
+      />
       {done.length === 0 ? (
         <Empty title="Not checked yet" hint="Open the draft and press Re-check to record its first version." />
       ) : (
         <ul>
           {done.map((run) => (
             <li key={run.id} className="flex flex-col">
-              <div className="flex items-center gap-3 border-b border-border-subtle py-2">
+              <div data-ask-target={askTarget({ kind: 'check', id: run.id })} className="flex items-center gap-3 border-b border-border-subtle py-2">
                 <Clock className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-medium text-ink">
@@ -137,7 +146,7 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
       ) : (
         <ul>
           {sources.map((source) => (
-            <li key={source.id} className="flex items-center gap-3 border-b border-border-subtle py-2">
+            <li key={source.id} data-ask-target={askTarget({ kind: 'source', id: source.id })} className="flex items-center gap-3 border-b border-border-subtle py-2">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-medium text-ink">
                   {source.authors}
@@ -194,7 +203,12 @@ export function ProjectDetail({
   const unfiledChecks = useDraftChecks(unfiledCurrent?.id ?? null)
 
   const back = (
-    <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
+    <button
+      type="button"
+      onClick={onBack}
+      data-ask-target={askTarget({ kind: 'action', id: 'back-to-library' })}
+      className="flex items-center gap-1.5 self-start text-[13px]"
+    >
       <span className="font-medium text-accent hover:underline">← Library</span>
     </button>
   )
@@ -218,7 +232,7 @@ export function ProjectDetail({
             <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Unsorted sources</h1>
             <p className="text-sm text-ink-muted">Drafts that are in no project yet, and sources saved to no project.</p>
           </div>
-          <Button onClick={() => void newDraft()} className="self-start sm:self-auto">
+          <Button onClick={() => void newDraft()} className="self-start sm:self-auto" data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
             <Plus className="size-4" aria-hidden="true" />
             New draft
           </Button>
@@ -271,7 +285,7 @@ export function ProjectDetail({
           <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{detail.name}</h1>
           <p className="text-sm text-ink-muted">{meta}</p>
         </div>
-        <Button onClick={() => void newDraft()} className="self-start sm:self-auto">
+        <Button onClick={() => void newDraft()} className="self-start sm:self-auto" data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
           <Plus className="size-4" aria-hidden="true" />
           New draft
         </Button>
@@ -319,6 +333,7 @@ function DraftList({
                 onClick={() => onSelect(draft.id)}
                 onDoubleClick={() => onOpenDraft(draft.id)}
                 aria-current={draft.id === selected ? 'true' : undefined}
+                data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn('flex w-full items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', draft.id === selected && 'bg-accent-soft/60')}
               >
                 <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
@@ -337,7 +352,7 @@ function DraftList({
         </ul>
       )}
       {selected && (
-        <TextLink onClick={() => onOpenDraft(selected)} className="self-start">
+        <TextLink onClick={() => onOpenDraft(selected)} className="self-start" data-ask-target={askTarget({ kind: 'action', id: 'open-draft' })}>
           Open on Check a draft
         </TextLink>
       )}

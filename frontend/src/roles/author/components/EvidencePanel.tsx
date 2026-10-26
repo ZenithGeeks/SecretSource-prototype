@@ -14,6 +14,7 @@ import { useRef, useState } from 'react'
 import type { Target } from '../../../components/PageViewer'
 import { Button, Card, Empty, Textarea } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { askTarget } from '../../../lib/askCursor'
 import { referenceNote } from '../../../lib/referenceCheck'
 import type { Citation } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
@@ -89,6 +90,7 @@ export function EvidencePanel({
             onClick={onNext}
             disabled={issues.length === 0}
             aria-label={issues.length ? `${pager}. Show the next issue` : pager}
+            data-ask-target={askTarget({ kind: 'action', id: 'next-issue' })}
             className="flex items-center gap-1 rounded text-xs text-accent hover:underline disabled:cursor-default disabled:text-ink-muted disabled:no-underline"
           >
             {pager}
@@ -119,7 +121,12 @@ export function EvidencePanel({
                     “{citation.evidence.passage}”
                   </blockquote>
                   {onShow && (
-                    <TextLink className="self-start" onClick={() => void showInPaper()} aria-disabled={locating}>
+                    <TextLink
+                      className="self-start"
+                      onClick={() => void showInPaper()}
+                      aria-disabled={locating}
+                      data-ask-target={askTarget({ kind: 'action', id: 'show-in-paper' })}
+                    >
                       {locating ? 'locating…' : 'show in the paper'}
                     </TextLink>
                   )}
@@ -166,7 +173,12 @@ export function EvidencePanel({
                     : 'Kept as written.'}
               </span>
               {citation.resolution.kind === 'overridden' && (
-                <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => onReopen(citation)}>
+                <Button
+                  variant="ghost"
+                  className="px-2 py-1 text-xs"
+                  onClick={() => onReopen(citation)}
+                  data-ask-target={askTarget({ kind: 'action', id: 'reopen' })}
+                >
                   <RotateCcw className="size-3.5" aria-hidden="true" />
                   Reopen
                 </Button>
@@ -200,7 +212,7 @@ export function EvidencePanel({
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" onClick={() => pdfInput.current?.click()}>
+              <Button variant="ghost" onClick={() => pdfInput.current?.click()} data-ask-target={askTarget({ kind: 'action', id: 'upload-pdf' })}>
                 <Upload className="size-4" aria-hidden="true" />
                 Upload source PDF
               </Button>
@@ -217,7 +229,7 @@ export function EvidencePanel({
                   if (file) onAttachPdf(citation, file)
                 }}
               />
-              <Button variant="ghost" onClick={() => setNoteOpen(true)}>
+              <Button variant="ghost" onClick={() => setNoteOpen(true)} data-ask-target={askTarget({ kind: 'action', id: 'override' })}>
                 <PencilLine className="size-4" aria-hidden="true" />
                 Override · add note
               </Button>

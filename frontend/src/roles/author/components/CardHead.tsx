@@ -27,6 +27,7 @@ export function TextLink({
   title?: string
   'aria-label'?: string
   'aria-disabled'?: boolean
+  'data-ask-target'?: string
 }) {
   return (
     <button

@@ -99,6 +99,35 @@ describe('the screen agent tools', () => {
     expect(await call('home')).toEqual({ status: 'done', screen: 'home' })
     expect(openScreen).toHaveBeenCalledWith('home')
   })
+
+  it('switch_role moves to the role the agent names only after the person approves it', async () => {
+    const switchRole = vi.fn()
+    const call = (role: string) => ({ id: '1', name: 'switch_role', args: { role, reason: 'Your drafts are in the Author role' } })
+
+    const confirm = vi.fn(async () => false)
+    expect(await runTool(call('author'), context({ actions: actions({ switchRole }), confirm }))).toEqual({ status: 'cancelled' })
+    expect(confirm).toHaveBeenCalledWith({ kind: 'switch', target: 'role:author', label: 'Author', text: 'Your drafts are in the Author role' })
+    expect(switchRole).not.toHaveBeenCalled()
+
+    // The agent says "author"; the app's id for that role is "writer".
+    expect(await runTool(call('author'), context({ actions: actions({ switchRole }) }))).toEqual({ status: 'switched', role: 'author' })
+    expect(switchRole).toHaveBeenCalledWith('writer')
+  })
+
+  it('switch_role says why it cannot switch, without asking the person', async () => {
+    const confirm = vi.fn(async () => true)
+    const call = (role: string) => ({ id: '1', name: 'switch_role', args: { role, reason: 'x' } })
+    const switchRole = vi.fn()
+    expect(await runTool(call('teacher'), context({ actions: actions({ switchRole }), confirm }))).toMatchObject({ status: 'error' })
+    // ScreenActions with no role is the Researcher's.
+    expect(await runTool(call('researcher'), context({ actions: actions({ switchRole }), confirm }))).toEqual({
+      status: 'error',
+      message: 'the person is already in the researcher role',
+    })
+    expect(await runTool(call('labeler'), context({ confirm }))).toMatchObject({ status: 'error' })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(switchRole).not.toHaveBeenCalled()
+  })
 })
 
 describe('Do it', () => {
@@ -124,6 +153,18 @@ describe('Do it', () => {
       { path: '/agent/runs', body: { message: 'Open ColBERT', screen: 'library' } },
       { path: '/agent/runs/s1/results', body: { id: 'c1', name: 'open_paper', result: { status: 'done' } } },
     ])
+  })
+
+  it('names the Author agent’s server steps in words', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'step', name: 'list_drafts' }, { type: 'step', name: 'draft_issues' }, { type: 'say', text: 'Two drafts.' }, { type: 'done' }],
+    ]
+    render(<DoIt actions={actions({ role: 'writer', examples: ['What drafts do I have?'] })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'What drafts do I have?' }))
+
+    expect(await screen.findByText('Two drafts.')).toBeInTheDocument()
+    expect(screen.getByText('Looking through your drafts')).toBeInTheDocument()
+    expect(screen.getByText('Reading what needs work in a draft')).toBeInTheDocument()
   })
 
   it('shows a change and waits for Apply before the field changes', async () => {

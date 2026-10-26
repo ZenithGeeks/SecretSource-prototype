@@ -5,13 +5,17 @@ import { FileText, FileUp, Library } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useRef } from 'react'
 
+import { askTarget } from '../../../lib/askCursor'
+
 type Icon = ComponentType<{ className?: string }>
 
-function ActionCard({ icon: Icon, title, hint, onClick }: { icon: Icon; title: string; hint: string; onClick: () => void }) {
+/** `target` is the card's id for the screen agent (lib/agentTools read_screen). */
+function ActionCard({ icon: Icon, title, hint, target, onClick }: { icon: Icon; title: string; hint: string; target: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-ask-target={askTarget({ kind: 'action', id: target })}
       className="flex flex-col items-start gap-2.5 rounded-xl border border-border-subtle bg-surface p-4 text-left transition-colors hover:border-accent focus-visible:border-accent"
     >
       <Icon className="size-4 text-accent" aria-hidden="true" />
@@ -68,14 +72,16 @@ export function QuickActions({
         icon={FileUp}
         title="Upload .tex or .zip"
         hint="One file or a whole Overleaf project with \input and figures"
+        target="upload"
         onClick={() => texInput.current?.click()}
       />
       <FilePicker accept=".tex,.zip,.bib" inputRef={texInput} onFile={onUpload} label="Upload a .tex or .zip file" />
-      <ActionCard icon={FileText} title="Write a draft" hint="Write or paste LaTeX in the editor and check it as you go" onClick={onWrite} />
+      <ActionCard icon={FileText} title="Write a draft" hint="Write or paste LaTeX in the editor and check it as you go" target="write-draft" onClick={onWrite} />
       <ActionCard
         icon={Library}
         title="Add bibliography"
         hint=".bib, BibLaTeX, or a \bibitem list, auto-linked to \cite keys"
+        target="add-bibliography"
         onClick={() => bibInput.current?.click()}
       />
       <FilePicker accept=".bib,.bbl,.txt" inputRef={bibInput} onFile={onAddBibliography} label="Upload a .bib file" />
