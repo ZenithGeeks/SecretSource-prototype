@@ -192,6 +192,20 @@ def test_worker_detail_mentions_worker_count_and_waiting_jobs(services, monkeypa
     assert "3 waiting" in worker["detail"]
 
 
+def test_every_dependency_answering_turns_every_feature_on(services):
+    assert dependencies.check()["features"] == {"analyses": True, "ask": True}
+
+
+def test_no_worker_turns_off_analyses_but_not_ask(services, monkeypatch):
+    monkeypatch.setattr(dependencies, "worker_status", lambda: (False, "0 workers, 2 waiting"))
+    assert dependencies.check()["features"] == {"analyses": False, "ask": True}
+
+
+def test_colbert_down_turns_off_analyses_and_ask(services, monkeypatch):
+    monkeypatch.setattr(dependencies, "COLBERT_URL", "http://colbret:8893")
+    assert dependencies.check()["features"] == {"analyses": False, "ask": False}
+
+
 def test_redis_password_never_reaches_the_report(services):
     result = dependencies.check()
     named = by_name(result)

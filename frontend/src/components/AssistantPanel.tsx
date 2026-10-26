@@ -13,6 +13,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
 import type { Role } from '../lib/roles'
+import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
 import { parseCommand, type PaperRef } from '../lib/askCommands'
@@ -349,6 +350,9 @@ export function AssistantPanel({
   const composer = useRef<HTMLFormElement>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
+  const askOnline = useFeature('ask')
+  // A /command does not ask the model, so it still runs while Ask is offline.
+  const canSend = draft.trim() !== '' && (askOnline || draft.trim().startsWith('/'))
 
   // The cursor rests a moment on the last check once an answer ends, then leaves.
   const [rested, setRested] = useState<number | null>(null)
@@ -368,7 +372,7 @@ export function AssistantPanel({
 
   const send = () => {
     const question = draft.trim()
-    if (!question || answering) return
+    if (!canSend || answering) return
     setDraft('')
     if (!question.startsWith('/')) {
       void assistant.ask(question, context)
@@ -476,7 +480,7 @@ export function AssistantPanel({
                       about={about}
                       canNarrow={canNarrow}
                       onAsk={(question) => {
-                        if (!answering) void assistant.ask(question, context)
+                        if (!answering && askOnline) void assistant.ask(question, context)
                       }}
                     />
                   </MotionConfig>
@@ -488,8 +492,8 @@ export function AssistantPanel({
                     about={about}
                     titles={titles}
                     onShowSource={onShowSource}
-                    onAskAgain={turn === last && !answering ? () => void assistant.ask(turn.question, context, true) : undefined}
-                    onRegenerate={turn === last && !answering ? () => void assistant.ask(turn.question, context) : undefined}
+                    onAskAgain={turn === last && !answering && askOnline ? () => void assistant.ask(turn.question, context, true) : undefined}
+                    onRegenerate={turn === last && !answering && askOnline ? () => void assistant.ask(turn.question, context) : undefined}
                   />
                 ))}
                 <div ref={end} />
@@ -536,7 +540,7 @@ export function AssistantPanel({
                     ) : (
                       <button
                         type="submit"
-                        disabled={!draft.trim()}
+                        disabled={!canSend}
                         aria-label="Send"
                         className="ml-auto flex size-11 items-center justify-center rounded-full bg-linear-to-br from-accent to-accent/70 text-white shadow-md disabled:opacity-40 lg:size-8"
                       >
@@ -545,7 +549,13 @@ export function AssistantPanel({
                     )}
                   </div>
                 </form>
-                <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+                {askOnline ? (
+                  <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+                ) : (
+                  <p role="status" className="mt-2 text-[11px] leading-4 text-refutes">
+                    {OFFLINE_REASON.ask}
+                  </p>
+                )}
               </div>
             </>
           )}

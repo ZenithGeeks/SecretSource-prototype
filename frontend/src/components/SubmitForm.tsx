@@ -9,6 +9,7 @@ import { FileUp, Loader2, Search } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { api } from '../lib/api'
+import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
 
 export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
@@ -17,6 +18,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
+  const online = useFeature('analyses')
 
   const start = useMutation({
     mutationFn: (input: string | File) =>
@@ -42,7 +44,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         event.preventDefault()
         setDragging(false)
         const file = event.dataTransfer.files?.[0]
-        if (file && !start.isPending) start.mutate(file)
+        if (file && online && !start.isPending) start.mutate(file)
       }}
       className={cn(
         'flex flex-col items-center gap-3.5 rounded-[18px] border-[1.5px] border-dashed bg-surface p-6 transition-colors',
@@ -66,7 +68,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         />
         <button
           type="submit"
-          disabled={!reference.trim() || start.isPending}
+          disabled={!reference.trim() || !online || start.isPending}
           className="inline-flex items-center gap-2 rounded-[9px] bg-accent px-3 py-[7px] text-[13px] font-medium whitespace-nowrap text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {start.isPending && <Loader2 className="size-4 animate-spin" />}
@@ -77,7 +79,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
       <button
         type="button"
         onClick={() => fileInput.current?.click()}
-        disabled={start.isPending}
+        disabled={!online || start.isPending}
         className="inline-flex items-center gap-1.5 rounded text-[13px] text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
       >
         <FileUp className="size-4" aria-hidden="true" />
@@ -126,6 +128,11 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         </div>
       </div>
 
+      {!online && (
+        <p role="status" className="w-full text-sm text-refutes">
+          {OFFLINE_REASON.analyses}
+        </p>
+      )}
       {start.isError && (
         <p role="alert" className="w-full text-sm text-refutes">
           {(start.error as Error).message}

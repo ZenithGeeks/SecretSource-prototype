@@ -11,6 +11,7 @@ import { type RefObject, useRef, useState } from 'react'
 import { Toggle } from '../../../components/settings'
 import { Button } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { cn } from '../../../lib/utils'
 
 export function HomeAnalyzeCard({
@@ -28,6 +29,7 @@ export function HomeAnalyzeCard({
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
+  const online = useFeature('analyses')
 
   const start = useMutation({
     mutationFn: (input: string | File) =>
@@ -40,7 +42,7 @@ export function HomeAnalyzeCard({
   })
 
   const pickPdf = (file: File | undefined) => {
-    if (file && file.type === 'application/pdf') start.mutate(file)
+    if (file && file.type === 'application/pdf' && online) start.mutate(file)
   }
 
   return (
@@ -83,7 +85,7 @@ export function HomeAnalyzeCard({
         <button
           type="button"
           onClick={() => fileInput.current?.click()}
-          disabled={start.isPending}
+          disabled={!online || start.isPending}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-muted hover:text-ink disabled:opacity-50"
         >
           <FileUp aria-hidden="true" className="size-4" />
@@ -92,7 +94,7 @@ export function HomeAnalyzeCard({
         <Button
           type="submit"
           className="rounded-[9px] px-3 py-[7px] text-[13px]"
-          disabled={!reference.trim() || start.isPending}
+          disabled={!reference.trim() || !online || start.isPending}
         >
           {start.isPending && <Loader2 className="size-4 animate-spin" />}
           Analyze
@@ -115,6 +117,11 @@ export function HomeAnalyzeCard({
         </span>
         <span className="text-ink-muted">· about 4 min</span>
       </div>
+      {!online && (
+        <p role="status" className="text-sm text-refutes">
+          {OFFLINE_REASON.analyses}
+        </p>
+      )}
       {start.isError && <p className="text-sm text-refutes">{(start.error as Error).message}</p>}
     </section>
   )
