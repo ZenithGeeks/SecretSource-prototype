@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { describeTool, runTool, type ConfirmRequest, type ScreenActions, type ToolCall } from './agentTools'
 import { postEvents } from './api'
 import type { Pointing } from './askCursor'
-import { leaveDoItConversation, peekDoItConversation } from './doItConversation'
+import { clearDoItConversation, leaveDoItConversation, peekDoItConversation } from './doItConversation'
 import type { Role } from './roles'
 
 export type AgentLine =
@@ -73,6 +73,18 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
   // A restored conversation keeps its session, so the new role's agent reads what was said.
   const continued = useRef(restored !== null)
   const controller = useRef<AbortController | null>(null)
+  const pendingRef = useRef<PendingChange | null>(null)
+  // Set while this view is gone, so a run still finishing does not carry its transcript into
+  // the next role or the next account after the role menu or sign-out cleared it.
+  const unmounted = useRef(false)
+  useEffect(() => {
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+      controller.current?.abort()
+      pendingRef.current?.answer(false)
+    }
+  }, [])
   // The latest actions: after open_screen the app is on another screen, and read_screen says so.
   const latest = useRef(actions)
   useEffect(() => {
@@ -83,7 +95,7 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
   const commit = (next: AgentLine[]) => {
     linesRef.current = next
     setLines(next)
-    if (continued.current) leaveDoItConversation({ lines: next, sessionId: session.current })
+    if (continued.current && !unmounted.current) leaveDoItConversation({ lines: next, sessionId: session.current })
   }
   const add = (line: AgentLine) => commit([...linesRef.current, line])
 
@@ -97,7 +109,7 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
       switch (event.type) {
         case 'session':
           session.current = event.id
-          if (continued.current) leaveDoItConversation({ lines: linesRef.current, sessionId: session.current })
+          if (continued.current && !unmounted.current) leaveDoItConversation({ lines: linesRef.current, sessionId: session.current })
           break
         case 'tool':
           call = { id: event.id, name: event.name, args: event.args }
@@ -127,15 +139,18 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     add({ kind: 'person', text: message })
     setRunning(true)
     const confirm = (change: ConfirmRequest) =>
-      new Promise<boolean>((resolve) =>
-        setPending({
+      new Promise<boolean>((resolve) => {
+        const card: PendingChange = {
           ...change,
           answer: (apply) => {
+            pendingRef.current = null
             setPending(null)
             resolve(apply)
           },
-        }),
-      )
+        }
+        pendingRef.current = card
+        setPending(card)
+      })
     // Set when switch_role is approved. The move happens after the agent has had its sentence,
     // so the result is sent to the role that asked and the transcript survives the unmount.
     let switchedTo: Role | null = null
@@ -147,7 +162,20 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
       const payload: Record<string, unknown> = { message, screen }
       if (role) payload.role = role
       if (sessionId) payload.session_id = sessionId
-      let call = await stream('/agent/runs', payload, abort.signal)
+      let call: ToolCall | null
+      try {
+        call = await stream('/agent/runs', payload, abort.signal)
+      } catch (error) {
+        if (!sessionId || (error as Error).name === 'AbortError') throw error
+        // The carried session ended (an hour after it started, or a gateway restart). Start a new
+        // one rather than failing every message until the role menu is used.
+        session.current = null
+        continued.current = false
+        clearDoItConversation()
+        add({ kind: 'step', text: 'The earlier conversation had ended, so this starts a new one' })
+        const { session_id: _ended, ...fresh } = payload
+        call = await stream('/agent/runs', fresh, abort.signal)
+      }
       while (call && !abort.signal.aborted) {
         add({ kind: 'step', text: describeTool(call) })
         const result = await runTool(call, {

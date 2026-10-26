@@ -7,20 +7,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   posts: [] as { path: string; body: Record<string, unknown> }[],
-  // One list of events per POST, in order.
-  streams: [] as object[][],
+  // One list of events per POST, in order; an Error makes that POST fail.
+  streams: [] as (object[] | Error)[],
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
   ...(await original<typeof import('../src/lib/api')>()),
   postEvents: vi.fn(async (path: string, body: Record<string, unknown>, onEvent: (event: object) => void) => {
     gateway.posts.push({ path, body })
-    for (const event of gateway.streams.shift() ?? []) onEvent(event)
+    const next = gateway.streams.shift() ?? []
+    if (next instanceof Error) throw next
+    for (const event of next) onEvent(event)
   }),
 }))
 
 import { DoIt } from '../src/components/DoIt'
 import { runTool, type ScreenActions } from '../src/lib/agentTools'
+import { clearDoItConversation, leaveDoItConversation, peekDoItConversation } from '../src/lib/doItConversation'
 
 function actions(overrides: Partial<ScreenActions> = {}): ScreenActions {
   return { screen: 'library', screens: ['home', 'library'], openScreen: vi.fn(), openPaper: vi.fn(), ...overrides }
@@ -139,6 +142,41 @@ describe('Do it', () => {
   beforeEach(() => {
     gateway.posts = []
     gateway.streams = []
+    clearDoItConversation()
+  })
+
+  it('starts a new session when the carried one has ended', async () => {
+    leaveDoItConversation({ lines: [], sessionId: 'old' })
+    gateway.streams = [new Error('404: no such session'), [{ type: 'session', id: 's2' }, { type: 'say', text: 'Here is Home.' }, { type: 'done' }]]
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Open Home' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Do it' }))
+
+    expect(await screen.findByText('Here is Home.')).toBeInTheDocument()
+    expect(gateway.posts.map((post) => post.body.session_id)).toEqual(['old', undefined])
+    expect(peekDoItConversation()).toBeNull()
+  })
+
+  it('stops a carried run when Do it closes, and does not bring back a cleared conversation', async () => {
+    leaveDoItConversation({ lines: [], sessionId: 's1' })
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'fill_field', args: { target: 'field:library-filter', text: 'late interaction' } }, { type: 'done' }],
+    ]
+    const { unmount } = render(
+      <>
+        <Screen />
+        <DoIt actions={actions()} />
+      </>,
+    )
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Filter it' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Do it' }))
+    await screen.findByRole('group', { name: 'Approve this change' })
+
+    // The role menu or sign-out clears the conversation, then this view goes away.
+    clearDoItConversation()
+    unmount()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(peekDoItConversation()).toBeNull()
   })
 
   it('runs each tool the agent asks for, sends the result back, and shows what the agent says', async () => {

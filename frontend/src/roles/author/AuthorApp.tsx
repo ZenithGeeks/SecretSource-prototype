@@ -144,12 +144,9 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     actions: {
       role: 'writer',
       screen,
-      screens: draftId ? ['home', 'library', 'graph', 'history', 'editor'] : ['home', 'library', 'graph', 'history'],
+      // Not the editor: it renders without Ask, so opening it would end this Do it run midway.
+      screens: ['home', 'library', 'graph', 'history'],
       openScreen: (next) => {
-        if (next === 'editor') {
-          if (draftId) navigate('editor')
-          return
-        }
         if (next === 'home' || next === 'library' || next === 'graph' || next === 'history') navigate(next)
       },
       openPaper: openAnalysis,
