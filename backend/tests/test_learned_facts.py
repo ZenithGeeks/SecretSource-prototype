@@ -106,3 +106,19 @@ def test_a_signed_out_user_gets_no_facts(sqlite):
     store.save_fact("user-ada", fact("ColBERT '20", "asked why BEIR disagrees with it"))
 
     assert search(memory.SIGNED_OUT, "ColBERT") == []
+
+
+def test_ask_reads_only_the_callers_facts_that_share_words_with_the_question(sqlite):
+    store.save_fact("user-ada", fact("ColBERT '20", "asked why BEIR disagrees with it"))
+    store.save_fact("user-ada", fact("PLAID", "studied centroid pruning"))
+    store.save_fact("user-bo", fact("ColBERT '20", "bo compared it with SPLADE"))
+
+    assert memory.remembered_for("why does BEIR disagree with ColBERT?", "user-ada") == [
+        "Remembered paper, ColBERT '20: asked why BEIR disagrees with it"
+    ]
+
+
+def test_ask_with_login_off_reads_no_facts(sqlite):
+    store.save_fact("user-ada", fact("ColBERT '20", "asked why BEIR disagrees with it"))
+
+    assert memory.remembered_for("ColBERT", None) == []

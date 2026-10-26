@@ -5,7 +5,9 @@
 
 A question about one paper is answered from that paper's most relevant passages. Any other
 question is answered from the caller's papers in the ColBERT index, and each statement names
-the passage it rests on. Every statement is then judged against its paper with check_prepared,
+the passage it rests on. What the user studied in earlier chats (app/memory.py) goes along to
+help the model read the question, never as a source. Every statement is then judged against
+its paper with check_prepared,
 the same check an analysis runs. A statement the judge does not call "supports" is shown as
 not backed, not hidden. With no passage that answers the question there are no statements.
 
@@ -42,9 +44,11 @@ _checks = ThreadPoolExecutor(max_workers=PARALLEL_CHECKS, thread_name_prefix="as
 class AnswerAsStatements(dspy.Signature):
     """Answer the question about one paper using only its passages. Write short statements that
     each say one fact the passages state, covering whichever of who, what, when, where, why and
-    how the question asks about."""
+    how the question asks about. What the user studied earlier only helps you see what they
+    mean: never state something because it is remembered."""
 
     passages: list[str] = dspy.InputField()
+    remembered: list[str] = dspy.InputField(desc="What this user studied or asked in earlier chats")
     question: str = dspy.InputField()
     statements: list[str] = dspy.OutputField(desc=f"At most {MAX_STATEMENTS} statements, one fact each")
 
@@ -57,9 +61,12 @@ class Statement(BaseModel):
 class AnswerFromLibrary(dspy.Signature):
     """Answer the question using only the numbered passages, which can come from several papers.
     Write short statements that each say one fact a passage states, and give that passage's
-    number. Return no statements when the passages do not answer the question."""
+    number. Return no statements when the passages do not answer the question. What the user
+    studied earlier only helps you see what they mean: never state something because it is
+    remembered."""
 
     passages: list[str] = dspy.InputField()
+    remembered: list[str] = dspy.InputField(desc="What this user studied or asked in earlier chats")
     question: str = dspy.InputField()
     statements: list[Statement] = dspy.OutputField(desc=f"At most {MAX_STATEMENTS}, one fact each")
 
@@ -83,11 +90,15 @@ def _answer_model() -> dspy.LM:
     return _language_model
 
 
-def answer_about_paper(question: str, paper: str, path: Path) -> list[Cited]:
+def answer_about_paper(
+    question: str, paper: str, path: Path, remembered: list[str] | None = None
+) -> list[Cited]:
     """Statements from one paper's passages, each judged against that paper."""
     passages = [item["text"] for item in verify.evidence_from(question, path.name)]
     with dspy.context(lm=_answer_model()):
-        statements = dspy.Predict(AnswerAsStatements)(passages=passages, question=question).statements
+        statements = dspy.Predict(AnswerAsStatements)(
+            passages=passages, remembered=remembered or [], question=question
+        ).statements
     return [Cited(text, paper, path) for text in statements[:MAX_STATEMENTS]]
 
 
@@ -103,14 +114,18 @@ def library_passages(question: str, papers: frozenset[str] | None = None) -> lis
     return [hit for hit in hits if hit["source"] in papers][:LIBRARY_PASSAGES]
 
 
-def answer_from_library(question: str, papers: frozenset[str] | None = None) -> list[Cited]:
+def answer_from_library(
+    question: str, papers: frozenset[str] | None = None, remembered: list[str] | None = None
+) -> list[Cited]:
     """Statements from the library, each judged against the paper of the passage it names."""
     hits = library_passages(question, papers)
     if not hits:
         return []  # nothing in this library to answer from, so no LLM call
     numbered = [f"[{number}] {hit['text']}" for number, hit in enumerate(hits, 1)]
     with dspy.context(lm=_answer_model()):
-        statements = dspy.Predict(AnswerFromLibrary)(passages=numbered, question=question).statements
+        statements = dspy.Predict(AnswerFromLibrary)(
+            passages=numbered, remembered=remembered or [], question=question
+        ).statements
     return [cite(statement, hits) for statement in statements[:MAX_STATEMENTS]]
 
 
@@ -162,22 +177,26 @@ async def check_text(sentences: list[str], papers: frozenset[str]) -> list[dict]
 
 
 async def answer(
-    question: str, paper: Path | None = None, papers: frozenset[str] | None = None
+    question: str,
+    paper: Path | None = None,
+    papers: frozenset[str] | None = None,
+    remembered: list[str] | None = None,
 ) -> AsyncIterator[dict]:
     """Answer a question and check each statement, as events in the order they happen.
 
     With `paper`, the answer comes from that PDF, which must already be indexed
     (verify.prepare_source). Otherwise it comes from the passages of `papers` (see
-    library_passages). Yields, in order:
+    library_passages). `remembered` is what the user studied before (memory.remembered_for).
+    Yields, in order:
 
         {"type": "statement", "index": 0, "text", "source", "page"}   one per statement
         {"type": "verdict", "index": 0, "verdict", "quote", "reasoning"}   as each check ends
         {"type": "done", "statements": n}
     """
     if paper is not None:
-        cited = await asyncio.to_thread(answer_about_paper, question, paper.name, paper)
+        cited = await asyncio.to_thread(answer_about_paper, question, paper.name, paper, remembered)
     else:
-        cited = await asyncio.to_thread(answer_from_library, question, papers)
+        cited = await asyncio.to_thread(answer_from_library, question, papers, remembered)
     for index, item in enumerate(cited):
         yield {
             "type": "statement",

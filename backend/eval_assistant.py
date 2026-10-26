@@ -2,13 +2,16 @@
 
     python eval_assistant.py ../docs/eval/assistant-questions.csv --runs 3 --fresh
     python eval_assistant.py ../docs/eval/assistant-library-questions.csv --runs 3 --fresh
+    python eval_assistant.py ../docs/eval/assistant-memory-questions.csv --runs 2 --fresh [--no-memory]
 
 A row with a paper is answered from that paper's most relevant passages. A row without one is
 answered from the whole ColBERT index, and each statement names the passage it rests on. Every
 statement is then judged against its paper with check_prepared, the same check an analysis runs,
 up to PARALLEL_CHECKS at once. A statement the judge does not call "supports" counts as not backed.
 A row marked answerable=no asks about something outside the library: the right answer is no
-statements. The answer and the checks are app/assistant.py's; this script only times them.
+statements. A row with `remembered` passes that fact to the answer step, as Ask does with the
+user's matching facts; --no-memory leaves it out, so the same rows show what the fact changed.
+The answer and the checks are app/assistant.py's; this script only times them.
 """
 
 import argparse
@@ -54,12 +57,15 @@ def judge(cited: list[Cited]) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("questions", type=Path, help="CSV with question, and optionally paper and answerable")
+    parser.add_argument(
+        "questions", type=Path, help="CSV with question, and optionally paper, answerable and remembered"
+    )
     parser.add_argument("--runs", type=int, default=3, help="how many times to answer every question")
     parser.add_argument(
         "--fresh", action="store_true",
         help="skip the answer cache, so each run asks the LLM again (needed to see run-to-run spread)",
     )
+    parser.add_argument("--no-memory", action="store_true", help="ignore the remembered column")
     args = parser.parse_args()
 
     with args.questions.open(newline="", encoding="utf-8") as file:
@@ -74,15 +80,18 @@ def main() -> None:
     for run in range(1, args.runs + 1):
         seconds, verdicts, declined, outside = [], [], 0, 0
         for number, row in enumerate(rows, 1):
+            remembered = [row["remembered"]] if row.get("remembered") and not args.no_memory else None
             started = time.perf_counter()
             if row.get("paper"):
                 paper = papers[row["paper"]]
                 if paper["status"] == "error":
                     print(f"run {run} {number}/{len(rows)} skipped: {row['paper']} {paper.get('reason')}")
                     continue
-                cited = assistant.answer_about_paper(row["question"], row["paper"], Path(paper["path"]))
+                cited = assistant.answer_about_paper(
+                    row["question"], row["paper"], Path(paper["path"]), remembered
+                )
             else:
-                cited = assistant.answer_from_library(row["question"])
+                cited = assistant.answer_from_library(row["question"], remembered=remembered)
             answered = time.perf_counter()
             cited = prepare_papers(cited)
             checking = time.perf_counter()

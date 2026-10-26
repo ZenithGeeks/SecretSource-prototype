@@ -1,0 +1,9 @@
+question,remembered,kind
+How does the retriever I studied choose its hard negatives?,"Remembered paper, RocketQA: studied denoised hard negatives for dense passage retrieval",help
+What did the paper I read say about re-ranking latency?,"Remembered paper, ColBERT '20: read how late interaction cuts re-ranking latency compared with BERT",help
+How is the encoder I asked about trained?,"Remembered question, DPR: asked how the dual encoder is trained with in-batch negatives",help
+How was the dataset I studied for claim verification built?,"Remembered paper, SciFact: studied a dataset of scientific claims paired with evidence abstracts",help
+Why do the models I asked about fall behind BM25?,"Remembered question, BEIR: asked why dense retrievers fall behind BM25 on zero-shot retrieval",help
+How does Qwen2-VL handle video input?,"Remembered question, DPR: asked how the passage encoder handles long input",distractor
+What loss does SigLIP use for image and text pairs?,"Remembered paper, ColBERT '20: studied late interaction for text retrieval",distractor
+How does ColBERTv2 compress its index?,"Remembered paper, RocketQA: studied how its index of dense passages is built",distractor
