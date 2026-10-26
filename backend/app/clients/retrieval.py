@@ -241,9 +241,17 @@ def colpali_add_figures(source: str, title: str, figures: list[dict]) -> None:
 def colpali_search(
     query: str, k: int = 20, source: str | None = None, *, visible: Collection[str] | None = None
 ) -> dict:
+    """Figures and pages for `query`. `source` limits the search to that one paper.
+
+    Hits whose file name is not `source` are dropped before the answer and before the span,
+    so a service that ignores `source` and answers from the whole index cannot put another
+    user's caption or file name in either. With no `source` the list is what the service
+    returned: that call is not limited to one paper.
+    """
     body = {"query": query, "k": k}
     if source is not None:
         body["source"] = source
+    scope = frozenset({source}) if source is not None else None
     with _retriever_span("colpali_search", query, source) as span:
         response = _session.post(
             f"{COLPALI_URL}/api/search",
@@ -253,5 +261,8 @@ def colpali_search(
         )
         response.raise_for_status()
         result = response.json()
-        _record_hits(span, result["topk"], _papers_we_may_trace(source, None, visible))
+        hits = _kept(result["topk"], scope)
+        allowed = scope if scope is not None else _papers_we_may_trace(source, None, visible)
+        _record_hits(span, hits, allowed)
+        result = {**result, "topk": hits}
     return result
