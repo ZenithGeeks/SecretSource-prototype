@@ -19,6 +19,7 @@ import { AppShell } from '../../components/AppShell'
 import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
+import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { Graph } from '../researcher/screens/Graph'
 import { Toast } from './components/Toast'
@@ -85,7 +86,7 @@ function syncParams(state: Params, analysis: string | null) {
   window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
 }
 
-export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
+export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [initial] = useState(readParams)
   const [screen, setScreen] = useState<AuthorScreen>(initial.screen)
   const [draftId, setDraftId] = useState<string | null>(initial.draftId)
@@ -99,14 +100,6 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
   const closeNotice = useCallback(() => setNotice(null), [])
   const history = useHistoryWorkspace()
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
-  // What is on screen to ask about: the open analysis on History, or the selected graph node.
-  const ask = useAsk({
-    role: 'writer',
-    screen,
-    analysis: screen === 'history' ? history.selected : null,
-    analysisFile: history.selectedName,
-    node: screen === 'graph' ? graphNode : null,
-  })
 
   useEffect(
     () => syncParams({ screen, draftId, target: editorTarget, projectId }, history.selected),
@@ -141,6 +134,25 @@ export function AuthorApp({ onChangeRole }: { onChangeRole?: () => void }) {
     history.open(id)
     navigate('history')
   }
+  // Do it for the Author's screen agent, so a role switch can land here and the chat can go on.
+  const ask = useAsk({
+    role: 'writer',
+    screen,
+    analysis: screen === 'history' ? history.selected : null,
+    analysisFile: history.selectedName,
+    node: screen === 'graph' ? graphNode : null,
+    actions: {
+      role: 'writer',
+      screen,
+      // Not the editor: it renders without Ask, so opening it would end this Do it run midway.
+      screens: ['home', 'library', 'graph', 'history'],
+      openScreen: (next) => {
+        if (next === 'home' || next === 'library' || next === 'graph' || next === 'history') navigate(next)
+      },
+      openPaper: openAnalysis,
+      switchRole: onSwitchRole,
+    },
+  })
 
   // The editor is full-bleed with its own top bar, so it renders outside the sidebar shell.
   if (screen === 'editor' && draftId) {

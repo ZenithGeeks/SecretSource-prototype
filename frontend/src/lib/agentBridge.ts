@@ -10,7 +10,8 @@ import { useEffect, useRef, useState } from 'react'
 
 import { followEvents, request } from './api'
 import type { Pointing } from './askCursor'
-import { describeTool, runTool, type ScreenActions, type ToolCall } from './agentTools'
+import { describeTool, runTool, type ConfirmRequest, type ScreenActions, type ToolCall } from './agentTools'
+import type { Role } from './roles'
 import type { PendingChange } from './screenAgent'
 
 const CONNECTED_KEY = 'agentBridge.connected'
@@ -37,11 +38,10 @@ export function useAgentBridge(actions: ScreenActions | undefined) {
 
   useEffect(() => {
     if (!connected || !canConnect) return
-    const confirm = ({ label, text }: { label: string; text: string }) =>
+    const confirm = (change: ConfirmRequest) =>
       new Promise<boolean>((resolve) =>
         setPending({
-          label,
-          text,
+          ...change,
           answer: (apply) => {
             setPending(null)
             resolve(apply)
@@ -54,10 +54,18 @@ export function useAgentBridge(actions: ScreenActions | undefined) {
       window.clearTimeout(rest)
       setSteps((all) => [...all, describeTool(event)].slice(-STEPS_SHOWN))
       setWorking(true)
+      // switch_role is not an MCP tool. If one arrives anyway, move only after the result is posted,
+      // so the answer is not lost when the role's screen unmounts.
+      let switchedTo: Role | null = null
       // Always answer: an MCP call with no answer waits two minutes on the gateway.
-      const result = await runTool(event, { actions: latest.current!, point: setPointing, confirm }).catch(
-        (error: Error) => ({ status: 'error', message: `the tab could not run it: ${error.message}` }),
-      )
+      const result = await runTool(event, {
+        actions: latest.current!,
+        point: setPointing,
+        confirm,
+        onSwitched: (role) => {
+          switchedTo = role
+        },
+      }).catch((error: Error) => ({ status: 'error', message: `the tab could not run it: ${error.message}` }))
       setWorking(false)
       // The cursor rests where it went, then leaves, unless the next call moves it first.
       rest = window.setTimeout(() => setPointing(null), CURSOR_REST_MS)
@@ -68,6 +76,7 @@ export function useAgentBridge(actions: ScreenActions | undefined) {
       }).catch(() => {
         // The call timed out or the gateway restarted; the MCP client already has its error.
       })
+      if (switchedTo) latest.current?.switchRole?.(switchedTo)
     })
     return () => {
       close()

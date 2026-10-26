@@ -2,25 +2,28 @@
  * sends their results back. A change waits for Apply. */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { useState } from 'react'
+import { StrictMode, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   posts: [] as { path: string; body: Record<string, unknown> }[],
-  // One list of events per POST, in order.
-  streams: [] as object[][],
+  // One list of events per POST, in order; an Error makes that POST fail.
+  streams: [] as (object[] | Error)[],
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
   ...(await original<typeof import('../src/lib/api')>()),
   postEvents: vi.fn(async (path: string, body: Record<string, unknown>, onEvent: (event: object) => void) => {
     gateway.posts.push({ path, body })
-    for (const event of gateway.streams.shift() ?? []) onEvent(event)
+    const next = gateway.streams.shift() ?? []
+    if (next instanceof Error) throw next
+    for (const event of next) onEvent(event)
   }),
 }))
 
 import { DoIt } from '../src/components/DoIt'
 import { runTool, type ScreenActions } from '../src/lib/agentTools'
+import { clearDoItConversation, leaveDoItConversation, peekDoItConversation } from '../src/lib/doItConversation'
 
 function actions(overrides: Partial<ScreenActions> = {}): ScreenActions {
   return { screen: 'library', screens: ['home', 'library'], openScreen: vi.fn(), openPaper: vi.fn(), ...overrides }
@@ -99,12 +102,81 @@ describe('the screen agent tools', () => {
     expect(await call('home')).toEqual({ status: 'done', screen: 'home' })
     expect(openScreen).toHaveBeenCalledWith('home')
   })
+
+  it('switch_role asks first, maps author to the app’s writer id, and does not move yet', async () => {
+    const onSwitched = vi.fn()
+    const switchRole = vi.fn()
+    const confirm = vi.fn(async () => true)
+    const base = { role: 'researcher' as const, switchRole, confirmLeave: () => true }
+    const switched = await runTool(
+      { id: '1', name: 'switch_role', args: { role: 'author', reason: 'Your drafts are there' } },
+      context({ actions: actions(base), confirm, onSwitched }),
+    )
+    expect(switched).toEqual({ status: 'switched' })
+    expect(onSwitched).toHaveBeenCalledWith('writer')
+    expect(switchRole).not.toHaveBeenCalled()
+    expect(confirm).toHaveBeenCalledWith({ summary: 'Switch to the Author role. Your drafts are there', action: 'Switch' })
+
+    const declined = await runTool(
+      { id: '2', name: 'switch_role', args: { role: 'labeler', reason: 'Labels live there' } },
+      context({ actions: actions(base), confirm: vi.fn(async () => false), onSwitched }),
+    )
+    expect(declined).toEqual({ status: 'cancelled' })
+
+    const unsaved = await runTool(
+      { id: '3', name: 'switch_role', args: { role: 'labeler', reason: 'Labels live there' } },
+      context({ actions: actions({ ...base, confirmLeave: () => false }), confirm: vi.fn(async () => true), onSwitched: vi.fn() }),
+    )
+    expect(unsaved).toEqual({ status: 'cancelled' })
+    expect(await runTool({ id: '4', name: 'switch_role', args: { role: 'teacher', reason: '' } }, context({ actions: actions(base), onSwitched }))).toMatchObject({
+      status: 'error',
+    })
+    expect(
+      await runTool({ id: '5', name: 'switch_role', args: { role: 'researcher', reason: 'back' } }, context({ actions: actions(base), onSwitched })),
+    ).toMatchObject({ status: 'error' })
+    expect(await runTool({ id: '6', name: 'switch_role', args: { role: 'labeler', reason: 'go' } }, context())).toMatchObject({ status: 'error' })
+  })
 })
 
 describe('Do it', () => {
   beforeEach(() => {
     gateway.posts = []
     gateway.streams = []
+    clearDoItConversation()
+  })
+
+  it('starts a new session when the carried one has ended', async () => {
+    leaveDoItConversation({ lines: [], sessionId: 'old' })
+    gateway.streams = [new Error('404: no such session'), [{ type: 'session', id: 's2' }, { type: 'say', text: 'Here is Home.' }, { type: 'done' }]]
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Open Home' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Do it' }))
+
+    expect(await screen.findByText('Here is Home.')).toBeInTheDocument()
+    expect(gateway.posts.map((post) => post.body.session_id)).toEqual(['old', undefined])
+    expect(peekDoItConversation()).toBeNull()
+  })
+
+  it('stops a carried run when Do it closes, and does not bring back a cleared conversation', async () => {
+    leaveDoItConversation({ lines: [], sessionId: 's1' })
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'fill_field', args: { target: 'field:library-filter', text: 'late interaction' } }, { type: 'done' }],
+    ]
+    const { unmount } = render(
+      <>
+        <Screen />
+        <DoIt actions={actions()} />
+      </>,
+    )
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Filter it' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Do it' }))
+    await screen.findByRole('group', { name: 'Approve this change' })
+
+    // The role menu or sign-out clears the conversation, then this view goes away.
+    clearDoItConversation()
+    unmount()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(peekDoItConversation()).toBeNull()
   })
 
   it('runs each tool the agent asks for, sends the result back, and shows what the agent says', async () => {
@@ -147,6 +219,113 @@ describe('Do it', () => {
     expect(await screen.findByText('Filtered.')).toBeInTheDocument()
     expect(screen.getByText('Filter: late interaction')).toBeInTheDocument()
     await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'fill_field', result: { status: 'applied' } }))
+  })
+
+  it('Cancel on the Apply step changes nothing and tells the agent', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'fill_field', args: { target: 'field:library-filter', text: 'late interaction' } }, { type: 'done' }],
+      [{ type: 'say', text: 'Left it as it was.' }, { type: 'done' }],
+    ]
+    render(
+      <>
+        <Screen />
+        <DoIt actions={actions()} />
+      </>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Show me where to search the library' }))
+
+    const approve = await screen.findByRole('group', { name: 'Approve this change' })
+    expect(approve).toHaveTextContent('Type “late interaction” into Filter papers.')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(await screen.findByText('Left it as it was.')).toBeInTheDocument()
+    expect(screen.getByText('Filter:')).toBeInTheDocument()
+    await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'fill_field', result: { status: 'cancelled' } }))
+  })
+
+  it('a role switch asks first, then the same conversation carries on in the new role', async () => {
+    function TwoRoles() {
+      const [role, setRole] = useState<'researcher' | 'labeler'>('researcher')
+      const shared = { openScreen: vi.fn(), openPaper: vi.fn(), switchRole: setRole }
+      const current =
+        role === 'researcher'
+          ? { role, screen: 'library', screens: ['home', 'library'], ...shared }
+          : { role, screen: 'papers', screens: ['papers'], ...shared }
+      return (
+        <>
+          <p>Showing {role}</p>
+          <DoIt key={role} actions={current} />
+        </>
+      )
+    }
+    gateway.streams = [
+      [
+        { type: 'session', id: 's1' },
+        { type: 'tool', id: 'c1', name: 'switch_role', args: { role: 'labeler', reason: 'The claims to label are there' } },
+        { type: 'done' },
+      ],
+      [{ type: 'say', text: 'Staying in the Researcher.' }, { type: 'done' }],
+    ]
+    render(
+      <StrictMode>
+        <TwoRoles />
+      </StrictMode>,
+    )
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'I want to label claims' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Do it' }))
+
+    const approve = await screen.findByRole('group', { name: 'Approve this change' })
+    expect(approve).toHaveTextContent('Switch to the Labeler role. The claims to label are there')
+    expect(gateway.posts).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(await screen.findByText('Staying in the Researcher.')).toBeInTheDocument()
+    expect(screen.getByText('Showing researcher')).toBeInTheDocument()
+    await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'switch_role', role: 'researcher', result: { status: 'cancelled' } }))
+  })
+
+  it('Switch moves to the new role and the next message stays in the same session', async () => {
+    function TwoRoles() {
+      const [role, setRole] = useState<'researcher' | 'labeler'>('researcher')
+      const shared = { openScreen: vi.fn(), openPaper: vi.fn(), switchRole: setRole }
+      const current =
+        role === 'researcher'
+          ? { role, screen: 'library', screens: ['home', 'library'], ...shared }
+          : { role, screen: 'papers', screens: ['papers'], ...shared }
+      return (
+        <>
+          <p>Showing {role}</p>
+          <DoIt key={role} actions={current} />
+        </>
+      )
+    }
+    gateway.streams = [
+      [
+        { type: 'session', id: 's1' },
+        { type: 'tool', id: 'c1', name: 'switch_role', args: { role: 'labeler', reason: 'The claims to label are there' } },
+        { type: 'done' },
+      ],
+      [{ type: 'say', text: 'Switched to the Labeler.' }, { type: 'done' }],
+      [{ type: 'session', id: 's1' }, { type: 'say', text: 'The papers are listed.' }, { type: 'done' }],
+    ]
+    render(
+      <StrictMode>
+        <TwoRoles />
+      </StrictMode>,
+    )
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'I want to label claims' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Do it' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch' }))
+
+    expect(await screen.findByText('Showing labeler')).toBeInTheDocument()
+    expect(screen.getByText('Switched to the Labeler.')).toBeInTheDocument()
+    expect(screen.getByText('I want to label claims')).toBeInTheDocument()
+    await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'switch_role', role: 'researcher', result: { status: 'switched' } }))
+
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'What is next?' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('The papers are listed.')).toBeInTheDocument()
+    expect(gateway.posts[2].body).toMatchObject({ message: 'What is next?', role: 'labeler', screen: 'papers', session_id: 's1' })
   })
 
   it('shows a badge when the agent hands work to a specialist, and settles it when the specialist answers', async () => {

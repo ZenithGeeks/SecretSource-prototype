@@ -14,6 +14,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { LoadingScreen } from './components/ui'
 import { authEnabled, supabase } from './lib/supabase'
 import { clearLastRole, isRole, loadLastRole, saveLastRole } from './lib/lastRole'
+import { clearDoItConversation } from './lib/doItConversation'
 import { consumeTeacherGoogleReturn } from './lib/teacherGoogleReturn'
 import { useAuth } from './lib/useAuth'
 import { Auth } from './screens/auth/Auth'
@@ -73,6 +74,7 @@ export function Root() {
       if (event !== 'SIGNED_OUT') return
       setScreen('onboarding')
       clearLastRole()
+      clearDoItConversation()
       const params = new URLSearchParams(window.location.search)
       for (const key of ['role', 'screen', 'analysis']) params.delete(key)
       const query = params.toString()
@@ -92,21 +94,29 @@ export function Root() {
       {screen === 'onboarding' ? (
         <Onboarding lastRole={loadLastRole()} onContinue={setScreen} />
       ) : (
-        roleScreen(screen, () => setScreen('onboarding'))
+        roleScreen(
+          screen,
+          () => {
+            // The role menu starts over. A switch the agent made keeps the Do it conversation.
+            clearDoItConversation()
+            setScreen('onboarding')
+          },
+          (role) => setScreen(role),
+        )
       )}
     </Suspense>
   )
 }
 
-function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => void) {
+function roleScreen(screen: Exclude<Screen, 'onboarding'>, onChangeRole: () => void, onSwitchRole: (role: Role) => void) {
   switch (screen) {
     case 'researcher':
-      return <ResearcherApp onChangeRole={onChangeRole} />
+      return <ResearcherApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     case 'writer':
-      return <AuthorApp onChangeRole={onChangeRole} />
+      return <AuthorApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     case 'teacher':
       return <TeacherApp onChangeRole={onChangeRole} />
     case 'labeler':
-      return <LabelerApp onChangeRole={onChangeRole} />
+      return <LabelerApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
   }
 }
