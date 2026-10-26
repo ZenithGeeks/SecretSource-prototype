@@ -106,13 +106,33 @@ class Store:
         self.files.write(source, rows, vectors, content_hash)
         return len(rows)
 
-    def search(self, query: str, k: int = 5, source: str | None = None) -> list[dict]:
-        """Top-k figures or pages by MaxSim, optionally restricted to one source paper."""
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        source: str | None = None,
+        sources: list[str] | None = None,
+    ) -> list[dict]:
+        """Top-k figures or pages by MaxSim, optionally restricted to one paper or a list.
+
+        `sources` empty, or a `source` that is not in `sources`, searches nothing: the caller
+        named a scope that contains no paper, and the alternative would be the whole index.
+        """
+        if sources is not None and source is not None:
+            names = [source] if source in sources else []
+        elif sources is not None:
+            names = list(sources)
+        elif source is not None:
+            names = [source]
+        else:
+            names = self.files.sources()
+        if not names:
+            return []
+
         vector = F.normalize(self.encoder.query(query), dim=-1)
-        sources = [source] if source is not None else self.files.sources()
 
         scored = []
-        for name in sources:
+        for name in names:
             paper = self.files.load(name)
             if paper is None or not paper.rows:
                 continue

@@ -118,15 +118,17 @@ jobs:
       # Unit tests only: tests/conftest.py replaces Redis. REDIS_URL points at a closed port, so
       # the real-Redis tests skip and never publish test analyses to production Redis, which
       # runs on this same machine. The retrieval services' server tests run in this venv too:
-      # they fake the store, so they need FastAPI and mcp but no model. Each service runs from
-      # its own folder, because both have a server.py and a store.py.
+      # they fake the store, so they need FastAPI and mcp but no model. test_store.py fakes the
+      # encoder as well and does exercise Store.search, including an empty paper list. It imports
+      # the real store module, so ColBERT needs pypdf (the backend venv does not otherwise).
+      # Each service runs from its own folder, because both have a server.py and a store.py.
       - name: Test
         env:
           REDIS_URL: redis://127.0.0.1:1/0
         run: |
           "$VENV/bin/python" -m pytest -q
-          (cd ../services/colbert && "$VENV/bin/python" -m pytest -q test_server*.py)
-          (cd ../services/colpali && "$VENV/bin/python" -m pytest -q test_server*.py)
+          (cd ../services/colbert && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
+          (cd ../services/colpali && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
 
   status-bot-tests:
     needs: changes
