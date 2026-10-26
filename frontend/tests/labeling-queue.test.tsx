@@ -21,7 +21,7 @@ const gateway = vi.hoisted(() => ({
     ],
     papers: [
       { analysis_id: 'x1', subject: '', keywords: [], title: 'HPC paper', topic: 'HPC', claims: 3, judged: 0, team_judged: 0, labelers: [], status: 'done', reason: '', mine: false, added_by: 'Nuttadon' },
-      { analysis_id: 'x2', subject: 'Information Retrieval', keywords: ['ColBERT', 'dense retrieval'], title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, team_judged: 4, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true },
+      { analysis_id: 'x2', subject: 'Information Retrieval', keywords: ['ColBERT', 'dense retrieval'], title: 'NLP paper', topic: 'NLP', claims: 5, judged: 2, team_judged: 4, labelers: ['Chanya', 'Somchai'], status: 'done', reason: '', mine: true, venue_rank: 'A*', venue_rank_source: 'CORE 2026' },
       { analysis_id: 'x3', subject: '', keywords: [], title: '10.1/new', topic: 'NLP', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'running', reason: '', mine: true },
       { analysis_id: 'x4', subject: '', keywords: [], title: '10.1/closed', topic: 'SE', claims: 0, judged: 0, team_judged: 0, labelers: [], status: 'error', reason: 'no open-access PDF known for DOI:10.1/closed', mine: true },
     ],
@@ -309,6 +309,13 @@ describe('the labeler queue', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles and keywords' }), { target: { value: 'hpc' } })
     expect(titlesIn(table)).toEqual(['HPC paper'])
+  })
+
+  it('shows a paper’s venue rank when it is known', async () => {
+    renderQueue()
+    const table = await screen.findByRole('table')
+    expect(within(rowOf(table, 'NLP paper')).getByTitle('Venue rank A*, CORE 2026')).toHaveTextContent('A* · CORE')
+    expect(within(rowOf(table, 'HPC paper')).queryByTitle(/Venue rank/)).toBeNull()
   })
 
   it('shows each paper’s subject and keywords, and finds a paper by a keyword', async () => {

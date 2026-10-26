@@ -2,8 +2,6 @@
  * Find papers in Scopus by topic and add them to the labeling list. The search runs when the
  * labeler presses Search, not as they type: every page costs Scopus quota. Results come 25 at a
  * time, most cited first unless the labeler picks another order, and each opens to its abstract.
- * A rank filter keeps Q1 journals or A* and A conferences; on all of Scopus that filter only
- * hides papers on the page that came back.
  */
 
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
@@ -14,14 +12,10 @@ import { SearchField } from '../../../components/SearchField'
 import { Button, Card, Input, TextButton } from '../../../components/ui'
 import {
   problem,
-  RANK_FILTERS,
-  ranksOf,
-  scopusResultLine,
   TOPIC_INFO,
   useScopusAdd,
   useScopusSearch,
   useUploadPaper,
-  venueRankLabel,
   type Pool,
   type RankFilter,
   type ScopusPaper,
@@ -34,7 +28,7 @@ import { GraphSegmented } from '../../researcher/components/GraphSegmented'
 import { PaperKeywords } from './PaperKeywords'
 import { TopicSelect } from './TopicSelect'
 import { UploadPdfButton } from './UploadPdfButton'
-import { VenueRankChip } from './VenueRankChip'
+import { VenueRankBadge } from './VenueRankBadge'
 
 const THIS_YEAR = new Date().getFullYear()
 const FIRST_YEAR = 1990
@@ -51,6 +45,13 @@ const SCOPES: { key: ScopusScope; label: string }[] = [
   { key: 'all', label: 'All of Scopus' },
 ]
 
+const RANKS: { key: RankFilter; label: string }[] = [
+  { key: 'any', label: 'Any' },
+  { key: 'q1', label: 'Q1' },
+  { key: 'q1q2', label: 'Q1-Q2' },
+  { key: 'core', label: 'A*/A' },
+]
+
 /** A DOI on its own or inside a paper link; the gateway then looks up only that paper. */
 const DOI = /\b10\.\d{4,9}\/\S+/
 
@@ -61,9 +62,8 @@ function clampYear(value: string, fallback: number) {
   return Math.min(Math.max(year, FIRST_YEAR), THIS_YEAR)
 }
 
-/** The form as typed: the years stay text until a search, so a half-typed year is not undone.
- * `rank` is the filter's choice; the search sends the venue ranks it stands for. */
-type Form = Omit<ScopusQuery, 'since' | 'until' | 'ranks'> & { since: string; until: string; rank: RankFilter }
+/** The form as typed: the years stay text until a search, so a half-typed year is not undone. */
+type Form = Omit<ScopusQuery, 'since' | 'until'> & { since: string; until: string }
 
 export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
   const [form, setForm] = useState<Form>({
@@ -82,14 +82,9 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
   const add = useScopusAdd()
   const upload = useUploadPaper(({ doi }) => doi && setAdded((all) => ({ ...all, [doi]: true })))
 
-  const pages = search.data?.pages ?? []
-  const papers = pages.flatMap((page) => page.results)
-  const total = pages[0]?.total ?? 0
-  const hidden = pages.reduce((count, page) => count + (page.hidden ?? 0), 0)
-  // All of Scopus cannot filter by rank itself, so a chosen rank hides papers on the page that came back.
-  const filteringAll = Boolean(query && query.scope === 'all' && query.ranks.length > 0)
-  const filteredEmpty = search.isSuccess && papers.length === 0 && filteringAll && (total > 0 || hidden > 0)
-  const resultLine = query && pages.length ? scopusResultLine(total, pages, query.scope, query.ranks) : ''
+  const papers = search.data?.pages.flatMap((page) => page.results) ?? []
+  const total = search.data?.pages[0]?.total ?? 0
+  const hidden = search.data?.pages.reduce((sum, page) => sum + (page.hidden ?? 0), 0) ?? 0
   const set = (change: Partial<Form>) => setForm((current) => ({ ...current, ...change }))
   // A DOI search ignores words, years and venues, so the empty state's suggestions do not apply.
   const byDoi = query ? DOI.test(query.q) : false
@@ -102,7 +97,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
     // "Best match" means nothing without words, so an empty search falls back to most cited.
     const sort = next.sort === 'match' && !next.q.trim() ? 'cited' : next.sort
     setForm({ ...next, since: String(since), until: String(until) })
-    setQuery({ topic: next.topic, scope: next.scope, q: next.q.trim(), since, until, sort, ranks: ranksOf(next.rank) })
+    setQuery({ topic: next.topic, scope: next.scope, q: next.q.trim(), since, until, sort, rank: next.rank })
   }
   /** Changes the form and searches with it at once, for the empty state's suggestions. */
   const retryWith = (change: Partial<Form>) => {
@@ -150,9 +145,11 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-ink">Rank</span>
+              <span className="text-xs font-medium text-ink" title="Journals by CiteScore quartile, conferences by CORE rank">
+                Rank
+              </span>
               <div className="flex min-h-11 items-center">
-                <GraphSegmented label="Rank" value={form.rank} options={RANK_FILTERS} onChange={(rank) => set({ rank })} />
+                <GraphSegmented label="Rank" value={form.rank} options={RANKS} onChange={(rank) => set({ rank })} />
               </div>
             </div>
             <label className="flex flex-col gap-1.5 text-xs font-medium text-ink">
@@ -222,13 +219,27 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
 
         {search.isPending && query && <ResultSkeleton />}
 
-        {search.isSuccess && papers.length === 0 && !filteredEmpty && (
+        {search.isSuccess && papers.length === 0 && (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-subtle px-4 py-8 text-center">
             <SearchX className="size-5 text-ink-muted" aria-hidden="true" />
             <p className="text-sm font-medium text-ink">
-              {byDoi ? 'Scopus has no paper with that DOI.' : 'Scopus has no open-access papers for that.'}
+              {hidden > 0
+                ? `The venue rank filter hid all ${hidden} papers Scopus sent so far.`
+                : byDoi
+                  ? 'Scopus has no paper with that DOI.'
+                  : 'Scopus has no open-access papers for that.'}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
+              {hidden > 0 && search.hasNextPage && (
+                <Button variant="ghost" onClick={() => search.fetchNextPage()} disabled={search.isFetchingNextPage} className="min-h-9">
+                  Look at the next 25
+                </Button>
+              )}
+              {query && query.rank !== 'any' && (
+                <Button variant="ghost" onClick={() => retryWith({ rank: 'any' })} className="min-h-9">
+                  Any venue rank
+                </Button>
+              )}
               {query?.scope === 'topic' && !byDoi && (
                 <Button variant="ghost" onClick={() => retryWith({ scope: 'all' })} className="min-h-9">
                   Search all of Scopus
@@ -248,36 +259,37 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
           </div>
         )}
 
-        {(papers.length > 0 || filteredEmpty) && (
+        {papers.length > 0 && (
           <section className="flex flex-col gap-2">
             <p className="text-xs text-ink-muted tabular-nums" role="status">
-              {resultLine}
+              {query?.scope === 'all' && query.rank !== 'any'
+                ? `${total.toLocaleString()} papers · showing ${papers.length.toLocaleString()} of ${(papers.length + hidden).toLocaleString()} ${
+                    (search.data?.pages.length ?? 0) > 1 ? 'on these pages' : 'on this page'
+                  }`
+                : `${total.toLocaleString()} papers · showing ${papers.length}${hidden > 0 ? ` · ${hidden} hidden by the venue rank filter` : ''}`}
             </p>
-            {filteredEmpty && <p className="text-sm text-ink-muted">No paper on this page has that rank.</p>}
-            {papers.length > 0 && (
-              <ul aria-label="Scopus results" className="flex flex-col divide-y divide-border-subtle">
-                {papers.map((paper, index) => (
-                  <ResultRow
-                    key={paper.doi}
-                    paper={paper}
-                    // Only the first 25 arrive together; later pages fade in on their own.
-                    delay={index < 25 ? index * 0.03 : 0}
-                    done={paper.added || Boolean(added[paper.doi])}
-                    adding={add.isPending && add.variables?.doi === paper.doi}
-                    uploading={upload.isPending && upload.variables?.doi === paper.doi}
-                    // One upload at a time: the progress shown is the latest upload's only.
-                    uploadBlocked={upload.isPending}
-                    onAdd={() =>
-                      add.mutate(
-                        { doi: paper.doi, topic: query?.topic ?? form.topic },
-                        { onSuccess: () => setAdded((all) => ({ ...all, [paper.doi]: true })) },
-                      )
-                    }
-                    onUpload={(file) => upload.mutate({ file, topic: query?.topic ?? form.topic, doi: paper.doi })}
-                  />
-                ))}
-              </ul>
-            )}
+            <ul aria-label="Scopus results" className="flex flex-col divide-y divide-border-subtle">
+              {papers.map((paper, index) => (
+                <ResultRow
+                  key={paper.doi}
+                  paper={paper}
+                  // Only the first 25 arrive together; later pages fade in on their own.
+                  delay={index < 25 ? index * 0.03 : 0}
+                  done={paper.added || Boolean(added[paper.doi])}
+                  adding={add.isPending && add.variables?.doi === paper.doi}
+                  uploading={upload.isPending && upload.variables?.doi === paper.doi}
+                  // One upload at a time: the progress shown is the latest upload's only.
+                  uploadBlocked={upload.isPending}
+                  onAdd={() =>
+                    add.mutate(
+                      { doi: paper.doi, topic: query?.topic ?? form.topic },
+                      { onSuccess: () => setAdded((all) => ({ ...all, [paper.doi]: true })) },
+                    )
+                  }
+                  onUpload={(file) => upload.mutate({ file, topic: query?.topic ?? form.topic, doi: paper.doi })}
+                />
+              ))}
+            </ul>
             {search.hasNextPage && (
               <Button
                 variant="ghost"
@@ -320,7 +332,6 @@ function ResultRow({
   const [open, setOpen] = useState(false)
   const cited = paper.cited_by ? `cited ${paper.cited_by.toLocaleString()}` : ''
   const meta = [paper.venue, paper.year, paper.first_author, cited].filter(Boolean).join(' · ')
-  const rankLabel = venueRankLabel(paper.rank)
   // false: the only copy is on a site that refuses scripts, so the paper could never be read.
   // null: it could not be checked, so adding stays allowed.
   const unreachable = paper.downloadable === false && !done
@@ -344,10 +355,7 @@ function ResultRow({
           />
           <span className={cn('min-w-0', unreachable && 'opacity-60')}>
             <span className="block text-sm font-medium text-ink group-hover:text-accent">{paper.title}</span>
-            <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <VenueRankChip label={rankLabel} />
-              <span className="text-xs text-ink-muted tabular-nums [overflow-wrap:anywhere]">{meta}</span>
-            </span>
+            <span className="mt-0.5 block text-xs text-ink-muted tabular-nums [overflow-wrap:anywhere]">{meta}</span>
           </span>
         </button>
         {unreachable ? (
@@ -368,7 +376,19 @@ function ResultRow({
           </Button>
         )}
       </div>
-      <PaperKeywords subject={paper.subject} keywords={paper.keywords} className={cn('mt-1.5 ml-6', unreachable && 'opacity-60')} />
+      <div className={cn('mt-1.5 ml-6 flex flex-wrap items-center gap-1', unreachable && 'opacity-60')}>
+        {paper.rank === null ? (
+          <VenueRankBadge unavailable />
+        ) : (
+          paper.rank && (
+            <VenueRankBadge
+              value={paper.rank.value}
+              source={paper.rank.system ? `${paper.rank.system}${paper.rank.year != null ? ` ${paper.rank.year}` : ''}` : ''}
+            />
+          )
+        )}
+        <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
+      </div>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
