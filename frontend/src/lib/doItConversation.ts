@@ -6,7 +6,8 @@
 
 export type DoItLine = { kind: string; text?: string; name?: string; task?: string; state?: string }
 
-export type DoItConversation = { lines: DoItLine[]; sessionId: string | null }
+/** `resume` is set by a role switch: the new role's agent goes on with the request unasked. */
+export type DoItConversation = { lines: DoItLine[]; sessionId: string | null; resume?: boolean }
 
 let carried: DoItConversation | null = null
 
