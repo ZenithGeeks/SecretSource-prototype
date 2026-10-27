@@ -353,7 +353,7 @@ describe('Do it', () => {
     await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'switch_role', role: 'researcher', result: { status: 'cancelled' } }))
   })
 
-  it('Switch moves to the new role and the next message stays in the same session', async () => {
+  it('Switch moves to the new role, whose agent goes on with the request in the same session', async () => {
     function TwoRoles() {
       const [role, setRole] = useState<'researcher' | 'labeler'>('researcher')
       const shared = { openScreen: vi.fn(), openPaper: vi.fn(), switchRole: setRole }
@@ -375,6 +375,7 @@ describe('Do it', () => {
         { type: 'done' },
       ],
       [{ type: 'say', text: 'Switched to the Labeler.' }, { type: 'done' }],
+      [{ type: 'session', id: 's1' }, { type: 'say', text: 'Here are the papers to label.' }, { type: 'done' }],
       [{ type: 'session', id: 's1' }, { type: 'say', text: 'The papers are listed.' }, { type: 'done' }],
     ]
     render(
@@ -391,10 +392,17 @@ describe('Do it', () => {
     expect(screen.getByText('I want to label claims')).toBeInTheDocument()
     await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'switch_role', role: 'researcher', result: { status: 'switched' } }))
 
+    // The Labeler's agent picks up the request once, strict mode or not.
+    expect(await screen.findByText('Here are the papers to label.')).toBeInTheDocument()
+    expect(screen.getByText('Going on in this role')).toBeInTheDocument()
+    expect(gateway.posts[2].body).toMatchObject({ role: 'labeler', screen: 'papers', session_id: 's1' })
+    expect(peekDoItConversation()?.resume).toBeFalsy()
+
     fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'What is next?' } })
     fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
     expect(await screen.findByText('The papers are listed.')).toBeInTheDocument()
-    expect(gateway.posts[2].body).toMatchObject({ message: 'What is next?', role: 'labeler', screen: 'papers', session_id: 's1' })
+    expect(gateway.posts).toHaveLength(4)
+    expect(gateway.posts[3].body).toMatchObject({ message: 'What is next?', role: 'labeler', screen: 'papers', session_id: 's1' })
   })
 
   it('shows a badge when the agent hands work to a specialist, and settles it when the specialist answers', async () => {

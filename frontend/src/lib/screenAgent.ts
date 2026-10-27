@@ -55,6 +55,9 @@ const SERVER_STEPS: Record<string, string> = {
   draft_issues: 'Reading what needs work in a draft',
 }
 
+/** Sent for the person after a role switch; the agent reads the earlier request in the session. */
+const RESUME_MESSAGE = 'Go on with my last request in this role.'
+
 /** The open hand-overs (to `name`, or any) set to `state`. */
 function settle(lines: AgentLine[], name: string | null, state: DelegationState): AgentLine[] {
   return lines.map((line) =>
@@ -133,10 +136,19 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     return call
   }
 
-  async function send(message: string) {
+  // After a switch the new role's agent finishes the request without waiting for another message.
+  // A timer, so strict mode's second mount sends it once; the step line clears `resume`.
+  useEffect(() => {
+    if (!restored?.resume) return
+    const timer = setTimeout(() => void send(RESUME_MESSAGE, { kind: 'step', text: 'Going on in this role' }), 0)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per hand-over
+  }, [])
+
+  async function send(message: string, shown: AgentLine = { kind: 'person', text: message }) {
     controller.current?.abort()
     const abort = (controller.current = new AbortController())
-    add({ kind: 'person', text: message })
+    add(shown)
     setRunning(true)
     const confirm = (change: ConfirmRequest) =>
       new Promise<boolean>((resolve) => {
@@ -201,7 +213,9 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
         const settled = settle(linesRef.current, null, 'stopped')
         linesRef.current = settled
         setLines(settled)
-        leaveDoItConversation({ lines: settled, sessionId: session.current })
+        leaveDoItConversation({ lines: settled, sessionId: session.current, resume: true })
+        // This view is leaving: the commit in `finally` must not overwrite the hand-over.
+        continued.current = false
         latest.current.switchRole(switchedTo)
         switchedTo = null
       }
