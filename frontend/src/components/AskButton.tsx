@@ -42,7 +42,7 @@ export function AskButton({
   }
 
   return (
-    <div className="relative">
+    <div className="relative z-50">
       <button
         type="button"
         onClick={() => {
@@ -76,6 +76,20 @@ export function AskButton({
         <AnimatePresence>
           {!introSeen && !open && (
             <motion.div
+              key="ask-intro-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, delay: 0.4 }}
+              className="fixed inset-0 z-40 bg-ink/45"
+              onClick={dismiss}
+            />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {!introSeen && !open && (
+            <motion.div
+              key="ask-intro-bubble"
               role="note"
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
