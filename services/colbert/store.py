@@ -35,8 +35,9 @@ OVERLAP_WORDS = 40
 # indexed again the next time it is asked for. 2: reference lists are left out (#476).
 # 3: a figure or table caption starts a new passage (#491). 6: passages end at a sentence
 # end and overlap by one sentence, and a word hyphenated across a line break is joined again
-# (4 and 5 were first tries, indexed only on a development machine).
-PASSAGES_VERSION = "6"
+# (4 and 5 were first tries, indexed only on a development machine). 7: page numbers are left
+# out.
+PASSAGES_VERSION = "7"
 
 REFERENCES_HEADING = re.compile(
     r"^\s*(?:\d+\.?\s*)?(References|REFERENCES|Bibliography|BIBLIOGRAPHY)\s*$", re.M
@@ -45,6 +46,9 @@ REFERENCES_HEADING = re.compile(
 # is what tells a caption from a sentence that refers to one ("Table 3 presents ..."): on 28
 # papers this matched 601 caption lines and left out 60 such references.
 CAPTION = re.compile(r"^\s*(?:Figure|Fig\.|Table)\s*(?:\d+|[IVX]+)\s*[.:|]", re.I | re.M)
+# A first or last line that is only a number: pypdf reads the page number there. On 428 pages
+# of 40 papers, 238 such lines, all page numbers ("2229" at the foot, "6770" at the head).
+PAGE_NUMBER = re.compile(r"\A\s*\d{1,5}[ \t]*$|^[ \t]*\d{1,5}\s*\Z", re.M)
 YEAR = re.compile(r"\b(19[5-9]\d|20[0-3]\d)[a-z]?\b")
 PROSE_WORDS = frozenset(
     {"the", "is", "are", "we", "this", "that", "which", "our", "it", "was", "be", "can", "these", "its", "as"}
@@ -150,7 +154,8 @@ def pdf_passages(path: Path) -> list[dict]:
     passages = []
     in_references = False
     for number, page in enumerate(PdfReader(path).pages, start=1):
-        text = page.extract_text() or ""
+        # Spaces of the same length, so start and end still index the page's text.
+        text = PAGE_NUMBER.sub(lambda match: " " * len(match[0]), page.extract_text() or "")
         words, spans = _words(text)
         starts = [start for start, _ in spans]
         references_from = len(words)  # the first word of the reference list on this page
