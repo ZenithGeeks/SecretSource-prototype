@@ -91,7 +91,7 @@ export function Home({
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         {/* Conflicts */}
-        <Card className={cn(CARD, 'flex-1 p-0 pt-[18px] pb-1.5')}>
+        <Card className={cn(CARD, 'min-w-0 flex-1 p-0 pt-[18px] pb-1.5')}>
           <div className="flex items-center px-5 pb-2.5">
             <h2 className={cn(CARD_TITLE, 'flex-1')}>Conflicts in your library</h2>
             {home.conflicts.length > 0 && (
