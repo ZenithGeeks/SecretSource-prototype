@@ -140,6 +140,9 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     setRunning(true)
     const confirm = (change: ConfirmRequest) =>
       new Promise<boolean>((resolve) => {
+        // Stopped or closed before the card could show: the unmount cleanup has already run and
+        // would never answer it, so answer Cancel here.
+        if (abort.signal.aborted) return resolve(false)
         const card: PendingChange = {
           ...change,
           answer: (apply) => {
@@ -186,6 +189,8 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
             switchedTo = next
           },
         })
+        // Stopped or closed while the tool ran: send nothing more.
+        if (abort.signal.aborted) break
         if (call.name === 'switch_role' && result.status !== 'switched') switchedTo = null
         // The role whose agent made the call, so its result goes back to that agent.
         const body: Record<string, unknown> = { id: call.id, name: call.name, result }

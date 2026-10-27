@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Target } from '../../../components/PageViewer'
 import { PageViewer } from '../../../components/PageViewer'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorDrafts, useAuthorParse, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue } from '../../../lib/verdict'
@@ -248,7 +249,7 @@ function DraftCheckBody({
             {current.status.open} need{current.status.open === 1 ? 's' : ''} work
           </p>
         </div>
-        <Button onClick={recheck} disabled={isChecking} aria-busy={isChecking}>
+        <Button onClick={recheck} disabled={isChecking} aria-busy={isChecking} data-ask-target={askTarget({ kind: 'action', id: 'check' })}>
           {isChecking ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Search className="size-4" aria-hidden="true" />}
           {isChecking ? 'Checking…' : current.checks ? 'Re-check' : 'Check'}
         </Button>

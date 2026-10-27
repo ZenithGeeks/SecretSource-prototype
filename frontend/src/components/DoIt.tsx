@@ -45,7 +45,7 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
               deletes or uploads anything. For questions about what is inside your papers it asks a specialist, and you see that here.
             </p>
             <div className="flex flex-wrap gap-2">
-              {EXAMPLES.map((example) => (
+              {(actions.examples ?? EXAMPLES).map((example) => (
                 <button
                   key={example}
                   type="button"

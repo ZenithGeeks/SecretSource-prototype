@@ -1,7 +1,7 @@
 /** Ask's Do it mode: the browser tools the screen agent calls, and the loop that runs them and
  * sends their results back. A change waits for Apply. */
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { StrictMode, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,8 +22,11 @@ vi.mock('../src/lib/api', async (original) => ({
 }))
 
 import { DoIt } from '../src/components/DoIt'
-import { runTool, type ScreenActions } from '../src/lib/agentTools'
+import { describeTool, runTool, type ScreenActions } from '../src/lib/agentTools'
+import { postEvents } from '../src/lib/api'
+import type { Pointing } from '../src/lib/askCursor'
 import { clearDoItConversation, leaveDoItConversation, peekDoItConversation } from '../src/lib/doItConversation'
+import { useScreenAgent } from '../src/lib/screenAgent'
 
 function actions(overrides: Partial<ScreenActions> = {}): ScreenActions {
   return { screen: 'library', screens: ['home', 'library'], openScreen: vi.fn(), openPaper: vi.fn(), ...overrides }
@@ -136,6 +139,21 @@ describe('the screen agent tools', () => {
     ).toMatchObject({ status: 'error' })
     expect(await runTool({ id: '6', name: 'switch_role', args: { role: 'labeler', reason: 'go' } }, context())).toMatchObject({ status: 'error' })
   })
+
+  it('switch_role takes no inherited name, such as "constructor", for a role', async () => {
+    const onSwitched = vi.fn()
+    const switchRole = vi.fn()
+    const confirm = vi.fn(async () => true)
+    for (const role of ['constructor', 'toString', '__proto__']) {
+      const call = { id: '1', name: 'switch_role', args: { role, reason: 'x' } }
+      const result = await runTool(call, context({ actions: actions({ role: 'researcher', switchRole }), confirm, onSwitched }))
+      expect(result).toMatchObject({ status: 'error' })
+      expect(describeTool(call)).toBe(`Switching to the ${role} role`)
+    }
+    expect(confirm).not.toHaveBeenCalled()
+    expect(onSwitched).not.toHaveBeenCalled()
+    expect(switchRole).not.toHaveBeenCalled()
+  })
 })
 
 describe('Do it', () => {
@@ -177,6 +195,57 @@ describe('Do it', () => {
     unmount()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(peekDoItConversation()).toBeNull()
+  })
+
+  it('closing Do it while a change waits for Apply cancels it and sends nothing more', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'fill_field', args: { target: 'field:library-filter', text: 'colbert' } }],
+      [{ type: 'say', text: 'Filtered.' }, { type: 'done' }],
+    ]
+    render(<Screen />)
+    const { result, unmount } = renderHook(() => useScreenAgent(actions(), vi.fn()))
+    const sending = result.current.send('Filter my papers')
+    await waitFor(() => expect(result.current.pending).not.toBeNull())
+    const signal = vi.mocked(postEvents).mock.calls.at(-1)![3] as AbortSignal
+
+    unmount()
+    await sending // the waiting change answered Cancel, so the run ends instead of hanging
+    expect(signal.aborted).toBe(true)
+    expect(gateway.posts.map((post) => post.path)).toEqual(['/agent/runs'])
+    expect(screen.getByText('Filter:')).toBeInTheDocument()
+  })
+
+  it('a run stopped before its change can show answers Cancel instead of waiting for ever', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'fill_field', args: { target: 'field:library-filter', text: 'colbert' } }],
+      [{ type: 'say', text: 'Filtered.' }, { type: 'done' }],
+    ]
+    render(<Screen />)
+    // Stop lands after the tool started and before its approval card exists: the cursor's
+    // "Fill this in?" comes just before the card.
+    let stopRun = () => {}
+    const point = vi.fn((pointing: Pointing | null) => {
+      if (pointing?.tone === 'asks') stopRun()
+    })
+    const { result } = renderHook(() => useScreenAgent(actions(), point))
+    stopRun = () => result.current.stop()
+
+    await act(() => result.current.send('Filter my papers'))
+    expect(result.current.pending).toBeNull()
+    expect(gateway.posts.map((post) => post.path)).toEqual(['/agent/runs'])
+    expect(screen.getByText('Filter:')).toBeInTheDocument()
+  })
+
+  it('names the Author agent’s server steps in words', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'step', name: 'list_drafts' }, { type: 'step', name: 'draft_issues' }, { type: 'say', text: 'Two drafts.' }, { type: 'done' }],
+    ]
+    render(<DoIt actions={actions({ role: 'writer', examples: ['What drafts do I have?'] })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'What drafts do I have?' }))
+
+    expect(await screen.findByText('Two drafts.')).toBeInTheDocument()
+    expect(screen.getByText('Looking through your drafts')).toBeInTheDocument()
+    expect(screen.getByText('Reading what needs work in a draft')).toBeInTheDocument()
   })
 
   it('runs each tool the agent asks for, sends the result back, and shows what the agent says', async () => {

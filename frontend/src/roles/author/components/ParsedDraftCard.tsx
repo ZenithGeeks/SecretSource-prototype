@@ -4,6 +4,7 @@
 import { Loader2 } from 'lucide-react'
 
 import { Card, Empty } from '../../../components/ui'
+import { askTarget } from '../../../lib/askCursor'
 import { cn } from '../../../lib/utils'
 import type { ParseResult, ParseWarning, ParseWarningType } from '../../../types/draftCheck'
 import type { EditorTarget } from '../editorTarget'
@@ -69,11 +70,12 @@ export function ParsedDraftCard({
             <Empty title="Nothing to fix" hint="Every \cite key resolves and every entry is used." />
           ) : (
             <ul>
-              {warnings.map((w) => (
+              {warnings.map((w, index) => (
                 <li key={`${w.type}-${w.file}-${w.line}`} className="border-b border-border-subtle">
                   <button
                     type="button"
                     onClick={() => openAt(w)}
+                    data-ask-target={askTarget({ kind: 'action', id: `fix-warning-${index + 1}` })}
                     className="flex w-full flex-col items-start gap-0.5 rounded py-2 text-left hover:bg-accent-soft/40"
                     aria-label={`${WARNING_TITLE[w.type]}: ${w.detail}. Open ${w.file} line ${w.line} in the editor`}
                   >
@@ -87,6 +89,7 @@ export function ParsedDraftCard({
           <TextLink
             onClick={() => (warnings[0] ? openAt(warnings[0]) : onOpenEditor({ draftId }))}
             className="self-start"
+            data-ask-target={askTarget({ kind: 'action', id: 'fix-in-editor' })}
           >
             Fix in editor
           </TextLink>

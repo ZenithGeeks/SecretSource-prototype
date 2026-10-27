@@ -20,6 +20,8 @@ export type ScreenActions = {
   switchRole?: (role: Role) => void
   /** False when the person still has unsaved work and declines to leave it. */
   confirmLeave?: () => boolean
+  /** What Do it offers to try before the first message; the Researcher's when left out. */
+  examples?: string[]
 }
 
 /** What an approval step tells the person. The same card covers every change; the button word differs. */
@@ -71,6 +73,9 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
 const AGENT_ROLE: Record<string, Role> = { researcher: 'researcher', labeler: 'labeler', author: 'writer' }
 const AGENT_ROLE_LABEL: Record<string, string> = { researcher: 'Researcher', labeler: 'Labeler', author: 'Author' }
 
+/** The app's role for the agent's word; own keys only, so "constructor" or "toString" is not a role. */
+const agentRole = (role: string): Role | undefined => (Object.hasOwn(AGENT_ROLE, role) ? AGENT_ROLE[role] : undefined)
+
 /** One line for the Do it view, saying what a tool call does. */
 export function describeTool(call: ToolCall): string {
   const args = call.args as Record<string, string>
@@ -86,7 +91,7 @@ export function describeTool(call: ToolCall): string {
     case 'fill_field':
       return `Filling in: “${args.text}”`
     case 'switch_role':
-      return `Switching to the ${AGENT_ROLE_LABEL[args.role] ?? args.role} role`
+      return `Switching to the ${agentRole(args.role) ? AGENT_ROLE_LABEL[args.role] : args.role} role`
     default:
       return call.name
   }
@@ -132,7 +137,7 @@ async function fillField(target: string, text: string, { point, confirm }: ToolC
 
 /** Asks, then records the switch. Navigating here would unmount the page before the result is sent. */
 async function switchRole(role: string, reason: string, { actions, confirm, onSwitched }: ToolContext): Promise<ToolResult> {
-  const next = AGENT_ROLE[role]
+  const next = agentRole(role)
   if (!next) return { status: 'error', message: `no role ${role || '(none)'}; roles: researcher, labeler, author` }
   if (!actions.switchRole || !onSwitched) return { status: 'error', message: 'this screen cannot change role; use the role menu' }
   if (next === (actions.role ?? 'researcher')) return { status: 'error', message: `already in the ${role} role` }

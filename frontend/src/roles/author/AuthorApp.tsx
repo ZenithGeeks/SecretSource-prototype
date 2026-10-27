@@ -38,6 +38,9 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'history', label: 'History', icon: HistoryIcon },
 ]
 
+// What Ask's Do it mode offers to try here: the Author's own work, not the Researcher's papers.
+const DO_IT_EXAMPLES = ['What drafts do I have?', 'Open my library', 'Which citations in my latest draft aren’t supported?']
+
 // The editor is reached from Check a draft and counts as the Home section in the nav.
 const NAV_FOR: Record<AuthorScreen, NavKey> = {
   home: 'home',
@@ -151,6 +154,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
       },
       openPaper: openAnalysis,
       switchRole: onSwitchRole,
+      examples: DO_IT_EXAMPLES,
     },
   })
 

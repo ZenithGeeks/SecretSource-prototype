@@ -2,9 +2,25 @@
 
 import { Check, CircleHelp, Flag, Loader2, MousePointer2 } from 'lucide-react'
 
-/** An element on the page the cursor can point at. */
+/** An element on the page the cursor can point at. The Author's screens add their drafts, projects,
+ * citations, sources, check runs and the buttons the screen agent tells the person to press
+ * (`action`). */
 export type AskTarget = {
-  kind: 'claim' | 'passage' | 'reference' | 'statement' | 'question' | 'screen' | 'field' | 'paper'
+  kind:
+    | 'claim'
+    | 'passage'
+    | 'reference'
+    | 'statement'
+    | 'question'
+    | 'screen'
+    | 'field'
+    | 'paper'
+    | 'draft'
+    | 'project'
+    | 'citation'
+    | 'source'
+    | 'check'
+    | 'action'
   id: string
 }
 
