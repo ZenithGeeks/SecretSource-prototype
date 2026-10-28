@@ -72,7 +72,7 @@ export function Home({
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
-    <FadeIn className="mx-auto flex w-full max-w-[960px] flex-col gap-7 pt-4">
+    <FadeIn className="flex flex-col gap-7 pt-4">
       <header className="flex items-center gap-5">
         <Mascot role="researcher" size={84} className="hidden shrink-0 sm:block" />
         <div className="flex flex-col gap-2">
@@ -91,7 +91,7 @@ export function Home({
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         {/* Conflicts */}
-        <Card className={cn(CARD, 'flex-1 p-0 pt-[18px] pb-1.5')}>
+        <Card className={cn(CARD, 'min-w-0 flex-1 p-0 pt-[18px] pb-1.5')}>
           <div className="flex items-center px-5 pb-2.5">
             <h2 className={cn(CARD_TITLE, 'flex-1')}>Conflicts in your library</h2>
             {home.conflicts.length > 0 && (
