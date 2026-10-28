@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import type { ReactNode } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { runTool, type DraftReader } from '../src/lib/agentTools'
 import { Editor } from '../src/roles/author/screens/Editor'
 import { SplitPane } from '../src/components/SplitPane'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
@@ -333,6 +334,55 @@ describe('Author LaTeX editor — saving', () => {
     await waitFor(() => expect(screen.getByLabelText('seminar.tex source').textContent).toContain('\\section{Seminar}'))
     expect(screen.getByLabelText('seminar.tex source').textContent).not.toContain('% first draft')
     await waitFor(() => expect(stored().startsWith('% first draft\n')).toBe(true))
+  })
+})
+
+describe('Author LaTeX editor — what Ask reads', () => {
+  test('read_draft reads the text on screen, unsaved edits and an unsaved .bib key included, until the editor closes', async () => {
+    let reader: DraftReader | null = null
+    const onAgentApi = vi.fn((api: DraftReader | null) => {
+      reader = api
+    })
+    const { unmount } = renderWithQuery(
+      <Editor target={{ draftId: 'd1', file: 'related-work.tex' }} onFileChange={() => undefined} onNavigate={() => undefined} onAgentApi={onAgentApi} />,
+    )
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const read = (args: Record<string, unknown> = {}) =>
+      runTool(
+        { id: '1', name: 'read_draft', args },
+        { actions: { screen: 'editor', screens: [], openScreen: vi.fn(), openPaper: vi.fn(), draftEditor: () => reader }, point: vi.fn(), confirm: vi.fn() },
+      )
+
+    // The gateway refuses every write, so what is typed stays only on screen.
+    gateway.failWrites = true
+    type('% not saved yet\n')
+    const chapter = await read({ end_line: 2 })
+    expect(chapter).toMatchObject({ file: 'related-work.tex', first_line: 1, last_line: 2, truncated: false })
+    // Which draft is open, so the agent can check it is the one the person asked for.
+    expect(chapter.draft).toEqual({ id: 'd1', title: 'Related work — thesis ch.2' })
+    expect(chapter.text).toBe('1\t% not saved yet\n2\t\\documentclass[11pt]{article}')
+    expect(chapter.files).toEqual([
+      { name: 'related-work.tex', kind: 'tex', dirty: true },
+      { name: 'intro.tex', kind: 'tex', dirty: false },
+      { name: 'main.bib', kind: 'bib', dirty: false },
+    ])
+    expect(chapter.bib_keys).toEqual(expect.arrayContaining(['khattab2020', 'santhanam2022']))
+    expect(chapter.bib_keys).not.toContain('fresh2026')
+
+    fireEvent.click(screen.getByRole('tab', { name: /main\.bib/ }))
+    await waitFor(() => expect(screen.getByLabelText('main.bib source').textContent).toContain('khattab2020'))
+    type('@misc{fresh2026, title={Fresh}}\n')
+    const bib = await read({ file: 'main.bib', end_line: 1 })
+    expect(bib).toMatchObject({ file: 'main.bib', text: '1\t@misc{fresh2026, title={Fresh}}' })
+    expect(bib.bib_keys).toContain('fresh2026')
+    // With no file named, it reads the one on screen now.
+    expect(await read({ end_line: 1 })).toMatchObject({ file: 'main.bib' })
+    expect(gateway.drafts.get('d1')!.files.find((f) => f.name === 'main.bib')!.content).not.toContain('fresh2026')
+
+    // Closed, the editor takes its reader back, so read_draft finds no editor.
+    unmount()
+    expect(onAgentApi).toHaveBeenLastCalledWith(null)
+    expect(reader).toBeNull()
   })
 })
 

@@ -8,17 +8,19 @@
  * Home is Check a draft. Graph and History are the Researcher's screens (the same Graph
  * component, and History through useHistoryWorkspace), not copies: the Graph's papers open
  * on History here as they do there. Settings is a modal from the profile menu, not a screen
- * of its own.
+ * of its own. The editor is full-bleed with its own top bar: the shell is bare there, but it
+ * is the same shell, so the Ask panel beside it is not remounted and a Do it run goes on.
  */
 
 import { History as HistoryIcon, Home as HomeIcon, Library as LibraryIcon, Pen, Waypoints } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
+import type { DraftReader } from '../../lib/agentTools'
 import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { Graph } from '../researcher/screens/Graph'
@@ -40,6 +42,8 @@ const NAV: NavEntry<NavKey>[] = [
 
 // What Ask's Do it mode offers to try here: the Author's own work, not the Researcher's papers.
 const DO_IT_EXAMPLES = ['What drafts do I have?', 'Open my library', 'Which citations in my latest draft aren’t supported?']
+// On the editor, the draft on screen.
+const EDITOR_EXAMPLES = ['What do lines 1–20 say?', 'Which keys are in my .bib?', 'Which citations in this draft aren’t supported?']
 
 // The editor is reached from Check a draft and counts as the Home section in the nav.
 const NAV_FOR: Record<AuthorScreen, NavKey> = {
@@ -103,6 +107,11 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   const closeNotice = useCallback(() => setNotice(null), [])
   const history = useHistoryWorkspace()
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
+  // The open editor's reader for read_draft; set while the editor is mounted.
+  const draftReader = useRef<DraftReader | null>(null)
+  const onAgentApi = useCallback((api: DraftReader | null) => {
+    draftReader.current = api
+  }, [])
 
   useEffect(
     () => syncParams({ screen, draftId, target: editorTarget, projectId }, history.selected),
@@ -144,38 +153,27 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     analysis: screen === 'history' ? history.selected : null,
     analysisFile: history.selectedName,
     node: screen === 'graph' ? graphNode : null,
+    // On the editor, just "Ask AI": Answer still asks the library, Do it reads the draft.
+    scope: screen === 'editor' ? '' : undefined,
     actions: {
       role: 'writer',
       screen,
-      // Not the editor: it renders without Ask, so opening it would end this Do it run midway.
-      screens: ['home', 'library', 'graph', 'history'],
+      // The editor opens the draft Check a draft has selected, so only once there is one.
+      screens: draftId ? ['home', 'library', 'graph', 'history', 'editor'] : ['home', 'library', 'graph', 'history'],
       openScreen: (next) => {
         if (next === 'home' || next === 'library' || next === 'graph' || next === 'history') navigate(next)
+        else if (next === 'editor' && draftId) openEditor({ draftId })
       },
       openPaper: openAnalysis,
       switchRole: onSwitchRole,
-      examples: DO_IT_EXAMPLES,
+      examples: screen === 'editor' ? EDITOR_EXAMPLES : DO_IT_EXAMPLES,
+      draftEditor: () => draftReader.current,
     },
   })
 
-  // The editor is full-bleed with its own top bar, so it renders outside the sidebar shell.
-  if (screen === 'editor' && draftId) {
-    return (
-      <>
-        <Editor
-          key={draftId}
-          target={editorTarget ?? { draftId }}
-          onFileChange={(file) => setEditorTarget({ draftId, file })}
-          onNavigate={(next) => navigate(next)}
-          onWriteFailed={setNotice}
-        />
-        <Toast message={notice} onClose={closeNotice} ms={10_000} />
-      </>
-    )
-  }
-
   return (
     <AppShell
+      bare={screen === 'editor' && draftId !== null}
       nav={NAV}
       active={NAV_FOR[screen]}
       onNavigate={navigate}
@@ -188,7 +186,8 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
       // page viewer).
       wide={wide || (screen === 'history' && history.wide) || screen === 'graph'}
       sidebar={screen === 'history' ? history.sidebar : undefined}
-      // The toolbar is where Ask lives, so every Author screen in the shell has one.
+      // The toolbar is where Ask lives, so every framed Author screen has one; the bare editor
+      // puts the Ask button in its own top bar.
       breadcrumb={
         screen === 'history' && history.selectedName ? ['History', history.selectedName] : [NAV.find((n) => n.key === NAV_FOR[screen])?.label ?? 'Home']
       }
@@ -196,6 +195,17 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
       // On Graph the panel is a tab of the graph's own right panel.
       panel={screen === 'graph' ? undefined : ask.panel}
     >
+      {screen === 'editor' && draftId !== null && (
+        <Editor
+          key={draftId}
+          target={editorTarget ?? { draftId }}
+          onFileChange={(file) => setEditorTarget({ draftId, file })}
+          onNavigate={(next) => navigate(next)}
+          onWriteFailed={setNotice}
+          onAgentApi={onAgentApi}
+          askSlot={ask.button}
+        />
+      )}
       {screen === 'home' && (
         <DraftCheck
           key={draftId ?? 'none'}

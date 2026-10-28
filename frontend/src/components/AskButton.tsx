@@ -24,11 +24,14 @@ export function AskButton({
   role,
   open,
   about,
+  scope,
   onToggle,
 }: {
   role: Role
   open: boolean
   about: AskAbout
+  /** Replaces the words after "Ask AI" that `about` would give, for a screen that is about something else; empty for none. */
+  scope?: string
   onToggle: () => void
 }) {
   const [introSeen, setIntroSeen] = useState(readIntroSeen)
@@ -73,7 +76,9 @@ export function AskButton({
         </span>
         {/* On a phone only the icon shows: the toolbar also holds the breadcrumb and the screen's actions. */}
         <span className="sr-only sm:not-sr-only">Ask AI</span>
-        <span className={cn('hidden font-normal xl:inline', open ? 'text-canvas' : 'text-ink-muted')}>{SCOPE[about.kind]}</span>
+        {scope !== '' && (
+          <span className={cn('hidden font-normal xl:inline', open ? 'text-canvas' : 'text-ink-muted')}>{scope ?? SCOPE[about.kind]}</span>
+        )}
       </button>
       <MotionConfig reducedMotion="user">
         <AnimatePresence>

@@ -1,6 +1,7 @@
-/** The editor's own top bar (the screen is full-bleed, outside the AppShell sidebar): brand,
+/** The editor's own top bar (the screen is full-bleed, in AppShell's bare mode): brand,
  * breadcrumb with the version and save state, the Editor / Export / History tabs, Re-check,
- * and the role chip. `exportSlot` is where the Export dropdown mounts. */
+ * and the role chip. `exportSlot` is where the Export dropdown mounts, `askSlot` the Ask
+ * button (AppShell's toolbar, where it sits on the other screens, is not shown here). */
 
 import { Loader2, Pen, Search } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -42,6 +43,7 @@ export function EditorTopBar({
   onRecheck,
   rechecking,
   exportSlot,
+  askSlot,
 }: {
   title: string
   version: number
@@ -53,6 +55,7 @@ export function EditorTopBar({
   onRecheck: () => void
   rechecking: boolean
   exportSlot: ReactNode
+  askSlot?: ReactNode
 }) {
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border-subtle bg-surface px-4 sm:px-6">
@@ -103,6 +106,7 @@ export function EditorTopBar({
           {rechecking ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Search className="size-4" aria-hidden="true" />}
           {rechecking ? 'Checking…' : 'Re-check'}
         </Button>
+        {askSlot}
         <RoleChip role="Author" icon={Pen} />
       </div>
     </header>

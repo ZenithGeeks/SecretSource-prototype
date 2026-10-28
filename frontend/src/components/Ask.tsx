@@ -37,6 +37,7 @@ export function useAsk({
   analysisFile = null,
   node = null,
   canNarrow = true,
+  scope,
   actions,
   extra,
 }: {
@@ -50,6 +51,8 @@ export function useAsk({
   node?: AskNode | null
   /** False for a role with no paper or graph node to open (Teacher). */
   canNarrow?: boolean
+  /** The button's words after "Ask AI", when the screen is about something other than `about`; empty for none (AskButton). */
+  scope?: string
   /** What the screen agent may do in this role; with it, Ask gets the Do it mode. */
   actions?: ScreenActions
   /** A mode for what the screen shows (AssistantPanel's `extra`). */
@@ -100,7 +103,7 @@ export function useAsk({
   const button = (
     <div className="flex items-center gap-2">
       {agent.pill}
-      <AskButton role={role} open={open} about={about} onToggle={() => setOpenSaved(!open)} />
+      <AskButton role={role} open={open} about={about} scope={scope} onToggle={() => setOpenSaved(!open)} />
     </div>
   )
 

@@ -22,6 +22,22 @@ export type ScreenActions = {
   confirmLeave?: () => boolean
   /** What Do it offers to try before the first message; the Researcher's when left out. */
   examples?: string[]
+  /** The Author's open editor, for read_draft; null when no editor is open. */
+  draftEditor?: () => DraftReader | null
+}
+
+/** What the Author's editor lets the agent read: the text on screen, not the gateway's copy, so
+ * an edit still waiting for its autosave is included. */
+export type DraftReader = {
+  /** Which draft the editor has open, so the agent can tell it is the one the person asked for. */
+  draft: () => { id: string; title: string }
+  /** The file on screen. */
+  active: string | undefined
+  files: () => { name: string; kind: string; dirty: boolean }[]
+  /** A file's text as on screen; undefined for a file the draft does not have. */
+  read: (file: string) => string | undefined
+  /** The keys of the draft's .bib files as on screen. */
+  bibKeys: () => string[]
 }
 
 /** What an approval step tells the person. The same card covers every change; the button word differs. */
@@ -46,6 +62,12 @@ export type ToolResult = Record<string, unknown>
 
 const MAX_TARGETS = 60 // enough for a screen; read_screen's answer goes into every later model call
 const SETTLE_MS = 450 // the cursor's glide, so the person sees where it went before the app moves
+// read_draft's answer goes into every later model call: about 300 lines of LaTeX at most.
+export const DRAFT_MAX_LINES = 300
+export const DRAFT_MAX_CHARS = 24_000
+// Right after open_screen("editor") the editor may still be mounting or fetching the draft.
+export const DRAFT_WAIT_MS = 2_000
+const DRAFT_POLL_MS = 50
 
 /** Runs one tool call from the agent. An unknown tool is an error the agent reads, not a crash. */
 export async function runTool(call: ToolCall, context: ToolContext): Promise<ToolResult> {
@@ -64,6 +86,8 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
       return fillField(args.target, args.text, context)
     case 'switch_role':
       return switchRole(args.role, args.reason, context)
+    case 'read_draft':
+      return readDraft(call.args, context.actions)
     default:
       return { status: 'error', message: `there is no tool named ${call.name} in this app` }
   }
@@ -92,6 +116,8 @@ export function describeTool(call: ToolCall): string {
       return `Filling in: “${args.text}”`
     case 'switch_role':
       return `Switching to the ${agentRole(args.role) ? AGENT_ROLE_LABEL[args.role] : args.role} role`
+    case 'read_draft':
+      return `Reading ${args.file || 'the draft'}`
     default:
       return call.name
   }
@@ -103,6 +129,56 @@ function readScreen(screen: string): ToolResult {
     .slice(0, MAX_TARGETS)
     .map((element) => ({ target: element.dataset.askTarget, label: labelOf(element) }))
   return { screen, targets }
+}
+
+/** One file of the open draft, numbered from `start_line`, up to DRAFT_MAX_LINES lines or
+ * DRAFT_MAX_CHARS characters; `truncated` says the cap stopped it before `end_line` (or the end).
+ * Waits up to DRAFT_WAIT_MS for an editor that is still opening. */
+async function readDraft(args: Record<string, unknown>, actions: ScreenActions): Promise<ToolResult> {
+  if (!actions.draftEditor) return { status: 'error', message: 'there is no draft editor in this role' }
+  const opened = () => {
+    const reader = actions.draftEditor?.() ?? null
+    return reader && reader.files().length > 0 ? reader : null
+  }
+  let reader = opened()
+  for (let waited = 0; !reader && waited < DRAFT_WAIT_MS; waited += DRAFT_POLL_MS) {
+    await wait(DRAFT_POLL_MS)
+    reader = opened()
+  }
+  if (!reader) {
+    return actions.draftEditor()
+      ? { status: 'error', message: 'the draft is still opening; try again' }
+      : { status: 'error', message: 'no draft is open in the editor; open one with open_screen("editor")' }
+  }
+  const files = reader.files()
+  const file = typeof args.file === 'string' && args.file ? args.file : (reader.active ?? files[0].name)
+  const text = reader.read(file)
+  if (text === undefined) return { status: 'error', message: `no file ${file} in this draft; files: ${files.map((f) => f.name).join(', ')}` }
+  const lines = text.split('\n')
+  const first = Math.max(1, Math.trunc(Number(args.start_line)) || 1)
+  const asked = Math.trunc(Number(args.end_line)) || 0
+  const end = asked > 0 ? Math.min(asked, lines.length) : lines.length
+  if (first > lines.length) return { status: 'error', message: `${file} has ${lines.length} lines` }
+  const shown: string[] = []
+  let size = 0
+  for (let n = first; n <= end && shown.length < DRAFT_MAX_LINES; n += 1) {
+    const row = `${n}\t${lines[n - 1]}`
+    if (shown.length > 0 && size + row.length + 1 > DRAFT_MAX_CHARS) break
+    shown.push(row)
+    size += row.length + 1
+  }
+  const last = first + shown.length - 1
+  return {
+    draft: reader.draft(),
+    file,
+    files,
+    first_line: first,
+    last_line: last,
+    total_lines: lines.length,
+    truncated: last < end,
+    text: shown.join('\n'),
+    bib_keys: reader.bibKeys(),
+  }
 }
 
 async function openScreen(screen: string, { actions, point }: ToolContext): Promise<ToolResult> {

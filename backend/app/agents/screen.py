@@ -66,6 +66,12 @@ You are in the Author role. Its screens: home, library, graph, history, editor.
 - list_drafts lists the person's drafts. draft_issues gives what needs work in one: citations
   its last check did not back, and problems in its .bib file and cite commands. find_support
   finds passages in the person's papers for a sentence.
+- open_screen("editor") opens the draft selected on home in the editor. There, read_draft gives
+  the text on the screen, unsaved edits included, with line numbers, the draft's files, and the
+  keys of its .bib files. To say what the draft says, read it; do not answer from draft_issues or
+  from memory. If the result says truncated, read the next lines from last_line + 1.
+- read_draft's draft gives the open draft's title. After open_screen("editor"), check that it is
+  the draft the person asked for; if it is not, say which draft is open and stop.
 - You may only change something with fill_field, and the person must approve it. If the result
   says it was cancelled, say so and stop. Never say a change was made unless a result says so.
 - You cannot start a check, save, delete or upload. Point at the button and tell the person.
@@ -113,6 +119,21 @@ def fill_field(target: str, text: str) -> None:
     Args:
         target: a field, as "field:id" from read_screen.
         text: what to type into it.
+    """
+
+
+def read_draft(file: str = "", start_line: int = 1, end_line: int = 0) -> None:
+    """Read the draft open in the editor, as the person sees it, unsaved edits included. Returns
+    draft, the open draft's id and title, then the file's text with each line as
+    "number<TAB>text", first_line, last_line, total_lines,
+    truncated (true when the 300-line cap stopped it before end_line; read on from last_line + 1),
+    the draft's files with whether each has unsaved edits, and bib_keys, the keys of its .bib
+    files. Only on the editor screen. Runs in the browser.
+
+    Args:
+        file: a file of the draft, such as "main.tex"; empty for the file on screen.
+        start_line: the first line to read, from 1.
+        end_line: the last line to read; 0 for the end of the file.
     """
 
 
@@ -197,6 +218,8 @@ SCREEN_TOOLS = [
 read_screen_tool, open_screen_tool, open_paper_tool, point_at_tool, fill_field_tool = SCREEN_TOOLS[:5]
 # Not in SCREEN_TOOLS: the MCP server lists those, and a coding agent has no role to switch.
 switch_role_tool = LongRunningFunctionTool(func=switch_role)
+# The Author's editor only, and not on MCP either: a coding agent has no editor to read.
+read_draft_tool = LongRunningFunctionTool(func=read_draft)
 
 screen_agent = LlmAgent(
     name="screen_agent",
@@ -234,6 +257,7 @@ author_agent = LlmAgent(
         point_at_tool,
         fill_field_tool,
         switch_role_tool,
+        read_draft_tool,
         find_support,
         *AUTHOR_TOOLS,
     ],
@@ -243,5 +267,6 @@ author_agent = LlmAgent(
 ROLE_AGENTS = {"researcher": screen_agent, "labeler": labeler_agent, "writer": author_agent}
 
 # The long-running tools above: the only results agent_runs.py takes from the browser.
+# SCREEN_TOOL_NAMES is the MCP server's; switch_role and read_draft are the web app's only.
 SCREEN_TOOL_NAMES = frozenset({"read_screen", "open_screen", "open_paper", "point_at", "fill_field"})
-BROWSER_TOOL_NAMES = SCREEN_TOOL_NAMES | {"switch_role"}  # SCREEN_TOOL_NAMES is the MCP server's
+BROWSER_TOOL_NAMES = SCREEN_TOOL_NAMES | {"switch_role", "read_draft"}

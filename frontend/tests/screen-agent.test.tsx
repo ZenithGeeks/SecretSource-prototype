@@ -22,7 +22,7 @@ vi.mock('../src/lib/api', async (original) => ({
 }))
 
 import { DoIt } from '../src/components/DoIt'
-import { describeTool, runTool, type ScreenActions } from '../src/lib/agentTools'
+import { DRAFT_MAX_CHARS, DRAFT_MAX_LINES, DRAFT_WAIT_MS, describeTool, runTool, type DraftReader, type ScreenActions } from '../src/lib/agentTools'
 import { postEvents } from '../src/lib/api'
 import type { Pointing } from '../src/lib/askCursor'
 import { clearDoItConversation, leaveDoItConversation, peekDoItConversation } from '../src/lib/doItConversation'
@@ -153,6 +153,100 @@ describe('the screen agent tools', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(onSwitched).not.toHaveBeenCalled()
     expect(switchRole).not.toHaveBeenCalled()
+  })
+})
+
+describe('read_draft', () => {
+  /** An editor holding `files`, the first one on screen. */
+  function reader(files: { name: string; kind: string; content: string; dirty?: boolean }[], bibKeys: string[] = []): DraftReader {
+    return {
+      draft: () => ({ id: 'd1', title: 'Thesis: chapter 2' }),
+      active: files[0]?.name,
+      files: () => files.map((f) => ({ name: f.name, kind: f.kind, dirty: f.dirty ?? false })),
+      read: (file) => files.find((f) => f.name === file)?.content,
+      bibKeys: () => bibKeys,
+    }
+  }
+  const read = (args: Record<string, unknown>, draft: DraftReader | null) =>
+    runTool({ id: '1', name: 'read_draft', args }, context({ actions: actions({ draftEditor: () => draft }) }))
+
+  it('says which draft is open, numbers the lines of the file on screen and lists the files and bib keys', async () => {
+    const draft = reader(
+      [
+        { name: 'main.tex', kind: 'tex', content: '\\section{A}\nFirst \\cite{k1}.\nSecond.', dirty: true },
+        { name: 'refs.bib', kind: 'bib', content: '@misc{k1}' },
+      ],
+      ['k1'],
+    )
+    expect(await read({}, draft)).toEqual({
+      draft: { id: 'd1', title: 'Thesis: chapter 2' },
+      file: 'main.tex',
+      files: [
+        { name: 'main.tex', kind: 'tex', dirty: true },
+        { name: 'refs.bib', kind: 'bib', dirty: false },
+      ],
+      first_line: 1,
+      last_line: 3,
+      total_lines: 3,
+      truncated: false,
+      text: '1\t\\section{A}\n2\tFirst \\cite{k1}.\n3\tSecond.',
+      bib_keys: ['k1'],
+    })
+    // A range of lines, and another file of the draft.
+    expect(await read({ file: 'main.tex', start_line: 2, end_line: 2 }, draft)).toMatchObject({
+      text: '2\tFirst \\cite{k1}.',
+      first_line: 2,
+      last_line: 2,
+      truncated: false,
+    })
+    expect(await read({ file: 'refs.bib' }, draft)).toMatchObject({ file: 'refs.bib', text: '1\t@misc{k1}' })
+  })
+
+  it('stops at 300 lines or 24,000 characters and says there is more', async () => {
+    const long = reader([{ name: 'long.tex', kind: 'tex', content: Array.from({ length: 400 }, (_, i) => `line ${i + 1}`).join('\n') }])
+    expect(await read({}, long)).toMatchObject({ first_line: 1, last_line: DRAFT_MAX_LINES, total_lines: 400, truncated: true })
+    expect(await read({ start_line: DRAFT_MAX_LINES + 1 }, long)).toMatchObject({ first_line: 301, last_line: 400, truncated: false })
+
+    const wide = reader([{ name: 'wide.tex', kind: 'tex', content: Array.from({ length: 10 }, () => 'x'.repeat(5_000)).join('\n') }])
+    const result = await read({}, wide)
+    expect(result).toMatchObject({ last_line: 4, total_lines: 10, truncated: true })
+    expect((result.text as string).length).toBeLessThanOrEqual(DRAFT_MAX_CHARS)
+  })
+
+  it('says so when no editor is open, the file is not in the draft, or the lines are past its end', async () => {
+    // A role with no editor at all (the Researcher's, the Labeler's) answers at once.
+    expect(await runTool({ id: '1', name: 'read_draft', args: {} }, context())).toEqual({
+      status: 'error',
+      message: 'there is no draft editor in this role',
+    })
+    const draft = reader([{ name: 'main.tex', kind: 'tex', content: 'one\ntwo' }])
+    expect(await read({ file: 'other.tex' }, draft)).toEqual({ status: 'error', message: 'no file other.tex in this draft; files: main.tex' })
+    expect(await read({ start_line: 3 }, draft)).toEqual({ status: 'error', message: 'main.tex has 2 lines' })
+
+    // No editor, or one whose draft never arrives: it waits for it a little, then says which.
+    vi.useFakeTimers()
+    const none = read({}, null)
+    const empty = read({}, reader([]))
+    await vi.advanceTimersByTimeAsync(DRAFT_WAIT_MS)
+    expect(await none).toEqual({ status: 'error', message: 'no draft is open in the editor; open one with open_screen("editor")' })
+    expect(await empty).toEqual({ status: 'error', message: 'the draft is still opening; try again' })
+    vi.useRealTimers()
+  })
+
+  it('waits for an editor that is still opening, as right after open_screen("editor")', async () => {
+    vi.useFakeTimers()
+    let open: DraftReader | null = null
+    const result = runTool({ id: '1', name: 'read_draft', args: {} }, context({ actions: actions({ draftEditor: () => open }) }))
+    await vi.advanceTimersByTimeAsync(300)
+    open = reader([{ name: 'main.tex', kind: 'tex', content: 'arrived' }])
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await result).toMatchObject({ file: 'main.tex', text: '1\tarrived' })
+    vi.useRealTimers()
+  })
+
+  it('says what it reads in the Do it view', () => {
+    expect(describeTool({ id: '1', name: 'read_draft', args: {} })).toBe('Reading the draft')
+    expect(describeTool({ id: '1', name: 'read_draft', args: { file: 'main.tex' } })).toBe('Reading main.tex')
   })
 })
 

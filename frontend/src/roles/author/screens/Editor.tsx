@@ -30,13 +30,14 @@
  */
 
 import { Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button, Card } from '../../../components/ui'
+import type { DraftReader } from '../../../lib/agentTools'
 import { errorMessage } from '../../../lib/author'
 import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
 import { downloadBlob, downloadText } from '../../../lib/csv'
-import { bibEntries, findCites, parseProject, sentenceStart, withContent } from '../../../lib/latexProject'
+import { bibEntries, bibKeys, findCites, parseProject, sentenceStart, withContent } from '../../../lib/latexProject'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue, summarize } from '../../../lib/verdict'
 import type { Citation, Draft, ProjectFile } from '../../../types/draftCheck'
@@ -62,6 +63,8 @@ export function Editor({
   onFileChange,
   onNavigate,
   onWriteFailed,
+  onAgentApi,
+  askSlot,
 }: {
   target: EditorTarget
   /** The open file changed (for the URL). */
@@ -70,6 +73,10 @@ export function Editor({
   /** The write made on the way out of the editor was refused: the screen is gone by then, so
    * the app shows this. */
   onWriteFailed?: (message: string) => void
+  /** Hands Ask's read_draft what is on screen while this editor is open; null when it closes. */
+  onAgentApi?: (api: DraftReader | null) => void
+  /** The Ask button, in the top bar. */
+  askSlot?: ReactNode
 }) {
   const { draftId } = target
   const draft = useAuthorDraft(draftId)
@@ -367,6 +374,28 @@ export function Editor({
     return { bibKeys, suggested }
   }, [entries, saved.data])
 
+  // What Ask's read_draft reads: the project as on screen, kept current after every render. One
+  // reader for the editor's life, so the app holds a single handle while this screen is open.
+  const shown = { id: draftId, title: draft.data?.title ?? '' }
+  const onScreen = useRef({ liveFiles, dirtyNames, active: active?.name, shown })
+  useEffect(() => {
+    onScreen.current = { liveFiles, dirtyNames, active: active?.name, shown }
+  })
+  useEffect(() => {
+    if (!onAgentApi) return
+    const reader: DraftReader = {
+      draft: () => onScreen.current.shown,
+      get active() {
+        return onScreen.current.active
+      },
+      files: () => onScreen.current.liveFiles.map((f) => ({ name: f.name, kind: f.kind, dirty: onScreen.current.dirtyNames.has(f.name) })),
+      read: (file) => onScreen.current.liveFiles.find((f) => f.name === file)?.content,
+      bibKeys: () => bibKeys(onScreen.current.liveFiles),
+    }
+    onAgentApi(reader)
+    return () => onAgentApi(null)
+  }, [onAgentApi])
+
   if (draft.isPending) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas">
@@ -416,6 +445,7 @@ export function Editor({
         onRecheck={() => void recheck()}
         rechecking={isChecking}
         exportSlot={<ExportMenu openIssues={draft.data.status.open} busy={exporting} onExport={exportAs} />}
+        askSlot={askSlot}
       />
       {(start.isError || writeError || running.data?.status === 'error') && (
         <p role="alert" className="flex items-center gap-3 border-b border-refutes bg-refutes-soft px-4 py-1.5 text-xs text-refutes">

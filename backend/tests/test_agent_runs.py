@@ -209,6 +209,37 @@ def test_each_role_has_its_own_agent_and_each_can_ask_to_switch_role():
     assert "switch_role" in screen.BROWSER_TOOL_NAMES
 
 
+def test_only_the_author_agent_reads_the_draft_and_only_from_the_browser():
+    assert "read_draft" in tool_names(screen.author_agent)
+    assert "read_draft" not in tool_names(screen.screen_agent)
+    assert "read_draft" not in tool_names(screen.labeler_agent)
+    # The web app's editor answers it; a coding agent over MCP has no editor to read.
+    assert "read_draft" in screen.BROWSER_TOOL_NAMES
+    assert "read_draft" not in screen.SCREEN_TOOL_NAMES
+    text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
+    assert "| `read_draft` |" in text
+
+
+def test_a_read_draft_call_waits_for_the_editor_and_its_text_goes_to_the_author_agent(api, monkeypatch):
+    client, _, _ = api
+    replies = [{"name": "read_draft", "args": {"start_line": 3, "end_line": 3}}, "It says hi."]
+    author_model = ScriptedModel(replies=replies, seen=[])
+    monkeypatch.setattr(screen.author_agent, "model", author_model)
+
+    body = {"message": "What does line 3 say?", "screen": "editor", "role": "writer"}
+    first = events(client.post("/agent/runs", json=body))
+    session = first[0]["id"]
+    [tool] = [e for e in first if e["type"] == "tool"]
+    assert (tool["name"], tool["args"]) == ("read_draft", {"start_line": 3, "end_line": 3})
+
+    draft = {"file": "main.tex", "first_line": 3, "last_line": 3, "total_lines": 9, "text": "3\thi"}
+    result = {"id": tool["id"], "name": "read_draft", "result": draft, "role": "writer"}
+    second = events(client.post(f"/agent/runs/{session}/results", json=result))
+    assert {"type": "say", "text": "It says hi."} in second
+    # The author agent read the editor's text.
+    assert "3\\thi" in str(author_model.seen[-1].contents)
+
+
 def test_the_labeler_agent_cannot_write_or_see_a_verdict():
     names = set(tool_names(screen.labeler_agent))
     verdicts = {"get_claim", "get_analysis", "check_text", "ask_library", "search_claims", "get_gaps"}
