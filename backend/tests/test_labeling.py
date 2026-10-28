@@ -746,6 +746,72 @@ def test_scopus_search_asks_again_once_after_a_timeout_but_not_after_a_refused_k
     assert len(calls) == 1
 
 
+NO_RECORD = {
+    "search-results": {
+        "opensearch:totalResults": "0",
+        "entry": [{"@_fa": "true", "error": "Result set was empty"}],
+    }
+}
+
+
+def openalex_work(source):
+    return {
+        "doi": "https://doi.org/10.1145/3806653",
+        "title": "Generative AI for Testing of Autonomous Driving Systems: A Survey",
+        "publication_date": "2026-04-04",
+        "authorships": [{"author": {"display_name": "Ann Lee"}}],
+        "cited_by_count": 3,
+        "primary_location": {"source": source},
+    }
+
+
+def test_a_doi_scopus_does_not_list_yet_is_found_in_openalex_with_its_venue_rank(monkeypatch):
+    from app.pipeline import indexes
+
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    monkeypatch.setattr(scopus, "openalex_details", lambda dois: {})
+    monkeypatch.setattr(requests, "get", lambda *a, **k: ScopusReply(NO_RECORD))
+    q1 = {"system": "CiteScore", "value": "Q1", "year": 2025}
+    monkeypatch.setattr(scopus, "citescore_ranks", lambda issns: {"1049331X": q1, "15577392": None})
+    tosem = {
+        "display_name": "ACM Transactions on Software Engineering and Methodology",
+        "issn": ["1049-331X", "1557-7392"],
+        "type": "journal",
+    }
+    asked = []
+    monkeypatch.setattr(
+        indexes, "openalex_works", lambda params: asked.append(params) or [openalex_work(tosem)]
+    )
+
+    found = scopus.search("SE", "https://dl.acm.org/doi/epdf/10.1145/3806653", 2020)
+    assert asked[0]["filter"] == "doi:10.1145/3806653"
+    assert found["total"] == 1 and found["hidden"] == 0
+    paper = found["results"][0]
+    assert (paper["doi"], paper["venue"], paper["year"], paper["first_author"], paper["cited_by"]) == (
+        "10.1145/3806653",
+        "ACM Transactions on Software Engineering and Methodology",
+        "2026",
+        "Ann Lee",
+        3,
+    )
+    assert paper["rank"] == q1
+    assert scopus.rank_of("10.1145/3806653") == q1  # listing the paper ranks it the same way
+
+    # A conference is ranked by its name, as a Scopus proceedings record is.
+    models = {
+        "display_name": "ACM/IEEE International Conference on Model Driven Engineering Languages and Systems"
+        " (MODELS)",
+        "issn": None,
+        "type": "conference",
+    }
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: [openalex_work(models)])
+    assert scopus.rank_of("10.1145/3822455.3830327") == {"system": "CORE", "value": "A", "year": 2026}
+
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: [])
+    assert scopus.search("SE", "10.1/none", 2020) == {"total": 0, "results": [], "hidden": 0}
+    assert scopus.rank_of("10.1/none") is None
+
+
 def serial(issn, e_issn, years):
     """A Serial Title entry: years maps "2025" to (status, [percentile per subject])."""
     return {
@@ -1295,8 +1361,15 @@ def test_scopus_search_says_which_papers_can_be_downloaded(api, monkeypatch):
 
 def test_every_venue_name_is_specific_enough_to_match_only_that_venue():
     # "Supercomputing" matched a journal and "Computer Vision and Pattern Recognition" a book series
-    # when checked against the live Scopus index; short names do that.
-    assert all(len(venue.split()) >= 4 for venues in scopus.VENUES.values() for venue in venues)
+    # when checked against the live Scopus index; short names do that. "IEEE Software" matched only
+    # that journal in 200 open-access records since 2020 (checked 2026-10-28).
+    checked = {"IEEE Software"}
+    assert all(
+        len(venue.split()) >= 4
+        for venues in scopus.VENUES.values()
+        for venue in venues
+        if venue not in checked
+    )
 
 
 C0, C1 = "paperA-0123456789ab#0", "paperA-0123456789ab#1"

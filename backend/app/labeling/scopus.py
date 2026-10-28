@@ -58,7 +58,10 @@ VENUES: dict[str, dict[str, str]] = {
         "International Conference on Software Engineering": "A*",
         "Foundations of Software Engineering": "A*",
         "International Conference on Automated Software Engineering": "A*",
+        "Model Driven Engineering Languages and Systems": "A",
         "IEEE Transactions on Software Engineering": "Q1",
+        "ACM Transactions on Software Engineering and Methodology": "Q1",
+        "IEEE Software": "Q2",
     },
     "HPC": {
         "High Performance Computing, Networking, Storage and Analysis": "A",
@@ -229,6 +232,9 @@ def search(
     if query is None:
         return {"total": 0, "results": [], "hidden": 0}
     entries = _entries({"query": query, "start": start, "count": PAGE, "sort": SORTS[sort]})
+    if not entries["entries"] and (doi := doi_in(text)):
+        from_openalex = _openalex_entries(doi)
+        entries = {"total": len(from_openalex), "entries": from_openalex}
     found = [
         {
             "doi": entry["prism:doi"],
@@ -248,13 +254,13 @@ def search(
 
 
 def rank_of(doi: str) -> dict | None:
-    """The venue rank of one paper (see `venue_rank`); None when Scopus does not know the DOI.
+    """The venue rank of one paper (see `venue_rank`); None when neither Scopus nor OpenAlex knows the DOI.
 
     Raises the same errors as `search`.
     """
     if not config.SCOPUS_API_KEY:
         raise NotConfigured("set SCOPUS_API_KEY")
-    entries = _entries({"query": f'DOI("{doi}")', "count": 1})["entries"]
+    entries = _entries({"query": f'DOI("{doi}")', "count": 1})["entries"] or _openalex_entries(doi)
     return _ranks(entries)[0] if entries else None
 
 
@@ -264,6 +270,46 @@ def _entries(params: dict) -> dict:
     # An empty result is one entry that only has an "error" key, so it has no DOI and is skipped.
     entries = [entry for entry in body.get("entry", []) if entry.get("prism:doi")]
     return {"total": int(body.get("opensearch:totalResults") or 0), "entries": entries}
+
+
+def _openalex_entries(doi: str) -> list[dict]:
+    """OpenAlex's record of one DOI, in the shape of a Scopus record; [] when OpenAlex does not know it.
+
+    Scopus lists a paper weeks or months after it is published: in October 2026 it had no record of
+    TOSEM papers published in April or of MODELS 2026. OpenAlex has them, so a pasted DOI is still found.
+    """
+    from app.pipeline.indexes import _IndexError, openalex_works
+
+    if re.search(r"[,|]", doi):  # value separators in an OpenAlex filter
+        return []
+    params = {
+        "filter": f"doi:{doi}",
+        "select": "doi,title,publication_date,authorships,cited_by_count,primary_location",
+    }
+    try:
+        works = openalex_works(params)
+    except _IndexError as error:
+        log.warning("OpenAlex record of %s: %s", doi, error)
+        return []
+    return [_as_scopus_entry(work) for work in works[:1] if work.get("doi")]
+
+
+def _as_scopus_entry(work: dict) -> dict:
+    source = (work.get("primary_location") or {}).get("source") or {}
+    issns = source.get("issn") or []
+    authors = work.get("authorships") or []
+    return {
+        "prism:doi": work["doi"].removeprefix("https://doi.org/"),
+        "dc:title": work.get("title") or "",
+        "prism:publicationName": source.get("display_name") or "",
+        "prism:coverDate": work.get("publication_date") or "",
+        "dc:creator": (authors[0].get("author") or {}).get("display_name") or "" if authors else "",
+        "citedby-count": work.get("cited_by_count") or 0,
+        "prism:issn": issns[0] if issns else None,
+        "prism:eIssn": issns[1] if len(issns) > 1 else None,
+        # venue_rank gives a CORE rank only to what Scopus calls proceedings.
+        "prism:aggregationType": "Conference Proceeding" if source.get("type") == "conference" else "Journal",
+    }
 
 
 def _ranks(entries: list[dict]) -> list[dict | None]:
