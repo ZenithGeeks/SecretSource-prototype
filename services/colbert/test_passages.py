@@ -123,6 +123,15 @@ def test_a_sentence_that_mentions_a_table_does_not_start_a_passage(tmp_path):
     assert not any(text.startswith("Table 3") for text in texts)
 
 
+def test_the_page_number_is_left_out_and_numbers_in_the_text_kept(tmp_path):
+    # "2229" ended the last passage of a NAACL paper's page 3 in the labeler.
+    pdf = _pdf(tmp_path / "paper.pdf", f"12\n{BODY}\nThe model has 340 layers.\n2229")
+
+    texts = [passage["text"] for passage in store.pdf_passages(pdf)]
+
+    assert texts[0].startswith("We train") and texts[-1].endswith("340 layers.")
+
+
 def test_the_passage_version_and_doc_len_are_part_of_the_content_hash(tmp_path, monkeypatch):
     calls = []
 

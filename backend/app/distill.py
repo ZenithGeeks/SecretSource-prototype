@@ -17,6 +17,7 @@ import dspy
 from pydantic import BaseModel, Field
 
 from app import store
+from app.auth import acting_user
 from app.llm import dspy_lm
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def distill(lines: list[str]) -> list[Fact]:
 
 def run_distill_job(owner: str, chat_id: str, lines: list[str]) -> int:
     """The RQ job: save the facts in one chat's lines. Returns how many were saved."""
+    acting_user.set(owner)
     facts = distill(lines)
     for fact in facts:
         store.save_fact(

@@ -13,6 +13,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from pathlib import Path
 
 import pydantic
@@ -354,7 +355,9 @@ def extract_claims(pdf_path: str) -> dict:
             _claim_extractor = _build_claim_extractor()
         windows = _windows(_pdf_to_text(pdf_path))
         with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
-            per_window = list(pool.map(_claim_extractor, windows))
+            # copy_context: a pool thread does not inherit the acting user, whose LLM calls these are.
+            futures = [pool.submit(copy_context().run, _claim_extractor, window) for window in windows]
+            per_window = [future.result() for future in futures]
         # The abstract and the conclusion repeat each other across windows: keep first wording.
         claims: dict[str, str] = {}
         for window_claims in per_window:
@@ -1254,7 +1257,8 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         cited = _cited_sentences(paper_text)
         windows = _citing_windows(paper_text)  # a paper that cites nothing has no windows
         with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
-            per_window = list(pool.map(_cited_claim_extractor, windows))
+            futures = [pool.submit(copy_context().run, _cited_claim_extractor, window) for window in windows]
+            per_window = [future.result() for future in futures]
         found = [
             _cited_claim(extracted, references, cited, pdf_path)
             for window_claims in per_window

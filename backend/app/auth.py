@@ -28,6 +28,7 @@ import hmac
 import os
 import threading
 import time
+from contextvars import ContextVar
 
 from fastapi import HTTPException, Request
 
@@ -70,6 +71,11 @@ def _user_id_for(token: str) -> str | None:
     return user.id
 
 
+# The signed-in user the current request or job works for. app.llm sends it with each LLM call,
+# so Gatehouse can count LLM usage per person. None when login is off or the work is for nobody.
+acting_user: ContextVar[str | None] = ContextVar("acting_user", default=None)
+
+
 async def current_user(request: Request) -> str | None:
     """FastAPI dependency: the signed-in user's id, or None when login is off."""
     if not _supabase_configured():
@@ -80,6 +86,7 @@ async def current_user(request: Request) -> str | None:
     user_id = await asyncio.to_thread(_user_id_for, token)
     if user_id is None:
         raise HTTPException(401, "the session has expired, sign in again")
+    acting_user.set(user_id)
     return user_id
 
 
@@ -107,6 +114,7 @@ async def gatehouse_user(request: Request) -> str | None:
     user_id = await asyncio.to_thread(_user_id_for_email, email)
     if user_id is None:
         raise HTTPException(403, f"no SecretSource account signs in as {email}")
+    acting_user.set(user_id)
     return user_id
 
 

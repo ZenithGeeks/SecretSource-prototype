@@ -22,6 +22,7 @@ from rq.exceptions import InvalidJobOperation, NoSuchJobError
 from rq.job import Callback, Job, JobStatus, Retry
 from rq.serializers import JSONSerializer
 
+from app.auth import acting_user
 from app.config import REDIS_URL
 from app.metrics import ANALYSES_RUNNING, ANALYSIS_QUEUE_WAIT_SECONDS
 
@@ -73,6 +74,9 @@ def run_analysis_job(
     # Imported here, not at module level: main imports app.queue, so a top-level
     # `from app import main` here would be a circular import.
     from app import main
+
+    # Set before asyncio.run, which copies it into the job's tasks and their threads.
+    acting_user.set(owner)
 
     async def run():
         try:
@@ -416,6 +420,8 @@ def run_draft_check_job(
     """
     from app import main
     from app.author.router import _run_draft_check, new_draft_check
+
+    acting_user.set(owner)
 
     async def run():
         seen_stored = [False]
