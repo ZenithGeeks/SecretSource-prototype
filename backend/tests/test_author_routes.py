@@ -81,6 +81,51 @@ def make_draft(client, headers=ADA, project_id=None, title="Related work"):
 # --- drafts ---------------------------------------------------------------------------
 
 
+def test_new_drafts_without_a_title_are_numbered_untitled_drafts_per_owner(client):
+    def blank(headers=ADA, **body):
+        response = client.post("/author/drafts", headers=headers, json=body)
+        assert response.status_code == 200, response.text
+        return response.json()["title"]
+
+    assert blank() == "Untitled draft"
+    assert blank(title="Untitled draft") == "Untitled draft 2"
+    assert blank(title="   ") == "Untitled draft 3"
+    # another owner's drafts do not take the numbers
+    assert blank(headers=BO) == "Untitled draft"
+    # a freed number is used again
+    drafts = client.get("/author/drafts", headers=ADA).json()
+    second = next(d for d in drafts if d["title"] == "Untitled draft 2")
+    client.delete(f"/author/drafts/{second['id']}", headers=ADA)
+    assert blank() == "Untitled draft 2"
+    assert blank(title="  My   paper ") == "My paper"
+
+
+def test_a_rename_is_trimmed_refuses_an_empty_or_long_title_and_leaves_updated_alone(client):
+    draft = make_draft(client)
+    url = f"/author/drafts/{draft['id']}"
+
+    renamed = client.patch(url, headers=ADA, json={"title": "  Chapter 2:\n related work  "})
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Chapter 2: related work"
+    # a rename is not an edit of the text: an editor holding the old `updated` still writes
+    assert renamed.json()["updated"] == draft["updated"]
+    write = client.put(
+        f"{url}/files/related-work.tex", headers=ADA, json={"content": "x", "updated": draft["updated"]}
+    )
+    assert write.status_code == 200
+
+    empty = client.patch(url, headers=ADA, json={"title": "   "})
+    assert empty.status_code == 400 and empty.json()["detail"] == "a draft needs a title"
+    long = client.patch(url, headers=ADA, json={"title": "x" * (author.MAX_TITLE + 1)})
+    assert long.status_code == 400
+    assert client.patch(url, headers=ADA, json={"title": "x" * author.MAX_TITLE}).status_code == 200
+    assert client.get(url, headers=ADA).json()["title"] == "x" * author.MAX_TITLE
+    # the list shows the new name
+    assert [d["title"] for d in client.get("/author/drafts", headers=ADA).json()] == ["x" * author.MAX_TITLE]
+    # only its owner renames it
+    assert client.patch(url, headers=BO, json={"title": "Mine"}).status_code == 404
+
+
 def test_a_draft_is_created_read_edited_saved_and_only_by_its_owner(client):
     draft = make_draft(client)
     assert draft["version"] == 1 and draft["status"]["checked"] == 0

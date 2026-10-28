@@ -32,7 +32,8 @@ function renderWithQuery(ui: ReactNode) {
 function renderEditor(target = { draftId: 'd1', file: 'related-work.tex', line: 10 }) {
   const onFileChange = vi.fn()
   const onNavigate = vi.fn()
-  const view = renderWithQuery(<Editor target={target} onFileChange={onFileChange} onNavigate={onNavigate} />)
+  // The write logic, not the 2 s pause, is under test here; the pause has its own test.
+  const view = renderWithQuery(<Editor target={target} onFileChange={onFileChange} onNavigate={onNavigate} autosaveMs={600} />)
   return { ...view, onFileChange, onNavigate }
 }
 
@@ -51,6 +52,8 @@ const writes = () => gateway.calls.filter((c) => c === 'PUT /author/drafts/d1/fi
 
 beforeEach(() => {
   gateway = installFakeGateway({ files: THESIS_FILES })
+  // what a failed write keeps on this device must not reach the next test
+  window.localStorage.clear()
 })
 
 afterEach(() => vi.unstubAllGlobals())
@@ -74,7 +77,7 @@ describe('Author LaTeX editor', () => {
     await waitFor(() => expect(document.querySelector('.cm-cite-refutes')?.textContent).toBe('khattab2020'))
 
     expect(screen.getByText('Related work — thesis ch.2')).toBeInTheDocument()
-    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saved')
   })
 
   test('switching tabs shows that file and reports it; "+ file" adds one on the gateway', async () => {
@@ -108,7 +111,7 @@ describe('Author LaTeX editor', () => {
     const editor = screen.getByLabelText('related-work.tex source')
     fireEvent.keyDown(editor, { key: 's', ctrlKey: true })
     await waitFor(() => expect(gateway.drafts.get('d1')!.version).toBe(4))
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v4 · saved'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v4 · Saved'))
   })
 
   test('a change made on the gateway (a replacement elsewhere) shows up in the open file', async () => {
@@ -146,18 +149,18 @@ describe('Author LaTeX editor', () => {
 })
 
 describe('Author LaTeX editor — saving', () => {
-  test('typing writes the file after a pause; the status goes saving… then saved and the tab dot comes and goes', async () => {
+  test('typing writes the file after a pause; the status goes Unsaved changes then Saved and the tab dot comes and goes', async () => {
     renderEditor()
     await screen.findByRole('tab', { name: /related-work\.tex/ })
     await waitFor(() => expect(source()).toContain('\\section{Related work}'))
     const before = writes()
 
     type('% typed\n')
-    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saving…')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Unsaved changes')
     expect(within(screen.getByRole('tab', { name: /related-work\.tex/ })).getByLabelText('unsaved changes')).toBeInTheDocument()
 
     await waitFor(() => expect(writes()).toBe(before + 1), { timeout: 3000 })
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saved'))
     expect(stored().startsWith('% typed\n')).toBe(true)
     expect(gateway.drafts.get('d1')!.version).toBe(3) // typing never makes a version
     expect(within(screen.getByRole('tab', { name: /related-work\.tex/ })).queryByLabelText('unsaved changes')).toBeNull()
@@ -172,7 +175,7 @@ describe('Author LaTeX editor — saving', () => {
     await waitFor(() => expect(stored().startsWith('% leaving\n')).toBe(true))
   })
 
-  test('a refused write keeps the text on screen, says not saved, and Retry sends it again; Ctrl+S does not make a version until it lands', async () => {
+  test('a refused write keeps the text on screen and on this device, says Save failed, and retry sends it again; Ctrl+S does not make a version until it lands', async () => {
     renderEditor()
     await screen.findByRole('tab', { name: /related-work\.tex/ })
     await waitFor(() => expect(source()).toContain('\\section{Related work}'))
@@ -182,12 +185,14 @@ describe('Author LaTeX editor — saving', () => {
     type('% offline\n')
     const alert = await screen.findByRole('alert', {}, { timeout: 3000 })
     expect(alert).toHaveTextContent('Could not save related-work.tex: the gateway is down')
-    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · not saved')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Save failed — retry')
     expect(stored()).toBe(original)
+    // kept on this device too, for a reopen
+    expect(JSON.parse(window.localStorage.getItem('ss.author.unsaved.d1')!).files['related-work.tex'].startsWith('% offline\n')).toBe(true)
 
     // a refetch of the draft (a check landing, the window focused) does not put the old text back
     fireEvent.click(screen.getByRole('button', { name: 'Re-check' }))
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('not saved'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('Save failed'))
     expect(source()).toContain('% offline')
     expect(gateway.calls).not.toContain('POST /author/drafts/d1/check')
 
@@ -198,9 +203,11 @@ describe('Author LaTeX editor — saving', () => {
     expect(gateway.drafts.get('d1')!.version).toBe(3)
 
     gateway.failWrites = false
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    fireEvent.click(screen.getByRole('button', { name: 'retry' }))
     await waitFor(() => expect(stored().startsWith('% offline\n')).toBe(true))
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saved'))
+    // saved: nothing is kept on this device any more
+    expect(window.localStorage.getItem('ss.author.unsaved.d1')).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(source()).toContain('% offline')
 
@@ -238,12 +245,12 @@ describe('Author LaTeX editor — saving', () => {
     // past the pause, the second write has not gone out: one PUT of this file is in flight
     await new Promise((resolve) => setTimeout(resolve, 900))
     expect(writes()).toBe(before + 1)
-    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saving…')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saving…')
 
     releaseFirst!()
     await waitFor(() => expect(writes()).toBe(before + 2), { timeout: 3000 })
     await waitFor(() => expect(stored().startsWith('% one\n% two\n')).toBe(true))
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saved'))
     expect(screen.queryByRole('alert')).toBeNull()
     expect(source()).toContain('% one% two') // CodeMirror's textContent has no line breaks
 
@@ -277,7 +284,7 @@ describe('Author LaTeX editor — saving', () => {
     // undo: the text on screen is the last confirmed text again, with that write unanswered
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!
     act(() => view.dispatch({ changes: { from: 0, to: '% typed\n'.length, insert: '' } }))
-    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saving…')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saving…')
     fireEvent.keyDown(screen.getByLabelText('related-work.tex source'), { key: 's', ctrlKey: true })
     await new Promise((resolve) => setTimeout(resolve, 900))
     expect(gateway.calls).not.toContain('POST /author/drafts/d1/save')
@@ -289,11 +296,18 @@ describe('Author LaTeX editor — saving', () => {
     expect(stored()).toBe(original) // what v4 names is what the gateway holds
     const put = gateway.calls.lastIndexOf('PUT /author/drafts/d1/files/related-work.tex')
     expect(put).toBeLessThan(gateway.calls.indexOf('POST /author/drafts/d1/save'))
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v4 · saved'))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v4 · Saved'))
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  test('a write from an editor another tab has overtaken is refused: the text stays, the error names it, and Retry overwrites', async () => {
+  /** Another tab saves related-work.tex: the draft's `updated` moves on without this editor seeing it. */
+  function savedElsewhere(original: string) {
+    const draft = gateway.drafts.get('d1')!
+    draft.files.find((f) => f.name === 'related-work.tex')!.content = `% from another tab\n${original}`
+    draft.updated = new Date(Date.now() + 60_000).toISOString()
+  }
+
+  test('a write from an editor another tab has overtaken is refused and the author is asked; Keep my version overwrites', async () => {
     renderEditor()
     await screen.findByRole('tab', { name: /related-work\.tex/ })
     await waitFor(() => expect(source()).toContain('\\section{Related work}'))
@@ -301,25 +315,45 @@ describe('Author LaTeX editor — saving', () => {
     const reads = () => gateway.calls.filter((c) => c === 'GET /author/drafts/d1').length
     const readsBefore = reads()
 
-    // another tab saves the file: the draft's `updated` moves on without this editor seeing it
-    const draft = gateway.drafts.get('d1')!
-    draft.files.find((f) => f.name === 'related-work.tex')!.content = `% from another tab\n${original}`
-    draft.updated = new Date(Date.now() + 60_000).toISOString()
-
+    savedElsewhere(original)
     type('% here\n')
     const alert = await screen.findByRole('alert', {}, { timeout: 3000 })
-    expect(alert).toHaveTextContent('related-work.tex was changed elsewhere (another tab?) since this editor last saved it.')
-    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · not saved')
+    expect(alert).toHaveTextContent('related-work.tex was changed elsewhere (another tab?) since this editor last saved it. Which version do you want to keep?')
+    expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Save failed')
     expect(stored().startsWith('% from another tab\n')).toBe(true) // nothing was overwritten
     expect(source()).toContain('% here') // and the author's text is still on screen
     expect(source()).not.toContain('% from another tab')
-    // the draft was read again, so the editor now knows the gateway's `updated`
     await waitFor(() => expect(reads()).toBeGreaterThan(readsBefore))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    await waitFor(() => expect(stored().startsWith('% here\n')).toBe(true), { timeout: 3000 })
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · saved'))
+    // more typing, Save and Ctrl+S do not overwrite while the choice is open
+    type('% more\n')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Not saved: choose which version of the file to keep first.')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    expect(stored().startsWith('% from another tab\n')).toBe(true)
+
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Keep my version' }))
+    await waitFor(() => expect(stored().startsWith('% more\n% here\n')).toBe(true), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saved'))
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  test('in a conflict, Use the saved copy puts the newer text from the gateway on screen and writes nothing', async () => {
+    renderEditor()
+    await screen.findByRole('tab', { name: /related-work\.tex/ })
+    await waitFor(() => expect(source()).toContain('\\section{Related work}'))
+    const original = stored()
+
+    savedElsewhere(original)
+    type('% here\n')
+    const alert = await screen.findByRole('alert', {}, { timeout: 3000 })
+    const before = writes()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Use the saved copy' }))
+    await waitFor(() => expect(source()).toContain('% from another tab'))
+    expect(source()).not.toContain('% here')
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('v3 · Saved'))
+    expect(writes()).toBe(before)
+    expect(stored().startsWith('% from another tab\n')).toBe(true)
   })
 
   test('switching drafts keeps each draft its own text', async () => {

@@ -120,14 +120,24 @@ export function errorMessage(error: unknown): string {
 /** "checked 2 min ago" · "checked yesterday" · "not checked yet". */
 export function checkedLabel(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return 'not checked yet'
+  return `checked ${ago(iso, now)}`
+}
+
+/** "edited 5 min ago" for a draft's last change to its text (its `updated`). */
+export function editedLabel(iso: string, now = Date.now()): string {
+  return `edited ${ago(iso, now)}`
+}
+
+/** "just now", "5 min ago", "2 h ago", "yesterday", "3 days ago". */
+function ago(iso: string, now: number): string {
   const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60_000))
-  if (minutes < 1) return 'checked just now'
-  if (minutes < 60) return `checked ${minutes} min ago`
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `checked ${hours} h ago`
+  if (hours < 24) return `${hours} h ago`
   const days = Math.round(hours / 24)
-  if (days === 1) return 'checked yesterday'
-  return `checked ${days} days ago`
+  if (days === 1) return 'yesterday'
+  return `${days} days ago`
 }
 
 /** "Checked 2 min ago" for a card footer, "Not checked yet" when never. */

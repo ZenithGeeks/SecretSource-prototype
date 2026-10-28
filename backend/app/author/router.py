@@ -265,13 +265,43 @@ class FileIn(BaseModel):
     updated: str | None = None
 
 
+UNTITLED = "Untitled draft"
+MAX_TITLE = 120
+
+
+def _clean_title(title: str) -> str:
+    """A title as stored: trimmed, on one line, and refused (400) when empty or over
+    MAX_TITLE characters."""
+    clean = " ".join(title.split())
+    if not clean:
+        raise HTTPException(400, "a draft needs a title")
+    if len(clean) > MAX_TITLE:
+        raise HTTPException(400, f"a draft title is at most {MAX_TITLE} characters")
+    return clean
+
+
+def _untitled(user: str | None) -> str:
+    """The first free default title among this user's drafts: "Untitled draft", then
+    "Untitled draft 2", "Untitled draft 3", …"""
+    taken = {d.get("title") for d in _rows(DRAFTS, user)}
+    if UNTITLED not in taken:
+        return UNTITLED
+    n = 2
+    while f"{UNTITLED} {n}" in taken:
+        n += 1
+    return f"{UNTITLED} {n}"
+
+
 def _new_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
+    """A new draft. No title, or the bare default the app sends for a blank draft, gets the
+    next free "Untitled draft N"; an upload's file name longer than MAX_TITLE is cut."""
     now = logic.now_iso()
+    wanted = " ".join(title.split())[:MAX_TITLE]
     draft = {
         "id": _new_id(),
         "owner": user,
         "projectId": project_id,
-        "title": title.strip() or "Untitled draft",
+        "title": wanted if wanted and wanted != UNTITLED else _untitled(user),
         "version": 1,
         "files": files,
         "pdfs": {},
@@ -336,7 +366,7 @@ async def create_draft(request: DraftIn, user: str | None = Depends(current_user
         for f in (request.files or [])
     ] or [{"name": "main.tex", "kind": "tex", "content": ""}]
     draft = await asyncio.to_thread(
-        _new_draft, user, request.title or "Untitled draft", request.projectId, files
+        _new_draft, user, request.title or "", request.projectId, files
     )
     return await _draft_answer(draft, user)
 
@@ -361,14 +391,17 @@ async def get_draft(draft_id: str, user: str | None = Depends(current_user)):
 
 @router.patch("/drafts/{draft_id}")
 async def update_draft(draft_id: str, request: DraftIn, user: str | None = Depends(current_user)):
+    """Rename a draft or move it to another project. Neither is an edit of its text, so
+    `updated` (what the editor's writes are checked against, and the list's "last edited")
+    stays as it was: a rename never makes an open editor's next write a conflict."""
     draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
     if request.title is not None:
-        draft["title"] = request.title.strip() or draft["title"]
+        draft["title"] = _clean_title(request.title)
     if request.projectId is not None:
         if request.projectId:
             await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
         draft["projectId"] = request.projectId or None
-    await asyncio.to_thread(_save, DRAFTS, draft)
+    await asyncio.to_thread(store.save_author_row, DRAFTS, draft)
     return await _draft_answer(draft, user)
 
 
