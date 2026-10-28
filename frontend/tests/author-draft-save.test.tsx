@@ -161,7 +161,9 @@ describe('rename and save', () => {
     expect(screen.queryByText(/from its \\title/)).toBeNull()
 
     type('\\documentclass{article}\n\\title{Batched \\textbf{Dense} Solvers\\\\ on GPUs\\thanks{Funded.}}\n\\begin{document}\n\\end{document}\n')
-    const offer = await screen.findByText('Name this draft “Batched Dense Solvers on GPUs”, from its \\title?')
+    // offered once typing pauses for a second, not while the \title is half typed
+    expect(screen.queryByText(/from its \\title/)).toBeNull()
+    const offer = await screen.findByText('Name this draft “Batched Dense Solvers on GPUs”, from its \\title?', {}, { timeout: 3000 })
     fireEvent.click(within(offer.parentElement!).getByRole('button', { name: 'Use this title' }))
     expect(await screen.findByRole('button', { name: 'Draft title: Batched Dense Solvers on GPUs. Rename' })).toBeInTheDocument()
     expect(gateway.drafts.get(id)!.title).toBe('Batched Dense Solvers on GPUs')
@@ -169,7 +171,57 @@ describe('rename and save', () => {
   })
 })
 
+describe('what is not a conflict', () => {
+  test("the editor's own Save, and another tab changing another file, never ask which version to keep", async () => {
+    open('d1')
+    await screen.findByRole('button', { name: /^Draft title: Related work/ })
+    await waitFor(() => expect(docText()).toContain('\\section{Related work}'))
+    const chapter = () => gateway.drafts.get('d1')!.files.find((f) => f.name === 'related-work.tex')!.content
+
+    // Save makes a version (the draft's `updated` moves); typing right after still writes
+    type('% one\n')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(gateway.drafts.get('d1')!.version).toBe(4))
+    type('% two\n')
+    await waitFor(() => expect(chapter().startsWith('% two\n% one\n')).toBe(true), { timeout: 4000 })
+
+    // another tab changes intro.tex only: this file is written, nothing is asked
+    const draft = gateway.drafts.get('d1')!
+    draft.files.find((f) => f.name === 'intro.tex')!.content += '% elsewhere\n'
+    draft.updated = new Date(Date.now() + 60_000).toISOString()
+    type('% three\n')
+    await waitFor(() => expect(chapter().startsWith('% three\n% two\n')).toBe(true), { timeout: 4000 })
+    expect(screen.queryByText(/Which version do you want to keep/)).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('Saved'))
+  }, 20000)
+
+  test('Escape, then the field losing focus, does not rename', async () => {
+    open('d1')
+    fireEvent.click(await screen.findByRole('button', { name: /^Draft title: Related work/ }))
+    const field = screen.getByRole('textbox', { name: 'Draft title' })
+    fireEvent.change(field, { target: { value: 'Draft X' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    fireEvent.blur(field)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(patchesOf('d1')).toBe(0)
+    expect(gateway.drafts.get('d1')!.title).toBe('Related work — thesis ch.2')
+  })
+})
+
 describe('a save that fails', () => {
+  test('leaving the editor writes what is pending and keeps nothing on this device once that write lands', async () => {
+    const { id } = await authorApi.createDraft({ title: 'Leaving', files: [{ name: 'main.tex', content: 'saved text\n' }] })
+    const first = open(id)
+    await waitFor(() => expect(docText()).toBe('saved text\n'))
+    type('% typed then left\n')
+    first.unmount()
+    await waitFor(() => expect(stored(id)).toBe('% typed then left\nsaved text\n'))
+    await waitFor(() => expect(window.localStorage.getItem(`ss.author.unsaved.${id}`)).toBeNull())
+    open(id)
+    await waitFor(() => expect(docText()).toBe('% typed then left\nsaved text\n'))
+    expect(screen.queryByText(/were kept on this device/)).toBeNull()
+  })
+
   test('keeps the text on this device; reopening offers it back, Restore writes it, and then nothing is kept', async () => {
     const { id } = await authorApi.createDraft({ title: 'Recovery', files: [{ name: 'main.tex', content: 'saved text\n' }] })
     const first = open(id)

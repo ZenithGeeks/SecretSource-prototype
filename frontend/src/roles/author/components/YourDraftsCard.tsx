@@ -64,7 +64,7 @@ export function YourDraftsCard({
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-[13px] font-medium text-ink">{draft.title}</span>
                   <span className="text-xs text-ink-muted">
-                    v{draft.version} · {editedLabel(draft.updated)} · {draft.runningCheckId ? 'checking…' : checkedLabel(draft.lastCheckedAt)}
+                    v{draft.version} · {editedLabel(draft.edited ?? draft.updated)} · {draft.runningCheckId ? 'checking…' : checkedLabel(draft.lastCheckedAt)}
                   </span>
                 </span>
                 <span className={cn('shrink-0 whitespace-nowrap text-xs', tone(draft))}>{statusLabel(draft.status)}</span>

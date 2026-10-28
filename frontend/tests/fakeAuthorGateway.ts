@@ -268,7 +268,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         while (taken.has(`Untitled draft ${n}`)) n += 1
         title = `Untitled draft ${n}`
       }
-      const draft: StoredDraft = { id: id('draft'), projectId: (body?.projectId as string | null) ?? null, title, version: 1, files: files.length ? files : [{ name: 'main.tex', kind: 'tex', content: '' }], pdfs: {}, created: now(), updated: now(), savedAt: now() }
+      const draft: StoredDraft = { id: id('draft'), projectId: (body?.projectId as string | null) ?? null, title, version: 1, files: files.length ? files : [{ name: 'main.tex', kind: 'tex', content: '' }], pdfs: {}, created: now(), updated: now(), edited: now(), savedAt: now() }
       markSaved(draft)
       gateway.drafts.set(draft.id, draft)
       return json(draftView(gateway, draft))
@@ -315,6 +315,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         if (existing) existing.content = content
         else draft.files.push({ name, kind: kindOf(name), content })
         draft.updated = now()
+        draft.edited = draft.updated
         return json(draftView(gateway, draft))
       }
       if (method === 'DELETE') {

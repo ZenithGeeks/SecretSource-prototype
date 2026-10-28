@@ -37,6 +37,15 @@ export function writeBackup(draftId: string, files: Record<string, string>): voi
   }
 }
 
+/** Drops one file from what is kept, when it is the text just written (a newer edit stays). */
+export function forgetBackup(draftId: string, name: string, written: string): void {
+  const kept = readBackup(draftId)
+  if (!kept || kept.files[name] !== written) return
+  const { [name]: _written, ...rest } = kept.files
+  if (Object.keys(rest).length === 0) dropBackup(draftId)
+  else writeBackup(draftId, rest)
+}
+
 export function dropBackup(draftId: string): void {
   try {
     window.localStorage.removeItem(backupKey(draftId))

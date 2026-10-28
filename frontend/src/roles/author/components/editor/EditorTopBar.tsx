@@ -5,7 +5,7 @@
  * toolbar, where it sits on the other screens, is not shown here). */
 
 import { Loader2, Pen, Save, Search } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { Brand } from '../../../../components/Brand'
 import { RoleChip } from '../../../../components/RoleChip'
@@ -29,18 +29,22 @@ function DraftTitle({ title, onRename }: { title: string; onRename: (title: stri
   const [value, setValue] = useState(title)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Set by Escape: a browser may fire blur as the field goes away, and that blur must not save.
+  const cancelled = useRef(false)
 
   const start = () => {
+    cancelled.current = false
     setValue(title)
     setError(null)
     setEditing(true)
   }
   const cancel = () => {
+    cancelled.current = true
     setEditing(false)
     setError(null)
   }
   const commit = async (leaving: boolean) => {
-    if (busy) return
+    if (busy || cancelled.current) return
     const next = value.split(/\s+/).filter(Boolean).join(' ')
     if (!next) {
       // Leaving the field keeps the old title; Enter says why it cannot be empty.

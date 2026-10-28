@@ -43,7 +43,8 @@ import type { DraftReader } from '../../../lib/agentTools'
 import { errorMessage } from '../../../lib/author'
 import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
 import { downloadBlob, downloadText } from '../../../lib/csv'
-import { AUTOSAVE_DELAY_MS, DEFAULT_TITLE, dropBackup, readBackup, texTitle, writeBackup, type Backup } from '../../../lib/draftSave'
+import { AUTOSAVE_DELAY_MS, DEFAULT_TITLE, dropBackup, forgetBackup, readBackup, texTitle, writeBackup, type Backup } from '../../../lib/draftSave'
+import { useDebounced } from '../../../lib/useDebounced'
 import { bibEntries, bibKeys, findCites, parseProject, sentenceStart, withContent } from '../../../lib/latexProject'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue, summarize } from '../../../lib/verdict'
@@ -59,6 +60,9 @@ import { Toast } from '../components/Toast'
 import type { EditorTarget } from '../editorTarget'
 
 type Texts = Record<string, string>
+
+/** How long typing must pause before a 	itle is offered as the draft's name. */
+const TITLE_OFFER_DELAY_MS = 1_000
 
 /** The gateway refused the write because the draft changed since this editor last saw it. */
 const isConflict = (error: unknown) => error instanceof Error && error.message.startsWith('409: ')
@@ -137,9 +141,14 @@ export function Editor({
     for (const name of Object.keys(textsRef.current)) if (isUnsettled(name)) kept[name] = textsRef.current[name]
     writeBackup(draftId, kept)
   }, [draftId, isUnsettled])
-  /** The file whose write the gateway refused because the draft changed elsewhere: the
-   * author chooses between their text and the saved copy (never overwritten silently). */
-  const [conflict, setConflict] = useState<string | null>(null)
+  /** The files whose writes the gateway refused because someone else changed them since this
+   * editor last saved: the author chooses between their text and the saved copy (never
+   * overwritten silently), and until then nothing writes them. */
+  const [conflicts, setConflicts] = useState<ReadonlySet<string>>(new Set())
+  const conflictsRef = useRef<ReadonlySet<string>>(conflicts)
+  useEffect(() => {
+    conflictsRef.current = conflicts
+  })
 
   // What the gateway holds: adopted for a file the author has not changed (first load, a
   // replacement made on Check a draft, a refetch); a dirty file keeps the author's text.
@@ -182,24 +191,40 @@ export function Editor({
       const write: Promise<boolean> = previous
         .then(() => {
           if (sequence.current[name] !== seq) return true // superseded before it went out; the newer write answers
+          const accept = (updated: Draft) => {
+            lastUpdated.current = updated.updated
+            if (sequence.current[name] !== seq) return true // superseded; the newer write answers
+            setConfirmed((c) => ({ ...c, [name]: content }))
+            actionsRef.current.acceptWrite(draftId, updated)
+            setWriteError(null)
+            return true
+          }
           return actionsRef.current
             .writeFile(draftId, name, content, lastUpdated.current)
-            .then((updated: Draft) => {
-              lastUpdated.current = updated.updated
-              if (sequence.current[name] !== seq) return true // superseded; the newer write answers
-              setConfirmed((c) => ({ ...c, [name]: content }))
-              actionsRef.current.acceptWrite(draftId, updated)
-              setWriteError(null)
-              return true
-            })
-            .catch((error: unknown) => {
+            .then(accept)
+            .catch(async (error: unknown) => {
+              if (isConflict(error)) {
+                // `updated` is the draft's, not this file's: it also moves on this editor's own
+                // Save or check, or when another tab changes another file. Read the draft
+                // again; if this file is still what this editor last confirmed, nobody changed
+                // it, so write it again against the new value.
+                const { data } = await refetchDraftRef.current()
+                const held = data?.files.find((f) => f.name === name)?.content
+                if (data && held === confirmedRef.current[name]) {
+                  lastUpdated.current = data.updated
+                  try {
+                    return accept(await actionsRef.current.writeFile(draftId, name, content, data.updated))
+                  } catch (again) {
+                    error = again
+                  }
+                }
+              }
               backupNow()
               if (isConflict(error)) {
-                // Another tab saved since this editor last did. Refetch so the confirmed text
-                // catches up; this file stays dirty with the author's text until they choose.
-                void refetchDraftRef.current()
+                // Someone else changed this file: it stays dirty with the author's text until
+                // they choose (see `conflicts`).
                 if (sequence.current[name] === seq) {
-                  setConflict(name)
+                  setConflicts((names) => new Set([...names, name]))
                   setWriteError(`${name} was changed elsewhere (another tab?) since this editor last saved it.`)
                 }
               } else if (sequence.current[name] === seq) {
@@ -222,23 +247,19 @@ export function Editor({
 
   const onChange = (name: string, content: string) => {
     setTexts((prev) => ({ ...prev, [name]: content }))
-    if (name !== conflict) setWriteError(null)
     window.clearTimeout(timers.current[name])
-    // A file in conflict is not written again until the author chooses (see `conflict`).
-    if (name !== conflict) timers.current[name] = window.setTimeout(() => void commit(name), autosaveMs)
+    // A file in conflict is not written again until the author chooses (see `conflicts`).
+    if (conflicts.has(name)) return
+    if (conflicts.size === 0) setWriteError(null)
+    timers.current[name] = window.setTimeout(() => void commit(name), autosaveMs)
   }
-
-  const conflictRef = useRef<string | null>(null)
-  useEffect(() => {
-    conflictRef.current = conflict
-  })
 
   /** Writes every file the gateway may not hold now; true when it holds all of them. A file in
    * conflict is left for the author to settle, so this is false while there is one. */
   const flush = useCallback(async (): Promise<boolean> => {
-    const names = Object.keys(textsRef.current).filter((name) => isUnsettled(name) && name !== conflictRef.current)
+    const names = Object.keys(textsRef.current).filter((name) => isUnsettled(name) && !conflictsRef.current.has(name))
     const results = await Promise.all(names.map((name) => commit(name)))
-    return results.every(Boolean) && conflictRef.current === null
+    return results.every(Boolean) && conflictsRef.current.size === 0
   }, [commit, isUnsettled])
 
   // Leaving the screen: send what is still waiting for the pause. The cache is updated when
@@ -252,14 +273,18 @@ export function Editor({
       backupNow()
       for (const name of Object.keys(textsRef.current)) {
         // A file in conflict is not overwritten on the way out; its text stays in the backup.
-        if (!isUnsettled(name) || name === conflictRef.current) continue
+        if (!isUnsettled(name) || conflictsRef.current.has(name)) continue
         const content = textsRef.current[name]
         // After the file's in-flight write, if any, for the same reason commit() waits.
         const previous = inFlight.current[name] ?? Promise.resolve(true)
         void previous.then(() =>
           actionsRef.current
             .writeFile(draftId, name, content, lastUpdated.current)
-            .then((updated) => actionsRef.current.acceptWrite(draftId, updated))
+            .then((updated) => {
+              actionsRef.current.acceptWrite(draftId, updated)
+              // Written after all: what was kept for it would only be offered back stale.
+              forgetBackup(draftId, name, content)
+            })
             .catch((error: unknown) => onWriteFailedRef.current?.(`Your last edits to ${name} were not saved: ${errorMessage(error)}`)),
         )
       }
@@ -307,11 +332,13 @@ export function Editor({
     setSavingVersion(true)
     try {
       if (!(await flush())) {
-        setToast(conflictRef.current ? 'Not saved: choose which version of the file to keep first.' : 'Not saved: the gateway refused the last edit. Retry, then save again.')
+        setToast(conflictsRef.current.size ? 'Not saved: choose which version of the file to keep first.' : 'Not saved: the gateway refused the last edit. Retry, then save again.')
         return
       }
-      await actions.saveDraft(draftId)
-      setToast(`Saved as v${(draft.data?.version ?? 0) + 1}`)
+      const saved = await actions.saveDraft(draftId)
+      // A version moves the draft's `updated`; the next write carries the new value.
+      lastUpdated.current = saved.updated
+      setToast(`Saved as v${saved.version}`)
     } catch (error) {
       setToast(`Could not save: ${errorMessage(error)}`)
     } finally {
@@ -334,24 +361,27 @@ export function Editor({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  /** The author's choice for the file in conflict: their text over the newer saved copy, or
-   * the saved copy over their text. Either way from the draft as the gateway holds it now. */
-  const settleConflict = async (keep: 'mine' | 'saved') => {
-    const name = conflict
-    if (!name) return
+  /** The author's choice for the files in conflict: their text over the newer saved copies, or
+   * the saved copies over their text. Either way from the draft as the gateway holds it now. */
+  const settleConflicts = async (keep: 'mine' | 'saved') => {
+    const names = [...conflictsRef.current]
+    if (names.length === 0) return
     const { data } = await refetchDraftRef.current()
     if (data) lastUpdated.current = data.updated
-    setConflict(null)
+    setConflicts(new Set())
+    conflictsRef.current = new Set()
     setWriteError(null)
     if (keep === 'mine') {
-      await commit(name)
+      await Promise.all(names.map((name) => commit(name)))
       return
     }
-    const saved = data?.files.find((f) => f.name === name)?.content
-    if (saved === undefined) return
-    window.clearTimeout(timers.current[name])
-    setTexts((t) => ({ ...t, [name]: saved }))
-    setConfirmed((c) => ({ ...c, [name]: saved }))
+    for (const name of names) {
+      const saved = data?.files.find((f) => f.name === name)?.content
+      if (saved === undefined) continue
+      window.clearTimeout(timers.current[name])
+      setTexts((t) => ({ ...t, [name]: saved }))
+      setConfirmed((c) => ({ ...c, [name]: saved }))
+    }
   }
   const keepMineButton = useRef<HTMLButtonElement>(null)
 
@@ -365,13 +395,17 @@ export function Editor({
   }
 
   // A new draft still called "Untitled draft N" whose LaTeX has a \title: offer that as its name.
+  // Read only for such a draft, and once typing pauses, so a half-typed \title is not offered.
   const [titleOfferDismissed, setTitleOfferDismissed] = useState(false)
+  const wantsTitle = !titleOfferDismissed && DEFAULT_TITLE.test(draft.data?.title ?? '')
+  const settledTexts = useDebounced(texts, TITLE_OFFER_DELAY_MS)
   const suggestedTitle = useMemo(() => {
+    if (!wantsTitle) return ''
     const tex = files.filter((f) => f.kind === 'tex')
-    const main = tex.find((f) => /\\begin\{document\}/.test(texts[f.name] ?? f.content)) ?? tex[0]
-    return main ? texTitle(texts[main.name] ?? main.content) : ''
-  }, [files, texts])
-  const offeredTitle = !titleOfferDismissed && suggestedTitle && DEFAULT_TITLE.test(draft.data?.title ?? '') ? suggestedTitle : null
+    const main = tex.find((f) => /\\begin\{document\}/.test(settledTexts[f.name] ?? f.content)) ?? tex[0]
+    return main ? texTitle(settledTexts[main.name] ?? main.content) : ''
+  }, [wantsTitle, files, settledTexts])
+  const offeredTitle = wantsTitle && suggestedTitle ? suggestedTitle : null
 
   const recheck = async () => {
     if (!(await flush())) {
@@ -541,7 +575,7 @@ export function Editor({
         title={draft.data.title}
         version={draft.data.version}
         status={status}
-        onRetry={() => (conflict ? keepMineButton.current?.focus() : void flush())}
+        onRetry={() => (conflicts.size ? keepMineButton.current?.focus() : void flush())}
         onRename={rename}
         onSave={() => void save()}
         saving={savingVersion}
@@ -552,16 +586,17 @@ export function Editor({
         exportSlot={<ExportMenu openIssues={draft.data.status.open} busy={exporting} onExport={exportAs} />}
         askSlot={askSlot}
       />
-      {conflict ? (
+      {conflicts.size > 0 ? (
         <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-refutes bg-refutes-soft px-4 py-1.5 text-xs text-refutes">
           <span className="min-w-0 flex-1">
-            {conflict} was changed elsewhere (another tab?) since this editor last saved it. Which version do you want to keep?
+            {[...conflicts].join(' and ')} {conflicts.size === 1 ? 'was' : 'were'} changed elsewhere (another tab?) since this editor last saved{' '}
+            {conflicts.size === 1 ? 'it. Which version do you want to keep?' : 'them. Which versions do you want to keep?'}
           </span>
-          <button ref={keepMineButton} type="button" onClick={() => void settleConflict('mine')} className="shrink-0 rounded font-medium underline">
-            Keep my version
+          <button ref={keepMineButton} type="button" onClick={() => void settleConflicts('mine')} className="shrink-0 rounded font-medium underline">
+            {conflicts.size === 1 ? 'Keep my version' : 'Keep my versions'}
           </button>
-          <button type="button" onClick={() => void settleConflict('saved')} className="shrink-0 rounded font-medium underline">
-            Use the saved copy
+          <button type="button" onClick={() => void settleConflicts('saved')} className="shrink-0 rounded font-medium underline">
+            {conflicts.size === 1 ? 'Use the saved copy' : 'Use the saved copies'}
           </button>
         </div>
       ) : (
@@ -636,7 +671,11 @@ export function Editor({
               onAdd={(name) => {
                 void actions
                   .putFile(draftId, name, '')
-                  .then(() => selectFile(name))
+                  .then((added) => {
+                    // Adding a file moves the draft's `updated`; the next write carries it.
+                    lastUpdated.current = added.updated
+                    selectFile(name)
+                  })
                   .catch((error) => setToast(`Could not add ${name}: ${errorMessage(error)}`))
               }}
             />

@@ -113,6 +113,10 @@ def test_a_rename_is_trimmed_refuses_an_empty_or_long_title_and_leaves_updated_a
         f"{url}/files/related-work.tex", headers=ADA, json={"content": "x", "updated": draft["updated"]}
     )
     assert write.status_code == 200
+    # `edited` is the text's last change: a write moves it, a Save (a version) does not
+    assert write.json()["edited"] >= draft["edited"]
+    saved = client.post(f"{url}/save", headers=ADA).json()
+    assert saved["edited"] == write.json()["edited"] and saved["updated"] != write.json()["updated"]
 
     empty = client.patch(url, headers=ADA, json={"title": "   "})
     assert empty.status_code == 400 and empty.json()["detail"] == "a draft needs a title"
