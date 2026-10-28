@@ -41,6 +41,8 @@ export function AskButton({
     }
   }
 
+  const showIntro = !introSeen && !open
+
   return (
     <div className="relative z-50">
       <button
@@ -53,7 +55,8 @@ export function AskButton({
         aria-label="Ask AI"
         title="Ask a question: the answer comes from your papers, and each sentence is checked against the passage it cites."
         className={cn(
-          'inline-flex min-h-11 items-center gap-2 rounded-full border py-1 pr-3.5 pl-1 text-[13px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9',
+          // Above the intro's backdrop, so the pill stays lit and clickable while the bubble shows.
+          'relative z-50 inline-flex min-h-11 items-center gap-2 rounded-full border py-1 pr-3.5 pl-1 text-[13px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9',
           open
             ? 'border-accent bg-accent text-canvas'
             : 'border-accent bg-accent-soft text-ink hover:bg-surface',
@@ -74,7 +77,7 @@ export function AskButton({
       </button>
       <MotionConfig reducedMotion="user">
         <AnimatePresence>
-          {!introSeen && !open && (
+          {showIntro && (
             <motion.div
               key="ask-intro-backdrop"
               initial={{ opacity: 0 }}
@@ -85,9 +88,7 @@ export function AskButton({
               onClick={dismiss}
             />
           )}
-        </AnimatePresence>
-        <AnimatePresence>
-          {!introSeen && !open && (
+          {showIntro && (
             <motion.div
               key="ask-intro-bubble"
               role="note"
