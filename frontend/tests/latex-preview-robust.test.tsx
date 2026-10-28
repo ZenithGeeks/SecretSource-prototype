@@ -145,6 +145,13 @@ describe('environments LaTeX.js lacks', () => {
     expect(root.textContent?.trim()).toBe('Body text.')
   })
 
+  test('a page-style command takes only its own argument: a group on the next line is still text', async () => {
+    const { root } = await render(doc('\\thispagestyle{empty}\n{\\bfseries My Thesis}\n\\fancyhead[L]{Draft}\n{Next line}'))
+    expect(visible(root)).toContain('My Thesis')
+    expect(visible(root)).toContain('Next line')
+    expect(visible(root)).not.toContain('Draft')
+  })
+
   test('thebibliography becomes a numbered References list and its keys are returned in order', async () => {
     const { root, prepared, unknown } = await render(doc('See \\cite{b}.\n\\begin{thebibliography}{9}\n\\bibitem{a} First.\n\\bibitem[X]{b} Second.\n\\end{thebibliography}'))
     expect(prepared.bibitems).toEqual(['a', 'b'])

@@ -107,7 +107,7 @@ export function PreviewPane({
   // error and the rest renders; only when nothing compiles does the last good page stay.
   useEffect(() => {
     let cancelled = false
-    renderIsolated(prepared.source, { images })
+    renderIsolated(prepared.source, { images, cancelled: () => cancelled })
       .then(({ root, unknown, failures }) => !cancelled && setState({ root, error: null, unknown, failures, source: debounced }))
       .catch((error: RenderFailure) => !cancelled && setState((s) => ({ ...s, error, source: debounced })))
     return () => {

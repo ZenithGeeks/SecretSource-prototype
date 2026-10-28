@@ -81,6 +81,15 @@ const NOT_SHOWN: Record<string, string> = { fancyhdr: 'fancyhdr (page headers an
  * are, with no notice of their own (fancyhdr's covers them). */
 const PAGE_STYLE_COMMANDS = ['fancyhf', 'fancyhead', 'fancyfoot', 'lhead', 'chead', 'rhead', 'lfoot', 'cfoot', 'rfoot', 'fancypagestyle', 'pagestyle', 'thispagestyle']
 
+/** What each page-style command takes: \pagestyle{s} and \thispagestyle{s} one group,
+ * \fancypagestyle{name}{defs} two, the header and footer commands an optional `[places]` and
+ * one group. */
+function pageStyleShape(name: string): { count: number; optional?: boolean } {
+  if (name === 'pagestyle' || name === 'thispagestyle') return { count: 1 }
+  if (name === 'fancypagestyle') return { count: 2 }
+  return { count: 1, optional: true }
+}
+
 /** Commands whose first argument is a bare control sequence, as in
  * `\algrenewcommand\algorithmicrequire{…}`: the preamble filter takes it with the command
  * instead of reading it as a statement of its own. */
@@ -164,7 +173,8 @@ export function preparePreview(content: string): PreparedSource {
   s = s.replace(/^[ \t]*\\(?:bibliographystyle|bibliography|input|include|graphicspath|hypersetup|nocite|addbibresource|printbibliography|listoffigures|listoftables|linespread|onehalfspacing|doublespacing)\b.*$/gm, '')
   s = s.replace(/\\(?:vspace|hspace)\*?\{[^}]*\}/g, '')
   s = s.replace(/\\(?:centering|raggedright|raggedleft|noindent|par|small|footnotesize|scriptsize|normalsize|large|Large|LARGE|huge|Huge)\b(?![A-Za-z])/g, '')
-  s = replaceCommands(s, PAGE_STYLE_COMMANDS, () => '')
+  // Each takes exactly its own arguments, so a `{…}` group on the next line stays text.
+  s = replaceCommands(s, PAGE_STYLE_COMMANDS, () => '', pageStyleShape)
   s = rewriteMath(s)
   const bibitems: string[] = []
   s = rewriteEnvironments(s, bibitems)
@@ -986,7 +996,7 @@ function appendPage(into: HTMLElement, from: HTMLElement): void {
  * its line where it stood; the others render. Throws the whole file's RenderFailure only when
  * no block compiles (the preamble itself is broken) or the body is one block.
  */
-export async function renderIsolated(source: string, options: { images?: ImageMap } = {}): Promise<IsolatedResult> {
+export async function renderIsolated(source: string, options: { images?: ImageMap; cancelled?: () => boolean } = {}): Promise<IsolatedResult> {
   try {
     return { ...(await renderLatex(source, options)), failures: [] }
   } catch (error) {
@@ -998,6 +1008,8 @@ export async function renderIsolated(source: string, options: { images?: ImageMa
     const failures: BlockFailure[] = []
     let rendered = 0
     for (const [start, end] of split.blocks) {
+      // A newer edit superseded this render: stop parsing blocks nobody will see.
+      if (options.cancelled?.()) throw error
       const only = lines.map((line, i) => (i > split.first && i < split.last && (i < start || i >= end) ? '%' : line))
       only[start] = countersBefore(lines, start) + only[start]
       try {
