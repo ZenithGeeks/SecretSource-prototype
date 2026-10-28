@@ -8,6 +8,7 @@ import { runTool, type DraftReader } from '../src/lib/agentTools'
 import { Editor } from '../src/roles/author/screens/Editor'
 import { SplitPane } from '../src/components/SplitPane'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
+import { PAPER_TEX } from './fixtures/paper'
 import { THESIS_FILES } from './fixtures/thesis'
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
@@ -335,6 +336,23 @@ describe('Author LaTeX editor — saving', () => {
     expect(screen.getByLabelText('seminar.tex source').textContent).not.toContain('% first draft')
     await waitFor(() => expect(stored().startsWith('% first draft\n')).toBe(true))
   })
+})
+
+describe('Author LaTeX editor — the preview never edits the source', () => {
+  test('a pasted paper renders in the preview while the saved file stays byte-identical and nothing is written', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: PAPER_TEX }] })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    const preview = () => screen.getByTestId('preview-page').shadowRoot
+    await waitFor(() => expect(preview()?.querySelectorAll('.ss-graphic')).toHaveLength(4), { timeout: 15000 })
+    expect(preview()?.textContent).toContain('Image not uploaded: figures/gemm_spock.png')
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    const saved = gateway.drafts.get('d1')!.files.find((f) => f.name === 'main.tex')!.content
+    expect(saved).toBe(PAPER_TEX)
+    expect(gateway.calls.filter((c) => c.startsWith('PUT ') || c.endsWith('/save'))).toEqual([])
+    // and the editor's own document is the same text (CodeMirror draws only the visible lines)
+    expect(EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString()).toBe(PAPER_TEX)
+  }, 20000)
 })
 
 describe('Author LaTeX editor — what Ask reads', () => {

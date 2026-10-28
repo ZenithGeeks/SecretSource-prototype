@@ -79,7 +79,7 @@ describe('PreviewPane', () => {
     expect(refs[4]).toMatch(/^\[5\] N\. Thakur et al\./)
     // math, the figure box, the table rows and the footnote made it through the rewrites
     expect(page().querySelector('.katex-display')).toBeTruthy()
-    expect(page().querySelector('.ss-graphic')?.textContent).toBe('figure · figures/architecture.pdf')
+    expect(page().querySelector('.ss-graphic')?.textContent).toBe('Image not uploaded: figures/architecture.pdf')
     expect(page().textContent).toContain('ColBERTv2 │ 0.42 │ 20')
     expect(page().querySelector('.ss-footnote')?.textContent).toBe('[Reported on MS MARCO dev.]')
     // nothing of the page's styling reached the document
@@ -120,7 +120,7 @@ describe('PreviewPane', () => {
     expect(screen.getByTestId('preview-ignored')).toHaveTextContent('Unknown to the preview, shown as grey boxes: \\badmacro (line 12)')
   }, 20000)
 
-  test('a source that will not compile keeps the last page and names the line', async () => {
+  test('a section that will not compile is left out with its line, inline and in the alert; the rest of the page renders', async () => {
     const { rerender } = renderPane(RELATED_WORK_TEX)
     await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Related work/), { timeout: 15000 })
 
@@ -136,8 +136,39 @@ describe('PreviewPane', () => {
     )
     const alert = await screen.findByRole('alert', {}, { timeout: 15000 })
     expect(alert).toHaveTextContent(/Line 1[89]: /)
+    expect(alert).toHaveTextContent('that part is left out, the rest of the page is shown')
+    expect(alert).not.toHaveTextContent('last good render')
+    expect(page().querySelector('.ss-block-error')?.textContent).toMatch(/^Line 1[89]: .* · this part is left out of the preview$/)
+    // the broken section is gone; its subsection, numbered as in the whole file, still renders
+    expect([...page().querySelectorAll('h2, h3')].map((h) => h.textContent?.replace(/\s+/g, ' '))).toEqual(['1.1 Distillation', 'References'])
+  }, 20000)
+
+  test('when nothing compiles (a broken preamble) the last good page stays and the alert names the line', async () => {
+    const { rerender } = renderPane(RELATED_WORK_TEX)
+    await waitFor(() => expect(page().querySelector('h2')?.textContent).toMatch(/Related work/), { timeout: 15000 })
+
+    rerender(
+      <PreviewPane
+        content={RELATED_WORK_TEX.replace(/\\title\{/, '\\title{{')}
+        citations={citations}
+        bibEntries={bib}
+        verdictColors
+        onToggleVerdictColors={() => undefined}
+        onKeepMine={() => undefined}
+      />,
+    )
+    const alert = await screen.findByRole('alert', {}, { timeout: 15000 })
     expect(alert).toHaveTextContent('showing the last good render')
     expect(page().querySelector('h2')?.textContent).toMatch(/Related work/)
+  }, 20000)
+
+  test("a file with its own thebibliography is numbered by it, lists it itself, and the .bib's list is not added", async () => {
+    const source = ['\\documentclass{article}', '\\begin{document}', 'Both \\cite{b} and \\cite{a}.', '\\begin{thebibliography}{9}', '\\bibitem{a} First.', '\\bibitem{b} Second.', '\\end{thebibliography}', '\\end{document}'].join('\n')
+    renderPane(source, { citations: [], bibEntries: bib })
+    await waitFor(() => expect(page().querySelectorAll('.ss-cite')).toHaveLength(2), { timeout: 15000 })
+    expect([...page().querySelectorAll('.ss-cite')].map((el) => el.textContent)).toEqual(['[2]', '[1]'])
+    expect(page().querySelector('.ss-refs')).toBeNull()
+    expect(page().textContent).toContain('[1]\u00a0First.')
   }, 20000)
 
   test('a flagged marker opens the popover; Keep mine calls back; Escape closes', async () => {

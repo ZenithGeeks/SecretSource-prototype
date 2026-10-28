@@ -1,8 +1,9 @@
 /**
  * The right half of the split: "Live preview · rendered with LaTeX.js" over the rendered
- * page. Compiles the open file a moment after typing stops; when the source will not
- * compile, the last good page stays and a one-line error says where (the line in the
- * author's file: preparePreview keeps the line count). What the preview had to leave out
+ * page. Compiles the open file a moment after typing stops; when a part of it will not
+ * compile, that part is an inline error and the rest of the page renders (renderIsolated),
+ * and a one-line error says where (the line in the author's file: preparePreview keeps the
+ * line count). Only when nothing compiles does the last good page stay. What the preview had to leave out
  * (packages and preamble commands LaTeX.js lacks) and what it did not know in the body
  * (shown as grey placeholders) are named in a quiet notice that never blocks the page. The
  * `[n]` markers are coloured by verdict when the toggle is on, and a flagged one opens the
@@ -19,7 +20,17 @@ import { AlertTriangle, Info, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { cn } from '../../../../lib/utils'
-import { appendReferences, decorateCitations, preparePreview, referenceNumbers, renderLatex, type RenderFailure, type UnknownMacro } from '../../../../lib/latexPreview'
+import {
+  appendReferences,
+  decorateCitations,
+  preparePreview,
+  referenceNumbers,
+  renderIsolated,
+  type BlockFailure,
+  type ImageMap,
+  type RenderFailure,
+  type UnknownMacro,
+} from '../../../../lib/latexPreview'
 import type { BibEntry } from '../../../../lib/bibtex'
 import { findCites } from '../../../../lib/latexProject'
 import { useDebounced } from '../../../../lib/useDebounced'
@@ -57,6 +68,8 @@ type RenderState = {
   error: RenderFailure | null
   /** What the last good render had to stand in for. */
   unknown: UnknownMacro[]
+  /** The blocks of the body left out because they would not compile on their own. */
+  failures: BlockFailure[]
   /** The source the state above came from; rendering is under way while it lags `debounced`. */
   source: string | null
 }
@@ -65,6 +78,7 @@ export function PreviewPane({
   content,
   citations,
   bibEntries,
+  images,
   verdictColors,
   onToggleVerdictColors,
   onKeepMine,
@@ -73,35 +87,44 @@ export function PreviewPane({
   /** The open file's citations, in line order. */
   citations: Citation[]
   bibEntries: BibEntry[]
+  /** The draft's images by path, drawn where \includegraphics names them (latexPreview's
+   * ImageMap); without it every image is a box naming the file. */
+  images?: ImageMap
   verdictColors: boolean
   onToggleVerdictColors: () => void
   onKeepMine: (citation: Citation, note: string) => void
 }) {
   const debounced = useDebounced(content, RENDER_DELAY_MS)
   const prepared = useMemo(() => preparePreview(debounced), [debounced])
-  const [state, setState] = useState<RenderState>({ root: null, error: null, unknown: [], source: null })
+  const [state, setState] = useState<RenderState>({ root: null, error: null, unknown: [], failures: [], source: null })
   const rendering = state.source !== debounced
   const host = useRef<HTMLDivElement>(null)
   const page = useRef<HTMLElement | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState<{ id: string; anchor: PopoverAnchor; trigger: HTMLElement | null; containerWidth: number } | null>(null)
 
-  // Compile after typing pauses; keep the last good page on failure.
+  // Compile after typing pauses. A block that will not compile is left out with an inline
+  // error and the rest renders; only when nothing compiles does the last good page stay.
   useEffect(() => {
     let cancelled = false
-    renderLatex(prepared.source)
-      .then(({ root, unknown }) => !cancelled && setState({ root, error: null, unknown, source: debounced }))
+    renderIsolated(prepared.source, { images })
+      .then(({ root, unknown, failures }) => !cancelled && setState({ root, error: null, unknown, failures, source: debounced }))
       .catch((error: RenderFailure) => !cancelled && setState((s) => ({ ...s, error, source: debounced })))
     return () => {
       cancelled = true
     }
-  }, [debounced, prepared])
+  }, [debounced, prepared, images])
 
   // Numbered like plainnat: only the works this file cites, by first author. From the debounced
-  // text, like the render the numbers decorate: not a scan and a redecoration per keystroke.
+  // text, like the render the numbers decorate: not a scan and a redecoration per keystroke. A
+  // file with its own thebibliography is numbered by it, as LaTeX does, and lists it itself.
+  const ownList = prepared.bibitems.length > 0
   const numbers = useMemo(
-    () => referenceNumbers(bibEntries, new Set(findCites({ name: 'preview', content: debounced }).map((c) => c.key))),
-    [bibEntries, debounced],
+    () =>
+      ownList
+        ? new Map(prepared.bibitems.map((key, i) => [key, i + 1]))
+        : referenceNumbers(bibEntries, new Set(findCites({ name: 'preview', content: debounced }).map((c) => c.key))),
+    [bibEntries, debounced, ownList, prepared.bibitems],
   )
   const issues = useMemo(() => citations.filter(isOpenIssue), [citations])
 
@@ -176,11 +199,11 @@ export function PreviewPane({
       const citation = seen.get(key)?.[occurrence]
       return { id: citation?.id, verdict: citation?.verdict, n: numbers.get(key) ?? null }
     })
-    appendReferences(clone, bibEntries, numbers, cited)
+    if (!ownList) appendReferences(clone, bibEntries, numbers, cited)
     body.replaceChildren(clone)
     body.classList.toggle('ss-verdicts', verdictColors)
     body.setAttribute('aria-busy', String(rendering))
-  }, [state.root, citations, bibEntries, numbers, verdictColors, rendering])
+  }, [state.root, citations, bibEntries, numbers, ownList, verdictColors, rendering])
 
   useEffect(() => {
     page.current?.classList.toggle('ss-verdicts', verdictColors)
@@ -230,7 +253,7 @@ export function PreviewPane({
           verdict colors {verdictColors ? 'on' : 'off'}
         </button>
       </div>
-      {state.error && (
+      {state.error ? (
         <p role="alert" className="flex items-center gap-2 border-b border-insufficient bg-insufficient-soft px-3.5 py-1.5 text-xs text-insufficient">
           <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
           <span>
@@ -239,6 +262,16 @@ export function PreviewPane({
             {state.root ? ' · showing the last good render' : ''}
           </span>
         </p>
+      ) : (
+        state.failures.length > 0 && (
+          <p role="alert" className="flex items-center gap-2 border-b border-insufficient bg-insufficient-soft px-3.5 py-1.5 text-xs text-insufficient">
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              {state.failures.map((f) => `Line ${f.line}: ${f.message}`).join(' · ')} · {state.failures.length === 1 ? 'that part is' : 'those parts are'} left out, the rest
+              of the page is shown
+            </span>
+          </p>
+        )
       )}
       {notice && (
         <p data-testid="preview-ignored" className="flex items-center gap-2 border-b border-border-subtle bg-canvas px-3.5 py-1 text-[11px] text-ink-muted">
