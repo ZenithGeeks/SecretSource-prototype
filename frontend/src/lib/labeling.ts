@@ -8,7 +8,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api, API_BASE, fetchFile, postEvents, request, type Source } from './api'
+import { api, API_BASE, fetchFile, postEvents, request, type CitationMarker, type Source } from './api'
 import type { AnswerEvent } from './assistant'
 
 export type Level = 1 | 2 | 3 | 4
@@ -67,6 +67,8 @@ export type Session = {
   annotator: string
   claims: SessionClaim[]
   references: Reference[]
+  /** Where the paper cites its references; missing from a gateway older than this field. */
+  markers?: CitationMarker[]
   saved: { claims: Row[]; candidates: Row[]; labels: Row[] }
   /** "claim_id|reference_id" -> the other people who labeled that pair. */
   others: Record<string, string[]>
@@ -542,6 +544,32 @@ export function bestCandidate(claim: WorkClaim, references: Reference[]): Candid
 /** True when a draft is what was last saved (nothing saved yet reads as an empty draft). */
 export const sameDraft = (draft: Draft, saved: Draft | undefined) =>
   JSON.stringify(draft) === JSON.stringify(saved ?? emptyDraft())
+
+/** Decisions not saved yet, kept in this browser so a reload or a gateway outage loses none:
+ * the draft of each unsaved claim, and the unsaved claims added by hand. */
+export type Unsaved = { drafts: Record<string, Draft>; added: WorkClaim[] }
+
+const unsavedKey = (analysisId: string, annotator: string) => `labeler.unsaved.${analysisId}.${annotator}`
+
+export function readUnsaved(analysisId: string, annotator: string): Unsaved | null {
+  try {
+    const stored = window.localStorage.getItem(unsavedKey(analysisId, annotator))
+    return stored ? (JSON.parse(stored) as Unsaved) : null
+  } catch {
+    return null // storage blocked, or a value this version cannot read
+  }
+}
+
+/** Keep `unsaved`, or forget it once nothing is left unsaved. */
+export function writeUnsaved(analysisId: string, annotator: string, unsaved: Unsaved): void {
+  try {
+    const key = unsavedKey(analysisId, annotator)
+    if (Object.keys(unsaved.drafts).length) window.localStorage.setItem(key, JSON.stringify(unsaved))
+    else window.localStorage.removeItem(key)
+  } catch {
+    // storage blocked or full: the drafts are still on screen until saved
+  }
+}
 
 /** What is still undecided, in words. Empty means the claim is finished. */
 export function remaining(claim: WorkClaim, draft: Draft, references: Reference[]): string[] {

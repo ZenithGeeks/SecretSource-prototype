@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   session: {
@@ -58,9 +58,13 @@ vi.mock('../src/components/PageViewer', () => ({
   PageViewer: ({
     target,
     onSelectText,
+    markers = [],
+    onCitation,
   }: {
     target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; paperRole?: string }
     onSelectText?: (s: { text: string; page: number | null }) => void
+    markers?: { ref: string; text: string }[]
+    onCitation?: (marker: { ref: string; text: string }) => void
   }) => (
     <div>
       <div data-testid="viewer">{target.paper}|{target.quote}</div>
@@ -70,6 +74,11 @@ vi.mock('../src/components/PageViewer', () => ({
       <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
         select in {target.paper}
       </button>
+      {markers.map((m) => (
+        <button key={m.text} type="button" onClick={() => onCitation?.(m)}>
+          cite {m.text}
+        </button>
+      ))}
     </div>
   ),
 }))
@@ -180,6 +189,7 @@ describe('the workspace', () => {
     gateway.searched.length = 0
     gateway.found = []
     gateway.failSearch = false
+    window.localStorage.removeItem('labeler.unsaved.a1.chanya')
     window.localStorage.setItem('labeler.paperView', 'both')
     window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   })
@@ -640,6 +650,89 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search again' }))
     expect(await screen.findByText(/Y doubles recall on Z/)).toBeInTheDocument()
     expect(screen.queryByText(/Retrieval did not answer/)).not.toBeInTheDocument()
+  })
+})
+
+describe('opening a reference by hand', () => {
+  const session = gateway.session
+  beforeEach(() => {
+    gateway.session = {
+      ...session,
+      references: [...session.references, { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b9', authors: [], year: '2020' }],
+      // b30 was cited but never read, so it has no paper to open.
+      markers: [
+        { ref: 'b9', text: 'Guo et al., 2025', page: 1, x0: 0, y0: 0, x1: 1, y1: 1, page_width: 10, page_height: 10 },
+        { ref: 'b30', text: 'OpenAI et al., 2024', page: 1, x0: 0, y0: 0, x1: 1, y1: 1, page_width: 10, page_height: 10 },
+      ],
+    } as typeof session
+    window.localStorage.removeItem('labeler.unsaved.a1.chanya')
+    window.localStorage.setItem('labeler.paperView', 'both')
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  })
+  afterEach(() => {
+    gateway.session = session
+  })
+
+  const open = async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Workspace analysisId="a1" />
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+  }
+
+  it('opens the reference a citation in the paper names, and only for references that were read', async () => {
+    await open()
+    expect(screen.queryByRole('button', { name: 'cite OpenAI et al., 2024' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'cite Guo et al., 2025' }))
+    expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('refC.pdf')
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'select in refC.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.getAllByText('picked in refC.pdf', { exact: false }).length).toBeGreaterThan(0)
+  })
+
+  it('opens any reference from the list, cited by the claim or not', async () => {
+    await open()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Open reference' }), { target: { value: 'refC' } })
+    expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('refC.pdf')
+  })
+})
+
+describe('unsaved labels', () => {
+  beforeEach(() => {
+    gateway.posts.length = 0
+    gateway.failSaves = false
+    window.localStorage.removeItem('labeler.unsaved.a1.chanya')
+    window.localStorage.setItem('labeler.paperView', 'both')
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  })
+
+  const open = async () => {
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Workspace analysisId="a1" />
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+    return view
+  }
+
+  it('come back after the page is opened again, until they are saved', async () => {
+    const first = await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
+    first.unmount()
+
+    await open()
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved labels from your last visit')
+    fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Not relevant/ })[1])
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    await waitFor(() => expect(window.localStorage.getItem('labeler.unsaved.a1.chanya')).toBeNull())
   })
 })
 
