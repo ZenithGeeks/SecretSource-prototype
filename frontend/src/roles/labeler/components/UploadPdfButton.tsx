@@ -1,4 +1,4 @@
-/** "Upload the PDF": picks one PDF from this computer for a paper the analysis cannot download.
+/** "Upload the PDF": picks one PDF from this computer, for a paper the analysis cannot download or reads badly.
  * A button that opens the file picker, so it looks and works like the buttons beside it. */
 
 import { Loader2, Upload } from 'lucide-react'

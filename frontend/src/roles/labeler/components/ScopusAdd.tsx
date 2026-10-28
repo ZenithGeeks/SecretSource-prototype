@@ -333,7 +333,7 @@ function ResultRow({
   /** An analysis can start now; when not, neither Add nor an upload is offered. */
   online: boolean
   onAdd: () => void
-  /** For a paper whose PDF the analysis cannot download: the labeler's own copy instead. */
+  /** The labeler's own copy of the PDF, for a paper the analysis cannot download or reads badly. */
   onUpload: (file: File) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -371,16 +371,21 @@ function ResultRow({
             <span className="text-xs text-ink-muted">No copy we can download</span>
           </span>
         ) : (
-          <Button
-            variant="ghost"
-            className="min-h-11 shrink-0"
-            disabled={done || adding || !online}
-            aria-label={`Add ${paper.title}`}
-            onClick={onAdd}
-          >
-            {adding ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : !done && <Plus className="size-4" aria-hidden="true" />}
-            {done ? 'Added' : 'Add'}
-          </Button>
+          <span className="flex shrink-0 flex-col items-end sm:flex-row sm:items-center">
+            <Button
+              variant="ghost"
+              className="min-h-11"
+              disabled={done || adding || uploading || !online}
+              aria-label={`Add ${paper.title}`}
+              onClick={onAdd}
+            >
+              {adding ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : !done && <Plus className="size-4" aria-hidden="true" />}
+              {done ? 'Added' : 'Add'}
+            </Button>
+            {!done && (
+              <UploadPdfButton title={paper.title} busy={uploading} disabled={adding || uploadBlocked || !online} onFile={onUpload} />
+            )}
+          </span>
         )}
       </div>
       <div className={cn('mt-1.5 ml-6 flex flex-wrap items-center gap-1', unreachable && 'opacity-60')}>
