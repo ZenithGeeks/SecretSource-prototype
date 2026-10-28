@@ -9,11 +9,13 @@ import asyncio
 import json
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from app import llm
+from app.auth import acting_user
 from dspy.utils.exceptions import LMRateLimitError
 from google.adk.models.llm_request import LlmRequest
 from google.genai import types
@@ -199,3 +201,94 @@ def test_each_call_records_how_long_it_waited_for_a_slot():
 
     asyncio.run(hold_async_slot())
     assert waits() == before + 2
+
+
+OK_ANSWER = {
+    "id": "answer-1",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "test",
+    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+}
+
+
+class RecordedAnswer(BaseHTTPRequestHandler):
+    """Answer each chat request with "ok", and keep the request bodies."""
+
+    bodies: list[dict] = []
+
+    def do_POST(self):
+        RecordedAnswer.bodies.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(OK_ANSWER).encode())
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def recording_gateway(monkeypatch):
+    """Point app.llm at a local server that records what each request sent."""
+    RecordedAnswer.bodies = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RecordedAnswer)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(llm, "VLLM_URL", f"http://127.0.0.1:{server.server_port}/v1")
+    yield RecordedAnswer.bodies
+    server.shutdown()
+
+
+@pytest.fixture
+def as_user():
+    """Act as a user for one test, then go back to nobody."""
+    tokens = []
+    yield lambda user: tokens.append(acting_user.set(user))
+    for token in reversed(tokens):
+        acting_user.reset(token)
+
+
+def test_dspy_call_sends_the_acting_user(recording_gateway, as_user):
+    as_user("user-a")
+
+    llm.dspy_lm().copy(cache=False)("hi")
+
+    assert recording_gateway[-1]["user"] == "user-a"
+
+
+def test_call_for_nobody_sends_no_user(recording_gateway, as_user):
+    as_user(None)
+
+    llm.dspy_lm().copy(cache=False)("hi")
+
+    assert "user" not in recording_gateway[-1]
+
+
+def test_two_people_share_one_cached_answer(recording_gateway, as_user):
+    # A new question each run, so the disk cache from an earlier run cannot answer it.
+    question = f"cached question {uuid.uuid4()}"
+    lm = llm.dspy_lm()
+
+    as_user("user-a")
+    lm(question)
+    as_user("user-b")
+    lm(question)
+
+    assert len(recording_gateway) == 1
+
+
+def test_adk_call_sends_the_acting_user(recording_gateway, as_user):
+    as_user("user-a")
+    model = llm.adk_model()
+    request = LlmRequest(
+        model=model.model, contents=[types.Content(role="user", parts=[types.Part(text="hi")])]
+    )
+
+    async def ask():
+        async for _ in model.generate_content_async(request):
+            pass
+
+    asyncio.run(ask())
+
+    assert recording_gateway[-1]["user"] == "user-a"

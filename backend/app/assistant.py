@@ -20,6 +20,7 @@ has the plan; eval_assistant.py and eval_assistant_stream.py measure this code (
 import asyncio
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from pathlib import Path
 from typing import NamedTuple
 
@@ -195,7 +196,9 @@ async def check_text(sentences: list[str], papers: frozenset[str]) -> list[dict]
         item = cite(Statement(text=sentence, passage=1), hits)
         return {"text": sentence, "source": item.source, "page": item.page, **check(item)}
 
-    return list(await asyncio.gather(*(loop.run_in_executor(_checks, judged, text) for text in sentences)))
+    # run_in_executor, unlike to_thread, does not copy the acting user into the thread.
+    checks = (loop.run_in_executor(_checks, copy_context().run, judged, text) for text in sentences)
+    return list(await asyncio.gather(*checks))
 
 
 async def answer(
@@ -231,7 +234,8 @@ async def answer(
     loop = asyncio.get_running_loop()
 
     async def checked(index: int, item: Cited) -> dict:
-        return {"type": "verdict", "index": index, **await loop.run_in_executor(_checks, check, item)}
+        verdict = await loop.run_in_executor(_checks, copy_context().run, check, item)
+        return {"type": "verdict", "index": index, **verdict}
 
     checks = [asyncio.create_task(checked(index, item)) for index, item in enumerate(cited)]
     try:
