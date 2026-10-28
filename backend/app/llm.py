@@ -9,16 +9,35 @@ import time
 from contextlib import asynccontextmanager, contextmanager
 
 import dspy
+from dspy.clients.cache import Cache
 from dspy.utils.callback import BaseCallback
 from dspy.utils.exceptions import LMRateLimitError
-from google.adk.models.lite_llm import LiteLlm
+from google.adk.models.lite_llm import LiteLlm, LiteLLMClient
 
+from app.auth import acting_user
 from app.config import LLM_PARALLEL_REQUESTS, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.metrics import LLM_RATE_LIMITED, LLM_SLOT_WAIT_SECONDS
 
 # One slot per request in flight, for every model in this process. dspy calls come from
 # worker threads and ADK calls from the event loop, so this is a threading semaphore.
 _slots = threading.BoundedSemaphore(LLM_PARALLEL_REQUESTS)
+
+
+_dspy_cache_key = Cache.cache_key
+
+
+def _cache_key_without_user(self, request: dict, ignored_args_for_cache_key=None) -> str:
+    """dspy's cache key without the user in extra_body, so people share cached answers."""
+    extra_body = request.get("extra_body")
+    if isinstance(extra_body, dict) and "user" in extra_body:
+        rest = {key: value for key, value in extra_body.items() if key != "user"}
+        request = {**request, "extra_body": rest}
+    return _dspy_cache_key(self, request, ignored_args_for_cache_key)
+
+
+# dspy keys its cache on the whole request, and its ignore list only covers top-level fields.
+# test_two_people_share_one_cached_answer fails if a dspy upgrade moves the field.
+Cache.cache_key = _cache_key_without_user
 
 
 @contextmanager
@@ -50,11 +69,32 @@ class CappedLM(dspy.LM):
 
     def __call__(self, *args, **kwargs):
         with _slot():
-            return super().__call__(*args, **kwargs)
+            return super().__call__(*args, **self._with_user(kwargs))
 
     async def acall(self, *args, **kwargs):
         async with _async_slot():
-            return await super().acall(*args, **kwargs)
+            return await super().acall(*args, **self._with_user(kwargs))
+
+    def _with_user(self, kwargs: dict) -> dict:
+        """Send the acting user as `user`, the OpenAI field LiteLLM counts usage per person by."""
+        user = acting_user.get()
+        if not user:
+            return kwargs
+        # dspy's own lm15 client drops a top-level `user`, but sends what is in extra_body.
+        # A call's extra_body replaces the LM's, so both are merged here.
+        extra_body = {**self.kwargs.get("extra_body", {}), **kwargs.get("extra_body", {})}
+        return {**kwargs, "extra_body": {**extra_body, "user": user}}
+
+
+class UserLiteLLMClient(LiteLLMClient):
+    """ADK's LiteLLM client, sending the acting user as `user` with each request."""
+
+    async def acompletion(self, model, messages, tools, **kwargs):
+        user = acting_user.get()
+        if user:
+            # LiteLLM drops a top-level `user` for an openai/ model on our api_base.
+            kwargs = {**kwargs, "extra_body": {**kwargs.get("extra_body", {}), "user": user}}
+        return await super().acompletion(model, messages, tools, **kwargs)
 
 
 class CappedLiteLlm(LiteLlm):
@@ -102,6 +142,7 @@ def adk_model() -> CappedLiteLlm:
         temperature=0.3,
         extra_body=NO_THINKING,
         failure_callback=[count_adk_rate_limit],
+        llm_client=UserLiteLLMClient(),
     )
 
 
