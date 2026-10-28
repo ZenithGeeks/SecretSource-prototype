@@ -431,16 +431,18 @@ TITLE_PATHS = (
     "tei:monogr/tei:title[@level='j']",  # a journal, when nothing finer was parsed
 )
 NAME_TOKEN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['’-])*\.?$")  # any alphabet, so "Stéphane" counts
+OTHERS_TAIL = re.compile(r",?\s*(?:\band\s+\d+\s+others|\bet\s+al)\.?$")  # "and 244 others", "et al."
 
 
 def _looks_like_authors(text: str) -> bool:
     """Whether this "title" is really an author list GROBID mis-parsed.
 
     The test: two or more comma- or "and"-separated groups, each two or three name-shaped
-    words.
+    words. A list cut short with "and 244 others" or "et al." needs only one named group.
     """
-    groups = [group.split() for group in re.split(r",|\band\b", text) if group.strip()]
-    return len(groups) >= 2 and all(
+    names, cut_short = OTHERS_TAIL.subn("", text.strip())
+    groups = [group.split() for group in re.split(r",|\band\b", names) if group.strip()]
+    return len(groups) >= (1 if cut_short else 2) and all(
         2 <= len(group) <= 3 and all(NAME_TOKEN.match(word) and word[0].isupper() for word in group)
         for group in groups
     )
