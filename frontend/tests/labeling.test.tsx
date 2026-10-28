@@ -700,6 +700,42 @@ describe('opening a reference by hand', () => {
   })
 })
 
+describe('unsaved labels', () => {
+  beforeEach(() => {
+    gateway.posts.length = 0
+    gateway.failSaves = false
+    window.localStorage.removeItem('labeler.unsaved.a1.chanya')
+    window.localStorage.setItem('labeler.paperView', 'both')
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  })
+
+  const open = async () => {
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Workspace analysisId="a1" />
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+    return view
+  }
+
+  it('come back after the page is opened again, until they are saved', async () => {
+    const first = await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
+    first.unmount()
+
+    await open()
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved labels from your last visit')
+    fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Not relevant/ })[1])
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    await waitFor(() => expect(window.localStorage.getItem('labeler.unsaved.a1.chanya')).toBeNull())
+  })
+})
+
 describe('claims added by hand earlier', () => {
   it('come back with the sentence and page they were saved with, so they can be boxed again', () => {
     const [added] = workClaims({

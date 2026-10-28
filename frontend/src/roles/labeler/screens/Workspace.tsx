@@ -29,6 +29,7 @@ import {
   emptyLabel,
   labelingApi,
   progress,
+  readUnsaved,
   referencesOf,
   relevantPassages,
   remaining,
@@ -36,6 +37,7 @@ import {
   problem,
   useSaveLabels,
   workClaims,
+  writeUnsaved,
   type Candidate,
   type Draft,
   type Level,
@@ -168,15 +170,18 @@ function Body({
   askSlot: HTMLElement | null
 }) {
   const base = useMemo(() => workClaims(session), [session])
-  const [extra, setExtra] = useState<WorkClaim[]>([])
+  // What this browser kept from before a reload or an outage, put back on top of what was saved.
+  const [restored] = useState(() => readUnsaved(session.analysis_id, session.annotator))
+  const [extra, setExtra] = useState<WorkClaim[]>(() => restored?.added ?? [])
   const listed = useMemo(
     () => [...base, ...extra.filter((e) => !base.some((b) => b.claim_id === e.claim_id))],
     [base, extra],
   )
-  const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
+  // Each claim as last written, to know what changed.
+  const [saved, setSaved] = useState<Record<string, Draft>>(() =>
     Object.fromEntries(base.map((c) => [c.claim_id, draftFromSaved(c, session.saved)])),
   )
-  const [saved, setSaved] = useState(drafts) // each claim as last written, to know what changed
+  const [drafts, setDrafts] = useState(() => ({ ...saved, ...restored?.drafts }))
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
@@ -285,6 +290,12 @@ function Body({
       },
     })
   }
+
+  useEffect(() => {
+    const unsaved = Object.fromEntries(Object.entries(drafts).filter(([id, d]) => !sameDraft(d, saved[id])))
+    const added = extra.filter((c) => unsaved[c.claim_id])
+    writeUnsaved(session.analysis_id, session.annotator, { drafts: unsaved, added })
+  }, [drafts, saved, extra, session.analysis_id, session.annotator])
 
   // Tell the app whether leaving would lose work; leaving the workspace clears it.
   useEffect(() => {
@@ -674,6 +685,11 @@ function Body({
           {shortcutsButton}
         </div>
       </header>
+      {restored && anyDirty && (
+        <p role="status" className="text-sm text-ink-muted">
+          Unsaved labels from your last visit were kept in this browser. Save them to keep them for good.
+        </p>
+      )}
 
       {wide ? (
         <SplitPane
