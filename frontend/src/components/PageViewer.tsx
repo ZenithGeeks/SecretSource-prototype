@@ -208,6 +208,7 @@ export function PageViewer({
   onSelectText,
   compactQuote = false,
   zoomKey,
+  onCitation,
 }: {
   target: Target
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
@@ -225,6 +226,8 @@ export function PageViewer({
   /** Citation markers of this paper. Only passed when the viewer shows the analysed paper. */
   markers?: CitationMarker[]
   references?: Record<string, Citation>
+  /** Called when a citation marker is clicked, in place of the card that names the paper. */
+  onCitation?: (marker: CitationMarker) => void
 }) {
   const [pageCount, setPageCount] = useState(0)
   const [pageRatio, setPageRatio] = useState(1.294) // height / width; US Letter until page 1 says
@@ -569,7 +572,7 @@ export function PageViewer({
                         <button
                           key={`marker-${i}`}
                           type="button"
-                          onClick={() => setOpened(marker === openMarker ? null : { marker, target })}
+                          onClick={() => (onCitation ? onCitation(marker) : setOpened(marker === openMarker ? null : { marker, target }))}
                           aria-label={`Cited paper ${marker.text}: ${reference(references[marker.ref])}`}
                           aria-expanded={marker === openMarker}
                           className={cn(

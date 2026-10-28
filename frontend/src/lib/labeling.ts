@@ -8,7 +8,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api, API_BASE, fetchFile, postEvents, request, type Source } from './api'
+import { api, API_BASE, fetchFile, postEvents, request, type CitationMarker, type Source } from './api'
 import type { AnswerEvent } from './assistant'
 
 export type Level = 1 | 2 | 3 | 4
@@ -67,6 +67,8 @@ export type Session = {
   annotator: string
   claims: SessionClaim[]
   references: Reference[]
+  /** Where the paper cites its references; missing from a gateway older than this field. */
+  markers?: CitationMarker[]
   saved: { claims: Row[]; candidates: Row[]; labels: Row[] }
   /** "claim_id|reference_id" -> the other people who labeled that pair. */
   others: Record<string, string[]>

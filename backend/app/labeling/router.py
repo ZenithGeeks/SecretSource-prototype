@@ -157,6 +157,8 @@ def build_session(analysis: dict) -> dict:
         "title": analysis.get("title") or Path(analysis["file"]).name,
         "claims": claims,
         "references": list(references.values()),
+        # Where the paper cites each reference, so a click on "[12]" can open that reference.
+        "markers": analysis.get("markers") or [],
     }
 
 

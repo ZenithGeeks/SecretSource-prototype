@@ -131,6 +131,13 @@ def test_a_reference_is_named_by_its_title_when_the_citation_list_has_it():
     ]
 
 
+def test_session_carries_where_the_paper_cites_its_references():
+    marker = {"ref": "b4", "text": "[4]", "page": 1, "x0": 1, "y0": 2, "x1": 3, "y1": 4}
+
+    assert labeling.build_session({**ANALYSIS, "markers": [marker]})["markers"] == [marker]
+    assert labeling.build_session(ANALYSIS)["markers"] == []  # an analysis from before markers
+
+
 def test_session_asks_the_store_only_for_that_papers_rows(api):
     client, db, _ = api
     db.append("claims", [_claim("chanya", "paperA-0123456789ab#0")])

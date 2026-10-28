@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Empty, LoadingScreen, Segmented } from '../../../components/ui'
-import { api } from '../../../lib/api'
+import { api, type Citation, type CitationMarker } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
@@ -39,6 +39,7 @@ import {
   type Candidate,
   type Draft,
   type Level,
+  type Reference,
   type Session,
   type WorkClaim,
   useLabelSession,
@@ -391,6 +392,45 @@ function Body({
     page: focus.page ?? 1,
     error: found.isError ? 'Could not look up where this passage is.' : undefined,
   }
+  // Any reference that was read can be opened, to select a passage retrieval missed in it: from
+  // the list, or by clicking where the paper under review cites it. A citation of a reference
+  // that was not read keeps the PDF's own link to the reference list.
+  const openReference = (r: Reference) => {
+    setFocus({ file: r.file, passage: '', page: 1, key: `ref:${r.reference_id}` })
+    setPicked(null)
+  }
+  const readRefs = Object.fromEntries(session.references.flatMap((r) => (r.ref ? [[r.ref, r] as const] : [])))
+  const citing = {
+    markers: (session.markers ?? []).filter((m) => readRefs[m.ref]),
+    references: Object.fromEntries(
+      Object.entries(readRefs).map(([ref, r]): [string, Citation] => [
+        ref,
+        { title: r.label, authors: r.authors ?? [], year: r.year ?? '', doi: '', arxiv: '', url: '' },
+      ]),
+    ),
+    onCitation: (marker: CitationMarker) => openReference(readRefs[marker.ref]),
+  }
+  const referencePicker = session.references.length > 0 && (
+    <label className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
+      Open reference
+      <select
+        value={refId ?? ''}
+        onChange={(e) => {
+          const r = session.references.find((x) => x.reference_id === e.target.value)
+          if (r) openReference(r)
+        }}
+        className="min-h-9 min-w-0 flex-1 truncate rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink"
+      >
+        {!refId && <option value="">Choose a reference</option>}
+        {session.references.map((r) => (
+          <option key={r.reference_id} value={r.reference_id}>
+            {r.ref ? `[${r.ref}] ` : ''}
+            {r.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
   const { done, total } = progress(claims, drafts, session.references, saved)
   const refs = referencesOf(claim, draft)
   const viewer = (target: Target, side: Picked['side'], onClose?: () => void) => (
@@ -398,6 +438,7 @@ function Body({
       key={target.paper}
       target={target}
       onClose={onClose}
+      {...(side === 'paper' && citing)}
       className={!wide ? VIEWER_HEIGHT : both ? 'h-[75vh] shrink-0' : 'h-full min-h-0'}
       keyboard={false}
       compactQuote={wide}
@@ -577,6 +618,7 @@ function Body({
 
   const papers = (
     <div className="mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+      {referencePicker}
       {selection}
       {/* Side by side: the paper under review left, the reference right, as they are read.
           Stacked: the reference on top, since it is the paper being judged. */}
@@ -654,6 +696,7 @@ function Body({
               Read the reference
             </button>
           </div>
+          {referencePicker}
           {overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
           {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
           {selection}
