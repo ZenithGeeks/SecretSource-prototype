@@ -218,7 +218,7 @@ describe('the Scopus search', () => {
     expect(await screen.findByText('1 papers · showing 1')).toBeInTheDocument()
   })
 
-  it('offers no Add for a paper whose only copy cannot be downloaded', async () => {
+  it('offers no Add for a paper whose only copy cannot be downloaded, and an upload for every paper', async () => {
     gateway([{ total: 3, results: [paper(0, { downloadable: false }), paper(1, { downloadable: null }), paper(2)] }])
     renderSearch()
     search()
@@ -227,6 +227,9 @@ describe('the Scopus search', () => {
     expect(screen.queryByRole('button', { name: 'Add Paper 0' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add Paper 1' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Add Paper 2' })).toBeEnabled()
+    for (const title of ['Paper 0', 'Paper 1', 'Paper 2']) {
+      expect(screen.getByRole('button', { name: `Upload the PDF of ${title}` })).toBeEnabled()
+    }
   })
 
   it('takes the labeler’s own PDF for a paper it cannot download, under the topic and its DOI', async () => {
