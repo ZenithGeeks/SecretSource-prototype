@@ -39,6 +39,7 @@ test('every icon-only button has an accessible name', () => {
     expect(screen.getByRole('button', { name })).toBeInTheDocument()
   }
   expect(screen.getByRole('link', { name: 'Open original PDF' })).toBeInTheDocument()
+  expect(screen.getByRole('group', { name: 'Paper annotations' })).toBeInTheDocument()
 })
 
 test('Escape closes the viewer', () => {

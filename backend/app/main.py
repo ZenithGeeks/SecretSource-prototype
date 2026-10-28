@@ -47,7 +47,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -56,7 +56,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from openinference.semconv.trace import OpenInferenceSpanKindValues, SpanAttributes
 from opentelemetry import trace
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from redis.exceptions import RedisError
 
 from app import chats, dependencies, mcp_server, researcher, store, uploads
@@ -432,6 +432,65 @@ app.mount("/mcp", mcp_server.handle_mcp)  # MCP clients use /mcp/: Starlette red
 class AnalysisRequest(BaseModel):
     paper: str
     verify: bool = True
+
+
+class AnnotationPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class AnnotationRect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x0: float = Field(ge=0, le=1)
+    y0: float = Field(ge=0, le=1)
+    x1: float = Field(ge=0, le=1)
+    y1: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def has_area(self):
+        if self.x1 <= self.x0 or self.y1 <= self.y0:
+            raise ValueError("annotation rectangles must have positive width and height")
+        return self
+
+
+class PaperAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=100)
+    kind: Literal["highlight", "ink", "note"]
+    page: int = Field(ge=1)
+    color: Literal["yellow", "green", "blue", "pink"]
+    rects: list[AnnotationRect] = Field(default_factory=list, max_length=1000)
+    points: list[AnnotationPoint] = Field(default_factory=list, max_length=5000)
+    x: float | None = Field(default=None, ge=0, le=1)
+    y: float | None = Field(default=None, ge=0, le=1)
+    text: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def has_geometry(self):
+        if self.kind == "highlight" and not self.rects:
+            raise ValueError("highlights need at least one rectangle")
+        if self.kind == "ink" and len(self.points) < 2:
+            raise ValueError("pen strokes need at least two points")
+        if self.kind == "note" and (self.x is None or self.y is None or not self.text):
+            raise ValueError("notes need a page position and text")
+        return self
+
+
+class PaperAnnotationsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    annotations: list[PaperAnnotation] = Field(max_length=1000)
+
+    @model_validator(mode="after")
+    def bounded_geometry(self):
+        elements = sum(len(item.points) + len(item.rects) for item in self.annotations)
+        if elements > 100_000:
+            raise ValueError("paper annotations contain too many geometry elements")
+        return self
 
 
 class CheckRequest(BaseModel):
@@ -1069,6 +1128,12 @@ def _paper(name: str, user: str | None) -> Path:
     return path
 
 
+def _paper_content_hash(path: Path) -> str:
+    """Stable identity across roles and filenames for the exact PDF bytes."""
+    with path.open("rb") as pdf:
+        return hashlib.file_digest(pdf, "sha256").hexdigest()
+
+
 # Only the browser that asked may keep a copy: these are one user's papers.
 PRIVATE_CACHE = {"Cache-Control": "private, max-age=31536000"}
 
@@ -1079,6 +1144,29 @@ async def paper(name: str, user: str | None = Depends(current_user)):
     return FileResponse(
         path, media_type="application/pdf", filename=name, headers={"Cache-Control": "private"}
     )
+
+
+@app.get("/papers/{name}/annotations")
+async def get_paper_annotations(name: str, user: str | None = Depends(current_user)):
+    if user is None:
+        raise HTTPException(401, "sign in to use paper annotations")
+    path = await asyncio.to_thread(_paper, name, user)
+    paper_hash = await asyncio.to_thread(_paper_content_hash, path)
+    annotations = await asyncio.to_thread(store.load_paper_annotations, user, paper_hash)
+    return {"annotations": annotations}
+
+
+@app.put("/papers/{name}/annotations")
+async def put_paper_annotations(
+    name: str, body: PaperAnnotationsIn, user: str | None = Depends(current_user)
+):
+    if user is None:
+        raise HTTPException(401, "sign in to use paper annotations")
+    path = await asyncio.to_thread(_paper, name, user)
+    paper_hash = await asyncio.to_thread(_paper_content_hash, path)
+    annotations = [item.model_dump(exclude_none=True, exclude_unset=True) for item in body.annotations]
+    await asyncio.to_thread(store.save_paper_annotations, user, paper_hash, annotations)
+    return {"annotations": annotations}
 
 
 def _render(path: Path, page_number: int, dpi: int) -> Path:
@@ -1527,6 +1615,7 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         await asyncio.to_thread(store.delete_projects, user)
         if user is not None:  # with login off there is no user, so there are no facts
             await asyncio.to_thread(store.delete_facts, user)
+            await asyncio.to_thread(store.delete_paper_annotations, user)
     if author:
         await asyncio.to_thread(store.delete_author_rows, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}

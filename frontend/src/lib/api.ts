@@ -51,6 +51,19 @@ export type Source = {
   page_height: number
 }
 
+export type PaperAnnotationColor = 'yellow' | 'green' | 'blue' | 'pink'
+export type PaperAnnotation = {
+  id: string
+  kind: 'highlight' | 'ink' | 'note'
+  page: number
+  color: PaperAnnotationColor
+  rects?: { x0: number; y0: number; x1: number; y1: number }[]
+  points?: { x: number; y: number }[]
+  x?: number
+  y?: number
+  text?: string
+}
+
 export type Claim = {
   claim: string
   citations: Citation[]
@@ -240,6 +253,16 @@ export async function requestBlob(path: string, init?: RequestInit): Promise<Blo
 
 export const api = {
   listAnalyses: () => request<Analysis[]>('/analyses'),
+
+  getPaperAnnotations: (paper: string) =>
+    request<{ annotations: PaperAnnotation[] }>(`/papers/${encodeURIComponent(paper)}/annotations`),
+
+  savePaperAnnotations: (paper: string, annotations: PaperAnnotation[]) =>
+    request<{ annotations: PaperAnnotation[] }>(`/papers/${encodeURIComponent(paper)}/annotations`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ annotations }),
+    }),
 
   getAnalysis: (id: string, signal?: AbortSignal) => request<Analysis>(`/analyses/${id}`, { signal }),
 

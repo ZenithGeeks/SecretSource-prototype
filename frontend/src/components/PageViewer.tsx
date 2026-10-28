@@ -28,6 +28,7 @@ import { API_BASE, type Citation, type CitationMarker, type Source, type Verdict
 import { citationLink, reference } from '../lib/citations'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
+import { PdfAnnotations } from './PdfAnnotations'
 import { Button } from './ui'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -365,6 +366,7 @@ export function PageViewer({
       {expanded && !narrow && (
         <div className="fixed inset-0 z-40 bg-ink/30" onClick={() => setExpanded(false)} aria-hidden />
       )}
+      <PdfAnnotations key={target.paper} paper={target.paper}>
       <aside
         aria-label={`${target.paper}, page ${page}`}
         className={cn(
@@ -461,6 +463,7 @@ export function PageViewer({
             >
               <ChevronRight className="size-4" />
             </IconButton>
+            <PdfAnnotations.Toolbar />
             <span className="flex-1" />
             <IconButton
               label="Zoom out"
@@ -564,6 +567,7 @@ export function PageViewer({
                           loading={<div style={{ height: pageWidth * pageRatio }} />}
                         />
                       )}
+                      <PdfAnnotations.Page page={number} />
                       {number === highlightPage &&
                         target.source?.boxes.map((box, i) => (
                           <Highlight key={i} box={box} source={target.source as Source} verdict={target.verdict} />
@@ -600,6 +604,7 @@ export function PageViewer({
           </div>
         </div>
       </aside>
+      </PdfAnnotations>
     </>
   )
 }

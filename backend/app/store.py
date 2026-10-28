@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS cache (
 )
 """
 
+PAPER_ANNOTATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS paper_annotations (
+    owner      TEXT NOT NULL,
+    paper_hash TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (owner, paper_hash)
+)
+"""
+
 PROJECTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
     id    TEXT PRIMARY KEY,
@@ -173,6 +183,7 @@ def _connect() -> sqlite3.Connection:
         _db.execute(SCHEMA)
         _db.execute(SOURCES_SCHEMA)
         _db.execute(CACHE_SCHEMA)
+        _db.execute(PAPER_ANNOTATIONS_SCHEMA)
         _db.execute(PROJECTS_SCHEMA)
         _db.execute(PREFERENCES_SCHEMA)
         _db.execute(LEARNED_FACTS_SCHEMA)
@@ -634,6 +645,63 @@ def delete_facts(owner: str) -> int:
         return len(_execute_with_retry(query).data)
     with _sqlite() as database:
         cursor = database.execute("DELETE FROM learned_facts WHERE owner = ?", (owner,))
+        database.commit()
+    return cursor.rowcount
+
+
+def load_paper_annotations(owner: str, paper_hash: str) -> list[dict]:
+    """Load one signed-in owner's marks for the exact PDF content."""
+    if _use_supabase():
+        rows = _execute_with_retry(
+            _supabase()
+            .table("paper_annotations")
+            .select("data")
+            .eq("owner", owner)
+            .eq("paper_hash", paper_hash)
+            .limit(1)
+        ).data
+        return (rows[0]["data"] if rows else []) or []
+    with _sqlite() as database:
+        row = database.execute(
+            "SELECT data FROM paper_annotations WHERE owner = ? AND paper_hash = ?",
+            (owner, paper_hash),
+        ).fetchone()
+    return json.loads(row["data"]) if row else []
+
+
+def save_paper_annotations(owner: str, paper_hash: str, annotations: list[dict]) -> None:
+    """Replace one owner's annotation document for one exact PDF."""
+    if _use_supabase():
+        _execute_with_retry(
+            _supabase().table("paper_annotations").upsert(
+                {
+                    "owner": owner,
+                    "paper_hash": paper_hash,
+                    "data": postgres_safe(annotations),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+                on_conflict="owner,paper_hash",
+            )
+        )
+        return
+    with _sqlite() as database:
+        database.execute(
+            "INSERT INTO paper_annotations (owner, paper_hash, data, updated_at) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(owner, paper_hash) DO UPDATE SET "
+            "data = excluded.data, updated_at = CURRENT_TIMESTAMP",
+            (owner, paper_hash, json.dumps(annotations)),
+        )
+        database.commit()
+
+
+def delete_paper_annotations(owner: str) -> int:
+    """Delete all of one owner's paper annotations during researcher/all data removal."""
+    if _use_supabase():
+        query = _supabase().table("paper_annotations").delete().eq("owner", owner)
+        return len(_execute_with_retry(query).data)
+    with _sqlite() as database:
+        cursor = database.execute("DELETE FROM paper_annotations WHERE owner = ?", (owner,))
         database.commit()
     return cursor.rowcount
 
