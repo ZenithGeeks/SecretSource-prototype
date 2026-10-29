@@ -148,7 +148,7 @@ def test_statements_come_first_then_each_verdict_as_its_check_ends(monkeypatch):
 def test_a_question_about_one_paper_is_answered_from_that_paper(monkeypatch):
     asked = {}
 
-    def about_paper(question, paper, path, remembered):
+    def about_paper(question, paper, path, remembered, passages):
         asked.update(question=question, paper=paper, path=path)
         return []
 
@@ -156,6 +156,23 @@ def test_a_question_about_one_paper_is_answered_from_that_paper(monkeypatch):
     events = events_of("who wrote it?", paper=Path("data/papers/ada.pdf"))
     assert asked == {"question": "who wrote it?", "paper": "ada.pdf", "path": Path("data/papers/ada.pdf")}
     assert events == [{"type": "done", "statements": 0}]
+
+
+def test_given_passages_are_answered_from_without_searching_the_paper(monkeypatch):
+    monkeypatch.setattr(assistant.verify, "evidence_from", refuse)
+    read = {}
+
+    def predict(passages, remembered, question):
+        read.update(passages=passages)
+        return SimpleNamespace(statements=["Recall rose by 4 points."])
+
+    monkeypatch.setattr(assistant.dspy, "Predict", lambda signature: predict)
+    monkeypatch.setattr(assistant, "_answer_model", lambda: None)
+    cited = assistant.answer_about_paper(
+        "recall?", "b.pdf", Path("data/papers/b.pdf"), passages=["recall rose by 4 points"]
+    )
+    assert read == {"passages": ["recall rose by 4 points"]}
+    assert [item.text for item in cited] == ["Recall rose by 4 points."]
 
 
 def test_a_statement_with_no_paper_is_unchecked_without_asking_the_judge(monkeypatch):

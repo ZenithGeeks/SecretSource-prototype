@@ -1,7 +1,7 @@
 /**
  * Ask AI in the labeler, for the claim on screen: a review of what the person saved, and
- * questions about the paper or one of the references it cites. The review points things out and
- * never changes a label (docs/labeling.md). The workspace keys this panel by claim, so moving to
+ * questions about the paper, one of the references it cites, or one retrieved passage read with
+ * the claim. The review points things out and never changes a label (docs/labeling.md). The workspace keys this panel by claim, so moving to
  * another claim starts it afresh and stops a review still running.
  */
 
@@ -45,21 +45,35 @@ const VERDICTS: Record<StatementVerdict | 'checking', Verdict> = {
   checking: { label: 'Checking…', tone: 'neutral', icon: Loader2 },
 }
 
+/** A passage the labeler chose to ask about (PassageList's Ask button). `name` is how the chip
+ * reads, such as "#1 OpenAI o1 System Card". */
+export type AskedPassage = { referenceId: string; name: string; page: number | null; text: string }
+
 type Answer = { question: string; statements: Statement[]; status: 'answering' | 'done' | 'failed'; error?: string; note?: string; view?: CommandView; command?: string }
 
 export function AskPanel({
   analysisId,
   claim,
+  wording,
   references,
   reviewBlocked,
   onPoint,
+  passage,
+  askId,
+  onClearPassage,
 }: {
   analysisId: string
   claim: WorkClaim
+  /** The claim as worded on screen: the labeler's edit, if they reworded it. */
+  wording: string
   references: Reference[]
   /** Why the review cannot run yet (nothing saved, or unsaved changes), or null. */
   reviewBlocked: string | null
   onPoint: (pointing: Pointing | null) => void
+  passage: AskedPassage | null
+  /** Changes with each Ask about a passage, which starts a fresh question focused for it. */
+  askId: number
+  onClearPassage: () => void
 }) {
   const review = useReview(analysisId, claim.claim_id, onPoint)
   const cited = references.filter((r) => claim.candidates.some((c) => c.reference_id === r.reference_id))
@@ -118,7 +132,14 @@ export function AskPanel({
         </ul>
         {review.status === 'done' && review.findings.length === 0 && <p className="text-sm text-ink-muted">Nothing to point out.</p>}
       </section>
-      <Question analysisId={analysisId} references={cited} />
+      <Question
+        key={askId}
+        analysisId={analysisId}
+        references={cited}
+        passage={passage}
+        wording={wording}
+        onClearPassage={onClearPassage}
+      />
     </div>
   )
 }
@@ -179,7 +200,19 @@ function useReview(analysisId: string, claimId: string, onPoint: (pointing: Poin
   return { findings, status, error, step, start, show }
 }
 
-function Question({ analysisId, references }: { analysisId: string; references: Reference[] }) {
+function Question({
+  analysisId,
+  references,
+  passage,
+  wording,
+  onClearPassage,
+}: {
+  analysisId: string
+  references: Reference[]
+  passage: AskedPassage | null
+  wording: string
+  onClearPassage: () => void
+}) {
   const [about, setAbout] = useState('')
   const [text, setText] = useState('')
   const [answer, setAnswer] = useState<Answer | null>(null)
@@ -201,7 +234,7 @@ function Question({ analysisId, references }: { analysisId: string; references: 
     askLabeling(
       analysisId,
       question,
-      about,
+      passage ? { reference_id: passage.referenceId, passage: passage.text, claim: wording } : { reference_id: about },
       (event) => {
         if (event.type === 'statement') update((a) => ({ ...a, statements: [...a.statements, event] }))
         else if (event.type === 'verdict')
@@ -243,17 +276,21 @@ function Question({ analysisId, references }: { analysisId: string; references: 
         Ask a question
       </h3>
       <form onSubmit={ask} className="flex flex-col gap-2">
-        <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
-          About
-          <select value={about} onChange={(e) => setAbout(e.target.value)} className="min-h-9 rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink">
-            <option value="">The paper under review</option>
-            {references.map((r) => (
-              <option key={r.reference_id} value={r.reference_id}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {passage ? (
+          <PassageChip passage={passage} onClear={onClearPassage} />
+        ) : (
+          <label className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
+            About
+            <select value={about} onChange={(e) => setAbout(e.target.value)} className="min-h-9 rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink">
+              <option value="">The paper under review</option>
+              {references.map((r) => (
+                <option key={r.reference_id} value={r.reference_id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="flex items-end gap-2">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-ink-muted">
             Question
@@ -263,7 +300,8 @@ function Question({ analysisId, references }: { analysisId: string; references: 
               papers={[]}
               disabled={false}
               label="Question"
-              placeholder="e.g. Which dataset does it report recall on? Or / for commands"
+              placeholder={passage ? 'e.g. Does this passage back the claim?' : 'e.g. Which dataset does it report recall on? Or / for commands'}
+              autoFocus={passage !== null}
               className="min-h-9 w-full rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink placeholder:text-ink-muted"
               menuClassName="absolute bottom-full left-0 z-20 mb-1 w-full"
             />
@@ -274,14 +312,38 @@ function Question({ analysisId, references }: { analysisId: string; references: 
           </Button>
         </div>
       </form>
-      {answer && <AnswerView answer={answer} />}
+      {answer && <AnswerView answer={answer} reading={passage ? 'Reading the passage…' : 'Reading the paper…'} />}
     </section>
+  )
+}
+
+/** The passage a question is about, with the claim it is read with; × goes back to asking a whole paper. */
+function PassageChip({ passage, onClear }: { passage: AskedPassage; onClear: () => void }) {
+  return (
+    <div className="flex flex-col gap-1 text-xs font-medium text-ink-muted">
+      About
+      <div className="flex min-h-9 items-center gap-2 rounded-lg border border-accent bg-accent-soft pl-2 text-sm text-ink">
+        <span className="min-w-0 flex-1 truncate" title={passage.text}>
+          {passage.name}
+          {passage.page != null && ` · p.${passage.page}`}
+        </span>
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label="Stop asking about this passage"
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+      <p className="font-normal">The answer reads only this passage, with the claim as worded on screen.</p>
+    </div>
   )
 }
 
 /** A question and its answer: what was asked, a count of the checks, and each statement with a
  * badge for what the judge found in the passage it cites. */
-function AnswerView({ answer }: { answer: Answer }) {
+function AnswerView({ answer, reading }: { answer: Answer; reading: string }) {
   const { statements } = answer
   const answering = answer.status === 'answering'
   return (
@@ -293,7 +355,7 @@ function AnswerView({ answer }: { answer: Answer }) {
       {statements.length > 0 && <p className="text-xs font-medium text-ink-muted">{answerSummary(statements, answering)}</p>}
       {answering && statements.length === 0 && (
         <p className="flex items-center gap-1.5 text-ink-muted">
-          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> Reading the paper…
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> {reading}
         </p>
       )}
       {statements.length > 0 && (

@@ -166,6 +166,10 @@ class ReviewIn(BaseModel):
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     reference_id: str = Field(default="", max_length=200)  # "" asks the paper under review
+    # Asking about one passage of that reference: the answer reads only it, with the claim (as
+    # worded on screen) for context.
+    passage: str = Field(default="", max_length=4000)
+    claim: str = Field(default="", max_length=2000)
 
 
 class SaveIn(BaseModel):

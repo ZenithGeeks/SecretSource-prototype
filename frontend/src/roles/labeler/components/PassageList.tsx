@@ -5,7 +5,7 @@
  * focused one is shown in full. Below, a form to add a passage retrieval missed.
  */
 
-import { Loader2, Plus, X } from 'lucide-react'
+import { Loader2, Plus, Sparkles, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Button, IconButton, Input, Textarea } from '../../../components/ui'
@@ -20,6 +20,7 @@ import {
 } from '../../../lib/labeling'
 import { askTarget } from '../../../lib/askCursor'
 import { cn } from '../../../lib/utils'
+import type { AskedPassage } from './AskPanel'
 import { Kbd } from './ClaimDecision'
 
 export type Focus = { file: string; passage: string; page: number | null; key: string }
@@ -39,6 +40,20 @@ function useReveal(shown: boolean) {
   return ref
 }
 
+/** Opens Ask on one passage, under the card's own controls. */
+function AskAboutButton({ onAsk }: { onAsk: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onAsk}
+      className="mt-1 flex min-h-8 items-center gap-1.5 self-start rounded-md px-2 text-xs font-medium text-accent hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <Sparkles className="size-3.5" aria-hidden="true" />
+      Ask AI about this passage
+    </button>
+  )
+}
+
 function PassageCard({
   c,
   label,
@@ -46,6 +61,7 @@ function PassageCard({
   status,
   onFocus,
   onJudge,
+  onAsk,
 }: {
   c: Candidate
   label: string
@@ -53,6 +69,7 @@ function PassageCard({
   status: CandidateStatus | undefined
   onFocus: () => void
   onJudge: (status: CandidateStatus) => void
+  onAsk?: () => void
 }) {
   const ref = useReveal(shown)
   return (
@@ -103,6 +120,7 @@ function PassageCard({
           </button>
         ))}
       </div>
+      {onAsk && <AskAboutButton onAsk={onAsk} />}
     </li>
   )
 }
@@ -112,39 +130,44 @@ function AddedCard({
   shown,
   onFocus,
   onRemove,
+  onAsk,
 }: {
   a: AddedPassage
   shown: boolean
   onFocus: () => void
   onRemove: () => void
+  onAsk?: () => void
 }) {
   const ref = useReveal(shown)
   return (
     <li
       ref={ref}
       className={cn(
-        'flex items-start gap-2 rounded-lg border p-3',
+        'flex flex-col rounded-lg border p-3',
         shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
       )}
     >
-      <button
-        type="button"
-        onClick={onFocus}
-        aria-pressed={shown}
-        className="min-w-0 flex-1 rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        {a.page != null && <span className="block text-xs text-ink-muted">p.{a.page}</span>}
-        <span title={shown ? undefined : a.passage} className={cn('block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
-          {a.passage}
-        </span>
-      </button>
-      <IconButton
-        onClick={onRemove}
-        aria-label="Remove this passage"
-        className="lg:size-11 hover:bg-refutes-soft hover:text-refutes"
-      >
-        <X className="size-4" />
-      </IconButton>
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={onFocus}
+          aria-pressed={shown}
+          className="min-w-0 flex-1 rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {a.page != null && <span className="block text-xs text-ink-muted">p.{a.page}</span>}
+          <span title={shown ? undefined : a.passage} className={cn('block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
+            {a.passage}
+          </span>
+        </button>
+        <IconButton
+          onClick={onRemove}
+          aria-label="Remove this passage"
+          className="lg:size-11 hover:bg-refutes-soft hover:text-refutes"
+        >
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      {onAsk && <AskAboutButton onAsk={onAsk} />}
     </li>
   )
 }
@@ -161,6 +184,7 @@ export function PassageList({
   grade,
   search,
   onSearchAgain,
+  onAsk,
 }: {
   claim: WorkClaim
   draft: Draft
@@ -175,6 +199,8 @@ export function PassageList({
   /** The live search for a claim added by hand, while it runs or after it failed. */
   search?: 'searching' | 'failed'
   onSearchAgain?: () => void
+  /** Ask AI about one passage; without it the cards have no Ask button. */
+  onAsk?: (passage: AskedPassage) => void
 }) {
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
@@ -217,6 +243,10 @@ export function PassageList({
                     status={draft.cands[c.cand_id]}
                     onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
                     onJudge={(status) => onJudge(c.cand_id, status)}
+                    onAsk={
+                      onAsk &&
+                      (() => onAsk({ referenceId: id, name: `#${c.rank} ${labelOf(id)}`, page: c.page, text: c.passage }))
+                    }
                   />
                 ))}
               </ul>
@@ -234,6 +264,10 @@ export function PassageList({
                         shown={focus?.key === key}
                         onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key })}
                         onRemove={() => onRemove(a)}
+                        onAsk={
+                          onAsk &&
+                          (() => onAsk({ referenceId: id, name: `Yours · ${labelOf(id)}`, page: a.page, text: a.passage }))
+                        }
                       />
                     )
                   })}
