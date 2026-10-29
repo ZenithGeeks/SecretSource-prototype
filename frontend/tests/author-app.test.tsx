@@ -232,6 +232,65 @@ describe('AuthorApp', () => {
     vi.restoreAllMocks()
   })
 
+  test('the editor has Ask in its own top bar, and the panel opens beside source and preview, with no sidebar', async () => {
+    renderApp('?screen=editor&draft=d1&file=related-work.tex')
+    await waitFor(() => expect(screen.getByLabelText('related-work.tex source').textContent).toContain('\\section{Related work}'))
+    // Full-bleed: no sidebar and no shell toolbar, only the editor's own top bar.
+    expect(screen.queryByRole('complementary', { name: 'Sidebar' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open the menu' })).toBeNull()
+    const topBar = screen.getByRole('banner')
+    // Just "Ask AI" here, not "about your library".
+    expect(within(topBar).getByRole('button', { name: 'Ask AI', pressed: false })).toHaveTextContent(/^Ask AI$/)
+    fireEvent.click(within(topBar).getByRole('button', { name: 'Ask AI', pressed: false }))
+    expect(within(topBar).getByRole('button', { name: 'Ask AI', pressed: true })).toBeInTheDocument()
+
+    const modes = screen.getByRole('group', { name: 'What Ask does' })
+    fireEvent.click(within(modes).getByRole('button', { name: 'Do it' }))
+    // The editor's own examples, about the draft on screen.
+    expect(screen.getByRole('button', { name: 'What do lines 1–20 say?' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Source' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Preview' })).toBeInTheDocument()
+  })
+
+  test('a Do it run started on Home goes on in the editor, reads the draft there, and comes back', async () => {
+    agent.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_screen', args: { screen: 'editor' } }],
+      [{ type: 'tool', id: 'c2', name: 'read_draft', args: { start_line: 1, end_line: 2 } }],
+      [{ type: 'tool', id: 'c3', name: 'open_screen', args: { screen: 'home' } }],
+      [{ type: 'say', text: 'Lines 1 and 2 set up the article.' }, { type: 'done' }],
+    ]
+    renderApp('?screen=home&draft=d1')
+    await screen.findByRole('list', { name: 'Drafts' })
+    doIt('Open my latest draft in the editor')
+
+    await waitFor(() => expect(agent.posts).toHaveLength(4), { timeout: 5000 })
+    expect(agent.posts[1].body).toEqual({ id: 'c1', name: 'open_screen', result: { status: 'done', screen: 'editor' }, role: 'writer' })
+    const read = agent.posts[2].body.result as Record<string, unknown>
+    expect(read).toMatchObject({ file: 'related-work.tex', first_line: 1, last_line: 2, text: '1\t\\documentclass[11pt]{article}\n2\t\\usepackage{amsmath}' })
+    expect(read.bib_keys).toEqual(expect.arrayContaining(['khattab2020']))
+    expect(agent.posts[3].body).toEqual({ id: 'c3', name: 'open_screen', result: { status: 'done', screen: 'home' }, role: 'writer' })
+
+    // One conversation the whole way: the panel was never remounted.
+    expect(await screen.findByText('Lines 1 and 2 set up the article.')).toBeInTheDocument()
+    expect(screen.getByText('Open my latest draft in the editor')).toBeInTheDocument()
+    expect(screen.getByText('Reading the draft')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Check a draft' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Sidebar' })).toBeInTheDocument()
+  })
+
+  test('the editor is not a screen the agent can open until a draft is selected', async () => {
+    agent.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_screen', args: { screen: 'editor' } }],
+      [{ type: 'say', text: 'Pick a draft first.' }, { type: 'done' }],
+    ]
+    renderApp('?screen=library')
+    await screen.findAllByRole('navigation')
+    doIt('Open the editor')
+    await waitFor(() => expect(agent.posts).toHaveLength(2))
+    expect(agent.posts[1].body.result).toEqual({ status: 'error', message: 'no screen editor; screens: home, library, graph, history' })
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+  })
+
   test('a bookmarked ?screen=find-source (the removed tab) lands on Home', async () => {
     renderApp('?screen=find-source&q=late+interaction')
     await screen.findAllByRole('navigation')

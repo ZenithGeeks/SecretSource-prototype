@@ -259,7 +259,16 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
     if (parts.length === 2 && method === 'GET') return json([...gateway.drafts.values()].map((d) => draftView(gateway, d)).sort((a, b) => b.updated.localeCompare(a.updated)))
     if (parts.length === 2 && method === 'POST') {
       const files = ((body?.files as { name: string; content: string }[] | undefined) ?? []).map((f) => ({ ...f, kind: kindOf(f.name) }))
-      const draft: StoredDraft = { id: id('draft'), projectId: (body?.projectId as string | null) ?? null, title: String(body?.title ?? 'Untitled draft'), version: 1, files: files.length ? files : [{ name: 'main.tex', kind: 'tex', content: '' }], pdfs: {}, created: now(), updated: now(), savedAt: now() }
+      // As the real route: no title, or the bare default, is the next free "Untitled draft N".
+      const wanted = String(body?.title ?? '').split(/\s+/).filter(Boolean).join(' ')
+      const taken = new Set([...gateway.drafts.values()].map((d) => d.title))
+      let title = wanted && wanted !== 'Untitled draft' ? wanted : 'Untitled draft'
+      if (title === 'Untitled draft' && taken.has(title)) {
+        let n = 2
+        while (taken.has(`Untitled draft ${n}`)) n += 1
+        title = `Untitled draft ${n}`
+      }
+      const draft: StoredDraft = { id: id('draft'), projectId: (body?.projectId as string | null) ?? null, title, version: 1, files: files.length ? files : [{ name: 'main.tex', kind: 'tex', content: '' }], pdfs: {}, created: now(), updated: now(), edited: now(), savedAt: now() }
       markSaved(draft)
       gateway.drafts.set(draft.id, draft)
       return json(draftView(gateway, draft))
@@ -276,9 +285,16 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
     if (!draft) return fail(404, 'no such draft')
     if (parts.length === 3 && method === 'GET') return json(draftView(gateway, draft))
     if (parts.length === 3 && method === 'PATCH') {
-      if (body?.title) draft.title = String(body.title)
+      // As the real route: the title is trimmed to one line, refused when empty or over 120
+      // characters, and a rename or a move leaves `updated` (the text's version) alone.
+      if (body && 'title' in body) {
+        if (gateway.failWrites) return fail(503, 'the gateway is down')
+        const title = String(body.title ?? '').split(/\s+/).filter(Boolean).join(' ')
+        if (!title) return fail(400, 'a draft needs a title')
+        if (title.length > 120) return fail(400, 'a draft title is at most 120 characters')
+        draft.title = title
+      }
       if ('projectId' in (body ?? {})) draft.projectId = (body?.projectId as string) || null
-      draft.updated = now()
       return json(draftView(gateway, draft))
     }
     if (parts.length === 3 && method === 'DELETE') {
@@ -299,6 +315,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         if (existing) existing.content = content
         else draft.files.push({ name, kind: kindOf(name), content })
         draft.updated = now()
+        draft.edited = draft.updated
         return json(draftView(gateway, draft))
       }
       if (method === 'DELETE') {

@@ -170,16 +170,37 @@
   text-align: center;
 }
 
+/* \includegraphics: the draft's image, or a box of the same width naming the missing file. */
+.ss-preview .ss-image {
+  display: block;
+  margin: 0.6em auto;
+  max-width: 100%;
+  height: auto;
+}
+
 .ss-preview .ss-graphic {
+  box-sizing: border-box;
   margin: 0.6em auto;
   padding: 1.4em 1em;
-  max-width: 80%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   border: 1px dashed var(--color-border-subtle);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85em;
   text-align: center;
   color: var(--color-ink-muted);
+}
+
+/* A block of the body that would not compile, where it stood (renderIsolated). */
+.ss-preview .ss-block-error {
+  margin: 0.8em 0;
+  padding: 0.5em 0.75em;
+  border-left: 3px solid var(--color-insufficient);
+  background: var(--color-insufficient-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8em;
+  color: var(--color-insufficient);
 }
 
 .ss-preview .ss-unknown {
@@ -193,6 +214,13 @@
   line-height: 1.4;
   color: var(--color-ink-muted);
   vertical-align: baseline;
+}
+
+/* \texttt, and the typewriter lines of the verbatim, tabular and algorithmic rewrites:
+   LaTeX.js's own stylesheet (which would set the font) is not loaded. */
+.ss-preview .tt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
 }
 
 .ss-preview .list.flushleft .tt {

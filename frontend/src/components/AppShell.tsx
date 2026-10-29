@@ -9,6 +9,9 @@
  * (the labeler's two PDFs side by side). `foldable` adds a button that folds the sidebar to a
  * rail of nav icons, remembered in this browser. `panel` is a drawer on the right, below
  * the toolbar (the Ask panel), and `toolbarLead` comes first among the toolbar's actions.
+ * `bare` is for a full-bleed screen with its own top bar (the Author's editor): no sidebar, phone
+ * top bar or toolbar, and the content fills the window. The panel stays where it is in the tree,
+ * so moving between a bare screen and a framed one does not remount it (a Do it run goes on).
  *
  * Toolbar: pass `breadcrumb` (["Analyses", "group-norm-2018.pdf"], the last item is the
  * current page) to show it, and fill its right side from any screen with
@@ -233,6 +236,7 @@ export function AppShell<K extends string>({
   notifications,
   panel,
   toolbarLead,
+  bare = false,
   children,
 }: {
   nav: NavEntry<K>[]
@@ -256,6 +260,8 @@ export function AppShell<K extends string>({
   notifications?: ReactNode
   panel?: ReactNode
   toolbarLead?: ReactNode
+  /** A full-bleed screen with its own top bar: no sidebar, phone top bar or toolbar. */
+  bare?: boolean
   children: ReactNode
 }) {
   // Below the lg breakpoint the sidebar would leave a phone almost no room, so it moves into
@@ -338,15 +344,17 @@ export function AppShell<K extends string>({
 
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
-        <Brand compact />
-        <div className="flex items-center gap-1">
-          {notifications}
-          <IconButton onClick={() => setMenuOpen(true)} aria-label="Open the menu" aria-expanded={menuOpen} className="text-ink">
-            <Menu className="size-5" />
-          </IconButton>
-        </div>
-      </header>
+      {!bare && (
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
+          <Brand compact />
+          <div className="flex items-center gap-1">
+            {notifications}
+            <IconButton onClick={() => setMenuOpen(true)} aria-label="Open the menu" aria-expanded={menuOpen} className="text-ink">
+              <Menu className="size-5" />
+            </IconButton>
+          </div>
+        </header>
+      )}
 
       {menuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
@@ -366,61 +374,63 @@ export function AppShell<K extends string>({
       {/* Solid (not translucent) and viewport-tall, so the profile footer stays pinned to the
           bottom of the screen, not the bottom of a long page. Folded, it keeps only the nav
           icons: the profile menu and the `sidebar` slot come back when it is opened. */}
-      <aside
-        aria-label="Sidebar"
-        data-folded={folded || undefined}
-        className={cn(
-          'hidden shrink-0 flex-col border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen',
-          folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-y-auto px-3 pb-3.5',
-        )}
-      >
-        <div className={cn('flex items-center', folded ? 'flex-col gap-2' : 'gap-0.5 px-2')}>
-          {!folded && (
-            <div className="mr-auto">
-              <Brand compact />
-            </div>
+      {!bare && (
+        <aside
+          aria-label="Sidebar"
+          data-folded={folded || undefined}
+          className={cn(
+            'hidden shrink-0 flex-col border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen',
+            folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-y-auto px-3 pb-3.5',
           )}
-          {/* One button for both states, so keyboard focus stays on it after a click. */}
-          {foldable && (
-            <IconButton
-              onClick={() => fold(!folded)}
-              aria-label={folded ? 'Open the sidebar' : 'Fold the sidebar'}
-              aria-expanded={!folded}
-              title={folded ? 'Open the sidebar' : 'Fold the sidebar'}
-              className={folded ? 'size-10 lg:size-10' : 'size-8'}
-            >
-              {folded ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-            </IconButton>
-          )}
-          {notifications}
-        </div>
-        {folded ? (
-          <nav aria-label="Main" className="flex flex-col gap-0.5">
-            {nav.map(({ key, label, icon: NavIcon }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => navigate(key)}
-                data-ask-target={askTarget({ kind: 'screen', id: key })}
-                aria-label={label}
-                title={label}
-                aria-current={active === key ? 'page' : undefined}
-                className={cn(
-                  'flex size-10 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-accent',
-                  active === key ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-accent-soft/60',
-                )}
+        >
+          <div className={cn('flex items-center', folded ? 'flex-col gap-2' : 'gap-0.5 px-2')}>
+            {!folded && (
+              <div className="mr-auto">
+                <Brand compact />
+              </div>
+            )}
+            {/* One button for both states, so keyboard focus stays on it after a click. */}
+            {foldable && (
+              <IconButton
+                onClick={() => fold(!folded)}
+                aria-label={folded ? 'Open the sidebar' : 'Fold the sidebar'}
+                aria-expanded={!folded}
+                title={folded ? 'Open the sidebar' : 'Fold the sidebar'}
+                className={folded ? 'size-10 lg:size-10' : 'size-8'}
               >
-                <NavIcon className="size-4" />
-              </button>
-            ))}
-          </nav>
-        ) : (
-          sidebarContent
-        )}
-      </aside>
+                {folded ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+              </IconButton>
+            )}
+            {notifications}
+          </div>
+          {folded ? (
+            <nav aria-label="Main" className="flex flex-col gap-0.5">
+              {nav.map(({ key, label, icon: NavIcon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => navigate(key)}
+                  data-ask-target={askTarget({ kind: 'screen', id: key })}
+                  aria-label={label}
+                  title={label}
+                  aria-current={active === key ? 'page' : undefined}
+                  className={cn(
+                    'flex size-10 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-accent',
+                    active === key ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-accent-soft/60',
+                  )}
+                >
+                  <NavIcon className="size-4" />
+                </button>
+              ))}
+            </nav>
+          ) : (
+            sidebarContent
+          )}
+        </aside>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {breadcrumb && (
+        {breadcrumb && !bare && (
           // Translucent so the content scrolls under it, blurred. Under the phone top bar it
           // sticks just below it (the bar is 3.75rem tall).
           <div className="sticky top-[3.75rem] z-20 flex min-h-[52px] items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8">
@@ -431,20 +441,30 @@ export function AppShell<K extends string>({
             </div>
           </div>
         )}
-        <ToolbarSlot.Provider value={breadcrumb ? actionsEl : null}>
+        <ToolbarSlot.Provider value={breadcrumb && !bare ? actionsEl : null}>
           <div className="flex min-w-0 flex-1">
             <main
               className={cn(
-                'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-                wide === 'full' ? 'max-w-none' : wide ? 'max-w-[110rem]' : 'max-w-6xl',
+                bare
+                  ? 'flex h-screen w-full min-w-0 flex-1 flex-col overflow-hidden'
+                  : 'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
+                !bare && (wide === 'full' ? 'max-w-none' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
               )}
             >
               {children}
             </main>
-            {/* Sticks under the 52px toolbar and stays as tall as the window while the page scrolls.
-                On a phone the panel itself covers the screen. */}
+            {/* Sticks under the 52px toolbar (the top, when bare) and stays as tall as the window
+                while the page scrolls. On a phone the panel itself covers the screen. */}
             {panel && (
-              <div className="lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0">{panel}</div>
+              <div
+                className={
+                  bare
+                    ? 'lg:sticky lg:top-0 lg:h-screen lg:w-[400px] lg:shrink-0'
+                    : 'lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0'
+                }
+              >
+                {panel}
+              </div>
             )}
           </div>
         </ToolbarSlot.Provider>

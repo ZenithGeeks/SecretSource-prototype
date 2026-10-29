@@ -35,7 +35,7 @@ describe('LaTeX.js on a thesis chapter', () => {
     expect(root.querySelector('.ss-footnote')?.textContent).toBe('[Reported on MS MARCO dev.]')
     expect(root.querySelector('a[href="https://github.com/stanford-futuredata/ColBERT"]')).toBeTruthy()
     expect(root.querySelectorAll('ul li')).toHaveLength(2)
-    expect(root.querySelector('.ss-graphic')?.textContent).toBe('figure · figures/architecture.pdf')
+    expect(root.querySelector('.ss-graphic')?.textContent).toBe('Image not uploaded: figures/architecture.pdf')
     expect([...root.querySelectorAll('.ss-caption')].map((c) => c.textContent?.replace(/‐/g, '-'))).toEqual([
       'The late-interaction architecture.',
       'Index size and quality on MS MARCO.',

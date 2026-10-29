@@ -26,10 +26,13 @@
  *    known unknowns costs one parse; an entry that no longer matches anything is dropped,
  *    and only the MAX_SCOPES most recently rendered package sets are remembered at all.
  *    Only a real syntax error — an unclosed group, a missing \end{document} — is reported.
+ *    `renderIsolated` goes one step further: when the whole file fails, it renders the body
+ *    section by section, so only the broken block becomes an inline error with its line.
  * 3. `SECRETSOURCE_MACROS` adds the commands the chapter still needs as LaTeX.js custom
- *    macros (\footnote, \url, \eqref, \pageref, \caption, \includegraphics as a labelled
- *    box, the placeholder). LaTeX.js copies the *enumerable* members of the macro object,
- *    so they are assigned on the prototype, never written as class methods.
+ *    macros (\footnote, \url, \eqref, \pageref, \caption, \includegraphics as the draft's
+ *    image or a sized box naming it, the placeholder). LaTeX.js copies the *enumerable*
+ *    members of the macro object, so they are assigned on the prototype, never written as
+ *    class methods.
  *
  * After rendering, `decorateCitations` swaps the markers for `<a class="ss-cite">[n]</a>`
  * and wraps the sentence each one ends, and `appendReferences` builds the list from the
@@ -64,9 +67,33 @@ export const BUILT_IN_PACKAGES = new Set(['color', 'xcolor', 'echo', 'gensymb', 
  * nothing worth a notice. */
 const KATEX_COVERS = new Set(['amsmath', 'amssymb', 'amsfonts', 'amsthm', 'mathtools'])
 
-/** Packages LaTeX.js lacks that preparePreview stands in for itself (comment: its
- * environments are blanked out, as LaTeX hides them), so they get no notice either. */
-const EMULATED = new Set(['comment'])
+/** Packages LaTeX.js lacks that preparePreview stands in for itself, so they get no notice
+ * either: comment (its environments are blanked out, as LaTeX hides them), subcaption, subfig
+ * and caption (a sub-figure becomes a block with its caption), and algorithm, algpseudocode
+ * and algorithmic (an algorithm becomes numbered monospace lines). */
+const EMULATED = new Set(['comment', 'subcaption', 'subfig', 'caption', 'algorithm', 'algpseudocode', 'algorithmic', 'algorithmicx'])
+
+/** What the notice says for a package whose effect the preview cannot show, where its bare
+ * name would not say what is missing. */
+const NOT_SHOWN: Record<string, string> = { fancyhdr: 'fancyhdr (page headers and footers are not shown)' }
+
+/** Page styles, headers and footers: the preview is one page with none. Dropped wherever they
+ * are, with no notice of their own (fancyhdr's covers them). */
+const PAGE_STYLE_COMMANDS = ['fancyhf', 'fancyhead', 'fancyfoot', 'lhead', 'chead', 'rhead', 'lfoot', 'cfoot', 'rfoot', 'fancypagestyle', 'pagestyle', 'thispagestyle']
+
+/** What each page-style command takes: \pagestyle{s} and \thispagestyle{s} one group,
+ * \fancypagestyle{name}{defs} two, the header and footer commands an optional `[places]` and
+ * one group. */
+function pageStyleShape(name: string): { count: number; optional?: boolean } {
+  if (name === 'pagestyle' || name === 'thispagestyle') return { count: 1 }
+  if (name === 'fancypagestyle') return { count: 2 }
+  return { count: 1, optional: true }
+}
+
+/** Commands whose first argument is a bare control sequence, as in
+ * `\algrenewcommand\algorithmicrequire{…}`: the preamble filter takes it with the command
+ * instead of reading it as a statement of its own. */
+const TAKES_A_MACRO = new Set(['algrenewcommand', 'algnewcommand', 'algrenewtext', 'algnewtext', 'renewcommand', 'newcommand', 'providecommand', 'DeclareRobustCommand', 'def', 'let'])
 
 /** Whether the file loads `name` (in any \usepackage, with or without options). */
 function usesPackage(source: string, name: string): boolean {
@@ -80,7 +107,8 @@ function usesPackage(source: string, name: string): boolean {
 export const REWRITES: readonly { construct: string; shownAs: string }[] = [
   { construct: '\\cite, \\citep, \\citet, \\parencite, \\textcite, \\autocite', shownAs: 'a [n] marker linked to the .bib entry; an unfinished \\cite{… becomes [?]' },
   { construct: '\\usepackage of a package LaTeX.js does not bundle (geometry, booktabs, tikz, …)', shownAs: 'dropped and named in the "ignored" notice; the bundled ones (multicol, textgreek, gensymb, textcomp, stix, hyperref, graphicx, xcolor, …) load; amsmath is dropped silently, KaTeX covers it' },
-  { construct: 'anything else in the preamble (\\newtheorem, \\geometry, \\DeclareMathOperator, \\hypersetup, …)', shownAs: 'dropped and named in the notice; \\documentclass, \\title, \\author, \\date, \\setcounter, \\setlength and \\pagestyle stay' },
+  { construct: 'anything else in the preamble (\\newtheorem, \\geometry, \\DeclareMathOperator, \\hypersetup, \\algrenewcommand, …)', shownAs: 'dropped and named in the notice; \\documentclass, \\title, \\author, \\date, \\setcounter and \\setlength stay' },
+  { construct: '\\pagestyle, \\thispagestyle and fancyhdr (\\fancyhf, \\fancyhead, \\fancyfoot, …), anywhere', shownAs: 'dropped: the preview is one page with no header or footer; the notice says "fancyhdr (page headers and footers are not shown)" once' },
   { construct: 'a macro or environment LaTeX.js does not know, in the body', shownAs: 'a grey box with its name where it was; the rest of the page still renders, and the notice lists it with its lines' },
   { construct: '\\setcounter / \\setlength of a counter or length LaTeX.js does not have', shownAs: 'dropped and listed in the notice' },
   { construct: 'comment environments, with \\usepackage{comment}', shownAs: 'nothing, as LaTeX shows nothing (the package is not bundled, so the preview blanks them itself)' },
@@ -88,14 +116,18 @@ export const REWRITES: readonly { construct: string; shownAs: string }[] = [
   { construct: '\\newcommand / \\renewcommand with plain or #1…#3 bodies', shownAs: 'expanded in the source before parsing' },
   { construct: 'equation, equation*, displaymath', shownAs: 'display math \\[ … \\], \\label and \\nonumber removed' },
   { construct: 'align, align*, gather, gather*, multline, multline*, eqnarray', shownAs: 'display math with an aligned block' },
-  { construct: 'figure, figure*, table, table*, subfigure, minipage', shownAs: 'a centered block; \\includegraphics becomes a labelled box' },
+  { construct: 'figure, figure*, table, table*, subfigure, minipage', shownAs: 'a centered block with its caption' },
+  { construct: '\\subcaptionbox{caption}{content}, \\subfloat[caption]{content}', shownAs: 'the content, then the caption, in a centered block' },
+  { construct: 'algorithm with algorithmic (algpseudocode: \\State, \\If, \\For, \\While, \\Function, \\Return, \\Comment, …)', shownAs: '"Algorithm n:" and its caption, then numbered monospace lines indented by nesting' },
+  { construct: 'thebibliography with \\bibitem', shownAs: 'a numbered References list; \\cite numbers follow it instead of the .bib' },
   { construct: 'tabular, tabularx, array', shownAs: 'one line per row, cells separated by │; rules dropped' },
   { construct: 'verbatim, lstlisting, minted', shownAs: 'typewriter lines' },
   { construct: 'theorem-like environments (theorem, lemma, proof, definition, remark, corollary)', shownAs: 'a bold heading and the text' },
   { construct: '\\footnote, \\thanks', shownAs: 'the note in superscript brackets' },
   { construct: '\\eqref, \\pageref', shownAs: '(label) / ?' },
   { construct: '\\url, \\href', shownAs: 'a link' },
-  { construct: '\\includegraphics[width=…\\linewidth]{file}', shownAs: 'a box naming the file (images are not uploaded with a draft)' },
+  { construct: '\\includegraphics[width=0.49\\textwidth | 5cm | scale=0.5]{file}', shownAs: 'the image at that width when the draft has it, else a box of that width saying "Image not uploaded: file" (drafts keep no images yet)' },
+  { construct: 'a block of the body that will not compile (an unclosed group, …)', shownAs: 'an inline error with its line where the block stood; the other sections still render' },
 ]
 
 /** The LaTeX.js-safe version of a file, and what the preview left out of it. `source` has
@@ -105,6 +137,9 @@ export type PreparedSource = {
   /** What was dropped, in the author's words, in source order, each once: "geometry",
    * "\\newtheorem", "multicols (shown as one column)". Empty when nothing was. */
   ignored: string[]
+  /** The keys of the file's own thebibliography, in order: its \cite numbers come from these
+   * (the page shows that list) instead of the .bib. Empty when it has none. */
+  bibitems: string[]
 }
 
 function lineCount(text: string): number {
@@ -138,8 +173,11 @@ export function preparePreview(content: string): PreparedSource {
   s = s.replace(/^[ \t]*\\(?:bibliographystyle|bibliography|input|include|graphicspath|hypersetup|nocite|addbibresource|printbibliography|listoffigures|listoftables|linespread|onehalfspacing|doublespacing)\b.*$/gm, '')
   s = s.replace(/\\(?:vspace|hspace)\*?\{[^}]*\}/g, '')
   s = s.replace(/\\(?:centering|raggedright|raggedleft|noindent|par|small|footnotesize|scriptsize|normalsize|large|Large|LARGE|huge|Huge)\b(?![A-Za-z])/g, '')
+  // Each takes exactly its own arguments, so a `{…}` group on the next line stays text.
+  s = replaceCommands(s, PAGE_STYLE_COMMANDS, () => '', pageStyleShape)
   s = rewriteMath(s)
-  s = rewriteEnvironments(s)
+  const bibitems: string[] = []
+  s = rewriteEnvironments(s, bibitems)
   s = s
     .replace(CITE, (_, keys: string) =>
       keys
@@ -150,7 +188,7 @@ export function preparePreview(content: string): PreparedSource {
         .join(''),
     )
     .replace(UNFINISHED_CITE, `${MARKER_OPEN}?${MARKER_CLOSE}`)
-  return { source: s, ignored }
+  return { source: s, ignored, bibitems }
 }
 
 /** The LaTeX.js-safe version of a file (see preparePreview). */
@@ -162,7 +200,7 @@ export function prepareSource(content: string): string {
 
 /** What may precede \begin{document}: LaTeX.js accepts these there (a \setcounter or
  * \setlength of something it lacks is caught by renderLatex) and nothing else. */
-const PREAMBLE_ALLOWED = new Set(['documentclass', 'title', 'author', 'date', 'setcounter', 'setlength', 'pagestyle', 'makeatletter', 'makeatother'])
+const PREAMBLE_ALLOWED = new Set(['documentclass', 'title', 'author', 'date', 'setcounter', 'setlength', 'makeatletter', 'makeatother'])
 
 /** The end of the balanced group opening at `open` (`{` … `}` or `[` … `]`), or -1 when it
  * never closes. A backslash escapes the next character; `%` starts a comment to the end of
@@ -204,6 +242,93 @@ function argumentsEnd(text: string, from: number): number {
   }
 }
 
+/** Where `count` bare control sequences after `from` end (spaces before each allowed), or
+ * `from` when there are none: `\algorithmicrequire` in `\algrenewcommand\algorithmicrequire`. */
+function macroTokensEnd(text: string, from: number, count: number): number {
+  let i = from
+  for (let n = 0; n < count; n += 1) {
+    let j = i
+    while (j < text.length && /\s/.test(text[j])) j += 1
+    const token = text[j] === '\\' ? text.slice(j + 1).match(/^(?:[A-Za-z@]+|.)/)?.[0] : undefined
+    if (!token) return i
+    i = j + 1 + token.length
+  }
+  return i
+}
+
+/** The brace groups after a command name at `from`: an optional `[…]` first when `optional`,
+ * then exactly `count` `{…}` groups, with spaces or newlines between. Their contents and where
+ * they end; null when a required group is missing or never closes. */
+function commandArguments(text: string, from: number, count: number, optional = false): { optional?: string; args: string[]; end: number } | null {
+  const skip = (at: number) => {
+    let j = at
+    while (j < text.length && /\s/.test(text[j])) j += 1
+    return j
+  }
+  let i = from
+  let opt: string | undefined
+  if (optional && text[skip(i)] === '[') {
+    const open = skip(i)
+    const close = groupEnd(text, open)
+    if (close === -1) return null
+    opt = text.slice(open + 1, close)
+    i = close + 1
+  }
+  const args: string[] = []
+  for (let n = 0; n < count; n += 1) {
+    const open = skip(i)
+    if (text[open] !== '{') return null
+    const close = groupEnd(text, open)
+    if (close === -1) return null
+    args.push(text.slice(open + 1, close))
+    i = close + 1
+  }
+  return { optional: opt, args, end: i }
+}
+
+/**
+ * Every use of the commands in `names` (not a longer name that starts with one) replaced by
+ * what `render` makes of its arguments. `shape` says what each takes (see commandArguments);
+ * by default all the `[…]` and `{…}` groups that follow, as `args` in order. A use whose
+ * arguments are missing is left as it is. The replacement keeps the line count.
+ */
+function replaceCommands(
+  text: string,
+  names: readonly string[],
+  render: (name: string, args: string[], optional: string | undefined) => string,
+  shape?: (name: string) => { count: number; optional?: boolean },
+): string {
+  const pattern = new RegExp(`\\\\(${names.map(escapeRegExp).join('|')})\\*?(?![A-Za-z@])`, 'g')
+  let out = ''
+  let last = 0
+  for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
+    const start = m.index
+    const from = start + m[0].length
+    let args: string[]
+    let optional: string | undefined
+    let end: number
+    if (shape) {
+      const { count, optional: takesOptional } = shape(m[1])
+      const found = commandArguments(text, from, count, takesOptional)
+      if (!found) continue
+      ;({ args, optional, end } = found)
+    } else {
+      end = argumentsEnd(text, from)
+      args = []
+      for (let i = from; i < end; ) {
+        while (/\s/.test(text[i])) i += 1
+        const close = groupEnd(text, i)
+        args.push(text.slice(i + 1, close))
+        i = close + 1
+      }
+    }
+    out += text.slice(last, start) + sameLines(text.slice(start, end), render(m[1], args, optional))
+    last = end
+    pattern.lastIndex = end
+  }
+  return out + text.slice(last)
+}
+
 /** `\usepackage[opts]{a,b}` as LaTeX.js can take it: the built-in packages without options,
  * or nothing. The others are reported. */
 function rewriteUsepackage(statement: string, note: (what: string) => void): string {
@@ -212,7 +337,7 @@ function rewriteUsepackage(statement: string, note: (what: string) => void): str
     .map((n) => n.trim())
     .filter(Boolean)
   const kept = names.filter((n) => BUILT_IN_PACKAGES.has(n))
-  for (const n of names) if (!BUILT_IN_PACKAGES.has(n) && !KATEX_COVERS.has(n) && !EMULATED.has(n)) note(n)
+  for (const n of names) if (!BUILT_IN_PACKAGES.has(n) && !KATEX_COVERS.has(n) && !EMULATED.has(n)) note(NOT_SHOWN[n] ?? n)
   return kept.length ? `\\usepackage{${kept.join(',')}}` : ''
 }
 
@@ -239,11 +364,13 @@ function filterPreamble(source: string, note: (what: string) => void): string {
       i = end
     } else if (ch === '\\') {
       const name = preamble.slice(i + 1).match(/^(?:[A-Za-z@]+\*?|.)/)?.[0] ?? ''
-      const end = argumentsEnd(preamble, i + 1 + name.length)
-      const statement = preamble.slice(i, end)
       const bare = name.replace(/\*$/, '')
+      const after = TAKES_A_MACRO.has(bare) ? macroTokensEnd(preamble, i + 1 + name.length, bare === 'let' ? 2 : 1) : i + 1 + name.length
+      const end = argumentsEnd(preamble, after)
+      const statement = preamble.slice(i, end)
       if (PREAMBLE_ALLOWED.has(bare)) out += statement
       else if (bare === 'usepackage') out += sameLines(statement, rewriteUsepackage(statement, note))
+      else if (PAGE_STYLE_COMMANDS.includes(bare)) out += sameLines(statement, '')
       else {
         if (/^[A-Za-z@]/.test(bare)) note(`\\${bare}`)
         out += sameLines(statement, '')
@@ -303,8 +430,135 @@ function escapeText(text: string): string {
 
 const THEOREM_ENVS = ['theorem', 'lemma', 'proof', 'definition', 'remark', 'corollary', 'proposition', 'example']
 
-function rewriteEnvironments(source: string): string {
+/** algpseudocode's statements: what each prints (`#` for its arguments, in order) and how it
+ * moves the indentation. Unnumbered ones get no line number, as in LaTeX. */
+type AlgStep = { words: string; args: number; outdent?: boolean; indent?: boolean; unnumbered?: boolean }
+const ALG_STEPS: Record<string, AlgStep> = {
+  State: { words: '', args: 0 },
+  Statex: { words: '', args: 0, unnumbered: true },
+  Require: { words: '\\textbf{Require:}', args: 0, unnumbered: true },
+  Ensure: { words: '\\textbf{Ensure:}', args: 0, unnumbered: true },
+  Input: { words: '\\textbf{Input:}', args: 0, unnumbered: true },
+  Output: { words: '\\textbf{Output:}', args: 0, unnumbered: true },
+  If: { words: '\\textbf{if} # \\textbf{then}', args: 1, indent: true },
+  ElsIf: { words: '\\textbf{else if} # \\textbf{then}', args: 1, outdent: true, indent: true },
+  Else: { words: '\\textbf{else}', args: 0, outdent: true, indent: true },
+  EndIf: { words: '\\textbf{end if}', args: 0, outdent: true },
+  For: { words: '\\textbf{for} # \\textbf{do}', args: 1, indent: true },
+  ForAll: { words: '\\textbf{for all} # \\textbf{do}', args: 1, indent: true },
+  EndFor: { words: '\\textbf{end for}', args: 0, outdent: true },
+  While: { words: '\\textbf{while} # \\textbf{do}', args: 1, indent: true },
+  EndWhile: { words: '\\textbf{end while}', args: 0, outdent: true },
+  Repeat: { words: '\\textbf{repeat}', args: 0, indent: true },
+  Until: { words: '\\textbf{until} #', args: 1, outdent: true },
+  Loop: { words: '\\textbf{loop}', args: 0, indent: true },
+  EndLoop: { words: '\\textbf{end loop}', args: 0, outdent: true },
+  Function: { words: '\\textbf{function} #(#)', args: 2, indent: true },
+  EndFunction: { words: '\\textbf{end function}', args: 0, outdent: true },
+  Procedure: { words: '\\textbf{procedure} #(#)', args: 2, indent: true },
+  EndProcedure: { words: '\\textbf{end procedure}', args: 0, outdent: true },
+}
+
+/** algpseudocode's commands inside a statement, with what each prints. */
+const ALG_INLINE: Record<string, { args: number; words: string }> = {
+  Return: { args: 0, words: '\\textbf{return}' },
+  Comment: { args: 1, words: '~~$\\triangleright$ #' },
+  Call: { args: 2, words: '#(#)' },
+  True: { args: 0, words: '\\textbf{true}' },
+  False: { args: 0, words: '\\textbf{false}' },
+  And: { args: 0, words: '\\textbf{and}' },
+  Or: { args: 0, words: '\\textbf{or}' },
+  Not: { args: 0, words: '\\textbf{not}' },
+  To: { args: 0, words: '\\textbf{to}' },
+}
+
+/** `words` with each `#` replaced by the next argument, on one line. */
+function fill(words: string, args: string[]): string {
+  let i = 0
+  return words.replace(/#/g, () => (args[i++] ?? '').replace(/\s+/g, ' ').trim())
+}
+
+/** An algorithmic block as numbered monospace lines (every `every`-th numbered, as
+ * `\begin{algorithmic}[every]`; none when 0), indented by its If/For/While nesting. */
+function rewriteAlgorithmic(every: number, body: string): string {
+  const text = replaceCommands(
+    body.replace(/(?<!\\)%[^\n]*/g, ''),
+    Object.keys(ALG_INLINE),
+    (name, args) => fill(ALG_INLINE[name].words, args),
+    (name) => ({ count: ALG_INLINE[name].args }),
+  )
+  const steps = [...text.matchAll(new RegExp(`\\\\(${Object.keys(ALG_STEPS).join('|')})(?![A-Za-z])`, 'g'))]
+  const lines: string[] = []
+  let depth = 0
+  let number = 0
+  steps.forEach((m, k) => {
+    const step = ALG_STEPS[m[1]]
+    const from = (m.index ?? 0) + m[0].length
+    const found = commandArguments(text, from, step.args) ?? { args: [], end: from }
+    const rest = text.slice(found.end, steps[k + 1]?.index ?? text.length).replace(/\s+/g, ' ').trim()
+    if (step.outdent) depth = Math.max(0, depth - 1)
+    if (!step.unnumbered) number += 1
+    const label = every > 0 ? (!step.unnumbered && number % every === 0 ? `${number}:` : '').padStart(4, '~') + '~' : ''
+    lines.push(`\\texttt{${label}${'~~'.repeat(depth)}${[fill(step.words, found.args), rest].filter(Boolean).join(' ')}}`)
+    if (step.indent) depth += 1
+  })
+  return `\\begin{flushleft}${lines.join('\\\\ ')}\\end{flushleft}`
+}
+
+/** \includegraphics's width as the preview sizes it: a fraction of \textwidth, \linewidth or
+ * \columnwidth as a percentage ("49%"), an absolute width as a CSS length ("5cm"), a scale as
+ * "scale 0.5" (of the image's own size), or "" when the options set none of these. */
+export function graphicWidth(options: string): string {
+  const width = options.match(/(?:^|[[,\s])width\s*=\s*([\d.]*)\s*(\\(?:textwidth|linewidth|columnwidth|hsize)|cm|mm|in|pt|bp|pc|em|ex)(?![A-Za-z])/)
+  if (width) {
+    const n = width[1] === '' ? 1 : Number(width[1])
+    if (!Number.isFinite(n) || n <= 0) return ''
+    if (width[2].startsWith('\\')) return `${Math.round(Math.min(n, 1) * 10000) / 100}%`
+    return `${n}${width[2] === 'bp' ? 'pt' : width[2]}`
+  }
+  const scale = options.match(/(?:^|[[,\s])scale\s*=\s*([\d.]+)/)
+  if (scale && Number(scale[1]) > 0) return `scale ${Number(scale[1])}`
+  return ''
+}
+
+function rewriteEnvironments(source: string, bibitems: string[]): string {
   let s = source
+  // thebibliography: its own numbered list, which the \cite numbers then follow
+  s = s.replace(/\\begin\{thebibliography\}\{[^}\n]*\}([\s\S]*?)\\end\{thebibliography\}/g, (whole, body: string) => {
+    const parts = body.split(/\\bibitem(?:\[[^\]]*\])?\{([^}]*)\}/)
+    const entries: string[] = []
+    for (let i = 1; i < parts.length; i += 2) {
+      bibitems.push(parts[i].trim())
+      entries.push(`{[${bibitems.length}]}~${parts[i + 1].replace(/\s+/g, ' ').trim()}`)
+    }
+    return sameLines(whole, `\\begin{flushleft}\\textbf{References}${entries.map((e) => `\\\\ ${e}`).join('')}\\end{flushleft}`)
+  })
+  // algorithmic: numbered monospace lines; algorithm around it: "Algorithm n:" and its caption
+  s = s.replace(/\\begin\{algorithmic\}(?:\[(\d*)\])?([\s\S]*?)\\end\{algorithmic\}/g, (whole, every: string | undefined, body: string) =>
+    sameLines(whole, rewriteAlgorithmic(Number(every || 0), body)),
+  )
+  let algorithms = 0
+  s = s.replace(/\\begin\{algorithm\*?\}(?:\[[^\]]*\])?([\s\S]*?)\\end\{algorithm\*?\}/g, (whole, body: string) => {
+    algorithms += 1
+    const n = algorithms
+    const captioned = replaceCommands(
+      body,
+      ['caption'],
+      (_, [caption]) => `\\begin{flushleft}\\textbf{Algorithm ${n}:} ${caption.replace(/\s+/g, ' ')}\\end{flushleft}`,
+      () => ({ count: 1, optional: true }),
+    )
+    return sameLines(whole, captioned)
+  })
+  // subfigure-like commands: the content, then its caption, in a centered block
+  s = replaceCommands(
+    s,
+    ['subcaptionbox', 'subfloat'],
+    (name, [first, second], optional) => {
+      const [caption, content] = name === 'subfloat' ? [optional ?? '', first] : [first, second]
+      return `\\begin{center}${content}${caption.trim() ? `\\caption{${caption}}` : ''}\\end{center}`
+    },
+    (name) => (name === 'subfloat' ? { count: 1, optional: true } : { count: 2, optional: true }),
+  )
   // verbatim-like: typewriter lines, specials escaped
   s = s.replace(/\\begin\{(verbatim|lstlisting|minted)\}(?:\{[^}]*\})?(?:\[[^\]]*\])?\n?([\s\S]*?)\\end\{\1\}/g, (whole, __, body: string) =>
     sameLines(
@@ -329,7 +583,12 @@ function rewriteEnvironments(source: string): string {
   // floats: a centered block, \includegraphics inside becomes the custom box
   s = s.replace(/\\begin\{(figure\*?|table\*?|subfigure|wrapfigure|minipage|center)\}(?:\[[^\]]*\])?(?:\{[^}]*\})*/g, (whole) => sameLines(whole, '\\begin{center}'))
   s = s.replace(/\\end\{(figure\*?|table\*?|subfigure|wrapfigure|minipage)\}/g, '\\end{center}')
-  s = s.replace(/\\includegraphics\*?(?:\[[^\]]*\])?\{([^}]*)\}/g, (whole, file: string) => sameLines(whole, `\\ssgraphic{${file}}`))
+  // \includegraphics: the path and the width as text, escaped, so an `_` or `%` in a file name
+  // is a character and not math or a comment (an unescaped `_` stopped LaTeX.js with "group
+  // argument expected"); SECRETSOURCE_MACROS draws the image or a box naming it.
+  s = s.replace(/\\includegraphics\*?(\[[^\]]*\])?\{([^}]*)\}/g, (whole, options: string | undefined, file: string) =>
+    sameLines(whole, `\\ssgraphic{${escapeText(file.trim())}}{${escapeText(graphicWidth(options ?? ''))}}`),
+  )
   s = s.replace(/\\captionof\{[^}]*\}/g, '\\caption')
   // theorem-like: a bold heading, then the text
   for (const env of THEOREM_ENVS) {
@@ -363,7 +622,7 @@ Macros.args = {
   eqref: ['H', 'g'],
   pageref: ['H', 'g'],
   caption: ['H', 'o?', 'g'],
-  ssgraphic: ['H', 'g'],
+  ssgraphic: ['H', 'g', 'g'],
   ssunknown: ['H', 'g'],
   textsubscript: ['H', 'g'],
   textsuperscript: ['H', 'g'],
@@ -398,20 +657,16 @@ Macros.prototype.caption = function (this: { g: Generator }, _short: Node | unde
   p.append(text)
   return [p]
 }
-Macros.prototype.ssgraphic = function (this: { g: Generator }, file: Node) {
-  const box = this.g.create('div')
-  box.className = 'ss-graphic'
-  // LaTeX.js has already typeset the argument (fi → ﬁ, - → ‐); a file name wants the plain characters back.
-  const name = (file.textContent ?? '').replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff').replace(/‐/g, '-')
-  box.textContent = `figure · ${name}`
-  return [box]
+// An empty group ("no width") reaches a macro as undefined, not as an empty node.
+Macros.prototype.ssgraphic = function (this: { g: Generator }, file?: Node, width?: Node) {
+  return [graphic(this.g, plain(file?.textContent ?? ''), plain(width?.textContent ?? ''))]
 }
 /** Where a macro LaTeX.js does not know stood: its name in a grey box, so the page still
  * renders and the author can see what the preview could not show. */
 Macros.prototype.ssunknown = function (this: { g: Generator }, name: Node) {
   const box = this.g.create('span')
   box.className = 'ss-unknown'
-  box.textContent = `\\${(name.textContent ?? '').replace(/‐/g, '-')}`
+  box.textContent = `\\${plain(name.textContent ?? '')}`
   box.title = 'Not supported by the preview (LaTeX.js). It still compiles with LaTeX.'
   return [box]
 }
@@ -433,6 +688,80 @@ Macros.prototype.and = function (this: { g: Generator }) {
 }
 
 export const SECRETSOURCE_MACROS = Macros
+
+/** An argument LaTeX.js has already typeset (fi → ﬁ, - → ‐, a zero-width space after `\_`)
+ * with the plain characters back, as a file name or a width wants them. */
+function plain(text: string): string {
+  return text.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff').replace(/ﬃ/g, 'ffi').replace(/ﬄ/g, 'ffl').replace(/‐/g, '-').replace(/​/g, '')
+}
+
+/** The draft's images by path ("figures/gemm_spock.png") to a URL the page can load. Nothing
+ * supplies one yet: drafts keep only their .tex and .bib files, so every image is a box naming
+ * it. When images are uploaded with a draft, the editor passes them here and they render. */
+export type ImageMap = ReadonlyMap<string, string>
+
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'pdf', 'svg', 'gif', 'eps']
+
+function baseName(path: string): string {
+  return path.replace(/^\.\//, '').split('/').pop() ?? path
+}
+
+/** The URL of the image \includegraphics{path} names, matched as LaTeX finds it: the exact
+ * path first, then the same file name in any folder, and a path without an extension
+ * ("figures/posv") matches posv.png, .jpg, .pdf, …. Undefined when the draft has none. */
+export function findImage(images: ImageMap, path: string): string | undefined {
+  const wanted = path.trim().replace(/^\.\//, '')
+  const hasExtension = /\.[A-Za-z0-9]+$/.test(baseName(wanted))
+  const candidates = hasExtension ? [wanted] : IMAGE_EXTENSIONS.map((ext) => `${wanted}.${ext}`)
+  for (const candidate of candidates) {
+    const exact = images.get(candidate) ?? images.get(`./${candidate}`)
+    if (exact) return exact
+  }
+  for (const candidate of candidates) {
+    for (const [key, url] of images) if (baseName(key) === baseName(candidate)) return url
+  }
+  return undefined
+}
+
+/** The CSS width for graphicWidth's answer, or "" for the image's own size. */
+function cssWidth(width: string): string {
+  return width.startsWith('scale ') ? '' : width
+}
+
+/** An image the draft has, at its \includegraphics width, or a box of that width naming the
+ * file the draft does not have. */
+function graphic(g: Generator, path: string, width: string, images?: ImageMap): HTMLElement {
+  const url = images ? findImage(images, path) : undefined
+  const scale = width.startsWith('scale ') ? Number(width.slice(6)) : null
+  if (url) {
+    const img = g.create('img') as HTMLImageElement
+    img.className = 'ss-image'
+    img.src = url
+    img.alt = path
+    img.style.width = cssWidth(width)
+    if (scale) img.addEventListener('load', () => (img.style.width = `${Math.round(img.naturalWidth * scale)}px`), { once: true })
+    return img
+  }
+  const box = g.create('div')
+  box.className = 'ss-graphic'
+  box.textContent = `Image not uploaded: ${path}`
+  box.style.width = scale ? `${Math.round(Math.min(scale, 1) * 100)}%` : cssWidth(width)
+  return box
+}
+
+/** SECRETSOURCE_MACROS with \ssgraphic drawing the draft's images from `images`. */
+function macrosWith(images: ImageMap | undefined): typeof Macros {
+  if (!images || images.size === 0) return Macros
+  function WithImages(this: { g: Generator }, generator: Generator) {
+    this.g = generator
+  }
+  WithImages.args = Macros.args
+  WithImages.prototype = Object.create(Macros.prototype) as typeof Macros.prototype
+  WithImages.prototype.ssgraphic = function (this: { g: Generator }, file?: Node, width?: Node) {
+    return [graphic(this.g, plain(file?.textContent ?? ''), plain(width?.textContent ?? ''), images)]
+  }
+  return WithImages as unknown as typeof Macros
+}
 
 // --- references ---------------------------------------------------------------------------
 
@@ -554,8 +883,9 @@ function loadLatex(): Promise<LatexModule> {
  * with the line only for a real syntax error; never anything else, so the editor cannot
  * crash on it.
  */
-export async function renderLatex(source: string): Promise<RenderResult> {
+export async function renderLatex(source: string, options: { images?: ImageMap } = {}): Promise<RenderResult> {
   const { parse, HtmlGenerator } = await loadLatex()
+  const CustomMacros = macrosWith(options.images)
   const unknown: UnknownMacro[] = []
   let current = source
   const scope = packageScope(source)
@@ -580,7 +910,7 @@ export async function renderLatex(source: string): Promise<RenderResult> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       previewStats.parses += 1
-      const generator = new HtmlGenerator({ hyphenate: false, CustomMacros: SECRETSOURCE_MACROS })
+      const generator = new HtmlGenerator({ hyphenate: false, CustomMacros })
       const doc = parse(current, { generator })
       const root = document.createElement('div')
       root.appendChild(doc.domFragment())
@@ -596,6 +926,110 @@ export async function renderLatex(source: string): Promise<RenderResult> {
       unknown.push({ what: fix.what, lines: applied.lines })
       current = applied.source
     }
+  }
+}
+
+/** A block of the body that would not compile on its own, with the line LaTeX.js stopped at
+ * (in the author's file) or, when it named none, the block's first line. */
+export type BlockFailure = { message: string; line: number }
+export type IsolatedResult = RenderResult & { failures: BlockFailure[] }
+
+const HEADING = /^[ \t]*\\(?:part|chapter|section|subsection)\*?\s*[[{]/
+
+/**
+ * The body's blocks as line ranges [start, end) (0-based, in the prepared source): cut before
+ * every \part, \chapter, \section or \subsection, or, in a body with none, at blank lines.
+ * Never inside an environment, so a figure or an algorithm stays whole. Null when the source
+ * has no \begin{document} … \end{document} or only one block.
+ */
+function bodyBlocks(lines: string[]): { first: number; last: number; blocks: [number, number][] } | null {
+  const first = lines.findIndex((l) => /^[ \t]*\\begin\{document\}/.test(l))
+  const last = lines.findLastIndex((l) => /^[ \t]*\\end\{document\}/.test(l))
+  if (first === -1 || last <= first) return null
+  const body = lines.slice(first + 1, last)
+  const byHeading = body.some((l) => HEADING.test(l))
+  const blocks: [number, number][] = []
+  let start = first + 1
+  let depth = 0
+  for (let i = first + 1; i < last; i += 1) {
+    const line = lines[i]
+    const cut = byHeading ? HEADING.test(line) : line.trim() === '' && lines[i - 1]?.trim() !== ''
+    if (cut && depth === 0 && i > start) {
+      blocks.push([start, i])
+      start = i
+    }
+    depth += (line.match(/\\begin\{/g)?.length ?? 0) - (line.match(/\\end\{/g)?.length ?? 0)
+    if (depth < 0) depth = 0
+  }
+  blocks.push([start, last])
+  return blocks.length > 1 ? { first, last, blocks } : null
+}
+
+/** How many headings of each level come before `line`, as \setcounter commands, so a block
+ * rendered on its own numbers its sections as the whole document would. */
+function countersBefore(lines: string[], line: number): string {
+  let section = 0
+  let subsection = 0
+  for (let i = 0; i < line; i += 1) {
+    if (/\\section\s*[[{]/.test(lines[i])) {
+      section += 1
+      subsection = 0
+    } else if (/\\subsection\s*[[{]/.test(lines[i])) subsection += 1
+  }
+  return `\\setcounter{section}{${section}}\\setcounter{subsection}{${subsection}}`
+}
+
+/** Moves `from`'s children to the end of `into`, joining a leading `.body` wrapper with the
+ * one `into` already ends with, so blocks rendered apart read as one page. */
+function appendPage(into: HTMLElement, from: HTMLElement): void {
+  for (const child of [...from.childNodes]) {
+    const tail = into.lastElementChild
+    if (child instanceof HTMLElement && child.classList.contains('body') && tail?.classList.contains('body')) tail.append(...child.childNodes)
+    else into.append(child)
+  }
+}
+
+/**
+ * renderLatex, and when the whole file will not compile, the body block by block (see
+ * bodyBlocks): each block is parsed with the preamble and every other body line blanked to a
+ * comment, so the line numbers stay the file's. A block that fails is an inline error box with
+ * its line where it stood; the others render. Throws the whole file's RenderFailure only when
+ * no block compiles (the preamble itself is broken) or the body is one block.
+ */
+export async function renderIsolated(source: string, options: { images?: ImageMap; cancelled?: () => boolean } = {}): Promise<IsolatedResult> {
+  try {
+    return { ...(await renderLatex(source, options)), failures: [] }
+  } catch (error) {
+    const lines = source.split('\n')
+    const split = bodyBlocks(lines)
+    if (!split) throw error
+    const root = document.createElement('div')
+    const unknown = new Map<string, Set<number>>()
+    const failures: BlockFailure[] = []
+    let rendered = 0
+    for (const [start, end] of split.blocks) {
+      // A newer edit superseded this render: stop parsing blocks nobody will see.
+      if (options.cancelled?.()) throw error
+      const only = lines.map((line, i) => (i > split.first && i < split.last && (i < start || i >= end) ? '%' : line))
+      only[start] = countersBefore(lines, start) + only[start]
+      try {
+        const block = await renderLatex(only.join('\n'), options)
+        for (const u of block.unknown) for (const l of u.lines) unknown.set(u.what, (unknown.get(u.what) ?? new Set()).add(l))
+        appendPage(root, block.root)
+        rendered += 1
+      } catch (blockError) {
+        const failure = blockError as RenderFailure
+        const line = failure.line ?? start + 1
+        failures.push({ message: failure.message, line })
+        const box = document.createElement('div')
+        box.className = 'ss-block-error'
+        box.setAttribute('role', 'note')
+        box.textContent = `Line ${line}: ${failure.message} · this part is left out of the preview`
+        root.append(box)
+      }
+    }
+    if (rendered === 0) throw error
+    return { root, unknown: [...unknown].map(([what, l]) => ({ what, lines: [...l].sort((a, b) => a - b) })), failures }
   }
 }
 

@@ -10,7 +10,7 @@ import { useCallback, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
-import { checkedLabel, errorMessage } from '../../../lib/author'
+import { checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
 import { statusLabel, VERDICTS } from '../../../lib/verdict'
@@ -340,7 +340,7 @@ function DraftList({
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-[13px] font-medium text-ink">{draft.title}</span>
                   <span className="text-xs text-ink-muted">
-                    v{draft.version} · {checkedLabel(draft.lastCheckedAt)}
+                    v{draft.version} · {editedLabel(draft.edited ?? draft.updated)} · {checkedLabel(draft.lastCheckedAt)}
                   </span>
                 </span>
                 <span className={cn('shrink-0 whitespace-nowrap text-xs', tone(draft))}>

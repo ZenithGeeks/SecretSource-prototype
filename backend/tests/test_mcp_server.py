@@ -68,6 +68,8 @@ def test_tool_list_is_the_screen_agents(app):
         *[tool.__name__ for tool in DATA_TOOLS],
         "review_claim",
     ]
+    # The Author editor's read_draft and switch_role are the web app's only.
+    assert not {"read_draft", "switch_role"} & {tool["name"] for tool in tools}
     by_name = {tool["name"]: tool for tool in tools}
     assert by_name["point_at"]["description"] == FunctionTool(screen.point_at).description
     assert by_name["point_at"]["inputSchema"]["required"] == ["target", "note"]

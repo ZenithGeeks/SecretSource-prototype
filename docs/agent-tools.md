@@ -15,6 +15,7 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `point_at` | browser | Moves the AI cursor to a target, rings it, shows a note | `target` (`kind:id`), `note` | `{status: "done"}`, or `{status: "error", message: "not on the screen"}` |
 | `fill_field` | browser, after the person approves | Shows the text, waits for Apply or Cancel, then types it into the field | `target` (`field:id`), `text` | `{status: "applied"}` or `{status: "cancelled"}` |
 | `switch_role` | browser, after the person approves | Shows the reason, waits for Switch or Cancel, then moves the person to that role. Not on MCP | `role`: `researcher`, `labeler` or `author`; `reason` | `{status: "switched"}` or `{status: "cancelled"}` |
+| `read_draft` | browser, `author_agent`, on the editor | The draft open in the editor as the person sees it, unsaved edits included: which draft it is, one file's lines, numbered, at most 300 lines or 24,000 characters a call, the draft's files (at most 50), and the keys of its .bib files (at most 500). A single line over 24,000 characters is cut, and the rest of it cannot be read. Reads only. Not on MCP | `file` (empty for the file on screen), `start_line` (from 1), `end_line` (0 for the end) | `{draft: {id, title}, file, files: [{name, kind, dirty}], first_line, last_line, total_lines, truncated, text, bib_keys}`; `text` is `number<TAB>line` per line; `line_truncated` and `note` when a line was cut, `files_truncated` / `bib_keys_truncated` when a list stopped at its cap; or `{status: "error", message}` when no editor is open |
 | `list_papers` | server | The person's analysed papers, newest first, at most 50 | none | `[{id, title, status}]` |
 | `get_analysis` | server, `data_agent` | One analysis: status, why it failed, claims per standing, each claim with its number | `analysis_id` | `{id, title, status, stage, message, standing, claims: [{number, claim, section, standing}]}` |
 | `get_claim` | server, `data_agent` | The evidence behind one claim: verdict, quote and reasoning per cited paper, and citations that could not be checked | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, standing, verdicts, unchecked}` |
@@ -58,7 +59,7 @@ conversation, so after `switch_role` the next role's agent reads what was said b
 |---|---|---|---|
 | `researcher` | `screen_agent` | `home`, `analyses`, `library`, `graph` | `list_papers`, `fill_field`, and `data_agent` with the server tools above |
 | `labeler` | `labeler_agent` | `papers`, `workspace` | `labeling_papers`, `labeling_progress`, `claim_passages`, `find_support` |
-| `writer` (Author) | `author_agent` | `home`, `library`, `graph`, `history`, `editor` | `list_drafts`, `draft_issues`, `find_support`, `fill_field` |
+| `writer` (Author) | `author_agent` | `home`, `library`, `graph`, `history`, `editor` (once a draft is selected) | `list_drafts`, `draft_issues`, `find_support`, `fill_field`, `read_draft` |
 
 Every role also has `read_screen`, `open_screen`, `point_at` and `switch_role`. The Labeler's agent
 has no `fill_field` and no tool that returns a verdict (`get_claim`, `get_analysis`, `check_text`,

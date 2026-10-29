@@ -194,7 +194,11 @@ export function useAuthorActions() {
     },
     updateDraft: async (draftId: string, body: { title?: string; projectId?: string | null }): Promise<Draft> => {
       const draft = await authorApi.updateDraft(draftId, body)
+      // The new name shows at once in the editor and the drafts list; the refetches confirm it.
+      qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) => (current ? { ...current, title: draft.title, projectId: draft.projectId } : current))
+      qc.setQueryData<Draft[]>(AUTHOR_KEYS.drafts, (list) => list?.map((d) => (d.id === draftId ? { ...d, title: draft.title, projectId: draft.projectId } : d)))
       touched(draftId)
+      void qc.invalidateQueries({ queryKey: ['author', 'project'] })
       return draft
     },
     deleteDraft: async (draftId: string): Promise<void> => {

@@ -17,6 +17,7 @@ import io
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 import zipfile
@@ -265,18 +266,54 @@ class FileIn(BaseModel):
     updated: str | None = None
 
 
+UNTITLED = "Untitled draft"
+MAX_TITLE = 120
+# One gateway instance serves the app (see agent_runs.py); a rename and a file write each read
+# the whole draft row and write it back, so they take this lock to not undo one another.
+DRAFT_WRITES = threading.Lock()
+
+
+def _clean_title(title: str) -> str:
+    """A title as stored: trimmed, on one line, and refused (400) when empty or over
+    MAX_TITLE characters."""
+    clean = " ".join(title.split())
+    if not clean:
+        raise HTTPException(400, "a draft needs a title")
+    if len(clean) > MAX_TITLE:
+        raise HTTPException(400, f"a draft title is at most {MAX_TITLE} characters")
+    return clean
+
+
+def _untitled(user: str | None) -> str:
+    """The first free default title among this user's drafts: "Untitled draft", then
+    "Untitled draft 2", "Untitled draft 3", …"""
+    taken = {d.get("title") for d in _rows(DRAFTS, user)}
+    if UNTITLED not in taken:
+        return UNTITLED
+    n = 2
+    while f"{UNTITLED} {n}" in taken:
+        n += 1
+    return f"{UNTITLED} {n}"
+
+
 def _new_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
+    """A new draft. No title, or the bare default the app sends for a blank draft, gets the
+    next free "Untitled draft N"; an upload's file name longer than MAX_TITLE is cut."""
     now = logic.now_iso()
+    wanted = " ".join(title.split())[:MAX_TITLE]
     draft = {
         "id": _new_id(),
         "owner": user,
         "projectId": project_id,
-        "title": title.strip() or "Untitled draft",
+        "title": wanted if wanted and wanted != UNTITLED else _untitled(user),
         "version": 1,
         "files": files,
         "pdfs": {},
         "created": now,
         "updated": now,
+        # The last change to its text (`updated` also moves on Save, a check, a PDF): the
+        # drafts list's "edited 5 min ago".
+        "edited": now,
         "savedAt": now,
         "savedHash": logic.content_hash(files),
     }
@@ -335,9 +372,7 @@ async def create_draft(request: DraftIn, user: str | None = Depends(current_user
         {"name": _safe_name(f["name"]), "kind": _kind_of(f["name"]), "content": str(f.get("content", ""))}
         for f in (request.files or [])
     ] or [{"name": "main.tex", "kind": "tex", "content": ""}]
-    draft = await asyncio.to_thread(
-        _new_draft, user, request.title or "Untitled draft", request.projectId, files
-    )
+    draft = await asyncio.to_thread(_new_draft, user, request.title or "", request.projectId, files)
     return await _draft_answer(draft, user)
 
 
@@ -361,15 +396,26 @@ async def get_draft(draft_id: str, user: str | None = Depends(current_user)):
 
 @router.patch("/drafts/{draft_id}")
 async def update_draft(draft_id: str, request: DraftIn, user: str | None = Depends(current_user)):
-    draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    if request.title is not None:
-        draft["title"] = request.title.strip() or draft["title"]
-    if request.projectId is not None:
-        if request.projectId:
-            await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
-        draft["projectId"] = request.projectId or None
-    await asyncio.to_thread(_save, DRAFTS, draft)
-    return await _draft_answer(draft, user)
+    """Rename a draft or move it to another project. Neither is an edit of its text, so
+    `updated` (what the editor's writes are checked against) and `edited` stay as they were:
+    a rename never makes an open editor's next write a conflict."""
+    title = _clean_title(request.title) if request.title is not None else None
+    if request.projectId:
+        await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
+
+    def rename() -> dict:
+        # Read and written under the lock a file write takes, so an autosave landing between
+        # the two is not put back to the text this rename read.
+        with DRAFT_WRITES:
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            if title is not None:
+                draft["title"] = title
+            if request.projectId is not None:
+                draft["projectId"] = request.projectId or None
+            store.save_author_row(DRAFTS, draft)
+            return draft
+
+    return await _draft_answer(await asyncio.to_thread(rename), user)
 
 
 @router.delete("/drafts/{draft_id}")
@@ -388,18 +434,25 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
     """Write one file's whole content; a new name adds the file. The version is not bumped
     here — that is what Save does — so typing never makes a v4 out of a v3."""
     name = _safe_name(name)
-    draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    if request.updated is not None and request.updated != draft.get("updated"):
-        raise HTTPException(409, "the draft was changed elsewhere since this editor last saved it")
     if len(request.content.encode("utf-8")) > MAX_TEXT_FILE:
         raise HTTPException(413, "a draft file must be under 2MB")
-    existing = next((f for f in draft["files"] if f["name"] == name), None)
-    if existing:
-        existing["content"] = request.content
-    else:
-        draft["files"].append({"name": name, "kind": _kind_of(name), "content": request.content})
-    await asyncio.to_thread(_save, DRAFTS, draft)
-    return await _draft_answer(draft, user)
+
+    def write() -> dict:
+        # The check against `updated` and the write are one step under DRAFT_WRITES, so a
+        # rename or another write cannot land between them.
+        with DRAFT_WRITES:
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            if request.updated is not None and request.updated != draft.get("updated"):
+                raise HTTPException(409, "the draft was changed elsewhere since this editor last saved it")
+            existing = next((f for f in draft["files"] if f["name"] == name), None)
+            if existing:
+                existing["content"] = request.content
+            else:
+                draft["files"].append({"name": name, "kind": _kind_of(name), "content": request.content})
+            draft["edited"] = logic.now_iso()
+            return _save(DRAFTS, draft)
+
+    return await _draft_answer(await asyncio.to_thread(write), user)
 
 
 @router.delete("/drafts/{draft_id}/files/{name:path}")

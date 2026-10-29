@@ -232,6 +232,24 @@ TASKS = [
         role="writer",
         screen="home",
     ),
+    # The editor: what the draft says comes from read_draft, not from memory.
+    Task(
+        "What does line 3 say?",
+        both(called("read_draft"), lambda run: "residual" in run.reply.lower()),
+        role="writer",
+        screen="editor",
+    ),
+    Task(
+        # Names the draft: home lists two, and read_screen does not say which one is selected.
+        "Open my thesis draft in the editor and tell me which keys its .bib has.",
+        both(
+            called("open_screen", screen="editor"),
+            called("read_draft"),
+            lambda run: "khattab2020" in run.reply and "santhanam2022" in run.reply,
+        ),
+        role="writer",
+        screen="home",
+    ),
 ]
 
 
@@ -262,6 +280,16 @@ DRAFTS = [
     {"id": "d1", "title": "Thesis: chapter 2", "last_checked": "2026-10-25T10:00:00Z", "checking_now": False},
     {"id": "d2", "title": "Workshop abstract", "last_checked": "2026-10-24T09:00:00Z", "checking_now": False},
 ]
+# What the editor shows for d1, as read_draft reads it (frontend/src/lib/agentTools.ts).
+DRAFT_TEXT = "\n".join(
+    [
+        r"\section{Related work}",
+        r"Late interaction scores every query token against every passage token \cite{khattab2020}.",
+        r"ColBERTv2 stores each vector as a centroid id plus a quantized residual \cite{santhanam2022}.",
+        r"Transformers replaced recurrence \cite{vaswani2017}.",
+    ]
+)
+BIB_KEYS = ["khattab2020", "santhanam2022"]
 
 
 class FakeScreen:
@@ -303,6 +331,8 @@ class FakeScreen:
             return {"status": "done"}
         if name == "switch_role":
             return {"status": "switched" if self.approve else "cancelled"}
+        if name == "read_draft":
+            return self.read_draft(args)
         known = {t["target"] for t in self.targets()}
         if name == "point_at":
             ok = args.get("target") in known
@@ -319,6 +349,38 @@ class FakeScreen:
             self.filter = args.get("text", "")
             return {"status": "applied"}
         return {"status": "error", "message": f"no tool {name}"}
+
+    def read_draft(self, args: dict) -> dict:
+        """The editor's read_draft on d1's one file, with the browser runner's errors."""
+        if self.role != "writer" or self.screen != "editor":
+            return {
+                "status": "error",
+                "message": 'no draft is open in the editor; open one with open_screen("editor")',
+            }
+        if args.get("file") not in (None, "", "chapter2.tex"):
+            return {
+                "status": "error",
+                "message": f"no file {args['file']} in this draft; files: chapter2.tex, refs.bib",
+            }
+        lines = DRAFT_TEXT.split("\n")
+        first = max(1, int(args.get("start_line") or 1))
+        end = min(int(args.get("end_line") or 0) or len(lines), len(lines))
+        if first > len(lines):
+            return {"status": "error", "message": f"chapter2.tex has {len(lines)} lines"}
+        return {
+            "draft": {"id": "d1", "title": DRAFTS[0]["title"]},
+            "file": "chapter2.tex",
+            "files": [
+                {"name": "chapter2.tex", "kind": "tex", "dirty": False},
+                {"name": "refs.bib", "kind": "bib", "dirty": False},
+            ],
+            "first_line": first,
+            "last_line": end,
+            "total_lines": len(lines),
+            "truncated": False,
+            "text": "\n".join(f"{n}\t{lines[n - 1]}" for n in range(first, end + 1)),
+            "bib_keys": BIB_KEYS,
+        }
 
 
 async def list_papers(tool_context) -> list[dict]:

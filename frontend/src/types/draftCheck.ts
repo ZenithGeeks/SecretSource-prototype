@@ -145,6 +145,9 @@ export type Draft = {
   checks: number
   created: string
   updated: string
+  /** The last change to its text (`updated` also moves on Save, a check, a PDF). Missing on
+   * drafts made before it existed. */
+  edited?: string
   savedAt: string
 }
 

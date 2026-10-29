@@ -1,0 +1,84 @@
+/** A bare shell is for a full-bleed screen with its own top bar (the Author's editor): no
+ * sidebar, phone top bar or toolbar. The default shell every other screen uses keeps all three,
+ * and moving between the two keeps the panel mounted, so a Do it run in it goes on. */
+
+import { fireEvent, render, screen } from '@testing-library/react'
+import { Home, Library } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { expect, test, vi } from 'vitest'
+
+import { AppShell, ToolbarActions } from '../src/components/AppShell'
+
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+
+const NAV = [
+  { key: 'home', label: 'Home', icon: Home },
+  { key: 'library', label: 'Library', icon: Library },
+]
+
+let mounts = 0
+
+/** Stands in for the Ask panel: counts its mounts and keeps a value in state. */
+function Panel() {
+  const [value, setValue] = useState('')
+  useEffect(() => {
+    mounts += 1
+  }, [])
+  return <input aria-label="Panel field" value={value} onChange={(event) => setValue(event.target.value)} />
+}
+
+const shell = (bare: boolean) => (
+  <AppShell
+    nav={NAV}
+    active="home"
+    onNavigate={() => {}}
+    role="Author"
+    roleIcon={Home}
+    breadcrumb={['Home']}
+    toolbarLead={<button type="button">Ask AI</button>}
+    panel={<Panel />}
+    bare={bare}
+  >
+    <p>content</p>
+    <ToolbarActions>
+      <button type="button">Export</button>
+    </ToolbarActions>
+  </AppShell>
+)
+
+test('the default shell has the sidebar, the phone top bar and the toolbar, with the panel under it', () => {
+  render(shell(false))
+  expect(screen.getByRole('complementary', { name: 'Sidebar' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Open the menu' })).toBeInTheDocument()
+  expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toHaveTextContent('Home')
+  expect(screen.getByRole('button', { name: 'Ask AI' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
+  expect(screen.getByRole('main')).toHaveClass('mx-auto', 'max-w-6xl', 'px-4', 'py-6')
+  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-[52px]', 'lg:h-[calc(100vh-52px)]', 'lg:w-[400px]')
+})
+
+test('a bare shell has none of them: the content fills the window and the panel runs its full height', () => {
+  render(shell(true))
+  expect(screen.queryByRole('complementary', { name: 'Sidebar' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Open the menu' })).toBeNull()
+  expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Ask AI' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+  expect(screen.getByText('content')).toBeInTheDocument()
+  expect(screen.getByRole('main')).toHaveClass('h-screen', 'overflow-hidden')
+  expect(screen.getByRole('main')).not.toHaveClass('max-w-6xl')
+  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-0', 'lg:h-screen', 'lg:w-[400px]')
+})
+
+test('moving between the default shell and a bare one keeps the panel mounted', () => {
+  mounts = 0
+  const { rerender } = render(shell(false))
+  const field = screen.getByLabelText('Panel field') as HTMLInputElement
+  fireEvent.change(field, { target: { value: 'kept' } })
+
+  rerender(shell(true))
+  rerender(shell(false))
+  expect(screen.getByLabelText('Panel field')).toBe(field)
+  expect(field.value).toBe('kept')
+  expect(mounts).toBe(1)
+})
