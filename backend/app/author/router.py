@@ -372,9 +372,7 @@ async def create_draft(request: DraftIn, user: str | None = Depends(current_user
         {"name": _safe_name(f["name"]), "kind": _kind_of(f["name"]), "content": str(f.get("content", ""))}
         for f in (request.files or [])
     ] or [{"name": "main.tex", "kind": "tex", "content": ""}]
-    draft = await asyncio.to_thread(
-        _new_draft, user, request.title or "", request.projectId, files
-    )
+    draft = await asyncio.to_thread(_new_draft, user, request.title or "", request.projectId, files)
     return await _draft_answer(draft, user)
 
 

@@ -109,7 +109,10 @@ async def send_result(session_id: str, body: ToolResult, user: str | None = Depe
         # Answer the call rather than refuse the request: the agent's pending call still gets its
         # result, so the conversation goes on and the agent can tell the person.
         log.warning(
-            "%s result of %d bytes is over %d; not passed to the agent", body.name, size, MAX_TOOL_RESULT_BYTES
+            "%s result of %d bytes is over %d; not passed to the agent",
+            body.name,
+            size,
+            MAX_TOOL_RESULT_BYTES,
         )
         result = {"status": "error", "message": "tool result too large"}
     response = types.FunctionResponse(id=body.id, name=body.name, response=result)
