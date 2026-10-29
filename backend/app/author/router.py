@@ -267,33 +267,43 @@ class FileIn(BaseModel):
 
 
 UNTITLED = "Untitled draft"
+UNTITLED_PROJECT = "Untitled project"
 MAX_TITLE = 120
 # One gateway instance serves the app (see agent_runs.py); a rename and a file write each read
 # the whole draft row and write it back, so they take this lock to not undo one another.
 DRAFT_WRITES = threading.Lock()
 
 
-def _clean_title(title: str) -> str:
-    """A title as stored: trimmed, on one line, and refused (400) when empty or over
-    MAX_TITLE characters."""
+def _clean_title(title: str, empty: str = "a draft needs a title", noun: str = "a draft title") -> str:
+    """A draft title (or, with its own words, a project name) as stored: trimmed, on one
+    line, and refused (400) when empty or over MAX_TITLE characters."""
     clean = " ".join(title.split())
     if not clean:
-        raise HTTPException(400, "a draft needs a title")
+        raise HTTPException(400, empty)
     if len(clean) > MAX_TITLE:
-        raise HTTPException(400, f"a draft title is at most {MAX_TITLE} characters")
+        raise HTTPException(400, f"{noun} is at most {MAX_TITLE} characters")
     return clean
+
+
+def _clean_name(name: str) -> str:
+    """A project name: the same rules as a draft title."""
+    return _clean_title(name, "a project needs a name", "a project name")
+
+
+def _first_free(base: str, taken: set) -> str:
+    """`base`, then "base 2", "base 3", …: the first one not taken."""
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base} {n}" in taken:
+        n += 1
+    return f"{base} {n}"
 
 
 def _untitled(user: str | None) -> str:
     """The first free default title among this user's drafts: "Untitled draft", then
     "Untitled draft 2", "Untitled draft 3", …"""
-    taken = {d.get("title") for d in _rows(DRAFTS, user)}
-    if UNTITLED not in taken:
-        return UNTITLED
-    n = 2
-    while f"{UNTITLED} {n}" in taken:
-        n += 1
-    return f"{UNTITLED} {n}"
+    return _first_free(UNTITLED, {d.get("title") for d in _rows(DRAFTS, user)})
 
 
 def _new_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
@@ -983,9 +993,14 @@ async def list_projects(user: str | None = Depends(current_user)):
 
 @router.post("/projects")
 async def create_project(request: ProjectIn, user: str | None = Depends(current_user)):
-    if not (request.name or "").strip():
-        raise HTTPException(400, "a project needs a name")
-    project = await asyncio.to_thread(_new_project, user, request.name, request.bibName, request.bib)
+    """+ New project. No name (or a blank one) gets the next free "Untitled project N"; a
+    name follows the draft title rules."""
+    if (request.name or "").strip():
+        name = _clean_name(request.name or "")
+    else:
+        projects = await asyncio.to_thread(_rows, PROJECTS, user)
+        name = _first_free(UNTITLED_PROJECT, {p.get("name") for p in projects})
+    project = await asyncio.to_thread(_new_project, user, name, request.bibName, request.bib)
     return _project_view(project, [], {})
 
 
@@ -1032,9 +1047,10 @@ async def get_project(project_id: str, user: str | None = Depends(current_user))
 
 @router.patch("/projects/{project_id}")
 async def update_project(project_id: str, request: ProjectIn, user: str | None = Depends(current_user)):
+    name = _clean_name(request.name) if request.name is not None else None
     project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
-    if request.name is not None:
-        project["name"] = request.name.strip() or project["name"]
+    if name is not None:
+        project["name"] = name
     if request.bib is not None:
         project["bib"] = {
             "name": request.bibName or project.get("bib", {}).get("name") or "main.bib",
@@ -1046,12 +1062,16 @@ async def update_project(project_id: str, request: ProjectIn, user: str | None =
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, user: str | None = Depends(current_user)):
-    """Deletes the project; its drafts stay and become unsorted."""
+    """Deletes the project, and with it its .bib and the PDFs attached to its entries (the
+    files stay in the papers store, but nothing points at them any more). Its drafts and saved
+    sources stay and become unsorted: a source left pointing at a deleted project would show
+    up nowhere."""
     await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
-    for draft in await asyncio.to_thread(_rows, DRAFTS, user):
-        if draft.get("projectId") == project_id:
-            draft["projectId"] = None
-            await asyncio.to_thread(_save, DRAFTS, draft)
+    for table in (DRAFTS, SOURCES):
+        for row in await asyncio.to_thread(_rows, table, user):
+            if row.get("projectId") == project_id:
+                row["projectId"] = None
+                await asyncio.to_thread(_save, table, row)
     await asyncio.to_thread(store.delete_author_row, PROJECTS, project_id)
     return {"deleted": project_id}
 

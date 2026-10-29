@@ -912,7 +912,6 @@ def test_projects_carry_a_bib_and_their_cards_count_entries_cited_and_issues(cli
     stub_verify(monkeypatch, verdicts={"10.1145/3397271.3401075": "refutes"})
     project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
     assert project["entries"] == 3 and project["cited"] == 0 and project["drafts"] == 0
-    assert client.post("/author/projects", headers=ADA, json={"name": "  "}).status_code == 400
 
     draft = client.post(
         "/author/drafts",
@@ -938,6 +937,64 @@ def test_projects_carry_a_bib_and_their_cards_count_entries_cited_and_issues(cli
     gone = client.delete(f"/author/projects/{project['id']}", headers=ADA).json()
     assert gone == {"deleted": project["id"]}
     assert client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()["projectId"] is None
+
+
+def test_a_new_project_with_no_name_gets_the_next_untitled_project(client):
+    # no name, or a blank one (was a 400), is "+ New project" with no name yet
+    bodies = [{}, {"name": "  "}, {"name": None}]
+    names = [client.post("/author/projects", headers=ADA, json=body).json()["name"] for body in bodies]
+    assert names == ["Untitled project", "Untitled project 2", "Untitled project 3"]
+    # numbered per owner, and an empty project has an empty .bib and no drafts
+    bo = client.post("/author/projects", headers=BO, json={}).json()
+    assert bo["name"] == "Untitled project" and bo["entries"] == 0 and bo["drafts"] == 0
+    named = client.post("/author/projects", headers=ADA, json={"name": "  Thesis \n ch.2 "}).json()
+    assert named["name"] == "Thesis ch.2"
+    too_long = client.post("/author/projects", headers=ADA, json={"name": "x" * (author.MAX_TITLE + 1)})
+    assert too_long.status_code == 400
+    assert too_long.json()["detail"] == "a project name is at most 120 characters"
+
+
+def test_renaming_a_project_follows_the_draft_title_rules_and_is_owner_only(client):
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis"}).json()
+    url = f"/author/projects/{project['id']}"
+
+    renamed = client.patch(url, headers=ADA, json={"name": "  Related   work "})
+    assert renamed.status_code == 200 and renamed.json()["name"] == "Related work"
+    empty = client.patch(url, headers=ADA, json={"name": " \n "})
+    assert empty.status_code == 400 and empty.json()["detail"] == "a project needs a name"
+    assert client.patch(url, headers=ADA, json={"name": "x" * (author.MAX_TITLE + 1)}).status_code == 400
+    assert client.patch(url, headers=BO, json={"name": "Mine now"}).status_code == 404
+    assert client.delete(url, headers=BO).status_code == 404
+    assert client.get(url, headers=ADA).json()["name"] == "Related work"
+
+
+def test_deleting_a_project_moves_its_drafts_and_saved_sources_to_unsorted(client):
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
+    draft = client.post(
+        "/author/drafts",
+        headers=ADA,
+        json={"title": "ch2", "projectId": project["id"], "files": [{"name": "ch2.tex", "content": TEX}]},
+    ).json()
+    source = client.post(
+        "/author/sources",
+        headers=ADA,
+        json={"title": "ColBERTv2", "authorsList": ["K S"], "year": 2022, "projectId": project["id"]},
+    ).json()
+    before = client.get("/author/library", headers=ADA).json()["unsorted"]
+
+    gone = client.delete(f"/author/projects/{project['id']}", headers=ADA).json()
+    assert gone == {"deleted": project["id"]}
+
+    library = client.get("/author/library", headers=ADA).json()
+    assert library["projects"] == []
+    assert library["unsorted"]["drafts"] == before["drafts"] + 1
+    assert library["unsorted"]["sources"] == before["sources"] + 1
+    assert [s["projectId"] for s in library["saved"] if s["id"] == source["id"]] == [None]
+    assert source["id"] in [s["id"] for s in client.get("/author/sources", headers=ADA).json()]
+    # the draft stays, unsorted; the project's .bib went with the project
+    kept = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
+    assert kept["projectId"] is None and [f["name"] for f in kept["files"]] == ["ch2.tex"]
+    assert client.get(f"/author/projects/{project['id']}", headers=ADA).status_code == 404
 
 
 def test_importing_a_bib_or_a_zip_makes_a_project(client):

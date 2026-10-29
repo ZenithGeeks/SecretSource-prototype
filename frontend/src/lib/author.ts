@@ -80,7 +80,7 @@ export const authorApi = {
   getLibrary: () => request<LibraryView>('/author/library'),
   listProjects: () => request<Project[]>('/author/projects'),
   getProject: (id: string) => request<ProjectDetail>(`/author/projects/${enc(id)}`),
-  createProject: (body: { name: string; bib?: string; bibName?: string }) =>
+  createProject: (body: { name?: string; bib?: string; bibName?: string }) =>
     request<Project>('/author/projects', json('POST', body)),
   importProject: (file: File) => request<Project>('/author/projects/import', upload(file)),
   updateProject: (id: string, body: { name?: string; bib?: string; bibName?: string }) =>

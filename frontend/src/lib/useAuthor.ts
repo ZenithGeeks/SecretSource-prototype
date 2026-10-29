@@ -11,7 +11,8 @@ import { useEffect } from 'react'
 import { followEvents } from './api'
 import { authorApi } from './author'
 import { parseBib } from './bibtex'
-import type { CheckRun, CheckStage, Citation, Draft } from '../types/draftCheck'
+import { dropBackup } from './draftSave'
+import type { CheckRun, CheckStage, Citation, Draft, LibraryView, ProjectDetail } from '../types/draftCheck'
 
 export const AUTHOR_KEYS = {
   all: ['author'] as const,
@@ -201,8 +202,15 @@ export function useAuthorActions() {
       void qc.invalidateQueries({ queryKey: ['author', 'project'] })
       return draft
     },
+    /** Deletes the draft, takes it out of every list at once, and drops the unsaved text this
+     * device kept for it (ss.author.unsaved.<id>), which nothing could restore any more. */
     deleteDraft: async (draftId: string): Promise<void> => {
       await authorApi.deleteDraft(draftId)
+      dropBackup(draftId)
+      qc.setQueryData<Draft[]>(AUTHOR_KEYS.drafts, (list) => list?.filter((d) => d.id !== draftId))
+      qc.setQueriesData<ProjectDetail>({ queryKey: ['author', 'project'] }, (detail) =>
+        detail?.draftList ? { ...detail, draftList: detail.draftList.filter((d) => d.id !== draftId) } : detail,
+      )
       void qc.removeQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
       libraryChanged()
@@ -253,7 +261,8 @@ export function useAuthorActions() {
       return check
     },
 
-    createProject: async (body: { name: string; bib?: string; bibName?: string }) => {
+    /** No name: the gateway names it "Untitled project N". */
+    createProject: async (body: { name?: string; bib?: string; bibName?: string }) => {
       const project = await authorApi.createProject(body)
       libraryChanged()
       return project
@@ -266,12 +275,21 @@ export function useAuthorActions() {
     },
     updateProject: async (projectId: string, body: { name?: string; bib?: string; bibName?: string }) => {
       const project = await authorApi.updateProject(projectId, body)
+      // A new name shows at once on the Library card and the project page; the refetches confirm it.
+      qc.setQueryData<LibraryView>(AUTHOR_KEYS.library, (library) =>
+        library ? { ...library, projects: library.projects.map((p) => (p.id === projectId ? { ...p, name: project.name } : p)) } : library,
+      )
+      qc.setQueryData<ProjectDetail>(AUTHOR_KEYS.project(projectId), (detail) => (detail ? { ...detail, name: project.name } : detail))
       libraryChanged()
       void qc.invalidateQueries({ queryKey: ['author', 'draft'] })
       return project
     },
     deleteProject: async (projectId: string) => {
       await authorApi.deleteProject(projectId)
+      qc.setQueryData<LibraryView>(AUTHOR_KEYS.library, (library) =>
+        library ? { ...library, projects: library.projects.filter((p) => p.id !== projectId) } : library,
+      )
+      void qc.removeQueries({ queryKey: AUTHOR_KEYS.project(projectId) })
       libraryChanged()
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
     },
