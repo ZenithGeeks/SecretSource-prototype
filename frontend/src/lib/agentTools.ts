@@ -65,6 +65,12 @@ const SETTLE_MS = 450 // the cursor's glide, so the person sees where it went be
 // read_draft's answer goes into every later model call: about 300 lines of LaTeX at most.
 export const DRAFT_MAX_LINES = 300
 export const DRAFT_MAX_CHARS = 24_000
+// The draft's files and .bib keys go with every read_draft answer too: a thesis has tens of files
+// and a few hundred keys; past that, or past the characters (as JSON), the list stops.
+export const DRAFT_MAX_FILES = 50
+export const DRAFT_FILES_MAX_CHARS = 4_000
+export const DRAFT_MAX_BIB_KEYS = 500
+export const DRAFT_BIB_KEYS_MAX_CHARS = 8_000
 // Right after open_screen("editor") the editor may still be mounting or fetching the draft.
 export const DRAFT_WAIT_MS = 2_000
 const DRAFT_POLL_MS = 50
@@ -133,6 +139,8 @@ function readScreen(screen: string): ToolResult {
 
 /** One file of the open draft, numbered from `start_line`, up to DRAFT_MAX_LINES lines or
  * DRAFT_MAX_CHARS characters; `truncated` says the cap stopped it before `end_line` (or the end).
+ * A first line longer than the cap is cut and `line_truncated` says so: the rest of it cannot be read.
+ * The files and .bib keys stop at their caps too, with `files_truncated` / `bib_keys_truncated`.
  * Waits up to DRAFT_WAIT_MS for an editor that is still opening. */
 async function readDraft(args: Record<string, unknown>, actions: ScreenActions): Promise<ToolResult> {
   if (!actions.draftEditor) return { status: 'error', message: 'there is no draft editor in this role' }
@@ -150,10 +158,14 @@ async function readDraft(args: Record<string, unknown>, actions: ScreenActions):
       ? { status: 'error', message: 'the draft is still opening; try again' }
       : { status: 'error', message: 'no draft is open in the editor; open one with open_screen("editor")' }
   }
-  const files = reader.files()
-  const file = typeof args.file === 'string' && args.file ? args.file : (reader.active ?? files[0].name)
+  const allFiles = reader.files()
+  const files = capList(allFiles, DRAFT_MAX_FILES, DRAFT_FILES_MAX_CHARS)
+  const file = typeof args.file === 'string' && args.file ? args.file : (reader.active ?? allFiles[0].name)
   const text = reader.read(file)
-  if (text === undefined) return { status: 'error', message: `no file ${file} in this draft; files: ${files.map((f) => f.name).join(', ')}` }
+  if (text === undefined) {
+    const names = files.kept.map((f) => f.name).join(', ') + (files.cut ? ', …' : '')
+    return { status: 'error', message: `no file ${file} in this draft; files: ${names}` }
+  }
   const lines = text.split('\n')
   const first = Math.max(1, Math.trunc(Number(args.start_line)) || 1)
   const asked = Math.trunc(Number(args.end_line)) || 0
@@ -161,24 +173,53 @@ async function readDraft(args: Record<string, unknown>, actions: ScreenActions):
   if (first > lines.length) return { status: 'error', message: `${file} has ${lines.length} lines` }
   const shown: string[] = []
   let size = 0
+  let lineCut = false
   for (let n = first; n <= end && shown.length < DRAFT_MAX_LINES; n += 1) {
     const row = `${n}\t${lines[n - 1]}`
+    if (shown.length === 0 && row.length > DRAFT_MAX_CHARS) {
+      // One line over the cap on its own (a paragraph with no line breaks): show its start.
+      shown.push(row.slice(0, DRAFT_MAX_CHARS))
+      lineCut = true
+      break
+    }
     if (shown.length > 0 && size + row.length + 1 > DRAFT_MAX_CHARS) break
     shown.push(row)
     size += row.length + 1
   }
   const last = first + shown.length - 1
+  const bibKeys = capList(reader.bibKeys(), DRAFT_MAX_BIB_KEYS, DRAFT_BIB_KEYS_MAX_CHARS)
   return {
     draft: reader.draft(),
     file,
-    files,
+    files: files.kept,
+    ...(files.cut && { files_truncated: true }),
     first_line: first,
     last_line: last,
     total_lines: lines.length,
-    truncated: last < end,
+    truncated: last < end || lineCut,
+    ...(lineCut && {
+      line_truncated: true,
+      note:
+        `line ${last} has ${lines[last - 1].length} characters and only its start is shown; read_draft cannot show the rest of a line.` +
+        (last < lines.length ? ` The next line is ${last + 1}.` : ''),
+    }),
     text: shown.join('\n'),
-    bib_keys: reader.bibKeys(),
+    bib_keys: bibKeys.kept,
+    ...(bibKeys.cut && { bib_keys_truncated: true }),
   }
+}
+
+/** The first of `items` that fit in `max` entries and `maxChars` characters as JSON; `cut` says some were left out. */
+function capList<T>(items: T[], max: number, maxChars: number): { kept: T[]; cut: boolean } {
+  const kept: T[] = []
+  let size = 0
+  for (const item of items) {
+    const itemSize = JSON.stringify(item).length + 1
+    if (kept.length === max || size + itemSize > maxChars) break
+    kept.push(item)
+    size += itemSize
+  }
+  return { kept, cut: kept.length < items.length }
 }
 
 async function openScreen(screen: string, { actions, point }: ToolContext): Promise<ToolResult> {

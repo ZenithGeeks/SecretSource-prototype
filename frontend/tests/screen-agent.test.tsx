@@ -22,7 +22,19 @@ vi.mock('../src/lib/api', async (original) => ({
 }))
 
 import { DoIt } from '../src/components/DoIt'
-import { DRAFT_MAX_CHARS, DRAFT_MAX_LINES, DRAFT_WAIT_MS, describeTool, runTool, type DraftReader, type ScreenActions } from '../src/lib/agentTools'
+import {
+  DRAFT_BIB_KEYS_MAX_CHARS,
+  DRAFT_FILES_MAX_CHARS,
+  DRAFT_MAX_BIB_KEYS,
+  DRAFT_MAX_CHARS,
+  DRAFT_MAX_FILES,
+  DRAFT_MAX_LINES,
+  DRAFT_WAIT_MS,
+  describeTool,
+  runTool,
+  type DraftReader,
+  type ScreenActions,
+} from '../src/lib/agentTools'
 import { postEvents } from '../src/lib/api'
 import type { Pointing } from '../src/lib/askCursor'
 import { clearDoItConversation, leaveDoItConversation, peekDoItConversation } from '../src/lib/doItConversation'
@@ -211,6 +223,48 @@ describe('read_draft', () => {
     const result = await read({}, wide)
     expect(result).toMatchObject({ last_line: 4, total_lines: 10, truncated: true })
     expect((result.text as string).length).toBeLessThanOrEqual(DRAFT_MAX_CHARS)
+    expect(result).not.toHaveProperty('line_truncated')
+  })
+
+  it('cuts a single line longer than the cap and says the rest of it cannot be read', async () => {
+    const huge = 'x'.repeat(DRAFT_MAX_CHARS * 2)
+    const result = await read({}, reader([{ name: 'one.tex', kind: 'tex', content: huge }]))
+    expect(result).toMatchObject({ first_line: 1, last_line: 1, total_lines: 1, truncated: true, line_truncated: true })
+    expect((result.text as string).length).toBe(DRAFT_MAX_CHARS)
+    expect(result.text as string).toMatch(/^1\tx+$/)
+    expect(result.note).toBe(`line 1 has ${DRAFT_MAX_CHARS * 2} characters and only its start is shown; read_draft cannot show the rest of a line.`)
+
+    // In the middle of a file: the lines before it come whole, then the next call starts at it.
+    const middle = reader([{ name: 'mid.tex', kind: 'tex', content: `before\n${huge}\nafter` }])
+    expect(await read({}, middle)).toMatchObject({ last_line: 1, truncated: true, text: '1\tbefore' })
+    const cut = await read({ start_line: 2 }, middle)
+    expect(cut).toMatchObject({ first_line: 2, last_line: 2, truncated: true, line_truncated: true })
+    expect(cut.note).toMatch(/The next line is 3\.$/)
+    expect((cut.text as string).length).toBeLessThanOrEqual(DRAFT_MAX_CHARS)
+    expect(await read({ start_line: 3 }, middle)).toEqual(expect.objectContaining({ text: '3\tafter', truncated: false }))
+  })
+
+  it('stops the files and .bib keys at their caps and says there are more', async () => {
+    const many = Array.from({ length: DRAFT_MAX_FILES + 10 }, (_, i) => ({ name: `ch${i + 1}.tex`, kind: 'tex', content: 'x' }))
+    const keys = Array.from({ length: DRAFT_MAX_BIB_KEYS + 10 }, (_, i) => `key${i + 1}`)
+    const result = await read({}, reader(many, keys))
+    expect(result.files).toHaveLength(DRAFT_MAX_FILES)
+    expect(result.bib_keys).toHaveLength(DRAFT_MAX_BIB_KEYS)
+    expect(result).toMatchObject({ files_truncated: true, bib_keys_truncated: true, text: '1\tx' })
+    // A file past the cap can still be read by name, and an unknown one lists the first files.
+    expect(await read({ file: `ch${DRAFT_MAX_FILES + 5}.tex` }, reader(many))).toMatchObject({ file: `ch${DRAFT_MAX_FILES + 5}.tex` })
+    expect((await read({ file: 'nope.tex' }, reader(many))).message).toMatch(/files: ch1\.tex, .*, ch50\.tex, …$/)
+
+    // Long names or keys stop at the characters first.
+    const longKeys = Array.from({ length: 100 }, (_, i) => `${'k'.repeat(200)}${i}`)
+    const wide = await read({}, reader([{ name: 'main.tex', kind: 'tex', content: 'x' }], longKeys))
+    expect(JSON.stringify(wide.bib_keys).length).toBeLessThanOrEqual(DRAFT_BIB_KEYS_MAX_CHARS)
+    expect(wide).toMatchObject({ bib_keys_truncated: true })
+    const longNames = Array.from({ length: 40 }, (_, i) => ({ name: `${'chapter-'.repeat(25)}${i}.tex`, kind: 'tex', content: 'x' }))
+    const named = await read({}, reader(longNames))
+    expect(JSON.stringify(named.files).length).toBeLessThanOrEqual(DRAFT_FILES_MAX_CHARS)
+    expect(named).toMatchObject({ files_truncated: true })
+    expect(named).not.toHaveProperty('bib_keys_truncated')
   })
 
   it('says so when no editor is open, the file is not in the draft, or the lines are past its end', async () => {

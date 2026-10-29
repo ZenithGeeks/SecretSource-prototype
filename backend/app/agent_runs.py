@@ -40,6 +40,11 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 APP_NAME = "secretsource-screen"
 MAX_LLM_CALLS = 8  # per request; a task takes 3-5 in eval_screen_agent.py, so this stops a loop, not a task
 SESSION_SECONDS = 3600
+# A browser tool's result as UTF-8 JSON. The largest real one is read_draft's: 24,000 characters of
+# text plus capped file and .bib key lists (frontend/src/lib/agentTools.ts), about 36,000 characters.
+# In Thai or other 3-byte UTF-8 text that is about 100 KB, so 128 KiB keeps every real result while
+# a bigger one (a faulty or hostile browser) never reaches the model.
+MAX_TOOL_RESULT_BYTES = 128 * 1024
 # The specialists the screen agent hands work to (app/agents/screen.py), reported to the browser.
 DELEGATES = frozenset({"data_agent"})
 
@@ -98,7 +103,16 @@ async def send_result(session_id: str, body: ToolResult, user: str | None = Depe
         raise HTTPException(
             422, f"{body.name} is not a screen tool; expected one of {sorted(BROWSER_TOOL_NAMES)}"
         )
-    response = types.FunctionResponse(id=body.id, name=body.name, response=body.result)
+    result = body.result
+    size = len(json.dumps(result, ensure_ascii=False).encode())
+    if size > MAX_TOOL_RESULT_BYTES:
+        # Answer the call rather than refuse the request: the agent's pending call still gets its
+        # result, so the conversation goes on and the agent can tell the person.
+        log.warning(
+            "%s result of %d bytes is over %d; not passed to the agent", body.name, size, MAX_TOOL_RESULT_BYTES
+        )
+        result = {"status": "error", "message": "tool result too large"}
+    response = types.FunctionResponse(id=body.id, name=body.name, response=result)
     message = types.Content(role="user", parts=[types.Part(function_response=response)])
     return _stream(body.role, session_id, owner, message)
 
