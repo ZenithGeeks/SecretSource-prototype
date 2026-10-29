@@ -197,6 +197,24 @@ describe('Author Check a draft', () => {
     expect(gateway.calls.some((c) => c.includes('/author/search'))).toBe(false)
   })
 
+  test('a check that judged nothing is not "all supported" (#727)', async () => {
+    // Every source unreadable (as with ColBERT down), plus the thesis's missing key liu2023.
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: () => ({ verdict: 'unavailable', reason: 'indexing-failed', message: 'the index is down' }),
+    })
+    renderDraftCheck()
+    expect(await screen.findByText(/citations found · 0 need work/)).toBeInTheDocument()
+    const row = within(screen.getByRole('list', { name: 'Drafts' })).getAllByRole('button')[0]
+    expect(row).toHaveTextContent(/\d+ unavailable · \d+ not checked/)
+    expect(row).not.toHaveTextContent('all supported')
+    // The Citation check card and the Evidence panel say why, not "holds up".
+    expect(screen.getByText('Nothing needs work')).toBeInTheDocument()
+    expect(screen.getAllByText(/couldn't be checked: \d+ sources? unavailable, \d+ keys? missing from the \.bib\./)).toHaveLength(2)
+    expect(screen.queryByText(/holds up/)).not.toBeInTheDocument()
+    expect(screen.queryByText('all supported')).not.toBeInTheDocument()
+  })
+
   test('a draft that does not exist shows an honest message, not a crash', async () => {
     renderDraftCheck('gone')
     expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument()

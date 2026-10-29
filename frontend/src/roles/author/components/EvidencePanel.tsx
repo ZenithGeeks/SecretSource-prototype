@@ -16,7 +16,8 @@ import { Button, Card, Empty, Textarea } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import { askTarget } from '../../../lib/askCursor'
 import { referenceNote } from '../../../lib/referenceCheck'
-import type { Citation } from '../../../types/draftCheck'
+import { settledHint } from '../../../lib/verdict'
+import type { Citation, DraftStatus } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
 import { AuditNote, CitationBadge } from './Verdicts'
@@ -24,6 +25,7 @@ import { AuditNote, CitationBadge } from './Verdicts'
 export function EvidencePanel({
   citation,
   issues,
+  status,
   onNext,
   onOverride,
   onReopen,
@@ -33,6 +35,8 @@ export function EvidencePanel({
   citation: Citation | undefined
   /** The open issues, for the "N of M" pager. */
   issues: Citation[]
+  /** The draft's counts, so "No open issues" says what they say (#727). */
+  status: DraftStatus
   onNext: () => void
   onOverride: (citation: Citation, note: string) => void
   onReopen: (citation: Citation) => void
@@ -100,7 +104,7 @@ export function EvidencePanel({
       />
 
       {!citation ? (
-        <Empty title="No open issues" hint="Every checked citation in this draft holds up. Pick a row above to read its evidence." />
+        <Empty title="No open issues" hint={`${settledHint(status)} Pick a row above to read its evidence.`} />
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2">

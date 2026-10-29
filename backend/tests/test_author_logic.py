@@ -230,6 +230,30 @@ def test_report_html_lists_every_citation_with_its_verdict_and_passage():
     assert "no free copy published" in html
 
 
+def test_the_report_header_says_the_status_once():
+    """#727: the header ends with the label, minus the unavailable count the counts line
+    already ends with, and never says "all supported" for a citation nobody judged."""
+    row = {"key": "a2020", "file": "main.tex", "line": 1, "claim": "A claim."}
+    unread = {**row, "verdict": "unavailable", "message": "no free copy"}
+    missing = {**row, "key": "nope", "verdict": "unchecked", "message": "nope is not in the bibliography"}
+
+    def header(*citations: dict) -> str:
+        return logic.report_html({"title": "T"}, {"version": 1, "citations": list(citations)})
+
+    html = header(unread, unread)
+    assert "<p>2 citations · 2 unavailable</p>" in html and "all supported" not in html
+    html = header(unread, missing)
+    assert "<p>1 citation · 1 unavailable · 1 not checked</p>" in html and "all supported" not in html
+    html = header({**row, "verdict": "supports"}, missing)
+    assert "<p>1 citation · 1 supported · 1 not checked</p>" in html and "all supported" not in html
+    assert "<p>1 citation · 1 supported · all supported</p>" in header({**row, "verdict": "supports"})
+    assert "<p>2 citations · 1 supported · 1 not supported · 1 issue</p>" in header(
+        {**row, "verdict": "supports"}, {**row, "verdict": "refutes"}
+    )
+    assert "<p>0 citations · not checked</p>" in header()
+    assert "<p>0 citations · 2 not checked</p>" in header(missing, missing)
+
+
 def test_plain_text_unwraps_two_levels_of_formatting():
     """plain_text runs its unwrap twice on purpose (PR #291 review): each pass reaches only an
     innermost {...}, so nested formatting needs the second."""
@@ -300,3 +324,39 @@ def test_cited_text_marks_where_the_key_is_cited():
 
     assert logic.cited_text(sentence, "adamw") == "We use AdamW [cited] with weight decay 0.1 in PyTorch."
     assert logic.cited_text(sentence, "jax") == "We use AdamW with weight decay 0.1 in PyTorch [cited]."
+
+
+KEPT = {"kind": "overridden", "note": "kept as written"}
+
+
+@pytest.mark.parametrize(
+    ("verdicts", "label"),
+    [
+        (["supports", "supports"], "all supported"),
+        (["unavailable", "unavailable"], "2 unavailable"),  # #727: was "all supported"
+        (["refutes", "insufficient"], "2 issues"),
+        ([("refutes", KEPT)], "no open issues"),  # nothing supported, nothing left to do
+        (["supports", "unavailable"], "1 unavailable"),
+        (["supports", ("refutes", KEPT), "unavailable"], "1 unavailable"),
+        (["supports", "refutes", "unavailable"], "1 issue"),
+        (["supports", ("refutes", KEPT)], "no open issues"),
+        (["unavailable", "unchecked"], "1 unavailable · 1 not checked"),  # #727's run
+        (["supports", "unchecked"], "1 not checked"),  # a missing key is not supported
+        (["supports", "unavailable", "unchecked", "unchecked"], "1 unavailable · 2 not checked"),
+        (["insufficient", "unchecked"], "1 issue"),  # partial is open: it needs work
+        ([("insufficient", KEPT)], "no open issues"),
+        (["unchecked"], "1 not checked"),  # a check ran, every key missing
+        (["unchecked", "unchecked"], "2 not checked"),
+        ([], "not checked"),
+    ],
+)
+def test_the_status_label_follows_the_counts(verdicts, label):
+    """#727: "all supported" only when every citation is; an unread source, a missing key or
+    a contradiction the author kept is never called supported."""
+
+    def citation(item: str | tuple[str, dict]) -> dict:
+        if isinstance(item, tuple):
+            return {"verdict": item[0], "resolution": item[1]}
+        return {"verdict": item}
+
+    assert logic.status_label(logic.summarize([citation(v) for v in verdicts])) == label
