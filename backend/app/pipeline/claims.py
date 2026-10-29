@@ -464,12 +464,27 @@ def _without_the_authors(title: str) -> str:
     return YEAR_PREFIX.sub("", trimmed).strip()
 
 
+# "Thought Anchors: Which LLM Reasoning Steps Matter? ArXiv preprint, abs/2506": the venue
+# GROBID left on the end of the title.
+PREPRINT_TAIL = re.compile(r"[.,]?\s*\barxiv preprint\b[\s,:]*(?:abs/|arxiv:)?[\d./v]*\s*$", re.IGNORECASE)
+# "Reason-ingFlow": a word the PDF broke across two lines. Only a hyphen inside one word whose
+# rest runs into a capital is joined, so "Chain-of-Thought" and "Zero-shot" keep theirs.
+LINE_BREAK_HYPHEN = re.compile(r"(?<=[a-z])-(?=[a-z]+[A-Z])")
+
+
+def _cleaned_title(title: str) -> str:
+    """The title with a leading author list, a trailing preprint note and line-break hyphens
+    taken out, so a title-only lookup can match it."""
+    title = PREPRINT_TAIL.sub("", _without_the_authors(title))
+    return LINE_BREAK_HYPHEN.sub("", title).strip()
+
+
 def _title_of(reference) -> str:
     for path in TITLE_PATHS:
         found = reference.find(path, TEI_NAMESPACE)
         title = (found.text or "").strip() if found is not None else ""
         if title and not _looks_like_authors(title):
-            return _without_the_authors(title)
+            return _cleaned_title(title)
     return ""
 
 
