@@ -82,7 +82,7 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       notifications={<PaperBell onOpen={openPaper} />}
     >
       {analysis ? (
-        <Workspace analysisId={analysis} onDirtyChange={setUnsaved} askSlot={claimSlot} />
+        <Workspace analysisId={analysis} onDirtyChange={setUnsaved} askSlot={claimSlot} onOpenAsk={ask.showExtra} />
       ) : (
         <Queue onOpen={setAnalysis} />
       )}

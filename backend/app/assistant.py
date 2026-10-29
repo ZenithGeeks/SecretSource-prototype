@@ -114,10 +114,16 @@ def standalone_question(question: str, chat: list[str]) -> str:
 
 
 def answer_about_paper(
-    question: str, paper: str, path: Path, remembered: list[str] | None = None
+    question: str,
+    paper: str,
+    path: Path,
+    remembered: list[str] | None = None,
+    passages: list[str] | None = None,
 ) -> list[Cited]:
-    """Statements from one paper's passages, each judged against that paper."""
-    passages = [item["text"] for item in verify.evidence_from(question, path.name)]
+    """Statements from one paper's passages, each judged against that paper. With `passages`,
+    the answer comes from those alone instead of a search of the paper."""
+    if passages is None:
+        passages = [item["text"] for item in verify.evidence_from(question, path.name)]
     with dspy.context(lm=_answer_model()):
         statements = dspy.Predict(AnswerAsStatements)(
             passages=passages, remembered=remembered or [], question=question
@@ -206,12 +212,14 @@ async def answer(
     paper: Path | None = None,
     papers: frozenset[str] | None = None,
     remembered: list[str] | None = None,
+    passages: list[str] | None = None,
 ) -> AsyncIterator[dict]:
     """Answer a question and check each statement, as events in the order they happen.
 
     With `paper`, the answer comes from that PDF, which must already be indexed
-    (verify.prepare_source). Otherwise it comes from the passages of `papers` (see
-    library_passages). `remembered` is what the user studied before (memory.remembered_for).
+    (verify.prepare_source); `passages` narrows it to those passages of it. Otherwise it comes
+    from the passages of `papers` (see library_passages). `remembered` is what the user studied
+    before (memory.remembered_for).
     Yields, in order:
 
         {"type": "statement", "index": 0, "text", "source", "page"}   one per statement
@@ -219,7 +227,7 @@ async def answer(
         {"type": "done", "statements": n}
     """
     if paper is not None:
-        cited = await asyncio.to_thread(answer_about_paper, question, paper.name, paper, remembered)
+        cited = await asyncio.to_thread(answer_about_paper, question, paper.name, paper, remembered, passages)
     else:
         cited = await asyncio.to_thread(answer_from_library, question, papers, remembered)
     for index, item in enumerate(cited):

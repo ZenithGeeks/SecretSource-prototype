@@ -1718,7 +1718,7 @@ def test_ask_answers_from_a_reference_the_claim_cites(api, monkeypatch):
     asked = []
     monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "ok", "path": pdf})
 
-    async def answer(question, paper=None, papers=None):
+    async def answer(question, paper=None, papers=None, passages=None):
         asked.append((question, paper.as_posix()))
         yield {"type": "done", "statements": 0}
 
@@ -1729,6 +1729,36 @@ def test_ask_answers_from_a_reference_the_claim_cites(api, monkeypatch):
     assert events == [{"type": "done", "statements": 0}]
     unknown = {"question": "q", "reference_id": "nope"}
     assert client.post("/labeling/sessions/a1/ask", json=unknown).status_code == 422
+
+
+def test_ask_about_one_passage_reads_only_it_with_the_claim(api, monkeypatch):
+    from app import assistant
+
+    client, _, _ = api
+    asked = []
+    monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "ok", "path": pdf})
+
+    async def answer(question, paper=None, papers=None, passages=None):
+        asked.append((question, paper.as_posix(), passages))
+        yield {"type": "done", "statements": 0}
+
+    monkeypatch.setattr(assistant, "answer", answer)
+    body = {
+        "question": "Does this passage back the claim?",
+        "reference_id": REF_B,
+        "passage": "recall rose by 4 points",
+        "claim": "Recall improves.",
+    }
+    _events(client.post("/labeling/sessions/a1/ask", json=body))
+    assert asked == [
+        (
+            'Does this passage back the claim?\nThe claim: "Recall improves."',
+            "data/papers/refB-aaaaaaaaaaaa.pdf",
+            ["recall rose by 4 points"],
+        )
+    ]
+    no_reference = {"question": "q", "passage": "recall rose by 4 points"}
+    assert client.post("/labeling/sessions/a1/ask", json=no_reference).status_code == 422
 
 
 # review_for: the same review for a coding agent over MCP (app/mcp_server.py)

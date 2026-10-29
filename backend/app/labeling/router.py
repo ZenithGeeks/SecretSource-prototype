@@ -780,18 +780,24 @@ async def _review_events(store, stamp: dict, claim: dict, saved: review.Saved):
 
 @router.post("/sessions/{analysis_id}/ask")
 async def ask(body: AskIn, analysis: dict = Depends(owned_analysis)):
-    """Answer a question from the paper under review, or from one of its references.
+    """Answer a question from the paper under review, from one of its references, or from one
+    passage of a reference. A claim sent with the question is added to it, so the answer reads
+    the passage with the claim as the labeler worded it.
 
     The same answer as the other roles' Ask (assistant.answer): short statements, each checked by
     the judge, as server-sent events.
     """
+    if body.passage and not body.reference_id:
+        raise HTTPException(422, "a passage needs reference_id, the paper it is from")
     if not body.reference_id:
         pdf = analysis["file"]
     elif (pdf := _reference_path(analysis, body.reference_id)) is None:
         raise HTTPException(422, f"{body.reference_id} is not a paper this analysis read")
+    question = f'{body.question}\nThe claim: "{body.claim}"' if body.claim else body.question
+    passages = [body.passage] if body.passage else None
     from app import main
 
-    events = main._keep_alive(_answer_events(body.question, pdf))
+    events = main._keep_alive(_answer_events(question, pdf, passages))
     return StreamingResponse(events, media_type="text/event-stream")
 
 
@@ -804,7 +810,7 @@ def _reference_path(analysis: dict, reference_id: str) -> str | None:
     return None
 
 
-async def _answer_events(question: str, pdf: str):
+async def _answer_events(question: str, pdf: str, passages: list[str] | None = None):
     """assistant.answer's events for one PDF, after making sure the PDF is indexed."""
     from app import assistant  # imports dspy, about 0.6 s, so not at start-up
 
@@ -813,7 +819,8 @@ async def _answer_events(question: str, pdf: str):
         yield f"data: {json.dumps({'type': 'error', 'message': 'this paper could not be read'})}\n\n"
         return
     try:
-        async for event in assistant.answer(question, paper=Path(prepared["path"])):
+        events = assistant.answer(question, paper=Path(prepared["path"]), passages=passages)
+        async for event in events:
             yield f"data: {json.dumps(event)}\n\n"
     except Exception:
         log.exception("answering a labeler's question failed")

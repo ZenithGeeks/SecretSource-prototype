@@ -49,7 +49,7 @@ import {
 import { AiCursor } from '../../../components/AiCursor'
 import type { Pointing } from '../../../lib/askCursor'
 import { SplitPane } from '../../../components/SplitPane'
-import { AskPanel } from '../components/AskPanel'
+import { AskPanel, type AskedPassage } from '../components/AskPanel'
 import { ClaimDecision, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
 import { LabelForm } from '../components/LabelForm'
@@ -118,14 +118,16 @@ type WorkspaceProps = {
   onDirtyChange?: (unsaved: boolean) => void
   /** The Ask panel's "This claim" view (LabelerApp), while it shows; the claim tools are drawn there. */
   askSlot?: HTMLElement | null
+  /** Opens the Ask panel on "This claim", for a passage the labeler asks about. */
+  onOpenAsk?: () => void
 }
 
-export function Workspace({ analysisId, onDirtyChange, askSlot = null }: WorkspaceProps) {
+export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk }: WorkspaceProps) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
   if (query.error || !query.data)
     return <Empty {...problem(query.error)} />
-  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} askSlot={askSlot} />
+  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} askSlot={askSlot} onOpenAsk={onOpenAsk} />
 }
 
 /** Search the references for each claim added by hand, and add what is found to its passages (#404).
@@ -164,10 +166,12 @@ function Body({
   session,
   onDirtyChange,
   askSlot,
+  onOpenAsk,
 }: {
   session: Session
   onDirtyChange?: (unsaved: boolean) => void
   askSlot: HTMLElement | null
+  onOpenAsk?: () => void
 }) {
   const base = useMemo(() => workClaims(session), [session])
   // What this browser kept from before a reload or an outage, put back on top of what was saved.
@@ -199,6 +203,10 @@ function Body({
   })
   const claimSource = claim?.source ?? (placed.data?.page ? placed.data : null)
   const [focus, setFocus] = useState<Focus | null>(() => (claims[0] ? firstFocus(claims[0], session) : null))
+  // The passage the labeler asked Ask about. `id` counts the asks, so asking again (even about
+  // the same passage) starts a fresh question; moving to another claim drops it.
+  const [asked, setAsked] = useState<{ claimId: string; passage: AskedPassage | null; id: number } | null>(null)
+  if (asked && asked.claimId !== currentId) setAsked(null)
   const [overlay, setOverlay] = useState<'paper' | 'reference' | null>(null)
   const [savedRows, setSavedRows] = useState<number | null>(null)
   const [picked, setPicked] = useState<Picked | null>(null) // text just selected in a PDF
@@ -551,6 +559,13 @@ function Body({
           search={search}
           onSearchAgain={searchAgain}
           grade={grade}
+          onAsk={
+            onOpenAsk &&
+            ((passage) => {
+              setAsked((before) => ({ claimId: claim.claim_id, passage, id: (before?.id ?? 0) + 1 }))
+              onOpenAsk()
+            })
+          }
         />
       )}
       {deciding && refs.length === 0 && <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>}
@@ -576,9 +591,13 @@ function Body({
       key={claim.claim_id}
       analysisId={session.analysis_id}
       claim={claim}
+      wording={draft.status === 'edited' && draft.edited ? draft.edited : claim.claim}
       references={session.references}
       reviewBlocked={reviewBlocked}
       onPoint={point}
+      passage={asked?.passage ?? null}
+      askId={asked?.id ?? 0}
+      onClearPassage={() => setAsked((before) => before && { ...before, passage: null })}
     />
   )
 

@@ -13,7 +13,7 @@ import { api, paperName } from '../lib/api'
 import type { Role } from '../lib/roles'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
-import { loadAskOpen, saveAskOpen, useAskUserId } from '../lib/askSession'
+import { loadAskOpen, saveAskMode, saveAskOpen, useAskUserId } from '../lib/askSession'
 import type { PaperRef } from '../lib/askCommands'
 import { useAnalyses } from '../lib/useAnalysis'
 import type { ScreenActions } from '../lib/agentTools'
@@ -70,6 +70,14 @@ export function useAsk({
     setOpen(next)
     saveAskOpen(userId, next)
   }
+  // The panel reads its mode when it mounts, so showExtra remounts it on the screen's own mode.
+  const [panelKey, setPanelKey] = useState(0)
+  /** Opens the panel on the screen's own mode (`extra`), as when a screen hands it something to ask about. */
+  function showExtra() {
+    saveAskMode(userId, 'extra')
+    setPanelKey((key) => key + 1)
+    setOpenSaved(true)
+  }
   // The paper or node whose chip the reader removed: questions about it go to the whole
   // library. Opening a different paper or node brings the chip back.
   const [cleared, setCleared] = useState<string | null>(null)
@@ -106,6 +114,7 @@ export function useAsk({
 
   const panel = open ? (
     <AssistantPanel
+      key={panelKey}
       role={role}
       assistant={assistant}
       context={context}
@@ -133,5 +142,5 @@ export function useAsk({
     </>
   )
 
-  return { button, panel, viewer }
+  return { button, panel, viewer, showExtra }
 }

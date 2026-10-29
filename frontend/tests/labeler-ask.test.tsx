@@ -177,6 +177,43 @@ describe('Ask AI in the labeler', () => {
     expect(within(backed).getByText('“recall rose by 4 points”')).toBeInTheDocument()
   })
 
+  it('asks about one passage, with the claim as reworded, from the passage card', async () => {
+    gateway.session.saved = {
+      ...SAVED,
+      claims: [{ claim_id: 'paperA#0', origin: 'extracted', status: 'edited', claim_edited: 'Y raises recall by 4 points.' }],
+    }
+    // Ask was last closed and left on Do it: the card's button still opens it on this claim.
+    window.localStorage.clear()
+    window.history.replaceState(null, '', '?role=labeler&analysis=a1')
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <LabelerApp />
+      </QueryClientProvider>,
+    )
+    const [first] = await screen.findAllByRole('button', { name: 'Ask AI about this passage' })
+    fireEvent.click(first)
+
+    const modes = await screen.findByRole('group', { name: 'What Ask does' })
+    expect(within(modes).getByRole('button', { name: 'This claim' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('#1 Ref B · p.5')).toBeInTheDocument()
+    expect(screen.queryByLabelText('About')).not.toBeInTheDocument()
+    const field = screen.getByLabelText('Question')
+    expect(field).toHaveFocus()
+    fireEvent.change(field, { target: { value: 'Does it back the claim?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    await waitFor(() =>
+      expect(gateway.streamed[0]).toEqual({
+        path: '/labeling/sessions/a1/ask',
+        body: { question: 'Does it back the claim?', reference_id: 'refB', passage: 'recall rose by 4 points', claim: 'Y raises recall by 4 points.' },
+      }),
+    )
+
+    // Clearing the passage goes back to asking a whole paper.
+    fireEvent.click(screen.getByRole('button', { name: 'Stop asking about this passage' }))
+    expect(screen.getByLabelText('About')).toHaveValue('')
+  })
+
   it('runs a /command on the open paper, and says what is wrong with one that cannot run', async () => {
     gateway.toolResult = { claims: 2, saved: 1, reviewed: 0, next_unsaved: { number: 2, claim: 'Method Z is faster.', passages: [] } }
     await openAsk()

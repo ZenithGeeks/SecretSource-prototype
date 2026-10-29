@@ -20,6 +20,7 @@ export function AskInput({
   label = 'Your question',
   className = 'w-full bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed',
   menuClassName = 'absolute bottom-full left-[-0.75rem] z-20 mb-3 w-[calc(100%+1.25rem)]',
+  autoFocus = false,
 }: {
   draft: string
   onChange: (draft: string) => void
@@ -32,6 +33,7 @@ export function AskInput({
   className?: string
   /** Where the menu sits. */
   menuClassName?: string
+  autoFocus?: boolean
 }) {
   const [active, setActive] = useState(0)
   // The reader pressed Escape on this draft; typing again brings the menu back.
@@ -81,6 +83,7 @@ export function AskInput({
         }}
         onKeyDown={onKeyDown}
         disabled={disabled}
+        autoFocus={autoFocus}
         aria-label={label}
         aria-autocomplete="list"
         aria-controls={open ? 'ask-suggestions' : undefined}

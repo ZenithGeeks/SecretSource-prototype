@@ -416,14 +416,18 @@ export type ReviewEvent = ({ type: 'finding' } & Finding) | { type: 'done'; find
 export const reviewClaim = (analysisId: string, claimId: string, onEvent: (event: ReviewEvent) => void, signal: AbortSignal) =>
   postEvents(`/labeling/sessions/${encodeURIComponent(analysisId)}/review`, { claim_id: claimId }, onEvent, signal)
 
-/** Asks about the paper under review, or about one of its references with `referenceId`. */
+/** What a labeler's question is about: the paper under review (reference_id ""), one of its
+ * references, or one passage of a reference read with the claim as worded on screen. */
+export type AskAbout = { reference_id: string; passage?: string; claim?: string }
+
+/** Asks about the paper under review, one of its references, or one passage of a reference. */
 export const askLabeling = (
   analysisId: string,
   question: string,
-  referenceId: string,
+  about: AskAbout,
   onEvent: (event: AnswerEvent) => void,
   signal: AbortSignal,
-) => postEvents(`/labeling/sessions/${encodeURIComponent(analysisId)}/ask`, { question, reference_id: referenceId }, onEvent, signal)
+) => postEvents(`/labeling/sessions/${encodeURIComponent(analysisId)}/ask`, { question, ...about }, onEvent, signal)
 
 // --- what a person decided about one claim ---
 
