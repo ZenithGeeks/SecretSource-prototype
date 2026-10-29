@@ -209,6 +209,18 @@ def test_each_role_has_its_own_agent_and_each_can_ask_to_switch_role():
     assert "switch_role" in screen.BROWSER_TOOL_NAMES
 
 
+def test_the_author_agent_offers_only_the_author_screens():
+    """#712: History and Graph left the Author role (frontend AuthorApp `screens`); the agent
+    sends the person to the Researcher for them instead of opening them here."""
+    assert "Its screens: home, library, editor." in screen.AUTHOR_ROLE
+    assert "graph," not in screen.AUTHOR_ROLE and "history," not in screen.AUTHOR_ROLE
+    assert 'switch_role with "researcher"' in screen.AUTHOR_ROLE
+    text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
+    writer_row = next(line for line in text.splitlines() if line.startswith("| `writer`"))
+    assert "`home`, `library`, `editor`" in writer_row
+    assert "`graph`" not in writer_row and "`history`" not in writer_row
+
+
 def test_only_the_author_agent_reads_the_draft_and_only_from_the_browser():
     assert "read_draft" in tool_names(screen.author_agent)
     assert "read_draft" not in tool_names(screen.screen_agent)

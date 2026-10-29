@@ -59,7 +59,7 @@ conversation, so after `switch_role` the next role's agent reads what was said b
 |---|---|---|---|
 | `researcher` | `screen_agent` | `home`, `analyses`, `library`, `graph` | `list_papers`, `fill_field`, and `data_agent` with the server tools above |
 | `labeler` | `labeler_agent` | `papers`, `workspace` | `labeling_papers`, `labeling_progress`, `claim_passages`, `find_support` |
-| `writer` (Author) | `author_agent` | `home`, `library`, `graph`, `history`, `editor` (once a draft is selected) | `list_drafts`, `draft_issues`, `find_support`, `fill_field`, `read_draft` |
+| `writer` (Author) | `author_agent` | `home`, `library`, `editor` (once a draft is selected) | `list_drafts`, `draft_issues`, `find_support`, `fill_field`, `read_draft` |
 
 Every role also has `read_screen`, `open_screen`, `point_at` and `switch_role`. The Labeler's agent
 has no `fill_field` and no tool that returns a verdict (`get_claim`, `get_analysis`, `check_text`,

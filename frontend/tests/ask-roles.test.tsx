@@ -19,7 +19,12 @@ afterEach(() => {
 })
 
 function renderAt(search: string, app: ReactNode) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })))
+  // An empty account: no drafts, no projects (the Author sidebar reads the library from the start).
+  const library = { projects: [], unsorted: { sources: 0, pdfs: 0, drafts: 0 }, attention: [], saved: [] }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes('/author/library') ? library : []), { status: 200 })),
+  )
   window.history.replaceState(null, '', search)
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{app}</QueryClientProvider>)
 }
@@ -29,12 +34,12 @@ function openAsk() {
   return within(screen.getByRole('complementary', { name: 'Ask' }))
 }
 
-test('an author asks the library from Library and keeps the chat on History', () => {
+test('an author asks the library from Library and keeps the chat on Home', () => {
   renderAt('?role=author&screen=library', <AuthorApp />)
 
   expect(openAsk().getByText('About: your library')).toBeInTheDocument()
 
-  fireEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('button', { name: 'History' }))
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('button', { name: 'Home' }))
   expect(screen.getByRole('complementary', { name: 'Ask' })).toBeInTheDocument()
 })
 

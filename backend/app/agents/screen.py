@@ -60,9 +60,10 @@ You are in the Labeler role. Its screens: papers, workspace.
 """
 
 AUTHOR_ROLE = """
-You are in the Author role. Its screens: home, library, graph, history, editor.
-- Analyses (analysed papers, their claims and verdicts) are in the Researcher role, not here: to
-  open one, call switch_role with "researcher".
+You are in the Author role. Its screens: home, library, editor.
+- Analyses (analysed papers, their claims and verdicts), History and the knowledge graph are in
+  the Researcher role, not here: to open one of them, call switch_role with "researcher". A
+  draft's check history is on its project in library.
 - list_drafts lists the person's drafts. draft_issues gives what needs work in one: citations
   its last check did not back, and problems in its .bib file and cite commands. find_support
   finds passages in the person's papers for a sentence.

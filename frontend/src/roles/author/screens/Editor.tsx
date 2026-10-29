@@ -50,7 +50,7 @@ import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useS
 import { isOpenIssue, summarize } from '../../../lib/verdict'
 import type { Citation, Draft, ProjectFile } from '../../../types/draftCheck'
 import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark } from '../components/editor/CodeEditor'
-import { EditorTopBar, type EditorTab, type SaveStatus } from '../components/editor/EditorTopBar'
+import { EditorTopBar, type SaveStatus } from '../components/editor/EditorTopBar'
 import { ExportMenu, type ExportKind } from '../components/editor/ExportMenu'
 import { FileTabs } from '../components/editor/FileTabs'
 import { PreviewPane } from '../components/editor/PreviewPane'
@@ -81,7 +81,8 @@ export function Editor({
   autosaveMs?: number
   /** The open file changed (for the URL). */
   onFileChange: (file: string) => void
-  onNavigate: (tab: EditorTab | 'home') => void
+  /** Back to Check a draft. */
+  onNavigate: (screen: 'home') => void
   /** The write made on the way out of the editor was refused: the screen is gone by then, so
    * the app shows this. */
   onWriteFailed?: (message: string) => void
@@ -580,7 +581,6 @@ export function Editor({
         onSave={() => void save()}
         saving={savingVersion}
         onBack={() => onNavigate('home')}
-        onNavigate={(tab) => onNavigate(tab)}
         onRecheck={() => void recheck()}
         rechecking={isChecking}
         exportSlot={<ExportMenu openIssues={draft.data.status.open} busy={exporting} onExport={exportAs} />}

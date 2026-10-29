@@ -42,7 +42,7 @@ src/
 │  └─ auth/Auth.tsx       sign in / sign up / forgot / reset / check-email (Supabase Auth)
 ├─ roles/                 one folder per role — no cross-role imports
 │  ├─ researcher/         ResearcherApp + screens/ (Home, Library, FieldConsensus, Graph, History, Settings)
-│  ├─ author/             AuthorApp + screens/ (DraftCheck = Home, Editor, Library, ProjectDetail, FindASource) + components/
+│  ├─ author/             AuthorApp + screens/ (DraftCheck = Home, Editor, Library, ProjectDetail) + components/
 │  └─ teacher/            TeacherApp + screens/ (Home, Classes, AddClass, ClassWorkspace,
 │                          Classwork, People, AssignmentDetail, EssayCheck, ReadingQuestions,
 │                          Settings) + role-local components
@@ -314,8 +314,11 @@ popover and Find a source's "Cite this". Use `VERDICTS[verdict]` for any word or
 to a verdict — never a local map. `unavailable` is not an open issue (the gateway counts the
 same way); the Library's "Needs attention" lists it with "Upload PDF".
 
-History for the Author is the Researcher's History: `components/HistoryWorkspace.tsx`
-(`useHistoryWorkspace`) holds the form, results, page viewer and sidebar list both apps render.
+The Author nav is Home and Library (Redesign R/Sidebar, Role=Author, without its "Projects" and
+"Find a source" items), with `components/RecentProjects.tsx` under it: the last five projects
+from `/author/library`, a status dot, what needs work, and "+ New". History and Graph are the
+Researcher's only (#712): an old `?screen=history`, `?screen=graph` or `?analysis=` link opens
+the Library with a notice, and a draft's check history is on its project.
 
 ### LaTeX.js preview
 
