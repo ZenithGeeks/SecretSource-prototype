@@ -1067,11 +1067,22 @@ async def delete_project(project_id: str, user: str | None = Depends(current_use
     sources stay and become unsorted: a source left pointing at a deleted project would show
     up nowhere."""
     await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
-    for table in (DRAFTS, SOURCES):
-        for row in await asyncio.to_thread(_rows, table, user):
-            if row.get("projectId") == project_id:
-                row["projectId"] = None
-                await asyncio.to_thread(_save, table, row)
+
+    def unsort_drafts() -> None:
+        # Under the lock a file write takes, and without touching `updated`, as update_draft
+        # moves a draft: an open editor's next autosave neither conflicts nor puts the draft
+        # back in the deleted project.
+        with DRAFT_WRITES:
+            for draft in _rows(DRAFTS, user):
+                if draft.get("projectId") == project_id:
+                    draft["projectId"] = None
+                    store.save_author_row(DRAFTS, draft)
+
+    await asyncio.to_thread(unsort_drafts)
+    for source in await asyncio.to_thread(_rows, SOURCES, user):
+        if source.get("projectId") == project_id:
+            source["projectId"] = None
+            await asyncio.to_thread(_save, SOURCES, source)
     await asyncio.to_thread(store.delete_author_row, PROJECTS, project_id)
     return {"deleted": project_id}
 

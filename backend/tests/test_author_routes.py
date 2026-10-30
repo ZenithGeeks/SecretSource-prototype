@@ -994,6 +994,8 @@ def test_deleting_a_project_moves_its_drafts_and_saved_sources_to_unsorted(clien
     # the draft stays, unsorted; the project's .bib went with the project
     kept = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
     assert kept["projectId"] is None and [f["name"] for f in kept["files"]] == ["ch2.tex"]
+    # a move, not an edit: an editor open on the draft does not get a conflict on its next save
+    assert kept["updated"] == draft["updated"]
     assert client.get(f"/author/projects/{project['id']}", headers=ADA).status_code == 404
 
 
