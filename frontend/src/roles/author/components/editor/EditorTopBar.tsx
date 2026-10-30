@@ -1,6 +1,7 @@
 /** The editor's own top bar (the screen is full-bleed, in AppShell's bare mode): brand,
  * breadcrumb with the draft's title (click it to rename, Figma A2 716:5104), the version and
- * save state, Save, the Editor / Export / History tabs, Re-check, and the role chip.
+ * save state, Save, the Editor / Export tabs, Re-check, and the role chip. (No History tab:
+ * History is the Researcher's, and a draft's check history is on its project, #712.)
  * `exportSlot` is where the Export dropdown mounts, `askSlot` the Ask button (AppShell's
  * toolbar, where it sits on the other screens, is not shown here). */
 
@@ -12,8 +13,6 @@ import { RoleChip } from '../../../../components/RoleChip'
 import { Button, TextButton } from '../../../../components/ui'
 import { MAX_TITLE } from '../../../../lib/draftSave'
 import { cn } from '../../../../lib/utils'
-
-export type EditorTab = 'editor' | 'history'
 
 /** Where the draft's text stands against the gateway: every edit written, an edit waiting for
  * the autosave pause, a write in flight, or the last write refused. */
@@ -109,22 +108,6 @@ function DraftTitle({ title, onRename }: { title: string; onRename: (title: stri
   )
 }
 
-function TabButton({ active, onClick, children }: { active?: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? 'page' : undefined}
-      className={cn(
-        'border-b-2 px-1 pt-[19px] pb-[15px] text-[15px] font-medium transition-colors',
-        active ? 'border-accent text-accent' : 'border-transparent text-ink hover:text-accent',
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
 export function EditorTopBar({
   title,
   version,
@@ -134,7 +117,6 @@ export function EditorTopBar({
   onSave,
   saving,
   onBack,
-  onNavigate,
   onRecheck,
   rechecking,
   exportSlot,
@@ -151,7 +133,6 @@ export function EditorTopBar({
   onSave: () => void
   saving: boolean
   onBack: () => void
-  onNavigate: (tab: EditorTab) => void
   onRecheck: () => void
   rechecking: boolean
   exportSlot: ReactNode
@@ -195,11 +176,10 @@ export function EditorTopBar({
         </nav>
       </div>
       <nav aria-label="Editor sections" className="ml-auto flex items-center gap-5">
-        <TabButton active onClick={() => onNavigate('editor')}>
+        <span aria-current="page" className="border-b-2 border-accent px-1 pt-[19px] pb-[15px] text-[15px] font-medium text-accent">
           Editor
-        </TabButton>
+        </span>
         {exportSlot}
-        <TabButton onClick={() => onNavigate('history')}>History</TabButton>
       </nav>
       <div className="flex items-center gap-3 py-3">
         <Button variant="ghost" onClick={onSave} disabled={saving} aria-busy={saving} title="Save a version (Ctrl+S or ⌘S)" aria-keyshortcuts="Control+S Meta+S">

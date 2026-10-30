@@ -95,13 +95,15 @@ describe('Author LaTeX editor', () => {
     expect(gateway.drafts.get('d1')!.files.some((f) => f.name === 'methods.tex')).toBe(true)
   })
 
-  test('the top bar navigates (no Find a source tab), Re-check starts a run, and Ctrl+S saves a new version', async () => {
+  test('the top bar navigates (no Find a source or History tab), Re-check starts a run, and Ctrl+S saves a new version', async () => {
     const { onNavigate } = renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'Check a draft' }))
     expect(onNavigate).toHaveBeenCalledWith('home')
-    expect(screen.queryByRole('button', { name: 'Find a source' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'History' }))
-    expect(onNavigate).toHaveBeenCalledWith('history')
+    // A draft's check history is on its project (#712); the Editor tab is the current page.
+    const sections = within(screen.getByRole('navigation', { name: 'Editor sections' }))
+    expect(sections.queryByRole('button', { name: 'Find a source' })).not.toBeInTheDocument()
+    expect(sections.queryByRole('button', { name: 'History' })).not.toBeInTheDocument()
+    expect(sections.getByText('Editor')).toHaveAttribute('aria-current', 'page')
 
     const before = gateway.checks.size
     fireEvent.click(screen.getByRole('button', { name: 'Re-check' }))

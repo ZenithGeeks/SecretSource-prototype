@@ -1,7 +1,7 @@
 /**
- * The Author role's shell: its nav is Home, Library, Graph and History — no Find a source —
- * and its Graph and History screens are the Researcher's components (Graph directly, History
- * through useHistoryWorkspace), not copies. Against the fake gateway, with login off.
+ * The Author role's shell (Redesign R/Sidebar, Role=Author): its nav is Home and Library — no
+ * Projects, Find a source, Graph or History (#712) — with Recent projects under it (#718).
+ * Against the fake gateway, with login off.
  */
 
 import { EditorView } from '@codemirror/view'
@@ -30,7 +30,7 @@ vi.mock('../src/lib/api', async (original) => ({
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
-// The Researcher's screens, stubbed so the test can tell the shared components from forks.
+// The Researcher's screens, stubbed so a test can tell they never render in the Author role.
 vi.mock('../src/roles/researcher/screens/History', () => ({
   History: (props: { selected: string | null }) => <div data-testid="researcher-history">researcher history · selected={String(props.selected)}</div>,
 }))
@@ -57,7 +57,25 @@ function renderApp(search = '') {
       <AuthorApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     </QueryClientProvider>,
   )
-  return { onChangeRole, onSwitchRole }
+  return { onChangeRole, onSwitchRole, queryClient }
+}
+
+/** The desktop sidebar's Recent projects list (the phone menu renders its own copy). */
+function recent() {
+  return within(within(screen.getByRole('complementary', { name: 'Sidebar' })).getByRole('list', { name: 'Recent projects' }))
+}
+
+/** Each row as it reads on screen: the name and its count (not the screen-reader status). */
+function recentNames(): string[] {
+  return recent()
+    .getAllByRole('button')
+    .map((row) =>
+      [...row.querySelectorAll('span')]
+        .filter((span) => span.children.length === 0 && !span.classList.contains('sr-only'))
+        .map((span) => span.textContent?.trim())
+        .filter(Boolean)
+        .join(' '),
+    )
 }
 
 /** Opens the toolbar's Ask on its Do it mode and sends `message` to the agent. */
@@ -101,39 +119,43 @@ afterEach(() => {
 })
 
 describe('AuthorApp', () => {
-  test('the nav is exactly Home, Library, Graph, History — no Find a source', async () => {
+  test('the nav is exactly Home and Library — no Projects, Find a source, Graph or History', async () => {
     renderApp()
     await screen.findAllByRole('navigation')
-    expect(navLabels()).toEqual(['Home', 'Library', 'Graph', 'History'])
-    expect(nav().queryByRole('button', { name: 'Find a source' })).toBeNull()
+    expect(navLabels()).toEqual(['Home', 'Library'])
+    for (const gone of ['Projects', 'Find a source', 'Graph', 'History']) expect(nav().queryByRole('button', { name: gone })).toBeNull()
     expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
 
-  test('each tab opens its screen and the URL follows', async () => {
-    renderApp()
-    await screen.findAllByRole('navigation')
+  test('each tab opens its screen and the URL follows; Library opens the Library, not the last project', async () => {
+    renderApp('?screen=library&project=proj1')
+    expect(await screen.findByRole('heading', { name: 'Related work — thesis ch.2' })).toBeInTheDocument()
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+
+    fireEvent.click(nav().getByRole('button', { name: 'Home' }))
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('home')
     fireEvent.click(nav().getByRole('button', { name: 'Library' }))
     expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('library')
+    expect(new URLSearchParams(window.location.search).get('project')).toBeNull()
     expect(await screen.findByRole('button', { name: /Unsorted sources/ })).toBeInTheDocument()
-
-    fireEvent.click(nav().getByRole('button', { name: 'Graph' }))
-    expect(new URLSearchParams(window.location.search).get('screen')).toBe('graph')
-    expect(screen.getByTestId('researcher-graph')).toBeInTheDocument()
-
-    fireEvent.click(nav().getByRole('button', { name: 'History' }))
-    expect(new URLSearchParams(window.location.search).get('screen')).toBe('history')
-    expect(screen.getByTestId('researcher-history')).toBeInTheDocument()
   })
 
-  test('Graph is the Researcher Graph component; a paper picked on it opens on History', async () => {
-    renderApp('?screen=graph')
-    expect(await screen.findByTestId('researcher-graph')).toBeInTheDocument()
-    expect(nav().getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-current', 'page')
-    fireEvent.click(screen.getByRole('button', { name: 'open paper a7' }))
-    expect(await screen.findByTestId('researcher-history')).toHaveTextContent('selected=a7')
-    expect(new URLSearchParams(window.location.search).get('screen')).toBe('history')
-    expect(new URLSearchParams(window.location.search).get('analysis')).toBe('a7')
+  test.each([
+    ['?screen=graph', 'graph'],
+    ['?screen=history', 'history'],
+    ['?screen=history&analysis=a42', 'an analysis on History'],
+    ['?analysis=a42', 'an analysis'],
+  ])('a bookmark of %s (%s) opens the Library and says where it went', async (search) => {
+    renderApp(search)
+    expect(await screen.findByRole('button', { name: /Unsorted sources/ })).toBeInTheDocument()
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText(/History and Graph are in the Researcher role now/)).toBeInTheDocument()
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('screen')).toBe('library')
+    expect(params.get('analysis')).toBeNull()
+    expect(screen.queryByTestId('researcher-graph')).toBeNull()
+    expect(screen.queryByTestId('researcher-history')).toBeNull()
   })
 
   test('an edit refused on the way out of the editor is reported on the screen the author lands on', async () => {
@@ -172,17 +194,17 @@ describe('AuthorApp', () => {
 
   test('the agent opens an Author screen, and moves to another role only after Switch', async () => {
     agent.streams = [
-      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_screen', args: { screen: 'history' } }],
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_screen', args: { screen: 'library' } }],
       [{ type: 'tool', id: 'c2', name: 'switch_role', args: { role: 'researcher', reason: 'Analyses are in the Researcher role' } }],
       [{ type: 'say', text: 'You are in the Researcher role now.' }, { type: 'done' }],
     ]
-    const { onSwitchRole } = renderApp('?screen=library')
+    const { onSwitchRole } = renderApp('?screen=home&draft=d1')
     await screen.findAllByRole('navigation')
     doIt('Open my analyses')
 
     const approve = await screen.findByRole('group', { name: 'Approve this change' })
-    expect(nav().getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page')
-    expect(agent.posts[1].body).toEqual({ id: 'c1', name: 'open_screen', result: { status: 'done', screen: 'history' }, role: 'writer' })
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+    expect(agent.posts[1].body).toEqual({ id: 'c1', name: 'open_screen', result: { status: 'done', screen: 'library' }, role: 'writer' })
     expect(approve).toHaveTextContent('Switch to the Researcher role. Analyses are in the Researcher role')
     expect(within(approve).getByRole('button', { name: 'Switch' })).toBeInTheDocument()
     expect(onSwitchRole).not.toHaveBeenCalled()
@@ -197,6 +219,20 @@ describe('AuthorApp', () => {
     })
     expect(screen.getByText('You are in the Researcher role now.')).toBeInTheDocument()
     expect(agent.streams).toHaveLength(0)
+  })
+
+  test('open_paper in the Author role fails instead of switching roles without approval', async () => {
+    agent.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_paper', args: { analysis_id: 'a7' } }],
+      [{ type: 'done' }],
+    ]
+    const { onSwitchRole } = renderApp('?screen=home&draft=d1')
+    await screen.findAllByRole('navigation')
+    doIt('Open paper a7')
+
+    await waitFor(() => expect(agent.posts).toHaveLength(2))
+    expect(agent.posts[1].body).toMatchObject({ id: 'c1', name: 'open_paper', result: { status: 'error' } })
+    expect(onSwitchRole).not.toHaveBeenCalled()
   })
 
   test('read_screen sees the drafts, citations, projects and buttons on Home, the Library and a project', async () => {
@@ -287,8 +323,23 @@ describe('AuthorApp', () => {
     await screen.findAllByRole('navigation')
     doIt('Open the editor')
     await waitFor(() => expect(agent.posts).toHaveLength(2))
-    expect(agent.posts[1].body.result).toEqual({ status: 'error', message: 'no screen editor; screens: home, library, graph, history' })
+    expect(agent.posts[1].body.result).toEqual({ status: 'error', message: 'no screen editor; screens: home, library' })
     expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('the agent cannot open Graph or History in the Author role', async () => {
+    agent.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_screen', args: { screen: 'graph' } }],
+      [{ type: 'tool', id: 'c2', name: 'open_screen', args: { screen: 'history' } }],
+      [{ type: 'say', text: 'The graph is in the Researcher role.' }, { type: 'done' }],
+    ]
+    renderApp('?screen=home&draft=d1')
+    await screen.findAllByRole('navigation')
+    doIt('Show me the graph')
+    await waitFor(() => expect(agent.posts).toHaveLength(3))
+    expect(agent.posts[1].body.result).toEqual({ status: 'error', message: 'no screen graph; screens: home, library, editor' })
+    expect(agent.posts[2].body.result).toEqual({ status: 'error', message: 'no screen history; screens: home, library, editor' })
+    expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
 
   test('a bookmarked ?screen=find-source (the removed tab) lands on Home', async () => {
@@ -299,12 +350,74 @@ describe('AuthorApp', () => {
     expect(new URLSearchParams(window.location.search).get('q')).toBeNull()
   })
 
-  test('History renders the Researcher History component, with ?analysis= as the open one', async () => {
-    renderApp('?screen=history&analysis=a42')
-    expect(await screen.findByTestId('researcher-history')).toHaveTextContent('selected=a42')
-    expect(nav().getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page')
-    // the shared sidebar list is there too, fed by the same /analyses the Researcher reads
-    expect(await screen.findByText('No analyses yet.')).toBeInTheDocument()
-    expect(gateway.calls).toContain('GET /analyses')
+})
+
+describe('Recent projects in the sidebar', () => {
+  const t = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
+
+  /** Three projects besides the fixture's proj1, each last touched at a different time. */
+  function seedProjects() {
+    const base = { bib: null, pdfs: {} }
+    gateway.projects.set('pA', { ...base, id: 'pA', name: 'Grant aims', created: t(500), updated: t(300) })
+    gateway.projects.set('pB', { ...base, id: 'pB', name: 'ICLR submission', created: t(500), updated: t(5) })
+    gateway.projects.set('pC', { ...base, id: 'pC', name: 'Workshop paper', created: t(500), updated: t(900) })
+    gateway.projects.get('proj1')!.updated = t(1000)
+    // proj1's draft d1 was edited after everything else: the project counts as the most recent.
+    gateway.drafts.get('d1')!.edited = t(1)
+  }
+
+  test('lists the projects worked on last first, with what needs work and "—" before a check', async () => {
+    seedProjects()
+    renderApp()
+    await waitFor(() => expect(recentNames()).toHaveLength(4))
+    expect(recentNames()).toEqual(['Related work — thesis ch.2 3', 'ICLR submission —', 'Grant aims —', 'Workshop paper —'])
+    expect(recent().getByRole('button', { name: /^Related work — thesis ch.2/ })).toHaveAccessibleName(/3 need work/)
+    expect(recent().getByRole('button', { name: /^Grant aims/ })).toHaveAccessibleName(/not checked yet/)
+  })
+
+  test('shows at most five, and a row opens its project and lights up there', async () => {
+    seedProjects()
+    for (const i of [1, 2, 3]) gateway.projects.set(`old${i}`, { id: `old${i}`, name: `Old ${i}`, bib: null, pdfs: {}, created: t(5000), updated: t(5000 + i) })
+    renderApp()
+    await waitFor(() => expect(recentNames()).toHaveLength(5))
+    expect(recentNames().some((name) => name.startsWith('Old 3'))).toBe(false)
+
+    fireEvent.click(recent().getByRole('button', { name: /^ICLR submission/ }))
+    expect(await screen.findByRole('heading', { name: 'ICLR submission' })).toBeInTheDocument()
+    expect(recent().getByRole('button', { name: /^ICLR submission/ })).toHaveAttribute('aria-current', 'page')
+    expect(recent().getByRole('button', { name: /^Grant aims/ })).not.toHaveAttribute('aria-current')
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+    expect(new URLSearchParams(window.location.search).get('project')).toBe('pB')
+  })
+
+  test('"+ New" makes a project, opens it, and the list shows it', async () => {
+    renderApp()
+    await waitFor(() => expect(recentNames()).toHaveLength(1))
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Sidebar' })).getByRole('button', { name: 'New project' }))
+    expect(await screen.findByRole('heading', { name: 'Untitled project' })).toBeInTheDocument()
+    expect(gateway.calls).toContain('POST /author/projects')
+    await waitFor(() => expect(recentNames()[0]).toBe('Untitled project —'))
+    expect(recent().getByRole('button', { name: /^Untitled project/ })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('follows a rename and a delete made elsewhere once the library refetches', async () => {
+    seedProjects()
+    const { queryClient } = renderApp()
+    await waitFor(() => expect(recentNames()).toHaveLength(4))
+    gateway.projects.get('pB')!.name = 'ICLR camera-ready'
+    gateway.projects.delete('pA')
+    await act(() => queryClient.invalidateQueries({ queryKey: ['author', 'library'] }))
+    await waitFor(() => expect(recentNames()).toEqual(['Related work — thesis ch.2 3', 'ICLR camera-ready —', 'Workshop paper —']))
+  })
+
+  test('works from the phone menu: a row opens its project and closes the menu', async () => {
+    seedProjects()
+    renderApp()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the menu' }))
+    const menu = within(screen.getByRole('dialog', { name: 'Menu' }))
+    expect(menu.getAllByRole('navigation')[0]).toHaveTextContent(/^HomeLibrary$/)
+    fireEvent.click(await menu.findByRole('button', { name: /^Workshop paper/ }))
+    expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
+    expect(await screen.findByRole('heading', { name: 'Workshop paper' })).toBeInTheDocument()
   })
 })

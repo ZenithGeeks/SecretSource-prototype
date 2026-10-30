@@ -89,6 +89,11 @@ def never(*names: str):
     return lambda run: not any(n in names for n, _ in run.calls)
 
 
+def never_screen(*screens: str):
+    """No open_screen call for any of `screens`."""
+    return lambda run: not any(n == "open_screen" and a.get("screen") in screens for n, a in run.calls)
+
+
 def says_not(*words: str):
     """The reply does not claim the change: none of `words`, or it says it cannot or did not."""
 
@@ -217,6 +222,13 @@ TASKS = [
     Task(
         "Open my ColBERTv2 analysis.", called("switch_role", role="researcher"), role="writer", screen="home"
     ),
+    # Graph and History left the Author role (#712): the graph is the Researcher's.
+    Task(
+        "Show me the knowledge graph.",
+        both(called("switch_role", role="researcher"), never_screen("graph", "history")),
+        role="writer",
+        screen="home",
+    ),
     Task(
         "Run a citation check on my thesis draft.",
         says_not("started", "running", "is checking", "has begun"),
@@ -257,7 +269,7 @@ TASKS = [
 ROLE_SCREENS = {
     "researcher": SCREENS,
     "labeler": ["papers", "workspace"],
-    "writer": ["home", "library", "graph", "history", "editor"],
+    "writer": ["home", "library", "editor"],
 }
 # The Labeler's pool: ColBERTv2 is half done, RocketQA is finished.
 POOL = [
