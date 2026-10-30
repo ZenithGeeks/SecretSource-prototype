@@ -53,3 +53,24 @@ def test_a_real_title_is_left_alone():
 
 def test_a_lowercase_word_is_not_a_name():
     assert claims._looks_like_authors("deep learning, and neural networks") is False
+
+
+def test_a_preprint_note_after_the_title_is_cut_off():
+    title = "Thought Anchors: Which LLM Reasoning Steps Matter?"
+    assert claims._cleaned_title(f"{title} ArXiv preprint, abs/2506") == title
+    assert claims._cleaned_title("Sparks of AGI. arXiv preprint arXiv:2303.12712") == "Sparks of AGI"
+
+
+def test_a_title_about_preprints_keeps_its_words():
+    assert claims._cleaned_title("An arXiv preprint server study") == "An arXiv preprint server study"
+
+
+def test_a_word_broken_across_lines_is_joined():
+    assert claims._cleaned_title("Reason-ingFlow: Semantic Structure of Complex Reasoning Traces") == (
+        "ReasoningFlow: Semantic Structure of Complex Reasoning Traces"
+    )
+
+
+def test_real_hyphens_are_kept():
+    for title in ("Chain-of-Thought Is Not Explainability", "Zero-shot Mixture-of-Experts", "DIM-SUM"):
+        assert claims._cleaned_title(title) == title

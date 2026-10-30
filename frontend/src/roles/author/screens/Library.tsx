@@ -14,6 +14,7 @@ import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/
 import { askTarget } from '../../../lib/askCursor'
 import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
+import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
 import { NewProjectDialog, ProjectMenu, ProjectNameField } from '../components/ProjectActions'
@@ -43,11 +44,16 @@ function ProjectCard({
   onDelete: () => void
 }) {
   const [renaming, setRenaming] = useState(false)
+  const status = projectStatus(project)
   const meta = [
     project.bibName ?? 'no .bib yet',
     count(project.entries, 'entry').replace('entrys', 'entries'),
     `${project.cited} cited`,
-    project.needWork ? `${project.needWork} need work` : project.checkedAt ? 'all supported' : `${count(project.drafts, 'draft')}`,
+    project.needWork
+      ? `${project.needWork} need work`
+      : status.checked || status.counts.unchecked
+        ? statusLabel(status)
+        : `${count(project.drafts, 'draft')}`,
   ]
   return (
     <div className="relative flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent">
