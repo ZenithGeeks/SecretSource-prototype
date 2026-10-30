@@ -8,6 +8,7 @@
  * picked. The parent keys this component by it so selection resets when the draft changes.
  */
 
+import { AnimatePresence } from 'framer-motion'
 import { Loader2, Search } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -21,6 +22,7 @@ import { isOpenIssue } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { CheckProgress } from '../components/CheckProgress'
 import { CitationCheckCard } from '../components/CitationCheckCard'
+import { DeleteDraftDialog } from '../components/DeleteDraftButton'
 import { EvidencePanel } from '../components/EvidencePanel'
 import { ParsedDraftCard } from '../components/ParsedDraftCard'
 import { QuickActions } from '../components/QuickActions'
@@ -173,6 +175,18 @@ function DraftCheckBody({
   const actions = useAuthorActions()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [target, setTarget] = useState<Target | null>(null)
+  const [deleting, setDeleting] = useState<Draft | null>(null)
+
+  /** After the delete, the open draft moves to its neighbour in the list (the next one, or the
+   * one before the last); with no draft left, Home shows its empty state. */
+  const deleteDraft = async (gone: Draft) => {
+    const at = drafts.findIndex((d) => d.id === gone.id)
+    const neighbour = drafts[at + 1] ?? drafts[at - 1]
+    await actions.deleteDraft(gone.id)
+    setDeleting(null)
+    setToast(`${gone.title} deleted`)
+    if (gone.id === draftId && neighbour) onSelectDraft(neighbour.id)
+  }
 
   const showTarget = (next: Target | null) => {
     setTarget(next)
@@ -295,7 +309,7 @@ function DraftCheckBody({
           />
 
           <div className="grid items-start gap-4 lg:grid-cols-2">
-            <YourDraftsCard drafts={drafts} currentId={current.id} onSelect={onSelectDraft} onNew={onNewDraft} onHistory={onOpenHistory} />
+            <YourDraftsCard drafts={drafts} currentId={current.id} onSelect={onSelectDraft} onNew={onNewDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
           </div>
         </div>
         {target && (
@@ -305,6 +319,9 @@ function DraftCheckBody({
         )}
       </div>
 
+      <AnimatePresence>
+        {deleting && <DeleteDraftDialog draft={deleting} onCancel={() => setDeleting(null)} onConfirm={() => deleteDraft(deleting)} />}
+      </AnimatePresence>
       <Toast message={toast} onClose={closeToast} />
     </FadeIn>
   )

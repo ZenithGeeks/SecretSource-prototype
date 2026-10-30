@@ -5,6 +5,7 @@
  * Opening a card shows the project detail (597:4404); `?project=` deep-links it.
  */
 
+import { AnimatePresence } from 'framer-motion'
 import { AlertCircle, ArrowRight, Bookmark, FileText, Trash2, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 
@@ -16,17 +17,33 @@ import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
+import { NewProjectDialog, ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { VerdictBar } from '../components/Verdicts'
 import { issues } from '../labels'
-import { ProjectDetail, UNSORTED } from './ProjectDetail'
+import { DeleteProjectDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
-function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
+/** A project card. The whole card opens the project; its "⋯" menu renames it in place or asks
+ * to delete it (the Researcher's card pattern: the open button lies under the content, which
+ * lets clicks through except on the menu and the name field). */
+function ProjectCard({
+  project,
+  onOpen,
+  onRename,
+  onDelete,
+}: {
+  project: Project
+  onOpen: () => void
+  /** Resolves to the gateway's refusal, or null when it took the name. */
+  onRename: (name: string) => Promise<string | null>
+  onDelete: () => void
+}) {
+  const [renaming, setRenaming] = useState(false)
   const status = projectStatus(project)
   const meta = [
     project.bibName ?? 'no .bib yet',
@@ -39,20 +56,33 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         : `${count(project.drafts, 'draft')}`,
   ]
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      data-ask-target={askTarget({ kind: 'project', id: project.id })}
-      className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
-    >
-      <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
-      <p className="text-[13px] text-ink-muted">{meta.join(' · ')}</p>
-      <VerdictBar counts={project.tally} />
-      <div className="mt-1 flex items-center justify-between">
-        <span className="text-xs text-ink-muted">{checkedSentence(project.checkedAt)}</span>
-        <ArrowRight className="size-4 text-accent" aria-hidden="true" />
+    <div className="relative flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent">
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open ${project.name}`}
+        data-ask-target={askTarget({ kind: 'project', id: project.id })}
+        className="absolute inset-0 rounded-xl"
+      />
+      <div className="pointer-events-none flex flex-col gap-3">
+        {renaming ? (
+          <ProjectNameField name={project.name} onSave={onRename} onDone={() => setRenaming(false)} />
+        ) : (
+          <p className="pr-8 font-serif text-base font-semibold break-words text-ink">{project.name}</p>
+        )}
+        <p className="text-[13px] text-ink-muted">{meta.join(' · ')}</p>
+        <VerdictBar counts={project.tally} />
+        <div className="mt-1 flex items-center justify-between">
+          <span className="text-xs text-ink-muted">{checkedSentence(project.checkedAt)}</span>
+          <ArrowRight className="size-4 text-accent" aria-hidden="true" />
+        </div>
       </div>
-    </button>
+      {!renaming && (
+        <div className="absolute top-3 right-3">
+          <ProjectMenu name={project.name} onRename={() => setRenaming(true)} onDelete={onDelete} />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -83,6 +113,8 @@ export function Library({
   const pdfInput = useRef<HTMLInputElement>(null)
   const [pdfFor, setPdfFor] = useState<AttentionRow | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [deleting, setDeleting] = useState<Project | null>(null)
 
   if (projectId) {
     return (
@@ -106,6 +138,27 @@ export function Library({
       setToast(`Could not import ${file.name}: ${errorMessage(error)}`)
     } finally {
       setBusy(null)
+    }
+  }
+
+  /** "+ New project" by name: an empty project, opened right away. */
+  const createProject = async (name: string): Promise<string | null> => {
+    try {
+      const project = await actions.createProject(name ? { name } : {})
+      setCreating(false)
+      onOpenProject(project.id)
+      return null
+    } catch (error) {
+      return errorMessage(error)
+    }
+  }
+
+  const renameProject = async (projectId: string, name: string): Promise<string | null> => {
+    try {
+      await actions.updateProject(projectId, { name })
+      return null
+    } catch (error) {
+      return errorMessage(error)
     }
   }
 
@@ -248,7 +301,13 @@ export function Library({
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((project) => (
-          <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project.id)} />
+          <ProjectCard
+            key={project.id}
+            project={project}
+            onOpen={() => onOpenProject(project.id)}
+            onRename={(name) => renameProject(project.id, name)}
+            onDelete={() => setDeleting(project)}
+          />
         ))}
         <button
           type="button"
@@ -274,12 +333,12 @@ export function Library({
         </button>
         <button
           type="button"
-          onClick={() => importInput.current?.click()}
+          onClick={() => setCreating(true)}
           data-ask-target={askTarget({ kind: 'action', id: 'new-project' })}
           className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
         >
           <span className="font-serif text-base font-semibold text-accent">+ New project</span>
-          <span className="text-xs text-ink-muted">Import a .bib or an Overleaf .zip</span>
+          <span className="text-xs text-ink-muted">An empty project, or import a .bib or an Overleaf .zip</span>
         </button>
       </div>
 
@@ -363,6 +422,33 @@ export function Library({
         </Card>
       </div>
 
+      <AnimatePresence>
+        {creating && (
+          <NewProjectDialog
+            onCancel={() => setCreating(false)}
+            onCreate={createProject}
+            onImport={() => {
+              setCreating(false)
+              importInput.current?.click()
+            }}
+          />
+        )}
+        {deleting && (
+          <DeleteProjectDialog
+            name={deleting.name}
+            drafts={deleting.drafts}
+            sources={saved.filter((s) => s.projectId === deleting.id).length}
+            entries={deleting.entries}
+            bibName={deleting.bibName}
+            onCancel={() => setDeleting(null)}
+            onConfirm={async () => {
+              await actions.deleteProject(deleting.id)
+              setToast(`${deleting.name} deleted`)
+              setDeleting(null)
+            }}
+          />
+        )}
+      </AnimatePresence>
       <Toast message={toast} onClose={closeToast} />
     </FadeIn>
   )

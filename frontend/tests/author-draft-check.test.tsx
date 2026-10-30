@@ -106,7 +106,7 @@ describe('Author Check a draft', () => {
 
   test('Your drafts switches drafts and "+ New draft" creates one on the gateway', async () => {
     const { onSelectDraft, onOpenEditor } = renderDraftCheck()
-    fireEvent.click(await screen.findByRole('button', { name: /Seminar paper \(CPE\)/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Seminar paper \(CPE\)/ }))
     expect(onSelectDraft).toHaveBeenCalledWith('d2')
     expect(screen.getByText('all supported')).toBeInTheDocument()
 

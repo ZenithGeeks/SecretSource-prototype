@@ -45,7 +45,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('Author Library', () => {
   test('lists the project card with its .bib stats, the unsorted card, attention rows and saved sources', async () => {
     renderLibrary()
-    const card = await screen.findByRole('button', { name: /Related work — thesis ch\.2/ })
+    const card = (await screen.findByRole('button', { name: 'Open Related work — thesis ch.2' })).parentElement!
     expect(card).toHaveTextContent('main.bib · 7 entries · 0 cited · 3 need work')
     expect(card).toHaveTextContent(/Checked/)
     expect(screen.getByRole('button', { name: /Unsorted sources/ })).toHaveTextContent('1 draft in no project')
@@ -111,7 +111,7 @@ describe('Author Library', () => {
 
   test('clicking a project card asks to open it, and the project id then shows the detail view', async () => {
     const { onOpenProject } = renderLibrary()
-    fireEvent.click(await screen.findByRole('button', { name: /Related work — thesis ch\.2/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Related work — thesis ch.2' }))
     expect(onOpenProject).toHaveBeenCalledWith('proj1')
 
     // What AuthorApp does with that id: the same Library, now on the project's detail.
@@ -137,7 +137,7 @@ describe('Author Library', () => {
     // nguyen2016 has no free copy (unavailable) and one \cite key is not in the .bib (not
     // checked): neither is supported, so the project is not "all supported" (#727)
     expect(screen.getByText('main.bib · 7 entries · 0 cited · 1 unavailable · 1 not checked')).toBeInTheDocument()
-    const drafts = within(screen.getByRole('list', { name: 'Drafts in this project' })).getAllByRole('button')
+    const drafts = within(screen.getByRole('list', { name: 'Drafts in this project' })).getAllByRole('listitem')
     expect(drafts).toHaveLength(1)
     expect(drafts[0]).toHaveTextContent('v4')
 
@@ -169,7 +169,7 @@ describe('Author Library', () => {
     gateway.sources.set('in-project', { id: 'in-project', projectId: 'proj1', key: 'formal2021', title: 'SPLADE v2', authors: 'Formal et al.', authorsList: ['Thibault Formal'], year: 2021, venue: '', doi: '', arxiv: '', url: '', identifier: 'arxiv:2109.10086', openAccess: true, citedBy: 1, bibtex: '', inBib: false, bibName: null, savedAt: '2026-09-27T00:00:00Z' })
     renderLibrary('unsorted')
     expect(await screen.findByRole('heading', { level: 1, name: 'Unsorted sources' })).toBeInTheDocument()
-    expect(within(screen.getByRole('list', { name: 'Drafts in no project' })).getAllByRole('button')).toHaveLength(1)
+    expect(within(screen.getByRole('list', { name: 'Drafts in no project' })).getAllByRole('listitem')).toHaveLength(1)
     expect(screen.getByText('No unsorted sources')).toBeInTheDocument()
     expect(screen.queryByText(/SPLADE v2/)).not.toBeInTheDocument()
     expect(gateway.calls).toContain('GET /author/sources?project=')

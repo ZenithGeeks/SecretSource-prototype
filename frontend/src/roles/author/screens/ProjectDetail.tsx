@@ -5,6 +5,7 @@
  * citation by citation. "unsorted" shows the drafts in no project and the unsorted sources.
  */
 
+import { AnimatePresence } from 'framer-motion'
 import { Clock, FileText, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
@@ -16,6 +17,9 @@ import { cn } from '../../../lib/utils'
 import { labelAfterCounts, projectStatus, statusLabel, statusTone, VERDICTS } from '../../../lib/verdict'
 import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import { DeleteDraftButton, DeleteDraftDialog } from '../components/DeleteDraftButton'
+import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { CitationBadge } from '../components/Verdicts'
@@ -186,10 +190,14 @@ export function ProjectDetail({
   const unsorted = projectId === UNSORTED
   const project = useAuthorProject(unsorted ? null : projectId)
   const drafts = useAuthorDrafts()
-  const sources = useSavedSources(unsorted ? '' : undefined)
+  // Unsorted lists its sources; a project counts its own for "Delete project".
+  const sources = useSavedSources(unsorted ? '' : projectId)
   const actions = useAuthorActions()
   const [selectedDraft, setSelectedDraft] = useState<string | null>(initialDraft)
   const [toast, setToast] = useState<string | null>(null)
+  const [deletingDraft, setDeletingDraft] = useState<Draft | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [deletingProject, setDeletingProject] = useState(false)
   const closeToast = useCallback(() => setToast(null), [])
   // Unsorted drafts belong to no project, so their check history comes from the draft itself.
   const unfiled = unsorted ? (drafts.data ?? []).filter((d) => !d.projectId) : []
@@ -216,6 +224,19 @@ export function ProjectDetail({
     }
   }
 
+  /** A deleted draft that was selected hands the selection back to the first one left. */
+  const deleteDraft = async (gone: Draft) => {
+    await actions.deleteDraft(gone.id)
+    setDeletingDraft(null)
+    if (selectedDraft === gone.id) setSelectedDraft(null)
+    setToast(`${gone.title} deleted`)
+  }
+  const draftDialog = (
+    <AnimatePresence>
+      {deletingDraft && <DeleteDraftDialog draft={deletingDraft} onCancel={() => setDeletingDraft(null)} onConfirm={() => deleteDraft(deletingDraft)} />}
+    </AnimatePresence>
+  )
+
   if (unsorted) {
     if (drafts.isPending || sources.isPending) return <LoadingScreen label="Loading unsorted sources…" />
     return (
@@ -232,7 +253,14 @@ export function ProjectDetail({
           </Button>
         </header>
         <div className="grid items-start gap-4 lg:grid-cols-[2fr_3fr]">
-          <DraftList drafts={unfiled} selected={unfiledCurrent?.id ?? null} onSelect={setSelectedDraft} onOpenDraft={onOpenDraft} title="Drafts in no project" />
+          <DraftList
+            drafts={unfiled}
+            selected={unfiledCurrent?.id ?? null}
+            onSelect={setSelectedDraft}
+            onOpenDraft={onOpenDraft}
+            onDelete={setDeletingDraft}
+            title="Drafts in no project"
+          />
           {unfiledCurrent ? (
             <CheckHistory draft={unfiledCurrent} runs={unfiledChecks.data ?? []} onOpenEditor={() => onOpenEditor(unfiledCurrent.id)} />
           ) : (
@@ -242,6 +270,7 @@ export function ProjectDetail({
           )}
         </div>
         <UnsortedSources sources={sources.data ?? []} onToast={setToast} />
+        {draftDialog}
         <Toast message={toast} onClose={closeToast} />
       </FadeIn>
     )
@@ -264,6 +293,14 @@ export function ProjectDetail({
 
   const detail = project.data
   const current = detail.draftList.find((d) => d.id === selectedDraft) ?? detail.draftList[0]
+  const renameProject = async (name: string): Promise<string | null> => {
+    try {
+      await actions.updateProject(projectId, { name })
+      return null
+    } catch (error) {
+      return errorMessage(error)
+    }
+  }
   const status = projectStatus(detail)
   const meta = [
     detail.bibName ?? 'no .bib yet',
@@ -282,18 +319,32 @@ export function ProjectDetail({
     <FadeIn className="flex flex-col gap-5">
       {back}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">{detail.name}</h1>
+        <div className="min-w-0 flex-1">
+          {renaming ? (
+            <ProjectNameField name={detail.name} onSave={renameProject} onDone={() => setRenaming(false)} className="max-w-md" />
+          ) : (
+            <h1 className="font-serif text-[22px] font-semibold tracking-tight break-words text-ink">{detail.name}</h1>
+          )}
           <p className="text-sm text-ink-muted">{meta}</p>
         </div>
-        <Button onClick={() => void newDraft()} className="self-start sm:self-auto" data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
-          <Plus className="size-4" aria-hidden="true" />
-          New draft
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button onClick={() => void newDraft()} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
+            <Plus className="size-4" aria-hidden="true" />
+            New draft
+          </Button>
+          <ProjectMenu name={detail.name} onRename={() => setRenaming(true)} onDelete={() => setDeletingProject(true)} />
+        </div>
       </header>
 
       <div className="grid items-start gap-4 lg:grid-cols-[2fr_3fr]">
-        <DraftList drafts={detail.draftList} selected={current?.id ?? null} onSelect={setSelectedDraft} onOpenDraft={onOpenDraft} title="Drafts in this project" />
+        <DraftList
+          drafts={detail.draftList}
+          selected={current?.id ?? null}
+          onSelect={setSelectedDraft}
+          onOpenDraft={onOpenDraft}
+          onDelete={setDeletingDraft}
+          title="Drafts in this project"
+        />
         {current ? (
           <CheckHistory draft={current} runs={detail.history[current.id] ?? []} onOpenEditor={() => onOpenEditor(current.id)} />
         ) : (
@@ -302,8 +353,59 @@ export function ProjectDetail({
           </Card>
         )}
       </div>
+      {draftDialog}
+      <AnimatePresence>
+        {deletingProject && (
+          <DeleteProjectDialog
+            name={detail.name}
+            drafts={detail.draftList.length}
+            sources={(sources.data ?? []).length}
+            entries={detail.entries}
+            bibName={detail.bibName}
+            onCancel={() => setDeletingProject(false)}
+            onConfirm={async () => {
+              await actions.deleteProject(projectId)
+              setDeletingProject(false)
+              onBack()
+            }}
+          />
+        )}
+      </AnimatePresence>
       <Toast message={toast} onClose={closeToast} />
     </FadeIn>
+  )
+}
+
+/** "Delete project?": says what the gateway does. The drafts and saved sources stay and move
+ * to Unsorted; the .bib and the PDFs attached to its entries go with the project. */
+export function DeleteProjectDialog({
+  name,
+  drafts,
+  sources,
+  entries,
+  bibName,
+  onCancel,
+  onConfirm,
+}: {
+  name: string
+  drafts: number
+  sources: number
+  entries: number
+  bibName: string | null | undefined
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  return (
+    <ConfirmDialog title={`Delete “${name}”?`} confirmLabel="Delete project" onCancel={onCancel} onConfirm={onConfirm}>
+      <p>
+        Its {plural(drafts, 'draft', 'drafts')} and {plural(sources, 'saved source', 'saved sources')} move to Unsorted.
+      </p>
+      <p className="mt-2">
+        {bibName ?? 'Its .bib'} ({plural(entries, 'entry', 'entries')}) and the PDFs attached to it are deleted, so drafts that cite
+        those keys will show them as missing. This can't be undone.
+      </p>
+    </ConfirmDialog>
   )
 }
 
@@ -312,12 +414,15 @@ function DraftList({
   selected,
   onSelect,
   onOpenDraft,
+  onDelete,
   title,
 }: {
   drafts: Draft[]
   selected: string | null
   onSelect: (id: string) => void
   onOpenDraft: (id: string) => void
+  /** The bin on each row: asks first. */
+  onDelete: (draft: Draft) => void
   title: string
 }) {
   return (
@@ -328,14 +433,14 @@ function DraftList({
       ) : (
         <ul aria-label={title}>
           {drafts.map((draft) => (
-            <li key={draft.id} className="border-b border-border-subtle">
+            <li key={draft.id} className="flex items-center gap-1 border-b border-border-subtle">
               <button
                 type="button"
                 onClick={() => onSelect(draft.id)}
                 onDoubleClick={() => onOpenDraft(draft.id)}
                 aria-current={draft.id === selected ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
-                className={cn('flex w-full items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', draft.id === selected && 'bg-accent-soft/60')}
+                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', draft.id === selected && 'bg-accent-soft/60')}
               >
                 <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -348,6 +453,7 @@ function DraftList({
                   {statusLabel(draft.status)}
                 </span>
               </button>
+              <DeleteDraftButton draft={draft} onDelete={onDelete} />
             </li>
           ))}
         </ul>

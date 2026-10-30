@@ -11,6 +11,7 @@ import { cn } from '../../../lib/utils'
 import { statusLabel, statusTone } from '../../../lib/verdict'
 import type { Draft } from '../../../types/draftCheck'
 import { CardHead, TextLink } from './CardHead'
+import { DeleteDraftButton } from './DeleteDraftButton'
 
 export function YourDraftsCard({
   drafts,
@@ -18,12 +19,15 @@ export function YourDraftsCard({
   onSelect,
   onNew,
   onHistory,
+  onDelete,
 }: {
   drafts: Draft[]
   currentId: string
   onSelect: (id: string) => void
   onNew: () => void
   onHistory: (draft: Draft) => void
+  /** The bin on each row: asks first (the caller's confirm dialog). */
+  onDelete?: (draft: Draft) => void
 }) {
   const current = drafts.find((d) => d.id === currentId)
   const delta = current?.sinceLastCheck
@@ -44,14 +48,14 @@ export function YourDraftsCard({
       ) : (
         <ul aria-label="Drafts">
           {drafts.map((draft) => (
-            <li key={draft.id} className="border-b border-border-subtle">
+            <li key={draft.id} className="flex items-center gap-1 border-b border-border-subtle">
               <button
                 type="button"
                 onClick={() => onSelect(draft.id)}
                 aria-current={draft.id === currentId ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40',
+                  'flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40',
                   draft.id === currentId && 'bg-accent-soft/60',
                 )}
               >
@@ -64,6 +68,7 @@ export function YourDraftsCard({
                 </span>
                 <span className={cn('shrink-0 whitespace-nowrap text-xs', statusTone(draft.status))}>{statusLabel(draft.status)}</span>
               </button>
+              {onDelete && <DeleteDraftButton draft={draft} onDelete={onDelete} />}
             </li>
           ))}
         </ul>

@@ -407,7 +407,13 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       })
     if (parts.length === 2 && method === 'GET') return json(cards())
     if (parts.length === 2 && method === 'POST') {
-      const project: StoredProject = { id: id('proj'), name: String(body?.name ?? 'Untitled project'), bib: { name: String(body?.bibName ?? 'main.bib'), content: String(body?.bib ?? '') }, pdfs: {}, created: now(), updated: now() }
+      // As the gateway: no name gets the next free "Untitled project N"; a name is one trimmed line.
+      const asked = String(body?.name ?? '').split(/\s+/).filter(Boolean).join(' ')
+      if (asked.length > 120) return fail(400, 'a project name is at most 120 characters')
+      const taken = new Set([...gateway.projects.values()].map((p) => p.name))
+      let name = asked || 'Untitled project'
+      for (let n = 2; !asked && taken.has(name); n++) name = `Untitled project ${n}`
+      const project: StoredProject = { id: id('proj'), name, bib: { name: String(body?.bibName ?? 'main.bib'), content: String(body?.bib ?? '') }, pdfs: {}, created: now(), updated: now() }
       gateway.projects.set(project.id, project)
       return json(cards().find((c) => c.id === project.id))
     }
@@ -426,12 +432,20 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       return json({ ...cards().find((c) => c.id === project.id), bib: project.bib, draftList: drafts.map((d) => draftView(gateway, d)), history })
     }
     if (parts.length === 3 && method === 'PATCH') {
-      if (body?.name) project.name = String(body.name)
+      if (body && 'name' in body) {
+        const name = String(body.name ?? '').split(/\s+/).filter(Boolean).join(' ')
+        if (!name) return fail(400, 'a project needs a name')
+        if (name.length > 120) return fail(400, 'a project name is at most 120 characters')
+        project.name = name
+      }
       if (typeof body?.bib === 'string') project.bib = { name: String(body.bibName ?? project.bib?.name ?? 'main.bib'), content: body.bib }
       project.updated = now()
       return json(cards().find((c) => c.id === project.id))
     }
     if (parts.length === 3 && method === 'DELETE') {
+      // Its drafts and saved sources stay, unsorted; the .bib goes with the project.
+      for (const d of gateway.drafts.values()) if (d.projectId === project.id) d.projectId = null
+      for (const src of gateway.sources.values()) if (src.projectId === project.id) src.projectId = null
       gateway.projects.delete(project.id)
       return json({ deleted: project.id })
     }
