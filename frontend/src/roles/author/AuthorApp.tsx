@@ -173,8 +173,8 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
         if (next === 'home' || next === 'library') navigateFromSidebar(next)
         else if (next === 'editor' && draftId) openEditor({ draftId })
       },
-      // The author agent has no open_paper: analyses are the Researcher's, where this lands.
-      openPaper: () => onSwitchRole?.('researcher'),
+      // No openPaper: an MCP client's open_paper fails rather than switching roles past the
+      // Switch approval and the unsaved-edit prompt.
       switchRole: onSwitchRole,
       examples: screen === 'editor' ? EDITOR_EXAMPLES : DO_IT_EXAMPLES,
       draftEditor: () => draftReader.current,

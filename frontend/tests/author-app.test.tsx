@@ -221,6 +221,20 @@ describe('AuthorApp', () => {
     expect(agent.streams).toHaveLength(0)
   })
 
+  test('open_paper in the Author role fails instead of switching roles without approval', async () => {
+    agent.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'tool', id: 'c1', name: 'open_paper', args: { analysis_id: 'a7' } }],
+      [{ type: 'done' }],
+    ]
+    const { onSwitchRole } = renderApp('?screen=home&draft=d1')
+    await screen.findAllByRole('navigation')
+    doIt('Open paper a7')
+
+    await waitFor(() => expect(agent.posts).toHaveLength(2))
+    expect(agent.posts[1].body).toMatchObject({ id: 'c1', name: 'open_paper', result: { status: 'error' } })
+    expect(onSwitchRole).not.toHaveBeenCalled()
+  })
+
   test('read_screen sees the drafts, citations, projects and buttons on Home, the Library and a project', async () => {
     gateway = installFakeGateway({ files: THESIS_FILES, prechecked: true })
     // jsdom has no layout, so give every element a box the way a browser would.

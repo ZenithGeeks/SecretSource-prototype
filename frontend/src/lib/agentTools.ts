@@ -15,7 +15,8 @@ export type ScreenActions = {
   screen: string
   screens: string[]
   openScreen: (screen: string) => void
-  openPaper: (analysisId: string) => void
+  /** Missing in a role with no papers (the Author's), so open_paper fails instead of switching roles. */
+  openPaper?: (analysisId: string) => void
   /** Moves to that role the way the role menu does. The caller performs it after the result is sent. */
   switchRole?: (role: Role) => void
   /** False when the person still has unsaved work and declines to leave it. */
@@ -84,6 +85,7 @@ export async function runTool(call: ToolCall, context: ToolContext): Promise<Too
     case 'open_screen':
       return openScreen(args.screen, context)
     case 'open_paper':
+      if (!context.actions.openPaper) return { status: 'error', message: 'there are no papers in this role; call switch_role first' }
       context.actions.openPaper(args.analysis_id)
       return { status: 'done' }
     case 'point_at':
