@@ -509,12 +509,39 @@ def summarize(citations: list[dict]) -> dict:
 
 
 def status_label(status: dict) -> str:
-    """ "3 issues", "all supported", "not checked" — the words a draft row ends with."""
+    """ "3 issues", "1 unavailable · 1 not checked", "all supported", "no open issues",
+    "2 not checked", "not checked" — the words a draft row ends with. "all supported" only when
+    every citation is supported (#727): an unread source, a missing key (the only way a finished
+    check leaves a citation unchecked) or a contradiction the author kept is never called
+    supported. A check whose every key was missing says how many it could not check, not that
+    no check ran. Same rule as statusLabel in frontend/src/lib/verdict.ts."""
     if status["checked"] == 0:
-        return "not checked"
-    if status["open"] == 0:
+        unchecked = status["counts"].get("unchecked", 0)
+        return f"{unchecked} not checked" if unchecked else "not checked"
+    if status["open"]:
+        return f"{status['open']} issue{'' if status['open'] == 1 else 's'}"
+    unavailable = status["counts"].get("unavailable", 0)
+    unchecked = status["counts"].get("unchecked", 0)
+    if unavailable or unchecked:
+        parts = [
+            f"{unavailable} unavailable" if unavailable else "",
+            f"{unchecked} not checked" if unchecked else "",
+        ]
+        return " · ".join(p for p in parts if p)
+    if status["counts"].get("supports", 0) == status["checked"]:
         return "all supported"
-    return f"{status['open']} issue{'' if status['open'] == 1 else 's'}"
+    return "no open issues"
+
+
+def label_after_counts(status: dict) -> str:
+    """The label after a counts line that already ends with "· N unavailable" (the report
+    header), without that repeat; empty when nothing is left to say. Same as labelAfterCounts
+    in frontend/src/lib/verdict.ts."""
+    counts = status["counts"]
+    if status["checked"] == 0 or status["open"] or not counts.get("unavailable", 0):
+        return status_label(status)
+    unchecked = counts.get("unchecked", 0)
+    return f"{unchecked} not checked" if unchecked else ""
 
 
 def counts_line(status: dict) -> str:
@@ -693,12 +720,15 @@ def report_html(draft: dict, check: dict) -> str:
                 else ""
             )
         )
+    # "· 2 unavailable" is already the end of the counts line (#727).
+    after = label_after_counts(status)
+    label = f" · {_esc(after)}" if after else ""
     return (
         "<html><body>"
         f"<h1>SecretSource verification report</h1>"
         f"<p>{_esc(draft.get('title', ''))} · v{_esc(check.get('version', draft.get('version', 1)))}"
         f" · {_esc(when)}</p>"
-        f"<p>{_esc(counts_line(status))} · {_esc(status_label(status))}</p>"
+        f"<p>{_esc(counts_line(status))}{label}</p>"
         + "".join(rows)
         + "</body></html>"
     )

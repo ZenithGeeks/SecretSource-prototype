@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ALL_VERDICTS, VERDICTS, VERDICT_ORDER, isLowConfidence, isOpenIssue, statusLabel, summarize } from '../src/lib/verdict.ts'
+import { ALL_VERDICTS, VERDICTS, VERDICT_ORDER, isLowConfidence, isOpenIssue, labelAfterCounts, projectStatus, settledHint, statusLabel, statusTone, summarize } from '../src/lib/verdict.ts'
 import type { Verdict } from '../src/types/draftCheck.ts'
 
 test('every verdict has words and colours, and the bar order covers every checked verdict', () => {
@@ -44,6 +44,76 @@ test('summarize counts each verdict once and statusLabel says it in the drafts l
   assert.equal(statusLabel(status), '2 issues')
   assert.equal(statusLabel(summarize([{ verdict: 'supports' }])), 'all supported')
   assert.equal(statusLabel(summarize([{ verdict: 'refutes' }])), '1 issue')
-  assert.equal(statusLabel(summarize([{ verdict: 'unchecked' }])), 'not checked')
+  assert.equal(statusLabel(summarize([{ verdict: 'unchecked' }])), '1 not checked')
   assert.equal(statusLabel(summarize([])), 'not checked')
+})
+
+test('statusLabel follows the counts: "all supported" only when every citation is (#727)', () => {
+  const kept = { kind: 'overridden' as const, note: 'kept as written', at: new Date().toISOString() }
+  const label = (citations: { verdict: Verdict; resolution?: typeof kept }[]) => statusLabel(summarize(citations))
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'supports' }]), 'all supported')
+  assert.equal(label([{ verdict: 'unavailable' }, { verdict: 'unavailable' }]), '2 unavailable')
+  assert.equal(label([{ verdict: 'refutes' }, { verdict: 'insufficient' }]), '2 issues')
+  assert.equal(label([{ verdict: 'refutes', resolution: kept }]), 'no open issues')
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'unavailable' }]), '1 unavailable')
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'refutes', resolution: kept }, { verdict: 'unavailable' }]), '1 unavailable')
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'refutes' }, { verdict: 'unavailable' }]), '1 issue')
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'refutes', resolution: kept }]), 'no open issues')
+  // #727's run: one unread source and one missing key was labelled "all supported"
+  assert.equal(label([{ verdict: 'unavailable' }, { verdict: 'unchecked' }]), '1 unavailable · 1 not checked')
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'unchecked' }]), '1 not checked')
+  assert.equal(label([{ verdict: 'supports' }, { verdict: 'unavailable' }, { verdict: 'unchecked' }, { verdict: 'unchecked' }]), '1 unavailable · 2 not checked')
+  // partial is open (needs work), so it is an issue until the author resolves it
+  assert.equal(label([{ verdict: 'insufficient' }, { verdict: 'unchecked' }]), '1 issue')
+  assert.equal(label([{ verdict: 'insufficient', resolution: kept }]), 'no open issues')
+  // a check ran but every key was missing: say how many, not that no check ran
+  assert.equal(label([{ verdict: 'unchecked' }]), '1 not checked')
+  assert.equal(label([{ verdict: 'unchecked' }, { verdict: 'unchecked' }]), '2 not checked')
+  assert.equal(label([]), 'not checked')
+})
+
+test('settledHint says what the counts say when nothing needs work (#727)', () => {
+  const kept = { kind: 'overridden' as const, note: 'kept as written', at: new Date().toISOString() }
+  assert.equal(settledHint(summarize([{ verdict: 'supports' }])), 'Every checked citation holds up.')
+  assert.equal(settledHint(summarize([{ verdict: 'unavailable' }, { verdict: 'unavailable' }])), "2 citations couldn't be checked: 2 sources unavailable.")
+  assert.equal(settledHint(summarize([{ verdict: 'supports' }, { verdict: 'unavailable' }])), "1 citation couldn't be checked: 1 source unavailable.")
+  assert.equal(
+    settledHint(summarize([{ verdict: 'unavailable' }, { verdict: 'unchecked' }])),
+    "2 citations couldn't be checked: 1 source unavailable, 1 key missing from the .bib.",
+  )
+  assert.equal(settledHint(summarize([{ verdict: 'unchecked' }, { verdict: 'unchecked' }])), "2 citations couldn't be checked: 2 keys missing from the .bib.")
+  assert.equal(settledHint(summarize([{ verdict: 'refutes', resolution: kept }])), 'Every citation that needed work is resolved.')
+  assert.equal(settledHint(summarize([])), 'Re-check to verify every \\cite against its source.')
+})
+
+test('labelAfterCounts drops only what the counts line already says (#727)', () => {
+  assert.equal(labelAfterCounts(summarize([{ verdict: 'supports' }, { verdict: 'unavailable' }])), null)
+  assert.equal(labelAfterCounts(summarize([{ verdict: 'unavailable' }, { verdict: 'unchecked' }])), '1 not checked')
+  assert.equal(labelAfterCounts(summarize([{ verdict: 'refutes' }, { verdict: 'unavailable' }])), '1 issue')
+  assert.equal(labelAfterCounts(summarize([{ verdict: 'supports' }, { verdict: 'unchecked' }])), '1 not checked')
+  assert.equal(labelAfterCounts(summarize([{ verdict: 'supports' }])), 'all supported')
+  assert.equal(labelAfterCounts(summarize([])), 'not checked')
+})
+
+test('statusTone colours the label by the same counts: green only when all are supported (#727)', () => {
+  const kept = { kind: 'overridden' as const, note: 'kept as written', at: new Date().toISOString() }
+  assert.equal(statusTone(summarize([{ verdict: 'supports' }])), 'text-supports')
+  assert.equal(statusTone(summarize([{ verdict: 'unavailable' }])), 'text-ink-muted')
+  assert.equal(statusTone(summarize([{ verdict: 'supports' }, { verdict: 'unavailable' }])), 'text-ink-muted')
+  assert.equal(statusTone(summarize([{ verdict: 'supports' }, { verdict: 'unchecked' }])), 'text-ink-muted')
+  assert.equal(statusTone(summarize([{ verdict: 'unavailable' }, { verdict: 'unchecked' }])), 'text-ink-muted')
+  assert.equal(statusTone(summarize([{ verdict: 'refutes', resolution: kept }])), 'text-ink-muted')
+  assert.equal(statusTone(summarize([{ verdict: 'refutes' }])), 'text-refutes')
+  assert.equal(statusTone(summarize([])), 'text-ink-muted')
+})
+
+test('projectStatus reads a project card as one draft status', () => {
+  const tally = { supports: 3, refutes: 0, insufficient: 0, unavailable: 2, unchecked: 1 }
+  assert.deepEqual(projectStatus({ tally, needWork: 0 }), { checked: 5, counts: tally, open: 0 })
+  assert.equal(statusLabel(projectStatus({ tally, needWork: 0 })), '2 unavailable · 1 not checked')
+  const missing = { supports: 0, refutes: 0, insufficient: 0, unavailable: 0, unchecked: 2 }
+  assert.equal(statusLabel(projectStatus({ tally: missing, needWork: 0 })), '2 not checked')
+  assert.equal(statusTone(projectStatus({ tally: missing, needWork: 0 })), 'text-ink-muted')
+  const clean = { supports: 4, refutes: 0, insufficient: 0, unavailable: 0, unchecked: 0 }
+  assert.equal(statusLabel(projectStatus({ tally: clean, needWork: 0 })), 'all supported')
 })
