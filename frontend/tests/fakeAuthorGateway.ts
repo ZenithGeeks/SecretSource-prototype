@@ -510,7 +510,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       const seen = new Set<string>()
       for (const c of latest?.citations ?? []) {
         if (seen.has(c.key)) continue
-        if (c.verdict === 'refutes' && !c.resolution) attention.push({ kind: 'replace', key: c.key, title: `${c.sourceRef?.authors} (${c.sourceRef?.year}) · ${c.sourceRef?.title.split(':')[0]}`, detail: `\\cite{${c.key}} contradicts a claim in ${d.title}`, draftId: d.id, checkId: latest!.id, citationId: c.id, projectId: d.projectId })
+        if (c.verdict === 'refutes' && !c.resolution) attention.push({ kind: 'replace', key: c.key, title: `${c.sourceRef?.authors} (${c.sourceRef?.year}) · ${c.sourceRef?.title.split(':')[0]}`, detail: `\\cite{${c.key}} contradicts a claim in ${d.title}`, file: c.file, line: c.line, draftId: d.id, checkId: latest!.id, citationId: c.id, projectId: d.projectId })
         if (c.verdict === 'unavailable') attention.push({ kind: 'upload-pdf', key: c.key, title: `${c.key} · no DOI or PDF`, detail: 'Cannot be checked until a source is attached', draftId: d.id, projectId: d.projectId })
         if (c.verdict === 'refutes' || c.verdict === 'unavailable') seen.add(c.key)
       }

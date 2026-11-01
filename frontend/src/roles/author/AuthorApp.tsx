@@ -46,7 +46,7 @@ const DO_IT_EXAMPLES = ['What drafts do I have?', 'Open my library', 'Which cita
 // On the editor, the draft on screen.
 const EDITOR_EXAMPLES = ['What do lines 1–20 say?', 'Which keys are in my .bib?', 'Which citations in this draft aren’t supported?']
 
-// The editor is reached from Home and counts as the Home section in the nav.
+// The editor counts as the Home section in the nav, wherever it was opened from.
 const NAV_FOR: Record<AuthorScreen, NavKey> = {
   home: 'home',
   editor: 'home',
@@ -154,13 +154,6 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     setEditorTarget(target)
     navigate('editor')
   }
-  const openDraft = useCallback(
-    (id: string) => {
-      setDraftId(id)
-      navigate('home')
-    },
-    [navigate],
-  )
   // Do it for the Author's screen agent, so a role switch can land here and the chat can go on.
   const ask = useAsk({
     role: 'writer',
@@ -234,7 +227,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
           draftId={draftId}
           onOpenProject={setProjectId}
           onOpenEditor={(id, file, line) => openEditor({ draftId: id, file, line })}
-          onOpenDraft={openDraft}
+          onDraftDeleted={(id) => setDraftId((current) => (current === id ? null : current))}
         />
       )}
       {ask.viewer}

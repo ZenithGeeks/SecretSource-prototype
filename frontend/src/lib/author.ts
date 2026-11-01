@@ -116,7 +116,8 @@ export function errorMessage(error: unknown): string {
   } catch {
     // not JSON
   }
-  return body
+  // A proxy's bare 502 has no body: "" would show as no error at all.
+  return body || `the server did not answer (${text.trim().replace(/:$/, '')})`
 }
 
 /** "checked 2 min ago" · "checked yesterday" · "not checked yet". */

@@ -73,7 +73,8 @@ export function Home({
   onTargetChange,
 }: {
   draftId: string | null
-  onSelectDraft: (id: string) => void
+  /** The draft Home works on; null once the last one is deleted. */
+  onSelectDraft: (id: string | null) => void
   onOpenEditor: (target: EditorTarget) => void
   /** "View check history": the draft's project in the Library. */
   onOpenHistory: (draft: Draft) => void
@@ -185,7 +186,7 @@ function HomeBody({
   draftId: string
   drafts: Draft[]
   setToast: (message: string | null) => void
-  onSelectDraft: (id: string) => void
+  onSelectDraft: (id: string | null) => void
   onOpenEditor: (target: EditorTarget) => void
   onOpenHistory: (draft: Draft) => void
   onTargetChange?: (open: boolean) => void
@@ -209,14 +210,15 @@ function HomeBody({
   const evidence = useRef<HTMLDivElement>(null)
 
   /** After the delete, the open draft moves to its neighbour in the list (the next one, or the
-   * one before the last); with no draft left, Home shows its empty state. */
+   * one before the last); with no draft left, nothing is selected and Home shows its empty
+   * state. A refused delete throws: ConfirmDialog stays open with the reason. */
   const deleteDraft = async (gone: Draft) => {
     const at = drafts.findIndex((d) => d.id === gone.id)
     const neighbour = drafts[at + 1] ?? drafts[at - 1]
-    await actions.deleteDraft(gone.id)
+    const alreadyGone = await actions.deleteDraft(gone.id)
     setDeleting(null)
-    setToast(`${gone.title} deleted`)
-    if (gone.id === draftId && neighbour) onSelectDraft(neighbour.id)
+    setToast(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
+    if (gone.id === draftId) onSelectDraft(neighbour?.id ?? null)
   }
 
   const showTarget = (next: Target | null) => {
@@ -373,7 +375,7 @@ function HomeBody({
               onShow={showTarget}
             />
           </div>
-          <YourDraftsCard drafts={drafts} currentId={current.id} onSelect={onSelectDraft} onNew={onNewDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
+          <YourDraftsCard drafts={drafts} currentId={current.id} onOpen={(id) => onOpenEditor({ draftId: id })} onNew={onNewDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
         </div>
         {target && (
           <div className="min-w-0 xl:sticky xl:top-6 xl:z-20 xl:self-start">

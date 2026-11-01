@@ -1169,6 +1169,9 @@ def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str
                         "checkId": latest["id"],
                         "citationId": c["id"],
                         "projectId": draft.get("projectId"),
+                        # Where "Open draft" puts the editor's cursor.
+                        "file": c.get("file"),
+                        "line": c.get("line"),
                     }
                 )
             elif c.get("verdict") == "unavailable":

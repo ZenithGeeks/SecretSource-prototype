@@ -8,9 +8,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { resetSettings, updateSettings } from '../src/lib/settings'
+import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
@@ -166,13 +167,18 @@ describe('Author Home', () => {
     expect(screen.queryByText('No open issues')).not.toBeInTheDocument()
   })
 
-  test('Your drafts switches drafts and "+ New draft" creates one on the gateway', async () => {
+  test('a row in Your drafts opens that draft in the editor, the one already selected too', async () => {
     const { onSelectDraft, onOpenEditor } = renderHome()
     fireEvent.click(await screen.findByRole('button', { name: /^Seminar paper \(CPE\)/ }))
-    expect(onSelectDraft).toHaveBeenCalledWith('d2')
-    expect(screen.getByText('all supported')).toBeInTheDocument()
+    expect(onOpenEditor).toHaveBeenLastCalledWith({ draftId: 'd2' })
+    fireEvent.click(screen.getByRole('button', { name: /^Related work — thesis ch\.2/ }))
+    expect(onOpenEditor).toHaveBeenLastCalledWith({ draftId: 'd1' })
+    expect(onSelectDraft).not.toHaveBeenCalled()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: '+ New draft' }))
+  test('"+ New draft" creates one on the gateway and opens it', async () => {
+    const { onOpenEditor } = renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: '+ New draft' }))
     await waitFor(() => expect(onOpenEditor).toHaveBeenCalledWith({ draftId: expect.stringMatching(/^draft/), file: 'main.tex', line: 1 }))
     expect(gateway.calls).toContain('POST /author/drafts')
   })
@@ -252,6 +258,73 @@ describe('Author Home', () => {
     expect(container.querySelector('.grid-cols-\\[minmax\\(0\\,1fr\\)\\]')).not.toBeNull()
     const rows = await rowsOf()
     expect(rows[0].lastElementChild).toHaveClass('truncate')
+  })
+})
+
+describe('Opening a draft, in the whole Author role', () => {
+  // CodeMirror measures text with Range geometry that jsdom does not implement.
+  beforeAll(() => {
+    const rect = { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }
+    Range.prototype.getBoundingClientRect = () => rect as DOMRect
+    Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as DOMRectList
+    Element.prototype.scrollIntoView = () => undefined
+  })
+  afterEach(() => window.history.replaceState(null, '', window.location.pathname))
+
+  function renderApp(search: string) {
+    window.history.replaceState(null, '', search)
+    renderWithQuery(<AuthorApp />)
+  }
+  const inEditorOn = async (draftId: string, title: string) => {
+    expect(await screen.findByRole('button', { name: `Draft title: ${title}. Rename` })).toBeInTheDocument()
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('screen')).toBe('editor')
+    expect(params.get('draft')).toBe(draftId)
+  }
+  const SEMINAR = 'Seminar paper (CPE)'
+  const THESIS = 'Related work — thesis ch.2'
+
+  test('a row in Your drafts opens the editor on that draft, and Home agrees on it afterwards', async () => {
+    renderApp('?screen=home&draft=d1')
+    fireEvent.click(await screen.findByRole('button', { name: /^Seminar paper \(CPE\)/ }))
+    await inEditorOn('d2', SEMINAR)
+
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('button', { name: 'Home' }))
+    expect(await screen.findByRole('heading', { name: `${THESIS} · ${SEMINAR}` })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('draft')).toBe('d2')
+  })
+
+  test('the row of the draft Home already shows opens the editor too', async () => {
+    renderApp('?screen=home&draft=d1')
+    // Scoped: the sidebar's Recent projects has a project of the same name.
+    fireEvent.click(within(await screen.findByRole('list', { name: 'Drafts' })).getByRole('button', { name: /^Related work — thesis ch\.2/ }))
+    await inEditorOn('d1', THESIS)
+  })
+
+  test('a project’s "Open draft" opens the draft selected in its list in the editor', async () => {
+    renderApp('?screen=library&project=proj1')
+    fireEvent.click(await screen.findByRole('button', { name: /^Seminar paper \(CPE\)/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open draft' }))
+    await inEditorOn('d2', SEMINAR)
+  })
+
+  test('a double-click on a project’s draft opens it in the editor; one click only selects it', async () => {
+    renderApp('?screen=library&project=proj1')
+    const row = await screen.findByRole('button', { name: /^Seminar paper \(CPE\)/ })
+    fireEvent.click(row)
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('library')
+    fireEvent.doubleClick(row)
+    await inEditorOn('d2', SEMINAR)
+  })
+
+  test('"Open draft" on a Library attention row opens the editor on that draft', async () => {
+    renderApp('?screen=library')
+    fireEvent.click(await screen.findByRole('button', { name: 'Open draft' }))
+    await inEditorOn('d1', THESIS)
+    const cited = [...gateway.checks.values()].find((c) => c.draftId === 'd1')!.citations.find((c) => c.verdict === 'refutes')!
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('file')).toBe(cited.file)
+    expect(params.get('line')).toBe(String(cited.line))
   })
 })
 

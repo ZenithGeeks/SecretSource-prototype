@@ -11,6 +11,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { backupKey } from '../src/lib/draftSave'
+import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
 import { Library } from '../src/roles/author/screens/Library'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
@@ -30,7 +31,7 @@ function renderWithQuery(ui: ReactNode) {
 
 function renderLibrary(projectId: string | null = null) {
   const onOpenProject = vi.fn()
-  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={vi.fn()} onOpenDraft={vi.fn()} />)
+  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={vi.fn()} />)
   return { ...view, onOpenProject }
 }
 
@@ -198,10 +199,64 @@ describe('Project page', () => {
   })
 })
 
+describe('A project page: deleting a draft', () => {
+  beforeEach(() => {
+    gateway = installFakeGateway({ files: THESIS_FILES })
+    window.history.replaceState(null, '', '?screen=library&project=proj1&draft=d1')
+  })
+  afterEach(() => window.history.replaceState(null, '', window.location.pathname))
+  const draftInUrl = () => new URLSearchParams(window.location.search).get('draft')
+  const projectList = async () => within(await screen.findByRole('list', { name: 'Drafts in this project' }))
+
+  test('the selected draft clears draftId and ?draft=', async () => {
+    renderWithQuery(<AuthorApp />)
+    const title = gateway.drafts.get('d1')!.title
+    fireEvent.click((await projectList()).getByRole('button', { name: `Delete ${title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    await waitFor(() => expect(draftInUrl()).toBeNull())
+    expect(await screen.findByText(`${title} deleted`)).toBeInTheDocument()
+  })
+
+  test('the last draft clears them too, and Home then has nothing to open', async () => {
+    gateway.drafts.delete('d2')
+    renderWithQuery(<AuthorApp />)
+    const title = gateway.drafts.get('d1')!.title
+    fireEvent.click((await projectList()).getByRole('button', { name: `Delete ${title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    await waitFor(() => expect(draftInUrl()).toBeNull())
+
+    fireEvent.click(within(screen.getAllByRole('navigation')[0]).getByRole('button', { name: 'Home' }))
+    expect(await screen.findByRole('heading', { name: 'No drafts yet' })).toBeInTheDocument()
+    expect(draftInUrl()).toBeNull()
+  })
+
+  test('another draft leaves the selection alone', async () => {
+    renderWithQuery(<AuthorApp />)
+    fireEvent.click((await projectList()).getByRole('button', { name: 'Delete Seminar paper (CPE)' }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    await waitFor(() => expect(gateway.drafts.has('d2')).toBe(false))
+    await screen.findByText('Seminar paper (CPE) deleted')
+    expect(draftInUrl()).toBe('d1')
+  })
+
+  test('a draft already deleted elsewhere clears them as well, with a short note', async () => {
+    renderWithQuery(<AuthorApp />)
+    const list = await projectList()
+    const title = gateway.drafts.get('d1')!.title
+    gateway.drafts.delete('d1')
+    fireEvent.click(list.getByRole('button', { name: `Delete ${title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    expect(await screen.findByText(`${title} was already deleted`)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(draftInUrl()).toBeNull()
+  })
+})
+
 describe('Home: Your drafts', () => {
   beforeEach(() => {
     gateway = installFakeGateway({ files: THESIS_FILES })
   })
+  afterEach(() => window.history.replaceState(null, '', window.location.pathname))
 
   function renderHome(draftId: string) {
     const onSelectDraft = vi.fn()
@@ -235,5 +290,92 @@ describe('Home: Your drafts', () => {
     fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete Seminar paper (CPE)' })).not.toBeInTheDocument())
     expect(onSelectDraft).not.toHaveBeenCalled()
+  })
+
+  test('deleting the last draft clears the selection and ?draft=, and Home shows its empty state', async () => {
+    gateway.drafts.delete('d2')
+    window.history.replaceState(null, '', '?screen=home&draft=d1')
+    renderWithQuery(<AuthorApp />)
+    fireEvent.click(await screen.findByRole('button', { name: `Delete ${gateway.drafts.get('d1')!.title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+
+    expect(await screen.findByRole('heading', { name: 'No drafts yet' })).toBeInTheDocument()
+    await waitFor(() => expect(new URLSearchParams(window.location.search).has('draft')).toBe(false))
+    expect(gateway.drafts.size).toBe(0)
+  })
+
+  test('a refused delete says why in the dialog, stays usable, and a retry can succeed', async () => {
+    const real = gateway.fetch.getMockImplementation()!
+    gateway.fetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'DELETE' ? Promise.reject(new Error('500: {"detail":"the store is down"}')) : real(input, init),
+    )
+    const { onSelectDraft } = renderHome('d1')
+    fireEvent.click(await screen.findByRole('button', { name: `Delete ${gateway.drafts.get('d1')!.title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+
+    expect(await dialog().findByRole('alert')).toHaveTextContent('the store is down')
+    const again = dialog().getByRole('button', { name: 'Delete draft' })
+    expect(again).toBeEnabled()
+    expect(dialog().getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    expect(gateway.drafts.has('d1')).toBe(true)
+    expect(onSelectDraft).not.toHaveBeenCalled()
+
+    gateway.fetch.mockImplementation(real)
+    fireEvent.click(again)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(gateway.drafts.has('d1')).toBe(false)
+    expect(onSelectDraft).toHaveBeenCalledWith('d2')
+  })
+
+  test('a delete that gets a bare 502 from a proxy still says what happened', async () => {
+    const real = gateway.fetch.getMockImplementation()!
+    gateway.fetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'DELETE' ? Promise.resolve(new Response('', { status: 502 })) : real(input, init),
+    )
+    renderHome('d1')
+    fireEvent.click(await screen.findByRole('button', { name: `Delete ${gateway.drafts.get('d1')!.title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    expect(await dialog().findByRole('alert')).toHaveTextContent('the server did not answer (502)')
+    expect(dialog().getByRole('button', { name: 'Delete draft' })).toBeEnabled()
+  })
+
+  test('a draft already deleted elsewhere counts as deleted: row gone, dialog closed, and a short note', async () => {
+    const { onSelectDraft } = renderHome('d1')
+    const drafts = within(await screen.findByRole('list', { name: 'Drafts' }))
+    const title = gateway.drafts.get('d1')!.title
+    gateway.drafts.delete('d1') // another tab
+    fireEvent.click(drafts.getByRole('button', { name: `Delete ${title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await screen.findByText(`${title} was already deleted`)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: `Delete ${title}` })).not.toBeInTheDocument()
+    expect(onSelectDraft).toHaveBeenCalledWith('d2')
+  })
+
+  test('another 404 is still an error, not "already deleted"', async () => {
+    const real = gateway.fetch.getMockImplementation()!
+    gateway.fetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'DELETE' ? Promise.resolve(new Response('Not Found', { status: 404 })) : real(input, init),
+    )
+    renderHome('d1')
+    fireEvent.click(await screen.findByRole('button', { name: `Delete ${gateway.drafts.get('d1')!.title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    expect(await dialog().findByRole('alert')).toHaveTextContent('Not Found')
+    expect(gateway.drafts.has('d1')).toBe(true)
+  })
+
+  test('a refused delete can be cancelled', async () => {
+    const real = gateway.fetch.getMockImplementation()!
+    gateway.fetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'DELETE' ? Promise.reject(new Error('500: {"detail":"the store is down"}')) : real(input, init),
+    )
+    renderHome('d1')
+    fireEvent.click(await screen.findByRole('button', { name: `Delete ${gateway.drafts.get('d1')!.title}` }))
+    fireEvent.click(dialog().getByRole('button', { name: 'Delete draft' }))
+    await dialog().findByRole('alert')
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(gateway.drafts.has('d1')).toBe(true)
   })
 })

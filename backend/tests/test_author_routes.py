@@ -1058,6 +1058,10 @@ def test_the_library_lists_attention_rows_and_saved_sources(client, monkeypatch)
     assert ("upload-pdf", "nguyen2016") in kinds  # unavailable after the check
     assert ("remove", "unused2019") in kinds
     assert len([r for r in library["attention"] if r["key"] == "nguyen2016"]) == 1
+    # "Open draft" opens the editor at the \cite.
+    replace = next(r for r in library["attention"] if r["kind"] == "replace")
+    assert replace["file"] == "ch2.tex"
+    assert replace["line"] == next(n for n, text in enumerate(TEX.splitlines(), 1) if "khattab2020" in text)
     assert library["unsorted"] == {"sources": 1, "pdfs": 0, "drafts": 0}
     assert [s["id"] for s in library["saved"]] == [saved["id"]]
     assert client.get("/author/library", headers=BO).json()["saved"] == []

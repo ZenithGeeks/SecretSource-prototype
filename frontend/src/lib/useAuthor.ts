@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import { followEvents } from './api'
-import { authorApi } from './author'
+import { authorApi, errorMessage } from './author'
 import { parseBib } from './bibtex'
 import { dropBackup } from './draftSave'
 import type { CheckRun, CheckStage, Citation, Draft, LibraryView, ProjectDetail } from '../types/draftCheck'
@@ -215,9 +215,16 @@ export function useAuthorActions() {
       return draft
     },
     /** Deletes the draft, takes it out of every list at once, and drops the unsaved text this
-     * device kept for it (ss.author.unsaved.<id>), which nothing could restore any more. */
-    deleteDraft: async (draftId: string): Promise<void> => {
-      await authorApi.deleteDraft(draftId)
+     * device kept for it (ss.author.unsaved.<id>), which nothing could restore any more. A draft
+     * the gateway no longer has (deleted in another tab) ends the same way: resolves true. */
+    deleteDraft: async (draftId: string): Promise<boolean> => {
+      let alreadyGone = false
+      try {
+        await authorApi.deleteDraft(draftId)
+      } catch (error) {
+        if (!errorMessage(error).includes('no such draft')) throw error
+        alreadyGone = true
+      }
       dropBackup(draftId)
       qc.setQueryData<Draft[]>(AUTHOR_KEYS.drafts, (list) => list?.filter((d) => d.id !== draftId))
       qc.setQueriesData<ProjectDetail>({ queryKey: ['author', 'project'] }, (detail) =>
@@ -226,6 +233,7 @@ export function useAuthorActions() {
       void qc.removeQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
       libraryChanged()
+      return alreadyGone
     },
     /** Writes one file and refetches what shows it. */
     putFile: async (draftId: string, name: string, content: string): Promise<Draft> => {

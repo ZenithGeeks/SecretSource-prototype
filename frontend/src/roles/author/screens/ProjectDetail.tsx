@@ -178,14 +178,15 @@ export function ProjectDetail({
   initialDraft = null,
   onBack,
   onOpenEditor,
-  onOpenDraft,
+  onDraftDeleted,
 }: {
   projectId: string
   /** The draft to open the check history on; the first one otherwise. */
   initialDraft?: string | null
   onBack: () => void
   onOpenEditor: (draftId: string, file?: string, line?: number) => void
-  onOpenDraft: (draftId: string) => void
+  /** A draft is gone, so the app must not keep it selected. */
+  onDraftDeleted?: (draftId: string) => void
 }) {
   const unsorted = projectId === UNSORTED
   const project = useAuthorProject(unsorted ? null : projectId)
@@ -226,10 +227,11 @@ export function ProjectDetail({
 
   /** A deleted draft that was selected hands the selection back to the first one left. */
   const deleteDraft = async (gone: Draft) => {
-    await actions.deleteDraft(gone.id)
+    const alreadyGone = await actions.deleteDraft(gone.id)
     setDeletingDraft(null)
     if (selectedDraft === gone.id) setSelectedDraft(null)
-    setToast(`${gone.title} deleted`)
+    onDraftDeleted?.(gone.id)
+    setToast(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
   }
   const draftDialog = (
     <AnimatePresence>
@@ -257,7 +259,7 @@ export function ProjectDetail({
             drafts={unfiled}
             selected={unfiledCurrent?.id ?? null}
             onSelect={setSelectedDraft}
-            onOpenDraft={onOpenDraft}
+            onOpenEditor={onOpenEditor}
             onDelete={setDeletingDraft}
             title="Drafts in no project"
           />
@@ -341,7 +343,7 @@ export function ProjectDetail({
           drafts={detail.draftList}
           selected={current?.id ?? null}
           onSelect={setSelectedDraft}
-          onOpenDraft={onOpenDraft}
+          onOpenEditor={onOpenEditor}
           onDelete={setDeletingDraft}
           title="Drafts in this project"
         />
@@ -413,14 +415,14 @@ function DraftList({
   drafts,
   selected,
   onSelect,
-  onOpenDraft,
+  onOpenEditor,
   onDelete,
   title,
 }: {
   drafts: Draft[]
   selected: string | null
   onSelect: (id: string) => void
-  onOpenDraft: (id: string) => void
+  onOpenEditor: (id: string) => void
   /** The bin on each row: asks first. */
   onDelete: (draft: Draft) => void
   title: string
@@ -437,7 +439,7 @@ function DraftList({
               <button
                 type="button"
                 onClick={() => onSelect(draft.id)}
-                onDoubleClick={() => onOpenDraft(draft.id)}
+                onDoubleClick={() => onOpenEditor(draft.id)}
                 aria-current={draft.id === selected ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', draft.id === selected && 'bg-accent-soft/60')}
@@ -459,8 +461,8 @@ function DraftList({
         </ul>
       )}
       {selected && (
-        <TextLink onClick={() => onOpenDraft(selected)} className="self-start" data-ask-target={askTarget({ kind: 'action', id: 'open-draft' })}>
-          Open on Home
+        <TextLink onClick={() => onOpenEditor(selected)} className="self-start" data-ask-target={askTarget({ kind: 'action', id: 'open-draft' })}>
+          Open draft
         </TextLink>
       )}
     </Card>

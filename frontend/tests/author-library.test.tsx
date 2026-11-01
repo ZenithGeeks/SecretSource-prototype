@@ -26,9 +26,8 @@ function renderWithQuery(ui: ReactNode) {
 function renderLibrary(projectId: string | null = null) {
   const onOpenProject = vi.fn()
   const onOpenEditor = vi.fn()
-  const onOpenDraft = vi.fn()
-  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={onOpenEditor} onOpenDraft={onOpenDraft} />)
-  return { ...view, onOpenProject, onOpenEditor, onOpenDraft }
+  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={onOpenEditor} />)
+  return { ...view, onOpenProject, onOpenEditor }
 }
 
 beforeEach(() => {
@@ -73,10 +72,29 @@ describe('Author Library', () => {
     expect(screen.getByText('No saved sources')).toBeInTheDocument()
   })
 
-  test('a contradicted citation opens its draft on Home; Remove deletes the entry after a confirm', async () => {
-    const { onOpenDraft } = renderLibrary()
+  test('an attention row with no file or line opens the draft at its default file', async () => {
+    const real = gateway.fetch.getMockImplementation()!
+    gateway.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await real(input, init)
+      if (!String(input).endsWith('/author/library')) return response
+      const library = await response.json()
+      for (const row of library.attention) {
+        delete row.file
+        delete row.line
+      }
+      return new Response(JSON.stringify(library), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    const { onOpenEditor } = renderLibrary()
     fireEvent.click(await screen.findByRole('button', { name: 'Open draft' }))
-    expect(onOpenDraft).toHaveBeenCalledWith('d1')
+    expect(onOpenEditor).toHaveBeenCalledWith('d1', undefined, undefined)
+  })
+
+  test('a contradicted citation opens its draft at the \\cite; Remove deletes the entry after a confirm', async () => {
+    const { onOpenEditor } = renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open draft' }))
+    const cited = [...gateway.checks.values()].find((c) => c.draftId === 'd1')!.citations.find((c) => c.verdict === 'refutes')!
+    expect(onOpenEditor).toHaveBeenCalledWith('d1', cited.file, cited.line)
+    expect(cited.line).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /Find a source/ })).not.toBeInTheDocument()
 
     vi.spyOn(window, 'confirm').mockReturnValue(true)

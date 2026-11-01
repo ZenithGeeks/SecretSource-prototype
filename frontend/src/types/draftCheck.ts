@@ -268,6 +268,9 @@ export type AttentionRow = {
   projectId?: string | null
   checkId?: string
   citationId?: string
+  /** Where a contradicted citation's \cite is, for "Open draft". */
+  file?: string
+  line?: number
 }
 
 export type LibraryView = {
