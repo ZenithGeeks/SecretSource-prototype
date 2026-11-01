@@ -1087,6 +1087,16 @@ async def delete_project(project_id: str, user: str | None = Depends(current_use
     return {"deleted": project_id}
 
 
+@router.get("/projects/{project_id}/lint")
+async def lint_project(project_id: str, user: str | None = Depends(current_user)):
+    """The project's bib lint across all its drafts (#714). A draft's own /parse lints that
+    draft alone, so an entry cited only in another draft looks unused there; here it does not."""
+    project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
+    drafts = [d for d in await asyncio.to_thread(_rows, DRAFTS, user) if d.get("projectId") == project_id]
+    files = [(d["id"], _draft_files(d, project)) for d in drafts]
+    return await asyncio.to_thread(logic.lint_project, project.get("bib"), files)
+
+
 @router.delete("/projects/{project_id}/bib/{key}")
 async def remove_bib_entry(project_id: str, key: str, user: str | None = Depends(current_user)):
     """ "Remove" on a never-cited entry: drops every entry with that key from the .bib."""
