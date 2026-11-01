@@ -28,6 +28,7 @@
  *    Only a real syntax error — an unclosed group, a missing \end{document} — is reported.
  *    `renderIsolated` goes one step further: when the whole file fails, it renders the body
  *    section by section, so only the broken block becomes an inline error with its line.
+ *    Every render goes through `sanitizePreview` (previewSanitize.ts) before anyone sees it.
  * 3. `SECRETSOURCE_MACROS` adds the commands the chapter still needs as LaTeX.js custom
  *    macros (\footnote, \url, \eqref, \pageref, \caption, \includegraphics as the draft's
  *    image or a sized box naming it, the placeholder). LaTeX.js copies the *enumerable*
@@ -41,6 +42,7 @@
 
 import type { BibEntry } from './bibtex'
 import type { Verdict } from '../types/draftCheck'
+import { sanitizePreview } from './previewSanitize'
 
 export const MARKER_OPEN = '⟦c:'
 export const MARKER_CLOSE = '⟧'
@@ -125,7 +127,7 @@ export const REWRITES: readonly { construct: string; shownAs: string }[] = [
   { construct: 'theorem-like environments (theorem, lemma, proof, definition, remark, corollary)', shownAs: 'a bold heading and the text' },
   { construct: '\\footnote, \\thanks', shownAs: 'the note in superscript brackets' },
   { construct: '\\eqref, \\pageref', shownAs: '(label) / ?' },
-  { construct: '\\url, \\href', shownAs: 'a link' },
+  { construct: '\\url, \\href', shownAs: 'a link for http, https, mailto or a #fragment; otherwise plain text' },
   { construct: '\\includegraphics[width=0.49\\textwidth | 5cm | scale=0.5]{file}', shownAs: 'the image at that width when the draft has it, else a box of that width saying "Image not uploaded: file" (drafts keep no images yet)' },
   { construct: 'a block of the body that will not compile (an unclosed group, …)', shownAs: 'an inline error with its line where the block stood; the other sections still render' },
 ]
@@ -586,7 +588,7 @@ function rewriteEnvironments(source: string, bibitems: string[]): string {
   // \includegraphics: the path and the width as text, escaped, so an `_` or `%` in a file name
   // is a character and not math or a comment (an unescaped `_` stopped LaTeX.js with "group
   // argument expected"); SECRETSOURCE_MACROS draws the image or a box naming it.
-  s = s.replace(/\\includegraphics\*?(\[[^\]]*\])?\{([^}]*)\}/g, (whole, options: string | undefined, file: string) =>
+  s = s.replace(/\\includegraphics\*?\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g, (whole, options: string | undefined, file: string) =>
     sameLines(whole, `\\ssgraphic{${escapeText(file.trim())}}{${escapeText(graphicWidth(options ?? ''))}}`),
   )
   s = s.replace(/\\captionof\{[^}]*\}/g, '\\caption')
@@ -640,8 +642,6 @@ Macros.prototype.url = function (this: { g: Generator }, text: Node) {
   const a = this.g.create('a') as HTMLAnchorElement
   const href = text.textContent ?? ''
   a.href = href
-  a.target = '_blank'
-  a.rel = 'noreferrer'
   a.textContent = href
   return [a]
 }
@@ -914,6 +914,7 @@ export async function renderLatex(source: string, options: { images?: ImageMap }
       const doc = parse(current, { generator })
       const root = document.createElement('div')
       root.appendChild(doc.domFragment())
+      sanitizePreview(root, new Set(options.images?.values()))
       return { root, unknown }
     } catch (error) {
       const e = error as { message?: string; location?: { start?: { line?: number } } }
