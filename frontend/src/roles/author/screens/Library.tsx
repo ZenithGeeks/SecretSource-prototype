@@ -87,7 +87,7 @@ function ProjectCard({
 }
 
 const ATTENTION_ICON = { replace: AlertCircle, 'upload-pdf': FileText, remove: FileText } as const
-// A contradicted citation is dealt with on Check a draft (its evidence, "Keep mine", the editor).
+// A contradicted citation is dealt with on Home (its evidence, "Keep mine", the editor).
 const ATTENTION_ACTION = { replace: 'Open draft', 'upload-pdf': 'Upload PDF', remove: 'Remove' } as const
 
 export function Library({
@@ -342,7 +342,7 @@ export function Library({
         </button>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-2">
         <Card className="flex flex-col gap-2.5" aria-labelledby="attention-title">
           <CardHead id="attention-title" title="Needs attention" aside={<span className="text-ink-muted">{count(rows.length, 'source')}</span>} />
           {rows.length === 0 ? (

@@ -1,22 +1,23 @@
 /**
  * The verdict bar and its legend, for any role's redesign screen that counts citation verdicts
  * (#713): one stacked 8px bar sized by count, and the dots with counts beside it. Words and
- * colours come from src/lib/verdict.ts.
+ * colours come from src/lib/verdict.ts. Unavailable and unchecked citations are drawn and counted,
+ * so a partly checked draft is never an all-green bar (the rule statusLabel follows, #727).
  */
 
 import { cn } from '../lib/utils'
-import { VERDICTS, VERDICT_ORDER } from '../lib/verdict'
+import { ALL_VERDICTS, VERDICTS } from '../lib/verdict'
 import type { Verdict } from '../types/draftCheck'
 
-/** One 8px bar, a segment per verdict in VERDICT_ORDER, sized by count. Nothing checked yet
- * draws one muted track so the card keeps its shape. */
+/** One 8px bar, a segment per verdict in ALL_VERDICTS, sized by count. No citations yet draws
+ * one muted track so the card keeps its shape. */
 export function VerdictBar({ counts, className }: { counts: Record<Verdict, number>; className?: string }) {
-  const segments = VERDICT_ORDER.filter((v) => counts[v] > 0)
+  const segments = ALL_VERDICTS.filter((v) => counts[v] > 0)
   const total = segments.reduce((sum, v) => sum + counts[v], 0)
   return (
     <div
       role="img"
-      aria-label={VERDICT_ORDER.map((v) => `${counts[v]} ${VERDICTS[v].legend}`).join(', ')}
+      aria-label={ALL_VERDICTS.map((v) => `${counts[v]} ${VERDICTS[v].legend}`).join(', ')}
       className={cn('flex h-2 w-full gap-0.5', className)}
     >
       {total === 0 ? (
@@ -34,6 +35,7 @@ export function VerdictBar({ counts, className }: { counts: Record<Verdict, numb
   )
 }
 
+/** Every judged verdict with its count, and the two absences when there are any. */
 export function VerdictLegend({
   counts,
   className,
@@ -45,7 +47,7 @@ export function VerdictLegend({
 }) {
   return (
     <ul className={cn('flex flex-wrap items-center text-xs text-ink-muted', gap, className)}>
-      {VERDICT_ORDER.map((v) => (
+      {ALL_VERDICTS.filter((v) => VERDICTS[v].standing !== 'unchecked' || counts[v] > 0).map((v) => (
         <li key={v} className="flex items-center gap-1.5 whitespace-nowrap">
           <span aria-hidden="true" className={cn('inline-block size-2 rounded-full', VERDICTS[v].fill)} />
           {counts[v]} {VERDICTS[v].legend}

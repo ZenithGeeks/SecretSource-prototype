@@ -15,6 +15,7 @@ import type { Target } from '../../../components/PageViewer'
 import { Button, Card, Empty, Textarea } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import { askTarget } from '../../../lib/askCursor'
+import { shortMessage } from '../../../lib/citations'
 import { referenceNote } from '../../../lib/referenceCheck'
 import { settledHint } from '../../../lib/verdict'
 import type { Citation, DraftStatus } from '../../../types/draftCheck'
@@ -26,6 +27,7 @@ export function EvidencePanel({
   citation,
   issues,
   status,
+  notJudged,
   onNext,
   onOverride,
   onReopen,
@@ -37,6 +39,8 @@ export function EvidencePanel({
   issues: Citation[]
   /** The draft's counts, so "No open issues" says what they say (#727). */
   status: DraftStatus
+  /** No verdicts to show yet (title, hint), so "no open issues" would say too much. */
+  notJudged?: [string, string]
   onNext: () => void
   onOverride: (citation: Citation, note: string) => void
   onReopen: (citation: Citation) => void
@@ -52,7 +56,7 @@ export function EvidencePanel({
   const index = citation ? issues.findIndex((c) => c.id === citation.id) : -1
   const pager =
     issues.length === 0
-      ? 'no open issues'
+      ? (notJudged?.[0].toLowerCase() ?? 'no open issues')
       : index >= 0
         ? `${index + 1} of ${issues.length} issue${issues.length === 1 ? '' : 's'}`
         : `${issues.length} open issue${issues.length === 1 ? '' : 's'}`
@@ -104,24 +108,28 @@ export function EvidencePanel({
       />
 
       {!citation ? (
-        <Empty title="No open issues" hint={`${settledHint(status)} Pick a row above to read its evidence.`} />
+        notJudged ? (
+          <Empty title={notJudged[0]} hint={notJudged[1]} />
+        ) : (
+          <Empty title="No open issues" hint={`${settledHint(status)} Pick a row above to read its evidence.`} />
+        )
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex flex-col gap-1.5 rounded-lg bg-canvas p-3">
-              <p className="text-[11px] font-medium text-ink-muted">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
+              <p className="text-[11px] font-medium break-words text-ink-muted">
                 <span className="uppercase tracking-wide">Your sentence</span> · {citation.file} L{citation.line}
               </p>
-              <p className="font-mono text-xs leading-relaxed text-ink">{citation.sentence}</p>
+              <p className="font-mono text-xs leading-relaxed break-words text-ink">{citation.sentence}</p>
             </div>
-            <div className="flex flex-col gap-1.5 rounded-lg bg-canvas p-3">
+            <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
               {citation.evidence?.passage ? (
                 <>
-                  <p className="text-[11px] font-medium text-ink-muted">
+                  <p className="text-[11px] font-medium break-words text-ink-muted">
                     <span className="uppercase tracking-wide">Source passage</span> · {citation.evidence.pdf}
                     {citation.evidence.page ? ` p.${citation.evidence.page}` : ''}
                   </p>
-                  <blockquote className="font-serif text-[13px] italic leading-relaxed text-ink">
+                  <blockquote className="font-serif text-[13px] italic leading-relaxed break-words text-ink">
                     “{citation.evidence.passage}”
                   </blockquote>
                   {onShow && (
@@ -138,9 +146,9 @@ export function EvidencePanel({
               ) : (
                 <>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
-                  <p className="text-[13px] text-ink-muted">
+                  <p className="text-[13px] break-words text-ink-muted">
                     {citation.verdict === 'unavailable'
-                      ? `The source could not be read: ${citation.message || 'no PDF'}.`
+                      ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
                       : citation.verdict === 'unchecked'
                         ? citation.reason === 'missing-key'
                           ? `\\cite{${citation.key}} has no entry in the bibliography.`

@@ -1,15 +1,12 @@
 /**
  * "Recent projects" under the Author nav (Redesign R/Sidebar, Role=Author): the projects worked
  * on last, each with a status dot and what still needs work ("—" before its first check), and
- * "+ New". It reads the Library's projects, so a project created, renamed or deleted anywhere
+ * "+ New", which opens the New project dialog. It reads the Library's projects, so a project created, renamed or deleted anywhere
  * shows here once the Library refetches. In the phone menu a row closes the menu
  * (`data-closes-menu`, AppShell).
  */
 
-import { useState } from 'react'
-
-import { errorMessage } from '../../../lib/author'
-import { useAuthorActions, useAuthorDrafts, useLibrary } from '../../../lib/useAuthor'
+import { useAuthorDrafts, useLibrary } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
 import type { Draft, Project } from '../../../types/draftCheck'
 
@@ -36,16 +33,22 @@ function dot(project: Project): { className: string; label: string } {
     const label = `${project.needWork} need${project.needWork === 1 ? 's' : ''} work`
     return { className: project.tally.refutes ? 'bg-refutes' : 'bg-insufficient', label }
   }
-  if (project.tally.unavailable || project.tally.unchecked) return { className: 'bg-ink-muted', label: 'some citations could not be checked' }
+  if (project.tally.unavailable || project.tally.unchecked) return { className: 'bg-ink-muted', label: project.tally.unavailable ? 'some citations could not be checked' : 'some citations not checked yet' }
   return { className: 'bg-supports', label: 'all supported' }
 }
 
-export function RecentProjects({ activeId, onOpen }: { activeId: string | null; onOpen: (projectId: string) => void }) {
+export function RecentProjects({
+  activeId,
+  onOpen,
+  onNew,
+}: {
+  activeId: string | null
+  onOpen: (projectId: string) => void
+  /** "+ New": the New project dialog. */
+  onNew: () => void
+}) {
   const library = useLibrary()
   const drafts = useAuthorDrafts()
-  const actions = useAuthorActions()
-  const [creating, setCreating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const projects = library.data?.projects ?? []
   const recent = projects
@@ -53,19 +56,6 @@ export function RecentProjects({ activeId, onOpen }: { activeId: string | null; 
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
     .slice(0, RECENT_LIMIT)
     .map(({ project }) => project)
-
-  const create = async () => {
-    setCreating(true)
-    setError(null)
-    try {
-      const project = await actions.createProject({ name: 'Untitled project' })
-      onOpen(project.id)
-    } catch (e) {
-      setError(`Could not create the project: ${errorMessage(e)}`)
-    } finally {
-      setCreating(false)
-    }
-  }
 
   return (
     <section aria-labelledby="author-recent-projects" className="mt-5">
@@ -75,20 +65,14 @@ export function RecentProjects({ activeId, onOpen }: { activeId: string | null; 
         </h2>
         <button
           type="button"
-          onClick={() => void create()}
-          disabled={creating}
+          onClick={onNew}
           data-closes-menu
           aria-label="New project"
-          className="rounded px-1 text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"
+          className="rounded px-1 text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
         >
-          {creating ? 'Creating…' : '+ New'}
+          + New
         </button>
       </div>
-      {error && (
-        <p role="alert" className="px-2.5 pb-1 text-[11px] text-refutes">
-          {error}
-        </p>
-      )}
       {recent.length ? (
         <ul aria-label="Recent projects" className="flex flex-col gap-0.5">
           {recent.map((project) => {

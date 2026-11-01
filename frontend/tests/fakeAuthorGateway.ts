@@ -11,7 +11,7 @@ import { vi } from 'vitest'
 import { parseBib } from '../src/lib/bibtex'
 import { findCites, parseProject } from '../src/lib/latexProject'
 import { summarize } from '../src/lib/verdict'
-import type { CheckRun, Citation, Draft, ProjectFile, SavedSource, Verdict } from '../src/types/draftCheck'
+import type { CheckRun, Citation, Draft, ParseWarning, ProjectFile, SavedSource, Verdict } from '../src/types/draftCheck'
 
 type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks'> & { savedHash?: string }
 type StoredProject = { id: string; name: string; bib: { name: string; content: string } | null; pdfs: Record<string, string>; created: string; updated: string }
@@ -401,6 +401,8 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
           const v = draftView(gateway, d)
           for (const k of Object.keys(tally) as Verdict[]) tally[k] += v.status.counts[k]
           needWork += v.status.open
+          // As the gateway: a draft with no finished check counts its citations as not checked.
+          if (!v.checks) tally.unchecked += filesOf(gateway, d).filter((f) => f.kind === 'tex').flatMap((f) => findCites(f)).length
           if (v.lastCheckedAt && (!checkedAt || v.lastCheckedAt > checkedAt)) checkedAt = v.lastCheckedAt
         }
         return { id: p.id, name: p.name, bibName: p.bib?.name ?? null, entries: entries.length, cited: 0, needWork, tally, drafts: drafts.length, checkedAt, pdfs: p.pdfs, created: p.created, updated: p.updated }
@@ -448,6 +450,40 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       for (const src of gateway.sources.values()) if (src.projectId === project.id) src.projectId = null
       gateway.projects.delete(project.id)
       return json({ deleted: project.id })
+    }
+    if (parts[3] === 'lint') {
+      // As logic.lint_project: each draft as it builds; the project .bib's own warnings once,
+      // against what every draft that uses it cites.
+      const warnings: (ParseWarning & { draftId: string | null })[] = []
+      const cited = new Set<string>()
+      const drafts = [...gateway.drafts.values()].filter((d) => d.projectId === project.id)
+      for (const d of drafts) {
+        const files = filesOf(gateway, d)
+        if (files.some((f) => f.shared)) for (const c of files.filter((f) => f.kind === 'tex').flatMap((f) => findCites(f))) cited.add(c.key)
+      }
+      let texFiles = 0
+      let citeCommands = 0
+      let bibEntries = 0
+      if (project.bib) {
+        const standIn: ProjectFile = { name: '', kind: 'tex', content: cited.size ? `\\cite{${[...cited].sort().join(',')}}` : '' }
+        const whole = parseProject([standIn, { name: project.bib.name, kind: 'bib', content: project.bib.content }])
+        bibEntries = whole.bibEntries
+        warnings.push(...whole.warnings.filter((w) => w.file === project.bib!.name).map((w) => ({ ...w, draftId: null })))
+      }
+      const twice = new Set(warnings.filter((w) => w.type === 'duplicate-key').map((w) => w.detail))
+      for (const d of drafts) {
+        const files = filesOf(gateway, d)
+        const built = parseProject(files)
+        const own = parseProject(files.filter((f) => !f.shared))
+        texFiles += built.texFiles
+        citeCommands += built.citeCommands
+        bibEntries += own.bibEntries
+        for (const w of built.warnings) {
+          if (w.type === 'missing-key' || (w.type === 'duplicate-key' && !(w.file === project.bib?.name && twice.has(w.detail)))) warnings.push({ ...w, draftId: d.id })
+        }
+        for (const w of own.warnings) if (w.type === 'unused-entry' || w.type === 'no-doi-url') warnings.push({ ...w, draftId: d.id })
+      }
+      return json({ bibName: project.bib?.name ?? null, bibEntries, drafts: drafts.length, texFiles, citeCommands, warnings })
     }
     if (parts[3] === 'bib' && method === 'DELETE') {
       const entries = project.bib ? parseBib(project.bib.content) : []

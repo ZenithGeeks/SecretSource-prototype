@@ -206,6 +206,10 @@ describe('display name', () => {
     expect(greeting('  Ada ')).toBe('Good morning, Ada')
     expect(greeting('')).toBe('Good morning')
     expect(greeting('   ')).toBe('Good morning')
+    // Given the hour (the Author's Home), it says the part of the day.
+    expect(greeting('Ada', 9)).toBe('Good morning, Ada')
+    expect(greeting('Ada', 12)).toBe('Good afternoon, Ada')
+    expect(greeting('', 18)).toBe('Good evening')
   })
 })
 

@@ -12,7 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 import { runTool } from '../src/lib/agentTools'
 import { clearDoItConversation } from '../src/lib/doItConversation'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
-import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
+import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
 // Ask's Do it streams: each POST gets the next list of agent events.
@@ -168,9 +168,9 @@ describe('AuthorApp', () => {
     gateway.failWrites = true
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!
     act(() => view.dispatch({ changes: { from: 0, insert: '% leaving\n' } }))
-    fireEvent.click(screen.getByRole('button', { name: 'Check a draft' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }))
 
-    expect(await screen.findByRole('heading', { name: 'Check a draft' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: /^Good/ })).toBeInTheDocument()
     expect(await screen.findByText('Your last edits to related-work.tex were not saved: the gateway is down')).toBeInTheDocument()
     expect(gateway.drafts.get('d1')!.files.find((f) => f.name === 'related-work.tex')!.content.startsWith('% leaving')).toBe(false)
   })
@@ -252,9 +252,12 @@ describe('AuthorApp', () => {
     await screen.findByRole('list', { name: 'Drafts' })
     fireEvent.click(await screen.findByRole('button', { name: 'All' }))
     await waitFor(async () => expect((await targets()).some((t) => t.startsWith('citation:'))).toBe(true))
-    expect(await targets()).toEqual(
-      expect.arrayContaining(['screen:home', 'action:check', 'action:upload', 'action:write-draft', 'action:add-bibliography', 'draft:d1', 'draft:d2', 'action:new-draft']),
-    )
+    expect(await targets()).toEqual(expect.arrayContaining(['screen:home', 'action:check', 'action:open-editor', 'action:new-project', 'draft:d1', 'draft:d2', 'action:new-draft']))
+    // Uploading and the rest are in the New project menu: listed while it is open.
+    expect(await targets()).not.toContain('action:upload')
+    fireEvent.click(screen.getByRole('button', { name: 'New project', expanded: false }))
+    expect(await targets()).toEqual(expect.arrayContaining(['action:upload', 'action:write-draft', 'action:add-bibliography']))
+    fireEvent.click(screen.getByRole('button', { name: 'New project', expanded: true }))
     expect((await read()).find((t) => t.target === 'draft:d2')?.label).toContain('Seminar paper (CPE)')
 
     fireEvent.click(nav().getByRole('button', { name: 'Library' }))
@@ -314,7 +317,7 @@ describe('AuthorApp', () => {
     expect(await screen.findByText('Lines 1 and 2 set up the article.')).toBeInTheDocument()
     expect(screen.getByText('Open my latest draft in the editor')).toBeInTheDocument()
     expect(screen.getByText('Reading the draft')).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Check a draft' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: /^Good/ })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Sidebar' })).toBeInTheDocument()
   })
 
@@ -344,6 +347,75 @@ describe('AuthorApp', () => {
     expect(agent.posts[1].body.result).toEqual({ status: 'error', message: 'no screen graph; screens: home, library, editor' })
     expect(agent.posts[2].body.result).toEqual({ status: 'error', message: 'no screen history; screens: home, library, editor' })
     expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test.each(['check', 'draft-check', 'check-draft', 'draftcheck'])('an old link to the Check a draft screen (?screen=%s) redirects to Home, keeping its draft', async (old) => {
+    renderApp(`?screen=${old}&draft=d1`)
+    expect(await screen.findByRole('heading', { level: 1, name: /^Good/ })).toBeInTheDocument()
+    expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('screen')).toBe('home')
+    expect(params.get('draft')).toBe('d1')
+    expect(gateway.calls).toContain('GET /author/drafts/d1')
+  })
+
+  test('a toast set as Home moves to the new draft is still there after the move', async () => {
+    renderApp('?screen=home&draft=d1')
+    await screen.findByRole('list', { name: 'Drafts' })
+    fireEvent.change(screen.getByLabelText('Upload a .tex or .zip file'), { target: { files: [new File(['\\section{A}'], 'chapter.tex')] } })
+    expect(await screen.findByText(/chapter\.tex uploaded/)).toBeInTheDocument()
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('draft')).toMatch(/^draft/))
+    expect(screen.getByText(/chapter\.tex uploaded/)).toBeInTheDocument()
+  })
+
+  test('New project ▾ is in the toolbar on Home only, with the actions that start a draft or project', async () => {
+    renderApp('?screen=home&draft=d1')
+    await screen.findByRole('list', { name: 'Drafts' })
+    const button = screen.getByRole('button', { name: 'New project', expanded: false })
+    expect(button).toHaveAttribute('data-ask-target', 'action:new-project')
+    fireEvent.click(button)
+    const menu = within(screen.getByRole('menu'))
+    expect(menu.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['New project', 'Upload .tex or .zip', 'Write a draft', 'Add bibliography'])
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New project', expanded: false }))
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Write a draft' }))
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('screen')).toBe('editor'))
+    expect(gateway.calls).toContain('POST /author/drafts')
+  })
+
+  test.each([
+    ['New project ▾', () => {
+      fireEvent.click(screen.getByRole('button', { name: 'New project', expanded: false }))
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'New project' }))
+    }],
+    ['Recent projects "+ New"', () => {
+      fireEvent.click(within(screen.getByRole('complementary', { name: 'Sidebar' })).getByRole('button', { name: 'New project' }))
+    }],
+  ])('%s opens the New project dialog, and the project opens once created', async (_name, open) => {
+    renderApp('?screen=home&draft=d1')
+    await screen.findByRole('list', { name: 'Drafts' })
+    open()
+    const dialog = within(await screen.findByRole('dialog', { name: 'New project' }))
+    expect(gateway.calls).not.toContain('POST /author/projects')
+    fireEvent.change(dialog.getByLabelText('Project name'), { target: { value: 'Grant aims' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Create project' }))
+    expect(await screen.findByRole('heading', { name: 'Grant aims' })).toBeInTheDocument()
+    expect(gateway.calls).toContain('POST /author/projects')
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('the dialog\'s Import takes a .bib, says so, and opens the project', async () => {
+    renderApp('?screen=home&draft=d1')
+    await screen.findByRole('list', { name: 'Drafts' })
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Sidebar' })).getByRole('button', { name: 'New project' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'New project' })).getByRole('button', { name: /Import a \.bib/ }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New project' })).toBeNull())
+    fireEvent.change(screen.getByLabelText('Import a .bib or an Overleaf .zip'), { target: { files: [new File(['@misc{a,title={A}}'], 'refs.bib')] } })
+    await waitFor(() => expect(gateway.calls).toContain('POST /author/projects/import'))
+    expect(await screen.findByText(/created from refs\.bib/)).toBeInTheDocument()
+    expect(nav().getByRole('button', { name: 'Library' })).toHaveAttribute('aria-current', 'page')
   })
 
   test('a bookmarked ?screen=find-source (the removed tab) lands on Home', async () => {
@@ -394,10 +466,27 @@ describe('Recent projects in the sidebar', () => {
     expect(new URLSearchParams(window.location.search).get('project')).toBe('pB')
   })
 
-  test('"+ New" makes a project, opens it, and the list shows it', async () => {
+  test.each([
+    ['supports', /some citations not checked yet/],
+    ['unavailable', /some citations could not be checked/],
+  ] as const)('a project with one draft checked (%s) and one never checked says which', async (verdict, label) => {
+    gateway = installFakeGateway({
+      files: [{ name: 'a.tex', content: 'One~\\cite{k2020}.' }, { name: 'refs.bib', content: '@misc{k2020, title={K}, url={https://a.b}}' }],
+      prechecked: false,
+      verdictFor: () => (verdict === 'supports' ? { verdict, passage: 'all good', page: 1 } : { verdict, reason: 'no-open-access', message: 'no free copy' }),
+    })
+    gateway.drafts.get('d2')!.files = [{ name: 'b.tex', kind: 'tex', content: 'Two~\\cite{k2020}.' }]
+    runCheck(gateway, 'd1')
+    renderApp()
+    await waitFor(() => expect(recentNames()).toHaveLength(1))
+    expect(recent().getByRole('button', { name: /^Related work — thesis ch.2/ })).toHaveAccessibleName(label)
+  })
+
+  test('"+ New" asks for a name, makes the project, opens it, and the list shows it', async () => {
     renderApp()
     await waitFor(() => expect(recentNames()).toHaveLength(1))
     fireEvent.click(within(screen.getByRole('complementary', { name: 'Sidebar' })).getByRole('button', { name: 'New project' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'New project' })).getByRole('button', { name: 'Create project' }))
     expect(await screen.findByRole('heading', { name: 'Untitled project' })).toBeInTheDocument()
     expect(gateway.calls).toContain('POST /author/projects')
     await waitFor(() => expect(recentNames()[0]).toBe('Untitled project —'))

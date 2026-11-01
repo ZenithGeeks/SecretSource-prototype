@@ -931,7 +931,9 @@ class ProjectIn(BaseModel):
 
 
 def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, list[dict]]) -> dict:
-    """A project card: bib size, how many entries its drafts cite, what still needs work."""
+    """A project card: bib size, how many entries its drafts cite, what still needs work. A draft
+    with no finished check counts its citations as unchecked, so the card's bar is not all green
+    while part of the project was never checked (the rule status_label follows, #727)."""
     view = _public(project)
     bib = project.get("bib") or {}
     entries = logic.parse_bib(bib.get("content", ""))
@@ -943,7 +945,8 @@ def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, li
     checked_at = None
     for draft in mine:
         files = _draft_files(draft, project)
-        cited.update(c["key"] for c in logic.find_cites(files))
+        cites = logic.find_cites(files)
+        cited.update(c["key"] for c in cites)
         latest = _latest_done(runs_by_draft.get(draft["id"], []))
         if latest:
             summary = logic.summarize(latest.get("citations", []))
@@ -952,6 +955,8 @@ def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, li
             open_issues += summary["open"]
             if not checked_at or latest.get("finishedAt", "") > checked_at:
                 checked_at = latest.get("finishedAt")
+        else:
+            tally["unchecked"] += len(cites)
     view.update(
         {
             "bibName": bib.get("name"),
@@ -1172,7 +1177,9 @@ def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str
                     {
                         "kind": "upload-pdf",
                         "key": c["key"],
-                        "title": f"{c['key']} · {c.get('message') or 'no PDF could be read'}",
+                        "title": (
+                            f"{c['key']} · {logic.short_message(c.get('message')) or 'no PDF could be read'}"
+                        ),
                         "detail": "Cannot be checked until a source is attached",
                         "draftId": draft["id"],
                         "projectId": draft.get("projectId"),

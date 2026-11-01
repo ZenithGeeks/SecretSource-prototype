@@ -1,5 +1,5 @@
 /**
- * The data model shared by every Author screen: Check a draft (Figma 558:3647), the LaTeX
+ * The data model shared by every Author screen: Home (Redesign A1 716:4922), the LaTeX
  * editor (565:3957) and its Export menu (565:4207), the Library (597:3631) and a project's
  * detail (597:4404). These are the shapes the gateway's
  * /author routes answer with (backend/app/author/router.py), defined once here so the
@@ -105,6 +105,8 @@ export type ParseWarning = {
   detail: string // "\cite{liu2023} in intro.tex L18"
   file: string
   line: number
+  /** On a project's lint: the draft it is in, or null for the project's own .bib. */
+  draftId?: string | null
 }
 
 /** What the parser found in a draft's project. */
@@ -113,6 +115,12 @@ export type ParseResult = {
   citeCommands: number
   bibEntries: number
   warnings: ParseWarning[]
+}
+
+/** GET /author/projects/{id}/lint: the same, across all the project's drafts (#714). */
+export type ProjectLint = ParseResult & {
+  bibName: string | null
+  drafts: number
 }
 
 /** A draft's check at a glance: how many citations got each verdict, how many are open. */

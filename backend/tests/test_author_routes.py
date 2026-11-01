@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import pytest
 import redis
 from app import auth, main
+from app.author import logic as author_logic
 from app.author import router as author
 from app.author import verify as author_verify
 from app.metrics import AUDIT_FINDINGS
@@ -1312,3 +1313,63 @@ def test_a_project_lint_reports_a_duplicate_inside_the_project_bib_once(client):
     body = client.get(f"/author/projects/{project['id']}/lint", headers=ADA).json()
     (duplicate,) = [w for w in body["warnings"] if w["type"] == "duplicate-key"]
     assert duplicate["draftId"] is None and duplicate["detail"] == "used2020 defined twice"
+
+
+def test_a_never_checked_draft_counts_as_not_checked_on_its_project(client, monkeypatch):
+    """One draft checked and all supported, another never checked: the card is not all green."""
+    stub_verify(monkeypatch)
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
+
+    def draft(title: str, tex: str) -> dict:
+        files = [{"name": f"{title}.tex", "content": tex}]
+        return client.post(
+            "/author/drafts", headers=ADA, json={"title": title, "projectId": project["id"], "files": files}
+        ).json()
+
+    checked = draft("checked", r"One \cite{khattab2020}.")
+    unchecked = draft("unchecked", r"Two \cite{khattab2020} and \cite{nguyen2016}.")
+    run_check(client, checked["id"])
+
+    card = client.get("/author/projects", headers=ADA).json()[0]
+    assert card["tally"]["supports"] == 1 and card["tally"]["unchecked"] == 2
+    assert card["needWork"] == 0 and card["checkedAt"]
+    library = client.get("/author/library", headers=ADA).json()["projects"][0]
+    assert library["tally"]["unchecked"] == 2
+
+    run_check(client, unchecked["id"])
+    card = client.get("/author/projects", headers=ADA).json()[0]
+    assert card["tally"]["unchecked"] == 0 and card["tally"]["supports"] == 3
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>"
+            + '<div class="cf">x</div>' * 400
+            + "</body></html>",
+            "the server sent an error page (Just a moment...)",
+        ),
+        ("<html><body>nope</body></html>", "the server sent an error page"),
+        ("a <b>short</b>\n  reason", "a short reason"),
+        ("y" * 2000, "y" * 139 + "…"),
+        (None, ""),
+    ],
+)
+def test_short_message_summarises_or_trims(message, expected):
+    assert author_logic.short_message(message) == expected
+
+
+def test_the_librarys_attention_row_never_carries_a_raw_error_page(client, monkeypatch):
+    page = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>" + "<p>x</p>" * 500
+    monkeypatch.setattr(
+        main, "verify_claim", lambda claim, source: {"status": "error", "reason": "failed", "message": page}
+    )
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+    rows = client.get("/author/library", headers=ADA).json()["attention"]
+    titles = [r["title"] for r in rows if r["kind"] == "upload-pdf"]
+    assert titles and all("<" not in title and "error page (Just a moment...)" in title for title in titles)
+    # The check keeps what the server said; only the row is trimmed.
+    citations = client.get(f"/author/checks/{check_id}", headers=ADA).json()["citations"]
+    assert any(c.get("message") == page for c in citations)

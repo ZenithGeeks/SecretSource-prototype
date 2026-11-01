@@ -11,7 +11,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { backupKey } from '../src/lib/draftSave'
-import { DraftCheck } from '../src/roles/author/screens/DraftCheck'
+import { Home } from '../src/roles/author/screens/Home'
 import { Library } from '../src/roles/author/screens/Library'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX, THESIS_FILES } from './fixtures/thesis'
@@ -205,7 +205,7 @@ describe('Home: Your drafts', () => {
 
   function renderHome(draftId: string) {
     const onSelectDraft = vi.fn()
-    renderWithQuery(<DraftCheck draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={vi.fn()} onOpenHistory={vi.fn()} />)
+    renderWithQuery(<Home draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={vi.fn()} onOpenHistory={vi.fn()} />)
     return { onSelectDraft }
   }
 

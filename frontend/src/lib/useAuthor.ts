@@ -1,7 +1,7 @@
 /**
  * Query hooks for the Author screens, mirroring useResearcher/useAnalysis. Screens read
  * data only through these; every write goes through useAuthorActions, which calls the
- * gateway and invalidates the ['author', …] queries so Check a draft, the editor and the
+ * gateway and invalidates the ['author', …] queries so Home, the editor and the
  * Library all re-render from the same answer.
  */
 
@@ -19,6 +19,7 @@ export const AUTHOR_KEYS = {
   drafts: ['author', 'drafts'] as const,
   draft: (id: string) => ['author', 'draft', id] as const,
   parse: (id: string) => ['author', 'parse', id] as const,
+  lint: ['author', 'lint'] as const,
   checks: (draftId: string) => ['author', 'checks', draftId] as const,
   check: (id: string) => ['author', 'check', id] as const,
   compare: (id: string) => ['author', 'compare', id] as const,
@@ -45,6 +46,15 @@ export function useAuthorParse(draftId: string | null) {
     queryKey: AUTHOR_KEYS.parse(draftId ?? ''),
     queryFn: () => authorApi.parseDraft(draftId!),
     enabled: Boolean(draftId),
+  })
+}
+
+/** A project's bib lint across all its drafts (#714). */
+export function useProjectLint(projectId: string | null) {
+  return useQuery({
+    queryKey: [...AUTHOR_KEYS.lint, projectId ?? ''],
+    queryFn: () => authorApi.lintProject(projectId!),
+    enabled: Boolean(projectId),
   })
 }
 
@@ -168,6 +178,7 @@ export function useAuthorActions() {
   const touched = (draftId: string) => {
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.checks(draftId) })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
@@ -175,6 +186,7 @@ export function useAuthorActions() {
   }
   const libraryChanged = () => {
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.projects })
     void qc.invalidateQueries({ queryKey: ['author', 'project'] })
     void qc.invalidateQueries({ queryKey: ['author', 'sources'] })
@@ -231,6 +243,7 @@ export function useAuthorActions() {
     acceptWrite: (draftId: string, draft: Draft): void => {
       qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) => (current ? { ...current, files: draft.files, updated: draft.updated } : current))
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
     },
     deleteFile: async (draftId: string, name: string): Promise<Draft> => {
       const draft = await authorApi.deleteFile(draftId, name)

@@ -12,6 +12,7 @@ import { ChevronRight } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../../components/ui'
+import { shortMessage } from '../../../../lib/citations'
 import type { Citation } from '../../../../types/draftCheck'
 import { sourceLabel } from '../../labels'
 import { AuditNote, CitationBadge } from '../Verdicts'
@@ -91,7 +92,7 @@ export function IssuePopover({
         </blockquote>
       )}
       <AuditNote findings={citation.audit} className="text-xs" />
-      {citation.verdict === 'unavailable' && citation.message && <p className="text-xs text-ink-muted">{citation.message}</p>}
+      {citation.verdict === 'unavailable' && citation.message && <p className="text-xs break-words text-ink-muted">{shortMessage(citation.message)}</p>}
       {citation.resolution ? (
         <p className="text-xs text-ink-muted">
           {citation.resolution.kind === 'replaced' ? `Replaced with \\cite{${citation.key}}.` : 'Kept as written.'}

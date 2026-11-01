@@ -19,7 +19,8 @@ describe('VerdictBar and VerdictLegend', () => {
     const bar = screen.getByRole('img')
     expect(bar.getAttribute('aria-label')).toContain('3 supported')
     expect(bar.getAttribute('aria-label')).toContain('2 unavailable')
-    expect(bar.children).toHaveLength(3) // supports, refutes, unavailable
+    expect(bar.getAttribute('aria-label')).toContain('4 not checked')
+    expect(bar.children).toHaveLength(4) // supports, refutes, unavailable, unchecked: never all green
   })
 
   test('with nothing checked the bar keeps its shape as one muted track', () => {

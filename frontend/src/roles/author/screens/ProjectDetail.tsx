@@ -265,7 +265,7 @@ export function ProjectDetail({
             <CheckHistory draft={unfiledCurrent} runs={unfiledChecks.data ?? []} onOpenEditor={() => onOpenEditor(unfiledCurrent.id)} />
           ) : (
             <Card>
-              <Empty title="No drafts outside a project" hint="Every draft is in a project. Upload a .tex on Check a draft to start one here." />
+              <Empty title="No drafts outside a project" hint="Every draft is in a project. Upload a .tex on Home to start one here." />
             </Card>
           )}
         </div>
@@ -349,7 +349,7 @@ export function ProjectDetail({
           <CheckHistory draft={current} runs={detail.history[current.id] ?? []} onOpenEditor={() => onOpenEditor(current.id)} />
         ) : (
           <Card>
-            <Empty title="No drafts in this project" hint="Start one with + New draft, or upload a .tex on Check a draft." />
+            <Empty title="No drafts in this project" hint="Start one with + New draft, or upload a .tex on Home." />
           </Card>
         )}
       </div>
@@ -460,7 +460,7 @@ function DraftList({
       )}
       {selected && (
         <TextLink onClick={() => onOpenDraft(selected)} className="self-start" data-ask-target={askTarget({ kind: 'action', id: 'open-draft' })}>
-          Open on Check a draft
+          Open on Home
         </TextLink>
       )}
     </Card>

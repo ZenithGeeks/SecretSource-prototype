@@ -569,6 +569,27 @@ def summarize(citations: list[dict]) -> dict:
     }
 
 
+MESSAGE_LIMIT = 140
+
+
+def _clip(text: str, limit: int) -> str:
+    return f"{text[: limit - 1].rstrip()}…" if len(text) > limit else text
+
+
+def short_message(message: str | None) -> str:
+    """Why a source could not be read, fit for one line. A citation's message can be whatever a
+    server answered, such as a whole Cloudflare error page: that becomes a summary, and anything
+    else loses its tags and is cut short. Same rule as shortMessage in lib/citations.ts."""
+    if not message:
+        return ""
+    if re.search(r"<(!doctype|html|head|body)\b", message, re.IGNORECASE):
+        found = re.search(r"<title[^>]*>([^<]*)", message, re.IGNORECASE)
+        title = re.sub(r"\s+", " ", found.group(1)).strip() if found else ""
+        summary = "the server sent an error page"
+        return f"{summary} ({_clip(title, 60)})" if title else summary
+    return _clip(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", message)).strip(), MESSAGE_LIMIT)
+
+
 def status_label(status: dict) -> str:
     """ "3 issues", "1 unavailable · 1 not checked", "all supported", "no open issues",
     "2 not checked", "not checked" — the words a draft row ends with. "all supported" only when
@@ -771,7 +792,7 @@ def report_html(draft: dict, check: dict) -> str:
             )
             + (f"<p><b>Why.</b> {_esc(c['explanation'])}</p>" if c.get("explanation") else "")
             + (
-                f"<p><b>Could not check.</b> {_esc(c['message'])}</p>"
+                f"<p><b>Could not check.</b> {_esc(short_message(c['message']))}</p>"
                 if c.get("message") and c.get("verdict") in ("unavailable", "unchecked")
                 else ""
             )

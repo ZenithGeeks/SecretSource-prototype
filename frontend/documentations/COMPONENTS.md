@@ -44,7 +44,7 @@ src/
 │  └─ auth/Auth.tsx       sign in / sign up / forgot / reset / check-email (Supabase Auth)
 ├─ roles/                 one folder per role — no cross-role imports
 │  ├─ researcher/         ResearcherApp + screens/ (Home, Library, FieldConsensus, Graph, History, Settings)
-│  ├─ author/             AuthorApp + screens/ (DraftCheck = Home, Editor, Library, ProjectDetail) + components/
+│  ├─ author/             AuthorApp + screens/ (Home, Editor, Library, ProjectDetail) + components/
 │  └─ teacher/            TeacherApp + screens/ (Home, Classes, AddClass, ClassWorkspace,
 │                          Classwork, People, AssignmentDetail, EssayCheck, ReadingQuestions,
 │                          Settings) + role-local components
@@ -304,8 +304,8 @@ Writer still uses a store and mocks. Teacher uses the typed `teacherApi` adapter
 
 ### Author data layer
 
-Every Author screen (Figma 08 Home = Check a draft, 08c editor, 08d Library, 08d-1 project
-detail, 08e Find a source) reads the gateway's `/author` routes (`backend/app/author/router.py`)
+Every Author screen (Redesign A1 Home, 08c editor, 08d Library, 08d-1 project detail) reads the
+gateway's `/author` routes (`backend/app/author/router.py`)
 through one chain — there is no mock and no in-session store:
 
 ```
@@ -319,14 +319,21 @@ lib/latexPreview.ts   the LaTeX.js pipeline for the editor's preview (see below)
 
 `useAuthorActions.replaceCitation` is the one composite write: it rewrites the `\cite` in the
 file, appends the BibTeX entry to whichever .bib the draft cites from, and records the
-resolution on the check — the same call from Check a draft's "Insert \cite", the editor's
-popover and Find a source's "Cite this". Use `VERDICTS[verdict]` for any word or colour tied
+resolution on the check. Use `VERDICTS[verdict]` for any word or colour tied
 to a verdict — never a local map. `unavailable` is not an open issue (the gateway counts the
 same way); the Library's "Needs attention" lists it with "Upload PDF".
 
+Home (`screens/Home.tsx`, Redesign A1, #717) replaced the old Check a draft screen, and any old
+link to it opens Home. The latest-project card holds the verdict bar, Check and Open in editor;
+"Citations that need work" and "Bibliography" (project lint, `GET /author/projects/{id}/lint`, for
+a draft in a project) sit beside each other; the Evidence panel and "Your drafts" follow, which the
+design does not draw. Uploading, Write a draft and Add bibliography are in "New project ▾"
+(`DraftActions.tsx`), so `read_screen` lists them only while the menu is open.
+
 The Author nav is Home and Library (Redesign R/Sidebar, Role=Author, without its "Projects" and
-"Find a source" items), with `components/RecentProjects.tsx` under it: the last five projects
-from `/author/library`, a status dot, what needs work, and "+ New". History and Graph are the
+sources items), with `components/RecentProjects.tsx` under it: the last five projects
+from `/author/library`, a status dot, what needs work, and "+ New", which opens the same dialog as
+Home's menu (`NewProject.tsx`). History and Graph are the
 Researcher's only (#712): an old `?screen=history`, `?screen=graph` or `?analysis=` link opens
 the Library with a notice, and a draft's check history is on its project.
 
