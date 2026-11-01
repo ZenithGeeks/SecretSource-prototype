@@ -1,7 +1,19 @@
 """A reference title that GROBID read with its author list in front loses the authors,
 whatever alphabet the names are written in."""
 
-from app.pipeline import claims
+import xml.etree.ElementTree as ET
+
+from app.pipeline import claims, sources
+
+
+def bibl(article: str = "", journal: str = "", tagged: str = "") -> ET.Element:
+    analytic = f'<analytic><title level="a">{article}</title></analytic>' if article else "<analytic/>"
+    journal_xml = f'<title level="j">{journal}</title>' if journal else ""
+    idno = f'<idno type="arXiv">{tagged}</idno>' if tagged else ""
+    return ET.fromstring(
+        '<biblStruct xmlns="http://www.tei-c.org/ns/1.0">'
+        f"{analytic}<monogr>{journal_xml}{idno}</monogr></biblStruct>"
+    )
 
 
 def test_an_accented_author_list_is_cut_off_the_title():
@@ -58,7 +70,15 @@ def test_a_lowercase_word_is_not_a_name():
 def test_a_preprint_note_after_the_title_is_cut_off():
     title = "Thought Anchors: Which LLM Reasoning Steps Matter?"
     assert claims._cleaned_title(f"{title} ArXiv preprint, abs/2506") == title
-    assert claims._cleaned_title("Sparks of AGI. arXiv preprint arXiv:2303.12712") == "Sparks of AGI"
+    sparks = "Sparks of AGI. arXiv preprint arXiv:2303.12712"
+    # The venue note goes. The arXiv id stays, on the title and on the reference, so the
+    # lookup resolves 2303.12712 directly instead of searching for "Sparks of AGI".
+    assert claims._cleaned_title(sparks) == "Sparks of AGI arXiv:2303.12712"
+    parsed = claims._parse_reference(bibl(sparks))
+    assert parsed["title"] == "Sparks of AGI arXiv:2303.12712"
+    assert parsed["arxiv"] == "2303.12712"
+    assert sources.lookup_key(parsed) == "2303.12712"
+    assert sources._lookup(sources.lookup_key(parsed)).url == "https://arxiv.org/pdf/2303.12712"
 
 
 def test_a_title_about_preprints_keeps_its_words():
@@ -74,3 +94,49 @@ def test_a_word_broken_across_lines_is_joined():
 def test_real_hyphens_are_kept():
     for title in ("Chain-of-Thought Is Not Explainability", "Zero-shot Mixture-of-Experts", "DIM-SUM"):
         assert claims._cleaned_title(title) == title
+
+
+def test_hyphenated_compounds_stay_intact():
+    for title in ("Self-Attention", "BERT-base", "Q-learning", "state-of-the-art", "t-SNE"):
+        assert claims._cleaned_title(title) == title
+
+
+def test_a_note_that_would_erase_the_title_keeps_the_original():
+    # A truncated id is not an arXiv id, so the note would wipe the title. Keep the original
+    # rather than drop the reference as unfindable.
+    raw = "ArXiv preprint, abs/2506"
+    assert claims._cleaned_title(raw) == raw
+    parsed = claims._parse_reference(bibl(journal=raw))
+    assert parsed["title"] == raw
+    assert parsed["arxiv"] == ""
+
+
+def test_an_id_only_preprint_title_keeps_the_id():
+    # The journal line GROBID falls back to when it parsed no article title.
+    raw = "arXiv preprint arXiv:2303.12712"
+    assert claims._cleaned_title(raw) == "arXiv:2303.12712"
+    parsed = claims._parse_reference(bibl(journal=raw))
+    assert parsed["title"] == "arXiv:2303.12712"
+    assert parsed["arxiv"] == "2303.12712"
+    assert sources.lookup_key(parsed) == "2303.12712"
+
+
+def test_a_title_ending_in_arxiv_preprint_is_left_alone():
+    title = "Notes toward an arXiv preprint"
+    assert claims._cleaned_title(title) == title
+    parsed = claims._parse_reference(bibl(title))
+    assert parsed["title"] == title
+    assert parsed["arxiv"] == ""
+
+
+def test_a_reference_title_collapses_line_breaks():
+    parsed = claims._parse_reference(bibl("Sparks of\nAGI. arXiv preprint\narXiv:2303.12712"))
+    assert parsed["title"] == "Sparks of AGI arXiv:2303.12712"
+    assert parsed["arxiv"] == "2303.12712"
+
+
+def test_a_tagged_arxiv_id_wins_over_one_written_in_the_title():
+    parsed = claims._parse_reference(
+        bibl("Sparks of AGI. arXiv preprint arXiv:2303.12712", tagged="1111.22222")
+    )
+    assert parsed["arxiv"] == "1111.22222"
