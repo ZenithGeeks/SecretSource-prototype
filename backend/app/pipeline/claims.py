@@ -22,7 +22,7 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import local_pdf, lookup_key, tool_error
+from app.pipeline.sources import ARXIV_PATTERN, local_pdf, lookup_key, tool_error
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -465,27 +465,90 @@ def _without_the_authors(title: str) -> str:
 
 
 # "Thought Anchors: Which LLM Reasoning Steps Matter? ArXiv preprint, abs/2506": the venue
-# GROBID left on the end of the title.
-PREPRINT_TAIL = re.compile(r"[.,]?\s*\barxiv preprint\b[\s,:]*(?:abs/|arxiv:)?[\d./v]*\s*$", re.IGNORECASE)
+# GROBID left on the end of the title. The words count as that note only with a separator or an
+# id after them, so a title that simply ends in "arXiv preprint" keeps those words. A full id
+# stays on the title; a truncated one ("abs/2506") goes with the note.
+_PREPRINT_WORD = re.compile(r"\barxiv preprint\b", re.IGNORECASE)
+_NOTE_AFTER = re.compile(
+    r"\s*[,:;]?\s*"
+    r"(?:"
+    r"(?P<token>(?:arxiv:\s*|abs/)?\s*\d{4}\.\d{4,5}(?:v\d+)?)"
+    r"|(?:abs/)?(?P<junk>\d[\d./v]*)"
+    r"|(?P<bare>)"
+    r")"
+    r"\s*[,.]?\s*$",
+    re.IGNORECASE,
+)
+_NOTE_SEPARATOR = re.compile(r"[,.;:?!]\s*$")
 # "Reason-ingFlow": a word the PDF broke across two lines. Only a hyphen inside one word whose
 # rest runs into a capital is joined, so "Chain-of-Thought" and "Zero-shot" keep theirs.
 LINE_BREAK_HYPHEN = re.compile(r"(?<=[a-z])-(?=[a-z]+[A-Z])")
 
 
+def _one_line(text: str) -> str:
+    """Collapse whitespace and newlines, the same way the analysed paper's title is stored."""
+    return " ".join(text.split())
+
+
+def _without_preprint_note(title: str) -> str:
+    """Cut a trailing "arXiv preprint" note. A full arXiv id at the end is kept."""
+    found = None
+    for match in _PREPRINT_WORD.finditer(title):
+        found = match
+    if found is None:
+        return title
+    after = _NOTE_AFTER.match(title[found.end() :])
+    if after is None:
+        return title
+    before = title[: found.start()]
+    token = _one_line(after.group("token") or "")
+    junk = (after.group("junk") or "").strip()
+    # No separator and no id: the words are part of the title ("an arXiv preprint").
+    if not _NOTE_SEPARATOR.search(before) and not token and not junk:
+        return title
+    if token:
+        return f"{before.rstrip(' \t,.;:')} {token}".strip()
+    return before.rstrip(" \t,.;:")
+
+
 def _cleaned_title(title: str) -> str:
     """The title with a leading author list, a trailing preprint note and line-break hyphens
-    taken out, so a title-only lookup can match it."""
-    title = PREPRINT_TAIL.sub("", _without_the_authors(title))
-    return LINE_BREAK_HYPHEN.sub("", title).strip()
+    taken out, so a title-only lookup can match it.
+
+    A full arXiv id written in the note stays. When the note was the whole title, cleaning
+    would leave it empty and the reference would be dropped, so the original title is kept.
+    """
+    original = _one_line(title)
+    cleaned = _without_preprint_note(_without_the_authors(original))
+    cleaned = LINE_BREAK_HYPHEN.sub("", cleaned).strip()
+    return cleaned or original
+
+
+def _raw_title(reference) -> str:
+    """The reference's title as GROBID wrote it, before the preprint note is removed."""
+    for path in TITLE_PATHS:
+        found = reference.find(path, TEI_NAMESPACE)
+        title = _one_line(found.text or "") if found is not None else ""
+        if title and not _looks_like_authors(title):
+            return title
+    return ""
 
 
 def _title_of(reference) -> str:
-    for path in TITLE_PATHS:
-        found = reference.find(path, TEI_NAMESPACE)
-        title = (found.text or "").strip() if found is not None else ""
-        if title and not _looks_like_authors(title):
-            return _cleaned_title(title)
-    return ""
+    raw = _raw_title(reference)
+    return _cleaned_title(raw) if raw else ""
+
+
+def _arxiv_from_title(title: str) -> str:
+    """An arXiv id written in the title, read before the title is cleaned.
+
+    GROBID tags an id only sometimes. "arXiv preprint arXiv:2303.12712" still has one, and
+    a lookup resolves that id directly once it is stored on the reference.
+    """
+    if "arxiv" not in title.lower() and "abs/" not in title.lower():
+        return ""
+    found = ARXIV_PATTERN.search(title)
+    return found.group(1) if found else ""
 
 
 ARXIV_IN_URL = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})")
@@ -505,13 +568,18 @@ def _parse_reference(reference) -> dict:
     date = reference.find(".//tei:date[@when]", TEI_NAMESPACE)
     url = _url_of(reference)
     in_url = ARXIV_IN_URL.search(url)
+    raw_title = _raw_title(reference)
+    # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so, and
+    # failing that the raw title still may ("arXiv preprint arXiv:2303.12712"). Read the title
+    # before cleaning: cleaning takes the note, and the id with it, off the words we store.
+    tagged = _identifier(reference, "arXiv").replace("arXiv:", "").strip()
+    arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_from_title(raw_title)
     return {
-        "title": _title_of(reference),
+        "title": _cleaned_title(raw_title) if raw_title else "",
         "authors": [_full_name(person) for person in reference.findall(".//tei:persName", TEI_NAMESPACE)],
         "year": date.get("when", "")[:4] if date is not None else "",
         "doi": _identifier(reference, "DOI"),
-        # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so
-        "arxiv": _identifier(reference, "arXiv").replace("arXiv:", "") or (in_url.group(1) if in_url else ""),
+        "arxiv": arxiv,
         "url": url,
     }
 
@@ -530,7 +598,7 @@ def _paper_header(tei) -> dict:
     people = source.findall(".//tei:author/tei:persName", TEI_NAMESPACE) if source is not None else []
     authors = [name for name in (_full_name(person) for person in people) if name]
     return {
-        "title": " ".join((title.text or "").split()) if title is not None else "",
+        "title": _one_line(title.text or "") if title is not None else "",
         "authors": authors,
         "year": date.get("when", "")[:4] if date is not None else "",
     }
