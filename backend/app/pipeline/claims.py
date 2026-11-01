@@ -22,7 +22,7 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import ARXIV_PATTERN, local_pdf, lookup_key, tool_error
+from app.pipeline.sources import local_pdf, lookup_key, tool_error
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -539,16 +539,45 @@ def _title_of(reference) -> str:
     return _cleaned_title(raw) if raw else ""
 
 
+# A year range such as "2019.2020" is the same shape as an arXiv id. The id counts only
+# when it follows the marker GROBID writes: "arXiv:2303.12712", "abs/2303.12712", or
+# "arXiv preprint 2303.12712". Word boundaries keep the marker and the id from matching
+# inside a longer token. This is stricter than ARXIV_PATTERN: that one also has to match
+# a bare id and an arxiv.org PDF link, which carry none of these markers.
+_ARXIV_IN_TITLE = re.compile(
+    r"(?i)(?:"
+    r"\barxiv\s+preprint\s+(?:arxiv\s*:\s*|abs/\s*)?"
+    r"|\barxiv\s*:\s*"
+    r"|\babs/\s*"
+    r")"
+    r"(\d{4}\.\d{4,5})(?:v\d+)?\b"
+)
+
+
 def _arxiv_from_title(title: str) -> str:
-    """An arXiv id written in the title, read before the title is cleaned.
+    """An arXiv id written in this title, read before the title is cleaned.
 
     GROBID tags an id only sometimes. "arXiv preprint arXiv:2303.12712" still has one, and
-    a lookup resolves that id directly once it is stored on the reference.
+    a lookup resolves that id directly once it is stored on the reference. A year range
+    after the word arXiv, with no marker, is not an id.
     """
-    if "arxiv" not in title.lower() and "abs/" not in title.lower():
-        return ""
-    found = ARXIV_PATTERN.search(title)
+    found = _ARXIV_IN_TITLE.search(title)
     return found.group(1) if found else ""
+
+
+def _arxiv_in_reference_titles(reference) -> str:
+    """An arXiv id GROBID left on a title line instead of tagging it.
+
+    The article title is one place. GROBID 0.8.2 also puts "arXiv preprint arXiv:<id>"
+    on the monogr or journal line while the article title is the work's real title.
+    The displayed title stays the article's. The id is read from either line.
+    """
+    for path in TITLE_PATHS:
+        found = reference.find(path, TEI_NAMESPACE)
+        title = _one_line(found.text or "") if found is not None else ""
+        if title and (arxiv := _arxiv_from_title(title)):
+            return arxiv
+    return ""
 
 
 ARXIV_IN_URL = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})")
@@ -570,10 +599,10 @@ def _parse_reference(reference) -> dict:
     in_url = ARXIV_IN_URL.search(url)
     raw_title = _raw_title(reference)
     # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so, and
-    # failing that the raw title still may ("arXiv preprint arXiv:2303.12712"). Read the title
-    # before cleaning: cleaning takes the note, and the id with it, off the words we store.
+    # failing that a title line still may ("arXiv preprint arXiv:2303.12712"), including the
+    # journal line when the article title is separate. Read that before cleaning.
     tagged = _identifier(reference, "arXiv").replace("arXiv:", "").strip()
-    arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_from_title(raw_title)
+    arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_in_reference_titles(reference)
     return {
         "title": _cleaned_title(raw_title) if raw_title else "",
         "authors": [_full_name(person) for person in reference.findall(".//tei:persName", TEI_NAMESPACE)],
