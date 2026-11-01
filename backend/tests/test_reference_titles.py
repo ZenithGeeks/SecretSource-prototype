@@ -140,3 +140,52 @@ def test_a_tagged_arxiv_id_wins_over_one_written_in_the_title():
         bibl("Sparks of AGI. arXiv preprint arXiv:2303.12712", tagged="1111.22222")
     )
     assert parsed["arxiv"] == "1111.22222"
+
+
+def test_an_arxiv_id_on_the_journal_line_is_kept_beside_an_article_title():
+    # GROBID 0.8.2: the article title is the work, and the monogr line is the preprint note.
+    parsed = claims._parse_reference(bibl("Sparks of AGI", journal="arXiv preprint arXiv:2303.12712"))
+    assert parsed["title"] == "Sparks of AGI"
+    assert parsed["arxiv"] == "2303.12712"
+    assert sources.lookup_key(parsed) == "2303.12712"
+
+
+def test_a_year_range_after_the_word_arxiv_is_not_an_id():
+    parsed = claims._parse_reference(bibl("ArXiv usage statistics 2019.2020"))
+    assert parsed["arxiv"] == ""
+    assert parsed["title"] == "ArXiv usage statistics 2019.2020"
+
+
+def test_abs_version_and_trailing_punctuation_still_mark_an_id():
+    assert claims._parse_reference(bibl("abs/2303.12712"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("arXiv:2303.12712v2"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("arXiv:2303.12712."))["arxiv"] == "2303.12712"
+
+
+def test_a_space_or_a_doi_still_marks_an_arxiv_id():
+    assert claims._parse_reference(bibl("arXiv 2303.12712"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("arXiv.2303.12712"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("10.48550/arXiv.2303.12712"))["arxiv"] == "2303.12712"
+
+
+def test_a_slash_a_six_digit_tail_or_words_before_a_year_range_are_not_an_id():
+    for title in ("labs/2019.2020", "arXiv:2101.000012", "ArXiv usage statistics 2019.2020"):
+        assert claims._parse_reference(bibl(title))["arxiv"] == ""
+
+
+def test_a_year_range_after_an_arxiv_marker_is_not_an_id():
+    for title in (
+        "arXiv 2019.2020",
+        "arXiv:2019.2020",
+        "arxiv preprint 2019.2020",
+        "arXiv2019.2020",
+        "arXiv.2019.2020",
+        "Trends on arXiv 2010.2020",
+        "arXiv 2023.12345",
+    ):
+        assert claims._parse_reference(bibl(title))["arxiv"] == ""
+
+
+def test_issued_arxiv_ids_still_count():
+    for arxiv_id in ("2303.12712", "0704.0001", "1412.1234"):
+        assert claims._parse_reference(bibl(f"arXiv:{arxiv_id}"))["arxiv"] == arxiv_id
