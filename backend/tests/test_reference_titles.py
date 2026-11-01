@@ -154,3 +154,20 @@ def test_a_year_range_after_the_word_arxiv_is_not_an_id():
     parsed = claims._parse_reference(bibl("ArXiv usage statistics 2019.2020"))
     assert parsed["arxiv"] == ""
     assert parsed["title"] == "ArXiv usage statistics 2019.2020"
+
+
+def test_abs_version_and_trailing_punctuation_still_mark_an_id():
+    assert claims._parse_reference(bibl("abs/2303.12712"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("arXiv:2303.12712v2"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("arXiv:2303.12712."))["arxiv"] == "2303.12712"
+
+
+def test_a_space_or_a_doi_still_marks_an_arxiv_id():
+    assert claims._parse_reference(bibl("arXiv 2303.12712"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("arXiv.2303.12712"))["arxiv"] == "2303.12712"
+    assert claims._parse_reference(bibl("10.48550/arXiv.2303.12712"))["arxiv"] == "2303.12712"
+
+
+def test_a_slash_a_six_digit_tail_or_words_before_a_year_range_are_not_an_id():
+    for title in ("labs/2019.2020", "arXiv:2101.000012", "ArXiv usage statistics 2019.2020"):
+        assert claims._parse_reference(bibl(title))["arxiv"] == ""

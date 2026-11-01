@@ -540,14 +540,17 @@ def _title_of(reference) -> str:
 
 
 # A year range such as "2019.2020" is the same shape as an arXiv id. The id counts only
-# when it follows the marker GROBID writes: "arXiv:2303.12712", "abs/2303.12712", or
-# "arXiv preprint 2303.12712". Word boundaries keep the marker and the id from matching
-# inside a longer token. This is stricter than ARXIV_PATTERN: that one also has to match
-# a bare id and an arxiv.org PDF link, which carry none of these markers.
+# when a marker sits immediately in front of it: "arXiv:2303.12712", "arXiv 2303.12712",
+# "arXiv.2303.12712" (also the DOI 10.48550/arXiv.2303.12712), "abs/2303.12712", or
+# "arXiv preprint" plus one of those. The id is 4 or 5 digits after the dot, so
+# "arXiv:2101.000012" is not one, and "labs/2019.2020" has no marker. Word boundaries
+# keep the marker and the id from matching inside a longer token. This is stricter than
+# ARXIV_PATTERN: that one also has to match a bare id and an arxiv.org PDF link, which
+# carry none of these markers.
 _ARXIV_IN_TITLE = re.compile(
     r"(?i)(?:"
-    r"\barxiv\s+preprint\s+(?:arxiv\s*:\s*|abs/\s*)?"
-    r"|\barxiv\s*:\s*"
+    r"\barxiv\s+preprint\s+(?:arxiv\s*[.:]?\s*|abs/\s*)?"
+    r"|\barxiv\s*[.:]?\s*"
     r"|\babs/\s*"
     r")"
     r"(\d{4}\.\d{4,5})(?:v\d+)?\b"
