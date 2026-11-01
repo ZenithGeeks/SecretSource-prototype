@@ -171,3 +171,21 @@ def test_a_space_or_a_doi_still_marks_an_arxiv_id():
 def test_a_slash_a_six_digit_tail_or_words_before_a_year_range_are_not_an_id():
     for title in ("labs/2019.2020", "arXiv:2101.000012", "ArXiv usage statistics 2019.2020"):
         assert claims._parse_reference(bibl(title))["arxiv"] == ""
+
+
+def test_a_year_range_after_an_arxiv_marker_is_not_an_id():
+    for title in (
+        "arXiv 2019.2020",
+        "arXiv:2019.2020",
+        "arxiv preprint 2019.2020",
+        "arXiv2019.2020",
+        "arXiv.2019.2020",
+        "Trends on arXiv 2010.2020",
+        "arXiv 2023.12345",
+    ):
+        assert claims._parse_reference(bibl(title))["arxiv"] == ""
+
+
+def test_issued_arxiv_ids_still_count():
+    for arxiv_id in ("2303.12712", "0704.0001", "1412.1234"):
+        assert claims._parse_reference(bibl(f"arXiv:{arxiv_id}"))["arxiv"] == arxiv_id

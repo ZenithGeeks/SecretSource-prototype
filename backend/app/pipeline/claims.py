@@ -557,15 +557,42 @@ _ARXIV_IN_TITLE = re.compile(
 )
 
 
+def _looks_like_an_arxiv_id(arxiv_id: str) -> bool:
+    """Whether YYMM.number is an id arXiv has issued.
+
+    New-style ids start at 0704, and the month is 01 to 12. Through 1412 the serial
+    is 4 digits; from 1501 it is 5. The marker in front is loose, so "arXiv 2019.2020"
+    and "arXiv:2019.2020" match it, but the month is 19 and the length is wrong for
+    that year. A wrong id would be looked up instead of the title.
+    """
+    year_month, dot, tail = arxiv_id.partition(".")
+    if dot != "." or len(year_month) != 4 or not year_month.isdigit() or not tail.isdigit():
+        return False
+    month = int(year_month[2:])
+    if not 1 <= month <= 12:
+        return False
+    stamp = int(year_month)
+    if stamp < 704:
+        return False
+    if len(tail) == 4:
+        return stamp <= 1412
+    if len(tail) == 5:
+        return stamp >= 1501
+    return False
+
+
 def _arxiv_from_title(title: str) -> str:
     """An arXiv id written in this title, read before the title is cleaned.
 
     GROBID tags an id only sometimes. "arXiv preprint arXiv:2303.12712" still has one, and
-    a lookup resolves that id directly once it is stored on the reference. A year range
-    after the word arXiv, with no marker, is not an id.
+    a lookup resolves that id directly once it is stored on the reference. A match whose
+    YYMM or length arXiv has never issued is left unset.
     """
-    found = _ARXIV_IN_TITLE.search(title)
-    return found.group(1) if found else ""
+    for found in _ARXIV_IN_TITLE.finditer(title):
+        arxiv_id = found.group(1)
+        if _looks_like_an_arxiv_id(arxiv_id):
+            return arxiv_id
+    return ""
 
 
 def _arxiv_in_reference_titles(reference) -> str:
