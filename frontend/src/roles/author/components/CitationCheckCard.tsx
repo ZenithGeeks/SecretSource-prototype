@@ -4,6 +4,7 @@
 import { Fragment, useState } from 'react'
 
 import { Card, Empty } from '../../../components/ui'
+import { VerdictBar, VerdictLegend } from '../../../components/VerdictBar'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedLabel } from '../../../lib/author'
 import { preprintNote } from '../../../lib/citations'
@@ -11,7 +12,7 @@ import { cn } from '../../../lib/utils'
 import { isLowConfidence, isOpenIssue, settledHint } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { CardHead } from './CardHead'
-import { CitationBadge, VerdictBar, VerdictLegend } from './Verdicts'
+import { CitationBadge } from './Verdicts'
 
 type Filter = 'needs-work' | 'all' | 'by-section' | 'low-confidence'
 

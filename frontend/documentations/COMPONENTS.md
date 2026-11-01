@@ -30,7 +30,9 @@ src/
 ├─ index.css            design tokens (see Tokens — four blocks, incl. data-theme)
 ├─ vite-env.d.ts · assets/
 ├─ components/          shared UI
-│  ├─ ui.tsx              Button, Input, Card, VerdictBadge, StandingBadge, Empty
+│  ├─ ui.tsx              Button, Input, Card, VerdictBadge, StandingBadge, Empty, ErrorState
+│  ├─ VerdictBar.tsx      the stacked verdict bar and its legend
+│  ├─ Stamp.tsx           the Ask panel's verdict pill (Backed, Contradicted, …; words in lib/stamps.ts)
 │  ├─ Brand.tsx           logo + wordmark (sidebar + hero)
 │  ├─ AppShell.tsx        sidebar layout: nav items + role chip (Figma NavItem + RoleChip)
 │  └─ AnalysisView, ClaimCard, HistoryList, PageViewer, PipelineStages,
@@ -101,10 +103,9 @@ Figma uses two families:
 
 In code: headings/wordmark/quotes use `font-serif`, body uses the default sans (`font-sans`).
 
-> ⚠️ **Gap:** the real webfonts (Fraunces, Geist) are **not loaded yet** — we fall back to the
-> system serif/sans. To match Figma exactly, add the fonts and point `--font-sans` / a
-> `--font-serif` at them in `index.css`. Until then, use `font-serif` for the display/quote
-> role so the swap is a one-line change later.
+The fonts load in `index.html`. Only the redesign roots (`.teacher-app`, `.redesign-app` on
+Researcher and Author, `.onboarding-app`) map `font-sans` / `font-serif` onto them, in
+`index.css`. Leave `--font-sans` alone: Labeler keeps the system fonts through it.
 
 ## Icons
 
@@ -183,9 +184,18 @@ import { Empty } from '../components/ui'
 ```
 Dashed empty-state box for "no data" placeholders.
 
+### ErrorState
+```tsx
+import { ErrorState } from '../components/ui'
+<ErrorState title="Could not load the Library" message={errorMessage(error)} onRetry={() => void query.refetch()} />
+```
+A failed query, beside `Empty` and `LoadingScreen`: what failed, the gateway's error, and Retry
+when `onRetry` is given.
+
 > **Stamps** (Figma: big BACKED / CONTRADICTED / SILENT) are **not** these badges — they're
 > for share cards / exports / the verdict header, never small UI. Not built yet; build only
-> when a share-card feature needs them.
+> when a share-card feature needs them. `src/components/Stamp.tsx` is the Ask panel's small
+> verdict pill, not this.
 
 ## Brand — `src/components/Brand.tsx`
 ```tsx

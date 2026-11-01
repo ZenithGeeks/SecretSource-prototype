@@ -124,6 +124,8 @@ describe('AuthorApp', () => {
     await screen.findAllByRole('navigation')
     expect(navLabels()).toEqual(['Home', 'Library'])
     for (const gone of ['Projects', 'Find a source', 'Graph', 'History']) expect(nav().queryByRole('button', { name: gone })).toBeNull()
+    // The redesign's type scope, shared with the Researcher (#713).
+    expect(document.querySelector('.redesign-app')).not.toBeNull()
     expect(nav().getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   })
 
@@ -271,6 +273,8 @@ describe('AuthorApp', () => {
   test('the editor has Ask in its own top bar, and the panel opens beside source and preview, with no sidebar', async () => {
     renderApp('?screen=editor&draft=d1&file=related-work.tex')
     await waitFor(() => expect(screen.getByLabelText('related-work.tex source').textContent).toContain('\\section{Related work}'))
+    // The bare editor keeps the redesign's type scope too (#713).
+    expect(screen.getByLabelText('related-work.tex source').closest('.redesign-app')).not.toBeNull()
     // Full-bleed: no sidebar and no shell toolbar, only the editor's own top bar.
     expect(screen.queryByRole('complementary', { name: 'Sidebar' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open the menu' })).toBeNull()

@@ -79,6 +79,8 @@ export function AskButton({
               // Small enough to share a toolbar with the screen's actions: the gist shows, the whole
               // sentence is the tooltip and what a screen reader reads. Below 1400px it is just
               // "New · Try it · ×": at 1280 the Editor's top bar has no room for more without wrapping.
+              // Below 480px it is "New · ×", pointing at the pill, which does what Try it does: the
+              // Editor's top bar would otherwise push the pill off a phone's screen.
               className="relative flex shrink-0 items-center gap-1 rounded-full border border-border-subtle bg-surface py-0.5 pr-0.5 pl-3 text-left text-xs whitespace-nowrap shadow-sm"
             >
               {/* The point towards the pill on its right. */}
@@ -97,7 +99,7 @@ export function AskButton({
                     dismiss()
                     onToggle()
                   }}
-                  className="min-h-7 rounded-full px-2 font-semibold text-accent hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
+                  className="hidden min-h-7 rounded-full px-2 font-semibold text-accent hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent min-[480px]:inline"
                 >
                   Try it
                 </button>

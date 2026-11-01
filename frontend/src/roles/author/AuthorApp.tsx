@@ -182,6 +182,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   })
 
   return (
+    <div className="redesign-app">
     <AppShell
       bare={screen === 'editor' && draftId !== null}
       nav={NAV}
@@ -242,5 +243,6 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
         onSwitchRole={onChangeRole ?? (() => {})}
       />
     </AppShell>
+    </div>
   )
 }

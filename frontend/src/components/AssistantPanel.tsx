@@ -6,7 +6,7 @@
  * can unmount on a screen change without losing it.
  */
 
-import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Loader2, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
+import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
 import { MotionConfig } from 'framer-motion'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
@@ -14,6 +14,7 @@ import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, T
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
 import { loadAskMode, saveAskMode, useAskUserId, type AskPanelMode } from '../lib/askSession'
 import type { Role } from '../lib/roles'
+import { STAMPS } from '../lib/stamps'
 import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
@@ -25,22 +26,12 @@ import { AskWelcome } from './AskWelcome'
 import { CommandResult } from './CommandResult'
 import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
+import { Stamp } from './Stamp'
 import { ThinkingState } from './ThinkingState'
 import { IconButton, Segmented } from './ui'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
 export type AskAbout = { kind: 'paper' | 'node' | 'library'; label: string }
-
-type Stamp = { label: string; pill: string; bar: string }
-
-const STAMPS: Record<StatementVerdict | 'checking', Stamp> = {
-  supports: { label: 'Backed', pill: 'bg-supports-soft text-supports', bar: 'border-supports' },
-  refutes: { label: 'Contradicted', pill: 'bg-refutes-soft text-refutes', bar: 'border-refutes' },
-  insufficient: { label: 'Not backed', pill: 'bg-insufficient-soft text-insufficient', bar: 'border-insufficient' },
-  unchecked: { label: 'Can’t check', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
-  error: { label: 'Can’t check', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
-  checking: { label: 'Checking…', pill: 'bg-neutral-soft text-ink-muted', bar: 'border-dotted border-ink-muted' },
-}
 
 function ComposerChip({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
   return (
@@ -114,9 +105,9 @@ function StatementRow({
 }) {
   const [open, setOpen] = useState(false)
   const previewId = useId()
-  const stamp = STAMPS[statement.verdict ?? (answering ? 'checking' : 'unchecked')]
+  const verdict = statement.verdict ?? (answering ? 'checking' : 'unchecked')
+  const stamp = STAMPS[verdict]
   const explained = Boolean(statement.verdict && (statement.quote || statement.reasoning))
-  const pill = cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold', stamp.pill)
   return (
     <li data-ask-target={askTarget({ kind: 'statement', id: target })} className={cn('border-l-2 pl-3', stamp.bar)}>
       <p className="text-[13px] leading-5 text-ink">{statement.text}</p>
@@ -158,20 +149,10 @@ function StatementRow({
             aria-label={`${stamp.label}: why`}
             className="flex min-h-11 shrink-0 items-center rounded-full focus-visible:outline-2 focus-visible:outline-accent lg:min-h-6"
           >
-            <span className={pill}>
-              <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-              {stamp.label}
-            </span>
+            <Stamp verdict={verdict} />
           </button>
         ) : (
-          <span className={pill}>
-            {statement.verdict || !answering ? (
-              <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-            ) : (
-              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-            )}
-            {stamp.label}
-          </span>
+          <Stamp verdict={verdict} />
         )}
       </div>
       {open && <Why statement={statement} title={title} onShowSource={onShowSource} />}
