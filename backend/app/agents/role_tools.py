@@ -123,7 +123,7 @@ async def draft_issues(draft_id: str, tool_context: ToolContext) -> dict:
                 "line": citation.get("line"),
                 "sentence": citation.get("sentence", ""),
                 "verdict": citation.get("verdict", ""),
-                "why": citation.get("message") or citation.get("explanation") or "",
+                "why": logic.short_message(citation.get("message")) or citation.get("explanation") or "",
             }
             for citation in open_issues[:ISSUES]
         ],

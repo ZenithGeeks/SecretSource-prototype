@@ -1,6 +1,7 @@
 /** "Your drafts": every draft with its version, last check and standing; the current one is
- * marked. "+ New draft" opens an empty draft in the editor; the "Since v2" box sums up what
- * changed for the current draft and links to its check history in the Library. */
+ * marked, and a row opens its draft in the editor. "+ New draft" opens an empty draft there too;
+ * the "Since v2" box sums up what changed for the current draft and links to its check history
+ * in the Library. */
 
 import { FileText } from 'lucide-react'
 
@@ -16,14 +17,14 @@ import { DeleteDraftButton } from './DeleteDraftButton'
 export function YourDraftsCard({
   drafts,
   currentId,
-  onSelect,
+  onOpen,
   onNew,
   onHistory,
   onDelete,
 }: {
   drafts: Draft[]
   currentId: string
-  onSelect: (id: string) => void
+  onOpen: (id: string) => void
   onNew: () => void
   onHistory: (draft: Draft) => void
   /** The bin on each row: asks first (the caller's confirm dialog). */
@@ -51,7 +52,7 @@ export function YourDraftsCard({
             <li key={draft.id} className="flex items-center gap-1 border-b border-border-subtle">
               <button
                 type="button"
-                onClick={() => onSelect(draft.id)}
+                onClick={() => onOpen(draft.id)}
                 aria-current={draft.id === currentId ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn(

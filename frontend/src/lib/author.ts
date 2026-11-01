@@ -13,6 +13,7 @@ import type {
   ParseResult,
   Project,
   ProjectDetail,
+  ProjectLint,
   Resolution,
   SavedSource,
   SourceRef,
@@ -86,6 +87,7 @@ export const authorApi = {
   updateProject: (id: string, body: { name?: string; bib?: string; bibName?: string }) =>
     request<Project>(`/author/projects/${enc(id)}`, json('PATCH', body)),
   deleteProject: (id: string) => request<{ deleted: string }>(`/author/projects/${enc(id)}`, { method: 'DELETE' }),
+  lintProject: (id: string) => request<ProjectLint>(`/author/projects/${enc(id)}/lint`),
   removeBibEntry: (projectId: string, key: string) =>
     request<{ removed: string; entries: number }>(`/author/projects/${enc(projectId)}/bib/${enc(key)}`, { method: 'DELETE' }),
   attachProjectPdf: (projectId: string, key: string, file: File) =>
@@ -114,7 +116,8 @@ export function errorMessage(error: unknown): string {
   } catch {
     // not JSON
   }
-  return body
+  // A proxy's bare 502 has no body: "" would show as no error at all.
+  return body || `the server did not answer (${text.trim().replace(/:$/, '')})`
 }
 
 /** "checked 2 min ago" · "checked yesterday" · "not checked yet". */

@@ -120,7 +120,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
       : [NAV.find((n) => n.key === NAV_FOR[screen])?.label ?? 'Home']
 
   return (
-    <div className="researcher-app">
+    <div className="redesign-app">
     <AppShell
       nav={NAV}
       active={NAV_FOR[screen]}

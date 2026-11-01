@@ -29,3 +29,21 @@ export function citationLink({ doi, arxiv, url }: Citation) {
 export function preprintNote(arxiv?: string) {
   return `checked against the arXiv preprint${arxiv ? ` ${arxiv}` : ''}`
 }
+
+const MESSAGE_LIMIT = 140
+
+function clip(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text
+}
+
+/** Why a source could not be read, fit for one line. A citation's `message` can be whatever a
+ * server answered, such as a whole Cloudflare error page: that becomes a summary, and anything
+ * else loses its tags and is cut short. */
+export function shortMessage(message: string | undefined): string {
+  if (!message) return ''
+  if (/<(!doctype|html|head|body)\b/i.test(message)) {
+    const title = /<title[^>]*>([^<]*)/i.exec(message)?.[1].replace(/\s+/g, ' ').trim()
+    return title ? `the server sent an error page (${clip(title, 60)})` : 'the server sent an error page'
+  }
+  return clip(message.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(), MESSAGE_LIMIT)
+}

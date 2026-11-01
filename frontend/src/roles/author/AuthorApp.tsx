@@ -1,13 +1,14 @@
 /**
  * Author role router: which screen is showing, rendered inside the shared AppShell with the
  * Author sidebar of the Redesign (R/Sidebar, Role=Author): Home and Library, then Recent
- * projects. `?screen=` deep-links a screen, `?draft=` the draft Check a draft / the editor work
+ * projects. `?screen=` deep-links a screen, `?draft=` the draft Home and the editor work
  * on, `?file=` / `?line=` where the editor puts the cursor, and `?project=` a project in the
  * Library.
  *
- * Home is Check a draft. The design's "Projects" item has no screen of its own (the projects are
- * the Library's, and a project's page lights Library), so it is left out, as is "Find a source"
- * (Ask finds sources). History and Graph are the Researcher's screens and not part of this role
+ * The design's "Projects" item has no screen of its own (the projects are the Library's, and a
+ * project's page lights Library), so it is left out. Home replaced the old Check a draft screen
+ * (#717): an old link to it, like any screen this role does not know, opens Home. History and
+ * Graph are the Researcher's screens and not part of this role
  * (#712): a bookmark to either, or to an analysis, opens the Library, where a draft's check
  * history lives. Settings is a modal from the profile menu, not a screen of its own. The editor
  * is full-bleed with its own top bar: the shell is bare there, but it is the same shell, so the
@@ -24,11 +25,12 @@ import { SettingsModal } from '../../components/SettingsModal'
 import type { DraftReader } from '../../lib/agentTools'
 import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
+import { NewProject } from './components/NewProject'
 import { RecentProjects } from './components/RecentProjects'
 import { Toast } from './components/Toast'
 import type { EditorTarget } from './editorTarget'
-import { DraftCheck } from './screens/DraftCheck'
 import { Editor } from './screens/Editor'
+import { Home } from './screens/Home'
 import { Library } from './screens/Library'
 
 type NavKey = 'home' | 'library'
@@ -44,7 +46,7 @@ const DO_IT_EXAMPLES = ['What drafts do I have?', 'Open my library', 'Which cita
 // On the editor, the draft on screen.
 const EDITOR_EXAMPLES = ['What do lines 1–20 say?', 'Which keys are in my .bib?', 'Which citations in this draft aren’t supported?']
 
-// The editor is reached from Check a draft and counts as the Home section in the nav.
+// The editor counts as the Home section in the nav, wherever it was opened from.
 const NAV_FOR: Record<AuthorScreen, NavKey> = {
   home: 'home',
   editor: 'home',
@@ -97,7 +99,7 @@ function syncParams(state: Omit<Params, 'moved'>) {
   set('file', state.screen === 'editor' ? state.target?.file : null)
   set('line', state.screen === 'editor' && state.target?.line ? String(state.target.line) : null)
   set('project', state.screen === 'library' ? state.projectId : null)
-  // Screens that left the Author role: Find a source, and History's open analysis.
+  // What left the Author role's URLs: the old sources search, and History's open analysis.
   params.delete('q')
   params.delete('replace')
   params.delete('analysis')
@@ -112,6 +114,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(initial.screen === 'editor' ? initial.target : null)
   const [projectId, setProjectId] = useState<string | null>(initial.projectId)
   const [wide, setWide] = useState(false) // a page viewer is open beside the cards
+  const [creatingProject, setCreatingProject] = useState(false)
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   // What outlives a screen: the editor's last write being refused after the author left it, or
@@ -151,13 +154,6 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     setEditorTarget(target)
     navigate('editor')
   }
-  const openDraft = useCallback(
-    (id: string) => {
-      setDraftId(id)
-      navigate('home')
-    },
-    [navigate],
-  )
   // Do it for the Author's screen agent, so a role switch can land here and the chat can go on.
   const ask = useAsk({
     role: 'writer',
@@ -167,7 +163,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     actions: {
       role: 'writer',
       screen,
-      // The editor opens the draft Check a draft has selected, so only once there is one.
+      // The editor opens the draft Home has selected, so only once there is one.
       screens: draftId ? ['home', 'library', 'editor'] : ['home', 'library'],
       openScreen: (next) => {
         if (next === 'home' || next === 'library') navigateFromSidebar(next)
@@ -182,6 +178,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   })
 
   return (
+    <div className="redesign-app">
     <AppShell
       bare={screen === 'editor' && draftId !== null}
       nav={NAV}
@@ -193,7 +190,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
       onOpenSettings={() => setSettingsOpen(true)}
       settingsActive={settingsOpen}
       wide={wide}
-      sidebar={<RecentProjects activeId={screen === 'library' ? projectId : null} onOpen={openProject} />}
+      sidebar={<RecentProjects activeId={screen === 'library' ? projectId : null} onOpen={openProject} onNew={() => setCreatingProject(true)} />}
       // The toolbar is where Ask lives, so every framed Author screen has one; the bare editor
       // puts the Ask button in its own top bar.
       breadcrumb={[NAV.find((n) => n.key === NAV_FOR[screen])?.label ?? 'Home']}
@@ -212,8 +209,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
         />
       )}
       {screen === 'home' && (
-        <DraftCheck
-          key={draftId ?? 'none'}
+        <Home
           draftId={draftId}
           onSelectDraft={setDraftId}
           onOpenEditor={openEditor}
@@ -221,6 +217,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
             setProjectId(draft.projectId ?? 'unsorted')
             navigate('library')
           }}
+          onNewProject={() => setCreatingProject(true)}
           onTargetChange={setWide}
         />
       )}
@@ -230,10 +227,11 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
           draftId={draftId}
           onOpenProject={setProjectId}
           onOpenEditor={(id, file, line) => openEditor({ draftId: id, file, line })}
-          onOpenDraft={openDraft}
+          onDraftDeleted={(id) => setDraftId((current) => (current === id ? null : current))}
         />
       )}
       {ask.viewer}
+      <NewProject open={creatingProject} onClose={() => setCreatingProject(false)} onCreated={openProject} onNotice={setNotice} />
       <Toast message={notice} onClose={closeNotice} ms={10_000} />
       <SettingsModal
         open={settingsOpen}
@@ -242,5 +240,6 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
         onSwitchRole={onChangeRole ?? (() => {})}
       />
     </AppShell>
+    </div>
   )
 }

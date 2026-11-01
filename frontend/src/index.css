@@ -1,22 +1,23 @@
 @import 'tailwindcss' source('.');
 
-/* Figma's Teacher screens use Geist for interface copy and Fraunces for display headings.
-   Keep these overrides role-scoped so the other role frontends retain their own typography.
-   The onboarding role picker sits outside every role root, so it gets its own scope. */
+/* Figma's redesign uses Geist for interface copy and Fraunces for display headings. The
+   overrides are scoped to the roots that follow it: Teacher, and `.redesign-app` (Researcher
+   and Author, #713). The onboarding role picker sits outside every role root, so it gets its
+   own scope. Labeler keeps its own typography. */
 .teacher-app,
-.researcher-app,
+.redesign-app,
 .onboarding-app {
   font-family: var(--font-ui);
 }
 
 .teacher-app .font-sans,
-.researcher-app .font-sans,
+.redesign-app .font-sans,
 .onboarding-app .font-sans {
   font-family: var(--font-ui);
 }
 
 .teacher-app .font-serif,
-.researcher-app .font-serif,
+.redesign-app .font-serif,
 .onboarding-app .font-serif {
   font-family: var(--font-display);
   font-optical-sizing: auto;
@@ -84,8 +85,9 @@
   --color-code-comment: oklch(0.55 0.14 60); /* #aa5500 */
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  /* Geist/Fraunces/Crimson Pro get their own tokens: --font-sans is left alone so the Author
-     role keeps its fonts. Researcher/Teacher roots map .font-sans/.font-serif onto these. */
+  /* Geist/Fraunces/Crimson Pro get their own tokens and --font-sans is left alone: only the
+     redesign roots (Teacher, and .redesign-app for Researcher and Author) map .font-sans /
+     .font-serif onto these, so Labeler keeps its fonts. */
   --font-ui: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Fraunces', Georgia, serif;
   --font-paper: 'Crimson Pro', Georgia, serif;

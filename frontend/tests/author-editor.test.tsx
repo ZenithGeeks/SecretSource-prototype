@@ -97,7 +97,7 @@ describe('Author LaTeX editor', () => {
 
   test('the top bar navigates (no Find a source or History tab), Re-check starts a run, and Ctrl+S saves a new version', async () => {
     const { onNavigate } = renderEditor()
-    fireEvent.click(await screen.findByRole('button', { name: 'Check a draft' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Home' }))
     expect(onNavigate).toHaveBeenCalledWith('home')
     // A draft's check history is on its project (#712); the Editor tab is the current page.
     const sections = within(screen.getByRole('navigation', { name: 'Editor sections' }))
@@ -132,7 +132,7 @@ describe('Author LaTeX editor', () => {
   test('a draft that does not exist offers the way back', async () => {
     const { onNavigate } = renderEditor({ draftId: 'gone', file: undefined, line: undefined } as never)
     expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Back to Check a draft' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }))
     expect(onNavigate).toHaveBeenCalledWith('home')
   })
 

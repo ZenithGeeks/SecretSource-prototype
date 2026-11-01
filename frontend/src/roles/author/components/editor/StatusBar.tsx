@@ -1,7 +1,7 @@
 /** The strip under the editor: the current file's verdict counts on the left, the cursor,
  * \cite count and warning count on the right. Counts are for the open file only. */
 
-import { VerdictLegend } from '../Verdicts'
+import { VerdictLegend } from '../../../../components/VerdictBar'
 import type { CursorPosition } from './CodeEditor'
 import type { Verdict } from '../../../../types/draftCheck'
 

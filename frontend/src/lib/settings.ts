@@ -102,10 +102,11 @@ export function applyTheme(theme: ThemeChoice = settings.theme): void {
 }
 
 /** "Good morning, Ada" — or just "Good morning" when the display name is blank, since the
- * Settings modal lets it be cleared. */
-export function greeting(displayName: string): string {
+ * Settings modal lets it be cleared. Given the hour, it says the part of the day that is. */
+export function greeting(displayName: string, hour?: number): string {
   const name = displayName.trim()
-  return name ? `Good morning, ${name}` : 'Good morning'
+  const part = hour === undefined || hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+  return name ? `Good ${part}, ${name}` : `Good ${part}`
 }
 
 export function useSettings(): Settings {

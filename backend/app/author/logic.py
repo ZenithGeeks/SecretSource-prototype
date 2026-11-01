@@ -472,6 +472,67 @@ def parse_project(files: list[dict]) -> dict:
     }
 
 
+def lint_project(bib: dict | None, drafts: list[tuple[str, list[dict]]]) -> dict:
+    """The bib lint of a whole project (#714).
+
+    Each draft is linted as it builds: its own files plus the project's .bib unless it holds a
+    file of that name itself (`drafts` gives each draft's id and those files, the project's
+    .bib marked `shared`). Its warnings name the draft (`draftId`). What a draft's own .bib files
+    hold (never cited, no DOI or URL) is judged on those files alone, since parse_project merges
+    all of a draft's entries into one warning. The project .bib's own warnings are worked out
+    once, against the citations of every draft that uses it, and name no draft: an entry cited
+    only in another draft is not "never cited".
+
+    Args:
+        bib: the project's {"name", "content"}, or None.
+        drafts: (draft id, the files that draft builds with).
+    """
+    bib_name = (bib or {}).get("name")
+    project_warnings: list[dict] = []
+    entries = 0
+    if bib:
+        # The project .bib against everything its drafts cite. A stand-in file carries those
+        # cites, so the warnings are the ones a single draft would get, phrased the same way.
+        users = [files for _, files in drafts if any(f.get("shared") for f in files)]
+        keys = {c["key"] for files in users for c in find_cites(files)}
+        cites = "\\cite{" + ",".join(sorted(keys)) + "}" if keys else ""
+        stand_in = {"name": "", "kind": "tex", "content": cites}
+        project_bib = {"name": bib_name, "kind": "bib", "content": bib.get("content", "")}
+        whole = parse_project([stand_in, project_bib])
+        entries = whole["bibEntries"]
+        project_warnings = [{**w, "draftId": None} for w in whole["warnings"] if w["file"] == bib_name]
+    defined_twice_there = {w["detail"] for w in project_warnings if w["type"] == "duplicate-key"}
+
+    warnings = list(project_warnings)
+    tex_files = cite_commands = 0
+    for draft_id, files in drafts:
+        built = parse_project(files)
+        own = parse_project([f for f in files if not f.get("shared")])
+        uses_bib = any(f.get("shared") for f in files)
+        tex_files += built["texFiles"]
+        cite_commands += built["citeCommands"]
+        entries += own["bibEntries"]
+        found = [
+            w
+            for w in built["warnings"]
+            if w["type"] == "missing-key"
+            or (
+                w["type"] == "duplicate-key"
+                and not (uses_bib and w["file"] == bib_name and w["detail"] in defined_twice_there)
+            )
+        ]
+        found += [w for w in own["warnings"] if w["type"] in ("unused-entry", "no-doi-url")]
+        warnings += [{**w, "draftId": draft_id} for w in found]
+    return {
+        "bibName": bib_name,
+        "bibEntries": entries,
+        "drafts": len(drafts),
+        "texFiles": tex_files,
+        "citeCommands": cite_commands,
+        "warnings": warnings,
+    }
+
+
 def replace_cite_key(content: str, line: int, old: str, new: str) -> str:
     """Swap one key for another inside the \\cite on `line` (1-based). Other keys in the same
     command stay. Unchanged when the key is not there."""
@@ -506,6 +567,27 @@ def summarize(citations: list[dict]) -> dict:
         "counts": {v: counts.get(v, 0) for v in VERDICTS},
         "open": sum(1 for c in citations if is_open_issue(c)),
     }
+
+
+MESSAGE_LIMIT = 140
+
+
+def _clip(text: str, limit: int) -> str:
+    return f"{text[: limit - 1].rstrip()}…" if len(text) > limit else text
+
+
+def short_message(message: str | None) -> str:
+    """Why a source could not be read, fit for one line. A citation's message can be whatever a
+    server answered, such as a whole Cloudflare error page: that becomes a summary, and anything
+    else loses its tags and is cut short. Same rule as shortMessage in lib/citations.ts."""
+    if not message:
+        return ""
+    if re.search(r"<(!doctype|html|head|body)\b", message, re.IGNORECASE):
+        found = re.search(r"<title[^>]*>([^<]*)", message, re.IGNORECASE)
+        title = re.sub(r"\s+", " ", found.group(1)).strip() if found else ""
+        summary = "the server sent an error page"
+        return f"{summary} ({_clip(title, 60)})" if title else summary
+    return _clip(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", message)).strip(), MESSAGE_LIMIT)
 
 
 def status_label(status: dict) -> str:
@@ -710,7 +792,7 @@ def report_html(draft: dict, check: dict) -> str:
             )
             + (f"<p><b>Why.</b> {_esc(c['explanation'])}</p>" if c.get("explanation") else "")
             + (
-                f"<p><b>Could not check.</b> {_esc(c['message'])}</p>"
+                f"<p><b>Could not check.</b> {_esc(short_message(c['message']))}</p>"
                 if c.get("message") and c.get("verdict") in ("unavailable", "unchecked")
                 else ""
             )

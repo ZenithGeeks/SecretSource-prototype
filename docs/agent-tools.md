@@ -80,7 +80,10 @@ uses the one that is open when none is named. Commands are not saved in the chat
 
 A target is `kind:id`, the value of a `data-ask-target` attribute on the page (`lib/askCursor.ts`,
 `askTarget()`). `read_screen` lists the ones visible now, each with a label taken from its
-`aria-label`, its text, or its `title`. Kinds in use:
+`aria-label`, its text, or its `title`. On the Author's `home`, `action:upload`,
+`action:write-draft` and `action:add-bibliography` are items of the New project menu
+(`action:new-project`), so they are listed only while that menu is open or no draft exists yet.
+Kinds in use:
 
 | Kind | On | Id |
 |---|---|---|

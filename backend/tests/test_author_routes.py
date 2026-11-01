@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import pytest
 import redis
 from app import auth, main
+from app.author import logic as author_logic
 from app.author import router as author
 from app.author import verify as author_verify
 from app.metrics import AUDIT_FINDINGS
@@ -1057,6 +1058,10 @@ def test_the_library_lists_attention_rows_and_saved_sources(client, monkeypatch)
     assert ("upload-pdf", "nguyen2016") in kinds  # unavailable after the check
     assert ("remove", "unused2019") in kinds
     assert len([r for r in library["attention"] if r["key"] == "nguyen2016"]) == 1
+    # "Open draft" opens the editor at the \cite.
+    replace = next(r for r in library["attention"] if r["kind"] == "replace")
+    assert replace["file"] == "ch2.tex"
+    assert replace["line"] == next(n for n, text in enumerate(TEX.splitlines(), 1) if "khattab2020" in text)
     assert library["unsorted"] == {"sources": 1, "pdfs": 0, "drafts": 0}
     assert [s["id"] for s in library["saved"]] == [saved["id"]]
     assert client.get("/author/library", headers=BO).json()["saved"] == []
@@ -1189,3 +1194,186 @@ def test_a_draft_check_says_which_cited_dois_no_index_knows(client, monkeypatch)
     ).json()
     citation = next(c for c in replaced["citations"] if c["id"] == by_key[("khattab2020", 2)]["id"])
     assert "exists" not in citation
+
+
+# --- project lint (#714) -----------------------------------------------------------------
+
+LINT_BIB = r"""@article{used2020, title={Used}, author={Doe, Jane}, year={2020}, doi={10.1/a}}
+@article{elsewhere2021, title={Cited in ch3 only}, author={Roe, Rick}, year={2021}, doi={10.1/b}}
+@misc{nobody2019, title={Never cited}, author={Poe, Pat}, year={2019}, url={https://x.y}}
+"""
+
+
+def _lint_project(client):
+    project = client.post(
+        "/author/projects", headers=ADA, json={"name": "Thesis", "bib": LINT_BIB, "bibName": "refs.bib"}
+    ).json()
+
+    def draft(title: str, tex: str) -> dict:
+        files = [{"name": "main.tex", "content": tex}]
+        return client.post(
+            "/author/drafts", headers=ADA, json={"title": title, "projectId": project["id"], "files": files}
+        ).json()
+
+    ch2 = draft("ch2", r"Uses \cite{used2020} and \cite{ghost2018}.")
+    ch3 = draft("ch3", r"Cites \cite{elsewhere2021}.")
+    return project, ch2, ch3
+
+
+def test_a_project_lint_counts_a_key_cited_in_any_draft_as_cited(client):
+    """#714: per draft, elsewhere2021 looks unused in ch2; across the project it is cited."""
+    project, ch2, ch3 = _lint_project(client)
+    per_draft = client.get(f"/author/drafts/{ch2['id']}/parse", headers=ADA).json()
+    unused_in_ch2 = next(w for w in per_draft["warnings"] if w["type"] == "unused-entry")
+    assert unused_in_ch2["detail"] == "elsewhere2021 and 1 other are never cited"
+
+    lint = client.get(f"/author/projects/{project['id']}/lint", headers=ADA)
+    assert lint.status_code == 200, lint.text
+    body = lint.json()
+    assert body["bibName"] == "refs.bib" and body["bibEntries"] == 3 and body["drafts"] == 2
+    unused = [w for w in body["warnings"] if w["type"] == "unused-entry"]
+    assert len(unused) == 1 and unused[0]["detail"] == "nobody2019 is never cited"
+    assert unused[0]["draftId"] is None and unused[0]["file"] == "refs.bib"
+
+
+def test_a_project_lint_names_the_draft_each_warning_is_in(client):
+    project, ch2, ch3 = _lint_project(client)
+    body = client.get(f"/author/projects/{project['id']}/lint", headers=ADA).json()
+    (missing,) = [w for w in body["warnings"] if w["type"] == "missing-key"]
+    assert missing["draftId"] == ch2["id"] and missing["file"] == "main.tex" and missing["line"] == 1
+    assert missing["detail"] == r"\cite{ghost2018} in main.tex L1"
+
+
+def test_a_project_lint_is_only_for_its_owner_and_the_library_agrees(client):
+    project, _, _ = _lint_project(client)
+    assert client.get(f"/author/projects/{project['id']}/lint", headers=BO).status_code == 404
+    assert client.get("/author/projects/nope/lint", headers=ADA).status_code == 404
+    # The Library's "never cited" rows read the same project-wide citations.
+    rows = client.get("/author/library", headers=ADA).json()["attention"]
+    never_cited = {r["key"] for r in rows if r["kind"] == "remove"}
+    assert never_cited == {"nobody2019"}
+
+
+def test_a_project_lint_lints_each_draft_as_it_builds(client):
+    """#714: a key missing in two drafts is reported for each; a key only another draft's own
+    .bib defines is missing here; a draft's own copy of the project .bib is no duplicate."""
+    project, ch2, ch3 = _lint_project(client)
+    own = "@misc{local2022, title={Only ch3 has it}, author={Low, Lu}, year={2022}, doi={10.1/c}}"
+    client.put(f"/author/drafts/{ch3['id']}/files/local.bib", headers=ADA, json={"content": own})
+    client.put(
+        f"/author/drafts/{ch3['id']}/files/main.tex",
+        headers=ADA,
+        json={"content": r"Cites \cite{elsewhere2021}, \cite{local2022} and \cite{ghost2018}."},
+    )
+    client.put(
+        f"/author/drafts/{ch2['id']}/files/main.tex",
+        headers=ADA,
+        json={"content": r"Uses \cite{used2020}, \cite{ghost2018} and \cite{local2022}."},
+    )
+    body = client.get(f"/author/projects/{project['id']}/lint", headers=ADA).json()
+    missing = {(w["draftId"], w["detail"]) for w in body["warnings"] if w["type"] == "missing-key"}
+    assert (ch3["id"], r"\cite{ghost2018} in main.tex L1") in missing
+    assert (ch2["id"], r"\cite{ghost2018} in main.tex L1") in missing
+    assert (ch2["id"], r"\cite{local2022} in main.tex L1") in missing  # ch3's own .bib is not ch2's
+
+    client.post(
+        "/author/drafts",
+        headers=ADA,
+        json={
+            "title": "copy",
+            "projectId": project["id"],
+            "files": [
+                {"name": "c.tex", "content": r"\cite{used2020}"},
+                {"name": "refs.bib", "content": LINT_BIB},
+            ],
+        },
+    )
+    body = client.get(f"/author/projects/{project['id']}/lint", headers=ADA).json()
+    assert not [w for w in body["warnings"] if w["type"] == "duplicate-key"]
+
+
+def test_a_project_lint_judges_a_drafts_own_bib_on_its_own(client):
+    """A draft's own .bib beside the project's: its unused entry is its own warning, and does not
+    drag in project entries another draft cites; a key defined in both is a duplicate."""
+    project, ch2, _ = _lint_project(client)
+    own = (
+        "@misc{local2022, title={Unused here}, author={Low, Lu}, year={2022}, doi={10.1/c}}\n"
+        "@misc{used2020, title={Also in refs}, author={Doe, Jane}, year={2020}, doi={10.1/d}}"
+    )
+    client.put(f"/author/drafts/{ch2['id']}/files/local.bib", headers=ADA, json={"content": own})
+    body = client.get(f"/author/projects/{project['id']}/lint", headers=ADA).json()
+
+    unused = {(w["draftId"], w["detail"]) for w in body["warnings"] if w["type"] == "unused-entry"}
+    assert unused == {(None, "nobody2019 is never cited"), (ch2["id"], "local2022 is never cited")}
+    (duplicate,) = [w for w in body["warnings"] if w["type"] == "duplicate-key"]
+    assert duplicate["draftId"] == ch2["id"] and duplicate["detail"] == "used2020 defined twice"
+    assert body["bibEntries"] == 5  # 3 in refs.bib, 2 in local.bib
+
+
+def test_a_project_lint_reports_a_duplicate_inside_the_project_bib_once(client):
+    bib = LINT_BIB + "@article{used2020, title={Again}, author={Doe, Jane}, year={2020}, doi={10.1/a}}\n"
+    project, _, _ = _lint_project(client)
+    client.patch(f"/author/projects/{project['id']}", headers=ADA, json={"bib": bib})
+    body = client.get(f"/author/projects/{project['id']}/lint", headers=ADA).json()
+    (duplicate,) = [w for w in body["warnings"] if w["type"] == "duplicate-key"]
+    assert duplicate["draftId"] is None and duplicate["detail"] == "used2020 defined twice"
+
+
+def test_a_never_checked_draft_counts_as_not_checked_on_its_project(client, monkeypatch):
+    """One draft checked and all supported, another never checked: the card is not all green."""
+    stub_verify(monkeypatch)
+    project = client.post("/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB}).json()
+
+    def draft(title: str, tex: str) -> dict:
+        files = [{"name": f"{title}.tex", "content": tex}]
+        return client.post(
+            "/author/drafts", headers=ADA, json={"title": title, "projectId": project["id"], "files": files}
+        ).json()
+
+    checked = draft("checked", r"One \cite{khattab2020}.")
+    unchecked = draft("unchecked", r"Two \cite{khattab2020} and \cite{nguyen2016}.")
+    run_check(client, checked["id"])
+
+    card = client.get("/author/projects", headers=ADA).json()[0]
+    assert card["tally"]["supports"] == 1 and card["tally"]["unchecked"] == 2
+    assert card["needWork"] == 0 and card["checkedAt"]
+    library = client.get("/author/library", headers=ADA).json()["projects"][0]
+    assert library["tally"]["unchecked"] == 2
+
+    run_check(client, unchecked["id"])
+    card = client.get("/author/projects", headers=ADA).json()[0]
+    assert card["tally"]["unchecked"] == 0 and card["tally"]["supports"] == 3
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>"
+            + '<div class="cf">x</div>' * 400
+            + "</body></html>",
+            "the server sent an error page (Just a moment...)",
+        ),
+        ("<html><body>nope</body></html>", "the server sent an error page"),
+        ("a <b>short</b>\n  reason", "a short reason"),
+        ("y" * 2000, "y" * 139 + "…"),
+        (None, ""),
+    ],
+)
+def test_short_message_summarises_or_trims(message, expected):
+    assert author_logic.short_message(message) == expected
+
+
+def test_the_librarys_attention_row_never_carries_a_raw_error_page(client, monkeypatch):
+    page = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>" + "<p>x</p>" * 500
+    monkeypatch.setattr(
+        main, "verify_claim", lambda claim, source: {"status": "error", "reason": "failed", "message": page}
+    )
+    draft = make_draft(client)
+    check_id = run_check(client, draft["id"])
+    rows = client.get("/author/library", headers=ADA).json()["attention"]
+    titles = [r["title"] for r in rows if r["kind"] == "upload-pdf"]
+    assert titles and all("<" not in title and "error page (Just a moment...)" in title for title in titles)
+    # The check keeps what the server said; only the row is trimmed.
+    citations = client.get(f"/author/checks/{check_id}", headers=ADA).json()["citations"]
+    assert any(c.get("message") == page for c in citations)

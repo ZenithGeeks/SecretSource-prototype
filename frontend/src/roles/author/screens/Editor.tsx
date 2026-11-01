@@ -1,7 +1,7 @@
 /**
  * Author LaTeX editor (Figma 565:3957): a full-bleed screen with its own top bar, the file
  * tabs + CodeMirror + status bar on the left and the live preview on the right. Reads the
- * same draft and check the Check a draft screen does, so the verdict marks in the gutter are
+ * same draft and check Home does, so the verdict marks in the gutter are
  * the citations it lists, and an edit here moves those citations' lines there.
  *
  * Saving. Typing is written to the gateway once it pauses for AUTOSAVE_DELAY_MS (not per
@@ -42,6 +42,7 @@ import { Button, Card } from '../../../components/ui'
 import type { DraftReader } from '../../../lib/agentTools'
 import { errorMessage } from '../../../lib/author'
 import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
+import { shortMessage } from '../../../lib/citations'
 import { downloadBlob, downloadText } from '../../../lib/csv'
 import { AUTOSAVE_DELAY_MS, DEFAULT_TITLE, dropBackup, forgetBackup, readBackup, texTitle, writeBackup, type Backup } from '../../../lib/draftSave'
 import { useDebounced } from '../../../lib/useDebounced'
@@ -81,7 +82,7 @@ export function Editor({
   autosaveMs?: number
   /** The open file changed (for the URL). */
   onFileChange: (file: string) => void
-  /** Back to Check a draft. */
+  /** Back to Home. */
   onNavigate: (screen: 'home') => void
   /** The write made on the way out of the editor was refused: the screen is gone by then, so
    * the app shows this. */
@@ -152,7 +153,7 @@ export function Editor({
   })
 
   // What the gateway holds: adopted for a file the author has not changed (first load, a
-  // replacement made on Check a draft, a refetch); a dirty file keeps the author's text.
+  // replacement made on Home, a refetch); a dirty file keeps the author's text.
   useEffect(() => {
     if (!draft.data) return
     lastUpdated.current = draft.data.updated
@@ -264,7 +265,7 @@ export function Editor({
   }, [commit, isUnsettled])
 
   // Leaving the screen: send what is still waiting for the pause. The cache is updated when
-  // the reply lands, so Check a draft shows the same text; a refusal is reported through the
+  // the reply lands, so Home shows the same text; a refusal is reported through the
   // app, since this screen is gone.
   useEffect(
     () => () => {
@@ -559,7 +560,7 @@ export function Editor({
               </Button>
             )}
             <Button variant="ghost" onClick={() => onNavigate('home')}>
-              Back to Check a draft
+              Back to Home
             </Button>
           </div>
         </Card>
@@ -603,7 +604,7 @@ export function Editor({
         (start.isError || writeError || running.data?.status === 'error') && (
           <p role="alert" className="flex items-center gap-3 border-b border-refutes bg-refutes-soft px-4 py-1.5 text-xs text-refutes">
             <span className="min-w-0 flex-1">
-              {writeError ?? (start.isError ? `Re-check failed: ${errorMessage(start.error)}` : `The check failed: ${running.data?.message}`)}
+              {writeError ?? (start.isError ? `Re-check failed: ${errorMessage(start.error)}` : `The check failed: ${shortMessage(running.data?.message)}`)}
               {writeError && ' Your text is kept on this device until it is saved.'}
             </span>
             {writeError && (

@@ -244,6 +244,13 @@ TASKS = [
         role="writer",
         screen="home",
     ),
+    # Home's upload is in the New project menu, whose items show only while it is open (#717).
+    Task(
+        "How do I upload my .tex file?",
+        called("point_at", target="action:new-project"),
+        role="writer",
+        screen="home",
+    ),
     # The editor: what the draft says comes from read_draft, not from memory.
     Task(
         "What does line 3 say?",
@@ -325,6 +332,7 @@ class FakeScreen:
             found.append({"target": "field:rationale", "label": "Rationale"})
         if self.role == "writer" and self.screen == "home":
             found += [{"target": f"draft:{d['id']}", "label": d["title"]} for d in DRAFTS]
+            found.append({"target": "action:new-project", "label": "New project"})
         return found
 
     def answer(self, name: str, args: dict) -> dict:

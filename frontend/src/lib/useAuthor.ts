@@ -1,7 +1,7 @@
 /**
  * Query hooks for the Author screens, mirroring useResearcher/useAnalysis. Screens read
  * data only through these; every write goes through useAuthorActions, which calls the
- * gateway and invalidates the ['author', …] queries so Check a draft, the editor and the
+ * gateway and invalidates the ['author', …] queries so Home, the editor and the
  * Library all re-render from the same answer.
  */
 
@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import { followEvents } from './api'
-import { authorApi } from './author'
+import { authorApi, errorMessage } from './author'
 import { parseBib } from './bibtex'
 import { dropBackup } from './draftSave'
 import type { CheckRun, CheckStage, Citation, Draft, LibraryView, ProjectDetail } from '../types/draftCheck'
@@ -19,6 +19,7 @@ export const AUTHOR_KEYS = {
   drafts: ['author', 'drafts'] as const,
   draft: (id: string) => ['author', 'draft', id] as const,
   parse: (id: string) => ['author', 'parse', id] as const,
+  lint: ['author', 'lint'] as const,
   checks: (draftId: string) => ['author', 'checks', draftId] as const,
   check: (id: string) => ['author', 'check', id] as const,
   compare: (id: string) => ['author', 'compare', id] as const,
@@ -45,6 +46,15 @@ export function useAuthorParse(draftId: string | null) {
     queryKey: AUTHOR_KEYS.parse(draftId ?? ''),
     queryFn: () => authorApi.parseDraft(draftId!),
     enabled: Boolean(draftId),
+  })
+}
+
+/** A project's bib lint across all its drafts (#714). */
+export function useProjectLint(projectId: string | null) {
+  return useQuery({
+    queryKey: [...AUTHOR_KEYS.lint, projectId ?? ''],
+    queryFn: () => authorApi.lintProject(projectId!),
+    enabled: Boolean(projectId),
   })
 }
 
@@ -168,6 +178,7 @@ export function useAuthorActions() {
   const touched = (draftId: string) => {
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.checks(draftId) })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
@@ -175,6 +186,7 @@ export function useAuthorActions() {
   }
   const libraryChanged = () => {
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
+    void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
     void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.projects })
     void qc.invalidateQueries({ queryKey: ['author', 'project'] })
     void qc.invalidateQueries({ queryKey: ['author', 'sources'] })
@@ -203,9 +215,16 @@ export function useAuthorActions() {
       return draft
     },
     /** Deletes the draft, takes it out of every list at once, and drops the unsaved text this
-     * device kept for it (ss.author.unsaved.<id>), which nothing could restore any more. */
-    deleteDraft: async (draftId: string): Promise<void> => {
-      await authorApi.deleteDraft(draftId)
+     * device kept for it (ss.author.unsaved.<id>), which nothing could restore any more. A draft
+     * the gateway no longer has (deleted in another tab) ends the same way: resolves true. */
+    deleteDraft: async (draftId: string): Promise<boolean> => {
+      let alreadyGone = false
+      try {
+        await authorApi.deleteDraft(draftId)
+      } catch (error) {
+        if (!errorMessage(error).includes('no such draft')) throw error
+        alreadyGone = true
+      }
       dropBackup(draftId)
       qc.setQueryData<Draft[]>(AUTHOR_KEYS.drafts, (list) => list?.filter((d) => d.id !== draftId))
       qc.setQueriesData<ProjectDetail>({ queryKey: ['author', 'project'] }, (detail) =>
@@ -214,6 +233,7 @@ export function useAuthorActions() {
       void qc.removeQueries({ queryKey: AUTHOR_KEYS.draft(draftId) })
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.drafts })
       libraryChanged()
+      return alreadyGone
     },
     /** Writes one file and refetches what shows it. */
     putFile: async (draftId: string, name: string, content: string): Promise<Draft> => {
@@ -231,6 +251,7 @@ export function useAuthorActions() {
     acceptWrite: (draftId: string, draft: Draft): void => {
       qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) => (current ? { ...current, files: draft.files, updated: draft.updated } : current))
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
+      void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
     },
     deleteFile: async (draftId: string, name: string): Promise<Draft> => {
       const draft = await authorApi.deleteFile(draftId, name)

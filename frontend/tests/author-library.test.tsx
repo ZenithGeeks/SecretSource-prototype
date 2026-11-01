@@ -26,9 +26,8 @@ function renderWithQuery(ui: ReactNode) {
 function renderLibrary(projectId: string | null = null) {
   const onOpenProject = vi.fn()
   const onOpenEditor = vi.fn()
-  const onOpenDraft = vi.fn()
-  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={onOpenEditor} onOpenDraft={onOpenDraft} />)
-  return { ...view, onOpenProject, onOpenEditor, onOpenDraft }
+  const view = renderWithQuery(<Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={onOpenEditor} />)
+  return { ...view, onOpenProject, onOpenEditor }
 }
 
 beforeEach(() => {
@@ -43,6 +42,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Author Library', () => {
+  test('a project with one checked draft and one never checked is not all green', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'related-work.tex', content: RELATED_WORK_TEX }], prechecked: false, verdictFor: () => ({ verdict: 'supports', passage: 'all good', page: 1 }) })
+    gateway.projects.get('proj1')!.bib = { name: 'main.bib', content: MAIN_BIB }
+    gateway.drafts.get('d2')!.files = [{ name: 'note.tex', kind: 'tex', content: 'Fusion~\\cite{khattab2020}.' }]
+    gateway.drafts.get('d1')!.files = [{ name: 'a.tex', kind: 'tex', content: 'One~\\cite{khattab2020}.' }]
+    runCheck(gateway, 'd1')
+    renderLibrary()
+    const bar = await screen.findByRole('img', { name: /1 supported/ })
+    expect(bar.getAttribute('aria-label')).toContain('1 not checked')
+    expect(bar.children).toHaveLength(2)
+    expect(screen.getByText(/1 not checked/, { selector: 'p' })).toBeInTheDocument()
+    expect(screen.queryByText(/all supported/)).not.toBeInTheDocument()
+    // Long rows truncate rather than widen the page on a phone; a browser measures the rest.
+    expect(screen.getByRole('heading', { name: 'Needs attention' }).closest('.grid')).toHaveClass('grid-cols-[minmax(0,1fr)]')
+  })
+
   test('lists the project card with its .bib stats, the unsorted card, attention rows and saved sources', async () => {
     renderLibrary()
     const card = (await screen.findByRole('button', { name: 'Open Related work — thesis ch.2' })).parentElement!
@@ -57,10 +72,29 @@ describe('Author Library', () => {
     expect(screen.getByText('No saved sources')).toBeInTheDocument()
   })
 
-  test('a contradicted citation opens its draft on Check a draft; Remove deletes the entry after a confirm', async () => {
-    const { onOpenDraft } = renderLibrary()
+  test('an attention row with no file or line opens the draft at its default file', async () => {
+    const real = gateway.fetch.getMockImplementation()!
+    gateway.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await real(input, init)
+      if (!String(input).endsWith('/author/library')) return response
+      const library = await response.json()
+      for (const row of library.attention) {
+        delete row.file
+        delete row.line
+      }
+      return new Response(JSON.stringify(library), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    const { onOpenEditor } = renderLibrary()
     fireEvent.click(await screen.findByRole('button', { name: 'Open draft' }))
-    expect(onOpenDraft).toHaveBeenCalledWith('d1')
+    expect(onOpenEditor).toHaveBeenCalledWith('d1', undefined, undefined)
+  })
+
+  test('a contradicted citation opens its draft at the \\cite; Remove deletes the entry after a confirm', async () => {
+    const { onOpenEditor } = renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open draft' }))
+    const cited = [...gateway.checks.values()].find((c) => c.draftId === 'd1')!.citations.find((c) => c.verdict === 'refutes')!
+    expect(onOpenEditor).toHaveBeenCalledWith('d1', cited.file, cited.line)
+    expect(cited.line).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /Find a source/ })).not.toBeInTheDocument()
 
     vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -173,7 +207,7 @@ describe('Author Library', () => {
     expect(screen.getByText('No unsorted sources')).toBeInTheDocument()
     expect(screen.queryByText(/SPLADE v2/)).not.toBeInTheDocument()
     expect(gateway.calls).toContain('GET /author/sources?project=')
-    // "View check history" on Check a draft lands here for a draft in no project: its history shows.
+    // "View check history" on Home lands here for a draft in no project: its history shows.
     const unfiled = [...gateway.drafts.values()].find((d) => !d.projectId)!
     expect(screen.getByRole('heading', { name: `Check history · ${unfiled.title}` })).toBeInTheDocument()
     expect(gateway.calls).toContain(`GET /author/drafts/${unfiled.id}/checks`)

@@ -72,6 +72,15 @@ describe('the Ask AI button', () => {
     expect(window.localStorage.getItem('ask.introSeen')).toBe('1')
   })
 
+  it('below 480px the note drops Try it, so the pill stays on a phone screen, and keeps ×', async () => {
+    render(<AskButton role="writer" open={false} about={PAPER} onToggle={() => {}} />)
+    await screen.findByRole('note')
+    // jsdom has no media queries, so this reads the classes that decide it.
+    expect(screen.getByRole('button', { name: 'Try it' })).toHaveClass('hidden', 'min-[480px]:inline')
+    expect(screen.getByRole('button', { name: 'Close' })).not.toHaveClass('hidden')
+    expect(screen.getByRole('button', { name: 'Ask AI' })).not.toHaveClass('hidden')
+  })
+
   it('opens Ask from the bubble, and the bubble does not come back', async () => {
     const onToggle = vi.fn()
     render(<AskButton role="researcher" open={false} about={PAPER} onToggle={onToggle} />)

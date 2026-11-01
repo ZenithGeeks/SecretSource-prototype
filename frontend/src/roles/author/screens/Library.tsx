@@ -11,6 +11,7 @@ import { useCallback, useRef, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { VerdictBar } from '../../../components/VerdictBar'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
@@ -20,7 +21,6 @@ import { CardHead, TextLink } from '../components/CardHead'
 import { NewProjectDialog, ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
-import { VerdictBar } from '../components/Verdicts'
 import { issues } from '../labels'
 import { DeleteProjectDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
 
@@ -87,7 +87,7 @@ function ProjectCard({
 }
 
 const ATTENTION_ICON = { replace: AlertCircle, 'upload-pdf': FileText, remove: FileText } as const
-// A contradicted citation is dealt with on Check a draft (its evidence, "Keep mine", the editor).
+// A contradicted citation is dealt with in the editor (its issue popover, "Keep mine").
 const ATTENTION_ACTION = { replace: 'Open draft', 'upload-pdf': 'Upload PDF', remove: 'Remove' } as const
 
 export function Library({
@@ -95,7 +95,7 @@ export function Library({
   draftId,
   onOpenProject,
   onOpenEditor,
-  onOpenDraft,
+  onDraftDeleted,
 }: {
   /** `?project=`: a project's detail, "unsorted", or none for the landing. */
   projectId: string | null
@@ -103,7 +103,8 @@ export function Library({
   draftId?: string | null
   onOpenProject: (id: string | null) => void
   onOpenEditor: (draftId: string, file?: string, line?: number) => void
-  onOpenDraft: (draftId: string) => void
+  /** A draft deleted on a project's page, so the app must not keep it selected. */
+  onDraftDeleted?: (draftId: string) => void
 }) {
   const library = useLibrary()
   const actions = useAuthorActions()
@@ -123,7 +124,7 @@ export function Library({
         initialDraft={draftId ?? null}
         onBack={() => onOpenProject(null)}
         onOpenEditor={onOpenEditor}
-        onOpenDraft={onOpenDraft}
+        onDraftDeleted={onDraftDeleted}
       />
     )
   }
@@ -164,7 +165,7 @@ export function Library({
 
   const attention = async (row: AttentionRow) => {
     if (row.kind === 'replace' && row.draftId) {
-      onOpenDraft(row.draftId)
+      onOpenEditor(row.draftId, row.file, row.line)
       return
     }
     if (row.kind === 'upload-pdf') {
@@ -342,7 +343,7 @@ export function Library({
         </button>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-2">
         <Card className="flex flex-col gap-2.5" aria-labelledby="attention-title">
           <CardHead id="attention-title" title="Needs attention" aside={<span className="text-ink-muted">{count(rows.length, 'source')}</span>} />
           {rows.length === 0 ? (

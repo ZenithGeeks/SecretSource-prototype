@@ -9,6 +9,7 @@
 import { strToU8, zipSync } from 'fflate'
 
 import { parseBib, serializeBib, type BibEntry } from './bibtex'
+import { shortMessage } from './citations'
 import { findCites } from './latexProject'
 import { referenceNote } from './referenceCheck'
 import { VERDICTS, isOpenIssue } from './verdict'
@@ -44,7 +45,7 @@ export function annotationFor(citation: Citation): string {
   const detail =
     citation.explanation ??
     (citation.verdict === 'unavailable'
-      ? `The source could not be read: ${citation.message ?? 'no PDF'}.`
+      ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
       : citation.reason === 'missing-key'
         ? 'No entry in the bibliography.'
         : 'Not checked yet.')

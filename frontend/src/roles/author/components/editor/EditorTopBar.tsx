@@ -147,7 +147,7 @@ export function EditorTopBar({
             /
           </span>
           <button type="button" onClick={onBack} className="rounded text-ink-muted hover:text-accent hover:underline">
-            Check a draft
+            Home
           </button>
           <span className="text-ink-muted" aria-hidden="true">
             /

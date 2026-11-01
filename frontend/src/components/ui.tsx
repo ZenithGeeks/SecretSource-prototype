@@ -1,7 +1,7 @@
 /** The handful of primitives the app reuses. Styling lives here so screens stay about content. */
 
 import { motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
+import { CircleAlert, Loader2 } from 'lucide-react'
 import type { ButtonHTMLAttributes, ComponentProps, ReactNode } from 'react'
 
 import type { Standing } from '../lib/claims'
@@ -242,6 +242,23 @@ export function Empty({ title, hint }: { title: string; hint: string }) {
     <div className="rounded-xl border border-dashed border-border-subtle px-6 py-12 text-center">
       <p className="font-medium">{title}</p>
       <p className="mt-1 text-sm text-ink-muted">{hint}</p>
+    </div>
+  )
+}
+
+/** A query's failed state (#713), beside Empty and LoadingScreen: what failed, the error
+ * the gateway gave, and Retry when the caller can try again. */
+export function ErrorState({ title, message, onRetry }: { title: string; message: string; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="flex flex-col items-center gap-2 rounded-xl border border-refutes/40 bg-refutes-soft px-6 py-10 text-center">
+      <CircleAlert className="size-5 text-refutes" aria-hidden="true" />
+      <p className="font-medium text-ink">{title}</p>
+      <p className="text-sm text-ink-muted">{message}</p>
+      {onRetry && (
+        <Button type="button" variant="ghost" onClick={() => onRetry()} className="mt-1">
+          Retry
+        </Button>
+      )}
     </div>
   )
 }

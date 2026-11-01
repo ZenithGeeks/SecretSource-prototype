@@ -931,7 +931,9 @@ class ProjectIn(BaseModel):
 
 
 def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, list[dict]]) -> dict:
-    """A project card: bib size, how many entries its drafts cite, what still needs work."""
+    """A project card: bib size, how many entries its drafts cite, what still needs work. A draft
+    with no finished check counts its citations as unchecked, so the card's bar is not all green
+    while part of the project was never checked (the rule status_label follows, #727)."""
     view = _public(project)
     bib = project.get("bib") or {}
     entries = logic.parse_bib(bib.get("content", ""))
@@ -943,7 +945,8 @@ def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, li
     checked_at = None
     for draft in mine:
         files = _draft_files(draft, project)
-        cited.update(c["key"] for c in logic.find_cites(files))
+        cites = logic.find_cites(files)
+        cited.update(c["key"] for c in cites)
         latest = _latest_done(runs_by_draft.get(draft["id"], []))
         if latest:
             summary = logic.summarize(latest.get("citations", []))
@@ -952,6 +955,8 @@ def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, li
             open_issues += summary["open"]
             if not checked_at or latest.get("finishedAt", "") > checked_at:
                 checked_at = latest.get("finishedAt")
+        else:
+            tally["unchecked"] += len(cites)
     view.update(
         {
             "bibName": bib.get("name"),
@@ -1087,6 +1092,16 @@ async def delete_project(project_id: str, user: str | None = Depends(current_use
     return {"deleted": project_id}
 
 
+@router.get("/projects/{project_id}/lint")
+async def lint_project(project_id: str, user: str | None = Depends(current_user)):
+    """The project's bib lint across all its drafts (#714). A draft's own /parse lints that
+    draft alone, so an entry cited only in another draft looks unused there; here it does not."""
+    project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
+    drafts = [d for d in await asyncio.to_thread(_rows, DRAFTS, user) if d.get("projectId") == project_id]
+    files = [(d["id"], _draft_files(d, project)) for d in drafts]
+    return await asyncio.to_thread(logic.lint_project, project.get("bib"), files)
+
+
 @router.delete("/projects/{project_id}/bib/{key}")
 async def remove_bib_entry(project_id: str, key: str, user: str | None = Depends(current_user)):
     """ "Remove" on a never-cited entry: drops every entry with that key from the .bib."""
@@ -1154,6 +1169,9 @@ def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str
                         "checkId": latest["id"],
                         "citationId": c["id"],
                         "projectId": draft.get("projectId"),
+                        # Where "Open draft" puts the editor's cursor.
+                        "file": c.get("file"),
+                        "line": c.get("line"),
                     }
                 )
             elif c.get("verdict") == "unavailable":
@@ -1162,7 +1180,9 @@ def _attention(projects: list[dict], drafts: list[dict], runs_by_draft: dict[str
                     {
                         "kind": "upload-pdf",
                         "key": c["key"],
-                        "title": f"{c['key']} · {c.get('message') or 'no PDF could be read'}",
+                        "title": (
+                            f"{c['key']} · {logic.short_message(c.get('message')) or 'no PDF could be read'}"
+                        ),
                         "detail": "Cannot be checked until a source is attached",
                         "draftId": draft["id"],
                         "projectId": draft.get("projectId"),

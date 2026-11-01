@@ -360,3 +360,27 @@ def test_the_status_label_follows_the_counts(verdicts, label):
         return {"verdict": item}
 
     assert logic.status_label(logic.summarize([citation(v) for v in verdicts])) == label
+
+
+def test_a_project_lint_keeps_a_forked_copys_own_duplicate():
+    """A draft's own refs.bib is not the project's, even with the same name and the same duplicate."""
+    twice = "@misc{k, title={A}, url={https://a.b}}\n@misc{k, title={B}, url={https://a.b}}\n"
+    fork = [
+        {"name": "a.tex", "kind": "tex", "content": r"\cite{k}"},
+        {"name": "refs.bib", "kind": "bib", "content": twice},
+    ]
+    uses = [
+        {"name": "b.tex", "kind": "tex", "content": r"\cite{k}"},
+        {"name": "refs.bib", "kind": "bib", "content": twice, "shared": True},
+    ]
+    body = logic.lint_project({"name": "refs.bib", "content": twice}, [("fork", fork), ("uses", uses)])
+    duplicates = {w["draftId"] for w in body["warnings"] if w["type"] == "duplicate-key"}
+    assert duplicates == {None, "fork"}
+
+
+def test_the_report_never_prints_a_raw_error_page():
+    page = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>" + "<p>x</p>" * 300
+    citation = {"key": "k", "file": "a.tex", "line": 1, "verdict": "unavailable", "message": page}
+    html = logic.report_html({"title": "T"}, {"version": 1, "citations": [citation]})
+    assert "the server sent an error page (Just a moment...)" in html
+    assert "DOCTYPE" not in html
