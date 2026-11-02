@@ -2,6 +2,7 @@
 502/503/504 (never a read timeout), ColPali uploads that raise on failure, and a ColPali
 health answer remembered for HEALTH_TTL seconds."""
 
+import socket
 import threading
 import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -114,6 +115,21 @@ def test_a_400_is_sent_only_once():
         server.shutdown()
     assert response.status_code == 400
     assert len(seen) == 1
+
+
+def test_pooled_sockets_send_keepalive_probes():
+    server, _ = _serve([200])
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/api/search"
+        pool = retrieval._session.get_adapter(url).poolmanager.connection_from_url(url)
+        connection = pool._new_conn()
+        connection.connect()
+        try:
+            assert connection.sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+        finally:
+            connection.close()
+    finally:
+        server.shutdown()
 
 
 def _pdf_with_image(path):
