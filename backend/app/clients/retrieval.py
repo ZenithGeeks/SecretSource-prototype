@@ -11,7 +11,6 @@ be on another machine or on Cloud Run.
 
 import hashlib
 import json
-import socket
 import threading
 import time
 from collections.abc import Collection
@@ -22,7 +21,6 @@ import requests
 from openinference.semconv.trace import DocumentAttributes, OpenInferenceSpanKindValues, SpanAttributes
 from opentelemetry import trace
 from requests.adapters import HTTPAdapter
-from urllib3.connection import HTTPConnection
 from urllib3.util.retry import Retry
 
 from app.clients.cloud_run import uploadable
@@ -48,32 +46,34 @@ RETRY = Retry(
     raise_on_status=False,
 )
 
-# A pooled connection that sits idle can be dropped by a NAT or proxy on the way without a
-# FIN or RST. urllib3 cannot see that, reuses the socket, and the request hangs until its
-# timeout (#816). Keepalive probes after 30 s idle keep the path open, and close the socket
-# after about 60 s if the peer is gone. macOS has no TCP_KEEPIDLE, so options are kept only
-# where the platform has them.
-KEEPALIVE = [
-    (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
-    *(
-        (socket.IPPROTO_TCP, getattr(socket, name), value)
-        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3))
-        if hasattr(socket, name)
-    ),
-]
+# Behind Cloudflare, a connection idle for 2 minutes or less can stop carrying requests while
+# the TCP socket stays open, so neither urllib3 nor TCP keepalive notices. The next request on
+# it hangs until its timeout (#816). Idle connections are dropped instead of reused.
+IDLE_LIMIT = 30  # seconds; requests in one analysis come closer together and keep reusing
 
 
-class KeepAliveAdapter(HTTPAdapter):
-    """An HTTPAdapter whose pooled sockets send TCP keepalive probes."""
+class FreshAfterIdleAdapter(HTTPAdapter):
+    """An HTTPAdapter that closes its idle pooled connections after IDLE_LIMIT without a request.
 
-    def init_poolmanager(self, *args, **kwargs):
-        kwargs["socket_options"] = HTTPConnection.default_socket_options + KEEPALIVE
-        super().init_poolmanager(*args, **kwargs)
+    A request already running keeps its connection: clearing the pool closes only idle ones.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_request = time.monotonic()
+        self._lock = threading.Lock()
+
+    def send(self, request, **kwargs):
+        with self._lock:
+            if time.monotonic() - self._last_request > IDLE_LIMIT:
+                self.poolmanager.clear()
+            self._last_request = time.monotonic()
+        return super().send(request, **kwargs)
 
 
 _session = requests.Session()
-_session.mount("https://", KeepAliveAdapter(max_retries=RETRY, pool_maxsize=16))
-_session.mount("http://", KeepAliveAdapter(max_retries=RETRY, pool_maxsize=16))
+_session.mount("https://", FreshAfterIdleAdapter(max_retries=RETRY, pool_maxsize=16))
+_session.mount("http://", FreshAfterIdleAdapter(max_retries=RETRY, pool_maxsize=16))
 
 
 def _detail(response: requests.Response) -> str:

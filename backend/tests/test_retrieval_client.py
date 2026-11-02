@@ -2,7 +2,6 @@
 502/503/504 (never a read timeout), ColPali uploads that raise on failure, and a ColPali
 health answer remembered for HEALTH_TTL seconds."""
 
-import socket
 import threading
 import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,19 +116,40 @@ def test_a_400_is_sent_only_once():
     assert len(seen) == 1
 
 
-def test_pooled_sockets_send_keepalive_probes():
-    server, _ = _serve([200])
+def test_a_connection_idle_past_the_limit_is_not_reused():
+    client_ports = []
+
+    class KeepAliveHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"  # keeps the connection open between requests
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            client_ports.append(self.client_address[1])
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), KeepAliveHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    adapter = retrieval.FreshAfterIdleAdapter()
+    session = requests.Session()
+    session.mount("http://", adapter)
+    url = f"http://127.0.0.1:{server.server_port}/api/search"
     try:
-        url = f"http://127.0.0.1:{server.server_port}/api/search"
-        pool = retrieval._session.get_adapter(url).poolmanager.connection_from_url(url)
-        connection = pool._new_conn()
-        connection.connect()
-        try:
-            assert connection.sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
-        finally:
-            connection.close()
+        session.post(url, json={"query": "q"}, timeout=10)
+        session.post(url, json={"query": "q"}, timeout=10)
+        adapter._last_request -= retrieval.IDLE_LIMIT + 1
+        session.post(url, json={"query": "q"}, timeout=10)
     finally:
+        session.close()
         server.shutdown()
+    first, soon_after, after_idle = client_ports
+    assert soon_after == first  # reused while busy
+    assert after_idle != first  # a new connection after the idle limit
 
 
 def _pdf_with_image(path):
