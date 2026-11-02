@@ -806,7 +806,8 @@ def _reference_path(analysis: dict, reference_id: str) -> str | None:
     for claim in analysis.get("claims", []):
         for verdict in claim.get("verdicts") or []:
             if verdict.get("source") and Path(verdict["source"]).stem == reference_id:
-                return verdict["source"]
+                # A verdict names the file only; local_pdf reads a bare name as a title to search.
+                return (config.PAPERS_DIR / Path(verdict["source"]).name).as_posix()
     return None
 
 

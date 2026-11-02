@@ -44,7 +44,7 @@ ANALYSIS = {
             "section": "3",
             "verdicts": [
                 {
-                    "source": "data/papers/refB-aaaaaaaaaaaa.pdf",
+                    "source": "refB-aaaaaaaaaaaa.pdf",
                     "cited": "Ref B",
                     "evidence": [
                         {"text": "recall rose by 4 points", "page": 5, "score": 9.1},
