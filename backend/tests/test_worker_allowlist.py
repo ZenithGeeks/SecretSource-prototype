@@ -1,6 +1,7 @@
 """AnalysisWorker runs only the analysis job and the draft-check job. Anyone who can write to
 Redis could otherwise queue a job naming any importable function (or callback), and RQ would call it."""
 
+import inspect
 import logging
 from types import SimpleNamespace
 
@@ -89,3 +90,11 @@ def test_the_allowed_names_match_the_real_functions():
     assert q.DRAFT_CHECK_JOB == f"{q.run_draft_check_job.__module__}.{q.run_draft_check_job.__name__}"
     draft_failure = q._on_draft_check_job_failure
     assert q.DRAFT_FAILURE_CALLBACK == f"{draft_failure.__module__}.{draft_failure.__name__}"
+
+def test_perform_job_takes_what_rq_passes():
+    """RQ 3.0 passes perform_job a third argument, and an override without it stopped the worker
+    on its first job (#738). The fixture above replaces RQ's own perform_job, so only this
+    compares the two."""
+    ours = list(inspect.signature(q.AnalysisWorker.perform_job).parameters)
+    theirs = list(inspect.signature(SimpleWorker.perform_job).parameters)
+    assert ours == theirs
