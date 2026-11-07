@@ -187,6 +187,7 @@ class TeacherFeedback:
     sent_at: datetime | None
     citation_ids: tuple[str, ...] = ()
     sharing_options: dict[str, Any] | None = None
+    subject: str = ""
 
     def to_row(self) -> dict[str, Any]:
         return {

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.data_tools import DATA_TOOLS, find_support, labeling_progress
 from app.agents.role_tools import AUTHOR_TOOLS, LABELER_TOOLS
+from app.teacher.agent_tools import teacher_assignments, teacher_classes, teacher_essay_review, teacher_submissions
 from app.llm import adk_model
 
 # What every role's agent is told first; each role adds its own part below.
@@ -269,7 +270,13 @@ author_agent = LlmAgent(
 )
 
 # The web app's role ids (frontend/src/lib/roles.ts; the Author role is "writer" there).
-ROLE_AGENTS = {"researcher": screen_agent, "labeler": labeler_agent, "writer": author_agent}
+teacher_agent = LlmAgent(
+    name="teacher_agent", model=adk_model(),
+    instruction="Help the signed-in teacher understand their Classroom courses, assignments, submissions and essay reviews. Use teacher tools for facts; never guess IDs or claim a message was sent. Respect teacher decisions and distinguish them from automated findings. These tools are read-only.",
+    tools=[teacher_classes, teacher_assignments, teacher_submissions, teacher_essay_review],
+)
+
+ROLE_AGENTS = {"researcher": screen_agent, "labeler": labeler_agent, "writer": author_agent, "teacher": teacher_agent}
 
 # The long-running tools above: the only results agent_runs.py takes from the browser.
 # SCREEN_TOOL_NAMES is the MCP server's; switch_role and read_draft are the web app's only.

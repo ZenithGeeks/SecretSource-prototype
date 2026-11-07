@@ -165,21 +165,21 @@ describe('Teacher essay check', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Back/ }))
     expect(onBack).toHaveBeenCalledOnce()
-    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'CSV' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('combobox', { name: 'Human final decision for Source paper' })).toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: 'Human final decision for Source paper' }), { target: { value: 'contradicts' } })
     expect(mocks.updateReview).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'contradicts', reviewId: 'claim-0:10.1234/source:0' }))
-    expect(screen.getByRole('textbox', { name: 'Feedback to student' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Email message to the student' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add to feedback' })).toBeInTheDocument()
   })
 
   it('offers a Classroom sync when the student email is missing', () => {
     render(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
-    fireEvent.change(screen.getByRole('textbox', { name: 'Feedback to student' }), { target: { value: 'Please revise your thesis.' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Email message to the student' }), { target: { value: 'Please revise your thesis.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send to student' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Sync Classroom now' }))

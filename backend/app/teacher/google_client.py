@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 from collections.abc import Callable, Iterable
 from email.message import EmailMessage
 from time import sleep as default_sleep
@@ -10,6 +11,25 @@ from typing import Any
 
 GOOGLE_DOCUMENT_MIME_TYPE = "application/vnd.google-apps.document"
 PDF_MIME_TYPE = "application/pdf"
+
+
+def _feedback_pdf(html: str) -> bytes:
+    """Render the feedback report without loading external resources."""
+    import pymupdf
+
+    output = io.BytesIO()
+    writer = pymupdf.DocumentWriter(output)
+    story = pymupdf.Story(html=html)
+    page = pymupdf.paper_rect("a4")
+    content = page + (48, 48, -48, -48)
+    more = True
+    while more:
+        device = writer.begin_page(page)
+        more, _ = story.place(content)
+        story.draw(device)
+        writer.end_page()
+    writer.close()
+    return output.getvalue()
 
 
 class GoogleApiError(RuntimeError):
@@ -157,7 +177,7 @@ class GoogleClassroomClient:
         message["Subject"] = subject
         message.set_content(body)
         if report_html:
-            message.add_attachment(report_html.encode("utf-8"), maintype="text", subtype="html", filename="essay-feedback.html")
+            message.add_attachment(_feedback_pdf(report_html), maintype="application", subtype="pdf", filename="essay-feedback.pdf")
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
         return self._execute(lambda: self.gmail.users().messages().send(userId="me", body={"raw": raw}))
     def patch_assigned_grade(self, course_id: str, coursework_id: str, submission_id: str, grade: float):

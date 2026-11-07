@@ -8,14 +8,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from app import config
 from app.auth import current_user
-from app.teacher.analysis import TeacherEssayAnalysisService
+from app.teacher.analysis import TeacherEssayAnalysisService, _citation_id, _citation_key
 from app.teacher.crypto import RefreshTokenCipher
-from app.teacher.google_client import GoogleApiError, GoogleClassroomClient, select_supported_attachments
+from app.teacher.google_client import GoogleApiError, GoogleClassroomClient, _feedback_pdf, select_supported_attachments
 from app.teacher.models import ConnectedTeacher, TeacherCourse, TeacherCoursework, TeacherSubmission
 from app.teacher.oauth import (
     GoogleAuthorizationCodeTransport,
@@ -44,8 +44,13 @@ class FeedbackUpdate(BaseModel):
     citation_ids: list[str] = Field(default_factory=list, alias="citationIds")
     sharing_options: dict[str, dict[str, bool]] = Field(default_factory=dict, alias="sharingOptions")
     report_html: str | None = Field(default=None, alias="reportHtml", max_length=20_000_000)
+    subject: str | None = Field(default=None, max_length=200, pattern=r"^[^\r\n]*$")
 
     model_config = {"populate_by_name": True}
+
+
+class FeedbackReportRequest(BaseModel):
+    report_html: str = Field(alias="reportHtml", max_length=20_000_000)
 
 
 class PrepareEssayChecksRequest(BaseModel):
@@ -63,6 +68,11 @@ def require_teacher_user(user: str | None = Depends(current_user)) -> str:
     if not user:
         raise HTTPException(status_code=401, detail="sign in to use Google Classroom")
     return user
+
+
+@router.post("/feedback/report.pdf")
+def download_feedback_report(request: FeedbackReportRequest, owner: str = Depends(require_teacher_user)) -> Response:
+    return Response(content=_feedback_pdf(request.report_html), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="essay-feedback.pdf"'})
 
 
 def get_repository() -> TeacherGoogleRepository:
@@ -245,7 +255,18 @@ def _raw_course_view(raw: dict[str, Any], counts: dict[str, int] | None = None) 
     return view
 
 
-def _submission_view(submission: TeacherSubmission) -> dict[str, Any]:
+def _analysis_status(owner: str, submission: TeacherSubmission) -> str:
+    if not submission.analysis_id:
+        return "missing"
+    from app.main import lookup
+
+    snapshot = lookup(submission.analysis_id)
+    if not isinstance(snapshot, dict) or snapshot.get("owner") != owner:
+        return "missing"
+    return str(snapshot.get("status") or "missing")
+
+
+def _submission_view(submission: TeacherSubmission, owner: str | None = None) -> dict[str, Any]:
     raw = submission.raw or {}
     state = submission.state or ""
     display_state = "returned" if state == "RETURNED" else "submitted" if state in {"TURNED_IN", "RETURNED"} else "missing"
@@ -266,18 +287,30 @@ def _submission_view(submission: TeacherSubmission) -> dict[str, Any]:
         "studentEmail": submission.student_email,
         "fileName": attachments[0]["title"] if attachments else "submission.pdf",
         "state": display_state,
+        "reviewStatus": "analysis-ready" if owner and _analysis_status(owner, submission) == "done" else "not-checked",
         "submittedAt": raw.get("updateTime") or raw.get("creationTime"),
         "attachments": attachments,
     }
 
 
 def _assignment_view(
-    coursework: TeacherCoursework, submissions: list[TeacherSubmission], course: TeacherCourse | None = None
+    coursework: TeacherCoursework,
+    submissions: list[TeacherSubmission],
+    course: TeacherCourse | None = None,
+    owner: str | None = None,
 ) -> dict[str, Any]:
     raw = coursework.raw or {}
     enrolled = len((course.raw or {}).get("students") or []) if course is not None else len(submissions)
     submitted = sum(item.state in {"TURNED_IN", "RETURNED"} for item in submissions)
     returned = sum(item.state == "RETURNED" for item in submissions)
+    reviewed = sum(
+        item.state in {"TURNED_IN", "RETURNED"} and owner is not None and _analysis_status(owner, item) == "done"
+        for item in submissions
+    )
+    pending_review = sum(
+        item.state in {"TURNED_IN", "RETURNED"} and (owner is None or _analysis_status(owner, item) != "done")
+        for item in submissions
+    )
     return {
         "id": coursework.coursework_id,
         "courseId": coursework.course_id,
@@ -287,16 +320,15 @@ def _assignment_view(
         "submittedCount": submitted,
         "missingCount": max(0, enrolled - submitted),
         "returnedCount": returned,
-        "pendingReviewCount": sum(
-            item.state == "TURNED_IN" and not item.analysis_id for item in submissions
-        ),
+        "reviewedCount": reviewed,
+        "pendingReviewCount": pending_review,
         "status": "returned" if submitted and returned == submitted else "pending" if submitted else "not-started",
         "materials": _materials(raw),
     }
 
 
 def _workspace_view(
-    course: TeacherCourse, coursework: list[TeacherCoursework], submissions: list[TeacherSubmission]
+    course: TeacherCourse, coursework: list[TeacherCoursework], submissions: list[TeacherSubmission], owner: str
 ) -> dict[str, Any]:
     raw = course.raw or {}
     assignments = [item for item in coursework if item.resource_type == "coursework"]
@@ -315,8 +347,8 @@ def _workspace_view(
     return {
         "course": _course_view(course, coursework),
         "description": course.description or "",
-        "assignments": [_assignment_view(item, [sub for sub in submissions if sub.coursework_id == item.coursework_id], course) for item in assignments],
-        "submissions": [_submission_view(item) for item in submissions],
+        "assignments": [_assignment_view(item, [sub for sub in submissions if sub.coursework_id == item.coursework_id], course, owner) for item in assignments],
+        "submissions": [_submission_view(item, owner) for item in submissions],
         "people": people,
         "latestAnnouncement": ({
             "title": announcement.title or "Announcement",
@@ -481,10 +513,8 @@ def teacher_home(
                 continue
             due_at = assignment.due_at if assignment.due_at.tzinfo else assignment.due_at.replace(tzinfo=UTC)
             overdue = due_at < now
-            view = _assignment_view(assignment, assignment_submissions, course)
-            if (not overdue and due_at <= now + timedelta(days=7)) or (
-                overdue and (view["missingCount"] > 0 or view["pendingReviewCount"] > 0)
-            ):
+            view = _assignment_view(assignment, assignment_submissions, course, owner)
+            if (view["missingCount"] > 0 or view["pendingReviewCount"] > 0) and (overdue or due_at <= now + timedelta(days=7)):
                 due_soon.append({**view, "courseName": course.name, "overdue": overdue})
 
     primary_course = courses[0] if courses else None
@@ -492,19 +522,27 @@ def teacher_home(
         (assignment for course, assignment, _ in assignments_by_id.values() if course == primary_course),
         None,
     )
-    # An analysis is linked to its Classroom submission as soon as it starts. Once linked,
-    # that essay is no longer new work in the Home review queue; it remains available in
-    # Recently viewed for follow-up and professor review.
+    # A linked analysis may still be running or have failed; only completed analyses are reviewed.
+    from app.main import lookup
+
+    analysis_statuses: dict[str, str] = {}
+    for _course, _assignment, submission in submissions:
+        if submission.analysis_id and submission.analysis_id not in analysis_statuses:
+            snapshot = lookup(submission.analysis_id)
+            analysis_statuses[submission.analysis_id] = str(snapshot.get("status") or "missing") if snapshot and snapshot.get("owner") == owner else "missing"
+
     queue = [
         entry for entry in submissions
-        if entry[2].state == "TURNED_IN" and not entry[2].analysis_id
+        if entry[2].state == "TURNED_IN" and analysis_statuses.get(entry[2].analysis_id or "") != "done"
     ]
     queue.sort(key=lambda entry: str((entry[2].raw or {}).get("updateTime") or (entry[2].raw or {}).get("creationTime") or ""), reverse=True)
     # Keep near-term work visible when older overdue assignments still have missing work.
     due_soon.sort(key=lambda entry: (entry["overdue"], entry["dueAt"]))
     home_submissions = []
-    for course, assignment, submission in queue:
-        checked = bool(submission.analysis_id)
+    checked_submissions = [entry for entry in submissions if entry[2].state in {"TURNED_IN", "RETURNED"} and analysis_statuses.get(entry[2].analysis_id or "") == "done"]
+    for course, assignment, submission in (queue if queue else checked_submissions):
+        status = analysis_statuses.get(submission.analysis_id or "", "missing")
+        checked = status == "done"
         home_submissions.append({
             **_submission_view(submission),
             "courseId": course.course_id,
@@ -512,21 +550,52 @@ def teacher_home(
             "assignmentTitle": assignment.title if assignment and assignment.title else submission.coursework_id,
             "dueAt": _iso(assignment.due_at) if assignment and assignment.due_at else None,
             "initial": _initials(submission.student_name or submission.student_id),
-            "summary": "Analysis on file · open to review" if checked else "New submission · not checked",
-            "reviewStatus": "analysis-ready" if checked else "not-checked",
+            "summary": "Reviewed" if checked else "Checking" if status in {"running", "queued"} else "New submission · not checked",
+            "reviewStatus": "analysis-ready" if checked else "analysis-running" if status in {"running", "queued"} else "not-checked",
         })
+    most_misused_sources = _most_misused_sources(owner, submissions, repository)
     return {
         "user": owner,
         "course": primary_course.name if primary_course else "",
         "courseId": primary_course.course_id if primary_course else None,
-        "checkedEssays": sum(bool(entry[2].analysis_id) for entry in submissions),
+        "checkedEssays": sum(analysis_statuses.get(entry[2].analysis_id or "") == "done" for entry in submissions),
         "totalEssays": len(submissions),
         "reviewQueueCount": len(queue),
         "assignment": primary_assignment.title if primary_assignment else "",
         "assignmentId": primary_assignment.coursework_id if primary_assignment else None,
         "submissions": home_submissions,
         "dueSoon": due_soon[:8],
+        "mostMisusedSource": most_misused_sources[0] if most_misused_sources else None,
+        "mostMisusedSources": most_misused_sources,
     }
+
+
+def _most_misused_sources(owner: str, submissions: list[tuple[TeacherCourse, TeacherCoursework | None, TeacherSubmission]], repository: TeacherGoogleRepository) -> list[dict[str, Any]]:
+    """Rank sources by the number of distinct essays flagged as contradictory."""
+    from app.main import lookup
+
+    sources: dict[str, dict[str, Any]] = {}
+    for course, _assignment, submission in submissions:
+        if not submission.analysis_id:
+            continue
+        snapshot = lookup(submission.analysis_id)
+        if not isinstance(snapshot, dict) or snapshot.get("owner") != owner or snapshot.get("status") != "done":
+            continue
+        reviews = repository.get_professor_reviews(owner, course.course_id, submission.coursework_id, submission.submission_id)
+        reviews_by_id = {review.review_id: review for review in reviews if review.review_id}
+        for claim_index, claim in enumerate(snapshot.get("claims") or []):
+            verdicts = {str(verdict.get("cited") or ""): verdict for verdict in claim.get("verdicts") or []}
+            for citation_index, citation in enumerate(claim.get("citations") or []):
+                key = _citation_key(citation)
+                review = reviews_by_id.get(_citation_id(claim_index, citation, citation_index))
+                teacher_outcome = review.verdict if review else "not-reviewed"
+                contradicted = teacher_outcome == "contradicts" if teacher_outcome != "not-reviewed" else verdicts.get(key, {}).get("verdict") == "refutes"
+                if not key or not contradicted:
+                    continue
+                item = sources.setdefault(key.casefold(), {"title": str(citation.get("title") or key), "essays": set()})
+                item["essays"].add((course.course_id, submission.coursework_id, submission.submission_id))
+    ranked = sorted(sources.values(), key=lambda source: (-len(source["essays"]), source["title"].casefold()))
+    return [{"title": item["title"], "count": len(item["essays"]), "detail": f"Flagged as contradictory in {len(item['essays'])} {'essay' if len(item['essays']) == 1 else 'essays'}, using teacher decisions where available and automated findings otherwise."} for item in ranked]
 
 
 def _history_timestamp(value: Any) -> datetime | None:
@@ -721,7 +790,7 @@ def class_workspace(
     repository: TeacherGoogleRepository = Depends(get_repository),
 ) -> dict[str, Any]:
     course = _owned_course(repository, owner, course_id)
-    return _workspace_view(course, repository.list_coursework(owner, course_id), repository.list_submissions(owner, course_id))
+    return _workspace_view(course, repository.list_coursework(owner, course_id), repository.list_submissions(owner, course_id), owner)
 
 
 @router.post("/classes/{course_id}/refresh")
@@ -738,7 +807,7 @@ def refresh_class(
     except Exception as error:
         raise _map_google_error(error) from error
     course = _owned_course(repository, owner, course_id)
-    return {"workspace": _workspace_view(course, repository.list_coursework(owner, course_id), repository.list_submissions(owner, course_id)), "sync": result}
+    return {"workspace": _workspace_view(course, repository.list_coursework(owner, course_id), repository.list_submissions(owner, course_id), owner), "sync": result}
 
 
 @router.get("/classes/{course_id}/assignments/{assignment_id}")
@@ -750,7 +819,7 @@ def assignment_detail(
 ) -> dict[str, Any]:
     course, assignment = _owned_assignment(repository, owner, course_id, assignment_id)
     submissions = [item for item in repository.list_submissions(owner, course_id, assignment_id)]
-    return {"assignment": _assignment_view(assignment, submissions, course), "submissions": [_submission_view(item) for item in submissions]}
+    return {"assignment": _assignment_view(assignment, submissions, course, owner), "submissions": [_submission_view(item, owner) for item in submissions]}
 
 
 @router.post("/classes/{course_id}/assignments/{assignment_id}/students/{student_id}/analyze")
@@ -879,7 +948,7 @@ def save_feedback(
     if not set(request.sharing_options).issubset(allowed):
         raise HTTPException(status_code=422, detail="feedback sharing settings contain an unknown citation")
     try:
-        service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options)
+        service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options, request.subject)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return _essay_or_error(service, owner, course_id, assignment_id, submission_id)
@@ -903,7 +972,7 @@ def send_feedback(
                 raise HTTPException(status_code=422, detail="feedback contains an unknown citation")
             if not set(request.sharing_options).issubset(allowed):
                 raise HTTPException(status_code=422, detail="feedback sharing settings contain an unknown citation")
-            service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options)
+            service.save_feedback(owner, course_id, assignment_id, submission_id, request.body, request.citation_ids, request.sharing_options, request.subject)
     except HTTPException:
         raise
     except ValueError as error:
@@ -918,10 +987,11 @@ def send_feedback(
             detail="Feedback could not be prepared. No email was sent. Please try again.",
         ) from error
     try:
-        sent = service.send_feedback(owner, course_id, assignment_id, submission_id, request.report_html if request else None)
+        sent = service.send_feedback(owner, course_id, assignment_id, submission_id, request.report_html if request else None, request.subject if request else None)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except Exception as error:
+        logger.exception("Unable to send teacher feedback email")
         raise _map_google_error(error) from error
     return {
         "assignmentId": assignment_id,

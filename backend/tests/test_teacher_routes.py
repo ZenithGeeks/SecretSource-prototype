@@ -237,6 +237,47 @@ def test_teacher_history_lists_completed_analysis_and_saved_teacher_activity(tea
     assert rows[1]["assignmentTitle"] == "Essay"
 
 
+def test_home_shows_checked_submissions_and_most_frequently_contradicted_source(teacher_client, monkeypatch):
+    from app import main
+
+    client, repository, _ = teacher_client
+    monkeypatch.setattr(main, "lookup", lambda analysis_id: {
+        "id": analysis_id, "owner": "teacher-a", "status": "done", "claims": [{
+            "citations": [{"doi": "10.1/example", "title": "Example source"}],
+            "verdicts": [{"cited": "10.1/example", "verdict": "refutes"}],
+        }],
+    })
+    result = client.get('/teacher/home')
+    assert result.status_code == 200
+    assert result.json()['reviewQueueCount'] == 0
+    assert result.json()['submissions'][0]['reviewStatus'] == 'analysis-ready'
+    assert result.json()['mostMisusedSource']['title'] == 'Example source'
+    assert 'automated' in result.json()['mostMisusedSource']['detail'].lower()
+    assert result.json()['mostMisusedSources'][0]['count'] == 1
+
+
+def test_home_does_not_mark_a_running_analysis_reviewed(teacher_client, monkeypatch):
+    from app import main
+
+    client, _, _ = teacher_client
+    monkeypatch.setattr(main, 'lookup', lambda _id: {'owner': 'teacher-a', 'status': 'running', 'claims': []})
+    response = client.get('/teacher/home')
+    assert response.status_code == 200
+    assert response.json()['reviewQueueCount'] == 1
+    assert response.json()['submissions'][0]['reviewStatus'] == 'analysis-running'
+
+
+def test_feedback_report_download_returns_pdf(teacher_client):
+    import pymupdf
+
+    client, _, _ = teacher_client
+    response = client.post("/teacher/feedback/report.pdf", json={"reportHtml": "<h1>Teacher feedback</h1><p>Contradicts</p>"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    with pymupdf.open(stream=response.content, filetype="pdf") as report:
+        assert "Contradicts" in "".join(page.get_text() for page in report)
+
+
 def test_teacher_review_feedback_and_grade_return_mutations_are_scoped(teacher_client):
     client, repository, google = teacher_client
     review_id = "claim-0:10.1/example:0"
@@ -257,11 +298,11 @@ def test_teacher_review_feedback_and_grade_return_mutations_are_scoped(teacher_c
 
     sent = client.post(
         "/teacher/classes/course-1/assignments/work-1/students/student-1/essay-check/feedback/send",
-        json={"studentId": "student-1", "body": "Good work.", "citationIds": [review_id], "reportHtml": "<h1>Feedback</h1>"},
+        json={"studentId": "student-1", "body": "Good work.", "citationIds": [review_id], "subject": "Feedback on your essay", "reportHtml": "<h1>Feedback</h1>"},
     )
     assert sent.status_code == 200, sent.text
     assert sent.json()["status"] == "sent"
-    assert google.sent_emails == [("grace@example.edu", "Essay feedback for work-1", "Good work.", "<h1>Feedback</h1>")]
+    assert google.sent_emails == [("grace@example.edu", "Feedback on your essay", "Good work.", "<h1>Feedback</h1>")]
 
     graded = client.post(
         "/teacher/classes/course-1/assignments/work-1/students/student-1/grade-and-return",

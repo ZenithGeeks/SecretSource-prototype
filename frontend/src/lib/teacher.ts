@@ -59,6 +59,7 @@ export type TeacherSubmission = {
   studentEmail?: string
   fileName: string
   state: 'submitted' | 'missing' | 'returned'
+  reviewStatus?: 'not-checked' | 'analysis-ready' | 'analysis-running'
   submittedAt?: string
   attachments: ClassroomAttachment[]
 }
@@ -72,6 +73,7 @@ export type TeacherAssignment = {
   submittedCount: number
   missingCount: number
   returnedCount: number
+  reviewedCount?: number
   pendingReviewCount: number
   status: 'returned' | 'pending' | 'not-started'
   materials: ClassroomMaterial[]
@@ -120,7 +122,7 @@ export type TeacherHomeSubmission = TeacherSubmission & {
   dueAt?: string | null
   initial: string
   summary: string
-  reviewStatus?: 'not-checked' | 'analysis-ready'
+  reviewStatus?: 'not-checked' | 'analysis-ready' | 'analysis-running'
   standing?: TeacherStanding
 }
 
@@ -139,6 +141,7 @@ export type ClassPaper = {
 export type MostMisusedSource = {
   title: string
   detail: string
+  count?: number
 }
 
 export type TeacherHome = {
@@ -156,6 +159,7 @@ export type TeacherHome = {
   citationsNeedingAttention?: number
   library?: { paperCount: number; visibility: string; papers: ClassPaper[] }
   mostMisusedSource?: MostMisusedSource | null
+  mostMisusedSources?: MostMisusedSource[]
 }
 
 export type TeacherHistoryActivity = 'analysis' | 'professor-review' | 'feedback'
@@ -205,6 +209,7 @@ export type EssayReview = {
 
 export type FeedbackDraft = {
   body: string
+  subject?: string
   preview: string
   citedPages: string[]
   citationIds: string[]
@@ -272,6 +277,7 @@ export type SendFeedbackRequest = {
   courseWorkId?: string
   studentId: string
   body: string
+  subject?: string
   citationIds: string[]
   sharingOptions?: FeedbackSharingByCitation
   reportHtml?: string
@@ -401,9 +407,10 @@ const mockTeacherApi = {
   },
   getEssayCheck: async (assignmentId: string, studentId: string, _courseId?: string): Promise<EssayCheck | null> =>
     store.getEssayCheck(normalizedAssignmentId({ assignmentId }), studentId),
-  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: FeedbackSharingByCitation }): Promise<EssayCheck> =>
+  saveFeedback: async (input: { assignmentId: string; studentId: string; body: string; subject?: string; citationIds: string[]; sharingOptions?: FeedbackSharingByCitation }): Promise<EssayCheck> =>
     store.saveFeedback(input.assignmentId, input.studentId, {
       body: input.body,
+      subject: input.subject,
       citationIds: input.citationIds,
       sharingOptions: input.sharingOptions,
     }),
@@ -477,13 +484,13 @@ export const createRemoteTeacherApi = () => ({
       },
     )
   },
-  saveFeedback: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: FeedbackSharingByCitation }) =>
+  saveFeedback: (input: { courseId: string; assignmentId: string; studentId: string; body: string; subject?: string; citationIds: string[]; sharingOptions?: FeedbackSharingByCitation }) =>
     request<EssayCheck>(
       `/teacher/classes/${encodeURIComponent(input.courseId)}/assignments/${encodeURIComponent(input.assignmentId)}/essay-check/feedback`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds, sharingOptions: input.sharingOptions }),
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, subject: input.subject, citationIds: input.citationIds, sharingOptions: input.sharingOptions }),
       },
     ),
   sendFeedback: (input: SendFeedbackRequest) => {
@@ -494,7 +501,7 @@ export const createRemoteTeacherApi = () => ({
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: input.studentId, body: input.body, citationIds: input.citationIds, sharingOptions: input.sharingOptions, reportHtml: input.reportHtml }),
+        body: JSON.stringify({ studentId: input.studentId, body: input.body, subject: input.subject, citationIds: input.citationIds, sharingOptions: input.sharingOptions, reportHtml: input.reportHtml }),
       },
     )
   },

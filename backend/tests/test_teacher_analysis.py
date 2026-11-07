@@ -23,6 +23,24 @@ class Repository:
         self.resets.append((args, kwargs))
 
 
+def test_feedback_subject_survives_saving_and_sending():
+    submission = make_submission([])
+    submission = __import__('dataclasses').replace(submission, student_email='student@example.edu')
+    repository = Repository(submission)
+    repository.feedback = None
+    repository.get_feedback = lambda *_args: repository.feedback
+    repository.save_feedback = lambda feedback: setattr(repository, 'feedback', feedback)
+    sent = []
+    client = type('MailClient', (), {'send_feedback_email': lambda self, *args: sent.append(args)})()
+    service = TeacherEssayAnalysisService(client=client, repository=repository)
+
+    service.save_feedback('teacher-1', 'course-1', 'work-1', 'submission-1', 'Please revise.', [], subject='My subject')
+    assert repository.feedback.subject == 'My subject'
+    service.send_feedback('teacher-1', 'course-1', 'work-1', 'submission-1')
+    assert sent[0][1] == 'My subject'
+    assert repository.feedback.subject == 'My subject'
+
+
 class Drive:
     def __init__(self, version="3"):
         self.downloads = []

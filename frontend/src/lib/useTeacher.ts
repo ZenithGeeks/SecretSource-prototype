@@ -168,7 +168,7 @@ export function usePrepareTeacherEssayChecks() {
 export function useSaveTeacherFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; citationIds: string[]; sharingOptions?: import('./teacherFeedbackExport').FeedbackSharingByCitation }) =>
+    mutationFn: (input: { courseId: string; assignmentId: string; studentId: string; body: string; subject?: string; citationIds: string[]; sharingOptions?: import('./teacherFeedbackExport').FeedbackSharingByCitation }) =>
       teacherApi.saveFeedback(input),
     onSuccess: (essay, input) => {
       updateEssayCache(queryClient, essay, input.courseId)

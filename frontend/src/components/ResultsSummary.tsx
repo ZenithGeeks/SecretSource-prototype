@@ -4,15 +4,12 @@
  * Teacher's Essay Check keeps its own toolbar of buttons.
  */
 
-import { Copy, Download, FileText, MessageSquarePlus } from 'lucide-react'
-import { useState } from 'react'
+import { FileText } from 'lucide-react'
 
 import {
   STANDING_LABELS,
   STANDING_MEANINGS,
   STANDINGS,
-  toCsv,
-  toMarkdown,
   verdictCountLabel,
   verdictCountWord,
 } from '../lib/claims'
@@ -20,10 +17,8 @@ import type { Standing, Standings } from '../lib/claims'
 import { API_BASE, type Claim } from '../lib/api'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
-import { downloadText } from '../lib/csv'
 import { ToolbarActions } from './AppShell'
 import { ExportMenu, TOOLBAR_BUTTON } from './ExportMenu'
-import { Button } from './ui'
 
 /** Muted for the two standings that are not a verdict, so a colour always means an answer. */
 const COUNT_STYLES: Record<Standing, string> = {
@@ -46,6 +41,7 @@ export function ResultsSummary({
   onOpenPaper,
   onTeacherFeedback,
   teacherMode = false,
+  teacherDecisions,
   actionsInToolbar = false,
 }: {
   claims: Claim[]
@@ -62,6 +58,7 @@ export function ResultsSummary({
   onTeacherFeedback?: () => void
   /** Teacher's Essay Check uses the PDF, Copy All, and CSV analysis toolbar. */
   teacherMode?: boolean
+  teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number }
   /** Put "Open PDF" and "Export" in the shell's toolbar; without a toolbar they sit above the summary. */
   actionsInToolbar?: boolean
 }) {
@@ -90,6 +87,7 @@ export function ResultsSummary({
       paperLabel={paperLabel}
       onOpenPaper={onOpenPaper}
       onTeacherFeedback={onTeacherFeedback}
+      teacherDecisions={teacherDecisions}
     />
   )
 }
@@ -226,25 +224,14 @@ function ResearcherSummary({
 }
 
 function TeacherSummary({
-  claims,
   standings,
   counts,
   filter,
   onFilter,
   paper,
   paperLabel,
-  onOpenPaper,
-  onTeacherFeedback,
-}: SummaryProps & { paperLabel?: string; onTeacherFeedback?: () => void }) {
-  const teacherMode = true
-  const [copied, setCopied] = useState(false)
-
-  async function copyMarkdown() {
-    await navigator.clipboard.writeText(toMarkdown(claims, paper))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
+  teacherDecisions,
+}: SummaryProps & { paperLabel?: string; onTeacherFeedback?: () => void; teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number } }) {
   return (
     <div className="-mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur lg:sticky lg:top-0 lg:z-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -258,35 +245,17 @@ function TeacherSummary({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {paper && onOpenPaper && (
-            <Button variant="ghost" onClick={onOpenPaper} title="Read the paper here, page by page">
-              <FileText className="size-4" />
-              {teacherMode ? 'PDF' : 'The PDF'}
-            </Button>
-          )}
-          {teacherMode && onTeacherFeedback && (
-            <Button className="bg-accent-soft text-ink hover:bg-accent-soft" variant="ghost" onClick={onTeacherFeedback} title="Write feedback for the student">
-              <MessageSquarePlus className="size-4" />
-              Feedback
-            </Button>
-          )}
-          <>
-            <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">
-              <Copy className="size-4" />
-              {copied ? 'Copied' : teacherMode ? 'Copy all' : 'Copy'}
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
-              title="Download the claims, their verdicts and their pages as CSV"
-            >
-              <Download className="size-4" />
-              CSV
-            </Button>
-          </>
-        </div>
       </div>
+
+      {teacherDecisions && <div className="mt-4 border-t border-border-subtle pt-3" aria-label="Human final decisions">
+        <p className="mb-2 text-xs font-semibold text-ink-muted">Human final decisions · citations</p>
+        <div className="flex flex-wrap gap-2 text-xs font-medium">
+          <span className="rounded-lg bg-supports-soft px-3 py-1.5 text-supports">{teacherDecisions.supports} supports</span>
+          <span className="rounded-lg bg-refutes-soft px-3 py-1.5 text-refutes">{teacherDecisions.contradicts} contradicts</span>
+          <span className="rounded-lg bg-insufficient-soft px-3 py-1.5 text-insufficient">{teacherDecisions.inconclusive} inconclusive</span>
+          <span className="rounded-lg bg-neutral-soft px-3 py-1.5 text-ink-muted">{teacherDecisions.notReviewed} not reviewed</span>
+        </div>
+      </div>}
 
       {/* Each count is the filter for its own kind: the number a reader reacts to is the
           control they reach for next. */}

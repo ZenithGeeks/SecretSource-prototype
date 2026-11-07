@@ -53,7 +53,7 @@ _started: dict[str, tuple[float, str]] = {}  # session id -> (when it began, use
 
 
 # The web app's role ids with a screen agent (agents/screen.py ROLE_AGENTS). The Teacher has none.
-Role = Literal["researcher", "labeler", "writer"]
+Role = Literal["researcher", "labeler", "writer", "teacher"]
 
 
 class RunStart(BaseModel):

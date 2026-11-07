@@ -197,14 +197,36 @@ def test_gmail_feedback_sends_the_teacher_text_with_the_student_ready_report_att
     calls = []
     client = GoogleClassroomClient(Classroom({}, calls), Drive({"drive": []}, calls), Gmail(calls))
 
-    result = client.send_feedback_email("student@example.edu", "Essay feedback", "Please revise.", "<h1>Report</h1>")
+    result = client.send_feedback_email("student@example.edu", "Essay feedback", "Please revise.", "<h1>Report</h1><section><h4>Teacher decision</h4><p>Contradicts</p></section><section><h4>Teacher note</h4><p>Check the evidence.</p></section>")
 
     assert result == {"id": "gmail-message-1"}
     raw = calls[0][2]["body"]["raw"]
     message = message_from_bytes(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
     assert message["To"] == "student@example.edu"
     assert message["Subject"] == "Essay feedback"
-    assert any(part.get_filename() == "essay-feedback.html" and b"<h1>Report</h1>" in part.get_payload(decode=True) for part in message.walk())
+    attachment = next(part for part in message.walk() if part.get_filename() == "essay-feedback.pdf")
+    assert attachment.get_content_type() == "application/pdf"
+    import pymupdf
+    with pymupdf.open(stream=attachment.get_payload(decode=True), filetype="pdf") as document:
+        text = "".join(page.get_text() for page in document)
+        assert "Report" in text
+        assert "Contradicts" in text
+        assert "Check the evidence." in text
+
+
+def test_feedback_pdf_keeps_citations_across_multiple_pages():
+    import pymupdf
+    from app.teacher.google_client import _feedback_pdf
+
+    html = '<h1>Essay feedback</h1>' + ''.join(
+        f'<div><h2>Citation {number}</h2><p>{"Detailed feedback. " * 25}</p></div>'
+        for number in range(1, 16)
+    )
+    with pymupdf.open(stream=_feedback_pdf(html), filetype="pdf") as document:
+        text = ''.join(page.get_text() for page in document)
+        assert len(document) > 1
+        assert 'Citation 1' in text
+        assert 'Citation 15' in text
 
 
 def test_supported_attachments_prefer_pdf_then_google_docs_deterministically():

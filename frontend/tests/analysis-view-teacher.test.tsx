@@ -45,17 +45,18 @@ describe('teacher presentation of the shared analysis workflow', () => {
     expect(pdf).toHaveAttribute('data-verdict', 'supports')
     expect(pdf).toHaveTextContent('Claim 1 in the submission')
     expect(pdf.compareDocumentPosition(claim) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'CSV' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Professor result' })).toBeInTheDocument()
   })
 
-  it('shows the Figma PDF, Copy All, and CSV toolbar for Teacher analysis', () => {
+  it('shows citation counts without the analysis action toolbar', () => {
     render(<AnalysisView id="analysis-7" presentation="teacher" openPaperOnLoad />)
 
-    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'CSV' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
+    expect(screen.getByText(/source backs it/i)).toBeInTheDocument()
   })
 })

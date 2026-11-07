@@ -60,6 +60,7 @@ export function AnalysisView({
   paperLabel,
   onTeacherFeedback,
   renderClaimActions,
+  teacherDecisions,
   actionsInToolbar = false,
 }: {
   id: string | null
@@ -82,6 +83,7 @@ export function AnalysisView({
   onTeacherFeedback?: () => void
   /** Add teacher-only review controls inside the shared expanded claim card. */
   renderClaimActions?: (claim: NonNullable<Analysis['claims']>[number], index: number) => ReactNode
+  teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number }
   /** Put "Open PDF" and "Export" in the shell's toolbar (the researcher shell has one). */
   actionsInToolbar?: boolean
 }) {
@@ -249,6 +251,7 @@ export function AnalysisView({
               paper={file}
               paperLabel={presentation === 'teacher' ? paperLabel : undefined}
               teacherMode={presentation === 'teacher'}
+              teacherDecisions={teacherDecisions}
               actionsInToolbar={actionsInToolbar}
               onTeacherFeedback={presentation === 'teacher' ? onTeacherFeedback : undefined}
               // The paper itself, from page 1, in the same viewer a claim opens: reading it
