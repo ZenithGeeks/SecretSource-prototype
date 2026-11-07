@@ -707,6 +707,60 @@ async def review_for(analysis_id: str, claim_number: int, user: str | None) -> l
     return findings
 
 
+async def labels_for(analysis_id: str, claim_number: int, user: str | None) -> dict:
+    """What `user` saved for claim `claim_number` (1-based), for a coding agent to review over MCP.
+
+    Reading them counts as an AI review: a row goes to the reviews tab, so the next save of this
+    claim is marked ai_reviewed and an eval can keep labels the agent may have swayed apart.
+
+    Raises:
+        HTTPException: 404 for an analysis the caller may not label or a claim number it does not
+            have, 409 for a claim the caller has not saved.
+    """
+    analysis = await owned_analysis(analysis_id, user)
+    built = build_session(analysis)
+    claims = built["claims"]
+    if not 1 <= claim_number <= len(claims):
+        raise HTTPException(404, f"this paper has claims 1 to {len(claims)}, not {claim_number}")
+    claim_id = claims[claim_number - 1]["claim_id"]
+    who = await asyncio.to_thread(identity.annotator_for, user)
+    me = user or who  # as labeler_id: with login off there is one shared space
+    store = _store()
+    saved = await asyncio.to_thread(_saved_claim, store, built["paper_id"], me, claim_id)
+    if saved is None:
+        raise HTTPException(409, "save this claim in the labeler before an agent reviews it")
+    note = review.Finding(
+        target=review.Target(kind="claim", id=claim_id),
+        tone="asks",
+        text="A coding agent read these labels over MCP. Check what it said before you change them.",
+    )
+    row = {**_stamp(who, me, built["paper_id"]), "claim_id": claim_id}
+    row["findings"] = json.dumps([note.model_dump()], ensure_ascii=False)
+    await asyncio.to_thread(store.append, "reviews", [row])
+    names = {reference["reference_id"]: reference["label"] for reference in built["references"]}
+    return {
+        "claim": saved.claim_row["claim"],
+        "labels": [
+            {
+                "paper": names.get(label["reference_id"], label["reference_id"]),
+                "level": int(label["evidence"]),  # the tabs keep every cell as text
+                "rationale": label["rationale"],
+                "confidence": label["confidence"],
+            }
+            for label in saved.labels
+        ],
+        "passages": [
+            {
+                "paper": names.get(passage["reference_id"], passage["reference_id"]),
+                "page": passage["page"],
+                "status": passage["status"],
+                "text": passage["passage"],
+            }
+            for passage in saved.candidates
+        ],
+    }
+
+
 async def progress_for(analysis_id: str, user: str | None) -> dict:
     """Where `user` stands on one paper in the labeler, for the MCP server and the screen agent:
     how many claims they saved and had reviewed, and the first claim they have not saved, with
