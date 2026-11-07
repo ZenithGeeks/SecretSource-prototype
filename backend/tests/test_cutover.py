@@ -348,3 +348,90 @@ def test_failure_callback_builds_from_job_args_with_no_stored_row(monkeypatch):
     assert analysis["status"] == "error"
     assert analysis["stages"][0] == queued
     assert analysis["stages"][-1]["stage"] == "error"
+
+
+# --- stop: a queued or lost job ends at once, a running one is asked to stop ---
+
+
+def _running(analysis_id):
+    main.analyses[analysis_id] = {"id": analysis_id, "paper": "p.pdf", "status": "running", "owner": None,
+                                  "stages": [{"stage": "queued", "at": 1.0}], "claims": []}
+
+
+def test_stop_cancels_a_queued_job_and_keeps_the_row_as_stopped(monkeypatch):
+    _running("s1")
+    saved, channel = [], _Channel()
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: True)
+    monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(copy.deepcopy(analysis)))
+    monkeypatch.setattr(main, "redis_connection", lambda: channel)
+
+    response = TestClient(main.app).post("/analyses/s1/stop")
+
+    assert response.json() == {"id": "s1", "status": "error"}
+    assert saved[-1]["status"] == "error"
+    assert saved[-1]["stages"][-1]["stage"] == "error"
+    assert json.loads(channel.published[-1][1])["status"] == "error"
+
+
+def test_stop_ends_a_row_whose_job_is_gone(monkeypatch):
+    _running("s2")
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: False)
+    monkeypatch.setattr(main, "job_is_alive", lambda analysis_id: False)
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: None)
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+    monkeypatch.setattr(main, "redis_connection", lambda: _Channel())
+
+    assert TestClient(main.app).post("/analyses/s2/stop").json()["status"] == "error"
+    assert main.analyses["s2"]["status"] == "error"
+
+
+def test_stop_asks_a_running_job_to_stop(monkeypatch):
+    _running("s3")
+    asked = []
+    monkeypatch.setattr(main, "cancel_if_queued", lambda analysis_id: False)
+    monkeypatch.setattr(main, "job_is_alive", lambda analysis_id: True)
+    monkeypatch.setattr(main, "request_stop", asked.append)
+
+    assert TestClient(main.app).post("/analyses/s3/stop").json() == {"id": "s3", "status": "stopping"}
+    assert asked == ["s3"]
+    assert main.analyses["s3"]["status"] == "running"  # the worker writes the end
+
+
+def test_stop_refuses_a_finished_analysis():
+    main.analyses["s4"] = {"id": "s4", "paper": "p.pdf", "status": "done", "owner": None, "stages": [], "claims": []}
+
+    assert TestClient(main.app).post("/analyses/s4/stop").status_code == 409
+
+
+def test_a_stop_flag_cancels_the_pipeline_and_the_run_ends_as_stopped(monkeypatch):
+    from app import queue
+
+    class _Flag:
+        def exists(self, key):
+            return key == "analysis-stop:w1"
+
+        def delete(self, key):
+            pass
+
+    monkeypatch.setattr(queue, "redis_connection", lambda: _Flag())
+    monkeypatch.setattr(main, "redis_connection", lambda: _Channel())
+    monkeypatch.setattr(main.store, "save", lambda analysis: None)
+
+    async def forever(*args):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(main, "_in_step", forever)
+
+    async def scenario():
+        analysis = main._new_analysis("w1", "p.pdf", None)
+        main.analyses["w1"] = analysis
+        main.streams["w1"] = asyncio.Queue()
+        pipeline = asyncio.create_task(main._run_queued("w1", analysis, "p.pdf", True))
+        await asyncio.wait_for(queue._cancel_when_stopped("w1", pipeline), 5)
+        await asyncio.wait_for(pipeline, 5)
+        return analysis
+
+    analysis = asyncio.run(scenario())
+    assert analysis["status"] == "error"
+    assert analysis["message"] == main.STOPPED_MESSAGE
+    assert analysis["stages"][-1]["stage"] == "error"

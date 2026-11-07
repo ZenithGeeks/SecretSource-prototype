@@ -1,10 +1,13 @@
 /** The top of an analysis (Figma "Running" and "Results"): a small status label, the paper's title, one meta line. */
 
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Square } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { Analysis } from '../lib/api'
-import { paperName } from '../lib/api'
+import { api, paperName } from '../lib/api'
 import { duration, summarise } from '../lib/progress'
+import { Button } from './ui'
 
 /** "just now", "2 min ago", "3 h ago", "2 days ago". */
 function timeAgo(seconds: number) {
@@ -50,9 +53,35 @@ export function AnalysisHeader({ analysis }: { analysis: Analysis }) {
 
   return (
     <header className="flex flex-col gap-2">
-      <p className="type-label text-accent" aria-live="polite">{label}</p>
+      <div className="flex min-h-8 items-center justify-between gap-3">
+        <p className="type-label text-accent" aria-live="polite">{label}</p>
+        {running && <StopButton id={analysis.id} />}
+      </div>
       <h1 className="type-display tracking-[-0.01em]">{title}</h1>
       {meta.length > 0 && <p className="text-[15px] leading-6 text-ink-muted">{meta.join(' Â· ')}</p>}
     </header>
+  )
+}
+
+/** Stops a queued or running analysis. A running one ends after its current step, so the button waits for that. */
+function StopButton({ id }: { id: string }) {
+  const queryClient = useQueryClient()
+  const stop = useMutation({
+    mutationFn: () => api.stopAnalysis(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analysis', id] })
+      queryClient.invalidateQueries({ queryKey: ['analyses'] })
+    },
+  })
+  // After success the header stays until the stream brings the error stage, which unmounts this.
+  const stopping = stop.isPending || stop.isSuccess
+  return (
+    <div className="flex items-center gap-2">
+      {stop.isError && <span role="alert" className="text-xs text-refutes">{(stop.error as Error).message}</span>}
+      <Button variant="ghost" className="h-8 px-3 text-xs" disabled={stopping} onClick={() => stop.mutate()}>
+        <Square className="size-3" aria-hidden="true" />
+        {stopping ? 'Stopping…' : 'Stop'}
+      </Button>
+    </div>
   )
 }

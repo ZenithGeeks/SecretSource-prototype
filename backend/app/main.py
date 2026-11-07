@@ -106,9 +106,11 @@ from app.queue import (
     cancel_if_queued,
     enqueue_analysis,
     enqueue_distill,
+    STOPPED_MESSAGE,
     job_is_alive,
     pubsub_client,
     redis_connection,
+    request_stop,
 )
 from app.screen_bridge import router as bridge_router
 from app.teacher.router import router as teacher_router
@@ -673,6 +675,11 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         analysis["status"] = "error"
         analysis["message"] = str(error)
         await _publish(analysis_id, "error", message=str(error))
+    except asyncio.CancelledError:
+        # Its owner pressed Stop (queue._cancel_when_stopped); the run ends like a failed one.
+        analysis["status"] = "error"
+        analysis["message"] = STOPPED_MESSAGE
+        await _publish(analysis_id, "error", message=STOPPED_MESSAGE)
     finally:
         ANALYSIS_DURATION_SECONDS.observe(time.monotonic() - started_at)
         ANALYSES_FINISHED.labels(status=analysis["status"]).inc()
@@ -1017,6 +1024,48 @@ async def delete_analysis(analysis_id: str, user: str | None = Depends(current_u
             raise HTTPException(409, "this analysis is still running; delete it once it finishes")
     await _delete_one(analysis_id)
     return {"deleted": analysis_id}
+
+
+@app.post("/analyses/{analysis_id}/stop")
+async def stop_analysis(analysis_id: str, user: str | None = Depends(current_user)):
+    """Stop a queued or running analysis; the row stays, as "error". A queued job is cancelled
+    and a job no worker holds (lost in a restart) is ended here. A running one is asked to
+    stop and ends itself within a few seconds of its current step."""
+    analysis = await asyncio.to_thread(_mine, analysis_id, user)
+    if analysis["status"] != "running":
+        raise HTTPException(409, "this analysis has already finished")
+    if await asyncio.to_thread(cancel_if_queued, analysis_id):
+        await _end_stopped(analysis)
+        return {"id": analysis_id, "status": "error"}
+    alive = await asyncio.to_thread(job_is_alive, analysis_id)
+    if alive is None:
+        raise HTTPException(503, "could not reach the queue; try again")
+    if alive is False:
+        # The job may have just finished; its own saved row wins over this stale one.
+        stored = await asyncio.to_thread(store.load, analysis_id)
+        if stored is not None and stored.get("status") != "running":
+            raise HTTPException(409, "this analysis has already finished")
+        await _end_stopped(analysis)
+        return {"id": analysis_id, "status": "error"}
+    await asyncio.to_thread(request_stop, analysis_id)
+    return {"id": analysis_id, "status": "stopping"}
+
+
+async def _end_stopped(analysis: dict) -> None:
+    """Mark an analysis no worker runs as stopped: save it, close its stream, tell the others."""
+    analysis["status"] = "error"
+    analysis["message"] = STOPPED_MESSAGE
+    analysis["stages"].append({"stage": "error", "message": STOPPED_MESSAGE, "at": round(time.time(), 1)})
+    await asyncio.to_thread(store.save, analysis)
+    with _load_lock:
+        queue = streams.pop(analysis["id"], None)
+    if queue is not None:
+        queue.put_nowait(None)
+    try:
+        snapshot = json.dumps(analysis, default=str)
+        await asyncio.to_thread(redis_connection().publish, f"analysis:{analysis['id']}", snapshot)
+    except Exception as error:
+        logger.warning("publishing the stop of analysis %s to Redis failed: %s", analysis["id"], error)
 
 
 @app.get("/analyses/{analysis_id}/events")

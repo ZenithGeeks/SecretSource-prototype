@@ -1,4 +1,4 @@
-/** The researcher's Results and Running screens: count tiles that filter, one Export menu, one Stop action. */
+/** The researcher's Results and Running screens: count tiles that filter, one Export menu, and Stop while a run is going. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -28,6 +28,7 @@ vi.mock('../src/lib/csv', async (importOriginal) => ({
 }))
 
 import { AnalysisView } from '../src/components/AnalysisView'
+import { api } from '../src/lib/api'
 import { downloadText } from '../src/lib/csv'
 
 function finished() {
@@ -100,13 +101,21 @@ describe('researcher results', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Refuted claim.')))
   })
 
-  it('shows results so far while a run is going, with no stop or export action', async () => {
+  it('shows results so far while a run is going, with Stop and no export action', async () => {
+    const stop = vi.spyOn(api, 'stopAnalysis').mockResolvedValue({ id: 'a1', status: 'stopping' })
     data.analysis = { ...finished(), status: 'running', stages: [{ stage: 'extracting', at: 1 }] }
     renderView()
 
     expect(await screen.findByText('Results so far')).toBeInTheDocument()
-    // There is no stop endpoint; deleting is the only thing the gateway offers, and it is not a stop.
-    expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(stop).toHaveBeenCalledWith('a1'))
+    // A running job ends after its current step, so the button waits for the stream.
+    expect(await screen.findByRole('button', { name: 'Stopping…' })).toBeDisabled()
+  })
+
+  it('offers no Stop once a run has finished', () => {
+    renderView()
+    expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument()
   })
 })
