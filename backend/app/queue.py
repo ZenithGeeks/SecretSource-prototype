@@ -36,6 +36,12 @@ tracer = trace.get_tracer(__name__)
 _connection: redis.Redis | None = None
 _queue: Queue | None = None
 
+# Stop: RQ's own stop-job command kills a forked work horse, and AnalysisWorker is a SimpleWorker
+# with none. So the gateway sets this key and the running job cancels its own pipeline.
+STOP_KEY = "analysis-stop:{}"
+STOP_POLL_SECONDS = 2.0
+STOPPED_MESSAGE = "Stopped before it finished."
+
 _ALIVE_STATUSES = {JobStatus.QUEUED, JobStatus.STARTED, JobStatus.DEFERRED, JobStatus.SCHEDULED}
 
 
@@ -108,7 +114,12 @@ def run_analysis_job(
                 }
                 with tracer.start_as_current_span("analysis", attributes=attributes):
                     # _run_queued directly: RQ already did the queueing.
-                    await main._run_queued(analysis_id, analysis, paper, verify)
+                    pipeline = asyncio.create_task(main._run_queued(analysis_id, analysis, paper, verify))
+                    watcher = asyncio.create_task(_cancel_when_stopped(analysis_id, pipeline))
+                    try:
+                        await pipeline
+                    finally:
+                        watcher.cancel()
             finally:
                 ANALYSES_RUNNING.dec()
 
@@ -129,6 +140,26 @@ def run_analysis_job(
             main.streams.pop(analysis_id, None)
 
     return asyncio.run(run())
+
+
+def request_stop(analysis_id: str) -> None:
+    """Ask the worker running this analysis to stop it. The key outlives any job."""
+    redis_connection().set(STOP_KEY.format(analysis_id), 1, ex=JOB_TIMEOUT)
+
+
+async def _cancel_when_stopped(analysis_id: str, pipeline: asyncio.Task) -> None:
+    """Cancel `pipeline` once its owner asks to stop it. _run_queued turns the cancel into an
+    error row. Threads already running (a check, Docling) still finish before the job returns."""
+    key = STOP_KEY.format(analysis_id)
+    while not pipeline.done():
+        try:
+            if await asyncio.to_thread(redis_connection().exists, key):
+                pipeline.cancel()
+                await asyncio.to_thread(redis_connection().delete, key)
+                return
+        except redis.exceptions.RedisError as error:
+            logger.warning("could not read the stop flag of %s: %s", analysis_id, error)
+        await asyncio.sleep(STOP_POLL_SECONDS)
 
 
 def _on_analysis_job_failure(job: Job, connection, *exc_info) -> None:

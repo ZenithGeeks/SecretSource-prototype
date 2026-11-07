@@ -245,6 +245,10 @@ export const api = {
 
   deleteAnalysis: (id: string) => request<{ deleted: string }>(`/analyses/${id}`, { method: 'DELETE' }),
 
+  /** "error" when it ended at once (still queued); "stopping" when the worker ends it after its current step. */
+  stopAnalysis: (id: string) =>
+    request<{ id: string; status: 'error' | 'stopping' }>(`/analyses/${id}/stop`, { method: 'POST' }),
+
   startAnalysis: (paper: string, verify: boolean) =>
     request<{ id: string }>('/analyses', {
       method: 'POST',
