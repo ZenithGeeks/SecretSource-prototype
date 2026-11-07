@@ -80,7 +80,7 @@ function StopButton({ id }: { id: string }) {
       {stop.isError && <span role="alert" className="text-xs text-refutes">{(stop.error as Error).message}</span>}
       <Button variant="ghost" className="h-8 px-3 text-xs" disabled={stopping} onClick={() => stop.mutate()}>
         <Square className="size-3" aria-hidden="true" />
-        {stopping ? 'Stopping…' : 'Stop'}
+        {stopping ? 'Stoppingâ€¦' : 'Stop'}
       </Button>
     </div>
   )

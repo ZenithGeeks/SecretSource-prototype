@@ -398,7 +398,8 @@ def test_stop_asks_a_running_job_to_stop(monkeypatch):
 
 
 def test_stop_refuses_a_finished_analysis():
-    main.analyses["s4"] = {"id": "s4", "paper": "p.pdf", "status": "done", "owner": None, "stages": [], "claims": []}
+    main.analyses["s4"] = {"id": "s4", "paper": "p.pdf", "status": "done", "owner": None,
+                           "stages": [], "claims": []}
 
     assert TestClient(main.app).post("/analyses/s4/stop").status_code == 409
 

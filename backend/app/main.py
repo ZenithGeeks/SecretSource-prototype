@@ -103,10 +103,10 @@ from app.pipeline.verify import (
     verify_claim,
 )
 from app.queue import (
+    STOPPED_MESSAGE,
     cancel_if_queued,
     enqueue_analysis,
     enqueue_distill,
-    STOPPED_MESSAGE,
     job_is_alive,
     pubsub_client,
     redis_connection,

@@ -111,7 +111,7 @@ describe('researcher results', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(stop).toHaveBeenCalledWith('a1'))
     // A running job ends after its current step, so the button waits for the stream.
-    expect(await screen.findByRole('button', { name: 'Stopping…' })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: 'Stoppingâ€¦' })).toBeDisabled()
   })
 
   it('offers no Stop once a run has finished', () => {
