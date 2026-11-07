@@ -29,8 +29,9 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `submit_analysis` | server, `data_agent` | Starts an analysis of a DOI, arXiv ID or URL in the background | `paper` | `{id, status}`; poll `get_analysis` |
 | `load_memory` | server, `data_agent` only | What the person studied or asked in earlier chats (SPEC.md), then findings from their own analyses, at most 5. Not on MCP or `/commands` | `query` | `{memories: [{content, timestamp}]}` |
 | `labeling_progress` | server, `data_agent`, `labeler_agent` | Where the person stands on one paper in the labeler: claims saved and reviewed, and the first unsaved claim with its passages. Reads only | `analysis_id` | `{claims, saved, reviewed, next_unsaved}` |
-| `labeling_papers` | server, `labeler_agent` | The papers shared for labeling, at most 30, and how many claims the person saved on each | none | `{papers: [{id, title, topic, claims, saved}]}` |
-| `claim_passages` | server, `labeler_agent` | One claim's retrieved passages, best first, at most 8. No verdict and no score | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, passages: [{paper, page, rank, text}]}` |
+| `labeling_papers` | server, `labeler_agent`, MCP | The papers shared for labeling, at most 30, and how many claims the person saved on each | none | `{papers: [{id, title, topic, claims, saved}]}` |
+| `claim_passages` | server, `labeler_agent`, MCP | One claim's retrieved passages, best first, at most 8. No verdict and no score | `analysis_id`, `claim_number` (from 1) | `{claim, sentence, passages: [{paper, page, rank, text}]}` |
+| `saved_labels` | server, MCP only | What the person saved for one claim: a level (1-4), rationale and confidence per cited paper, and each passage they marked relevant or rejected. Saved claims only; marks the claim AI-reviewed | `analysis_id`, `claim_number` (from 1) | `{claim, labels: [{paper, level, rationale, confidence}], passages: [{paper, page, status, text}]}` |
 | `list_drafts` | server, `author_agent` | The person's drafts, most recently changed first, at most 30 | none | `{drafts: [{id, title, last_checked, checking_now}]}` |
 | `draft_issues` | server, `author_agent` | A draft's open citations from its last check (refuted, not backed, missing key) and its .bib and cite warnings, at most 20 each | `draft_id` | `{checked, citations: [{key, file, line, sentence, verdict, why}], warnings}` |
 
@@ -145,6 +146,14 @@ MCP also has one tool the screen agent does not: `review_claim(analysis_id, clai
 labeler's Review from Ask AI. It runs on the gateway with the same rules as the button: only a
 claim the caller has saved, it never changes a label, and what it found goes to the reviews tab
 (`docs/labeling.md`). It needs no tab, and it can take over a minute.
+
+The coding agent can also review claims itself, with no judge on the gateway: `labeling_papers`
+lists the papers, `claim_passages` gives a claim's passages, and `saved_labels` gives what the
+person saved for it. `saved_labels` works only on a saved claim, so the person's own decision
+comes first, and reading it writes a row to the reviews tab, as `review_claim` does: the next
+save of that claim is marked `ai_reviewed`, so an eval can keep labels the agent may have
+swayed apart. In Claude Code, for example: "Review my saved claims on paper `<id>`: for each one,
+read `claim_passages` and `saved_labels` and tell me where you read a passage differently."
 
 The tools that only read are marked `readOnlyHint`, so a client can run them without asking each
 time.

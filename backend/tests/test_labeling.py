@@ -1813,3 +1813,38 @@ def test_progress_for_names_the_first_claim_the_person_has_not_saved(api, agent)
     assert before["next_unsaved"]["passages"]
     assert after["saved"] == 1
     assert after["next_unsaved"]["number"] == 2  # claim 1 is saved, so the next one is offered
+
+
+def test_an_agent_reads_the_saved_labels_of_a_claim(api, agent):
+    client, db, _ = api
+    first, _ = _save_claim(client, evidence=3, rationale="Table 2 reports it.")
+
+    saved = asyncio.run(labeling.labels_for("a1", 1, None))
+
+    assert saved["labels"] == [
+        {"paper": "Ref B", "level": 3, "rationale": "Table 2 reports it.", "confidence": "medium"}
+    ]
+    [passage] = saved["passages"]
+    assert (passage["status"], passage["text"]) == ("relevant", first["passage"])
+
+
+def test_reading_saved_labels_marks_the_next_save_ai_reviewed(api, agent):
+    client, db, _ = api
+    _save_claim(client, evidence=4)
+
+    asyncio.run(labeling.labels_for("a1", 1, None))
+    _save_claim(client, evidence=3)
+
+    [row] = db.tabs["reviews"]
+    assert json.loads(row["findings"])[0]["tone"] == "asks"
+    assert [db.tabs[tab][-1]["ai_reviewed"] for tab in ("claims", "candidates", "labels")] == ["1", "1", "1"]
+
+
+def test_an_agent_cannot_read_labels_of_an_unsaved_claim_or_a_claim_that_is_not_there(api, agent):
+    with pytest.raises(HTTPException) as unsaved:
+        asyncio.run(labeling.labels_for("a1", 1, None))
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(labeling.labels_for("a1", 99, None))
+
+    assert unsaved.value.status_code == 409
+    assert missing.value.status_code == 404
