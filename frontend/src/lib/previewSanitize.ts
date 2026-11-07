@@ -11,10 +11,48 @@ const URL_ATTRIBUTES = new Set(['href', 'xlink:href', 'src', 'action', 'formacti
 /** Elements that run or load something whatever their attributes say. `animate` and `set` can
  * rewrite an SVG link's href after this check has passed it. */
 const REMOVED_ELEMENTS = new Set(['script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'base', 'meta', 'link', 'form', 'animate', 'set'])
+/** Old attributes that still load an image: <table background>, <img lowsrc>, <img dynsrc>. */
+const LEGACY_LOADS = new Set(['background', 'lowsrc', 'dynsrc'])
 const CSS_URL = /url\(\s*(['"]?)(.*?)\1\s*\)/gi
 /** CSS that can load something in a form CSS_URL cannot read: a backslash can spell any of it as
  * an escape, @import needs no url(), and image-set() takes a bare string. */
 const CSS_REFUSED = /\\|@import|image-set/i
+
+/** URL properties that start a request as soon as they are set, on an element not in any page
+ * too: an <img> fetches its src while LaTeX.js is still building, before sanitizePreview runs. */
+const LOADING_PROPERTIES: [string, string][] = [
+  ['HTMLImageElement', 'src'],
+  ['HTMLImageElement', 'srcset'],
+  ['HTMLSourceElement', 'src'],
+  ['HTMLSourceElement', 'srcset'],
+  ['HTMLMediaElement', 'src'],
+  ['HTMLVideoElement', 'poster'],
+  ['HTMLTrackElement', 'src'],
+  ['HTMLInputElement', 'src'],
+  ['HTMLLinkElement', 'href'],
+  ['HTMLScriptElement', 'src'],
+  ['HTMLIFrameElement', 'src'],
+  ['HTMLEmbedElement', 'src'],
+  ['HTMLObjectElement', 'data'],
+]
+const LOADING_TAGS = new Set(['img', 'source', 'video', 'audio', 'track', 'input', 'link', 'script', 'iframe', 'embed', 'object', 'image', 'feimage', 'use'])
+const LOADING_ATTRIBUTES = new Set(['src', 'srcset', 'poster', 'href', 'data'])
+
+/** Whether `name` on `element` is a URL the browser would fetch. */
+function isLoad(element: Element, name: string): boolean {
+  return LOADING_TAGS.has(element.localName.toLowerCase()) && LOADING_ATTRIBUTES.has(name.toLowerCase().replace(/^.*:/, ''))
+}
+
+/** Whether a URL may be set on `element` as `name`, while the preview renders and in what it
+ * shows: only an app-supplied image as an <img src>, or a #fragment within the document (an SVG
+ * <use href="#glyph">). Any other load is refused, https too: a third-party draft must not make
+ * a request the author never asked for when they open it. */
+function mayLoad(element: Element, name: string, value: unknown, trustedImages: ReadonlySet<string>): boolean {
+  if (!isLoad(element, name)) return true
+  const url = String(value)
+  if (url.startsWith('#') && name.toLowerCase().replace(/^.*:/, '') === 'href') return true
+  return element.localName.toLowerCase() === 'img' && name.toLowerCase() === 'src' && trustedImages.has(url)
+}
 
 /** Without C0 and C1 control characters and DEL. Browsers drop tabs and newlines from a URL
  * before reading its scheme, so they must not hide one here. */
@@ -53,29 +91,23 @@ export function safeUrl(url: string): string | null {
   return isSafe(clean) && isSafe(normalized(decodedEntities(url))) ? clean : null
 }
 
-function isSafeSrcset(srcset: string): boolean {
-  return srcset.split(',').every((candidate) => safeUrl(candidate.trim().split(/\s+/)[0]) !== null)
-}
-
-/** CSS with a url() outside the allowlist, or anything else that can load from a URL. */
+/** CSS that can load from a URL: any url() but a #fragment (an unclosed `url(` too, which CSS
+ * still reads to the end of the input), or anything CSS_REFUSED names. */
 function isUnsafeCss(css: string): boolean {
   if (CSS_REFUSED.test(css)) return true
-  return [...css.matchAll(CSS_URL)].some((match) => safeUrl(match[2]) === null)
+  const fragments = [...css.matchAll(CSS_URL)].filter((match) => match[2].trim().startsWith('#')).length
+  return (css.match(/url\(/gi)?.length ?? 0) !== fragments
 }
 
 function cleanAttributes(element: Element, trustedImages: ReadonlySet<string>): void {
   for (const attribute of [...element.attributes]) {
     const name = attribute.name.toLowerCase()
-    if (name.startsWith('on')) {
+    if (name.startsWith('on') || LEGACY_LOADS.has(name)) {
       element.removeAttributeNode(attribute)
     } else if (name === 'style') {
       if (isUnsafeCss(attribute.value)) element.removeAttributeNode(attribute)
-    } else if (name === 'src' && element.localName === 'img') {
-      // Only an image the app supplied: any other, https too, would be a request the author never
-      // asked for, made when they open a third-party draft.
-      if (!trustedImages.has(attribute.value)) element.removeAttributeNode(attribute)
-    } else if (name === 'srcset') {
-      if (element.localName === 'img' || !isSafeSrcset(attribute.value)) element.removeAttributeNode(attribute)
+    } else if (isLoad(element, name)) {
+      if (!mayLoad(element, name, attribute.value, trustedImages)) element.removeAttributeNode(attribute)
     } else if (URL_ATTRIBUTES.has(name) || URL_ATTRIBUTES.has(attribute.localName.toLowerCase())) {
       const url = safeUrl(attribute.value)
       if (url === null) element.removeAttributeNode(attribute)
@@ -98,6 +130,66 @@ function finishLink(link: Element, hadUrl: boolean): void {
   } else {
     link.setAttribute('target', '_blank')
     link.setAttribute('rel', 'noopener noreferrer')
+  }
+}
+
+/**
+ * Runs `render` with the setters LaTeX.js, KaTeX and svg.js use to put a URL on an element
+ * refused unless mayLoad allows it: the URL properties above, setAttribute, setAttributeNS,
+ * setAttributeNode(NS) and Attr's value. A refused URL is never set, so nothing is fetched even
+ * before sanitizePreview sees the result. `render` must be synchronous (LaTeX.js's parse and
+ * domFragment are): no other code runs while the guards are in, and `finally` takes them out.
+ *
+ * Not covered: markup parsed into the live document (innerHTML, insertAdjacentHTML,
+ * createContextualFragment). Of the three libraries only svg.js does that, with markup it writes
+ * itself, never draft text.
+ *
+ * LaTeX.js builds with the global `document` (createElement, createTextNode,
+ * createDocumentFragment), and `window.document` cannot be replaced, so the page cannot be built
+ * in an inert document instead.
+ */
+export function withoutUntrustedLoads<T>(trustedImages: ReadonlySet<string>, render: () => T): T {
+  const restores: (() => void)[] = []
+  const guard = (proto: object, property: string, wrap: (set: (this: unknown, value: unknown) => void) => (this: unknown, value: unknown) => void) => {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, property)
+    if (!descriptor?.set || !descriptor.configurable) return
+    Object.defineProperty(proto, property, { ...descriptor, set: wrap(descriptor.set) })
+    restores.push(() => Object.defineProperty(proto, property, descriptor))
+  }
+  const element = Element.prototype
+  const methods = { setAttribute: element.setAttribute, setAttributeNS: element.setAttributeNS, setAttributeNode: element.setAttributeNode, setAttributeNodeNS: element.setAttributeNodeNS }
+  try {
+    for (const [type, property] of LOADING_PROPERTIES) {
+      const proto = (globalThis as unknown as Record<string, { prototype?: object } | undefined>)[type]?.prototype
+      if (!proto) continue
+      guard(proto, property, (set) =>
+        function (this: unknown, value: unknown) {
+          if (mayLoad(this as Element, property, value, trustedImages)) set.call(this, value)
+        },
+      )
+    }
+    guard(Attr.prototype, 'value', (set) =>
+      function (this: unknown, value: unknown) {
+        const attr = this as Attr
+        if (!attr.ownerElement || mayLoad(attr.ownerElement, attr.name, value, trustedImages)) set.call(this, value)
+      },
+    )
+    restores.push(() => Object.assign(element, methods))
+    element.setAttribute = function (this: Element, name: string, value: string) {
+      if (mayLoad(this, name, value, trustedImages)) methods.setAttribute.call(this, name, value)
+    }
+    element.setAttributeNS = function (this: Element, ns: string | null, name: string, value: string) {
+      if (mayLoad(this, name, value, trustedImages)) methods.setAttributeNS.call(this, ns, name, value)
+    }
+    element.setAttributeNode = function (this: Element, attr: Attr) {
+      return mayLoad(this, attr.name, attr.value, trustedImages) ? methods.setAttributeNode.call(this, attr) : null
+    }
+    element.setAttributeNodeNS = function (this: Element, attr: Attr) {
+      return mayLoad(this, attr.name, attr.value, trustedImages) ? methods.setAttributeNodeNS.call(this, attr) : null
+    }
+    return render()
+  } finally {
+    for (const restore of restores.reverse()) restore()
   }
 }
 

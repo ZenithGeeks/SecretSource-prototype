@@ -105,6 +105,47 @@ describe('sanitizePreview', () => {
   test.each([
     ['src', 'video'],
     ['poster', 'video'],
+    ['src', 'audio'],
+    ['src', 'source'],
+    ['srcset', 'source'],
+    ['src', 'input'],
+    ['src', 'track'],
+  ])('any %s on <%s> goes, https too: it would load on open', (attribute, tag) => {
+    for (const url of [`${SCRIPT}void(0)`, 'https://example.com/x']) {
+      const element = document.createElement(tag)
+      element.setAttribute(attribute, url)
+      const root = document.createElement('div')
+      root.append(element)
+      sanitizePreview(root)
+      expect(element.hasAttribute(attribute)).toBe(false)
+    }
+  })
+
+  test.each([
+    ['image', 'href'],
+    ['image', 'xlink:href'],
+    ['use', 'href'],
+    ['feImage', 'href'],
+  ])('an SVG <%s %s> keeps only a #fragment', (tag, attribute) => {
+    const svg = 'http://www.w3.org/2000/svg'
+    const ns = attribute === 'xlink:href' ? 'http://www.w3.org/1999/xlink' : null
+    const outside = document.createElementNS(svg, tag)
+    outside.setAttributeNS(ns, attribute, 'https://example.com/x.svg#a')
+    const inside = document.createElementNS(svg, tag)
+    inside.setAttributeNS(ns, attribute, '#glyph')
+    const root = document.createElement('div')
+    root.append(outside, inside)
+    sanitizePreview(root)
+    expect(outside.hasAttribute(attribute)).toBe(false)
+    expect(inside.getAttribute(attribute)).toBe('#glyph')
+  })
+
+  test.each(['background', 'lowsrc', 'dynsrc'])('the old %s attribute goes', (attribute) => {
+    const root = cleaned(`<table ${attribute}="https://example.com/x.png"></table>`)
+    expect(root.querySelector('table')!.hasAttribute(attribute)).toBe(false)
+  })
+
+  test.each([
     ['action', 'div'],
     ['formaction', 'button'],
     ['data', 'div'],
@@ -127,10 +168,10 @@ describe('sanitizePreview', () => {
     expect(root.querySelector('text')?.textContent).toBe('x')
   })
 
-  test('a srcset with one unsafe candidate goes whole', () => {
-    const root = cleaned(`<source class="bad" srcset="https://example.com/a.png 1x, data:image/png;base64,AA 2x"><source class="good" srcset="https://example.com/a.png 1x, https://example.com/b.png 2x">`)
+  test('a <source srcset> goes, https candidates too', () => {
+    const root = cleaned(`<source class="bad" srcset="https://example.com/a.png 1x, data:image/png;base64,AA 2x"><source class="https" srcset="https://example.com/a.png 1x, https://example.com/b.png 2x">`)
     expect(root.querySelector('.bad')!.hasAttribute('srcset')).toBe(false)
-    expect(root.querySelector('.good')!.hasAttribute('srcset')).toBe(true)
+    expect(root.querySelector('.https')!.hasAttribute('srcset')).toBe(false)
   })
 
   test('an <img srcset> goes like any other image URL the app did not supply', () => {
@@ -148,6 +189,20 @@ describe('sanitizePreview', () => {
   test('SVG animation that could rewrite an href is removed', () => {
     const root = cleaned(`<svg><a href="https://example.com/"><set attributeName="href"></set><animate attributeName="href"></animate></a></svg>`)
     expect(root.querySelector('set, animate')).toBeNull()
+  })
+
+  test('a style with any url() but a #fragment goes, https and an unclosed url( too', () => {
+    const root = cleaned(
+      `<p id="https" style="background:url(https://example.com/x.png)"></p>` +
+        `<p id="quoted" style="background:url( 'https://example.com/x.png' )"></p>` +
+        `<p id="unclosed" style="background:url(https://example.com/x.png"></p>` +
+        `<p id="mixed" style="fill:url(#g); background:url(https://example.com/x.png)"></p>` +
+        `<p id="fragment" style="fill:url(#g)"></p>` +
+        `<style id="sheet">p { background: url(https://example.com/x.png) }</style>`,
+    )
+    for (const id of ['https', 'quoted', 'unclosed', 'mixed']) expect(root.querySelector(`#${id}`)!.hasAttribute('style')).toBe(false)
+    expect(root.querySelector('#fragment')!.getAttribute('style')).toBe('fill:url(#g)')
+    expect(root.querySelector('#sheet')).toBeNull()
   })
 
   test('a <style> or style attribute goes only for an unsafe url(), @import or CSS escape', () => {
