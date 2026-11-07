@@ -47,6 +47,7 @@ async def teacher_essay_review(course_id: str, assignment_id: str, student_id: s
     snapshot = None
     if submission.analysis_id:
         from fastapi import HTTPException
+
         from app.main import _owned
 
         try:

@@ -15,7 +15,12 @@ from app import config
 from app.auth import current_user
 from app.teacher.analysis import TeacherEssayAnalysisService, _citation_id, _citation_key
 from app.teacher.crypto import RefreshTokenCipher
-from app.teacher.google_client import GoogleApiError, GoogleClassroomClient, _feedback_pdf, select_supported_attachments
+from app.teacher.google_client import (
+    GoogleApiError,
+    GoogleClassroomClient,
+    _feedback_pdf,
+    select_supported_attachments,
+)
 from app.teacher.models import ConnectedTeacher, TeacherCourse, TeacherCoursework, TeacherSubmission
 from app.teacher.oauth import (
     GoogleAuthorizationCodeTransport,
