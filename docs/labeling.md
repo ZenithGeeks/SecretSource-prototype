@@ -44,6 +44,8 @@ the labeled papers by venue rank can be made from the export. Papers listed befo
    relevant**. Add what retrieval missed (a claim, or a passage in a cited paper). Give every
    reference you called relevant a 1-4 level and the reason (`1`-`4` keys label the reference on
    the right). **Save** writes that claim's rows; **Ctrl/⌘+S** works too.
+   A cited paper the pipeline could not download is still in the add form, marked "(no PDF)":
+   paste the passage from your own copy, with its page, and give it a level. It never opens on the right.
 
 The 1-4 labels grade how well the reference passage backs the claim (1 no support, 2 weak, 3 clear, 4 strong). The wording is `LEVELS` in `frontend/src/lib/labeling.ts`. How to choose a level, with examples and the hard cases, is in `docs/annotation-guideline.md`.
 

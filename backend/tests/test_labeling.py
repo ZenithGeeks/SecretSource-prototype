@@ -340,6 +340,61 @@ def test_misses_are_recorded(api):
     assert db.tabs["candidates"][0]["origin"] == "human_added"
 
 
+UNREAD = {
+    "ref": "b2",
+    "title": "Chain-of-Thought Is Not Explainability",
+    "authors": ["Fazl Barez"],
+    "year": "2020",
+}
+
+
+def _with_an_unread_citation() -> dict:
+    """ANALYSIS whose first claim also cites [b2], a work with no PDF (#824)."""
+    read = {"ref": "b5", "title": "Ref B", "authors": [], "year": ""}
+    first = {**ANALYSIS["claims"][0], "citations": [read, UNREAD]}
+    return {**ANALYSIS, "claims": [first, ANALYSIS["claims"][1]]}
+
+
+def test_session_lists_cited_works_that_have_no_pdf():
+    session = labeling.build_session(_with_an_unread_citation())
+
+    assert [r["reference_id"] for r in session["references"]] == ["refB-aaaaaaaaaaaa"]
+    assert session["unread"] == [
+        {
+            "reference_id": "unread-b2",
+            "file": "",
+            "label": "Chain-of-Thought Is Not Explainability",
+            "ref": "b2",
+            "authors": ["Fazl Barez"],
+            "year": "2020",
+        }
+    ]
+    assert labeling.build_session(ANALYSIS)["unread"] == []
+
+
+def test_save_keeps_a_passage_and_a_level_for_a_work_with_no_pdf(api):
+    client, db, app = api
+    app.dependency_overrides[labeling.owned_analysis] = _with_an_unread_citation
+    body = {
+        "candidates": [
+            {
+                "claim_id": "paperA-0123456789ab#0",
+                "reference_id": "unread-b2",
+                "origin": "human_added",
+                "status": "relevant",
+                "page": 3,
+                "passage": "CoT traces are not faithful explanations.",
+            }
+        ],
+        "labels": [{"claim_id": "paperA-0123456789ab#0", "reference_id": "unread-b2", "evidence": 3}],
+    }
+
+    assert client.post("/labeling/sessions/a1/save", json=body).status_code == 200
+    saved = client.get("/labeling/sessions/a1").json()["saved"]
+    assert [r["reference_id"] for r in saved["candidates"]] == ["unread-b2"]
+    assert [r["evidence"] for r in saved["labels"]] == ["3"]
+
+
 def test_unconfigured_store_is_a_503_with_setup_message(api, monkeypatch):
     client, _, _ = api
 
