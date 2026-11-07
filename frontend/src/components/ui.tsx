@@ -73,6 +73,7 @@ export function MenuItem({ className, type = 'button', ...props }: ComponentProp
       className={cn(
         'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink',
         'hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent',
+        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
         className,
       )}
       {...props}
