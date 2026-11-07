@@ -157,9 +157,37 @@ def build_session(analysis: dict) -> dict:
         "title": analysis.get("title") or Path(analysis["file"]).name,
         "claims": claims,
         "references": list(references.values()),
+        "unread": _unread_references(analysis, list(references.values())),
         # Where the paper cites each reference, so a click on "[12]" can open that reference.
         "markers": analysis.get("markers") or [],
     }
+
+
+def _unread_references(analysis: dict, read: list[dict]) -> list[dict]:
+    """The works the claims cite that have no PDF (#824), so a person can still add a passage
+    from one and give it a level. They have no file: retrieval and the reference viewer skip them.
+    """
+    read_refs = {r["ref"] for r in read if r["ref"]}
+    read_titles = {r["label"].casefold() for r in read}
+    unread: dict[str, dict] = {}
+    for claim in analysis.get("claims", []):
+        for citation in claim.get("citations") or []:
+            ref = citation.get("ref", "")
+            title = citation.get("title") or citation.get("label") or ref
+            if not ref or ref in read_refs or title.casefold() in read_titles:
+                continue
+            unread.setdefault(
+                f"unread-{ref}",
+                {
+                    "reference_id": f"unread-{ref}",
+                    "file": "",
+                    "label": title,
+                    "ref": ref,
+                    "authors": citation.get("authors", []),
+                    "year": citation.get("year", ""),
+                },
+            )
+    return list(unread.values())
 
 
 async def labeler_id(who: str = Depends(annotator), user: str | None = Depends(current_user)) -> str:
@@ -571,6 +599,7 @@ async def save(
     extracted = {c["claim_id"]: c for c in built["claims"]}
     retrieved = {cand["cand_id"]: (c["claim_id"], cand) for c in built["claims"] for cand in c["candidates"]}
     references = {r["reference_id"] for r in built["references"]}
+    unread = {r["reference_id"] for r in built["unread"]}
     stamp = _stamp(who, me, paper_id)
 
     def claim_known(claim_id: str, origin: str) -> bool:
@@ -613,8 +642,8 @@ async def save(
                 raise HTTPException(422, f"unknown passage for {item.claim_id}")
             row["cand_id"] = _candidate_id(item.claim_id, item.reference_id, item.rank or 0, item.passage)
         else:
-            if item.reference_id not in references:
-                raise HTTPException(422, f"{item.reference_id} is not a paper this analysis read")
+            if item.reference_id not in references | unread:
+                raise HTTPException(422, f"{item.reference_id} is not a paper this analysis cites")
             row["cand_id"] = _candidate_id(item.claim_id, item.reference_id, 0, item.passage)
         candidates.append({**stamp, **row})
 
@@ -622,8 +651,8 @@ async def save(
         cid: c["claim"] for cid, c in extracted.items() if cid not in {x["claim_id"] for x in claims}
     }
     for item in body.labels:
-        if item.reference_id not in references:
-            raise HTTPException(422, f"{item.reference_id} is not a paper this analysis read")
+        if item.reference_id not in references | unread:
+            raise HTTPException(422, f"{item.reference_id} is not a paper this analysis cites")
         if not claim_known(item.claim_id, "human_added" if "#h-" in item.claim_id else "extracted"):
             raise HTTPException(422, f"unknown claim {item.claim_id}")
         row = item.model_dump()
@@ -737,7 +766,7 @@ async def labels_for(analysis_id: str, claim_number: int, user: str | None) -> d
     row = {**_stamp(who, me, built["paper_id"]), "claim_id": claim_id}
     row["findings"] = json.dumps([note.model_dump()], ensure_ascii=False)
     await asyncio.to_thread(store.append, "reviews", [row])
-    names = {reference["reference_id"]: reference["label"] for reference in built["references"]}
+    names = {r["reference_id"]: r["label"] for r in [*built["references"], *built["unread"]]}
     return {
         "claim": saved.claim_row["claim"],
         "labels": [
