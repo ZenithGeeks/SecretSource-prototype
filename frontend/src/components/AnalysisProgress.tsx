@@ -131,13 +131,17 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
 
   // A finished run is one quiet line; its details open on request.
   if (!running && !details) {
-    const parts = [
-      count(progress.claims, 'claim'),
-      checked ? count(progress.checksDone, 'check') : 'sources not checked',
+    // These count checks (one per claim and cited work), not claims, unlike the tiles below.
+    const outcomes = [
       progress.verdicts.supports ? `${progress.verdicts.supports} backed` : '',
       progress.verdicts.refutes ? `${progress.verdicts.refutes} contradicted` : '',
       progress.verdicts.insufficient ? `${progress.verdicts.insufficient} silent` : '',
-      progress.failed ? `${progress.failed} couldn't check` : '',
+      progress.failed ? `${progress.failed} couldn't run` : '',
+    ].filter(Boolean)
+    const checks = count(progress.checksDone, 'source check')
+    const parts = [
+      count(progress.claims, 'claim'),
+      checked ? (outcomes.length ? `${checks}: ${outcomes.join(', ')}` : checks) : 'sources not checked',
       elapsed,
     ].filter(Boolean)
     return (
@@ -158,7 +162,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
             </span>
           ))}
         </p>
-        <TextButton onClick={() => setDetails(true)} className="flex items-center gap-1 text-xs">
+        <TextButton onClick={() => setDetails(true)} aria-expanded={false} className="flex items-center gap-1 text-xs">
           Details
           <ChevronRight className="size-3.5" />
         </TextButton>
@@ -183,7 +187,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
         {running ? (
           <p className="text-[13px] text-ink-muted tabular-nums">{percent}%</p>
         ) : (
-          <TextButton onClick={() => setDetails(false)} className="text-xs">
+          <TextButton onClick={() => setDetails(false)} aria-expanded className="text-xs">
             Hide details
           </TextButton>
         )}
