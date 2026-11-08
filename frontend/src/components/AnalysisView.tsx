@@ -298,6 +298,8 @@ export function AnalysisView({
                 section={claim.section ? sectionName(outline, claim.section) : undefined}
                 figures={analysis.data.figures}
                 references={analysis.data.references}
+                analysisId={teacher ? undefined : analysis.data.id}
+                disputes={analysis.data.disputes}
                 actions={renderClaimActions?.(claim, index)}
                 onSelect={presentation === 'teacher' && file && claim.source
                   ? () => setTarget({

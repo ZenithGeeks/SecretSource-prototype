@@ -415,7 +415,7 @@ export function PageViewer({
               compactQuote ? 'space-y-0.5 py-2' : 'max-h-32 space-y-1.5 overflow-y-auto py-3',
             )}
           >
-            <h3 className="type-label text-ink-muted">Quoted passage · page {page}</h3>
+            <h3 className="type-label text-ink-muted">Quoted passage · page {targetPage(target)}</h3>
             <blockquote
               title={compactQuote ? target.quote : undefined}
               className={cn(
