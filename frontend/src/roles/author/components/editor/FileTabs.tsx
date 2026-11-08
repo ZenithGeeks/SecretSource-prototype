@@ -1,5 +1,6 @@
-/** The file bar above the editor: one tab per project file, a dot on the unsaved ones, and
- * "+ file", which turns into a small name field. */
+/** The file bar above the editor: one tab per project file, a red dot on those with open
+ * issues from the last check, an amber one on a .bib with parse warnings, a muted dot on the
+ * unsaved ones, and "+ file", which turns into a small name field. */
 
 import { useState } from 'react'
 
@@ -12,7 +13,9 @@ export function FileTabs({
   onSelect,
   onAdd,
 }: {
-  files: ProjectFile[]
+  /** `issues`: the file's open issues (lib/verdict isOpenIssue); `problems`: a .bib's parse
+   * warnings, entry by entry (lib/latexProject bibProblems). */
+  files: (ProjectFile & { issues?: number; problems?: number })[]
   active: string
   onSelect: (name: string) => void
   onAdd: (name: string) => void
@@ -59,9 +62,25 @@ export function FileTabs({
               )}
             >
               {file.name}
-              {file.dirty && (
-                <span className="size-1.5 rounded-full bg-refutes" role="img" aria-label="unsaved changes" />
-              )}
+              {/* Red is for the check's verdicts (Figma A2), so unsaved typing is the muted dot. */}
+              {file.issues ? (
+                <span
+                  className="size-1.5 rounded-full bg-refutes"
+                  role="img"
+                  aria-label={`${file.issues} open issue${file.issues === 1 ? '' : 's'}`}
+                  title={`${file.issues} open issue${file.issues === 1 ? '' : 's'}`}
+                />
+              ) : null}
+              {/* A .bib's parse warnings take their own (amber) colour, as in the gutter. */}
+              {file.problems ? (
+                <span
+                  className="size-1.5 rounded-full bg-insufficient"
+                  role="img"
+                  aria-label={`${file.problems} bib problem${file.problems === 1 ? '' : 's'}`}
+                  title={`${file.problems} bib problem${file.problems === 1 ? '' : 's'}`}
+                />
+              ) : null}
+              {file.dirty && <span className="size-1.5 rounded-full bg-ink-muted" role="img" aria-label="unsaved changes" title="Unsaved changes" />}
             </button>
           )
         })}

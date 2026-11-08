@@ -5,7 +5,7 @@
  * own the real parse; the shapes here (ParseResult, ParseWarning) are what it will return.
  */
 
-import type { ParseResult, ParseWarning, ProjectFile } from '../types/draftCheck'
+import type { ParseResult, ParseWarning, ParseWarningType, ProjectFile } from '../types/draftCheck'
 import { duplicateKeys, lacksLocator, parseBib, type BibEntry } from './bibtex'
 
 /** One key inside one \cite{...}, with where it sits. Incomplete commands (no closing
@@ -126,6 +126,48 @@ export function parseProject(files: ProjectFile[]): ParseResult {
   }
 
   return { texFiles: tex.length, citeCommands: cites.length, bibEntries: entries.length, warnings }
+}
+
+/** What each parse warning is called, on the Bibliography card and in the .bib editor. */
+export const WARNING_TITLE: Record<ParseWarningType, string> = {
+  'missing-key': 'Missing bib key',
+  'duplicate-key': 'Duplicate key',
+  'unused-entry': 'Unused entry',
+  'no-doi-url': 'No DOI or URL',
+}
+
+/** A .bib warning of parseProject, placed on the entry it is about (the "@type{key," line). */
+export type BibProblem = {
+  type: Exclude<ParseWarningType, 'missing-key'>
+  key: string
+  file: string
+  line: number
+  message: string
+}
+
+/**
+ * parseProject's .bib warnings entry by entry, for the marks in the .bib editor. The rules are
+ * parseProject's own (no new ones): a key defined again, an entry no \cite names, a cited key
+ * none of whose entries has a DOI or URL. parseProject folds the last two into one warning on
+ * the first entry; here every entry concerned gets its own.
+ */
+export function bibProblems(files: ProjectFile[]): BibProblem[] {
+  const cited = new Set(files.filter((f) => f.kind === 'tex').flatMap(citesIn).map((c) => c.key))
+  const entries = bibEntries(files)
+  const locatable = new Set(entries.filter((e) => !lacksLocator(e)).map((e) => e.key))
+  const first = new Map<string, BibEntry & { file: string }>()
+  const problems: BibProblem[] = []
+  for (const e of entries) {
+    const at = { key: e.key, file: e.file, line: e.line }
+    const earlier = first.get(e.key)
+    if (earlier) {
+      const where = earlier.file === e.file ? `line ${earlier.line}` : `${earlier.file} line ${earlier.line}`
+      problems.push({ ...at, type: 'duplicate-key', message: `${e.key} is defined twice (first on ${where})` })
+    } else first.set(e.key, e)
+    if (!cited.has(e.key)) problems.push({ ...at, type: 'unused-entry', message: `${e.key} is never cited` })
+    else if (!locatable.has(e.key)) problems.push({ ...at, type: 'no-doi-url', message: `${e.key} has no DOI or URL to look it up by` })
+  }
+  return problems
 }
 
 /** The first line of the sentence that ends on `line`: walks up while the line above runs

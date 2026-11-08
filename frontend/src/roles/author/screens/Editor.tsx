@@ -46,11 +46,11 @@ import { shortMessage } from '../../../lib/citations'
 import { downloadBlob, downloadText } from '../../../lib/csv'
 import { AUTOSAVE_DELAY_MS, DEFAULT_TITLE, dropBackup, forgetBackup, readBackup, texTitle, writeBackup, type Backup } from '../../../lib/draftSave'
 import { useDebounced } from '../../../lib/useDebounced'
-import { bibEntries, bibKeys, findCites, parseProject, sentenceStart, withContent } from '../../../lib/latexProject'
-import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
-import { isOpenIssue, summarize } from '../../../lib/verdict'
+import { type BibProblem, bibEntries, bibKeys, bibProblems, findCites, parseProject, sentenceStart, WARNING_TITLE, withContent } from '../../../lib/latexProject'
+import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useProjectLint, useProjectName, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
+import { isOpenIssue, summarize, VERDICTS } from '../../../lib/verdict'
 import type { Citation, Draft, ProjectFile } from '../../../types/draftCheck'
-import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark } from '../components/editor/CodeEditor'
+import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark, type ProblemMark } from '../components/editor/CodeEditor'
 import { EditorTopBar, type SaveStatus } from '../components/editor/EditorTopBar'
 import { ExportMenu, type ExportKind } from '../components/editor/ExportMenu'
 import { FileTabs } from '../components/editor/FileTabs'
@@ -65,6 +65,7 @@ type Texts = Record<string, string>
 /** How long typing must pause before a 	itle is offered as the draft's name. */
 const TITLE_OFFER_DELAY_MS = 1_000
 
+
 /** The gateway refused the write because the draft changed since this editor last saw it. */
 const isConflict = (error: unknown) => error instanceof Error && error.message.startsWith('409: ')
 
@@ -75,6 +76,9 @@ export function Editor({
   onWriteFailed,
   onAgentApi,
   askSlot,
+  back,
+  onOpenProject,
+  onAskToFix,
   autosaveMs = AUTOSAVE_DELAY_MS,
 }: {
   target: EditorTarget
@@ -82,8 +86,14 @@ export function Editor({
   autosaveMs?: number
   /** The open file changed (for the URL). */
   onFileChange: (file: string) => void
-  /** Back to Home. */
+  /** To Home: the breadcrumb's Home, and Back when `back` is not given. */
   onNavigate: (screen: 'home') => void
+  /** Back to the screen the editor was opened from (the app knows it), named by `label`. */
+  back?: { label: string; onClick: () => void }
+  /** Opens the draft's project page, from the breadcrumb. */
+  onOpenProject?: (projectId: string) => void
+  /** Opens Ask's Do it mode with this request typed in, from an issue's "Ask AI how to fix". */
+  onAskToFix?: (request: string) => void
   /** The write made on the way out of the editor was refused: the screen is gone by then, so
    * the app shows this. */
   onWriteFailed?: (message: string) => void
@@ -97,6 +107,7 @@ export function Editor({
   const check = useAuthorCheck(draft.data?.lastCheckId ?? null)
   const running = useAuthorCheck(draft.data?.runningCheckId ?? null)
   const saved = useSavedSources(draft.data?.projectId ?? undefined)
+  const projectName = useProjectName(draft.data?.projectId)
   const start = useStartCheck()
   const exportReport = useExportReport()
   const actions = useAuthorActions()
@@ -496,11 +507,43 @@ export function Editor({
     [fileCitations, text],
   )
   const counts = useMemo(() => summarize(fileCitations).counts, [fileCitations])
+  // Open issues per file, for the dots on the file tabs (the same rule as the popover's pager).
+  const issuesByFile = useMemo(() => {
+    const issues: Record<string, number> = {}
+    for (const c of check.data?.citations ?? []) if (isOpenIssue(c)) issues[c.file] = (issues[c.file] ?? 0) + 1
+    return issues
+  }, [check.data])
   const citeCount = useMemo(() => (active ? findCites({ name: active.name, content: text }).length : 0), [active, text])
   // Warnings come from the project text as typed, so they follow the keystrokes. A file that
   // was not typed in stays the same object, so only the edited one is scanned again.
   const liveFiles = useMemo(() => files.map((f) => withContent(f, texts[f.name] ?? f.content)), [files, texts])
-  const warningCount = useMemo(() => parseProject(liveFiles).warnings.filter((w) => w.file === active?.name).length, [liveFiles, active?.name])
+  // .bib problems: parseProject's .bib warnings, one per entry, marked in the .bib editor and
+  // dotted on its tab. The project's shared .bib is cited by every draft of the project, so
+  // whether its entries are cited comes from the project's lint, not from this draft alone.
+  const sharesBib = files.some((f) => f.shared)
+  const lint = useProjectLint(sharesBib ? (draft.data?.projectId ?? null) : null)
+  const problems = useMemo(() => {
+    const shared = new Set(liveFiles.filter((f) => f.shared).map((f) => f.name))
+    const own = bibProblems(liveFiles).filter((p) => !(p.type === 'unused-entry' && shared.has(p.file)))
+    const projectWide: BibProblem[] = (lint.data?.warnings ?? [])
+      .filter((w) => w.draftId === null && w.type === 'unused-entry' && shared.has(w.file))
+      // The lint folds every never-cited entry into one warning on the first of them.
+      .map((w) => ({ type: 'unused-entry', key: w.detail.split(' ')[0], file: w.file, line: w.line, message: `${w.detail} in any draft of this project` }))
+    return [...own, ...projectWide]
+  }, [liveFiles, lint.data])
+  const problemsByFile = useMemo(() => {
+    const count: Record<string, number> = {}
+    for (const p of problems) count[p.file] = (count[p.file] ?? 0) + 1
+    return count
+  }, [problems])
+  const activeProblems: ProblemMark[] = useMemo(
+    () => problems.filter((p) => p.file === active?.name).map((p) => ({ line: p.line, key: p.key, title: WARNING_TITLE[p.type], message: p.message })),
+    [problems, active?.name],
+  )
+  const warningCount = useMemo(
+    () => (active?.kind === 'bib' ? activeProblems.length : parseProject(liveFiles).warnings.filter((w) => w.file === active?.name).length),
+    [liveFiles, active?.name, active?.kind, activeProblems],
+  )
 
   const entries = useMemo(() => bibEntries(liveFiles), [liveFiles])
   const completions: CiteCompletionSource = useMemo(() => {
@@ -569,21 +612,31 @@ export function Editor({
   }
 
   const isChecking = Boolean(draft.data.runningCheckId) || start.isPending
-  const filesWithDirty = files.map((f) => ({ ...f, dirty: dirtyNames.has(f.name) }))
+  const filesWithDirty = files.map((f) => ({ ...f, dirty: dirtyNames.has(f.name), issues: issuesByFile[f.name], problems: problemsByFile[f.name] }))
+  const projectId = draft.data.projectId
+  // Typed into Do it, not sent: the person reads it first. The why is cut short to keep it a request.
+  const askToFix =
+    onAskToFix &&
+    ((c: Citation) => {
+      const why = c.explanation && c.explanation.length > 300 ? `${c.explanation.slice(0, 299)}…` : c.explanation
+      onAskToFix(`How do I fix \\cite{${c.key}} in ${c.file}, line ${c.line}: ${VERDICTS[c.verdict].badge.toLowerCase()}${why ? ` — ${why}` : '.'}`)
+    })
 
   return (
     <div className="flex h-screen flex-col bg-canvas">
       <EditorTopBar
         title={draft.data.title}
-        version={draft.data.version}
         status={status}
         onRetry={() => (conflicts.size ? keepMineButton.current?.focus() : void flush())}
         onRename={rename}
         onSave={() => void save()}
         saving={savingVersion}
-        onBack={() => onNavigate('home')}
+        back={back ?? { label: 'Home', onClick: () => onNavigate('home') }}
+        onHome={() => onNavigate('home')}
+        project={projectId && projectName && onOpenProject ? { name: projectName, onOpen: () => onOpenProject(projectId) } : undefined}
         onRecheck={() => void recheck()}
         rechecking={isChecking}
+        lastCheckedAt={draft.data.lastCheckedAt}
         exportSlot={<ExportMenu openIssues={draft.data.status.open} busy={exporting} onExport={exportAs} />}
         askSlot={askSlot}
       />
@@ -685,6 +738,7 @@ export function Editor({
               ariaLabel={`${active.name} source`}
               value={text}
               marks={marks}
+              problems={activeProblems}
               completions={completions}
               onChange={(content) => onChange(active.name, content)}
               onCursor={setCursor}
@@ -702,6 +756,7 @@ export function Editor({
             verdictColors={verdictColors}
             onToggleVerdictColors={() => setVerdictColors((v) => !v)}
             onKeepMine={(citation, note) => void keepMine(citation, note)}
+            onAskToFix={askToFix}
           />
         }
       />

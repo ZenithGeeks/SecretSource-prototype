@@ -82,6 +82,7 @@ export function PreviewPane({
   verdictColors,
   onToggleVerdictColors,
   onKeepMine,
+  onAskToFix,
 }: {
   content: string
   /** The open file's citations, in line order. */
@@ -93,6 +94,8 @@ export function PreviewPane({
   verdictColors: boolean
   onToggleVerdictColors: () => void
   onKeepMine: (citation: Citation, note: string) => void
+  /** Hands the flagged citation to Ask's Do it mode; none hides "Ask AI how to fix". */
+  onAskToFix?: (citation: Citation) => void
 }) {
   const debounced = useDebounced(content, RENDER_DELAY_MS)
   const prepared = useMemo(() => preparePreview(debounced), [debounced])
@@ -300,6 +303,13 @@ export function PreviewPane({
               onKeepMine(current, note)
               close()
             }}
+            onAskToFix={
+              onAskToFix &&
+              (() => {
+                onAskToFix(current)
+                close()
+              })
+            }
             onNext={next}
             onClose={close}
           />

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { bibEntries, findCites, parseProject, replaceCiteKey, sentenceStart, withContent } from '../src/lib/latexProject.ts'
+import { bibEntries, bibProblems, findCites, parseProject, replaceCiteKey, sentenceStart, withContent } from '../src/lib/latexProject.ts'
 import type { ProjectFile } from '../src/types/draftCheck.ts'
 import { INTRO_TEX, MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
 
@@ -75,4 +75,40 @@ test('replaceCiteKey swaps one key and keeps the others in the same command', ()
   assert.equal(replaceCiteKey('a~\\cite{x, y}.', 1, 'y', 'z'), 'a~\\cite{x, z}.')
   assert.equal(replaceCiteKey('a~\\cite{x}.\nb~\\cite{x}.', 2, 'x', 'q'), 'a~\\cite{x}.\nb~\\cite{q}.')
   assert.equal(replaceCiteKey('a~\\cite{x}.', 9, 'x', 'q'), 'a~\\cite{x}.')
+})
+
+test('bibProblems places parseProject’s .bib warnings on every entry concerned, with no rule of its own', () => {
+  const files = [tex('related-work.tex', RELATED_WORK_TEX), tex('intro.tex', INTRO_TEX), bib('main.bib', MAIN_BIB)]
+  const problems = bibProblems(files)
+  assert.deepEqual(
+    problems.map((p) => [p.type, p.key, p.file]),
+    [
+      ['duplicate-key', 'santhanam2022', 'main.bib'],
+      ['no-doi-url', 'nguyen2016', 'main.bib'],
+      ['unused-entry', 'karpukhin2020', 'main.bib'],
+    ],
+  )
+  // each on its entry's "@type{key," line
+  const lines = MAIN_BIB.split('\n')
+  for (const p of problems) assert.ok(lines[p.line - 1].startsWith(`{${p.key},`, lines[p.line - 1].indexOf('{')), lines[p.line - 1])
+  assert.equal(problems[0].message, 'santhanam2022 is defined twice (first on line 17)')
+  // every .bib warning parseProject gives sits on one of these
+  for (const w of parseProject(files).warnings.filter((w) => w.file === 'main.bib')) {
+    assert.ok(problems.some((p) => p.type === w.type && p.file === w.file && p.line === w.line), `${w.type} L${w.line}`)
+  }
+
+  // the folded warnings come apart: two never-cited entries, two cited ones with nothing to look them up by
+  const more = bibProblems([tex('a.tex', String.raw`\cite{p,q}`), bib('a.bib', '@misc{p, title={P}}\n@misc{q, title={Q}}\n@misc{r, doi={1}}\n@misc{s, url={u}}')])
+  assert.deepEqual(
+    more.map((p) => [p.type, p.key, p.line]),
+    [
+      ['no-doi-url', 'p', 1],
+      ['no-doi-url', 'q', 2],
+      ['unused-entry', 'r', 3],
+      ['unused-entry', 's', 4],
+    ],
+  )
+  // a duplicate in another .bib names that file
+  const across = bibProblems([tex('a.tex', String.raw`\cite{p}`), bib('a.bib', '@misc{p, doi={1}}'), bib('b.bib', '\n@misc{p, doi={2}}')])
+  assert.deepEqual(across.map((p) => [p.file, p.line, p.message]), [['b.bib', 2, 'p is defined twice (first on a.bib line 1)']])
 })

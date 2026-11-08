@@ -2,37 +2,16 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Square } from 'lucide-react'
-import { useEffect, useState } from 'react'
 
 import type { Analysis } from '../lib/api'
 import { api, paperName } from '../lib/api'
 import { duration, summarise } from '../lib/progress'
+import { timeAgo, useNow } from '../lib/timeAgo'
 import { Button } from './ui'
-
-/** "just now", "2 min ago", "3 h ago", "2 days ago". */
-function timeAgo(seconds: number) {
-  if (seconds < 60) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} h ago`
-  const days = Math.round(hours / 24)
-  return `${days} ${days === 1 ? 'day' : 'days'} ago`
-}
-
-function useNow(live: boolean) {
-  const [now, setNow] = useState(() => Date.now() / 1000)
-  useEffect(() => {
-    if (!live) return
-    const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000)
-    return () => window.clearInterval(timer)
-  }, [live])
-  return now
-}
 
 export function AnalysisHeader({ analysis }: { analysis: Analysis }) {
   const running = analysis.status === 'running'
-  const now = useNow(running)
+  const now = useNow(1000, running) / 1000 // seconds
   const times = analysis.stages.map((s) => s.at).filter((at): at is number => typeof at === 'number')
   const progress = summarise(analysis.stages, analysis.claims, analysis.status, now)
 

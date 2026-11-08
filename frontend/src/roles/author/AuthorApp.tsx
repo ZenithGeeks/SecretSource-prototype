@@ -32,6 +32,8 @@ import type { EditorTarget } from './editorTarget'
 import { Editor } from './screens/Editor'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
+import { UNSORTED } from './screens/ProjectDetail'
+import { useProjectName } from '../../lib/useAuthor'
 
 type NavKey = 'home' | 'library'
 export type AuthorScreen = NavKey | 'editor'
@@ -57,6 +59,11 @@ const NAV_FOR: Record<AuthorScreen, NavKey> = {
 const MOVED: Record<string, AuthorScreen> = { history: 'library', graph: 'library' }
 const MOVED_NOTICE = 'History and Graph are in the Researcher role now. A draft’s check history is on its project here.'
 
+/** Where the editor was opened from, so its Back goes there: Home, or the Library itself or one
+ * of its project pages (`projectId`, UNSORTED included). In the URL as `?from=library` with the
+ * `?project=` it showed, so a refresh of the editor still goes back to the right place. */
+type Origin = { screen: 'home' } | { screen: 'library'; projectId: string | null }
+
 type Params = {
   screen: AuthorScreen
   /** The URL named a screen the Author role no longer has. */
@@ -64,6 +71,7 @@ type Params = {
   draftId: string | null
   target: EditorTarget | null
   projectId: string | null
+  origin: Origin
 }
 
 function resolveScreen(params: URLSearchParams): { screen: AuthorScreen; moved: boolean } {
@@ -86,6 +94,7 @@ function readParams(): Params {
     draftId,
     target: draftId ? { draftId, file: params.get('file') ?? undefined, line: Number.isFinite(line) && line > 0 ? line : undefined } : null,
     projectId: params.get('project'),
+    origin: screen === 'editor' && params.get('from') === 'library' ? { screen: 'library', projectId: params.get('project') } : { screen: 'home' },
   }
 }
 
@@ -98,7 +107,9 @@ function syncParams(state: Omit<Params, 'moved'>) {
   set('draft', state.draftId)
   set('file', state.screen === 'editor' ? state.target?.file : null)
   set('line', state.screen === 'editor' && state.target?.line ? String(state.target.line) : null)
-  set('project', state.screen === 'library' ? state.projectId : null)
+  const fromLibrary = state.screen === 'editor' && state.origin.screen === 'library'
+  set('from', fromLibrary ? 'library' : null)
+  set('project', state.screen === 'library' ? state.projectId : fromLibrary && state.origin.screen === 'library' ? state.origin.projectId : null)
   // What left the Author role's URLs: the old sources search, and History's open analysis.
   params.delete('q')
   params.delete('replace')
@@ -112,7 +123,10 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   const [screen, setScreen] = useState<AuthorScreen>(initial.screen)
   const [draftId, setDraftId] = useState<string | null>(initial.draftId)
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(initial.screen === 'editor' ? initial.target : null)
-  const [projectId, setProjectId] = useState<string | null>(initial.projectId)
+  // On the editor opened from a project page, ?project= is the origin's, not a Library page.
+  const [projectId, setProjectId] = useState<string | null>(initial.screen === 'library' ? initial.projectId : null)
+  const [origin, setOrigin] = useState<Origin>(initial.origin)
+  const originProject = useProjectName(origin.screen === 'library' ? origin.projectId : null)
   const [wide, setWide] = useState(false) // a page viewer is open beside the cards
   const [creatingProject, setCreatingProject] = useState(false)
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
@@ -127,7 +141,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     draftReader.current = api
   }, [])
 
-  useEffect(() => syncParams({ screen, draftId, target: editorTarget, projectId }), [screen, draftId, editorTarget, projectId])
+  useEffect(() => syncParams({ screen, draftId, target: editorTarget, projectId, origin }), [screen, draftId, editorTarget, projectId, origin])
 
   const navigate = useCallback((next: AuthorScreen) => {
     setScreen(next)
@@ -150,10 +164,27 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   )
 
   const openEditor = (target: EditorTarget) => {
+    // Opened again from the editor itself (Ask's open_screen), it keeps where it came from.
+    if (screen !== 'editor') setOrigin(screen === 'library' ? { screen: 'library', projectId } : { screen: 'home' })
     setDraftId(target.draftId)
     setEditorTarget(target)
     navigate('editor')
   }
+  const back =
+    origin.screen === 'home'
+      ? { label: 'Home', onClick: () => navigate('home') }
+      : {
+          label:
+            origin.projectId === null
+              ? 'Library'
+              : origin.projectId === UNSORTED
+                ? 'Unsorted'
+                : (originProject ?? 'the project'),
+          onClick: () => {
+            setProjectId(origin.projectId)
+            navigate('library')
+          },
+        }
   // Do it for the Author's screen agent, so a role switch can land here and the chat can go on.
   const ask = useAsk({
     role: 'writer',
@@ -206,6 +237,9 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
           onWriteFailed={setNotice}
           onAgentApi={onAgentApi}
           askSlot={ask.button}
+          back={back}
+          onOpenProject={openProject}
+          onAskToFix={ask.askToDo}
         />
       )}
       {screen === 'home' && (

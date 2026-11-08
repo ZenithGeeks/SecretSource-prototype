@@ -4,7 +4,7 @@
  * issue popover. The render is the real library; only the gateway is faked.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { parseBib } from '../src/lib/bibtex'
@@ -196,4 +196,25 @@ describe('PreviewPane', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   }, 20000)
+
+  test('"Ask AI how to fix" sits beside Keep mine, hands over the citation and closes; without a handler it is not offered', async () => {
+    const onAskToFix = vi.fn()
+    const { unmount } = renderPane(RELATED_WORK_TEX, { onAskToFix })
+    await waitFor(() => expect(page().querySelector('.ss-cite[data-verdict="refutes"]')).toBeTruthy(), { timeout: 15000 })
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="refutes"]')!)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getAllByRole('button').map((b) => b.textContent)).toEqual(expect.arrayContaining(['Ask AI how to fix', 'Keep mine']))
+    // Not built yet (#721): Ask cannot edit the draft, so there is no Replace.
+    expect(within(dialog).queryByRole('button', { name: /Replace with/ })).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ask AI how to fix' }))
+    expect(onAskToFix).toHaveBeenCalledWith(expect.objectContaining({ key: 'khattab2020', verdict: 'refutes' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    unmount()
+
+    renderPane(RELATED_WORK_TEX)
+    await waitFor(() => expect(page().querySelector('.ss-cite[data-verdict="refutes"]')).toBeTruthy(), { timeout: 15000 })
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="refutes"]')!)
+    await screen.findByRole('dialog')
+    expect(screen.queryByRole('button', { name: 'Ask AI how to fix' })).toBeNull()
+  }, 30000)
 })

@@ -7,17 +7,11 @@ import { Loader2 } from 'lucide-react'
 import { Card, Empty, ErrorState } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { errorMessage } from '../../../lib/author'
+import { WARNING_TITLE } from '../../../lib/latexProject'
 import { cn } from '../../../lib/utils'
 import type { ParseResult, ParseWarning, ParseWarningType, ProjectLint } from '../../../types/draftCheck'
 import type { EditorTarget } from '../editorTarget'
 import { CardHead, TextLink } from './CardHead'
-
-const WARNING_TITLE: Record<ParseWarningType, string> = {
-  'missing-key': 'Missing bib key',
-  'duplicate-key': 'Duplicate key',
-  'unused-entry': 'Unused entry',
-  'no-doi-url': 'No DOI or URL',
-}
 
 /** A missing key breaks the check (contradicted colour), a duplicate may read the wrong source
  * (silent colour); the other two are only notes. */

@@ -7,7 +7,7 @@
  * with `viewer`.
  */
 
-import { useState, type ComponentProps } from 'react'
+import { useCallback, useRef, useState, type ComponentProps } from 'react'
 
 import { api, paperName } from '../lib/api'
 import type { Role } from '../lib/roles'
@@ -81,6 +81,20 @@ export function useAsk({
     setPanelKey((key) => key + 1)
     setOpenSaved(true)
   }
+  // A request a screen typed into Do it for the person to send (askToDo), held until Do it has it
+  // in its field; `n` tells a repeat apart. It only ever goes up: the request is dropped once Do it
+  // has it, and a count restarting at 1 would read as the one Do it already took.
+  const [doRequest, setDoRequest] = useState<{ text: string; n: number } | null>(null)
+  const requests = useRef(0)
+  const clearDoRequest = useCallback(() => setDoRequest(null), [])
+  /** Opens Ask on Do it with `text` in its field, not sent: the person reads it and presses Do it.
+   * The panel is not remounted, so a Do it conversation already on screen stays. */
+  function askToDo(text: string) {
+    saveAskMode(userId, 'do')
+    requests.current += 1
+    setDoRequest({ text, n: requests.current })
+    setOpenSaved(true)
+  }
   // The paper or node whose chip the reader removed: questions about it go to the whole
   // library. Opening a different paper or node brings the chip back.
   const [cleared, setCleared] = useState<string | null>(null)
@@ -128,8 +142,9 @@ export function useAsk({
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
       onClose={() => setOpenSaved(false)}
       onShowSource={(target) => void showSource(target)}
-      doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
+      doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} prefill={doRequest ?? undefined} onPrefilled={clearDoRequest} />}
       initialMode={peekDoItConversation() ? 'do' : undefined}
+      doRequest={doRequest?.n}
       extra={extra}
     />
   ) : undefined
@@ -145,5 +160,5 @@ export function useAsk({
     </>
   )
 
-  return { button, panel, viewer, showExtra }
+  return { button, panel, viewer, showExtra, askToDo }
 }

@@ -6,7 +6,7 @@
 
 import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { runTool } from '../src/lib/agentTools'
@@ -513,4 +513,98 @@ describe('Recent projects in the sidebar', () => {
     expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
     expect(await screen.findByRole('heading', { name: 'Workshop paper' })).toBeInTheDocument()
   })
+})
+
+describe('The editor goes back where it was opened from (#721)', () => {
+  /** Waits for the editor to show the draft's source. */
+  async function editorOpen() {
+    await waitFor(() => expect(screen.getByLabelText(/ source$/).textContent).toContain('\\documentclass'))
+  }
+  const crumbs = () => within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
+  /** A reload: the app is mounted again from the URL as it stands. */
+  function reload() {
+    const search = window.location.search
+    cleanup()
+    renderApp(search)
+  }
+
+  beforeEach(() => {
+    gateway.projects.get('proj1')!.name = 'Thesis'
+  })
+
+  test('from Home: Back and the Home crumb go to Home; the project crumb opens the project', async () => {
+    renderApp('?screen=home&draft=d1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in editor' }))
+    await editorOpen()
+    expect(new URLSearchParams(window.location.search).get('from')).toBeNull()
+    expect(await crumbs().findByRole('button', { name: 'Thesis' })).toBeInTheDocument()
+    expect(crumbs().getByRole('button', { name: /^Draft title: Related work — thesis ch\.2/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }))
+    expect(await screen.findByRole('heading', { level: 1, name: /^Good/ })).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in editor' }))
+    await editorOpen()
+    fireEvent.click(await crumbs().findByRole('button', { name: 'Thesis' }))
+    expect(await screen.findByRole('heading', { name: 'Thesis' })).toBeInTheDocument()
+  })
+
+  test('from a project page: Back returns to it, also after a reload of the editor', async () => {
+    renderApp('?screen=library&project=proj1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in editor' }))
+    await editorOpen()
+    const params = new URLSearchParams(window.location.search)
+    expect([params.get('screen'), params.get('from'), params.get('project')]).toEqual(['editor', 'library', 'proj1'])
+
+    reload()
+    await editorOpen()
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to Thesis' }))
+    expect(await screen.findByRole('heading', { name: 'Thesis' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('from')).toBeNull()
+  })
+
+  test('from the Library itself, after a reload: Back goes to the Library, not a project', async () => {
+    renderApp('?screen=editor&draft=d1&from=library')
+    await editorOpen()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Library' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Library' })).toBeInTheDocument()
+  })
+
+  test('an Unsorted draft has no project crumb, and Back returns to Unsorted', async () => {
+    cleanup()
+    gateway = installFakeGateway({ files: THESIS_FILES, project: false })
+    renderApp('?screen=library&project=unsorted')
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in editor' }))
+    await editorOpen()
+    expect(crumbs().getAllByRole('button').map((b) => b.textContent)).toEqual(['Home', 'Related work — thesis ch.2'])
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Unsorted' }))
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('project')).toBe('unsorted'))
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('library')
+  })
+
+  test('an issue’s "Ask AI how to fix" opens Ask on Do it with the citation and its issue typed in, not sent', async () => {
+    renderApp('?screen=editor&draft=d1&file=related-work.tex')
+    await editorOpen()
+    const page = () => screen.getByTestId('preview-page').shadowRoot!
+    await waitFor(() => expect(page().querySelector('.ss-cite[data-verdict="refutes"]')).toBeTruthy(), { timeout: 15000 })
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="refutes"]')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask AI how to fix' }))
+
+    expect(screen.queryByRole('dialog', { name: /Khattab/ })).toBeNull()
+    const field = await screen.findByRole('textbox', { name: 'What should the AI do?' })
+    expect((field as HTMLInputElement).value).toMatch(/^How do I fix \\cite\{khattab2020\} in related-work\.tex, line \d+: source contradicts/)
+    expect(field).toHaveFocus()
+    expect(agent.posts).toHaveLength(0)
+
+    // A second issue while Do it is open replaces the request with its own.
+    fireEvent.click(page().querySelector('.ss-cite[data-verdict="insufficient"]')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask AI how to fix' }))
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'What should the AI do?' }) as HTMLInputElement).value).toMatch(/^How do I fix \\cite\{thakur2021\} in related-work\.tex, line \d+: /))
+
+    // Typed in once: leaving Do it and coming back does not put the request back.
+    fireEvent.change(field, { target: { value: '' } })
+    const modes = within(screen.getByRole('group', { name: 'What Ask does' }))
+    fireEvent.click(modes.getByRole('button', { name: 'Answer' }))
+    fireEvent.click(modes.getByRole('button', { name: 'Do it' }))
+    expect(screen.getByRole('textbox', { name: 'What should the AI do?' })).toHaveValue('')
+  }, 20000)
 })

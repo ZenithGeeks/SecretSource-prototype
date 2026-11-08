@@ -302,6 +302,7 @@ export function AssistantPanel({
   doIt,
   extra,
   initialMode,
+  doRequest,
   className,
 }: {
   /** Whose Quip (components/Mascot) the header and the empty chat show. */
@@ -325,6 +326,8 @@ export function AssistantPanel({
   extra?: { label: string; content: ReactNode }
   /** Which mode to open on. A role switch lands on Do it so the conversation is still there. */
   initialMode?: 'answer' | 'extra' | 'do'
+  /** Bumped when a screen hands Do it a request (useAsk's askToDo): the panel turns to Do it. */
+  doRequest?: number
   className?: string
 }) {
   const userId = useAskUserId()
@@ -338,6 +341,15 @@ export function AssistantPanel({
   if (modeFor !== userId) {
     setModeFor(userId)
     setChosen(loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  }
+  // Starts unseen, so a panel that opens with a request in hand turns to Do it too.
+  const [seenRequest, setSeenRequest] = useState<number | undefined>(undefined)
+  if (seenRequest !== doRequest) {
+    setSeenRequest(doRequest)
+    if (doRequest !== undefined) {
+      setChosen('do')
+      setView('chat')
+    }
   }
   const mode = (chosen === 'extra' && !extra) || (chosen === 'do' && !doIt) ? 'answer' : chosen
   function chooseMode(next: AskPanelMode) {
