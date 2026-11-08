@@ -5,7 +5,7 @@
  */
 
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
-import { ArrowUp, Ban, Check, CircleAlert, Loader2, MousePointerClick, Square, SquareTerminal, Users } from 'lucide-react'
+import { ArrowUp, Ban, Check, ChevronLeft, CircleAlert, Loader2, MousePointerClick, Square, SquareTerminal, Users } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { ScreenActions } from '../lib/agentTools'
@@ -17,11 +17,43 @@ import { Badge } from './ui'
 
 const EXAMPLES = ['Open my most recent paper', 'Show me where to search the library', 'Take me to the graph']
 
+/** After this long with no answer, the Working line says Stop is there. */
+const SLOW_SECONDS = 30
+
+/** Where the person was when they sent the request: a screen, and the analysis open on it. */
+type Place = { screen: string; analysis: string | null }
+
+function placeNow(screen: string): Place {
+  return { screen, analysis: new URLSearchParams(window.location.search).get('analysis') }
+}
+
+/** Seconds since `running` turned on, ticking once a second; 0 while it is off. */
+function useElapsed(running: boolean) {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    if (!running) return
+    const started = Date.now()
+    const timer = window.setInterval(() => setSeconds(Math.round((Date.now() - started) / 1000)), 1000)
+    return () => {
+      window.clearInterval(timer)
+      setSeconds(0)
+    }
+  }, [running])
+  return seconds
+}
+
 export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onConnectAgent?: () => void }) {
   const [pointing, setPointing] = useState<Pointing | null>(null)
   const agent = useScreenAgent(actions, setPointing)
   const [draft, setDraft] = useState('')
+  const [stopped, setStopped] = useState(false)
+  const [start, setStart] = useState<Place | null>(null)
+  const elapsed = useElapsed(agent.running)
   const end = useRef<HTMLDivElement>(null)
+  const now = placeNow(actions.screen)
+  // A run that took the person somewhere else offers the way back once it ends.
+  const moved = !agent.running && start && (start.screen !== now.screen || start.analysis !== now.analysis)
+  const last = agent.lines.at(-1)
 
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' })
@@ -30,20 +62,32 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
   const send = (message: string) => {
     if (!message.trim() || agent.running) return
     setDraft('')
+    setStopped(false)
+    setStart(placeNow(actions.screen))
     void agent.send(message.trim())
+  }
+
+  const goBack = () => {
+    if (!start) return
+    if (start.analysis && actions.openPaper) actions.openPaper(start.analysis)
+    else actions.openScreen(start.screen)
+    setStart(null)
   }
 
   return (
     <>
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4" aria-live="polite">
+      <p role="status" className="sr-only">
+        {agent.running ? 'Working' : stopped ? 'Stopped' : last?.kind === 'agent' || last?.kind === 'error' ? 'Done. The reply is below.' : ''}
+      </p>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
         {agent.lines.length === 0 && (
           <div className="flex flex-col gap-3">
             <p className="text-[15px] font-medium text-ink">Tell the AI what to do, and watch it work.</p>
-            <p className="text-[13px] leading-5 text-ink-muted">
-              It moves around the app with its own cursor: it opens screens and papers, and points at things. It fills in
-              a field only after you press Apply, and it changes role only after you press Switch. It never saves labels,
-              deletes or uploads anything. For questions about what is inside your papers it asks a specialist, and you see that here.
-            </p>
+            <ul className="flex list-disc flex-col gap-1 pl-4 text-[13px] leading-5 text-ink">
+              <li>It opens screens and papers, and points at things with its own cursor.</li>
+              <li>It fills in a field only after you press Apply, and changes role only after you press Switch.</li>
+              <li>It never saves labels, deletes or uploads anything.</li>
+            </ul>
             <div className="flex flex-wrap gap-2">
               {(actions.examples ?? EXAMPLES).map((example) => (
                 <button
@@ -66,8 +110,21 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
         {agent.pending && <ApproveChange change={agent.pending} />}
         {agent.running && !agent.pending && (
           <p className="flex items-center gap-2 text-xs text-ink-muted">
-            <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" /> Working…
+            <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            Working… <span className="tabular-nums">{elapsed} s</span>
+            {elapsed >= SLOW_SECONDS && <span>· still going. Stop ends it and changes nothing.</span>}
           </p>
+        )}
+        {stopped && !agent.running && <p className="text-[13px] leading-5 text-ink">Stopped. Nothing was changed.</p>}
+        {moved && (
+          <button
+            type="button"
+            onClick={goBack}
+            className="flex min-h-9 items-center gap-1.5 self-start rounded-lg px-2 text-[13px] font-medium text-accent hover:bg-accent-soft"
+          >
+            <ChevronLeft className="size-4" aria-hidden="true" />
+            Back to where you were
+          </button>
         )}
         <div ref={end} />
       </div>
@@ -84,12 +141,18 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
             onChange={(event) => setDraft(event.target.value)}
             disabled={agent.running}
             aria-label="What should the AI do?"
-            placeholder={agent.running ? 'Working… Stop ends it' : 'e.g. Open my ColBERT paper'}
+            placeholder={agent.running ? 'Working… Stop ends it' : 'e.g. Open my most recent paper'}
             maxLength={2000}
             className="min-h-9 min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
           />
           {agent.running ? (
-            <button type="button" onClick={agent.stop} aria-label="Stop" className="flex size-11 items-center justify-center rounded-lg border border-border-subtle text-ink lg:size-8">
+            <button
+              type="button"
+              onClick={() => {
+                setStopped(true)
+                agent.stop()
+              }}
+              aria-label="Stop" className="flex size-11 items-center justify-center rounded-lg border border-border-subtle text-ink lg:size-8">
               <Square className="size-3.5" aria-hidden="true" />
             </button>
           ) : (

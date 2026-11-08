@@ -186,3 +186,14 @@ def test_a_paper_not_on_this_disk_is_unchecked_and_never_fetched_by_name(monkeyp
     monkeypatch.setattr(assistant.verify, "check_prepared", refuse)
     missing = Cited("ColPali reads page images.", "upload-1a2b.pdf", tmp_path / "upload-1a2b.pdf")
     assert assistant.check(missing)["verdict"] == "unchecked"
+
+
+def test_a_quote_gets_the_page_of_the_passage_it_came_from():
+    evidence = [
+        {"text": "Intro text.", "page": 1},
+        {"text": "We trained two  fact-checking models here.", "page": 6},
+    ]
+
+    assert assistant.quote_page("We trained two fact-checking models … and more", evidence) == 6
+    assert assistant.quote_page("Nothing like this", evidence) is None
+    assert assistant.quote_page("", evidence) is None
