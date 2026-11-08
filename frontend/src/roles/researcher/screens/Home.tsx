@@ -114,10 +114,19 @@ export function Home({
                   className="flex w-full flex-col items-start gap-1.5 px-5 py-3 text-left hover:bg-accent-soft"
                 >
                   <p className="text-[15px] leading-6 text-ink">{c.claim}</p>
+                  {/* One badge per paper, not the list joined into one: VerdictBadge is
+                      whitespace-nowrap (right, for a short verdict word), so a joined "A, B, C"
+                      refused to wrap and overflowed the card instead — worse the narrower the
+                      card got (e.g. with the Ask panel open). This wraps in the flex-wrap row
+                      like any other badge. */}
                   <span className="flex flex-wrap items-center gap-2">
-                    {c.for.length > 0 && <VerdictBadge verdict="supports" text={c.for.join(', ')} />}
+                    {c.for.map((paper) => (
+                      <VerdictBadge key={`for-${paper}`} verdict="supports" text={paper} />
+                    ))}
                     {c.against.length > 0 ? (
-                      <VerdictBadge verdict="refutes" text={c.against.join(', ')} />
+                      c.against.map((paper) => (
+                        <VerdictBadge key={`against-${paper}`} verdict="refutes" text={paper} />
+                      ))
                     ) : (
                       <span className="text-xs text-ink-muted">No counter-evidence yet</span>
                     )}
