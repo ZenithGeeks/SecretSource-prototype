@@ -38,6 +38,7 @@ import { isOpenIssue } from '../../../../lib/verdict'
 import type { Citation } from '../../../../types/draftCheck'
 import { IssuePopover, type PopoverAnchor } from './IssuePopover'
 import previewCss from './preview.css?inline'
+import { HIGHLIGHT } from '../../hover'
 
 const RENDER_DELAY_MS = 300
 const FONT_STYLE_ID = 'ss-preview-fonts'
@@ -252,7 +253,7 @@ export function PreviewPane({
         <span className="text-[12px] font-medium text-ink">Live preview</span>
         <span className="hidden text-ink-muted sm:inline">rendered with LaTeX.js · updates as you type</span>
         {rendering && <Loader2 className="size-3.5 animate-spin text-ink-muted" aria-label="Rendering" />}
-        <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className="ml-auto rounded text-accent hover:underline">
+        <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className={`ml-auto rounded px-1 text-accent ${HIGHLIGHT}`}>
           verdict colors {verdictColors ? 'on' : 'off'}
         </button>
       </div>

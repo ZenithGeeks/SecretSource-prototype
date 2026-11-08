@@ -2,6 +2,7 @@
  * action on the right (Figma "head"). */
 
 import type { ReactNode } from 'react'
+import { LINK } from '../hover'
 
 export function CardHead({ title, aside, id }: { title: string; aside?: ReactNode; id?: string }) {
   return (
@@ -33,7 +34,7 @@ export function TextLink({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded text-xs text-accent hover:underline disabled:cursor-default disabled:no-underline disabled:opacity-60 ${className}`}
+      className={`${LINK} text-xs text-accent disabled:cursor-default disabled:opacity-60 ${className}`}
       {...rest}
     >
       {children}

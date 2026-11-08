@@ -12,6 +12,7 @@ import { VERDICTS, isLowConfidence, isOpenIssue, settledHint } from '../../../li
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { CardHead } from './CardHead'
 import { CitationBadge } from './Verdicts'
+import { FOCUS } from '../hover'
 
 type Filter = 'needs-work' | 'all' | 'by-section' | 'low-confidence'
 
@@ -80,6 +81,7 @@ function CitationRow({ citation, selected, onSelect }: { citation: Citation; sel
         data-ask-target={askTarget({ kind: 'citation', id: citation.id })}
         className={cn(
           'flex w-full min-w-0 flex-col items-start gap-1.5 px-5 py-3 text-left transition-colors hover:bg-accent-soft/40',
+          FOCUS,
           selected && 'bg-accent-soft/60',
         )}
       >
@@ -146,7 +148,8 @@ export function CitationCheckCard({
               aria-pressed={filter === f.id}
               className={cn(
                 'rounded-full px-2.5 py-1 text-xs transition-colors',
-                filter === f.id ? 'bg-accent-soft font-medium text-accent' : 'bg-canvas text-ink-muted hover:text-ink',
+                FOCUS,
+                filter === f.id ? 'bg-accent-soft font-medium text-accent' : 'bg-canvas text-ink-muted hover:bg-accent-soft hover:text-ink',
               )}
             >
               {f.label}

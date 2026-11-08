@@ -23,6 +23,7 @@ import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { CitationBadge } from '../components/Verdicts'
+import { FOCUS, HIGHLIGHT, LINK } from '../hover'
 
 export const UNSORTED = 'unsorted'
 
@@ -172,7 +173,7 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
                 type="button"
                 aria-label={`Delete ${source.title}`}
                 onClick={() => void actions.deleteSource(source.id).catch((error) => onToast(`Could not delete: ${errorMessage(error)}`))}
-                className="rounded text-ink-muted hover:text-refutes"
+                className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
               </button>
@@ -221,9 +222,9 @@ export function ProjectDetail({
       type="button"
       onClick={onBack}
       data-ask-target={askTarget({ kind: 'action', id: 'back-to-library' })}
-      className="flex items-center gap-1.5 self-start text-[13px]"
+      className={`flex items-center gap-1.5 self-start text-[13px] font-medium text-accent ${LINK}`}
     >
-      <span className="font-medium text-accent hover:underline">← Library</span>
+      ← Library
     </button>
   )
 
@@ -455,7 +456,7 @@ function DraftList({
                 onDoubleClick={() => onOpenEditor(draft.id)}
                 aria-current={draft.id === selected ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
-                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', draft.id === selected && 'bg-accent-soft/60')}
+                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', FOCUS, draft.id === selected && 'bg-accent-soft/60')}
               >
                 <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">

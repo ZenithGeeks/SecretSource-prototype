@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, IconButton, Input, MenuItem, TextButton } from '../../../components/ui'
 import { MAX_TITLE } from '../../../lib/draftSave'
 import { cn } from '../../../lib/utils'
+import { FOCUS, LINK } from '../hover'
 
 const BACKDROP_MOTION = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.15 } }
 const PANEL_MOTION = {
@@ -135,7 +136,7 @@ export function ProjectNameField({
           type="submit"
           disabled={saving}
           aria-label="Save name"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50"
+          className={`flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50 ${FOCUS}`}
         >
           <Check className="size-4" />
         </button>
@@ -210,7 +211,7 @@ export function NewProjectDialog({
         )}
 
         <div className="mt-5 flex items-center justify-between gap-2">
-          <TextButton onClick={onImport} disabled={busy} className="flex items-center gap-1.5 text-[13px]">
+          <TextButton onClick={onImport} disabled={busy} className={`flex items-center gap-1.5 text-[13px] ${LINK}`}>
             <Upload className="size-3.5" aria-hidden="true" />
             Import a .bib or an Overleaf .zip
           </TextButton>

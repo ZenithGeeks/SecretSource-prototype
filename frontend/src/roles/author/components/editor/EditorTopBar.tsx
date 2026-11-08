@@ -20,6 +20,7 @@ import { Button, TextButton } from '../../../../components/ui'
 import { MAX_TITLE } from '../../../../lib/draftSave'
 import { checkedLabel, useNow } from '../../../../lib/timeAgo'
 import { cn } from '../../../../lib/utils'
+import { LINK } from '../../hover'
 /** Where the draft's text stands against the gateway: every edit written, an edit waiting for
  * the autosave pause, a write in flight, or the last write refused. */
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error'
@@ -72,7 +73,7 @@ function DraftTitle({ title, onRename }: { title: string; onRename: (title: stri
         onClick={start}
         title="Rename this draft"
         aria-label={`Draft title: ${title}. Rename`}
-        className="truncate rounded px-0.5 font-medium text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
+        className={`truncate font-medium text-ink ${LINK}`}
       >
         {title}
       </button>
@@ -126,7 +127,7 @@ function CheckedAt({ id, lastCheckedAt }: { id: string; lastCheckedAt: string | 
   )
 }
 
-const CRUMB = 'min-w-0 truncate rounded text-ink-muted hover:text-accent hover:underline'
+const CRUMB = `min-w-0 truncate text-ink-muted hover:text-ink ${LINK}`
 const SEPARATOR = (
   <span className="hidden @xl:inline" aria-hidden="true">
     ›
@@ -211,7 +212,9 @@ export function EditorTopBar({
           ) : status === 'error' ? (
             <>
               Save failed —{' '}
-              <TextButton onClick={onRetry}>retry</TextButton>
+              <TextButton onClick={onRetry} className={LINK}>
+                retry
+              </TextButton>
             </>
           ) : (
             'Saved'

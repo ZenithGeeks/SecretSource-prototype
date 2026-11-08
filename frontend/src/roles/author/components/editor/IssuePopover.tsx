@@ -18,6 +18,7 @@ import { shortMessage } from '../../../../lib/citations'
 import type { Citation } from '../../../../types/draftCheck'
 import { sourceLabel } from '../../labels'
 import { AuditNote, CitationBadge } from '../Verdicts'
+import { LINK } from '../../hover'
 
 export type PopoverAnchor = { top: number; left: number; width: number; height: number }
 
@@ -147,7 +148,7 @@ export function IssuePopover({
         type="button"
         onClick={onNext}
         disabled={total === 0}
-        className="flex items-center gap-1 self-start rounded text-[11px] text-accent hover:underline disabled:text-ink-muted disabled:no-underline"
+        className={`flex items-center gap-1 self-start text-[11px] text-accent disabled:text-ink-muted ${LINK}`}
       >
         {pager} · next
         <ChevronRight className="size-3" aria-hidden="true" />

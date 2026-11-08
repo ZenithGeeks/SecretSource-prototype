@@ -6,6 +6,7 @@ import { useState } from 'react'
 
 import { cn } from '../../../../lib/utils'
 import type { ProjectFile } from '../../../../types/draftCheck'
+import { FOCUS, HIGHLIGHT } from '../../hover'
 
 export function FileTabs({
   files,
@@ -58,7 +59,8 @@ export function FileTabs({
               }}
               className={cn(
                 'flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-3.5 py-2 font-mono text-[12px] whitespace-nowrap',
-                selected ? 'bg-surface font-medium text-ink' : 'text-ink-muted hover:text-ink',
+                FOCUS,
+                selected ? 'bg-surface font-medium text-ink' : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
               )}
             >
               {file.name}
@@ -112,12 +114,12 @@ export function FileTabs({
               {error}
             </span>
           )}
-          <button type="submit" className="rounded px-1.5 py-0.5 text-xs text-accent hover:underline">
+          <button type="submit" className={`rounded px-1.5 py-0.5 text-xs text-accent ${HIGHLIGHT}`}>
             Add
           </button>
         </form>
       ) : (
-        <button type="button" onClick={() => setAdding(true)} className="shrink-0 px-3.5 py-2 text-xs text-accent hover:underline">
+        <button type="button" onClick={() => setAdding(true)} className={`shrink-0 px-3.5 py-2 text-xs text-accent ${HIGHLIGHT}`}>
           + file
         </button>
       )}
