@@ -76,6 +76,9 @@ test('a dropped file that is not a PDF says why nothing happened', async () => {
   const file = new File(['x'], 'notes.txt', { type: 'text/plain' })
   fireEvent.drop(card, { dataTransfer: { files: [file] } })
   expect(screen.getByRole('alert')).toHaveTextContent('Only PDF files can be analyzed')
+
+  fireEvent.change(screen.getByLabelText('Paper to analyze'), { target: { value: '10.1/x' } })
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 
 test('Analyze on a queued paper puts its identifier in the analyze box', async () => {

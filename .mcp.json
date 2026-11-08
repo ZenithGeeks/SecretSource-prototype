@@ -1,12 +1,8 @@
 {
   "mcpServers": {
-    "colbert": {
+    "supabase": {
       "type": "http",
-      "url": "https://colbert-540627595710.asia-southeast1.run.app/mcp/"
-    },
-    "colpali": {
-      "type": "http",
-      "url": "https://colpali-540627595710.asia-southeast1.run.app/mcp/"
+      "url": "https://mcp.supabase.com/mcp?project_ref=hecmskknxyssewgnflvy&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
     }
   }
 }

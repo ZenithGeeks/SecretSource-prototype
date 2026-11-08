@@ -84,7 +84,10 @@ export function HomeAnalyzeCard({
           <input
             ref={inputRef}
             value={reference}
-            onChange={(event) => onReferenceChange(event.target.value)}
+            onChange={(event) => {
+              setNotPdf(false)
+              onReferenceChange(event.target.value)
+            }}
             placeholder="Paste a DOI, arXiv ID or link, or drop a PDF here"
             aria-label="Paper to analyze"
             className="min-w-0 flex-1 bg-transparent py-1 text-[15px] text-ink placeholder:text-ink-muted focus:outline-none"
