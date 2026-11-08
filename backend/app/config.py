@@ -139,6 +139,10 @@ PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECK
 # checks and the assistant's agents. The 9arm key allows 3 and refuses the rest with HTTP 429
 # (#511). Other processes on the same key are not counted.
 LLM_PARALLEL_REQUESTS = int(os.getenv("LLM_PARALLEL_REQUESTS", "3"))
+# How long one LLM call keeps retrying while the provider is busy (HTTP 429) or has no route
+# (503), before it fails. Two workers can send 6 calls to a provider that takes 3 (#839), and a
+# TokenMe outage on 2026-11-08 lasted 4 minutes.
+LLM_BUSY_RETRY_SECONDS = float(os.getenv("LLM_BUSY_RETRY_SECONDS", "300"))
 # How many Docling PDF conversions run at once in this process. Each one holds about 2 GB of
 # layout and table models while it runs, which killed Cloud Run gateway instances at 4Gi and 8Gi.
 DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
