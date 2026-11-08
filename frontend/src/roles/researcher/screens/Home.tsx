@@ -8,7 +8,7 @@
 import { useRef, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
-import { Card, Empty, FadeIn, LoadingScreen, TextButton, VerdictBadge } from '../../../components/ui'
+import { Card, ErrorState, FadeIn, LoadingScreen, TextButton, VerdictBadge } from '../../../components/ui'
 import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
@@ -57,12 +57,20 @@ export function Home({
   onOpen: (screen: ResearcherScreen) => void
   onOpenAnalysis: (id: string) => void
 }) {
-  const { data: home, isError } = useResearcherHome()
+  const { data: home, isError, error, refetch } = useResearcherHome()
   const { displayName } = useSettings()
   const { session } = useAuth()
   const [reference, setReference] = useState('')
   const analyzeInput = useRef<HTMLInputElement>(null)
-  if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
+  if (isError) {
+    return (
+      <ErrorState
+        title="Your library could not load"
+        message={(error as Error | null)?.message ?? 'The gateway did not answer.'}
+        onRetry={() => refetch()}
+      />
+    )
+  }
   if (!home) return <LoadingScreen label="Loading your library…" />
 
   // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
@@ -70,6 +78,7 @@ export function Home({
   const metaName = session?.user?.user_metadata?.full_name as string | undefined
   const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+  const conflictsTotal = home.conflictsTotal ?? home.conflicts.length
 
   return (
     <FadeIn className="flex flex-col gap-7 pt-4">
@@ -94,9 +103,9 @@ export function Home({
         <Card className={cn(CARD, 'min-w-0 flex-1 p-0 pt-[18px] pb-1.5')}>
           <div className="flex items-center px-5 pb-2.5">
             <h2 className={cn(CARD_TITLE, 'flex-1')}>Conflicts in your library</h2>
-            {home.conflicts.length > 0 && (
+            {conflictsTotal > home.conflicts.length && (
               <TextButton onClick={() => onOpen('library')} className="text-[13px]">
-                See all {home.conflicts.length}
+                All {conflictsTotal} in Library
               </TextButton>
             )}
           </div>
@@ -111,16 +120,18 @@ export function Home({
                 <button
                   type="button"
                   onClick={() => onOpenAnalysis(c.analysis)}
-                  className="flex w-full flex-col items-start gap-1.5 px-5 py-3 text-left hover:bg-accent-soft"
+                  className="flex w-full min-w-0 flex-col items-start gap-1.5 px-5 py-3 text-left hover:bg-accent-soft"
                 >
-                  <p className="text-[15px] leading-6 text-ink">{c.claim}</p>
-                  <span className="flex flex-wrap items-center gap-2">
-                    {c.for.length > 0 && <VerdictBadge verdict="supports" text={c.for.join(', ')} />}
-                    {c.against.length > 0 ? (
-                      <VerdictBadge verdict="refutes" text={c.against.join(', ')} />
-                    ) : (
-                      <span className="text-xs text-ink-muted">No counter-evidence yet</span>
-                    )}
+                  {c.paper && <span className="max-w-full truncate text-xs text-ink-muted">{c.paper}</span>}
+                  <p className="line-clamp-2 text-sm leading-6 text-ink">{c.claim}</p>
+                  {/* One pill per cited work, so a long list wraps instead of running out of the card. */}
+                  <span className="flex max-w-full flex-wrap items-center gap-2">
+                    {c.against.map((work) => (
+                      <VerdictBadge key={`against-${work}`} verdict="refutes" text={work} title={work} />
+                    ))}
+                    {c.for.map((work) => (
+                      <VerdictBadge key={`for-${work}`} verdict="supports" text={work} title={work} />
+                    ))}
                   </span>
                 </button>
               </li>
@@ -173,7 +184,7 @@ export function Home({
         <div className="flex items-center gap-2">
           <h2 className={cn(CARD_TITLE, 'flex-1')}>Your library</h2>
           <span className="text-[13px] text-ink-muted">
-            {home.library.papers} papers · {home.library.claims} claims · {home.library.verified} verified
+            {home.library.papers} papers · {home.library.claims} claims
           </span>
           <TextButton onClick={() => onOpen('library')} className="text-[13px]">
             Open library
