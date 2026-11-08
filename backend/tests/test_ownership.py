@@ -235,3 +235,34 @@ def test_deleting_a_project_is_owner_only_and_keeps_its_papers(client, fake_proj
     assert client.get("/analyses/a1", headers=ada).status_code == 200
     # Deleting an id that no longer exists is also a 404, not a crash.
     assert client.delete(f"/researcher/projects/{project_id}", headers=ada).status_code == 404
+
+
+def test_only_the_owner_can_dispute_a_verdict_and_a_second_dispute_replaces_the_first(client):
+    main.analyses["a1"]["claims"][0]["verdicts"] = [{"source": "kotonya.pdf", "verdict": "insufficient"}]
+    ada = {"Authorization": "Bearer token-ada"}
+    bo = {"Authorization": "Bearer token-bo"}
+    body = {"claim": 0, "source": "kotonya.pdf", "note": "Table 2 backs it"}
+
+    assert client.post("/analyses/a1/disputes", json=body, headers=bo).status_code == 404
+    assert client.post("/analyses/a1/disputes", json=body, headers=ada).status_code == 200
+    client.post("/analyses/a1/disputes", json={**body, "note": "Section 4 backs it"}, headers=ada)
+
+    disputes = main.analyses["a1"]["disputes"]
+    assert [(d["source"], d["note"]) for d in disputes] == [("kotonya.pdf", "Section 4 backs it")]
+
+
+def test_a_dispute_must_name_a_verdict_the_claim_has(client):
+    ada = {"Authorization": "Bearer token-ada"}
+
+    for body in ({"claim": 5, "source": "x.pdf"}, {"claim": 0, "source": "x.pdf"}):
+        assert client.post("/analyses/a1/disputes", json=body, headers=ada).status_code == 422
+
+
+def test_a_running_analysis_cannot_be_disputed_yet(client):
+    main.analyses["a1"]["status"] = "running"
+    main.analyses["a1"]["claims"][0]["verdicts"] = [{"source": "kotonya.pdf", "verdict": "insufficient"}]
+    body = {"claim": 0, "source": "kotonya.pdf"}
+
+    response = client.post("/analyses/a1/disputes", json=body, headers={"Authorization": "Bearer token-ada"})
+
+    assert response.status_code == 409

@@ -11,6 +11,7 @@ DELETE /analyses/{id}
 GET  /papers/{name}             -> the PDF itself
 GET  /papers/{name}/pages/{n}.png?dpi=110   -> that page rendered
 GET  /papers/{name}/find?q=...&page=N       -> where that text sits, as boxes
+POST /analyses/{id}/disputes                -> the owner disagrees with one verdict
 GET  /user/preferences                      -> the signed-in user's stored settings patch
 PATCH /user/preferences  {"patch": {...}}   -> merges and returns the settings patch
 DELETE /user/data?scope=all|researcher|author -> deletes what the user owns in that role (default: both)
@@ -1066,6 +1067,44 @@ async def _end_stopped(analysis: dict) -> None:
         await asyncio.to_thread(redis_connection().publish, f"analysis:{analysis['id']}", snapshot)
     except Exception as error:
         logger.warning("publishing the stop of analysis %s to Redis failed: %s", analysis["id"], error)
+
+
+class DisputeRequest(BaseModel):
+    claim: int  # index into the analysis's claims
+    source: str  # the verdict's `source`, the cited work's file name
+    note: str = Field(default="", max_length=2000)
+
+
+@app.post("/analyses/{analysis_id}/disputes")
+async def dispute_verdict(
+    analysis_id: str, request: DisputeRequest, user: str | None = Depends(current_user)
+):
+    """Record that the owner disagrees with one verdict, and why. One dispute per verdict: a
+    second one replaces the first. The verdict itself stays as the judge gave it; disputes are
+    kept beside it so a reader sees both and they can feed the judge's eval set."""
+    analysis = await asyncio.to_thread(_mine, analysis_id, user)
+    # A running job saves its own copy of the analysis, which would drop a dispute added here.
+    if analysis["status"] == "running":
+        raise HTTPException(409, "this analysis is still running; dispute it once it has finished")
+    claims = analysis.get("claims", [])
+    if not 0 <= request.claim < len(claims):
+        raise HTTPException(422, f"claim {request.claim} is not in this analysis")
+    sources = {verdict.get("source") for verdict in claims[request.claim].get("verdicts", [])}
+    if request.source not in sources:
+        raise HTTPException(422, f"claim {request.claim} has no verdict from {request.source!r}")
+    dispute = {
+        "claim": request.claim,
+        "source": request.source,
+        "note": request.note.strip(),
+        "at": round(time.time()),
+    }
+    analysis["disputes"] = [
+        kept
+        for kept in analysis.get("disputes", [])
+        if (kept["claim"], kept["source"]) != (request.claim, request.source)
+    ] + [dispute]
+    await asyncio.to_thread(store.save, analysis)
+    return dispute
 
 
 @app.get("/analyses/{analysis_id}/events")

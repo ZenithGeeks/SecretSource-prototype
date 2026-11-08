@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, FileText, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 
-import type { Citation, Claim, PaperFigure, Unchecked, Verdict } from '../lib/api'
+import type { Citation, Claim, Dispute, PaperFigure, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
 import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
 import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
@@ -13,6 +13,7 @@ import { cn } from '../lib/utils'
 import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
 import { StandingBadge, TextButton, VerdictBadge } from './ui'
+import { VerdictDispute } from './VerdictDispute'
 
 /** The verdict colour, as the short rule before an evidence panel's label. */
 const VERDICT_BAR = {
@@ -185,13 +186,16 @@ async function showInCitedPaper(
   page?: number,
 ) {
   if (!onShow) return
-  const found = await api.findInPaper(verdict.source, quote, page).catch(() => null)
+  // The page comes from the retrieved passage, which can start on the page before the quote;
+  // when the quote is not on it, look through the whole paper.
+  let found = await api.findInPaper(verdict.source, quote, page).catch(() => null)
+  if (page && !found?.page) found = await api.findInPaper(verdict.source, quote).catch(() => null)
   onShow({
     paper: verdict.source,
     label,
     quote,
     source: found && found.page ? (found as Target['source']) : null,
-    page,
+    page: found?.page ?? page,
     verdict: verdict.verdict,
   })
 }
@@ -361,7 +365,15 @@ function PreprintNote({ verdict }: { verdict: Verdict }) {
 
 /** What a source answered, for a cited work that is not the claim's main evidence: one line until
  * opened, then the deciding quote and the working behind it. */
-function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
+function Answer({
+  verdict,
+  onShow,
+  footer,
+}: {
+  verdict: Verdict
+  onShow?: (target: Target) => void
+  footer?: ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const [showEvidence, setShowEvidence] = useState(false)
   const page = verdict.quote ? quotePage(verdict) : undefined
@@ -412,6 +424,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
         <Label>{WHY_LABELS[verdict.verdict]}</Label>
         <p className="max-w-prose text-sm text-ink-muted">{verdict.reasoning}</p>
         <PreprintNote verdict={verdict} />
+        {footer}
       </div>
 
       <FigureCrops verdict={verdict} onShow={onShow} />
@@ -448,6 +461,7 @@ function CitedWork({
   failure,
   onlyNamed = false,
   onShow,
+  footer,
 }: {
   citation: Citation
   verdict?: Verdict
@@ -455,6 +469,8 @@ function CitedWork({
   /** The claim only names this work as something the paper used, so it was not checked. */
   onlyNamed?: boolean
   onShow?: (target: Target) => void
+  /** Shown under the verdict's reasoning: the dispute control. */
+  footer?: (verdict: Verdict) => ReactNode
 }) {
   const link = citationLink(citation)
   return (
@@ -478,7 +494,7 @@ function CitedWork({
           <span className="ml-1.5 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
         )}
       </p>
-      {verdict && <Answer verdict={verdict} onShow={onShow} />}
+      {verdict && <Answer verdict={verdict} onShow={onShow} footer={footer?.(verdict)} />}
       {failure && <Failure failure={failure} />}
       {!verdict && !failure && onlyNamed && (
         <p className="mt-1 text-xs text-ink-muted">
@@ -504,6 +520,8 @@ export function ClaimCard({
   onSelect,
   actions,
   startCollapsed = false,
+  analysisId,
+  disputes = [],
 }: {
   claim: Claim
   index: number
@@ -522,6 +540,10 @@ export function ClaimCard({
   actions?: ReactNode
   /** Stay a one-line row until opened, whatever the verdict (the list shown while a run is going). */
   startCollapsed?: boolean
+  /** With it, the owner can dispute a verdict; left out where nobody may (shared or teacher views). */
+  analysisId?: string
+  /** The owner's disputes in this analysis. */
+  disputes?: Dispute[]
 }) {
   const [open, setOpen] = useState(!startCollapsed && opensByDefault(standing))
   const [showEvidence, setShowEvidence] = useState(false)
@@ -549,6 +571,15 @@ export function ClaimCard({
     setOpen(!open)
     onSelect?.()
   }
+  const disputeOf = (verdict: Verdict) =>
+    analysisId ? (
+      <VerdictDispute
+        analysisId={analysisId}
+        claimIndex={index}
+        verdict={verdict}
+        dispute={disputes.find((d) => d.claim === index && d.source === verdict.source)}
+      />
+    ) : null
   const surface =
     'rounded-2xl border border-border-subtle bg-surface shadow-card'
   const number = (
@@ -692,6 +723,7 @@ export function ClaimCard({
             </TextButton>
           )}
           <PreprintNote verdict={primary} />
+          {disputeOf(primary)}
         </div>
       )}
 
@@ -720,7 +752,16 @@ export function ClaimCard({
             if (answers.verdict && answers.verdict === primary) return null
             // claim.named holds lookup keys; citedAs builds the same key in the same order.
             const onlyNamed = (claim.named ?? []).includes(citedAs(citation))
-            return <CitedWork key={i} citation={citation} onlyNamed={onlyNamed} onShow={onShow} {...answers} />
+            return (
+              <CitedWork
+                key={i}
+                citation={citation}
+                onlyNamed={onlyNamed}
+                onShow={onShow}
+                footer={disputeOf}
+                {...answers}
+              />
+            )
           })}
         </ul>
       )}
@@ -733,7 +774,7 @@ export function ClaimCard({
           <p className="truncate text-sm text-ink-muted" title={verdict.source}>
             {verdict.source}
           </p>
-          <Answer verdict={verdict} onShow={onShow} />
+          <Answer verdict={verdict} onShow={onShow} footer={disputeOf(verdict)} />
         </div>
       ))}
       {loose.failures.map((failure, i) => (
