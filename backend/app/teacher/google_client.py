@@ -34,7 +34,8 @@ def _render_feedback_pdf(html: str) -> bytes:
     for _ in range(PDF_MAX_PAGES):
         device = writer.begin_page(page)
         more, filled = story.place(content)
-        if more and (filled.is_empty or filled.width <= 0 or filled.height <= 0):
+        filled_rect = pymupdf.Rect(filled)
+        if more and (filled_rect.is_empty or filled_rect.width <= 0 or filled_rect.height <= 0):
             raise ValueError("feedback report layout made no progress")
         story.draw(device)
         writer.end_page()
