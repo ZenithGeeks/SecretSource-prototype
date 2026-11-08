@@ -410,3 +410,19 @@ def test_the_check_my_draft_prompt_asks_for_check_text(app):
     assert [prompt["name"] for prompt in listed["prompts"]] == ["check_my_draft"]
     assert "check_text" in got["messages"][0]["content"]["text"]
     assert got["messages"][0]["content"]["text"].endswith("My draft.")
+
+
+def test_check_my_draft_is_off_when_check_text_is_not_allowed(app, monkeypatch):
+    allow(monkeypatch, {"level": "custom", "tools": ["list_papers"]})
+
+    async def steps(client):
+        listed = await rpc(client, "prompts/list")
+        body = {"jsonrpc": "2.0", "id": 2, "method": "prompts/get", "params": {"name": "check_my_draft"}}
+        got = await client.post("/mcp/", json=body, headers=MCP_HEADERS)
+        return listed, got.json()
+
+    listed, got = run_with_client(app, steps)
+
+    assert listed["prompts"] == []
+    assert "result" not in got
+    assert "Settings, Agents" in got["error"]["message"]
