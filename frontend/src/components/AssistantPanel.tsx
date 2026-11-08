@@ -8,7 +8,7 @@
 
 import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
 import { MotionConfig } from 'framer-motion'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
@@ -288,6 +288,48 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
   )
 }
 
+/** Below lg the panel covers the whole screen. */
+const PHONE = '(max-width: 1023px)'
+const isPhone = () => window.matchMedia?.(PHONE).matches ?? false
+
+/** Moves focus into the panel when a reader opens it and back to what opened it when it closes.
+ * On a phone, where the panel covers the screen, it is announced as a modal dialog. */
+function usePanelFocus(root: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const panel = root.current
+    if (!panel) return
+    const active = document.activeElement
+    // A panel restored open on page load leaves focus where it is; only a click or key opened it.
+    const opener = active instanceof HTMLElement && active !== document.body ? active : null
+    if (opener) panel.querySelector<HTMLElement>('input, textarea, button')?.focus()
+    if (isPhone()) {
+      panel.setAttribute('role', 'dialog')
+      panel.setAttribute('aria-modal', 'true')
+    }
+    return () => {
+      if (opener?.isConnected) opener.focus()
+    }
+  }, [root])
+}
+
+/** On a phone, Tab past the last control comes back to the first, so focus stays on the panel
+ * that covers the screen. Dialogs it opens (a source, Connect agent) sit outside it and trap
+ * their own focus. */
+function keepTabInside(event: KeyboardEvent<HTMLElement>) {
+  if (event.key !== 'Tab' || !isPhone()) return
+  const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button, input, textarea, a[href], [tabindex="0"]')]
+    .filter((element) => !element.hasAttribute('disabled') && element.offsetParent !== null)
+  const first = controls[0]
+  const last = controls.at(-1)
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last?.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first?.focus()
+  }
+}
+
 export function AssistantPanel({
   role,
   assistant,
@@ -346,6 +388,8 @@ export function AssistantPanel({
   }
   const end = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLFormElement>(null)
+  const root = useRef<HTMLElement>(null)
+  usePanelFocus(root)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
   const askOnline = useFeature('ask')
@@ -394,7 +438,13 @@ export function AssistantPanel({
 
   return (
     <aside
+      ref={root}
       aria-label="Ask"
+      // Escape closes the panel, unless a menu inside it (the @ and / list) used the key first.
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !event.defaultPrevented) onClose()
+        keepTabInside(event)
+      }}
       className={cn(
         'fixed inset-0 z-50 flex flex-col bg-surface lg:static lg:z-auto lg:h-full lg:border-l lg:border-border-subtle',
         className,
@@ -553,9 +603,9 @@ export function AssistantPanel({
                   </div>
                 </form>
                 {askOnline ? (
-                  <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+                  <p className="mt-2 text-xs text-ink-muted">{NOTE}</p>
                 ) : (
-                  <p role="status" className="mt-2 text-[11px] leading-4 text-refutes">
+                  <p role="status" className="mt-2 text-xs text-refutes">
                     {OFFLINE_REASON.ask}
                   </p>
                 )}
