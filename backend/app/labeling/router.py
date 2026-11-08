@@ -930,15 +930,15 @@ def _account(row: dict) -> str:
     return row.get("annotator_id") or row.get("annotator", "")
 
 
-def _venue_ranks_by_paper() -> dict[str, tuple[str, str]]:
-    """paper_id -> (venue_rank, venue_rank_source) of every listed paper with a rank."""
+def _by_paper[T](by_analysis: dict[str, T]) -> dict[str, T]:
+    """The same values keyed by paper_id (the PDF's stem), which is what label rows carry."""
     from app import main
 
     found = {}
-    for analysis_id, rank in pool.venue_ranks().items():
+    for analysis_id, value in by_analysis.items():
         row = main.lookup(analysis_id)
         if row and row.get("file"):
-            found[Path(row["file"]).stem] = rank
+            found[Path(row["file"]).stem] = value
     return found
 
 
@@ -976,11 +976,18 @@ async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Dep
         rows = [r for r in rows if not (r["origin"] == "human_added" and r["status"] == "rejected")]
     columns = TABS[tab]
     if tab == "labels":
-        # The paper's venue rank from when it was listed, for the thesis table (SCRUM-445).
-        ranks = await asyncio.to_thread(_venue_ranks_by_paper)
-        columns = [*columns, "venue_rank", "venue_rank_source"]
+        # The paper's venue rank from when it was listed, for the thesis table (SCRUM-445), and its
+        # topic, which split_dataset.py balances the splits on.
+        ranks = await asyncio.to_thread(lambda: _by_paper(pool.venue_ranks()))
+        topics = await asyncio.to_thread(lambda: _by_paper(pool.pooled()))
+        columns = [*columns, "venue_rank", "venue_rank_source", "topic"]
         rows = [
-            {**r, **dict(zip(columns[-2:], ranks.get(r["paper_id"], ("", "")), strict=True))} for r in rows
+            {
+                **r,
+                **dict(zip(columns[-3:-1], ranks.get(r["paper_id"], ("", "")), strict=True)),
+                "topic": topics.get(r["paper_id"], ""),
+            }
+            for r in rows
         ]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")

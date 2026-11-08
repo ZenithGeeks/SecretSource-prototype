@@ -1090,7 +1090,7 @@ def test_a_listed_paper_keeps_its_venue_rank_into_the_labels_csv(api, monkeypatc
     label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 2}
     client.post("/labeling/sessions/a1/save", json={"labels": [label]})
     header, row = client.get("/labeling/export?tab=labels").text.splitlines()
-    assert header.endswith(",venue_rank,venue_rank_source") and row.endswith(",A*,CORE 2026")
+    assert header.endswith(",venue_rank,venue_rank_source,topic") and row.endswith(",A*,CORE 2026,CV")
 
 
 def test_a_paper_is_listed_without_a_rank_when_scopus_fails(api, monkeypatch):
