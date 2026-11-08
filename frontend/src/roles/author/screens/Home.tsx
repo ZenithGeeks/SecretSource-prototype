@@ -21,6 +21,7 @@ import { Button, Card, ErrorState, FadeIn, LoadingScreen } from '../../../compon
 import { VerdictBar, VerdictLegend } from '../../../components/VerdictBar'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
+import { centreInView } from '../../../lib/centreInView'
 import { shortMessage } from '../../../lib/citations'
 import { SETTINGS_DEFAULTS, greeting, useSettings } from '../../../lib/settings'
 import { useAuth } from '../../../lib/useAuth'
@@ -255,16 +256,23 @@ function HomeBody({
     }
   }
 
+  // A row or the pager picks a citation; the Evidence panel is under the cards, so it is brought
+  // to the middle of the screen once it shows that citation (its height changes with it).
+  const [reveal, setReveal] = useState(0)
+  useEffect(() => {
+    if (reveal) centreInView(evidence.current)
+  }, [reveal])
+
   const nextIssue = () => {
     if (issues.length === 0) return
     const index = issues.findIndex((c) => c.id === selected?.id)
     setSelectedId(issues[(index + 1) % issues.length].id)
+    setReveal((n) => n + 1)
   }
 
-  /** A row picks the citation; the panel is under the cards, so bring it into view. */
   const selectRow = (id: string) => {
     setSelectedId(id)
-    evidence.current?.scrollIntoView?.({ block: 'nearest' })
+    setReveal((n) => n + 1)
   }
 
   if (draft.isPending) return <LoadingScreen label="Opening your draft…" />
