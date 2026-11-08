@@ -1,11 +1,16 @@
-"""Fill the `split` column: equal thirds, grouped so nothing leaks, label-balanced.
+"""Fill the `split` column: equal thirds, grouped so nothing leaks, balanced on label and topic.
 
 A paper and the reference papers it is labeled against all land in one split, and so does every
 other paper that shares one of those references (otherwise a reference the optimizer saw in
 training would reappear in test).
 
+Within that, each split gets about the same mix of evidence levels within each topic (CV, NLP, SE,
+HPC), so every topic can be scored on test. A CSV without a `topic` column (an export from before
+it was added) is balanced on the label only.
+
 usage: python split_dataset.py labels.csv   # the Labeler page's "Download labels CSV"
 """
+
 import sys
 
 import pandas as pd
@@ -31,11 +36,16 @@ for paper, ref in zip(df.paper_id, df.get("reference_id", df.paper_id), strict=T
     parent[find(f"paper:{paper}")] = find(f"paper:{ref}")
 groups = df.paper_id.map(lambda p: find(f"paper:{p}"))
 
+topic = df["topic"].fillna("") if "topic" in df else pd.Series("", index=df.index)
+strata = topic + "|" + df.evidence.astype(str)
+
 df["split"] = ""
 folds = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=0)
-for name, (_, idx) in zip(["train", "val", "test"], folds.split(df, df.evidence, groups), strict=True):
+for name, (_, idx) in zip(["train", "val", "test"], folds.split(df, strata, groups), strict=True):
     df.loc[df.index[idx], "split"] = name
 
 assert (df.groupby(groups).split.nunique() == 1).all(), "a paper group is in more than one split"
 df.to_csv(path, index=False)
 print(pd.crosstab(df.split, df.evidence, margins=True))
+if "topic" in df:
+    print(pd.crosstab(df.split, topic, margins=True))

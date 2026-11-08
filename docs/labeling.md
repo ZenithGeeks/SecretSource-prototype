@@ -100,8 +100,8 @@ claims and passages their author later rejected or removed. Then:
 uv run --with pandas --with scikit-learn python split_dataset.py labels.csv
 ```
 
-fills `split` in equal thirds, label-balanced, with a paper and every paper that shares one of its
-references kept in one split, so nothing leaks between train, val and test. Add the paper text
+fills `split` in equal thirds, balanced on label and topic (the export's `topic` column), with a paper and every paper that shares one of its
+references kept in one split, so nothing leaks between train, val and test. A topic needs papers in at least three such groups to reach every split. Add the paper text
 (or the retrieved passages) from `paper_id` / `reference_id` when you build the `dspy.Example`s.
 
 ## Topics
