@@ -9,11 +9,11 @@
 
 import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { paperName } from '../lib/api'
 import type { Analysis, Claim } from '../lib/api'
-import { countsOf, ranked, standingOf, verdictCountLabel } from '../lib/claims'
+import { countsOf, opensByDefault, ranked, standingOf, verdictCountLabel } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { sectionName, sectionOfPage } from '../lib/outline'
 import { useAnalysis } from '../lib/useAnalysis'
@@ -103,6 +103,8 @@ export function AnalysisView({
   const shown = (filter ? standings.filter((entry) => entry.standing === filter) : standings).filter(
     (entry) => !section || entry.claim.section === section,
   )
+  // Ranked worst first, so the first claim that needs nothing starts the settled group.
+  const settledFrom = shown.findIndex((entry) => !opensByDefault(entry.standing))
 
   const sectionTarget = jump && file && jump.at > opened.at
     ? { paper: file, label: `Section ${jump.n} · ${jump.title}`, source: null, page: jump.page, section: jump.n }
@@ -288,31 +290,35 @@ export function AnalysisView({
           {section && shown.length === 0 && standings.length > 0 && (
             <p className="px-1 text-sm text-ink-muted">No claims come from this section.</p>
           )}
-          {(teacher || !running) && shown.map(({ claim, index, standing }) => (
-            <ClaimCard
-              key={index}
-              claim={claim}
-              index={index}
-              standing={standing}
-              paper={file}
-              section={claim.section ? sectionName(outline, claim.section) : undefined}
-              figures={analysis.data.figures}
-              references={analysis.data.references}
-              actions={renderClaimActions?.(claim, index)}
-              onSelect={presentation === 'teacher' && file && claim.source
-                ? () => setTarget({
-                    paper: file,
-                    label: `Claim ${index + 1} in the submission`,
-                    quote: claim.sentence,
-                    source: claim.source ?? null,
-                    verdict: ['supports', 'refutes', 'insufficient'].includes(standing)
-                      ? standing as 'supports' | 'refutes' | 'insufficient'
-                      : undefined,
-                  })
-                : undefined}
-              // A page of the analysed paper carries the claim's section; a cited paper's does not.
-              onShow={(next) => setTarget(next.paper === file ? { ...next, section: claim.section } : next)}
-            />
+          {(teacher || !running) && shown.map(({ claim, index, standing }, i) => (
+            <Fragment key={index}>
+              {!teacher && i > 0 && i === settledFrom && <h2 className="type-title pt-3">Settled</h2>}
+              <ClaimCard
+                claim={claim}
+                index={index}
+                standing={standing}
+                paper={file}
+                section={claim.section ? sectionName(outline, claim.section) : undefined}
+                figures={analysis.data.figures}
+                references={analysis.data.references}
+                analysisId={teacher ? undefined : analysis.data.id}
+                disputes={analysis.data.disputes}
+                actions={renderClaimActions?.(claim, index)}
+                onSelect={presentation === 'teacher' && file && claim.source
+                  ? () => setTarget({
+                      paper: file,
+                      label: `Claim ${index + 1} in the submission`,
+                      quote: claim.sentence,
+                      source: claim.source ?? null,
+                      verdict: ['supports', 'refutes', 'insufficient'].includes(standing)
+                        ? standing as 'supports' | 'refutes' | 'insufficient'
+                        : undefined,
+                    })
+                  : undefined}
+                // A page of the analysed paper carries the claim's section; a cited paper's does not.
+                onShow={(next) => setTarget(next.paper === file ? { ...next, section: claim.section } : next)}
+              />
+            </Fragment>
           ))}
         </section>
 

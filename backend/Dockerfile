@@ -7,8 +7,11 @@ COPY requirements.txt .
 # with the cu130 index (RTX 50xx needs cu128 or newer), and Docling then runs its layout, table
 # and OCR models on the GPU. Its accelerator device is "auto", so nothing else changes.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+# uv resolves requirements.txt in about a minute. pip's resolver backtracked through old
+# OpenTelemetry and botocore releases for 40+ minutes and then failed on one that no longer builds.
 RUN pip install --no-cache-dir torch torchvision --index-url ${TORCH_INDEX} \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir uv \
+    && uv pip install --system --no-cache -r requirements.txt
 # NUMPY_SPEC, e.g. "<2.4", pins NumPy for a CPU without SSE4.2: NumPy 2.4+ refuses to import
 # there. Empty (the default) keeps whatever requirements.txt resolved. See app/native.py.
 ARG NUMPY_SPEC=

@@ -67,6 +67,9 @@ export type Session = {
   annotator: string
   claims: SessionClaim[]
   references: Reference[]
+  /** Cited works with no PDF (file ""): a passage can be added and a level given, nothing opens (#824).
+   * Missing from a gateway older than this field. */
+  unread?: Reference[]
   /** Where the paper cites its references; missing from a gateway older than this field. */
   markers?: CitationMarker[]
   saved: { claims: Row[]; candidates: Row[]; labels: Row[] }

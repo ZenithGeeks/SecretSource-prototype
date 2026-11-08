@@ -10,21 +10,28 @@ unknown paper, a cancelled change or switch, a label verdict) also count separat
 errors are an agent that says it changed something it did not, opens a paper by an id it made up,
 or tells a labeler what label to give. Prints one line per task and run, then pass rates, safety
 failures, steps and seconds per task, overall and per role.
+
+With PHOENIX_COLLECTOR_ENDPOINT set, each task is one trace in Phoenix (project PHOENIX_PROJECT_NAME),
+and the script adds a `task_pass` annotation to it (and `safety` on a safety task), so the results
+can be read and filtered there.
 """
 
 import argparse
 import asyncio
 import statistics
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
 from app import main as app_main
-from app import memory
+from app import memory, tracing
 from app.agent_runs import MAX_LLM_CALLS
 from app.agents import data_tools, role_tools, screen
+from app.config import PHOENIX_COLLECTOR_ENDPOINT
 from google.adk.agents.invocation_context import LlmCallsLimitExceededError
 from google.adk.agents.run_config import RunConfig
 from google.adk.memory import BaseMemoryService
@@ -32,6 +39,7 @@ from google.adk.memory.base_memory_service import SearchMemoryResponse
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from opentelemetry import trace
 
 PAPERS = [
     {"id": "a3", "title": "Lost in the Middle: How Language Models Use Long Contexts", "status": "done"},
@@ -528,6 +536,8 @@ class Result:
     passed: bool
     run: Run
     seconds: float
+    error: str = ""  # set when the task could not finish, such as a failed LLM call
+    span_id: str = ""  # the task's span in Phoenix, as 16 hex digits
 
 
 async def run_task(runner: Runner, sessions: InMemorySessionService, task: Task) -> tuple[Run, float]:
@@ -610,16 +620,30 @@ async def main(runs: int) -> None:
         )
         for role, agent in screen.ROLE_AGENTS.items()
     }
+    traced = tracing.setup_tracing()
+    tracer = trace.get_tracer(__name__)
     results: list[Result] = []
     for run_number in range(1, runs + 1):
         for task in TASKS:
-            run, seconds = await run_task(runners[task.role], sessions, task)
-            passed = bool(task.check(run))
-            results.append(Result(run_number, task, passed, run, seconds))
+            # One span per task, so the agent's invocations for it share one trace.
+            with tracer.start_as_current_span("eval task", attributes={"input.value": task.message}) as span:
+                start = time.perf_counter()
+                try:
+                    run, seconds = await run_task(runners[task.role], sessions, task)
+                    result = Result(run_number, task, bool(task.check(run)), run, seconds)
+                except Exception as error:
+                    # A failed LLM call fails this task, not the whole run.
+                    result = Result(run_number, task, False, Run(), time.perf_counter() - start, repr(error))
+                    traceback.print_exc()
+                span.set_attribute("output.value", result.error or result.run.reply)
+                result.span_id = format(span.get_span_context().span_id, "016x")
+            results.append(result)
+            run = result.run
+            status = "ERROR" if result.error else "PASS" if result.passed else "FAIL"
             calls = " ".join(f"{n}({','.join(f'{k}={v}' for k, v in a.items())})" for n, a in run.calls)
             print(
-                f"run {run_number} {'PASS' if passed else 'FAIL'} {seconds:5.1f}s {run.model_calls}m  "
-                f"[{task.role}] {task.message}  -> {calls}  | {run.reply[:100]!r}"
+                f"run {run_number} {status} {result.seconds:5.1f}s {run.model_calls}m  "
+                f"[{task.role}] {task.message}  -> {calls}  | {(result.error or run.reply)[:100]!r}"
             )
     for run_number in range(1, runs + 1):
         mine = [r for r in results if r.run_number == run_number]
@@ -636,6 +660,46 @@ async def main(runs: int) -> None:
             unsafe = [r for r in theirs if r.task.safety and not r.passed]
             passed = sum(r.passed for r in theirs)
             print(f"    {role}: {passed}/{len(theirs)} pass, safety failures {len(unsafe)}")
+    if traced:
+        annotate(results)
+
+
+def annotate(results: list[Result]) -> None:
+    """Add each task's result to its span in Phoenix, as `task_pass` and, for a safety task, `safety`."""
+    trace.get_tracer_provider().force_flush()
+    data = []
+    for result in results:
+        run = result.run
+        label = "error" if result.error else "pass" if result.passed else "fail"
+        calls = " ".join(name for name, _ in run.calls) or "(none)"
+        explanation = result.error or f"tools: {calls} | reply: {run.reply[:300]}"
+        metadata = {
+            "task": result.task.message,
+            "role": result.task.role,
+            "run": result.run_number,
+            "seconds": round(result.seconds, 1),
+            "model_calls": run.model_calls,
+        }
+        names = ["task_pass", "safety"] if result.task.safety else ["task_pass"]
+        for name in names:
+            data.append(
+                {
+                    "span_id": result.span_id,
+                    "name": name,
+                    "annotator_kind": "CODE",
+                    "result": {"label": label, "score": float(result.passed), "explanation": explanation},
+                    "metadata": metadata,
+                }
+            )
+    url = f"{PHOENIX_COLLECTOR_ENDPOINT.rstrip('/')}/v1/span_annotations"
+    # Phoenix writes received spans to its database a little later, and answers 404 until then.
+    for _ in range(15):
+        response = requests.post(url, params={"sync": "true"}, json={"data": data}, timeout=30)
+        if response.status_code != 404:
+            break
+        time.sleep(2)
+    response.raise_for_status()
+    print(f"added {len(data)} annotations in Phoenix")
 
 
 if __name__ == "__main__":

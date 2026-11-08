@@ -44,6 +44,8 @@ the labeled papers by venue rank can be made from the export. Papers listed befo
    relevant**. Add what retrieval missed (a claim, or a passage in a cited paper). Give every
    reference you called relevant a 1-4 level and the reason (`1`-`4` keys label the reference on
    the right). **Save** writes that claim's rows; **Ctrl/⌘+S** works too.
+   A cited paper the pipeline could not download is still in the add form, marked "(no PDF)":
+   paste the passage from your own copy, with its page, and give it a level. It never opens on the right.
 
 The 1-4 labels grade how well the reference passage backs the claim (1 no support, 2 weak, 3 clear, 4 strong). The wording is `LEVELS` in `frontend/src/lib/labeling.ts`. How to choose a level, with examples and the hard cases, is in `docs/annotation-guideline.md`.
 
@@ -98,8 +100,8 @@ claims and passages their author later rejected or removed. Then:
 uv run --with pandas --with scikit-learn python split_dataset.py labels.csv
 ```
 
-fills `split` in equal thirds, label-balanced, with a paper and every paper that shares one of its
-references kept in one split, so nothing leaks between train, val and test. Add the paper text
+fills `split` in equal thirds, balanced on label and topic (the export's `topic` column), with a paper and every paper that shares one of its
+references kept in one split, so nothing leaks between train, val and test. A topic needs papers in at least three such groups to reach every split. Add the paper text
 (or the retrieved passages) from `paper_id` / `reference_id` when you build the `dspy.Example`s.
 
 ## Topics

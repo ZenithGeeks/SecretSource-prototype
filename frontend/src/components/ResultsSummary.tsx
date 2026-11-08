@@ -106,10 +106,10 @@ type SummaryProps = {
 function headline(counts: Record<Standing, number>) {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
   if (counts.refutes) {
-    return `${counts.refutes} ${plural(counts.refutes, 'citation contradicts what the paper says it shows', 'citations contradict what the paper says they show')}`
+    return `${counts.refutes} ${plural(counts.refutes, 'claim is', 'claims are')} contradicted by a work they cite`
   }
   if (counts.insufficient) {
-    return `${counts.insufficient} ${plural(counts.insufficient, 'cited work does', 'cited works do')} not settle what the paper says`
+    return `${counts.insufficient} ${plural(counts.insufficient, 'claim is', 'claims are')} not settled by the works they cite`
   }
   if (counts.unchecked) {
     return `${counts.unchecked} ${plural(counts.unchecked, 'claim', 'claims')} could not be checked`

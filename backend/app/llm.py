@@ -1,9 +1,11 @@
 """One model behind two frameworks. ADK agents get a LiteLlm.
 DSPy programs get a dspy.LM. Both use the OpenAI wire format,
 which is what vLLM serves. Together they keep at most LLM_PARALLEL_REQUESTS requests
-in flight in this process."""
+in flight in this process, and wait out a busy provider instead of failing."""
 
 import asyncio
+import itertools
+import random
 import threading
 import time
 from contextlib import asynccontextmanager, contextmanager
@@ -15,12 +17,32 @@ from dspy.utils.exceptions import LMRateLimitError
 from google.adk.models.lite_llm import LiteLlm, LiteLLMClient
 
 from app.auth import acting_user
-from app.config import LLM_PARALLEL_REQUESTS, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
+from app.config import LLM_BUSY_RETRY_SECONDS, LLM_PARALLEL_REQUESTS, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.metrics import LLM_RATE_LIMITED, LLM_SLOT_WAIT_SECONDS
 
 # One slot per request in flight, for every model in this process. dspy calls come from
 # worker threads and ADK calls from the event loop, so this is a threading semaphore.
 _slots = threading.BoundedSemaphore(LLM_PARALLEL_REQUESTS)
+
+# HTTP statuses that mean "try again later": the provider's parallel slots are full (429), or
+# it has no route to the model right now (503). Waits between tries, then 30 s each.
+BUSY_STATUSES = {429, 503}
+BUSY_WAITS = (5, 10, 20, 30)
+BUSY_RETRY_SECONDS = LLM_BUSY_RETRY_SECONDS
+
+
+def _busy_wait(error: Exception, attempt: int, waited: float) -> float | None:
+    """Seconds to wait before trying again after `error`, or None to give up.
+
+    dspy raises a DSPyError with `.status`; LiteLLM's errors carry `.status_code`.
+    """
+    status = getattr(error, "status", None) or getattr(error, "status_code", None)
+    left = BUSY_RETRY_SECONDS - waited
+    if status not in BUSY_STATUSES or left <= 0:
+        return None
+    # A little jitter, so calls refused together do not all come back together.
+    wait = BUSY_WAITS[min(attempt, len(BUSY_WAITS) - 1)] + random.uniform(0, 2)
+    return min(wait, left)
 
 
 _dspy_cache_key = Cache.cache_key
@@ -65,15 +87,38 @@ async def _async_slot():
 
 
 class CappedLM(dspy.LM):
-    """A dspy.LM that holds a request slot for each call, retries included."""
+    """A dspy.LM that holds a request slot for each call, and retries while the provider is busy.
+
+    The slot is given back during each wait, so a call waiting out a 429 does not block the others.
+    """
 
     def __call__(self, *args, **kwargs):
-        with _slot():
-            return super().__call__(*args, **self._with_user(kwargs))
+        kwargs = self._with_user(kwargs)
+        waited = 0.0
+        for attempt in itertools.count():
+            try:
+                with _slot():
+                    return super().__call__(*args, **kwargs)
+            except Exception as error:
+                wait = _busy_wait(error, attempt, waited)
+                if wait is None:
+                    raise
+            time.sleep(wait)
+            waited += wait
 
     async def acall(self, *args, **kwargs):
-        async with _async_slot():
-            return await super().acall(*args, **self._with_user(kwargs))
+        kwargs = self._with_user(kwargs)
+        waited = 0.0
+        for attempt in itertools.count():
+            try:
+                async with _async_slot():
+                    return await super().acall(*args, **kwargs)
+            except Exception as error:
+                wait = _busy_wait(error, attempt, waited)
+                if wait is None:
+                    raise
+            await asyncio.sleep(wait)
+            waited += wait
 
     def _with_user(self, kwargs: dict) -> dict:
         """Send the acting user as `user`, the OpenAI field LiteLLM counts usage per person by."""
@@ -98,13 +143,27 @@ class UserLiteLLMClient(LiteLLMClient):
 
 
 class CappedLiteLlm(LiteLlm):
-    """An ADK LiteLlm that holds a request slot for each model turn."""
+    """An ADK LiteLlm that holds a request slot for each model turn, and retries a turn the
+    provider refused as busy before any of it reached the caller."""
 
     async def generate_content_async(self, llm_request, stream=False):
-        # Held until the caller has read the last response, so a streamed turn keeps its slot.
-        async with _async_slot():
-            async for response in super().generate_content_async(llm_request, stream):
-                yield response
+        waited = 0.0
+        for attempt in itertools.count():
+            sent = False
+            try:
+                # Held until the caller has read the last response, so a streamed turn keeps its slot.
+                async with _async_slot():
+                    async for response in super().generate_content_async(llm_request, stream):
+                        sent = True
+                        yield response
+                return
+            except Exception as error:
+                # Part of a reply already went out: a retry would send it twice.
+                wait = None if sent else _busy_wait(error, attempt, waited)
+                if wait is None:
+                    raise
+            await asyncio.sleep(wait)
+            waited += wait
 
 
 # Qwen3 thinks before it answers unless told not to. The compose vLLM is started with

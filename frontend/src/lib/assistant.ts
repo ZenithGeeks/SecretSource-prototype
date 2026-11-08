@@ -53,7 +53,8 @@ type ChatMessage = { role: 'user'; text: string } | { role: 'assistant'; stateme
 
 export type AnswerEvent =
   | ({ type: 'statement' } & Pick<Statement, 'index' | 'text' | 'source' | 'page'>)
-  | ({ type: 'verdict' } & Required<Pick<Statement, 'index' | 'verdict' | 'quote' | 'reasoning'>>)
+  // `page` comes only when the statement had none: the page of the passage the judge quoted.
+  | ({ type: 'verdict' } & Required<Pick<Statement, 'index' | 'verdict' | 'quote' | 'reasoning'>> & Pick<Statement, 'page'>)
   | { type: 'done'; statements: number }
   | { type: 'error'; message: string }
 

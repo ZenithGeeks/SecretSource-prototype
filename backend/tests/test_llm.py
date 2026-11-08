@@ -41,6 +41,8 @@ def refusing_gateway(monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), TooManyRequests)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setattr(llm, "VLLM_URL", f"http://127.0.0.1:{server.server_port}/v1")
+    # No waiting out the 429: these tests check what happens when it is final.
+    monkeypatch.setattr(llm, "BUSY_RETRY_SECONDS", 0)
     yield
     server.shutdown()
 
@@ -292,3 +294,82 @@ def test_adk_call_sends_the_acting_user(recording_gateway, as_user):
     asyncio.run(ask())
 
     assert recording_gateway[-1]["user"] == "user-a"
+
+
+class BusyThenAnswer(BaseHTTPRequestHandler):
+    """Refuse the first `busy` requests as the provider does when its slots are full, then answer."""
+
+    busy = 0
+    seen = 0
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        BusyThenAnswer.seen += 1
+        if BusyThenAnswer.seen <= BusyThenAnswer.busy:
+            status, body = 429, {"error": {"message": "No deployments available", "code": 429}}
+        else:
+            status, body = 200, OK_ANSWER
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(body).encode())
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def busy_gateway(monkeypatch):
+    """A local server that is busy for the first few requests; waits are cut to milliseconds."""
+    BusyThenAnswer.seen = 0
+    server = ThreadingHTTPServer(("127.0.0.1", 0), BusyThenAnswer)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(llm, "VLLM_URL", f"http://127.0.0.1:{server.server_port}/v1")
+    monkeypatch.setattr(llm, "BUSY_WAITS", (0.01,))
+    monkeypatch.setattr(llm.random, "uniform", lambda low, high: 0)
+    yield BusyThenAnswer
+    server.shutdown()
+
+
+def test_dspy_call_waits_out_a_busy_provider(busy_gateway):
+    busy_gateway.busy = 3
+    lm = llm.dspy_lm().copy(num_retries=0, cache=False)
+
+    assert lm("hi") == ["ok"]
+    assert busy_gateway.seen == 4
+
+
+def test_dspy_call_gives_up_when_the_provider_stays_busy(busy_gateway, monkeypatch):
+    busy_gateway.busy = 1000
+    monkeypatch.setattr(llm, "BUSY_RETRY_SECONDS", 0.05)
+    lm = llm.dspy_lm().copy(num_retries=0, cache=False)
+
+    with pytest.raises(LMRateLimitError):
+        lm("hi")
+    assert busy_gateway.seen > 1
+
+
+def test_adk_turn_waits_out_a_busy_provider(busy_gateway):
+    busy_gateway.busy = 2
+    model = llm.adk_model()
+    request = LlmRequest(
+        model=model.model, contents=[types.Content(role="user", parts=[types.Part(text="hi")])]
+    )
+
+    async def ask():
+        return [response async for response in model.generate_content_async(request)]
+
+    responses = asyncio.run(ask())
+
+    assert responses[-1].content.parts[0].text == "ok"
+    assert busy_gateway.seen == 3
+
+
+def test_a_wait_gives_the_slot_back(busy_gateway, monkeypatch):
+    # One slot: the retry only gets through if the first try released it before waiting.
+    monkeypatch.setattr(llm, "_slots", threading.BoundedSemaphore(1))
+    busy_gateway.busy = 1
+    lm = llm.dspy_lm().copy(num_retries=0, cache=False)
+
+    assert lm("hi") == ["ok"]
+    assert llm._slots.acquire(blocking=False)

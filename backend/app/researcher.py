@@ -87,9 +87,19 @@ def cite(authors: list[str], year: str, comma: bool = False) -> str:
 
 
 def short_title(title: str) -> str:
-    """ "ColBERTv2" from "ColBERTv2: Effective and Efficient Retrieval via ..."."""
+    """ "ColBERTv2" from "ColBERTv2: Effective and Efficient Retrieval via ...". A long title is
+    cut at the last whole word before 60 characters, so no word is cut in half."""
     head = title.split(":")[0].strip()
-    return head if 0 < len(head) <= 60 else title[:60]
+    if 0 < len(head) <= 60:
+        return head
+    if len(title) <= 60:
+        return title
+    return title[:60].rsplit(" ", 1)[0].rstrip(",;") + "…"
+
+
+def _tidy(text: str) -> str:
+    """Extracted claims keep the PDF's stray spaces before punctuation ("results , or")."""
+    return re.sub(r"\s+([,.;:])", r"\1", text)
 
 
 def work_key(citation: dict) -> str:
@@ -156,7 +166,7 @@ def home(analyses: list[dict]) -> dict:
     verified = claims - counts["unchecked"]
 
     if not papers:
-        alert = "Analyse a paper to start your library."
+        alert = "Analyze a paper to start your library."
     elif counts["contradicted"]:
         alert = (
             f"{_count(counts['contradicted'], 'claim')} in your papers contradicted by the work they cite."
@@ -164,9 +174,11 @@ def home(analyses: list[dict]) -> dict:
     else:
         alert = f"{verified} of {_count(claims, 'claim')} in your papers checked against their sources."
 
+    conflicts = contradictions(papers)
     return {
         "alert": alert,
-        "conflicts": contradictions(papers)[:HOME_CONFLICTS],
+        "conflicts": conflicts[:HOME_CONFLICTS],
+        "conflictsTotal": len(conflicts),
         "queue": reading_queue(papers)[:HOME_QUEUE],
         "library": {"papers": len(papers), "claims": claims, "verified": verified, "tally": counts},
     }
@@ -185,7 +197,8 @@ def contradictions(papers: list[dict]) -> list[dict]:
             if against:
                 conflicts.append(
                     {
-                        "claim": claim["claim"],
+                        "claim": _tidy(claim["claim"]),
+                        "paper": short_title(title_of(paper)),
                         "for": [
                             short_title(_cited_work(claim, v)["title"])
                             for v in verdicts
@@ -229,12 +242,8 @@ def reading_queue(papers: list[dict]) -> list[dict]:
             {
                 "paper": short_title(citation.get("title") or key)
                 + (f" ({citation['year']})" if citation.get("year") else ""),
-                "note": (
-                    f"cited by {by} papers you analysed"
-                    if by > 1
-                    else f"cited by {claims_citing[key]} claims"
-                )
-                + ", not in your library",
+                "note": (f"Cited by {by} papers" if by > 1 else f"Cited by {claims_citing[key]} claims")
+                + " · not in your library",
                 "identifier": citation.get("doi") or citation.get("arxiv") or citation.get("title", ""),
                 "analysis": first_citer[key],
             }

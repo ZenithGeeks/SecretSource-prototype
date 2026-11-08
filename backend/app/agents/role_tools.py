@@ -1,9 +1,10 @@
-"""Read-only tools for the Labeler and Author screen agents (app/agents/screen.py, SCRUM-444).
+"""Read tools for the Labeler and Author screen agents (app/agents/screen.py, SCRUM-444), and
+saved_labels for coding agents over MCP (app/mcp_server.py).
 
 Each tool wraps the route function the role's own page calls, so it keeps that route's owner
-check: another person's paper or draft answers an error, the same as a missing one. None of
-them changes anything. The Labeler's tools never return a verdict, so the agent cannot nudge
-the labels the thesis is scored on.
+check: another person's paper or draft answers an error, the same as a missing one. Only
+saved_labels writes, one reviews row. The Labeler's tools never return a verdict, so the agent
+cannot nudge the labels the thesis is scored on.
 """
 
 import asyncio
@@ -78,6 +79,24 @@ async def claim_passages(analysis_id: str, claim_number: int, tool_context: Tool
     }
 
 
+async def saved_labels(analysis_id: str, claim_number: int, tool_context: ToolContext) -> dict:
+    """What the person saved for one claim, so you can review it: the claim as they kept it, a
+    level per cited paper (1 no support, 2 weak, 3 clear, 4 strong) with their rationale and
+    confidence, and each passage they marked relevant or rejected. Compare the levels with
+    claim_passages and say where you read a passage differently. Never tell the person which level
+    to pick; point at the passage and say why. Works only on a claim the person has saved, and it
+    marks the claim as AI-reviewed.
+
+    Args:
+        analysis_id: the paper's id, from labeling_papers.
+        claim_number: the claim's number on the labeling page, from 1.
+    """
+    try:
+        return await labeling.labels_for(analysis_id, claim_number, _user(tool_context))
+    except HTTPException as error:
+        return _error(str(error.detail))
+
+
 async def list_drafts(tool_context: ToolContext) -> dict:
     """The person's drafts, the most recently changed first: id, title, when the last check
     finished, and whether a check is running now."""
@@ -132,4 +151,5 @@ async def draft_issues(draft_id: str, tool_context: ToolContext) -> dict:
 
 
 LABELER_TOOLS = [labeling_papers, claim_passages]
+MCP_LABELER_TOOLS = [*LABELER_TOOLS, saved_labels]  # the in-app labeler agent never reads labels
 AUTHOR_TOOLS = [list_drafts, draft_issues]
