@@ -256,3 +256,13 @@ def test_a_dispute_must_name_a_verdict_the_claim_has(client):
 
     for body in ({"claim": 5, "source": "x.pdf"}, {"claim": 0, "source": "x.pdf"}):
         assert client.post("/analyses/a1/disputes", json=body, headers=ada).status_code == 422
+
+
+def test_a_running_analysis_cannot_be_disputed_yet(client):
+    main.analyses["a1"]["status"] = "running"
+    main.analyses["a1"]["claims"][0]["verdicts"] = [{"source": "kotonya.pdf", "verdict": "insufficient"}]
+    body = {"claim": 0, "source": "kotonya.pdf"}
+
+    response = client.post("/analyses/a1/disputes", json=body, headers={"Authorization": "Bearer token-ada"})
+
+    assert response.status_code == 409

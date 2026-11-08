@@ -1083,6 +1083,9 @@ async def dispute_verdict(
     second one replaces the first. The verdict itself stays as the judge gave it; disputes are
     kept beside it so a reader sees both and they can feed the judge's eval set."""
     analysis = await asyncio.to_thread(_mine, analysis_id, user)
+    # A running job saves its own copy of the analysis, which would drop a dispute added here.
+    if analysis["status"] == "running":
+        raise HTTPException(409, "this analysis is still running; dispute it once it has finished")
     claims = analysis.get("claims", [])
     if not 0 <= request.claim < len(claims):
         raise HTTPException(422, f"claim {request.claim} is not in this analysis")
