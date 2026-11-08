@@ -63,6 +63,7 @@ export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}
   const sidebar = (
     <HistoryList
       analyses={analyses.data ?? []}
+      loading={analyses.isPending}
       selected={selected}
       onSelect={(id) => {
         select(id)

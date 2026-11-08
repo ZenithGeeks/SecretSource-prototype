@@ -359,15 +359,43 @@ function PreprintNote({ verdict }: { verdict: Verdict }) {
   return <p className="text-xs text-ink-muted">{note}. Its wording or numbers can differ from the published paper.</p>
 }
 
-/** What a source answered, for a cited work that is not the claim's main evidence: the deciding
- * quote first, then the working behind it. */
+/** What a source answered, for a cited work that is not the claim's main evidence: one line until
+ * opened, then the deciding quote and the working behind it. */
 function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
+  const [open, setOpen] = useState(false)
   const [showEvidence, setShowEvidence] = useState(false)
   const page = verdict.quote ? quotePage(verdict) : undefined
 
+  // The card already leads with the deciding source; the others stay one line each, so a claim
+  // citing eight works is not eight full panels long.
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-expanded={false}
+        className="mt-2 flex w-full items-center gap-2.5 rounded-xl bg-neutral-soft px-3.5 py-2.5 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <VerdictBadge verdict={verdict.verdict} />
+        <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">
+          {verdict.quote || verdict.reasoning}
+        </span>
+        <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+      </button>
+    )
+  }
+
   return (
     <div className="mt-2 flex flex-col gap-3 rounded-xl bg-neutral-soft p-3.5">
-      <VerdictBadge verdict={verdict.verdict} />
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        aria-expanded
+        className="flex items-center gap-2.5 self-start rounded focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <VerdictBadge verdict={verdict.verdict} />
+        <ChevronDown className="size-4 text-ink-muted" aria-hidden="true" />
+      </button>
 
       {verdict.quote && (
         <EvidencePanel
@@ -382,7 +410,7 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
 
       <div className="space-y-1.5">
         <Label>{WHY_LABELS[verdict.verdict]}</Label>
-        <p className="text-sm text-ink-muted">{verdict.reasoning}</p>
+        <p className="max-w-prose text-sm text-ink-muted">{verdict.reasoning}</p>
         <PreprintNote verdict={verdict} />
       </div>
 
@@ -402,6 +430,15 @@ function Answer({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Targe
       {showEvidence && verdict.evidence.length > 0 && <Passages verdict={verdict} onShow={onShow} />}
     </div>
   )
+}
+
+/** About three lines of reasoning at the card's width; longer text folds behind "Read all". */
+const LONG_REASON = 300
+
+/** The claim is the paper's sentence word for word, apart from case, spacing and punctuation. */
+function sameWords(a: string, b?: string) {
+  const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return !!b && words(a) === words(b)
 }
 
 /** One cited work and how it answered, never a bare bibliography line (#46). */
@@ -488,6 +525,7 @@ export function ClaimCard({
 }) {
   const [open, setOpen] = useState(!startCollapsed && opensByDefault(standing))
   const [showEvidence, setShowEvidence] = useState(false)
+  const [fullReason, setFullReason] = useState(false)
   const loose = unpaired(claim)
   // The analysis-wide references too: a sentence can carry a marker its claim did not keep.
   const sentence = claim.sentence
@@ -560,9 +598,11 @@ export function ClaimCard({
         <ChevronDown className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       </button>
 
-      <p className="text-[17px] leading-6 font-medium tracking-[-0.01em]">{claim.claim}</p>
+      {!sameWords(claim.claim, claim.sentence) && (
+        <p className="text-[17px] leading-6 font-medium tracking-[-0.01em]">{claim.claim}</p>
+      )}
 
-      {(claim.sentence || primary?.quote) && (
+      {(claim.sentence || primary) && (
         <div className="grid gap-3 md:grid-cols-2">
           {/* The paper's own words are evidence; the paraphrase above them is not (#46). */}
           {claim.sentence && (
@@ -593,6 +633,13 @@ export function ClaimCard({
               }
             >
               “{primary.quote}”
+            </EvidencePanel>
+          )}
+          {primary && !primary.quote && (
+            <EvidencePanel bar={VERDICT_BAR[primary.verdict]} label={primaryName ?? 'The cited paper'}>
+              <span className="not-italic text-ink-muted">
+                No passage in the cited paper matched this claim.
+              </span>
             </EvidencePanel>
           )}
         </div>
@@ -627,9 +674,23 @@ export function ClaimCard({
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5 text-accent">
             <Sparkles className="size-4" aria-hidden="true" />
-            <p className="type-label">{WHY_LABELS[primary.verdict]}</p>
+            <p className="type-label">
+              {WHY_LABELS[primary.verdict]}
+              {primaryName && <span className="text-ink-muted"> · {primaryName}</span>}
+            </p>
           </div>
-          <p className="text-[15px] leading-6 text-ink-muted">{primary.reasoning}</p>
+          <p className={cn('max-w-prose text-[15px] leading-6 text-ink-muted', !fullReason && 'line-clamp-3')}>
+            {primary.reasoning}
+          </p>
+          {primary.reasoning.length > LONG_REASON && (
+            <TextButton
+              onClick={() => setFullReason(!fullReason)}
+              aria-expanded={fullReason}
+              className="self-start text-[13px]"
+            >
+              {fullReason ? 'Show less' : 'Read all'}
+            </TextButton>
+          )}
           <PreprintNote verdict={primary} />
         </div>
       )}
