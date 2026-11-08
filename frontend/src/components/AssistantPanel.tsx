@@ -18,7 +18,7 @@ import { STAMPS } from '../lib/stamps'
 import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
-import { parseCommand, type PaperRef } from '../lib/askCommands'
+import { parseCommand, type PaperRef, type Parsed } from '../lib/askCommands'
 import { AiCursor } from './AiCursor'
 import { AnswerActions } from './AnswerActions'
 import { AskInput } from './AskInput'
@@ -28,7 +28,7 @@ import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
 import { Stamp } from './Stamp'
 import { ThinkingState } from './ThinkingState'
-import { IconButton, Segmented } from './ui'
+import { Button, IconButton, Segmented } from './ui'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
 export type AskAbout = { kind: 'paper' | 'node' | 'library'; label: string }
@@ -390,6 +390,8 @@ export function AssistantPanel({
   const composer = useRef<HTMLFormElement>(null)
   const root = useRef<HTMLElement>(null)
   usePanelFocus(root)
+  // A /submit_analysis waiting for Start.
+  const [toStart, setToStart] = useState<{ question: string; parsed: Extract<Parsed, { name: string }> } | null>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
   const askOnline = useFeature('ask')
@@ -422,6 +424,8 @@ export function AssistantPanel({
     }
     const parsed = parseCommand(question, papers, context.analysis)
     if ('error' in parsed) assistant.refuse(question, parsed.error)
+    // Starting an analysis spends minutes of LLM budget, so it waits for Start.
+    else if (parsed.name === 'submit_analysis') setToStart({ question, parsed })
     else void assistant.run(question, parsed)
   }
 
@@ -553,6 +557,29 @@ export function AssistantPanel({
               </div>
 
               <div className="px-5 pb-4">
+                {toStart && (
+                  <div role="alert" className="mb-3 flex flex-col gap-2 rounded-xl border border-insufficient/40 bg-insufficient-soft p-3 text-[13px] text-ink">
+                    <p>
+                      Start checking <span className="font-medium">{String(toStart.parsed.args.paper)}</span>? It takes
+                      about 4 minutes and uses the team&apos;s LLM budget.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        className="px-3 py-1.5 text-[13px]"
+                        onClick={() => {
+                          void assistant.run(toStart.question, toStart.parsed)
+                          setToStart(null)
+                        }}
+                      >
+                        Start
+                      </Button>
+                      <Button type="button" variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setToStart(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <form
                   ref={composer}
                   onSubmit={(event) => {

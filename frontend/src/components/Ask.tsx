@@ -25,6 +25,7 @@ import { AssistantPanel } from './AssistantPanel'
 type AssistantPanelProps = ComponentProps<typeof AssistantPanel>
 import { DoIt } from './DoIt'
 import { PageViewer, type Target } from './PageViewer'
+import { SourceDialog } from './SourceDialog'
 import { useAgentConnection } from './useAgentConnection'
 
 /** A graph node the reader selected, which a question can be about. */
@@ -104,8 +105,17 @@ export function useAsk({
 
   /** Opens a statement's page with its quote marked, when the quote can be found on it. */
   async function showSource(target: Target) {
-    const found = target.quote ? await api.findInPaper(target.paper, target.quote, target.page).catch(() => null) : null
-    setSource({ ...target, source: found?.page ? (found as Target['source']) : null })
+    const found = target.quote ? await findQuote(target.paper, target.quote, target.page) : null
+    setSource({ ...target, page: found?.page ?? target.page, source: found?.page ? (found as Target['source']) : null })
+  }
+
+  /** Where the judge's quote sits. The judge joins pieces of passages with "…", which no page holds
+   * word for word, so the longest piece is looked for: on its page first, then in the whole paper. */
+  async function findQuote(paper: string, quote: string, page?: number) {
+    const piece = quote.split('…').reduce((longest, part) => (part.trim().length > longest.length ? part.trim() : longest), '')
+    const onPage = await api.findInPaper(paper, piece, page).catch(() => null)
+    if (onPage?.page || !page) return onPage
+    return api.findInPaper(paper, piece).catch(() => null)
   }
 
   const button = (
@@ -137,9 +147,9 @@ export function useAsk({
   const viewer = (
     <>
       {source && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/45 p-4" role="dialog" aria-modal="true" aria-label={source.label}>
+        <SourceDialog label={source.label}>
           <PageViewer target={source} onClose={() => setSource(null)} className="h-[90vh] w-full max-w-4xl" />
-        </div>
+        </SourceDialog>
       )}
       {agent.overlay}
     </>
