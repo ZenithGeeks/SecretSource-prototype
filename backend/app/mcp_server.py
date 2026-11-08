@@ -63,7 +63,10 @@ async def list_tools() -> list[types.Tool]:
 
 @server.list_prompts()
 async def list_prompts() -> list[types.Prompt]:
-    """One prompt, which a client such as Claude Code lists as a slash command."""
+    """One prompt, which a client such as Claude Code lists as a slash command. It asks the agent
+    to run check_text, so it is listed only while check_text is allowed."""
+    if not await _check_text_allowed():
+        return []
     text = types.PromptArgument(name="text", description="The writing to check", required=True)
     return [types.Prompt(name="check_my_draft", description=CHECK_DRAFT, arguments=[text])]
 
@@ -73,6 +76,8 @@ async def get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPr
     """The message check_my_draft sends the agent."""
     if name != "check_my_draft":
         raise ValueError(f"there is no prompt named {name}")
+    if not await _check_text_allowed():
+        raise ValueError("check_my_draft needs check_text, which is off for agents in Settings, Agents")
     message = (
         "Check this writing against my SecretSource papers with check_text. Then list each sentence "
         "a paper refutes or does not support, with the quote, and say which sentences hold.\n\n"
@@ -135,6 +140,11 @@ async def _run_tool(name: str, arguments: dict) -> dict:
         ) from None
     except TimeoutError:
         raise ValueError(f"the tab gave no answer in {screen_bridge.CALL_SECONDS} s") from None
+
+
+async def _check_text_allowed() -> bool:
+    allowed = await allowed_tools(server.request_context.request.state.user)
+    return allowed is None or "check_text" in allowed
 
 
 async def allowed_tools(user: str | None) -> set[str] | None:
