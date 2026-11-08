@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { checkedAtLabel } from '../src/lib/author'
 import { Library } from '../src/roles/author/screens/Library'
 import { installFakeGateway, markSaved, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
@@ -176,8 +177,8 @@ describe('Author Library', () => {
     expect(drafts[0]).toHaveTextContent('v4')
 
     const history = within(screen.getByRole('heading', { name: /Check history · Related work/ }).closest('div')!.parentElement!)
-    expect(history.getByText(/^v4 · checked/)).toBeInTheDocument()
-    expect(history.getByText(/^v3 · checked/)).toBeInTheDocument()
+    expect(history.getByText((_, el) => el?.tagName === 'P' && /^v4 · checked/.test(el.textContent ?? ''))).toBeInTheDocument()
+    expect(history.getByText((_, el) => el?.tagName === 'P' && /^v3 · checked/.test(el.textContent ?? ''))).toBeInTheDocument()
     expect(screen.getByText('Since v3')).toBeInTheDocument()
     expect(screen.getByText('+0 citations · 3 issues fixed · 0 new issues')).toBeInTheDocument()
 
@@ -197,6 +198,45 @@ describe('Author Library', () => {
     expect(screen.getByText('No changes since the previous check')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Compare v3 with v3/ })).not.toBeInTheDocument()
     expect(gateway.drafts.get('d1')!.version).toBe(3)
+  })
+
+  test('checks of the same version tell apart: each history row gives its time, the relative one in its tooltip (#721)', async () => {
+    // three checks of v3, the way the e2e seed made them: minutes apart, hours ago
+    runCheck(gateway, 'd1')
+    runCheck(gateway, 'd1')
+    const runs = [...gateway.checks.values()].filter((c) => c.draftId === 'd1')
+    expect(runs).toHaveLength(3)
+    runs.forEach((run, i) => {
+      run.startedAt = run.finishedAt = new Date(2020, 10, 8, 13, 27 + i * 2).toISOString()
+    })
+    renderLibrary('proj1')
+    await screen.findByRole('heading', { name: /Check history · Related work/ })
+    for (const minute of ['27', '29', '31']) {
+      const time = screen.getByText(`checked 13:${minute}, 8 Nov 2020`)
+      expect(time.tagName).toBe('TIME')
+      expect(time).toHaveAttribute('title', expect.stringMatching(/^checked \d+ days ago$/))
+      expect(time.closest('p')).toHaveTextContent(`v3 · checked 13:${minute}, 8 Nov 2020`)
+    }
+  })
+
+  test('checkedAtLabel: relative within the hour (exact in the tooltip), exact after, the year only when not this one', () => {
+    const now = new Date(2026, 10, 8, 15, 0).getTime()
+    expect(checkedAtLabel(new Date(2026, 10, 8, 14, 48).toISOString(), now)).toEqual({ text: 'checked 12 min ago', title: 'checked 14:48, 8 Nov' })
+    expect(checkedAtLabel(new Date(2026, 10, 8, 13, 5).toISOString(), now)).toEqual({ text: 'checked 13:05, 8 Nov', title: 'checked 2 h ago' })
+    expect(checkedAtLabel(new Date(2025, 0, 2, 9, 7).toISOString(), now).text).toBe('checked 09:07, 2 Jan 2025')
+  })
+
+  test('the check history sits below the drafts at full width, not in a column beside them (#721)', async () => {
+    renderLibrary('proj1')
+    // the heading's CardHead, then its Card
+    const history = (await screen.findByRole('heading', { name: /Check history · Related work/ })).parentElement!.parentElement!
+    const drafts = screen.getByRole('list', { name: 'Drafts in this project' })
+    const both = history.parentElement!
+    expect(both).toContainElement(drafts)
+    expect(both).toHaveClass('flex', 'flex-col')
+    expect(both.className).not.toMatch(/grid-cols/)
+    // the drafts come first
+    expect(drafts.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   test('"unsorted" shows the drafts in no project and only the sources saved to no project', async () => {
