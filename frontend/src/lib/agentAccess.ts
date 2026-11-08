@@ -103,6 +103,8 @@ export function useAgentAccess() {
   const queryClient = useQueryClient()
   const save = useMutation({
     mutationKey: SAVE_KEY,
+    // The backend keeps whichever PATCH arrives last, so saves go one at a time and the last click wins.
+    scope: { id: 'agentAccess' },
     mutationFn: ({ next }: { next: AgentAccess; previous?: Preferences }) =>
       accountApi.patchPreferences({ agentAccess: next }),
     onError: (_error, { previous }) => queryClient.setQueryData(PREFERENCES_KEY, previous),

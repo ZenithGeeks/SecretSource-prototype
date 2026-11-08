@@ -33,6 +33,7 @@ export function HistoryList({
   onSelect,
   onNew,
   contents,
+  loading = false,
 }: {
   analyses: Analysis[]
   selected: string | null
@@ -41,6 +42,8 @@ export function HistoryList({
   onNew?: () => void
   /** Shown under the selected analysis, e.g. its table of contents. */
   contents?: ReactNode
+  /** The list is still being fetched, so an empty list is not "no analyses". */
+  loading?: boolean
 }) {
   const queryClient = useQueryClient()
   const remove = useMutation({
@@ -67,7 +70,7 @@ export function HistoryList({
     return (
       <section aria-label="Recent analyses">
         {header}
-        <p className="px-2.5 text-[13px] text-ink-muted">No analyses yet.</p>
+        <p className="px-2.5 text-[13px] text-ink-muted">{loading ? 'Loading…' : 'No analyses yet.'}</p>
       </section>
     )
   }

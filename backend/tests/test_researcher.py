@@ -89,7 +89,31 @@ def test_home_counts_claims_and_lists_the_contradicted_one():
     }
     assert home["conflicts"][0]["against"] == ["ColBERT"]
     assert home["conflicts"][0]["analysis"] == "a1"
+    assert home["conflictsTotal"] == 1
     assert home["alert"].startswith("1 claim in your papers")
+
+
+def test_home_counts_every_conflict_but_lists_only_the_first_few():
+    many = [
+        {**CHECKED, "id": f"a{n}", "file": f"data/papers/{n}.pdf", "paper": f"data/papers/{n}.pdf"}
+        for n in range(researcher.HOME_CONFLICTS + 2)
+    ]
+    home = researcher.home(many)
+    assert len(home["conflicts"]) == researcher.HOME_CONFLICTS
+    assert home["conflictsTotal"] == researcher.HOME_CONFLICTS + 2
+
+
+def test_short_title_never_cuts_a_word_in_half():
+    title = "Retrieval-augmented generation for knowledge-intensive NLP tasks and other things"
+    short = researcher.short_title(title)
+    assert short.endswith("…")
+    assert title.startswith(short.removesuffix("…"))
+    assert title[len(short) - 1] == " "
+
+
+def test_a_conflict_claim_loses_the_pdf_space_before_a_comma():
+    tidy = researcher._tidy("limited effectiveness , or worse ; see")
+    assert tidy == "limited effectiveness, or worse; see"
 
 
 def test_a_finished_check_with_no_paper_is_skipped_instead_of_crashing_the_library():

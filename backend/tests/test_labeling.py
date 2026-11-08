@@ -340,6 +340,61 @@ def test_misses_are_recorded(api):
     assert db.tabs["candidates"][0]["origin"] == "human_added"
 
 
+UNREAD = {
+    "ref": "b2",
+    "title": "Chain-of-Thought Is Not Explainability",
+    "authors": ["Fazl Barez"],
+    "year": "2020",
+}
+
+
+def _with_an_unread_citation() -> dict:
+    """ANALYSIS whose first claim also cites [b2], a work with no PDF (#824)."""
+    read = {"ref": "b5", "title": "Ref B", "authors": [], "year": ""}
+    first = {**ANALYSIS["claims"][0], "citations": [read, UNREAD]}
+    return {**ANALYSIS, "claims": [first, ANALYSIS["claims"][1]]}
+
+
+def test_session_lists_cited_works_that_have_no_pdf():
+    session = labeling.build_session(_with_an_unread_citation())
+
+    assert [r["reference_id"] for r in session["references"]] == ["refB-aaaaaaaaaaaa"]
+    assert session["unread"] == [
+        {
+            "reference_id": "unread-b2",
+            "file": "",
+            "label": "Chain-of-Thought Is Not Explainability",
+            "ref": "b2",
+            "authors": ["Fazl Barez"],
+            "year": "2020",
+        }
+    ]
+    assert labeling.build_session(ANALYSIS)["unread"] == []
+
+
+def test_save_keeps_a_passage_and_a_level_for_a_work_with_no_pdf(api):
+    client, db, app = api
+    app.dependency_overrides[labeling.owned_analysis] = _with_an_unread_citation
+    body = {
+        "candidates": [
+            {
+                "claim_id": "paperA-0123456789ab#0",
+                "reference_id": "unread-b2",
+                "origin": "human_added",
+                "status": "relevant",
+                "page": 3,
+                "passage": "CoT traces are not faithful explanations.",
+            }
+        ],
+        "labels": [{"claim_id": "paperA-0123456789ab#0", "reference_id": "unread-b2", "evidence": 3}],
+    }
+
+    assert client.post("/labeling/sessions/a1/save", json=body).status_code == 200
+    saved = client.get("/labeling/sessions/a1").json()["saved"]
+    assert [r["reference_id"] for r in saved["candidates"]] == ["unread-b2"]
+    assert [r["evidence"] for r in saved["labels"]] == ["3"]
+
+
 def test_unconfigured_store_is_a_503_with_setup_message(api, monkeypatch):
     client, _, _ = api
 
@@ -1035,7 +1090,7 @@ def test_a_listed_paper_keeps_its_venue_rank_into_the_labels_csv(api, monkeypatc
     label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 2}
     client.post("/labeling/sessions/a1/save", json={"labels": [label]})
     header, row = client.get("/labeling/export?tab=labels").text.splitlines()
-    assert header.endswith(",venue_rank,venue_rank_source") and row.endswith(",A*,CORE 2026")
+    assert header.endswith(",venue_rank,venue_rank_source,topic") and row.endswith(",A*,CORE 2026,CV")
 
 
 def test_a_paper_is_listed_without_a_rank_when_scopus_fails(api, monkeypatch):
@@ -1813,3 +1868,38 @@ def test_progress_for_names_the_first_claim_the_person_has_not_saved(api, agent)
     assert before["next_unsaved"]["passages"]
     assert after["saved"] == 1
     assert after["next_unsaved"]["number"] == 2  # claim 1 is saved, so the next one is offered
+
+
+def test_an_agent_reads_the_saved_labels_of_a_claim(api, agent):
+    client, db, _ = api
+    first, _ = _save_claim(client, evidence=3, rationale="Table 2 reports it.")
+
+    saved = asyncio.run(labeling.labels_for("a1", 1, None))
+
+    assert saved["labels"] == [
+        {"paper": "Ref B", "level": 3, "rationale": "Table 2 reports it.", "confidence": "medium"}
+    ]
+    [passage] = saved["passages"]
+    assert (passage["status"], passage["text"]) == ("relevant", first["passage"])
+
+
+def test_reading_saved_labels_marks_the_next_save_ai_reviewed(api, agent):
+    client, db, _ = api
+    _save_claim(client, evidence=4)
+
+    asyncio.run(labeling.labels_for("a1", 1, None))
+    _save_claim(client, evidence=3)
+
+    [row] = db.tabs["reviews"]
+    assert json.loads(row["findings"])[0]["tone"] == "asks"
+    assert [db.tabs[tab][-1]["ai_reviewed"] for tab in ("claims", "candidates", "labels")] == ["1", "1", "1"]
+
+
+def test_an_agent_cannot_read_labels_of_an_unsaved_claim_or_a_claim_that_is_not_there(api, agent):
+    with pytest.raises(HTTPException) as unsaved:
+        asyncio.run(labeling.labels_for("a1", 1, None))
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(labeling.labels_for("a1", 99, None))
+
+    assert unsaved.value.status_code == 409
+    assert missing.value.status_code == 404

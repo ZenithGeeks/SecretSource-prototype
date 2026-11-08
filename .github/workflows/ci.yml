@@ -96,7 +96,7 @@ jobs:
       # file marks a venv whose install finished.
       - name: Install
         env:
-          RECIPE: backend-1
+          RECIPE: backend-2
         run: |
           key=$({ cat requirements.txt requirements-dev.txt; python -VV; echo "$RECIPE"; date +%G-%V; } | sha256sum | cut -c1-16)
           venv="$HOME/ci-venvs/backend-$key"
@@ -104,7 +104,9 @@ jobs:
             rm -rf "$venv"
             python -m venv "$venv"
             "$venv/bin/pip" install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-            "$venv/bin/pip" install -r requirements-dev.txt "numpy<2.4"
+            # uv, not pip: pip backtracks for 40+ minutes on this set (see backend/Dockerfile).
+            "$venv/bin/pip" install uv
+            "$venv/bin/uv" pip install --python "$venv/bin/python" -r requirements-dev.txt "numpy<2.4"
             if "$venv/bin/pip" show opencv-python >/dev/null 2>&1; then
               version=$("$venv/bin/python" -c "import importlib.metadata as m; print(m.version('opencv-python'))")
               "$venv/bin/pip" uninstall -y opencv-python

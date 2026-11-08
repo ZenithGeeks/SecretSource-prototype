@@ -177,15 +177,31 @@ def prepare(item: Cited) -> Cited:
 
 
 def check(item: Cited) -> dict:
-    """The judge's verdict on one statement: verdict, quote and reasoning. The verdict is
-    "unchecked" when the statement has no paper, and "error" when the check failed."""
+    """The judge's verdict on one statement: verdict, quote and reasoning, plus the quote's page
+    when the statement came without one (an answer about one paper names no passage). The
+    verdict is "unchecked" when the statement has no paper, and "error" when the check failed."""
     item = prepare(item)
     if item.path is None:
         return {"verdict": "unchecked", "quote": "", "reasoning": ""}
     result = verify.check_prepared(item.text, item.source, item.path)
     if result["status"] != "ok":
         return {"verdict": "error", "quote": "", "reasoning": result.get("message", "")}
-    return {key: result.get(key, "") for key in ("verdict", "quote", "reasoning")}
+    judged = {key: result.get(key, "") for key in ("verdict", "quote", "reasoning")}
+    if item.page is None and (page := quote_page(judged["quote"], result.get("evidence", []))):
+        judged["page"] = page
+    return judged
+
+
+def quote_page(quote: str, evidence: list[dict]) -> int | None:
+    """The page of the retrieved passage the judge quoted. The judge joins pieces of passages
+    with "…", so the first piece is what is looked for."""
+    first = " ".join(quote.split("…")[0].split()).lower()[:80]
+    if not first:
+        return None
+    for passage in evidence:
+        if first in " ".join(passage.get("text", "").split()).lower():
+            return passage.get("page")
+    return None
 
 
 async def check_text(sentences: list[str], papers: frozenset[str]) -> list[dict]:

@@ -66,6 +66,9 @@ def test_tool_list_is_the_screen_agents(app):
         "fill_field",
         "list_papers",
         *[tool.__name__ for tool in DATA_TOOLS],
+        "labeling_papers",
+        "claim_passages",
+        "saved_labels",
         "review_claim",
     ]
     # The Author editor's read_draft and switch_role are the web app's only.
@@ -78,6 +81,8 @@ def test_tool_list_is_the_screen_agents(app):
     assert "tool_context" not in by_name["get_claim"]["inputSchema"]["properties"]
     assert by_name["get_analysis"]["annotations"]["readOnlyHint"] is True
     assert by_name["submit_analysis"].get("annotations") is None
+    assert by_name["claim_passages"]["annotations"]["readOnlyHint"] is True
+    assert by_name["saved_labels"].get("annotations") is None  # it marks the claim AI-reviewed
 
 
 def allow(monkeypatch, access):
@@ -241,6 +246,20 @@ def test_review_claim_on_an_unsaved_claim_says_to_save_it(app, monkeypatch):
     assert "save this claim" in result["content"][0]["text"]
 
 
+def test_saved_labels_runs_for_the_caller(app, monkeypatch):
+    async def labels_for(analysis_id, claim_number, user):
+        assert (analysis_id, claim_number, user) == ("a1", 2, "user-1")
+        return {"claim": "Recall improves.", "labels": [{"paper": "Ref B", "level": 3}], "passages": []}
+
+    monkeypatch.setattr(mcp_server.labeling, "labels_for", labels_for)
+    args = {"analysis_id": "a1", "claim_number": 2}
+    result = run_with_client(
+        app, lambda client: rpc(client, "tools/call", {"name": "saved_labels", "arguments": args})
+    )
+
+    assert result["structuredContent"]["labels"] == [{"paper": "Ref B", "level": 3}]
+
+
 def test_another_user_cannot_answer_a_call(app):
     async def steps(client):
         result = asyncio.get_running_loop().create_future()
@@ -391,3 +410,19 @@ def test_the_check_my_draft_prompt_asks_for_check_text(app):
     assert [prompt["name"] for prompt in listed["prompts"]] == ["check_my_draft"]
     assert "check_text" in got["messages"][0]["content"]["text"]
     assert got["messages"][0]["content"]["text"].endswith("My draft.")
+
+
+def test_check_my_draft_is_off_when_check_text_is_not_allowed(app, monkeypatch):
+    allow(monkeypatch, {"level": "custom", "tools": ["list_papers"]})
+
+    async def steps(client):
+        listed = await rpc(client, "prompts/list")
+        body = {"jsonrpc": "2.0", "id": 2, "method": "prompts/get", "params": {"name": "check_my_draft"}}
+        got = await client.post("/mcp/", json=body, headers=MCP_HEADERS)
+        return listed, got.json()
+
+    listed, got = run_with_client(app, steps)
+
+    assert listed["prompts"] == []
+    assert "result" not in got
+    assert "Settings, Agents" in got["error"]["message"]

@@ -157,9 +157,37 @@ def build_session(analysis: dict) -> dict:
         "title": analysis.get("title") or Path(analysis["file"]).name,
         "claims": claims,
         "references": list(references.values()),
+        "unread": _unread_references(analysis, list(references.values())),
         # Where the paper cites each reference, so a click on "[12]" can open that reference.
         "markers": analysis.get("markers") or [],
     }
+
+
+def _unread_references(analysis: dict, read: list[dict]) -> list[dict]:
+    """The works the claims cite that have no PDF (#824), so a person can still add a passage
+    from one and give it a level. They have no file: retrieval and the reference viewer skip them.
+    """
+    read_refs = {r["ref"] for r in read if r["ref"]}
+    read_titles = {r["label"].casefold() for r in read}
+    unread: dict[str, dict] = {}
+    for claim in analysis.get("claims", []):
+        for citation in claim.get("citations") or []:
+            ref = citation.get("ref", "")
+            title = citation.get("title") or citation.get("label") or ref
+            if not ref or ref in read_refs or title.casefold() in read_titles:
+                continue
+            unread.setdefault(
+                f"unread-{ref}",
+                {
+                    "reference_id": f"unread-{ref}",
+                    "file": "",
+                    "label": title,
+                    "ref": ref,
+                    "authors": citation.get("authors", []),
+                    "year": citation.get("year", ""),
+                },
+            )
+    return list(unread.values())
 
 
 async def labeler_id(who: str = Depends(annotator), user: str | None = Depends(current_user)) -> str:
@@ -571,6 +599,7 @@ async def save(
     extracted = {c["claim_id"]: c for c in built["claims"]}
     retrieved = {cand["cand_id"]: (c["claim_id"], cand) for c in built["claims"] for cand in c["candidates"]}
     references = {r["reference_id"] for r in built["references"]}
+    unread = {r["reference_id"] for r in built["unread"]}
     stamp = _stamp(who, me, paper_id)
 
     def claim_known(claim_id: str, origin: str) -> bool:
@@ -613,8 +642,8 @@ async def save(
                 raise HTTPException(422, f"unknown passage for {item.claim_id}")
             row["cand_id"] = _candidate_id(item.claim_id, item.reference_id, item.rank or 0, item.passage)
         else:
-            if item.reference_id not in references:
-                raise HTTPException(422, f"{item.reference_id} is not a paper this analysis read")
+            if item.reference_id not in references | unread:
+                raise HTTPException(422, f"{item.reference_id} is not a paper this analysis cites")
             row["cand_id"] = _candidate_id(item.claim_id, item.reference_id, 0, item.passage)
         candidates.append({**stamp, **row})
 
@@ -622,8 +651,8 @@ async def save(
         cid: c["claim"] for cid, c in extracted.items() if cid not in {x["claim_id"] for x in claims}
     }
     for item in body.labels:
-        if item.reference_id not in references:
-            raise HTTPException(422, f"{item.reference_id} is not a paper this analysis read")
+        if item.reference_id not in references | unread:
+            raise HTTPException(422, f"{item.reference_id} is not a paper this analysis cites")
         if not claim_known(item.claim_id, "human_added" if "#h-" in item.claim_id else "extracted"):
             raise HTTPException(422, f"unknown claim {item.claim_id}")
         row = item.model_dump()
@@ -705,6 +734,60 @@ async def review_for(analysis_id: str, claim_number: int, user: str | None) -> l
     row["findings"] = json.dumps(findings, ensure_ascii=False)
     await asyncio.to_thread(store.append, "reviews", [row])
     return findings
+
+
+async def labels_for(analysis_id: str, claim_number: int, user: str | None) -> dict:
+    """What `user` saved for claim `claim_number` (1-based), for a coding agent to review over MCP.
+
+    Reading them counts as an AI review: a row goes to the reviews tab, so the next save of this
+    claim is marked ai_reviewed and an eval can keep labels the agent may have swayed apart.
+
+    Raises:
+        HTTPException: 404 for an analysis the caller may not label or a claim number it does not
+            have, 409 for a claim the caller has not saved.
+    """
+    analysis = await owned_analysis(analysis_id, user)
+    built = build_session(analysis)
+    claims = built["claims"]
+    if not 1 <= claim_number <= len(claims):
+        raise HTTPException(404, f"this paper has claims 1 to {len(claims)}, not {claim_number}")
+    claim_id = claims[claim_number - 1]["claim_id"]
+    who = await asyncio.to_thread(identity.annotator_for, user)
+    me = user or who  # as labeler_id: with login off there is one shared space
+    store = _store()
+    saved = await asyncio.to_thread(_saved_claim, store, built["paper_id"], me, claim_id)
+    if saved is None:
+        raise HTTPException(409, "save this claim in the labeler before an agent reviews it")
+    note = review.Finding(
+        target=review.Target(kind="claim", id=claim_id),
+        tone="asks",
+        text="A coding agent read these labels over MCP. Check what it said before you change them.",
+    )
+    row = {**_stamp(who, me, built["paper_id"]), "claim_id": claim_id}
+    row["findings"] = json.dumps([note.model_dump()], ensure_ascii=False)
+    await asyncio.to_thread(store.append, "reviews", [row])
+    names = {r["reference_id"]: r["label"] for r in [*built["references"], *built["unread"]]}
+    return {
+        "claim": saved.claim_row["claim"],
+        "labels": [
+            {
+                "paper": names.get(label["reference_id"], label["reference_id"]),
+                "level": int(label["evidence"]),  # the tabs keep every cell as text
+                "rationale": label["rationale"],
+                "confidence": label["confidence"],
+            }
+            for label in saved.labels
+        ],
+        "passages": [
+            {
+                "paper": names.get(passage["reference_id"], passage["reference_id"]),
+                "page": passage["page"],
+                "status": passage["status"],
+                "text": passage["passage"],
+            }
+            for passage in saved.candidates
+        ],
+    }
 
 
 async def progress_for(analysis_id: str, user: str | None) -> dict:
@@ -847,15 +930,15 @@ def _account(row: dict) -> str:
     return row.get("annotator_id") or row.get("annotator", "")
 
 
-def _venue_ranks_by_paper() -> dict[str, tuple[str, str]]:
-    """paper_id -> (venue_rank, venue_rank_source) of every listed paper with a rank."""
+def _by_paper[T](by_analysis: dict[str, T]) -> dict[str, T]:
+    """The same values keyed by paper_id (the PDF's stem), which is what label rows carry."""
     from app import main
 
     found = {}
-    for analysis_id, rank in pool.venue_ranks().items():
+    for analysis_id, value in by_analysis.items():
         row = main.lookup(analysis_id)
         if row and row.get("file"):
-            found[Path(row["file"]).stem] = rank
+            found[Path(row["file"]).stem] = value
     return found
 
 
@@ -893,11 +976,18 @@ async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Dep
         rows = [r for r in rows if not (r["origin"] == "human_added" and r["status"] == "rejected")]
     columns = TABS[tab]
     if tab == "labels":
-        # The paper's venue rank from when it was listed, for the thesis table (SCRUM-445).
-        ranks = await asyncio.to_thread(_venue_ranks_by_paper)
-        columns = [*columns, "venue_rank", "venue_rank_source"]
+        # The paper's venue rank from when it was listed, for the thesis table (SCRUM-445), and its
+        # topic, which split_dataset.py balances the splits on.
+        ranks = await asyncio.to_thread(lambda: _by_paper(pool.venue_ranks()))
+        topics = await asyncio.to_thread(lambda: _by_paper(pool.pooled()))
+        columns = [*columns, "venue_rank", "venue_rank_source", "topic"]
         rows = [
-            {**r, **dict(zip(columns[-2:], ranks.get(r["paper_id"], ("", "")), strict=True))} for r in rows
+            {
+                **r,
+                **dict(zip(columns[-3:-1], ranks.get(r["paper_id"], ("", "")), strict=True)),
+                "topic": topics.get(r["paper_id"], ""),
+            }
+            for r in rows
         ]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")

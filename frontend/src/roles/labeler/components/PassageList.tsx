@@ -265,8 +265,10 @@ export function PassageList({
                         onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key })}
                         onRemove={() => onRemove(a)}
                         onAsk={
-                          onAsk &&
-                          (() => onAsk({ referenceId: id, name: `Yours · ${labelOf(id)}`, page: a.page, text: a.passage }))
+                          // Ask reads the reference's PDF, which a work with no PDF does not have.
+                          onAsk && fileOf(id)
+                            ? () => onAsk({ referenceId: id, name: `Yours · ${labelOf(id)}`, page: a.page, text: a.passage })
+                            : undefined
                         }
                       />
                     )
@@ -328,7 +330,7 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
           >
             {references.map((r) => (
               <option key={r.reference_id} value={r.reference_id}>
-                {r.label}
+                {r.file ? r.label : `${r.label} (no PDF)`}
               </option>
             ))}
           </select>

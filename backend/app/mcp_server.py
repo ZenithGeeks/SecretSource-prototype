@@ -1,8 +1,9 @@
 """The screen agent's tools as an MCP server at /mcp/, for coding agents such as Claude Code or Codex.
 
 The tool list comes from screen_agent's own tools through ADK's adk_to_mcp_tool_type, so an MCP
-client reads the same descriptions as the screen agent, plus review_claim, the labeler's review.
-list_papers, the data tools (app/agents/data_tools.py) and review_claim run here. The screen
+client reads the same descriptions as the screen agent, plus review_claim, the labeler's review,
+and the labeler tools a coding agent needs to review claims itself (MCP_LABELER_TOOLS).
+list_papers, the data and labeler tools (app/agents/) and review_claim run here. The screen
 tools run in the caller's open tab (app/screen_bridge.py). Callers come through Gatehouse, which
 checks their key (app/auth.py, gatehouse_user). The person picks which tools an agent may use in
 Settings, Agents (allowed_tools). docs/agent-tools.md says how to connect.
@@ -30,6 +31,7 @@ server = Server("secretsource-screen")
 READ_ONLY = (
     "read_screen", "list_papers", "get_analysis", "get_claim", "search_claims", "find_in_paper",
     "find_support", "check_text", "ask_library", "get_gaps", "bibtex", "labeling_progress",
+    "labeling_papers", "claim_passages",
 )
 # The preference Settings, Agents writes: {"level": "full" | "read" | "custom", "tools": [...]}.
 ACCESS = "agentAccess"
@@ -61,7 +63,10 @@ async def list_tools() -> list[types.Tool]:
 
 @server.list_prompts()
 async def list_prompts() -> list[types.Prompt]:
-    """One prompt, which a client such as Claude Code lists as a slash command."""
+    """One prompt, which a client such as Claude Code lists as a slash command. It asks the agent
+    to run check_text, so it is listed only while check_text is allowed."""
+    if not await _check_text_allowed():
+        return []
     text = types.PromptArgument(name="text", description="The writing to check", required=True)
     return [types.Prompt(name="check_my_draft", description=CHECK_DRAFT, arguments=[text])]
 
@@ -71,6 +76,8 @@ async def get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPr
     """The message check_my_draft sends the agent."""
     if name != "check_my_draft":
         raise ValueError(f"there is no prompt named {name}")
+    if not await _check_text_allowed():
+        raise ValueError("check_my_draft needs check_text, which is off for agents in Settings, Agents")
     message = (
         "Check this writing against my SecretSource papers with check_text. Then list each sentence "
         "a paper refutes or does not support, with the quote, and say which sentences hold.\n\n"
@@ -99,8 +106,9 @@ async def call_tool(name: str, arguments: dict) -> dict:
 
 
 async def _run_tool(name: str, arguments: dict) -> dict:
-    """Run list_papers, a data tool or review_claim here, or a screen tool in the caller's tab."""
+    """Run list_papers, a data or labeler tool or review_claim here, or a screen tool in the caller's tab."""
     from app.agents.data_tools import DATA_TOOLS
+    from app.agents.role_tools import MCP_LABELER_TOOLS
     from app.agents.screen import SCREEN_TOOL_NAMES, papers_for  # see _tools for why not at the top
 
     # handle_mcp put the caller there before MCP saw the request.
@@ -116,7 +124,7 @@ async def _run_tool(name: str, arguments: dict) -> dict:
         except HTTPException as error:
             raise ValueError(error.detail) from None
         return {"findings": findings}
-    for tool in DATA_TOOLS:
+    for tool in [*DATA_TOOLS, *MCP_LABELER_TOOLS]:
         if tool.__name__ == name:
             # The same function the screen agent runs; it reads the person from the context's state.
             return await tool(**arguments, tool_context=SimpleNamespace(state={"user": user}))
@@ -132,6 +140,11 @@ async def _run_tool(name: str, arguments: dict) -> dict:
         ) from None
     except TimeoutError:
         raise ValueError(f"the tab gave no answer in {screen_bridge.CALL_SECONDS} s") from None
+
+
+async def _check_text_allowed() -> bool:
+    allowed = await allowed_tools(server.request_context.request.state.user)
+    return allowed is None or "check_text" in allowed
 
 
 async def allowed_tools(user: str | None) -> set[str] | None:
@@ -166,11 +179,13 @@ def _tools() -> dict[str, types.Tool]:
     from google.adk.tools.mcp_tool.conversion_utils import adk_to_mcp_tool_type
 
     from app.agents.data_tools import DATA_TOOLS
+    from app.agents.role_tools import MCP_LABELER_TOOLS
     from app.agents.screen import SCREEN_TOOLS
 
     tools = {}
-    # The data tools are listed directly: a coding agent plans its own steps, so it has no data_agent.
-    for tool in [*SCREEN_TOOLS, *DATA_TOOLS]:
+    # The data and labeler tools are listed directly: a coding agent plans its own steps, so it has
+    # no data_agent or labeler_agent.
+    for tool in [*SCREEN_TOOLS, *DATA_TOOLS, *MCP_LABELER_TOOLS]:
         mcp_tool = adk_to_mcp_tool_type(tool if isinstance(tool, BaseTool) else FunctionTool(tool))
         # A tool with no arguments comes out as {}; MCP needs an object schema.
         mcp_tool.inputSchema = mcp_tool.inputSchema or {"type": "object", "properties": {}}

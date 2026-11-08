@@ -416,6 +416,35 @@ describe('the workspace', () => {
     expect(within(section).getByRole('radiogroup', { name: 'Support level for Ref B' })).toBeInTheDocument()
   })
 
+  it('takes a passage and a level for a cited work with no PDF, without opening a reference for it', async () => {
+    const session = gateway.session as typeof gateway.session & { unread?: unknown[] }
+    session.unread = [{ reference_id: 'unread-b2', file: '', label: 'Ref C', ref: 'b2', authors: [], year: '2020' }]
+    try {
+      await open()
+      fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+      fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'unread-b2' } })
+      expect(screen.getByRole('option', { name: 'Ref C (no PDF)' })).toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'CoT is not explainability' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
+
+      const section = screen.getByRole('region', { name: 'Ref C' })
+      expect(within(section).queryByRole('button', { name: /Ask AI/ })).not.toBeInTheDocument()
+      expect(api.findInPaper).not.toHaveBeenCalledWith('', expect.anything(), expect.anything())
+      fireEvent.click(within(section).getByRole('radio', { name: /3 · Clear/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+      await waitFor(() => expect(gateway.posts).toHaveLength(1))
+      expect(gateway.posts[0]).toMatchObject({
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ reference_id: 'unread-b2', origin: 'human_added', passage: 'CoT is not explainability' }),
+        ]),
+        labels: [{ reference_id: 'unread-b2', evidence: 3 }],
+      })
+    } finally {
+      delete session.unread
+    }
+  })
+
   it('shows the focused passage in full and clamps the others', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))

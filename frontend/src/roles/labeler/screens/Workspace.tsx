@@ -284,7 +284,9 @@ function Body({
       ? 'Save your changes first: the review checks what you saved.'
       : null
   const position = claims.findIndex((c) => c.claim_id === currentId)
-  const left = claim ? remaining(claim, draft, session.references) : []
+  // Cited works with no PDF can still get a passage and a level (#824); they never open in the viewer.
+  const cited = [...session.references, ...(session.unread ?? [])]
+  const left = claim ? remaining(claim, draft, cited) : []
 
   const write = (next: boolean) => {
     if (!claim) return
@@ -384,7 +386,7 @@ function Body({
     queryKey: ['find', focus?.file, focus?.passage, focus?.page],
     // The whole passage: a 300-character prefix highlighted only the start of a long one.
     queryFn: () => api.findInPaper(focus!.file, focus!.passage, focus?.page ?? undefined),
-    enabled: Boolean(focus?.passage),
+    enabled: Boolean(focus?.file && focus.passage),
     staleTime: Infinity,
     retry: false,
   })
@@ -400,17 +402,20 @@ function Body({
     page: claimSource?.page ?? claim.page ?? 1,
   }
   const shown = focus && session.references.find((r) => r.file === focus.file)
-  const right: Target | null = focus && {
-    paper: focus.file,
-    paperRole: 'reference',
-    // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
-    label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
-    detail: shown ? byline(shown) : undefined,
-    quote: focus.passage || undefined,
-    source: found.data && found.data.page ? found.data : null,
-    page: focus.page ?? 1,
-    error: found.isError ? 'Could not look up where this passage is.' : undefined,
-  }
+  // A passage added for a work with no PDF has no file, so no reference opens for it.
+  const right: Target | null = focus?.file
+    ? {
+        paper: focus.file,
+        paperRole: 'reference',
+        // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
+        label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
+        detail: shown ? byline(shown) : undefined,
+        quote: focus.passage || undefined,
+        source: found.data && found.data.page ? found.data : null,
+        page: focus.page ?? 1,
+        error: found.isError ? 'Could not look up where this passage is.' : undefined,
+      }
+    : null
   // Any reference that was read can be opened, to select a passage retrieval missed in it: from
   // the list, or by clicking where the paper under review cites it. A citation of a reference
   // that was not read keeps the PDF's own link to the reference list.
@@ -450,7 +455,7 @@ function Body({
       </select>
     </label>
   )
-  const { done, total } = progress(claims, drafts, session.references, saved)
+  const { done, total } = progress(claims, drafts, cited, saved)
   const refs = referencesOf(claim, draft)
   const viewer = (target: Target, side: Picked['side'], onClose?: () => void) => (
     <PageViewer
@@ -505,7 +510,7 @@ function Body({
   const grade = (id: string) =>
     relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence ? (
       <LabelForm
-        title={session.references.find((r) => r.reference_id === id)?.label ?? id}
+        title={cited.find((r) => r.reference_id === id)?.label ?? id}
         active={id === refId}
         label={draft.labels[id]}
         others={session.others[`${claim.claim_id}|${id}`] ?? []}
@@ -546,7 +551,7 @@ function Body({
         <PassageList
           claim={claim}
           draft={draft}
-          references={session.references}
+          references={cited}
           focus={focus}
           onFocus={setFocus}
           onJudge={(id, status) => patch({ cands: { ...draft.cands, [id]: status } })}
@@ -686,7 +691,7 @@ function Body({
           claims={claims}
           drafts={drafts}
           saved={saved}
-          references={session.references}
+          references={cited}
           current={currentId}
           onSelect={select}
           onAdd={addClaim}

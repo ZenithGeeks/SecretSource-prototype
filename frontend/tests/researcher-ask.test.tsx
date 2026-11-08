@@ -35,3 +35,23 @@ test('Ask opens the panel, which stays open on another screen and closes again',
   fireEvent.click(screen.getByRole('button', { name: 'Close Ask' }))
   expect(screen.queryByRole('complementary', { name: 'Ask' })).not.toBeInTheDocument()
 })
+
+test('opening Ask moves focus into it, and Escape closes it and gives focus back', () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })))
+  window.history.replaceState(null, '', '?role=researcher&screen=library')
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ResearcherApp />
+    </QueryClientProvider>,
+  )
+
+  const ask = screen.getByRole('button', { name: 'Ask AI', pressed: false })
+  ask.focus()
+  fireEvent.click(ask)
+  const panel = screen.getByRole('complementary', { name: 'Ask' })
+  expect(panel.contains(document.activeElement)).toBe(true)
+
+  fireEvent.keyDown(document.activeElement ?? panel, { key: 'Escape' })
+  expect(screen.queryByRole('complementary', { name: 'Ask' })).not.toBeInTheDocument()
+  expect(document.activeElement).toBe(ask)
+})
