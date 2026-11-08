@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultFeedbackSharing, teacherFeedbackCsv, teacherFeedbackMarkdown } from '../src/lib/teacherFeedbackExport'
+import { defaultFeedbackSharing, resolveFeedbackSharing, teacherFeedbackCsv, teacherFeedbackMarkdown } from '../src/lib/teacherFeedbackExport'
 import { teacherFeedbackPdfHtml } from '../src/lib/teacherFeedbackPdf'
 
 describe('teacher feedback exports', () => {
-  it('includes teacher decisions and notes by default for citations added to feedback', () => {
-    expect(defaultFeedbackSharing).toEqual({ automated: true, evidence: true, teacherDecision: true, teacherNote: true })
+  it('keeps teacher decisions and notes private by default', () => {
+    expect(defaultFeedbackSharing).toEqual({ automated: true, evidence: true, teacherDecision: false, teacherNote: false })
+  })
+
+  it('keeps private defaults when loading a legacy draft with missing or partial sharing settings', () => {
+    expect(resolveFeedbackSharing()).toEqual(defaultFeedbackSharing)
+    expect(resolveFeedbackSharing({ automated: false })).toEqual({
+      automated: false, evidence: true, teacherDecision: false, teacherNote: false,
+    })
+    expect(resolveFeedbackSharing({ teacherDecision: true })).toEqual({
+      automated: true, evidence: true, teacherDecision: true, teacherNote: false,
+    })
   })
 
   it('writes feedback as structured Markdown and CSV', () => {

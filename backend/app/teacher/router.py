@@ -16,6 +16,7 @@ from app.auth import current_user
 from app.teacher.analysis import TeacherEssayAnalysisService, _citation_id, _citation_key
 from app.teacher.crypto import RefreshTokenCipher
 from app.teacher.google_client import (
+    FeedbackPdfError,
     GoogleApiError,
     GoogleClassroomClient,
     _feedback_pdf,
@@ -48,14 +49,14 @@ class FeedbackUpdate(BaseModel):
     body: str = ""
     citation_ids: list[str] = Field(default_factory=list, alias="citationIds")
     sharing_options: dict[str, dict[str, bool]] = Field(default_factory=dict, alias="sharingOptions")
-    report_html: str | None = Field(default=None, alias="reportHtml", max_length=20_000_000)
+    report_html: str | None = Field(default=None, alias="reportHtml", max_length=1_000_000)
     subject: str | None = Field(default=None, max_length=200, pattern=r"^[^\r\n]*$")
 
     model_config = {"populate_by_name": True}
 
 
 class FeedbackReportRequest(BaseModel):
-    report_html: str = Field(alias="reportHtml", max_length=20_000_000)
+    report_html: str = Field(alias="reportHtml", max_length=1_000_000)
 
 
 class PrepareEssayChecksRequest(BaseModel):
@@ -77,7 +78,11 @@ def require_teacher_user(user: str | None = Depends(current_user)) -> str:
 
 @router.post("/feedback/report.pdf")
 def download_feedback_report(request: FeedbackReportRequest, owner: str = Depends(require_teacher_user)) -> Response:
-    return Response(content=_feedback_pdf(request.report_html), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="essay-feedback.pdf"'})
+    try:
+        pdf = _feedback_pdf(request.report_html)
+    except FeedbackPdfError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="essay-feedback.pdf"'})
 
 
 def get_repository() -> TeacherGoogleRepository:
@@ -993,6 +998,8 @@ def send_feedback(
         ) from error
     try:
         sent = service.send_feedback(owner, course_id, assignment_id, submission_id, request.report_html if request else None, request.subject if request else None)
+    except FeedbackPdfError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except Exception as error:

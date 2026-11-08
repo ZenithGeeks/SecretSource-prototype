@@ -229,6 +229,23 @@ def test_feedback_pdf_keeps_citations_across_multiple_pages():
         assert 'Citation 15' in text
 
 
+def test_feedback_pdf_rejects_a_layout_that_makes_no_progress(monkeypatch):
+    import pymupdf
+    import pytest
+    from app.teacher.google_client import _render_feedback_pdf
+
+    class StuckStory:
+        def __init__(self, **_kwargs):
+            pass
+
+        def place(self, _rect):
+            return True, pymupdf.Rect(0, 0, 0, 0)
+
+    monkeypatch.setattr(pymupdf, "Story", StuckStory)
+    with pytest.raises(ValueError, match="made no progress"):
+        _render_feedback_pdf("<p style='font-size:1000pt'>Hello</p>")
+
+
 def test_supported_attachments_prefer_pdf_then_google_docs_deterministically():
     """Break caught: an unsupported or lower-priority attachment is selected for analysis."""
     from app.teacher.google_client import select_supported_attachments

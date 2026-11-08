@@ -11,6 +11,7 @@ import {
   teacherFeedbackMarkdown,
   teacherFeedbackCsv,
   defaultFeedbackSharing,
+  resolveFeedbackSharing,
   type FeedbackSharingByCitation,
   type FeedbackSharingOptions,
   type TeacherFeedbackReport,
@@ -38,7 +39,7 @@ async function buildFeedbackData(analysis: Analysis | undefined, reviews: EssayR
   const selected = analysis.claims.flatMap((claim, claimIndex) => claim.citations.flatMap((citation, citationIndex) => {
     const id = reviewIdFor(claim, claimIndex, citationIndex)
     const review = reviews.find((item) => item.id === id)
-    return selectedIds.includes(id) && review ? [{ claim, citation, review, options: { ...defaultFeedbackSharing, ...sharingOptions[id] } }] : []
+    return selectedIds.includes(id) && review ? [{ claim, citation, review, options: resolveFeedbackSharing(sharingOptions[id]) }] : []
   }))
   const pdfName = paperName(analysis.file ?? fileName ?? 'submission.pdf')
   const claims = selected.map(({ claim, citation, review, options }) => ({
@@ -372,7 +373,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink">{body.trim() || 'Your written feedback will appear here.'}</p>
             {citationIds.length > 0 && <div className="mt-3 space-y-3 border-t border-border-subtle pt-3">
               {data.reviews.filter((review) => citationIds.includes(review.id)).map((review) => {
-                const options = { ...defaultFeedbackSharing, ...sharingOptions[review.id] }
+                const options = resolveFeedbackSharing(sharingOptions[review.id])
                 const result = review.standing === 'supports' ? 'Supports' : review.standing === 'refutes' ? 'Contradicts' : review.standing === 'unchecked' ? 'Not checked' : 'Inconclusive'
                 const teacherOutcome = review.professorReview.outcome
                 const teacherDecision = teacherOutcome === 'supports' ? 'Supports' : teacherOutcome === 'contradicts' ? 'Contradicts' : 'Inconclusive'

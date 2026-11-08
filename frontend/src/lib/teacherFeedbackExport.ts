@@ -11,8 +11,12 @@ export type FeedbackSharingOptions = {
 export const defaultFeedbackSharing: FeedbackSharingOptions = {
   automated: true,
   evidence: true,
-  teacherDecision: true,
-  teacherNote: true,
+  teacherDecision: false,
+  teacherNote: false,
+}
+
+export function resolveFeedbackSharing(options: Partial<FeedbackSharingOptions> = {}): FeedbackSharingOptions {
+  return { ...defaultFeedbackSharing, ...options }
 }
 
 export type FeedbackSharingByCitation = Record<string, Partial<FeedbackSharingOptions>>
