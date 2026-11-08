@@ -19,6 +19,7 @@ import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/dr
 import { CardHead, TextLink } from '../components/CardHead'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { DeleteDraftButton, DeleteDraftDialog } from '../components/DeleteDraftButton'
+import { MoveDraftMenu } from '../components/MoveDraft'
 import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
@@ -274,6 +275,7 @@ export function ProjectDetail({
             onSelect={setSelectedDraft}
             onOpenEditor={onOpenEditor}
             onDelete={setDeletingDraft}
+            onNotice={setToast}
             title="Drafts in no project"
           />
           {unfiledCurrent ? (
@@ -359,6 +361,7 @@ export function ProjectDetail({
           onSelect={setSelectedDraft}
           onOpenEditor={onOpenEditor}
           onDelete={setDeletingDraft}
+          onNotice={setToast}
           title="Drafts in this project"
         />
         {current ? (
@@ -431,6 +434,7 @@ function DraftList({
   onSelect,
   onOpenEditor,
   onDelete,
+  onNotice,
   title,
 }: {
   drafts: Draft[]
@@ -439,6 +443,8 @@ function DraftList({
   onOpenEditor: (id: string) => void
   /** The bin on each row: asks first. */
   onDelete: (draft: Draft) => void
+  /** How a "Move to…" went. */
+  onNotice: (message: string) => void
   title: string
 }) {
   return (
@@ -469,6 +475,7 @@ function DraftList({
                   {statusLabel(draft.status)}
                 </span>
               </button>
+              <MoveDraftMenu draft={draft} onNotice={onNotice} />
               <DeleteDraftButton draft={draft} onDelete={onDelete} />
             </li>
           ))}

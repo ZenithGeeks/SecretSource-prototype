@@ -128,6 +128,27 @@ export function parseProject(files: ProjectFile[]): ParseResult {
   return { texFiles: tex.length, citeCommands: cites.length, bibEntries: entries.length, warnings }
 }
 
+type Bib = { name: string; content: string } | null | undefined
+
+/**
+ * The keys a draft cites that only its project's .bib defines, and the project it moves to does
+ * not: after the move they are missing (a missing-key warning, and "not in the bibliography" at
+ * the next check). A draft reads its project's .bib unless it holds a file of that name itself
+ * (the gateway's _draft_files), so the same holds here. `files` are the draft's own; a shared
+ * copy of the project's .bib among them is left out.
+ */
+export function keysLostByMove(files: ProjectFile[], from: Bib, to: Bib): string[] {
+  const own = files.filter((f) => !f.shared)
+  const reads = (bib: Bib) => Boolean(bib && !own.some((f) => f.name === bib.name))
+  if (!from || !reads(from)) return []
+  const keysOf = (content: string) => new Set(parseBib(content).map((e) => e.key))
+  const kept = keysOf(own.filter((f) => f.kind === 'bib').map((f) => f.content).join('\n'))
+  if (to && reads(to)) for (const key of keysOf(to.content)) kept.add(key)
+  const onlyThere = keysOf(from.content)
+  const cited = new Set(own.filter((f) => f.kind === 'tex').flatMap(citesIn).map((c) => c.key))
+  return [...cited].filter((key) => onlyThere.has(key) && !kept.has(key)).sort()
+}
+
 /** What each parse warning is called, on the Bibliography card and in the .bib editor. */
 export const WARNING_TITLE: Record<ParseWarningType, string> = {
   'missing-key': 'Missing bib key',

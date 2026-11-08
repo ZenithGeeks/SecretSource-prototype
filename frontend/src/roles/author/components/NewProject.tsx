@@ -1,13 +1,14 @@
 /** The one way a project starts outside the Library: NewProjectDialog, opened from Home's "New
  * project ▾" and from "+ New" in Recent projects, and the file input behind its Import. Either way
- * the new project opens; an import says how it is going, since the dialog has closed by then. */
+ * the new project opens; an import says how it is going, since the dialog has closed by then.
+ * The dialog can take existing drafts into the new project (MoveDraft). */
 
 import { AnimatePresence } from 'framer-motion'
 import { useRef } from 'react'
 
 import { errorMessage } from '../../../lib/author'
 import { useAuthorActions } from '../../../lib/useAuthor'
-import { NewProjectDialog } from './ProjectActions'
+import { NewProjectWithDrafts } from './MoveDraft'
 
 export function NewProject({
   open,
@@ -48,17 +49,12 @@ export function NewProject({
       />
       <AnimatePresence>
         {open && (
-          <NewProjectDialog
+          <NewProjectWithDrafts
             onCancel={onClose}
-            onCreate={async (name) => {
-              try {
-                const project = await actions.createProject(name ? { name } : {})
-                onClose()
-                onCreated(project.id)
-                return null
-              } catch (error) {
-                return errorMessage(error)
-              }
+            onCreated={(projectId, notice) => {
+              onClose()
+              onNotice(notice)
+              onCreated(projectId)
             }}
             onImport={() => {
               onClose()

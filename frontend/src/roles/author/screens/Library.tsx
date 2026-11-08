@@ -18,7 +18,8 @@ import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
-import { NewProjectDialog, ProjectMenu, ProjectNameField } from '../components/ProjectActions'
+import { NewProjectWithDrafts } from '../components/MoveDraft'
+import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { issues } from '../labels'
@@ -119,14 +120,18 @@ export function Library({
   const [deleting, setDeleting] = useState<Project | null>(null)
 
   if (projectId) {
+    // The toast stays: a project just created or imported here says so on its own page.
     return (
-      <ProjectDetail
-        projectId={projectId}
-        initialDraft={draftId ?? null}
-        onBack={() => onOpenProject(null)}
-        onOpenEditor={onOpenEditor}
-        onDraftDeleted={onDraftDeleted}
-      />
+      <>
+        <ProjectDetail
+          projectId={projectId}
+          initialDraft={draftId ?? null}
+          onBack={() => onOpenProject(null)}
+          onOpenEditor={onOpenEditor}
+          onDraftDeleted={onDraftDeleted}
+        />
+        <Toast message={toast} onClose={closeToast} />
+      </>
     )
   }
 
@@ -144,17 +149,6 @@ export function Library({
   }
 
   /** "+ New project" by name: an empty project, opened right away. */
-  const createProject = async (name: string): Promise<string | null> => {
-    try {
-      const project = await actions.createProject(name ? { name } : {})
-      setCreating(false)
-      onOpenProject(project.id)
-      return null
-    } catch (error) {
-      return errorMessage(error)
-    }
-  }
-
   const renameProject = async (projectId: string, name: string): Promise<string | null> => {
     try {
       await actions.updateProject(projectId, { name })
@@ -426,9 +420,13 @@ export function Library({
 
       <AnimatePresence>
         {creating && (
-          <NewProjectDialog
+          <NewProjectWithDrafts
             onCancel={() => setCreating(false)}
-            onCreate={createProject}
+            onCreated={(projectId, notice) => {
+              setCreating(false)
+              setToast(notice)
+              onOpenProject(projectId)
+            }}
             onImport={() => {
               setCreating(false)
               importInput.current?.click()
