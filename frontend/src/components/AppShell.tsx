@@ -26,7 +26,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import { avatarPhotoUrl } from '../lib/avatar'
+import { avatarPhotoUrl, initials } from '../lib/avatar'
 import { SETTINGS_DEFAULTS, useSettings } from '../lib/settings'
 import { authEnabled } from '../lib/supabase'
 import { useAuth, signOut } from '../lib/useAuth'
@@ -58,15 +58,6 @@ const ToolbarSlot = createContext<HTMLElement | null>(null)
 export function ToolbarActions({ children }: { children: ReactNode }) {
   const slot = useContext(ToolbarSlot)
   return slot ? createPortal(children, slot) : null
-}
-
-/** Avatar initials from the display name ("Alex S." -> "AS"). */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  // Unreachable: the name shown is never blank, 'Your account' being the last fallback.
-  /* v8 ignore next -- @preserve */
-  if (parts.length === 0) return '?'
-  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
 /** The profile footer: avatar, name, role and a settings gear. The row opens an upward menu

@@ -2,6 +2,13 @@
 
 import { API_BASE } from './api'
 
+/** Avatar initials from the display name ("Alex S." -> "AS"), or "?" for a blank name. */
+export function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
+}
+
 /** `avatarUrl` round-trips through the server's freeform preferences blob (PreferencesPatch
  * accepts any JSON), so a crafted PATCH could point it at an external URL — and it feeds
  * AuthorizedImage, which attaches the signed-in user's Bearer token to whatever it's given.

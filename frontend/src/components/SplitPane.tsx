@@ -13,6 +13,22 @@ const HANDLE_PX = 6 // the separator's width (lg:w-1.5): it sits between the pan
 
 const clamp = (value: number) => Math.min(MAX, Math.max(MIN, value))
 
+/** Where a key sends the handle, or null for a key it does not use. */
+function ratioForKey(key: string, ratio: number): number | null {
+  switch (key) {
+    case 'ArrowLeft':
+      return ratio - STEP
+    case 'ArrowRight':
+      return ratio + STEP
+    case 'Home':
+      return MIN
+    case 'End':
+      return MAX
+    default:
+      return null
+  }
+}
+
 function readRatio(key: string | undefined, fallback: number) {
   if (!key) return fallback
   try {
@@ -95,16 +111,7 @@ export function SplitPane({
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const next =
-      event.key === 'ArrowLeft'
-        ? ratio - STEP
-        : event.key === 'ArrowRight'
-          ? ratio + STEP
-          : event.key === 'Home'
-            ? MIN
-            : event.key === 'End'
-              ? MAX
-              : null
+    const next = ratioForKey(event.key, ratio)
     if (next === null) return
     event.preventDefault()
     change(next)
