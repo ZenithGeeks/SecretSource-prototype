@@ -5,6 +5,13 @@ import { useId } from 'react'
 import { Textarea } from '../../../components/ui'
 import { emptyLabel, LEVELS, type Confidence, type LabelDraft, type Level } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
+import { Kbd } from './ClaimDecision'
+
+const SURE: { value: Confidence; label: string; key: string }[] = [
+  { value: 'low', label: 'Low', key: 'L' },
+  { value: 'medium', label: 'Medium', key: 'M' },
+  { value: 'high', label: 'High', key: 'H' },
+]
 
 export function LabelForm({
   title,
@@ -26,9 +33,13 @@ export function LabelForm({
   const sure = useId()
   return (
     <fieldset
-      className={cn('flex flex-col gap-3 rounded-lg border p-3', active ? 'border-accent' : 'border-border-subtle')}
+      className={cn(
+        'flex flex-col gap-3 rounded-lg border p-3',
+        active ? 'border-accent bg-accent-soft/40 ring-2 ring-accent' : 'border-border-subtle',
+      )}
     >
       <legend className="px-1 text-sm font-medium text-ink">How well does {title} support the claim?</legend>
+      {active && <p className="text-xs font-medium text-accent">Keys 1–4 set the level here</p>}
       {others.length > 0 && (
         <p className="text-sm text-ink-muted">Also labeled by {others.join(', ')}. Label it yourself, without looking.</p>
       )}
@@ -58,21 +69,10 @@ export function LabelForm({
           </button>
         ))}
       </div>
-      <ul aria-label="What each level means" className="flex flex-col gap-1 text-sm leading-5 text-ink-muted">
-        {LEVELS.map(({ level, name, hint }) => (
-          <li
-            key={level}
-            aria-current={value.evidence === level ? 'true' : undefined}
-            className={cn(value.evidence === level && 'font-medium text-ink')}
-          >
-            <span className="tabular-nums">{level}</span> {name} — {hint}
-          </li>
-        ))}
-      </ul>
-      <p className="sr-only" aria-live="polite">
+      <p className="text-sm leading-5 text-ink-muted">
         {value.evidence
-          ? `Level ${value.evidence}, ${LEVELS[value.evidence - 1].name}: ${LEVELS[value.evidence - 1].hint}`
-          : 'Pick 1–4, or press the number key.'}
+          ? `${value.evidence} ${LEVELS[value.evidence - 1].name} — ${LEVELS[value.evidence - 1].hint}`
+          : 'Pick a level from 1 to 4. Each button’s title says what that level means.'}
       </p>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={why} className="text-sm font-medium text-ink">
@@ -86,20 +86,32 @@ export function LabelForm({
           maxLength={2000}
         />
       </div>
-      <div className="flex items-center gap-2">
-        <label htmlFor={sure} className="text-sm font-medium text-ink">
+      <div className="flex flex-col gap-1.5">
+        <span id={sure} className="text-sm font-medium text-ink">
           How sure are you?
-        </label>
-        <select
-          id={sure}
-          value={value.confidence}
-          onChange={(event) => onChange({ ...value, confidence: event.target.value as Confidence })}
-          className="rounded-lg border border-border-subtle bg-canvas px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
+        </span>
+        <div role="radiogroup" aria-labelledby={sure} className="grid grid-cols-3 gap-1.5">
+          {SURE.map(({ value: sureValue, label, key }) => (
+            <button
+              key={sureValue}
+              type="button"
+              role="radio"
+              aria-checked={value.confidence === sureValue}
+              aria-keyshortcuts={key}
+              onClick={() => onChange({ ...value, confidence: sureValue })}
+              className={cn(
+                'flex min-h-11 items-center justify-center gap-1.5 rounded-lg border px-2 text-sm font-medium',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                value.confidence === sureValue
+                  ? 'border-accent bg-accent-soft text-ink'
+                  : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
+              )}
+            >
+              {label}
+              <Kbd>{key}</Kbd>
+            </button>
+          ))}
+        </div>
       </div>
     </fieldset>
   )

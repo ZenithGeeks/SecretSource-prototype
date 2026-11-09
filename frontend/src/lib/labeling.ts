@@ -111,7 +111,9 @@ export type Save = {
     evidence: Level
     rationale: string
     spans: string[]
-    confidence: Confidence
+    /** "" when the labeler saved a level without choosing. Omitted on an old client, which the
+     * gateway still stores as medium. */
+    confidence: Confidence | ''
   }[]
 }
 
@@ -124,6 +126,40 @@ export const TOPIC_INFO: Record<string, { name: string; venues: string; journal:
 }
 
 /**
+ * A 403 that never reached the gateway. Cloudflare answers with an HTML challenge page
+ * ("Just a moment..."); the gateway's own 403 is JSON with "detail". An empty or plain-text
+ * 403 stays an access denial, because that is all the labeler can tell.
+ */
+export function cloudflareBlocked(message: string): boolean {
+  const body = message.replace(/^\d{3}:\s*/, '').trim()
+  if (!body) return false
+  if (body.startsWith('{') || body.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(body) as unknown
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed) return false
+    } catch {
+      // not JSON; an HTML page can still be a challenge
+    }
+  }
+  const lower = body.toLowerCase()
+  return (
+    lower.startsWith('<!doctype') ||
+    lower.startsWith('<html') ||
+    lower.includes('<html') ||
+    lower.includes('just a moment') ||
+    lower.includes('cf-mitigated') ||
+    lower.includes('challenge-platform') ||
+    lower.includes('/cdn-cgi/') ||
+    lower.includes('attention required')
+  )
+}
+
+const BLOCKED_BY_PROTECTION = {
+  title: "The site's protection blocked this request",
+  hint: 'It never reached the labeler. Reload the page, or open /api/health and pass the check, then try again.',
+}
+
+/**
  * What to tell a person when a labeling call fails. The gateway's own text ("403: {"detail": ...}",
  * setting names) is for logs, not for them: they get a sentence and what to do next.
  */
@@ -131,7 +167,10 @@ export function problem(error: unknown): { title: string; hint: string } {
   const message = error instanceof Error ? error.message : ''
   const status = Number(/^(\d{3}):/.exec(message)?.[1])
   if (status === 401) return { title: 'Please sign in again', hint: 'Your session has ended.' }
-  if (status === 403) return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
+  if (status === 403) {
+    if (cloudflareBlocked(message)) return BLOCKED_BY_PROTECTION
+    return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
+  }
   if (status === 404)
     return { title: 'This paper is not available', hint: 'It may have been deleted, or its owner has stopped sharing it.' }
   if (status === 502 && message.includes('API key'))
@@ -460,7 +499,7 @@ export const askLabeling = (
 
 export type AddedPassage = { reference_id: string; page: number | null; passage: string }
 
-export type LabelDraft = { evidence: Level | null; rationale: string; confidence: Confidence }
+export type LabelDraft = { evidence: Level | null; rationale: string; confidence: Confidence | null }
 
 export type Draft = {
   status: ClaimStatus | null // null: not judged yet
@@ -476,7 +515,16 @@ export type Draft = {
 export type WorkClaim = SessionClaim & { origin: 'extracted' | 'human_added'; page?: number | null }
 
 export const emptyDraft = (): Draft => ({ status: null, edited: '', cands: {}, added: [], labels: {} })
-export const emptyLabel = (): LabelDraft => ({ evidence: null, rationale: '', confidence: 'medium' })
+/** Confidence starts unset. Medium is a real answer, so a skipped one must not look like one. */
+export const emptyLabel = (): LabelDraft => ({ evidence: null, rationale: '', confidence: null })
+
+/** '' is a saved level whose confidence was never chosen. A missing value is an older row: the
+ * gateway used to store Medium when the field was left out, so those rows still load as Medium. */
+export function readConfidence(value: string | undefined): Confidence | null {
+  if (value === 'low' || value === 'medium' || value === 'high') return value
+  if (value === '') return null
+  return 'medium'
+}
 
 const numberOrNull = (value: string | undefined) => (value && !Number.isNaN(Number(value)) ? Number(value) : null)
 
@@ -530,10 +578,38 @@ export function draftFromSaved(claim: WorkClaim, saved: Session['saved']): Draft
     draft.labels[r.reference_id] = {
       evidence: Number(r.evidence) as Level,
       rationale: r.rationale,
-      confidence: (r.confidence || 'medium') as Confidence,
+      confidence: readConfidence(r.confidence),
     }
   }
   return draft
+}
+
+/** A reference can fold once every passage is judged and, if any of them were relevant, it has a level. */
+export function referenceFinished(claim: WorkClaim, draft: Draft, referenceId: string): boolean {
+  const cands = claim.candidates.filter((c) => c.reference_id === referenceId)
+  if (cands.some((c) => !draft.cands[c.cand_id])) return false
+  if (relevantPassages(claim, draft, referenceId).length > 0) return Boolean(draft.labels[referenceId]?.evidence)
+  return cands.length > 0 || draft.added.some((a) => a.reference_id === referenceId)
+}
+
+/** "[b40] 3/4 relevant · Clear · Medium" for a folded reference. */
+export function referenceSummary(
+  claim: WorkClaim,
+  draft: Draft,
+  reference: Reference | undefined,
+  referenceId: string,
+): string {
+  const tag = reference?.ref ? `[${reference.ref}]` : (reference?.label ?? referenceId)
+  const total =
+    claim.candidates.filter((c) => c.reference_id === referenceId).length +
+    draft.added.filter((a) => a.reference_id === referenceId).length
+  const level = draft.labels[referenceId]?.evidence
+  const confidence = draft.labels[referenceId]?.confidence
+  const count = `${relevantPassages(claim, draft, referenceId).length}/${total} relevant`
+  const parts = [`${tag} ${count}`]
+  if (level) parts.push(LEVELS[level - 1].name)
+  if (confidence) parts.push(confidence[0].toUpperCase() + confidence.slice(1))
+  return parts.join(' · ')
 }
 
 /** The references this claim is read against: where retrieval looked, plus ones the person added. */
@@ -612,8 +688,11 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
   const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
   if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
   for (const id of referencesOf(claim, draft)) {
-    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) {
-      left.push(`Give ${references.find((r) => r.reference_id === id)?.label ?? id} a level`)
+    const ref = references.find((r) => r.reference_id === id)
+    const title = ref?.label ?? id
+    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push(`Give ${title} a level`)
+    else if (draft.labels[id]?.evidence && !draft.labels[id]?.confidence) {
+      left.push(`Give ${ref?.ref ? `[${ref.ref}]` : title} a confidence`)
     }
   }
   return left
@@ -621,6 +700,86 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
 
 export const isDone = (claim: WorkClaim, draft: Draft, references: Reference[]) =>
   remaining(claim, draft, references).length === 0
+
+const draftOf = (drafts: Record<string, Draft>, id: string) => drafts[id] ?? emptyDraft()
+
+/** Finished means decided everywhere and written down. An unsaved draft is not finished. */
+export function isSavedDone(
+  claim: WorkClaim,
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+): boolean {
+  const draft = draftOf(drafts, claim.claim_id)
+  return isDone(claim, draft, references) && sameDraft(draft, saved[claim.claim_id])
+}
+
+/** The next claim that is not finished, after `from`, wrapping around. Never `from` itself. */
+export function nextUnfinishedIndex(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+  from: number,
+): number | null {
+  for (let step = 1; step < claims.length; step++) {
+    const index = (from + step) % claims.length
+    if (!isSavedDone(claims[index], drafts, saved, references)) return index
+  }
+  return null
+}
+
+/** The earliest claim that is not finished, for the progress count. */
+export function firstUnfinishedIndex(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+): number | null {
+  const index = claims.findIndex((claim) => !isSavedDone(claim, drafts, saved, references))
+  return index < 0 ? null : index
+}
+
+export type SaveNext = { kind: 'claim'; index: number } | { kind: 'paper-done' } | { kind: 'stay' }
+
+/**
+ * Where "Save and next" goes. An unfinished claim later in the paper wins, then one earlier.
+ * Saving the last unfinished claim says the paper is done. When every claim was already
+ * finished, it moves to the next one in order.
+ */
+export function saveNextTarget(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+  index: number,
+): SaveNext {
+  const open = nextUnfinishedIndex(claims, drafts, saved, references, index)
+  if (open != null) return { kind: 'claim', index: open }
+  const claim = claims[index]
+  if (!claim) return { kind: 'stay' }
+  const draft = draftOf(drafts, claim.claim_id)
+  const wasSavedDone = Boolean(saved[claim.claim_id] && isDone(claim, saved[claim.claim_id], references))
+  if (isDone(claim, draft, references) && !wasSavedDone) return { kind: 'paper-done' }
+  if (index + 1 < claims.length) return { kind: 'claim', index: index + 1 }
+  if (isDone(claim, draft, references)) return { kind: 'paper-done' }
+  return { kind: 'stay' }
+}
+
+/** The next paper in the signed-in person's topic: an unfinished one first, else any other. */
+export function nextPaperInTopic(pool: Pool, analysisId: string): Pool['papers'][number] | null {
+  const topic = pool.people.find((person) => person.name === pool.me)?.topic ?? ''
+  if (!topic) return null
+  const blind = new Set(pool.blind ?? [])
+  const rest = pool.papers.filter(
+    (paper) =>
+      paper.analysis_id !== analysisId &&
+      paper.topic === topic &&
+      paper.status === 'done' &&
+      !blind.has(paper.analysis_id),
+  )
+  return rest.find((paper) => paper.claims > 0 && paper.judged < paper.claims) ?? rest[0] ?? null
+}
 
 const sameAdded = (a: AddedPassage, b: AddedPassage) => a.reference_id === b.reference_id && a.passage === b.passage
 
@@ -704,7 +863,7 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
       evidence: label.evidence,
       rationale: label.rationale.trim(),
       spans: relevantPassages(claim, draft, id).slice(0, 10),
-      confidence: label.confidence,
+      confidence: label.confidence ?? '',
     })
   }
   return save
