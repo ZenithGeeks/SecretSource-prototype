@@ -1961,3 +1961,226 @@ def test_an_agent_cannot_read_labels_of_an_unsaved_claim_or_a_claim_that_is_not_
 
     assert unsaved.value.status_code == 409
     assert missing.value.status_code == 404
+
+
+# Gaps in the router: the status line, the team list, odd pool rows, search errors and failed streams
+
+
+def test_status_says_who_is_labeling_and_what_is_set_up(api, monkeypatch):
+    from app import auth
+
+    client, _, _ = api
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(labeling.config, "SCOPUS_API_KEY", "")
+    assert client.get("/labeling/status").json() == {
+        "annotator": "chanya",
+        "configured": True,
+        "scopus": False,
+    }
+
+
+def test_a_verdict_with_no_source_file_adds_no_reference_or_passage():
+    verdicts = [{"cited": "Ref B", "evidence": []}]
+    analysis = {**ANALYSIS, "claims": [{"claim": "Y is fast.", "verdicts": verdicts}]}
+    built = labeling.build_session(analysis)
+    assert built["references"] == [] and built["claims"][0]["candidates"] == []
+
+
+def _accounts(list_users):
+    return SimpleNamespace(auth=SimpleNamespace(admin=SimpleNamespace(list_users=list_users)))
+
+
+def test_team_is_every_account_by_its_name_or_the_start_of_its_email(monkeypatch):
+    from app import auth, store
+
+    named = SimpleNamespace(user_metadata={"full_name": " Somchai "}, email="s@example.com")
+    unnamed = SimpleNamespace(user_metadata=None, email="chanya@example.com")
+    nameless = SimpleNamespace(user_metadata={}, email=None)
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(store, "_supabase", lambda: _accounts(lambda: [named, unnamed, nameless]))
+    assert labeling._team() == ["Somchai", "chanya"]
+
+
+def test_team_is_empty_without_login_or_when_supabase_cannot_list(monkeypatch):
+    from app import auth, store
+
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: False)
+    assert labeling._team() == []
+
+    def refuse():
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(store, "_supabase", lambda: _accounts(refuse))
+    assert labeling._team() == []
+
+
+def test_pool_leaves_out_a_paper_that_is_gone_and_a_finished_one_with_no_claims(api, monkeypatch):
+    from app import main
+
+    client, _, _ = api
+    empty = {
+        "id": "empty",
+        "paper": "x",
+        "status": "done",
+        "claims": [],
+        "file": "data/papers/e-0123456789ab.pdf",
+    }
+    monkeypatch.setattr(main.analyses, "get", lambda i: {"empty": empty}.get(i))
+    for analysis_id in ("gone", "empty"):
+        pool.assign("chanya", "paper", analysis_id, "CV", "x")
+    assert client.get("/labeling/pool").json()["papers"] == []
+
+
+def test_sharing_a_paper_by_doi_looks_up_its_venue_rank(api, monkeypatch):
+    client, db, app = api
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {**ANALYSIS, "id": "d1", "paper": "10.1234/x"}
+    monkeypatch.setattr(scopus, "rank_of", lambda doi: {"system": "CORE", "value": "B", "year": 2026})
+    assert client.put("/labeling/papers/d1/topic", json={"topic": "NLP"}).status_code == 200
+    assert db.tabs["assignments"][-1]["venue_rank"] == "B"
+
+
+@pytest.mark.parametrize(
+    ("error", "detail"),
+    [
+        (requests.HTTPError("HTTP 500", response=ScopusReply(status=500)), "Scopus answered HTTP 500"),
+        (requests.HTTPError("HTTP ?"), "Scopus answered HTTP 0"),
+        (requests.ConnectionError("refused"), "Scopus could not be reached"),
+    ],
+)
+def test_scopus_search_errors_become_a_502(api, monkeypatch, error, detail):
+    client, _, _ = api
+
+    def search(*args):
+        raise error
+
+    monkeypatch.setattr(scopus, "search", search)
+    response = client.get("/labeling/scopus/search", params={"topic": "NLP"})
+    assert (response.status_code, response.json()["detail"]) == (502, detail)
+
+
+def test_a_passage_on_a_claim_of_another_paper_is_refused(api):
+    client, _, _ = api
+    stray = {
+        "claim_id": "other-0123456789ab#0",
+        "reference_id": REF_B,
+        "origin": "retrieved",
+        "status": "relevant",
+    }
+    response = client.post("/labeling/sessions/a1/save", json={"candidates": [stray]})
+    assert response.status_code == 422 and "unknown claim" in response.json()["detail"]
+
+
+def test_progress_has_no_next_claim_once_every_claim_is_saved(api, agent):
+    client, _, _ = api
+    claims = [{"claim_id": c, "origin": "extracted", "status": "accepted", "claim": "x"} for c in (C0, C1)]
+    client.post("/labeling/sessions/a1/save", json={"claims": claims})
+    done = asyncio.run(labeling.progress_for("a1", None))
+    assert (done["saved"], done["next_unsaved"]) == (2, None)
+
+
+def test_a_review_that_breaks_partway_ends_in_an_error_event_and_is_not_kept(api, monkeypatch):
+    client, db, _ = api
+    _save_claim(client)
+
+    async def broken(claim, saved):
+        raise RuntimeError("judge exploded")
+        yield  # makes this an async generator
+
+    monkeypatch.setattr(labeling.review, "review", broken)
+    events = _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
+    assert events == [{"type": "error", "message": "the review stopped partway; try again"}]
+    assert db.tabs["reviews"] == []
+
+
+def test_ask_without_a_reference_reads_the_paper_under_review(api, monkeypatch):
+    from app import assistant
+
+    client, _, _ = api
+    opened = []
+
+    def prepare(pdf):
+        opened.append(pdf)
+        return {"status": "ok", "path": pdf}
+
+    async def answer(question, paper=None, papers=None, passages=None):
+        yield {"type": "done", "statements": 0}
+
+    monkeypatch.setattr(verify, "prepare_source", prepare)
+    monkeypatch.setattr(assistant, "answer", answer)
+    _events(client.post("/labeling/sessions/a1/ask", json={"question": "What is the aim?"}))
+    assert opened == [ANALYSIS["file"]]
+
+
+def test_ask_says_so_when_the_paper_cannot_be_read(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "failed"})
+    events = _events(client.post("/labeling/sessions/a1/ask", json={"question": "q"}))
+    assert events == [{"type": "error", "message": "this paper could not be read"}]
+
+
+def test_ask_that_breaks_partway_ends_in_an_error_event(api, monkeypatch):
+    from app import assistant
+
+    client, _, _ = api
+
+    async def answer(question, paper=None, papers=None, passages=None):
+        yield {"type": "statement", "text": "one"}
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "ok", "path": pdf})
+    monkeypatch.setattr(assistant, "answer", answer)
+    events = _events(client.post("/labeling/sessions/a1/ask", json={"question": "q"}))
+    assert events[-1] == {"type": "error", "message": "the answer stopped partway; try again"}
+
+
+def test_papers_without_a_file_or_a_row_have_no_paper_id(monkeypatch):
+    from app import main
+
+    rows = {"a": {"id": "a", "file": "data/papers/p-0123456789ab.pdf"}, "b": {"id": "b"}}
+    monkeypatch.setattr(main, "lookup", lambda i: rows.get(i))
+    assert labeling._by_paper({"a": 1, "b": 2, "gone": 3}) == {"p-0123456789ab": 1}
+
+
+def test_export_of_an_unknown_tab_is_a_404(api):
+    client, _, _ = api
+    assert client.get("/labeling/export", params={"tab": "nope"}).status_code == 404
+
+
+# Gaps in scopus.py
+
+
+def test_ranking_one_paper_needs_a_scopus_key(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
+    with pytest.raises(scopus.NotConfigured):
+        scopus.rank_of("10.1/x")
+
+
+def test_a_doi_with_a_filter_separator_is_not_asked_of_openalex(monkeypatch):
+    from app.pipeline import indexes
+
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: pytest.fail("OpenAlex was asked"))
+    assert scopus._openalex_entries("10.1/a,b") == []
+    assert scopus.openalex_details(["10.1/a,b", "10.1/c|d"]) == {}
+
+
+def test_a_failing_openalex_gives_no_record_for_a_doi_scopus_lacks(monkeypatch):
+    from app.pipeline import indexes
+
+    def down(params):
+        raise indexes._IndexError("HTTP 503")
+
+    monkeypatch.setattr(indexes, "openalex_works", down)
+    assert scopus._openalex_entries("10.1/x") == []
+
+
+def test_a_latest_year_with_no_subject_percentile_has_no_quartile():
+    assert scopus._citescore_quartile(serial("1111-1111", None, {"2025": ("Complete", [])})) is None
+
+
+def test_scopus_is_asked_again_after_a_server_error(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    replies = [ScopusReply(status=503), ScopusReply()]
+    monkeypatch.setattr(requests, "get", lambda *a, **k: replies.pop(0))
+    assert scopus._ask_scopus({"query": "x"}) == SCOPUS_REPLY
+    assert replies == []
