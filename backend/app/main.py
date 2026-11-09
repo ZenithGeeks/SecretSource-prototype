@@ -152,9 +152,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def startup_recent() -> int:
-    raw = os.getenv("ANALYSES_STARTUP_RECENT", str(_STARTUP_RECENT_DEFAULT)).strip()
-    if not raw:
-        return _STARTUP_RECENT_DEFAULT
+    raw = os.getenv("ANALYSES_STARTUP_RECENT", str(_STARTUP_RECENT_DEFAULT))
     try:
         return max(0, int(raw))
     except ValueError:
