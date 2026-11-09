@@ -1073,13 +1073,18 @@ def _section_of(source: dict | None, headings: list[dict], sizes: dict[int, tupl
 
 def _paragraph_text(paragraph) -> str:
     """Paragraph text with each citation <ref target="#b12"> rendered as [b12]. A citation
-    with no target leaves no citation text behind (#481)."""
+    with no target leaves no citation text behind (#481). One written into the sentence,
+    "Shin et al. (2020) propose", keeps its names: "Shin et al. [b47] propose" (#835)."""
     parts = [paragraph.text or ""]
     for child in paragraph:
         text = "".join(child.itertext())
         if child.tag == TEI_TAG + "ref" and child.get("type") == "bibr":
             ids = _target_ids(child)
-            parts.append("".join(f"[{ref_id}]" for ref_id in ids) if ids else _without_citation(text))
+            markers = "".join(f"[{ref_id}]" for ref_id in ids)
+            if ids and (narrative := NARRATIVE_CITATION.fullmatch(text.strip())):
+                parts.append(f"{narrative['names']} {markers}")
+            else:
+                parts.append(markers or _without_citation(text))
         else:
             parts.append(text)
         parts.append(child.tail or "")
@@ -1087,6 +1092,8 @@ def _paragraph_text(paragraph) -> str:
 
 
 CITATION_YEAR = re.compile(r"\b(?:19|20)\d\d")
+# Names outside the brackets and only the year inside: "Li and Liang (2021)", "Nie et al. (2019a,b)"
+NARRATIVE_CITATION = re.compile(r"(?P<names>[^()\[\];]+?)\s*\((?:19|20)\d\d[a-z]?(?:,\s*[a-z])*\)")
 
 
 def _without_citation(text: str) -> str:
