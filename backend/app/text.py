@@ -1,10 +1,12 @@
-"""Sentence splitting for paper and draft text, with NLTK's Punkt model.
+"""Sentence splitting and stopwords for paper and draft text, from NLTK.
 
-services/colbert/store.py cuts passages with the same model and abbreviations.
+services/colbert/store.py cuts passages with the same model and abbreviations. The image
+downloads the punkt_tab and stopwords data.
 """
 
 from functools import cache
 
+from nltk.corpus import stopwords
 from nltk.tokenize import PunktTokenizer
 
 # The English model is trained on news, so it splits after these, which papers use a lot.
@@ -27,3 +29,9 @@ def split_sentences(text: str) -> list[str]:
 def sentence_spans(text: str) -> list[tuple[int, int]]:
     """Return the (start, end) offset of each sentence in text."""
     return list(_punkt().span_tokenize(text))
+
+
+@cache
+def english_stopwords() -> frozenset[str]:
+    """NLTK's English stopwords, without apostrophes ("dont"), as word tokens are compared."""
+    return frozenset(word.replace("'", "") for word in stopwords.words("english"))
