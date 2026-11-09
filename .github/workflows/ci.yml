@@ -101,6 +101,10 @@ jobs:
           key=$({ cat requirements.txt requirements-dev.txt; python -VV; echo "$RECIPE"; date +%G-%V; } | sha256sum | cut -c1-16)
           venv="$HOME/ci-venvs/backend-$key"
           if [ ! -f "$venv/.complete" ]; then
+            # nas-ci's /tmp is a 512 MB tmpfs and pip unpacks the torch wheel there, so a fresh
+            # install ran out of space. Build on the runner's disk; the tests keep the tmpfs.
+            export TMPDIR="$HOME/ci-tmp"
+            rm -rf "$TMPDIR" && mkdir -p "$TMPDIR"
             rm -rf "$venv"
             python -m venv "$venv"
             "$venv/bin/pip" install torch torchvision --index-url https://download.pytorch.org/whl/cpu
