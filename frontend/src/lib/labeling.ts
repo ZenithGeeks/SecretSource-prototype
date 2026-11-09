@@ -51,9 +51,7 @@ export type Reference = { reference_id: string; file: string; label: string; ref
 
 /** "Nogueira, Cho · 2019", "Karpukhin et al. · 2020": who wrote a reference, by surname. */
 export function byline(reference: Reference): string {
-  // split() never returns an empty array, so the `?? ''` only satisfies the type of at().
-  /* v8 ignore next -- @preserve */
-  const surnames = (reference.authors ?? []).map((name) => name.trim().split(/\s+/).at(-1) ?? '').filter(Boolean)
+  const surnames = (reference.authors ?? []).map((name) => name.trim().replace(/^.*\s/, '')).filter(Boolean)
   const who = surnames.length > 2 ? `${surnames[0]} et al.` : surnames.join(', ')
   return [who, reference.year].filter(Boolean).join(' · ')
 }
