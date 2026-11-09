@@ -287,3 +287,29 @@ def test_fetch_source_reports_a_failure_with_its_reason(monkeypatch):
         "reason": "no-open-access",
         "retryable": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("identifier", "arxiv_id"),
+    [
+        ("hep-th/9901001", "hep-th/9901001"),
+        ("arXiv:math.GT/0309136v2", "math.GT/0309136"),
+        ("2303.12712v3", "2303.12712"),
+    ],
+)
+def test_arxiv_ids_from_before_2007_resolve_to_arxiv(identifier, arxiv_id):
+    resolution = sources._lookup(identifier)
+    assert (resolution.url, resolution.ids) == (f"https://arxiv.org/pdf/{arxiv_id}", {"ArXiv": arxiv_id})
+
+
+def test_a_doi_is_quoted_in_the_lookup_paths(monkeypatch):
+    asked = []
+    monkeypatch.setattr(
+        sources, "_semantic_scholar_pdf", lambda paper_id: asked.append(paper_id) or sources.Resolution("x")
+    )
+    sources._lookup("https://doi.org/10.1000/a#b?c")  # "#" and "?" end a DOI inside a link
+    sources._lookup("10.1002/(SICI)1097-4571(199806)49:8<693::AID-ASI4>3.0.CO;2-0")
+    assert asked == [
+        "DOI:10.1000/a",
+        "DOI:10.1002/%28SICI%291097-4571%28199806%2949%3A8%3C693%3A%3AAID-ASI4%3E3.0.CO%3B2-0",
+    ]

@@ -17,6 +17,8 @@ import unicodedata
 from collections import Counter
 from datetime import UTC, datetime
 
+from app.pipeline.sources import ARXIV_PATTERN
+
 VERDICTS = ("supports", "refutes", "insufficient", "unavailable", "unchecked")
 NEEDS_WORK = ("refutes", "insufficient")
 
@@ -162,8 +164,8 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
     if doi := bib_doi(f):
         return doi
     eprint = f.get("eprint") or f.get("arxiv")
-    if eprint and re.search(r"\d{4}\.\d{4,5}", eprint):
-        return re.search(r"\d{4}\.\d{4,5}(v\d+)?", eprint).group(0)
+    if eprint and (arxiv := ARXIV_PATTERN.search(eprint)):
+        return arxiv.group(0)
     if f.get("url"):
         return f["url"].strip()
     return bib_title(f) or None

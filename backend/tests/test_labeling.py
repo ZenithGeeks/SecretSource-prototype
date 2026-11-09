@@ -775,6 +775,8 @@ def test_a_doi_keeps_its_own_parentheses_and_never_ends_in_a_backslash():
     assert scopus.doi_in("10.1002/(SICI)1097-4571(199806)") == "10.1002/(SICI)1097-4571(199806)"
     assert scopus.doi_in(f"see ({wiley[:31]}).") == "10.1002/(SICI)1097-4571(199806)"
     assert scopus.doi_in("(doi 10.1145/3784828.3785017)") == "10.1145/3784828.3785017"
+    assert scopus.doi_in(f"see {wiley}.") == wiley  # "<" and ">" are part of it
+    assert scopus.doi_in("<https://doi.org/10.1145/3784828.3785017>") == "10.1145/3784828.3785017"
     # A backslash would escape the closing quote of DOI("...") and Scopus would refuse the query.
     assert scopus.build_query("HPC", "10.1145/x\\", 2020) == 'DOI("10.1145/x")'
 

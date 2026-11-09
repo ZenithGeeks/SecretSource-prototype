@@ -17,7 +17,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from app import config
-from app.pipeline.sources import SEMANTIC_SCHOLAR_URL, USER_AGENT
+from app.pipeline.sources import SEMANTIC_SCHOLAR_URL, USER_AGENT, doi_in
 
 log = logging.getLogger(__name__)
 
@@ -100,29 +100,8 @@ _subjects_lock = threading.Lock()
 # Where a search looks: the topic's venues above, or every source Scopus indexes.
 Scope = Literal["topic", "all"]
 
-# A DOI on its own or inside a link (https://dl.acm.org/doi/10.1145/3784828.3785017). It ends
-# at a space, a quote, a backslash (it would escape the query's closing quote), or a link's
-# query or fragment.
-DOI = re.compile(r"\b10\.\d{4,9}/[^\s\"'<>?#\\]+")
-
-
 class NotConfigured(Exception):
     """There is no SCOPUS_API_KEY."""
-
-
-def doi_in(text: str) -> str | None:
-    """The DOI in a pasted DOI or paper link, without trailing punctuation; None when there is none.
-
-    A ")" is trailing punctuation only when it closes nothing in the DOI: old Wiley DOIs such as
-    10.1002/(SICI)1097-4571(199806)49:8<693::AID-ASI4>3.0.CO;2-0 hold their own parentheses.
-    """
-    match = DOI.search(text)
-    if not match:
-        return None
-    doi = match.group().rstrip(".,;]")
-    while doi.endswith(")") and doi.count(")") > doi.count("("):
-        doi = doi[:-1].rstrip(".,;]")
-    return doi
 
 
 def build_query(

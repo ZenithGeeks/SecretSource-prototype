@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from app.config import PAPERS_DIR, S2_API_KEY, UNPAYWALL_EMAIL
 
@@ -137,9 +137,29 @@ def tool_error(error: BaseException) -> dict:
             "retryable": is_retryable(error)}
 
 
-ARXIV_PATTERN = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?")
+# New ids (2303.12712) and the ones from before 2007 (hep-th/9901001, math.GT/0309136).
+ARXIV_PATTERN = re.compile(r"(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(v\d+)?")
 ARXIV_VERSION = re.compile(r"v\d+$")
-DOI_PATTERN = re.compile(r"(10\.\d{4,9}/\S+)")
+# A DOI on its own or inside a link (https://dl.acm.org/doi/10.1145/3784828.3785017). It ends
+# at a space, a quote, a backslash (it would escape a Scopus query's closing quote), or a link's
+# query or fragment. "<" and ">" can be part of it, as in old Wiley DOIs.
+DOI = re.compile(r"\b10\.\d{4,9}/[^\s\"'?#\\]+")
+CLOSING = {")": "(", ">": "<"}
+
+
+def doi_in(text: str) -> str | None:
+    """The DOI in a pasted DOI, link or reference, without trailing punctuation; None when there is none.
+
+    A ")" or ">" is trailing punctuation only when it closes nothing in the DOI: old Wiley DOIs
+    such as 10.1002/(SICI)1097-4571(199806)49:8<693::AID-ASI4>3.0.CO;2-0 hold their own.
+    """
+    match = DOI.search(text)
+    if not match:
+        return None
+    doi = match.group().rstrip(".,;]")
+    while doi[-1:] in CLOSING and doi.count(doi[-1]) > doi.count(CLOSING[doi[-1]]):
+        doi = doi[:-1].rstrip(".,;]")
+    return doi
 # An arXiv copy in an Unpaywall location: arxiv.org/pdf/<id>, arxiv.org/abs/<id>, or arXiv's DOI.
 ARXIV_LOCATION = re.compile(
     r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})|10\.48550/arxiv\.(\d{4}\.\d{4,5})", re.IGNORECASE
@@ -307,7 +327,7 @@ def _unpaywall_pdf(doi: str) -> Resolution:
     if not UNPAYWALL_EMAIL:
         raise LookupUnavailable("set S2_API_KEY, or UNPAYWALL_EMAIL to ask Unpaywall instead")
     response = requests.get(
-        f"{UNPAYWALL_URL}/{doi}", params={"email": UNPAYWALL_EMAIL}, headers=USER_AGENT, timeout=60
+        f"{UNPAYWALL_URL}/{quote(doi)}", params={"email": UNPAYWALL_EMAIL}, headers=USER_AGENT, timeout=60
     )
     if response.status_code == 404:
         raise Unresolvable(f"Unpaywall knows no work with DOI {doi}")
@@ -389,19 +409,19 @@ def _reported(failures: list[Exception]) -> Exception:
 
 
 def _by_doi(doi: str) -> Resolution:
-    return _first_answer((lambda found: _semantic_scholar_pdf(f"DOI:{found}"), _unpaywall_pdf), doi)
+    return _first_answer((lambda found: _semantic_scholar_pdf(f"DOI:{quote(found)}"), _unpaywall_pdf), doi)
 
 
 def _lookup(identifier: str) -> Resolution:
     arxiv = ARXIV_PATTERN.search(identifier)
-    doi = DOI_PATTERN.search(identifier)
+    doi = doi_in(identifier)
 
     if arxiv and ("arxiv" in identifier.lower() or arxiv.group(0) == identifier):
         return Resolution(
             f"https://arxiv.org/pdf/{arxiv.group(1)}", "", "arxiv", {"ArXiv": arxiv.group(1)}
         )
     if doi:
-        return _by_doi(doi.group(1).rstrip(".,;)"))
+        return _by_doi(doi)
     if identifier.isdigit():
         return _semantic_scholar_pdf(f"PMID:{identifier}")
     if identifier.startswith("http"):
