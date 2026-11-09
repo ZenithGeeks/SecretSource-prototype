@@ -573,12 +573,14 @@ function Body({
           search={search}
           onSearchAgain={searchAgain}
           grade={grade}
+          // A blind check keeps the judge out of the label, so no Ask on its passages either (#867).
           onAsk={
-            onOpenAsk &&
-            ((passage) => {
-              setAsked((before) => ({ claimId: claim.claim_id, passage, id: (before?.id ?? 0) + 1 }))
-              onOpenAsk()
-            })
+            onOpenAsk && !session.blind
+              ? (passage) => {
+                  setAsked((before) => ({ claimId: claim.claim_id, passage, id: (before?.id ?? 0) + 1 }))
+                  onOpenAsk()
+                }
+              : undefined
           }
         />
       )}

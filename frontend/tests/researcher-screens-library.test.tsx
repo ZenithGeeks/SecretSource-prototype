@@ -3,6 +3,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ResearcherApp } from '../src/roles/researcher/ResearcherApp'
@@ -211,6 +212,17 @@ describe('new project', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/researcher/projects/new1/library')).toBe(true))
   })
 
+  it('keeps the dialog open and says so when creating fails', async () => {
+    gateway({ fail: ['POST /researcher/projects'] })
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. Retrieval survey'), { target: { value: 'Graphs' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not create the project. Try again.'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
   it('does not create a project from a blank name', async () => {
     const calls = gateway()
     renderLibrary('&new=1')
@@ -264,6 +276,19 @@ describe('renaming and deleting', () => {
       expect(calls).toContainEqual({ method: 'PATCH', path: '/researcher/projects/p1', body: { name: 'Renamed' } }),
     )
     await waitFor(() => expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument())
+  })
+
+  it('stays in edit mode and says so when the rename fails', async () => {
+    gateway({ fail: ['PATCH /researcher/projects/p1'] })
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.change(input, { target: { value: 'Renamed' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not rename the project. Try again.'))
+    expect(screen.getByDisplayValue('Renamed')).toBeEnabled()
   })
 
   it('Rename with an unchanged or blank name sends nothing and leaves edit mode', async () => {

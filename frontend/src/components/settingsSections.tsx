@@ -354,6 +354,8 @@ function ResearcherYourData({ isPreview }: { isPreview: boolean }) {
         'application/json',
       )
       setNotice('Library exported.')
+    } catch {
+      setNotice('Export failed — try again.')
     } finally {
       setBusy(false)
     }

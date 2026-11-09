@@ -341,14 +341,14 @@ describe('pages, crops and passages of the leading answer', () => {
     expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 8, source: location, label: 'page 8 of bn.pdf' }))
     expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).toHaveAttribute(
       'title',
-      'Found by searching page images with Colqwen2 v1.0',
+      'Found by searching page images with ColQwen2 v1.0',
     )
   })
 
   it('names the model by its checkpoint when it has no repo path', () => {
     card({ verdicts: [verdict({ pages, page_model: 'colpali' })] }, { onShow })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).toHaveAttribute('title', 'Found by searching page images with Colpali')
+    expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).toHaveAttribute('title', 'Found by searching page images with ColPali')
   })
 
   it('shows chips as plain labels without a viewer', () => {
