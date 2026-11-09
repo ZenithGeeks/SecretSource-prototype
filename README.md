@@ -14,7 +14,7 @@
 - [Run the retrieval services on your own GPU](#run-the-retrieval-services-on-your-own-gpu)
 - [Everyday use](#everyday-use)
 - [Troubleshooting](#troubleshooting)
-- [Cost and speed](#cost-and-speed)
+- [Speed](#speed)
 - [API](#api)
 - [Roadmap](#roadmap)
 - [For maintainers](#for-maintainers)
@@ -166,7 +166,7 @@ NVIDIA GPU. A 16 GB card is enough. The LLM is still the shared endpoint.
 No LLM endpoint? `docker compose --profile gpu up -d --build` also runs vLLM on your GPU.
 
 The worker reads each paper's figures and tables with Docling, on the CPU by default. This is
-the slowest step of an analysis (see [Cost and speed](#cost-and-speed)). To run Docling on the
+the slowest step of an analysis (see [Speed](#speed)). To run Docling on the
 same GPU, rebuild the worker and the gateway with the GPU override:
 
 ```sh
@@ -207,48 +207,18 @@ while it runs. Past analyses are in History.
 | An analysis stays `queued` and never moves | no worker is running. Check the `worker` entry in `/health`, then `docker compose up -d worker` |
 | 503 when starting an analysis | Redis is unreachable. Check the `redis` entry in `/health` and that `REDIS_URL` in `.env` is correct |
 
-## Cost and speed
+## Speed
 
-Measured on 2026-10-16 for the production project, 26 Sep to 16 Oct. Cloud Run cost is
-billable instance time from Cloud Monitoring times the asia-southeast1 list price, without
-the free tier.
+Everything runs on our own machines: a mini PC serves the web app, the gateway and Redis, and a
+PC with an RTX 5070 Ti runs GROBID, ColBERT, ColPali and the worker. The LLM is a shared endpoint.
+No step bills per analysis.
 
-| | |
-| --- | --- |
-| Cloud Run spend | $353 |
-| Analyses started | 30 (17 finished) |
-| Spend per analysis, everything included | $11.78 |
-| Cost of one more analysis | about $1.11 |
+One analysis of arXiv 2305.06500 on this stack takes about 84 s: claims are extracted at 37 s and
+the 11 checks run from 48 s to 84 s. CONSTRAINTS.md warns when it goes over 120 s. A paper the
+store has seen before reuses cached answers, so time a paper it has not seen.
 
-One analysis costs about $1.11: the ColPali GPU stays awake for it ($0.75), the gateway
-($0.30), and ColBERT indexes about 12 cited papers ($0.05). The LLM and the worker cost the
-project nothing per analysis, because the LLM is a shared endpoint and the worker runs on
-university machines.
-
-Most of the spend is services that run with no traffic:
-
-- ColPali's GPU ran all day twice by mistake: 28 to 29 Sep (polling, fixed in #328) and 3 to 5
-  Oct (manual scaling set in the Console). Together about $175.
-- From 2 to 16 Oct, ColBERT kept one instance on (`minScale: 1`) and GROBID used manual
-  scaling. That cost $4.51 a day with no analyses at all. Both went back to automatic scaling
-  on 16 Oct.
-
-Where an analysis spends its time, per cited paper:
-
-| Step | Time | Runs on |
-| --- | --- | --- |
-| Find and download the PDF | 0.3 to 6 s | worker |
-| Index it in ColBERT | 7 to 48 s | Cloud Run `colbert` |
-| Read its figures with Docling | 40 to 140 s, one paper at a time | worker CPU |
-| Judge one claim | 1 to 7 s | LLM |
-
-Until 16 Oct a check waited for its paper's figures, and Docling runs one paper at a time
-(`DOCLING_PARALLEL=1`), so cited papers waited in a line. An analysis of 12 to 17 cited papers
-took 5 to 24 minutes.
-
-Since #446, checks leave ColPali out (`VISUAL_EVIDENCE=false`), so no cited paper goes through
-Docling and the GPU stays asleep. On the 192 claim/source pairs of finished production analyses,
-three runs each:
+Checks leave ColPali out unless `VISUAL_EVIDENCE=true`. On the 192 claim/source pairs of finished
+production analyses, three runs each:
 
 | Verdicts that differ | All 191 pairs | 85 pairs that had a figure caption |
 | --- | --- | --- |
@@ -256,18 +226,11 @@ three runs each:
 | Two runs with ColPali on | 8 to 16 | 5 to 8 |
 | One run off, one run on | 13 to 20 | 4 to 11 |
 
-ColBERT already indexes each caption with the rest of its page. Set `VISUAL_EVIDENCE=true` to
-use ColPali again.
+ColBERT already indexes each caption with the rest of its page.
 
-What would cut cost or time per analysis:
-
-| Change | Saves | Trade-off |
-| --- | --- | --- |
-| Gateway from 4 vCPU / 8 GiB to 1 vCPU / 2 GiB | about $0.20 | check its memory use first |
-
-Tried and dropped: running more Docling at once. On 10 cited PDFs with 4 CPUs, like the
-worker, `DOCLING_PARALLEL=1` took 377 s, `2` took 490 s and `3` took 421 s. One Docling run
-already uses every CPU, so more runs only compete for them.
+Tried and dropped: running more Docling at once. On 10 cited PDFs with 4 CPUs,
+`DOCLING_PARALLEL=1` took 377 s, `2` took 490 s and `3` took 421 s. One Docling run already uses
+every CPU, so more runs only compete for them.
 
 ## API
 
@@ -347,13 +310,8 @@ default, override with `VECTOR_BUCKET`) that the script creates and grants the C
 service account access to. For the vLLM part (quota, start-up time, cost), read
 [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md).
 
-Production works a bit differently:
-
-- The gateway deploys through `.github/workflows/deploy-gateway.yml` on every push to `main`
-  that changes `backend/**`. The workflow stops if the `REDIS_URL` repository secret is empty.
-- The web app runs on Vercel, which sends `/api/*` to the gateway.
-- Redis runs on Redis Cloud.
-- The worker runs on its own machine as the compose service `worker`, not on Cloud Run.
+We do not run on Cloud Run. Production is the compose stack on our own machines, described in
+[Speed](#speed); the web app is reached through a Cloudflare tunnel.
 
 See "Deploying this" in [ARCHITECTURE.md](ARCHITECTURE.md#services).
 </details>
