@@ -3,7 +3,7 @@
  * `?analysis=` deep-links the paper being labeled; with none, the list of papers shows.
  */
 
-import { ClipboardCheck, Tags } from 'lucide-react'
+import { ClipboardCheck, EyeOff, Tags } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -13,14 +13,23 @@ import { SettingsModal } from '../../components/SettingsModal'
 import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
+import { BlindChecks } from './screens/BlindChecks'
 import { Queue } from './screens/Queue'
 import { Workspace } from './screens/Workspace'
 import { usePaperNotices } from './usePaperNotices'
 
-const NAV: NavEntry<'papers'>[] = [{ key: 'papers', label: 'Papers to label', icon: Tags }]
+type Screen = 'papers' | 'blind'
+
+// Blind checks get their own tab, so a paper labeled blind is never mixed up with the main list (#867).
+const NAV: NavEntry<Screen>[] = [
+  { key: 'papers', label: 'Papers to label', icon: Tags },
+  { key: 'blind', label: 'Blind checks', icon: EyeOff },
+]
+const TITLES: Record<Screen, string> = { papers: 'Papers to label', blind: 'Blind checks' }
 
 export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [analysis, setAnalysis] = useState<string | null>(() => new URLSearchParams(window.location.search).get('analysis'))
+  const [screen, setScreen] = useState<Screen>(() => (new URLSearchParams(window.location.search).get('tab') === 'blind' ? 'blind' : 'papers'))
   const [unsaved, setUnsaved] = useState(false) // the open workspace holds drafts that are not saved
   // A modal over the current screen, as in the other roles, so unsaved labels stay open under it.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
@@ -46,7 +55,11 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       screen: analysis ? 'workspace' : 'papers',
       screens: analysis ? ['papers', 'workspace'] : ['papers'],
       openScreen: (next) => {
-        if (next === 'papers') leave(() => setAnalysis(null))()
+        if (next === 'papers')
+          leave(() => {
+            setScreen('papers')
+            setAnalysis(null)
+          })()
       },
       openPaper,
       switchRole: onSwitchRole,
@@ -59,15 +72,22 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
     const params = new URLSearchParams(window.location.search)
     if (analysis) params.set('analysis', analysis)
     else params.delete('analysis')
+    if (screen === 'blind') params.set('tab', 'blind')
+    else params.delete('tab')
     const query = params.toString()
     window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
-  }, [analysis])
+  }, [analysis, screen])
 
   return (
     <AppShell
       nav={NAV}
-      active="papers"
-      onNavigate={leave(() => setAnalysis(null))}
+      active={screen}
+      onNavigate={(next: Screen) =>
+        leave(() => {
+          setScreen(next)
+          setAnalysis(null)
+        })()
+      }
       role="Labeler"
       roleIcon={ClipboardCheck}
       onChangeRole={onChangeRole && leave(onChangeRole)}
@@ -76,15 +96,17 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       // The workspace shows two PDFs and a label panel, so it takes the whole window.
       wide={analysis ? 'full' : true}
       foldable
-      breadcrumb={['Papers to label']}
+      breadcrumb={[TITLES[screen]]}
       toolbarLead={ask.button}
       panel={ask.panel}
       notifications={<PaperBell onOpen={openPaper} />}
     >
       {analysis ? (
         <Workspace analysisId={analysis} onDirtyChange={setUnsaved} askSlot={claimSlot} onOpenAsk={ask.showExtra} />
+      ) : screen === 'blind' ? (
+        <BlindChecks onOpen={setAnalysis} />
       ) : (
-        <Queue onOpen={setAnalysis} />
+        <Queue onOpen={setAnalysis} onShowBlind={() => setScreen('blind')} />
       )}
       {ask.viewer}
       <SettingsModal

@@ -73,8 +73,11 @@ export type Session = {
   /** Where the paper cites its references; missing from a gateway older than this field. */
   markers?: CitationMarker[]
   saved: { claims: Row[]; candidates: Row[]; labels: Row[] }
-  /** "claim_id|reference_id" -> the other people who labeled that pair. */
+  /** "claim_id|reference_id" -> the other people who labeled that pair. Empty on a blind check. */
   others: Record<string, string[]>
+  /** The signed-in person checks this paper blind: other labels, Review and Ask are hidden (#867).
+   * Missing from a gateway older than this field. */
+  blind?: boolean
 }
 
 export type LabelStatus = { annotator: string; configured: boolean; scopus: boolean }
@@ -198,9 +201,18 @@ export type ScopusPage = { total: number; results: ScopusPaper[]; hidden: number
 /** A PDF for a paper the analysis could not download (see labelingApi.uploadPaper). */
 export type UploadedPaper = { file: File; topic: string; doi?: string; replaces?: string }
 
+/** A lead's record of who checks which paper blind. */
+export type BlindCheck = { name: string; analysis_id: string }
+
 export type Pool = {
   topics: string[]
   me: string
+  /** Leads can download the whole team's labels and assign blind checks. Missing from an older gateway. */
+  lead?: boolean
+  /** The analyses the signed-in person checks blind. They are listed under Blind checks, not here. */
+  blind?: string[]
+  /** Every blind check on the team; only a lead gets these. */
+  blind_checks?: BlindCheck[]
   people: { name: string; topic: string }[]
   /** Analyses their owners shared with the team, each under a topic. */
   papers: {
@@ -246,6 +258,9 @@ export const labelingApi = {
       body: JSON.stringify({ doi, topic }),
     }),
   setPersonTopic: (name: string, topic: string) => putJson('/labeling/people', { name, topic }),
+  /** A lead gives `name` a paper to label blind (`on`), or takes it back. */
+  setBlindCheck: (name: string, analysisId: string, on: boolean) =>
+    putJson('/labeling/blind', { name, analysis_id: analysisId, on }),
   setPaperTopic: (analysisId: string, topic: string) =>
     putJson(`/labeling/papers/${encodeURIComponent(analysisId)}/topic`, { topic }),
   /** Read one of your failed papers again; a new analysis takes its place on the list. */
@@ -320,6 +335,15 @@ export function useScopusSearch(query: ScopusQuery | null) {
     enabled: query !== null,
     retry: false,
     staleTime: 5 * 60_000,
+  })
+}
+
+/** Assigns or takes back a blind check, then reads the pool again. */
+export function useBlindCheck() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (v: BlindCheck & { on: boolean }) => labelingApi.setBlindCheck(v.name, v.analysis_id, v.on),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'pool'] }),
   })
 }
 

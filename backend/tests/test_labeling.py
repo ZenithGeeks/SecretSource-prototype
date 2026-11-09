@@ -73,6 +73,7 @@ def api(monkeypatch):
     app.dependency_overrides[labeling.mine_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.annotator] = lambda: "chanya"
     app.dependency_overrides[labeling.current_user] = lambda: None
+    app.dependency_overrides[labeling.is_lead] = lambda: True  # a test of a non-lead says so
     return TestClient(app), db, app
 
 
@@ -144,7 +145,8 @@ def test_session_asks_the_store_only_for_that_papers_rows(api):
     db.append("claims", [_claim("chanya", "other-paper#0", paper="other-paper")])
     db.reads.clear()
     s = client.get("/labeling/sessions/a1").json()
-    assert sorted(db.reads) == sorted(
+    # The assignments (who checks what blind) are one small cached read of their own.
+    assert sorted(r for r in db.reads if r[0] != "assignments") == sorted(
         (tab, "paperA-0123456789ab") for tab in ("claims", "candidates", "labels")
     )
     assert [r["claim_id"] for r in s["saved"]["claims"]] == ["paperA-0123456789ab#0"]
@@ -478,6 +480,62 @@ def test_export_drops_what_a_person_took_back(api):
     )
     assert len(client.get("/labeling/export?tab=labels").text.splitlines()) == 1
     assert c1 not in client.get("/labeling/export?tab=labels").text
+
+
+def test_only_a_lead_downloads_the_whole_teams_labels(api):
+    client, _, app = api
+    app.dependency_overrides[labeling.is_lead] = lambda: False
+    assert client.get("/labeling/export?tab=labels&scope=team").status_code == 403
+    assert client.get("/labeling/export?tab=labels").status_code == 200  # your own rows stay open
+    assert client.get("/labeling/pool").json()["lead"] is False
+
+
+def _blind_round(api, monkeypatch):
+    """Paper a1 shared under NLP, and somchai given it as a blind check by the lead chanya."""
+    from app import main
+
+    monkeypatch.setattr(main.analyses, "get", lambda i: ANALYSIS)
+    monkeypatch.setattr(labeling, "_team", lambda: ["chanya", "somchai"])
+    client, db, app = api
+    app.dependency_overrides[labeling.is_lead] = lambda: True
+    client.put("/labeling/papers/a1/topic", json={"topic": "NLP"})
+    label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 3}
+    client.post("/labeling/sessions/a1/save", json={"labels": [label]})
+    assert client.put("/labeling/blind", json={"name": "somchai", "analysis_id": "a1"}).status_code == 200
+    return client, db, app
+
+
+def test_a_lead_gives_a_person_a_blind_check_and_can_take_it_back(api, monkeypatch):
+    client, _, app = _blind_round(api, monkeypatch)
+    assert client.get("/labeling/pool").json()["blind_checks"] == [{"name": "somchai", "analysis_id": "a1"}]
+    app.dependency_overrides[labeling.annotator] = lambda: "somchai"
+    app.dependency_overrides[labeling.is_lead] = lambda: False
+    state = client.get("/labeling/pool").json()
+    assert state["blind"] == ["a1"]
+    assert state["blind_checks"] == []  # only a lead sees everyone's
+    assert client.put("/labeling/blind", json={"name": "chanya", "analysis_id": "a1"}).status_code == 403
+    app.dependency_overrides[labeling.is_lead] = lambda: True
+    client.put("/labeling/blind", json={"name": "somchai", "analysis_id": "a1", "on": False})
+    assert client.get("/labeling/pool").json()["blind"] == []
+
+
+def test_a_blind_check_needs_a_team_member_and_a_shared_paper(api, monkeypatch):
+    client, _, _ = _blind_round(api, monkeypatch)
+    assert client.put("/labeling/blind", json={"name": "stranger", "analysis_id": "a1"}).status_code == 422
+    assert client.put("/labeling/blind", json={"name": "somchai", "analysis_id": "nope"}).status_code == 422
+
+
+def test_a_blind_check_hides_other_labelers_and_turns_off_review_and_ask(api, monkeypatch):
+    client, _, app = _blind_round(api, monkeypatch)
+    app.dependency_overrides[labeling.annotator] = lambda: "somchai"
+    session = client.get("/labeling/sessions/a1").json()
+    assert session["blind"] is True
+    assert session["others"] == {}  # chanya's label exists, but is not even named
+    review = client.post("/labeling/sessions/a1/review", json={"claim_id": "paperA-0123456789ab#0"})
+    assert review.status_code == 403
+    assert client.post("/labeling/sessions/a1/ask", json={"question": "What does it say?"}).status_code == 403
+    app.dependency_overrides[labeling.annotator] = lambda: "nuttanon"  # not on a blind check
+    assert client.get("/labeling/sessions/a1").json()["others"] != {}
 
 
 def test_a_person_gets_a_topic_and_it_can_be_taken_back(api):

@@ -111,6 +111,17 @@ A paper's owner shares it with a dropdown next to the paper ("Not shared" by def
 and the papers their claims cite, open for every signed-in person under "Shared by the team", with
 the viewer's own topic first. Unsharing takes it back. Both choices are `assignments` rows, appended like everything else, so the table shows who set what and when.
 
+## Blind checks
+
+A blind check is a paper someone else already labeled, which a second person labels again on their
+own, so the team can measure how well people agree (`human_agreement` in `backend/app/evaluation.py`).
+A lead (an e-mail in `LABELING_LEADS`) assigns them under **Blind checks** in the sidebar, picking a
+person who has not labeled the paper, ideally from another topic. The person finds the paper under
+that tab only; it is left out of "Papers to label". While they label it, other people's labels are
+hidden, nobody else is named, and Review and Ask are off, so the judge cannot sway the level. Only a
+lead can download the whole team's labels, for the same reason. Each assignment is an
+`assignments` row of kind `blind`, appended like the others.
+
 ## Examples for a DSPy program
 
 A fact-check program has two steps, and each gets its own file from `/api/labeling/export`:
