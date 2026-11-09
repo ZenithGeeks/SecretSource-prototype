@@ -285,6 +285,13 @@ describe('Your data: researcher', () => {
     openTab('Your data')
   }
 
+  it('says so when the library export fails', async () => {
+    answers['GET /researcher/projects'] = json('no', 500)
+    openData()
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(await screen.findByText('Export failed — try again.')).toBeInTheDocument()
+  })
+
   it('exports the library of every project as one JSON file', async () => {
     answers['GET /researcher/projects'] = json([{ id: 'p1', name: 'Thesis' }])
     answers['GET /researcher/projects/p1/library'] = json({ papers: [] })

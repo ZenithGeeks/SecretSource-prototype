@@ -152,9 +152,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def startup_recent() -> int:
-    raw = os.getenv("ANALYSES_STARTUP_RECENT", str(_STARTUP_RECENT_DEFAULT)).strip()
-    if not raw:
-        return _STARTUP_RECENT_DEFAULT
+    raw = os.getenv("ANALYSES_STARTUP_RECENT", str(_STARTUP_RECENT_DEFAULT))
     try:
         return max(0, int(raw))
     except ValueError:
@@ -1720,5 +1718,5 @@ async def metrics(request: Request):
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - starts the server, never runs under pytest
     uvicorn.run(app, host="0.0.0.0", port=PORT)

@@ -47,7 +47,7 @@ function quotePage(verdict: Verdict) {
 /** "vidore/colqwen2-v1.0" -> "ColQwen2 v1.0": the reader wants the model, not the repo path. */
 function modelName(checkpoint: string) {
   const name = checkpoint.slice(checkpoint.lastIndexOf('/') + 1)
-  return name.replace(/^col/i, 'Col').replace(/-v/, ' v')
+  return name.replace(/^col(.)/i, (_, first: string) => `Col${first.toUpperCase()}`).replace(/-v/, ' v')
 }
 
 /** What to write under a crop: the caption when it already names the figure, the label

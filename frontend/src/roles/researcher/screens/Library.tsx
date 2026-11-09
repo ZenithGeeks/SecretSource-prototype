@@ -8,6 +8,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronRight, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { ToolbarActions } from '../../../components/AppShell'
 import { Button, Empty, FadeIn, IconButton, Input, LoadingScreen, MenuItem } from '../../../components/ui'
@@ -159,6 +160,8 @@ function ProjectCard({
     try {
       await onRename(project.id, name)
       setRenaming(false)
+    } catch {
+      toast.error('Could not rename the project. Try again.')
     } finally {
       setSaving(false)
     }
@@ -623,8 +626,14 @@ export function Library({
           <NewProjectDialog
             onCancel={() => setShowNew(false)}
             onCreate={async (name, description) => {
-              setShowNew(false)
-              setOpenId(await createProject(name, description))
+              try {
+                const id = await createProject(name, description)
+                setShowNew(false)
+                setOpenId(id)
+              } catch {
+                // The dialog stays open so the typed name is not lost.
+                toast.error('Could not create the project. Try again.')
+              }
             }}
           />
         )}
