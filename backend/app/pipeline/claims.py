@@ -24,6 +24,7 @@ from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
 from app.pipeline.sources import local_pdf, lookup_key, tool_error
+from app.text import split_sentences
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -1118,9 +1119,6 @@ def _body_text(tei) -> str:
 
 MARKER = re.compile(r"\[(b\d+)\]")
 SENTENCE_MATCH = 0.6  # loose: the model paraphrases whitespace and drops the markers
-# "et al." comes before a marker in "Shin et al. [b47] propose" and does not end the sentence (#835).
-# shortcut: other abbreviations ("Fig.", "e.g.") still split; use a sentence segmenter if they matter.
-SENTENCE_END = re.compile(r"(?<!\bal\.)(?<=[.!?])\s+")
 
 
 def _without_markers(text: str) -> str:
@@ -1129,7 +1127,7 @@ def _without_markers(text: str) -> str:
 
 
 def _cited_sentences(paper_text: str) -> list[str]:
-    return [s for s in SENTENCE_END.split(paper_text) if MARKER.search(s)]
+    return [s for s in split_sentences(paper_text) if MARKER.search(s)]
 
 
 def _citing_windows(paper_text: str, size: int = CITING_CHARS) -> list[str]:
