@@ -384,3 +384,21 @@ def test_the_report_never_prints_a_raw_error_page():
     html = logic.report_html({"title": "T"}, {"version": 1, "citations": [citation]})
     assert "the server sent an error page (Just a moment...)" in html
     assert "DOCTYPE" not in html
+
+
+def test_a_half_typed_entry_does_not_hide_the_entries_after_it():
+    text = (
+        '@string{sigir = "SIGIR"}\n'
+        "@article{broken, title={Unclosed\n\n"
+        "@misc{after, booktitle=sigir, year=2020}\n"
+    )
+    entries = logic.parse_bib(text)
+    assert [(e["key"], e["fields"].get("booktitle")) for e in entries] == [("after", "SIGIR")]
+
+
+def test_saved_bibtex_escapes_braces_accents_and_authors():
+    entry = logic.bibtex_for({"title": "{X} ~ y", "authorsList": ["Jan Müller"], "year": 2020})
+    assert entry.startswith("@inproceedings{muller2020,")
+    assert r'author = {Jan M\"uller}' in entry
+    assert r"title = {\{X\} {\textasciitilde} y}" in entry
+    assert logic.bib_surnames(logic.latex_escape("Jan Müller")) == ["Müller"]
