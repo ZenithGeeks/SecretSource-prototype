@@ -286,10 +286,13 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
                   online={online}
                   onAdd={() =>
                     add.mutate(
+                      // A result is only listed after a search, so `query` is set; `form.topic` only satisfies the type.
+                      /* v8 ignore next -- @preserve */
                       { doi: paper.doi, topic: query?.topic ?? form.topic },
                       { onSuccess: () => setAdded((all) => ({ ...all, [paper.doi]: true })) },
                     )
                   }
+                  /* v8 ignore next -- @preserve */
                   onUpload={(file) => upload.mutate({ file, topic: query?.topic ?? form.topic, doi: paper.doi })}
                 />
               ))}
