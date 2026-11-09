@@ -20,15 +20,12 @@ from collections import Counter
 from datetime import UTC, datetime
 
 import bibtexparser
+from bibtexparser.middlewares import RemoveEnclosingMiddleware
 from bibtexparser.middlewares.names import split_multiple_persons_names
-from bibtexparser.model import DuplicateBlockKeyBlock, Entry, Field
+from bibtexparser.model import DuplicateBlockKeyBlock, DuplicateFieldKeyBlock, Entry, Field
 from bibtexparser.writer import BibtexFormat
-from pylatexenc.latex2text import LatexNodes2Text, MacroTextSpec
-from pylatexenc.latex2text import get_default_latex_context_db as default_text_macros
+from pylatexenc.latex2text import LatexNodes2Text
 from pylatexenc.latexencode import unicode_to_latex
-from pylatexenc.latexwalker import LatexWalker
-from pylatexenc.latexwalker import get_default_latex_context_db as default_parse_macros
-from pylatexenc.macrospec import MacroSpec
 
 from app.names import surname
 from app.pipeline.sources import ARXIV_PATTERN
@@ -64,18 +61,41 @@ def now_iso() -> str:
 
 def parse_bib(text: str) -> list[dict]:
     """The entries of a .bib file: `{"type", "key", "fields", "line"}` each, in file order,
-    read by bibtexparser. A repeated key is kept, so the lint can report it. A half-typed entry
-    is a normal state in the editor: bibtexparser skips that block and reads the rest."""
+    read by bibtexparser. A half-typed entry is a normal state in the editor: bibtexparser
+    skips that block and reads the rest."""
+    library = bibtexparser.parse_string(text)
     entries: list[dict] = []
-    for block in bibtexparser.parse_string(text).blocks:
-        if isinstance(block, DuplicateBlockKeyBlock):
-            block = block.ignore_error_block
-        if not isinstance(block, Entry):  # @comment, @preamble, @string, failed blocks
-            continue
-        fields = {field.key.lower(): " ".join(str(field.value).split()) for field in block.fields}
-        line = block.start_line + 1
-        entries.append({"type": block.entry_type.lower(), "key": block.key, "fields": fields, "line": line})
+    for block in library.blocks:
+        if entry := _entry_of(block, library):
+            fields = {field.key.lower(): " ".join(str(field.value).split()) for field in entry.fields}
+            kind, line = entry.entry_type.lower(), entry.start_line + 1  # bibtexparser counts from 0
+            entries.append({"type": kind, "key": entry.key, "fields": fields, "line": line})
     return entries
+
+
+def _entry_of(block, library) -> Entry | None:
+    """The entry a block holds, or None for @comment, @preamble, @string and failed blocks.
+
+    bibtexparser sets aside an entry whose key or a field repeats, before its middlewares run;
+    it is kept here (the lint reports a repeated key), with the braces around its values removed.
+    """
+    if isinstance(block, DuplicateBlockKeyBlock | DuplicateFieldKeyBlock) and block.ignore_error_block:
+        return RemoveEnclosingMiddleware().transform_entry(block.ignore_error_block, library)
+    return block if isinstance(block, Entry) else None
+
+
+def without_bib_entry(text: str, key: str) -> tuple[str, int]:
+    """The .bib text with every entry under `key` cut out, and how many were cut. The rest of
+    the file stays byte for byte, comments and @string blocks included."""
+    library = bibtexparser.parse_string(text)
+    removed = 0
+    for block in library.blocks:
+        entry = _entry_of(block, library)
+        if entry is not None and entry.key == key:
+            text = text.replace(block.raw, "", 1)
+            removed += 1
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return (text + "\n" if text else ""), removed
 
 
 BIB_FORMAT = BibtexFormat()
@@ -298,26 +318,37 @@ def cited_text(sentence: str, key: str) -> str:
 def plain_text(latex: str) -> str:
     """A sentence in plain words: citations, comments and formatting commands removed, so
     the pipeline judges the claim and not the markup."""
-    text = _latex_to_text(CITE.sub("", latex))
-    return " ".join(re.sub(r"\s+([.,;:])", r"\1", text).split())
-
-
-# Commands whose argument is not part of the sentence. pylatexenc keeps the argument of a
-# command it does not know, so \index needs a spec to say it takes one.
-DROPPED = ("label", "ref", "eqref", "pageref", "footnote", "index")
-PARSE_MACROS = default_parse_macros()
-PARSE_MACROS.add_context_category("dropped", prepend=True, macros=[MacroSpec(name, "{") for name in DROPPED])
-TEXT_MACROS = default_text_macros()
-TEXT_MACROS.add_context_category(
-    "dropped", prepend=True, macros=[MacroTextSpec(name, simplify_repl="") for name in DROPPED]
-)
-LATEX_TEXT = LatexNodes2Text(latex_context=TEXT_MACROS)
+    s = CITE.sub("", latex)
+    s = re.sub(r"(?<!\\)%.*", "", s)
+    s = re.sub(r"\\(?:label|ref|eqref|pageref|footnote|index)\{[^}]*\}", "", s)
+    # Unwrap formatting commands, twice on purpose. The pattern's [^{}]* argument matches
+    # only an innermost {...}, so one pass turns \textbf{\emph{x}} into \textbf{x} and a
+    # second is needed to reach x. Two passes cover the two levels of nesting prose has.
+    for _ in range(2):
+        s = re.sub(r"\\[A-Za-z]+\*?(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"\$([^$]*)\$", r"\1", s)
+    for command, word in (
+        ("\\times", "×"),
+        ("\\ldots", "…"),
+        ("\\dots", "…"),
+        ("\\%", "%"),
+        ("\\&", "&"),
+        ("\\_", "_"),
+        ("\\#", "#"),
+        ("\\$", "$"),
+    ):
+        s = s.replace(command, word)
+    s = s.replace("~", " ").replace("---", "—").replace("--", "–")
+    s = re.sub(r"\\[A-Za-z]+", "", s)
+    s = re.sub(r"[{}]", "", s)
+    s = re.sub(r"\s+([.,;:])", r"\1", s)
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def _latex_to_text(latex: str) -> str:
-    """LaTeX in plain Unicode with pylatexenc: "Haji{\\v{c}}" is "Hajič", "$6$--$10\\times$" is "6–10×"."""
-    nodes, _, _ = LatexWalker(latex, latex_context=PARSE_MACROS, tolerant_parsing=True).get_latex_nodes()
-    return LATEX_TEXT.nodelist_to_text(nodes)
+    """A name in plain Unicode: "Haji{\\v{c}}" is "Hajič". Only for names: pylatexenc drops
+    the argument of commands like \\texttt and \\mbox, so plain_text keeps its own rules."""
+    return LatexNodes2Text().latex_to_text(latex)
 
 
 def parse_project(files: list[dict]) -> dict:
@@ -640,7 +671,7 @@ def bib_key_for(authors: list[str], year: str | int | None, taken: set[str] | No
 
 def latex_escape(text: str) -> str:
     """Text safe inside a BibTeX value: "A & B" is "A \\& B" and "Müller" is "M\\"uller"."""
-    return unicode_to_latex(text, unknown_char_policy="keep")
+    return unicode_to_latex(text, unknown_char_policy="keep")  # a character with no LaTeX form stays
 
 
 def bibtex_for(result: dict, key: str | None = None) -> str:
