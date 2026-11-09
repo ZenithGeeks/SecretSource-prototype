@@ -87,9 +87,11 @@ import {
   bestCandidate,
   buildSave,
   byline,
+  cloudflareBlocked,
   draftFromSaved,
   emptyDraft,
   isDone,
+  problem,
   remaining,
   workClaims,
   type Draft,
@@ -101,6 +103,21 @@ import { Workspace } from '../src/roles/labeler/screens/Workspace'
 const claim: WorkClaim = { ...gateway.session.claims[0], origin: 'extracted' }
 const refs = gateway.session.references
 const judged = (over: Partial<Draft>): Draft => ({ ...emptyDraft(), ...over })
+
+describe('a failed labeling call', () => {
+  const challenge = '403: <!DOCTYPE html><html><title>Just a moment...</title><body>cf-mitigated</body></html>'
+
+  it('shows a reload message for a Cloudflare challenge and keeps a gateway 403 as access', () => {
+    expect(cloudflareBlocked(challenge)).toBe(true)
+    expect(cloudflareBlocked('403: Just a moment...')).toBe(true)
+    expect(cloudflareBlocked('403: {"detail":"this account is not on the labeling team"}')).toBe(false)
+    expect(cloudflareBlocked('403: ')).toBe(false)
+    expect(problem(new Error(challenge))).toMatchObject({
+      title: "The site's protection blocked this request",
+    })
+    expect(problem(new Error('403: {"detail":"no access"}')).title).toBe("You can't use the labeler")
+  })
+})
 
 describe('what is left to decide', () => {
   it('asks for a decision on the claim first', () => {

@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
-import { Empty, LoadingScreen, Segmented } from '../../../components/ui'
+import { Button, Empty, LoadingScreen, Segmented } from '../../../components/ui'
 import { api, type Citation, type CitationMarker } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import {
@@ -125,8 +125,17 @@ type WorkspaceProps = {
 export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk }: WorkspaceProps) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
-  if (query.error || !query.data)
-    return <Empty {...problem(query.error)} />
+  if (query.error || !query.data) {
+    const fail = problem(query.error)
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <Empty title={fail.title} hint={fail.hint} />
+        <Button variant="ghost" onClick={() => void query.refetch()}>
+          Try again
+        </Button>
+      </div>
+    )
+  }
   return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} askSlot={askSlot} onOpenAsk={onOpenAsk} />
 }
 

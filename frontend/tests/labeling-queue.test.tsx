@@ -467,6 +467,17 @@ describe('the labeler queue', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 
+  it('tells a Cloudflare challenge apart from a real access denial', async () => {
+    gateway.statusError =
+      '403: <!DOCTYPE html><html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>'
+    renderQueue()
+    expect(await screen.findByText("The site's protection blocked this request")).toBeInTheDocument()
+    expect(screen.getByText(/Reload the page, or open \/api\/health/)).toBeInTheDocument()
+    expect(screen.queryByText("You can't use the labeler")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Just a moment|<!DOCTYPE/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
   it('shows who has which topic on one line, and opens by itself for someone with no topic', async () => {
     renderQueue()
     const summary = await screen.findByText(/NLP 1 · no topic 1 · you: NLP/)

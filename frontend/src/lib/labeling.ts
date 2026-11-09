@@ -124,6 +124,40 @@ export const TOPIC_INFO: Record<string, { name: string; venues: string; journal:
 }
 
 /**
+ * A 403 that never reached the gateway. Cloudflare answers with an HTML challenge page
+ * ("Just a moment..."); the gateway's own 403 is JSON with "detail". An empty or plain-text
+ * 403 stays an access denial, because that is all the labeler can tell.
+ */
+export function cloudflareBlocked(message: string): boolean {
+  const body = message.replace(/^\d{3}:\s*/, '').trim()
+  if (!body) return false
+  if (body.startsWith('{') || body.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(body) as unknown
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed) return false
+    } catch {
+      // not JSON; an HTML page can still be a challenge
+    }
+  }
+  const lower = body.toLowerCase()
+  return (
+    lower.startsWith('<!doctype') ||
+    lower.startsWith('<html') ||
+    lower.includes('<html') ||
+    lower.includes('just a moment') ||
+    lower.includes('cf-mitigated') ||
+    lower.includes('challenge-platform') ||
+    lower.includes('/cdn-cgi/') ||
+    lower.includes('attention required')
+  )
+}
+
+const BLOCKED_BY_PROTECTION = {
+  title: "The site's protection blocked this request",
+  hint: 'It never reached the labeler. Reload the page, or open /api/health and pass the check, then try again.',
+}
+
+/**
  * What to tell a person when a labeling call fails. The gateway's own text ("403: {"detail": ...}",
  * setting names) is for logs, not for them: they get a sentence and what to do next.
  */
@@ -131,7 +165,10 @@ export function problem(error: unknown): { title: string; hint: string } {
   const message = error instanceof Error ? error.message : ''
   const status = Number(/^(\d{3}):/.exec(message)?.[1])
   if (status === 401) return { title: 'Please sign in again', hint: 'Your session has ended.' }
-  if (status === 403) return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
+  if (status === 403) {
+    if (cloudflareBlocked(message)) return BLOCKED_BY_PROTECTION
+    return { title: 'You can\'t use the labeler', hint: 'Ask the team lead to give your account access.' }
+  }
   if (status === 404)
     return { title: 'This paper is not available', hint: 'It may have been deleted, or its owner has stopped sharing it.' }
   if (status === 502 && message.includes('API key'))
