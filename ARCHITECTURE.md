@@ -30,10 +30,10 @@ flowchart LR
 - Docling is not a service. It is a library inside the worker that turns a PDF into text
   and cuts out figures.
 
-In production: `web` runs on Vercel. `gateway`, GROBID, ColBERT and ColPali run as separate
-Cloud Run services in the same GCP project. Redis runs on Redis Cloud's free plan. `worker`
-runs on ss-core, a VM outside Cloud Run. It is the process that calls GROBID, ColBERT, ColPali
-and the LLM.
+In production everything runs on our own machines with Docker Compose. A mini PC runs `web`,
+`gateway` and `redis`, reached from the internet through a Cloudflare tunnel. A PC with an
+RTX 5070 Ti runs GROBID, ColBERT, ColPali and `worker`, which takes jobs from the mini PC's
+Redis. `worker` is the process that calls GROBID, ColBERT, ColPali and the LLM.
 
 ## Three ways to run the pipeline
 
@@ -409,9 +409,9 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
 
 | Service | What it does | Where it runs |
 | --- | --- | --- |
-| `colbert` | text index and search; also MCP at `/mcp/` | `services/colbert`; local GPU or Cloud Run |
-| `colpali` | index and search over figures and pages | `services/colpali`; local GPU or Cloud Run |
-| `grobid` | reads references and full text from PDFs | compose container (port 8070) or Cloud Run |
+| `colbert` | text index and search; also MCP at `/mcp/` | `services/colbert`; local GPU |
+| `colpali` | index and search over figures and pages | `services/colpali`; local GPU |
+| `grobid` | reads references and full text from PDFs | compose container (port 8070) |
 | LLM | extracts claims and judges them | any OpenAI-compatible endpoint (`VLLM_URL`) |
 | `gateway` | the HTTP API; queues each analysis for a worker | `backend/`, port 8080 |
 | `redis` | the analysis job queue, and progress from a worker back to the gateway | compose container, no published port |
@@ -427,14 +427,12 @@ and Drive APIs; `repository.py` is the store; `router.py` is the HTTP surface (s
   one analysis at a time, so N workers put up to N times one run's load on the retrieval
   services and the LLM (see step 5 above).
 
-**Deploying this.** `.github/workflows/deploy-gateway.yml` builds and deploys only the
-`gateway` container to Cloud Run, on every push to `main` that touches `backend/`. It refuses to
-deploy if the `REDIS_URL` repository secret is empty, because without a reachable Redis every
-`POST /analyses` would return `503`. The `worker` runs separately, as a compose service on
-ss-core, using the same `REDIS_URL` as the gateway.
+**Deploying this.** Build the `gateway` and `web` images, load them on the mini PC, and run
+`docker compose up -d --no-deps --force-recreate gateway web` there. Each `worker` is a compose
+service on the PC, with `REDIS_URL` pointing at the mini PC's Redis.
 
-**Why the queue uses JSON, not pickle.** The Redis Cloud free plan used in production has no
-TLS, so anyone who can write to that Redis could queue a job. `backend/app/queue.py` uses RQ's
+**Why the queue uses JSON, not pickle.** Redis runs without TLS, so anyone who can
+write to it could queue a job. `backend/app/queue.py` uses RQ's
 `JSONSerializer` instead of pickle, and the worker class `AnalysisWorker` refuses any job except
 `app.queue.run_analysis_job`, and refuses any callback other than its own failure callback.
 
