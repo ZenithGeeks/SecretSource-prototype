@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pydantic
@@ -524,11 +525,16 @@ def _cleaned_title(title: str) -> str:
     return cleaned or original
 
 
-def _raw_title(reference) -> str:
-    """The reference's title as GROBID wrote it, before the preprint note is removed."""
+def _title_lines(reference):
+    """The text at each of TITLE_PATHS, on one line; empty where the path is missing."""
     for path in TITLE_PATHS:
         found = reference.find(path, TEI_NAMESPACE)
-        title = _one_line(found.text or "") if found is not None else ""
+        yield _one_line(found.text or "") if found is not None else ""
+
+
+def _raw_title(reference) -> str:
+    """The reference's title as GROBID wrote it, before the preprint note is removed."""
+    for title in _title_lines(reference):
         if title and not _looks_like_authors(title):
             return title
     return ""
@@ -602,9 +608,7 @@ def _arxiv_in_reference_titles(reference) -> str:
     on the monogr or journal line while the article title is the work's real title.
     The displayed title stays the article's. The id is read from either line.
     """
-    for path in TITLE_PATHS:
-        found = reference.find(path, TEI_NAMESPACE)
-        title = _one_line(found.text or "") if found is not None else ""
+    for title in _title_lines(reference):
         if title and (arxiv := _arxiv_from_title(title)):
             return arxiv
     return ""
@@ -627,14 +631,13 @@ def _parse_reference(reference) -> dict:
     date = reference.find(".//tei:date[@when]", TEI_NAMESPACE)
     url = _url_of(reference)
     in_url = ARXIV_IN_URL.search(url)
-    raw_title = _raw_title(reference)
     # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so, and
     # failing that a title line still may ("arXiv preprint arXiv:2303.12712"), including the
     # journal line when the article title is separate. Read that before cleaning.
     tagged = _identifier(reference, "arXiv").replace("arXiv:", "").strip()
     arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_in_reference_titles(reference)
     return {
-        "title": _cleaned_title(raw_title) if raw_title else "",
+        "title": _title_of(reference),
         "authors": [_full_name(person) for person in reference.findall(".//tei:persName", TEI_NAMESPACE)],
         "year": date.get("when", "")[:4] if date is not None else "",
         "doi": _identifier(reference, "DOI"),
@@ -663,6 +666,18 @@ def _paper_header(tei) -> dict:
     }
 
 
+def _horizontal_spans(page) -> list[dict]:
+    """The non-blank text spans of a page that run left to right."""
+    return [
+        span
+        for block in page.get_text("dict")["blocks"]
+        for line in block.get("lines", [])
+        if line["dir"] == (1.0, 0.0)
+        for span in line["spans"]
+        if span["text"].strip()
+    ]
+
+
 def _printed_title(pdf_path: str) -> str:
     """The title as printed on page 1: the largest horizontal text in the top half of the page.
 
@@ -677,11 +692,8 @@ def _printed_title(pdf_path: str) -> str:
             half = page.rect.height / 2
             spans = [
                 (span["size"], span["bbox"][1], span["bbox"][0], span["text"])
-                for block in page.get_text("dict")["blocks"]
-                for line in block.get("lines", [])
-                if line["dir"] == (1.0, 0.0)
-                for span in line["spans"]
-                if span["text"].strip() and span["bbox"][3] < half
+                for span in _horizontal_spans(page)
+                if span["bbox"][3] < half
             ]
     except Exception:
         return ""
@@ -967,22 +979,11 @@ def _first_section_from_pdf(first: dict, pdf_path: str) -> list[dict]:
         if not 1 <= first["page"] <= document.page_count:
             return []
 
-        def spans(page_number: int) -> list[dict]:
-            page = document[page_number - 1]
-            return [
-                span
-                for block in page.get_text("dict")["blocks"]
-                for line in block.get("lines", [])
-                if line["dir"] == (1.0, 0.0)
-                for span in line["spans"]
-                if span["text"].strip()
-            ]
-
         box = first["boxes"][0]
         style = next(
             (
                 (span["font"], span["size"])
-                for span in spans(first["page"])
+                for span in _horizontal_spans(document[first["page"] - 1])
                 if abs(span["bbox"][1] - box["y0"]) < 3 and span["bbox"][0] <= box["x1"]
             ),
             None,
@@ -991,7 +992,7 @@ def _first_section_from_pdf(first: dict, pdf_path: str) -> list[dict]:
             return []
         for page_number in range(1, first["page"] + 1):
             rows: dict[int, list[dict]] = {}
-            for span in spans(page_number):
+            for span in _horizontal_spans(document[page_number - 1]):
                 if span["font"] == style[0] and abs(span["size"] - style[1]) < 0.3:
                     rows.setdefault(round(span["bbox"][1]), []).append(span)
             for y, row in sorted(rows.items()):
@@ -1098,6 +1099,11 @@ MARKER = re.compile(r"\[(b\d+)\]")
 SENTENCE_MATCH = 0.6  # loose: the model paraphrases whitespace and drops the markers
 
 
+def _without_markers(text: str) -> str:
+    """The text with its [bN] markers, and the space before each, taken out."""
+    return re.sub(r"\s*\[b\d+\]", "", text).strip()
+
+
 def _cited_sentences(paper_text: str) -> list[str]:
     return [s for s in re.split(r"(?<=[.!?])\s+", paper_text) if MARKER.search(s)]
 
@@ -1119,8 +1125,6 @@ def _markers_for(claim: str, sentence: str, cited: list[str]) -> list[str]:
     Taken from the claim if the model kept them. Otherwise recovered from the paper's own
     copy of the sentence: the text is the source we trust, the model's output only points at it.
     """
-    from difflib import SequenceMatcher
-
     if found := list(dict.fromkeys(MARKER.findall(claim))):
         return found
     if not sentence or not cited:
@@ -1239,7 +1243,7 @@ def _claims_with_citations(claims: list[dict]) -> str:
     for number, claim in enumerate(claims, 1):
         if not claim["citations"]:
             continue
-        sentence = re.sub(r"\s*\[b\d+\]", "", claim["sentence"] or claim["claim"]).strip()
+        sentence = _without_markers(claim["sentence"] or claim["claim"])
         lines.append(f"{number}. {sentence}")
         for position, citation in enumerate(claim["citations"], 1):
             year = f" ({citation['year']})" if citation.get("year") else ""
@@ -1300,9 +1304,9 @@ def _says_own_work(sentence: str, title: str) -> bool:
 def _cited_claim(extracted, references: dict, cited: list[str], pdf_path: str) -> dict:
     raw_claim, sentence = extracted.claim, extracted.sentence
     marker_ids = _markers_for(raw_claim, sentence, cited)
-    source = locate(pdf_path, re.sub(r"\s*\[b\d+\]", "", sentence).strip()) if sentence else None
+    source = locate(pdf_path, _without_markers(sentence)) if sentence else None
     return {
-        "claim": re.sub(r"\s*\[b\d+\]", "", raw_claim).strip(),
+        "claim": _without_markers(raw_claim),
         "citations": [references[i] for i in marker_ids if i in references],
         "sentence": sentence,
         "source": source,  # None when the sentence could not be found in the PDF
@@ -1337,8 +1341,6 @@ def _same_assertion(one: str, other: str) -> bool:
     Numbers must agree first: "improves by 5%" vs "15%" is a different claim in a
     near-identical string.
     """
-    from difflib import SequenceMatcher
-
     if NUMBER.findall(one) != NUMBER.findall(other):
         return False
     return SequenceMatcher(None, one.split(), other.split()).ratio() >= NEAR_DUPLICATE
