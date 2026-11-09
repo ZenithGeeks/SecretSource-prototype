@@ -63,6 +63,8 @@ export function ToolbarActions({ children }: { children: ReactNode }) {
 /** Avatar initials from the display name ("Alex S." -> "AS"). */
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
+  // Unreachable: the name shown is never blank, 'Your account' being the last fallback.
+  /* v8 ignore next -- @preserve */
   if (parts.length === 0) return '?'
   return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
 }

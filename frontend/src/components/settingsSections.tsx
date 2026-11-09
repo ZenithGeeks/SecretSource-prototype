@@ -30,6 +30,8 @@ import { Avatar, Row, Section, Select, Toggle } from './settings'
 import { Button } from './ui'
 
 function Notice({ text }: { text: string }) {
+  // Unreachable: every caller renders Notice only with text.
+  /* v8 ignore next -- @preserve */
   if (!text) return null
   return (
     <p role="status" className="w-full rounded-lg bg-accent-soft px-3 py-2 text-xs text-ink">

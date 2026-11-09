@@ -63,6 +63,8 @@ export function SplitPane({
   const limit = (value: number, width: number) => Math.min(clamp(value), width ? 1 - (minRight + HANDLE_PX) / width : MAX)
 
   const change = (value: number) => {
+    // Unreachable fallback: change() only runs from the mounted handle.
+    /* v8 ignore next -- @preserve */
     const next = limit(value, container.current?.getBoundingClientRect().width ?? 0)
     setRatio(next)
     writeRatio(storageKey, next)
@@ -71,6 +73,8 @@ export function SplitPane({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const rect = container.current?.getBoundingClientRect()
+    // Unreachable: the handle that was pressed is inside the mounted container.
+    /* v8 ignore next -- @preserve */
     if (!rect) return
     const handle = event.currentTarget
     handle.setPointerCapture(event.pointerId)
