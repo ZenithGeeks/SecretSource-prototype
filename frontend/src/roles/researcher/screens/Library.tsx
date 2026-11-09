@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ToolbarActions } from '../../../components/AppShell'
 import { Button, Empty, FadeIn, IconButton, Input, LoadingScreen, MenuItem } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
-import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
+import type { ClaimStanding, ClaimTally, LibraryPaper, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
@@ -390,6 +390,14 @@ function AddPapersDialog({
   )
 }
 
+/** Whether a paper shows under a filter segment: "All", "Unverified", "Conflicts" or a cluster name. */
+function inFilter(paper: LibraryPaper, filter: string) {
+  if (filter === 'All') return true
+  if (filter === 'Unverified') return paper.backed === null
+  if (filter === 'Conflicts') return (paper.contradicted ?? 0) > 0
+  return paper.cluster === filter
+}
+
 function ProjectDetail({
   projectId,
   projectName,
@@ -420,12 +428,11 @@ function ProjectDetail({
 
   // The filter keys are the gateway's ("All", "Unverified", cluster names); the words are ours.
   // "Has conflicts" sits right after "All", as designed.
-  const countFor = (key: string) =>
-    key === 'All'
-      ? library.papers.length
-      : key === 'Unverified'
-        ? notAnalyzed
-        : library.papers.filter((p) => p.cluster === key).length
+  const countFor = (key: string) => {
+    if (key === 'All') return library.papers.length
+    if (key === 'Unverified') return notAnalyzed
+    return library.papers.filter((p) => p.cluster === key).length
+  }
   const [first, ...others] = library.clusters
   const segments = [
     ...(first === undefined ? [] : [{ key: first, label: first, n: countFor(first) }]),
@@ -435,20 +442,8 @@ function ProjectDetail({
 
   const q = query.trim().toLowerCase()
   const shown = library.papers
-    .filter((p) =>
-      filter === 'All'
-        ? true
-        : filter === 'Unverified'
-          ? p.backed === null
-          : filter === 'Conflicts'
-            ? (p.contradicted ?? 0) > 0
-            : p.cluster === filter,
-    )
-    .filter((p) =>
-      q === ''
-        ? true
-        : `${p.title} ${p.cite} ${p.cluster} ${p.linked.join(' ')}`.toLowerCase().includes(q),
-    )
+    .filter((p) => inFilter(p, filter))
+    .filter((p) => q === '' || `${p.title} ${p.cite} ${p.cluster} ${p.linked.join(' ')}`.toLowerCase().includes(q))
 
   const items: LibraryAddItem[] = [
     ...(unsorted

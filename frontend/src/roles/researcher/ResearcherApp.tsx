@@ -39,10 +39,12 @@ const NAV: NavEntry<NavKey>[] = [
   { key: 'graph', label: 'Graph', icon: Waypoints },
 ]
 
-// Which nav item lights for each screen; null means none (field-consensus now lives in the Graph
-// tab as a Consensus toggle, so it lights Graph; Settings lights nothing — the profile button
-// carries its own active state instead).
-const NAV_FOR: Record<ResearcherScreen, NavKey | null> = {
+const NAV_LABEL = Object.fromEntries(NAV.map((entry) => [entry.key, entry.label])) as Record<NavKey, string>
+
+// Which nav item lights for each screen. field-consensus lives in the Graph tab as a Consensus
+// toggle, so it lights Graph. Settings is a modal and lights nothing; the profile button carries
+// its own active state.
+const NAV_FOR: Record<ResearcherScreen, NavKey> = {
   home: 'home',
   library: 'library',
   'field-consensus': 'graph',
@@ -67,8 +69,7 @@ function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
   params.set('screen', screen)
   if (screen === 'analyses' && selected) params.set('analysis', selected)
   else params.delete('analysis')
-  const query = params.toString()
-  window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+  window.history.replaceState(null, '', `?${params}`)
 }
 
 export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
@@ -84,7 +85,6 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
 
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
   const onGraph = screen === 'graph' || screen === 'field-consensus'
-  // What is on screen to ask about: the open analysis, or the selected graph node.
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
     history.closePage()
@@ -95,6 +95,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
     navigate('analyses')
   }
 
+  // What is on screen to ask about: the open analysis, or the selected graph node.
   const ask = useAsk({
     role: 'researcher',
     screen,
@@ -117,7 +118,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
       ? history.selectedName
         ? ['Analyses', history.selectedName]
         : ['Analyses']
-      : [NAV.find((n) => n.key === NAV_FOR[screen])?.label ?? 'Home']
+      : [NAV_LABEL[NAV_FOR[screen]]]
 
   return (
     <div className="redesign-app">
