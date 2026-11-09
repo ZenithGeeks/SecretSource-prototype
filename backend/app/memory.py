@@ -20,7 +20,6 @@ remembered_for gives it the same matching facts.
 
 import asyncio
 import os
-import re
 from datetime import UTC, datetime
 
 from google.adk.memory import BaseMemoryService
@@ -30,20 +29,15 @@ from google.genai import types
 
 from app import store
 from app.sessions import SIGNED_OUT
+from app.text import search_terms
 
 RESULTS = 5  # findings returned per search: enough to answer, few enough for the model to read
-WORD = re.compile(r"[a-z0-9]+")
-# Words that say nothing about which claim or paper is meant.
-STOP = {
-    "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "did", "does",
-    "what", "which", "about", "claim", "paper", "papers", "check", "checked", "find", "found",
-    "earlier", "already", "analysis", "analyses", "source", "sources", "cited", "our", "has",
-    "have", "not", "can", "its", "their", "than", "into", "been", "any",
-}  # fmt: skip
+# Words that say nothing about which claim or paper is meant, on top of English stopwords.
+ABOUT_THE_TASK = search_terms("claim paper check find found earlier already analysis source cited")
 
 
 def _words(text: str) -> set[str]:
-    return {word for word in WORD.findall((text or "").lower()) if len(word) > 2 and word not in STOP}
+    return search_terms(text or "") - ABOUT_THE_TASK
 
 
 def _readable(analysis: dict) -> tuple[str, str]:

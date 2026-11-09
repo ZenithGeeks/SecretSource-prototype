@@ -19,7 +19,7 @@ from app.author import logic
 from app.labeling import router as labeling
 from app.names import surname
 from app.pipeline.claims import locate
-from app.text import split_sentences
+from app.text import search_terms, split_sentences
 
 MAX_SENTENCES = assistant.MAX_STATEMENTS  # one judge call each, so the same cap as an answer
 MIN_SENTENCE = 20  # characters; shorter pieces are headings or list stubs, not claims
@@ -126,12 +126,12 @@ async def search_claims(query: str, tool_context: ToolContext) -> dict:
     """
     from app import main
 
-    words = set(re.findall(r"\w{3,}", query.lower()))
+    words = search_terms(query)
     rows = await asyncio.to_thread(main.visible_to, _user(tool_context))
     found = []
     for paper in researcher.library_papers(rows):
         for number, claim in enumerate(paper.get("claims", []), 1):
-            hits = len(words & set(re.findall(r"\w{3,}", claim.get("claim", "").lower())))
+            hits = len(words & search_terms(claim.get("claim", "")))
             if hits:
                 found.append((hits, paper, number, claim))
     found.sort(key=lambda item: -item[0])  # stable: the newest paper stays first among equals
