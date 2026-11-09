@@ -170,3 +170,8 @@ def test_a_citation_in_brackets_is_only_a_marker():
     citations = paragraph("(Peters et al., 2018)", "(Jiang et al., 2020;", "Shin et al., 2020)", "[12]")
     text = claims._paragraph_text(citations)
     assert text.split(" x. ")[:4] == ["[b0]", "[b1]", "[b2]", "[b3]"]
+
+
+def test_et_al_does_not_end_a_cited_sentence():
+    text = "Shin et al. [b47] propose a search algorithm. We do not."
+    assert claims._cited_sentences(text) == ["Shin et al. [b47] propose a search algorithm."]
