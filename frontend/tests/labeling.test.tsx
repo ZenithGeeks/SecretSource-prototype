@@ -106,6 +106,8 @@ import {
   nextUnfinishedIndex,
   problem,
   readConfidence,
+  referenceFinished,
+  referenceSummary,
   remaining,
   saveNextTarget,
   workClaims,
@@ -176,6 +178,18 @@ describe('what is left to decide', () => {
     })
     expect(back.labels.refB.confidence).toBeNull()
     expect(back.labels.refOld.confidence).toBe('medium')
+  })
+
+  it('folds a reference once its passages are judged and it has a level', () => {
+    const open = judged({ status: 'accepted', cands: { c1: 'relevant' } })
+    expect(referenceFinished(claim, open, 'refB')).toBe(false)
+    const done = judged({
+      status: 'accepted',
+      cands: { c1: 'relevant', c2: 'rejected' },
+      labels: { refB: { evidence: 3, rationale: '', confidence: 'medium' } },
+    })
+    expect(referenceFinished(claim, done, 'refB')).toBe(true)
+    expect(referenceSummary(claim, done, refs[0], 'refB')).toBe('[b4] 1/2 relevant · Clear · Medium')
   })
 
   it('wants the new wording of an edited claim', () => {
@@ -653,17 +667,15 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /Reject/ })).toHaveTextContent('No, it is not a claim of this paper.')
   })
 
-  it('lists what every level means under the picker, with the chosen one marked', async () => {
+  it('puts a level’s meaning on its button, and one line for the chosen level', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
-    const rubric = screen.getByRole('list', { name: 'What each level means' })
-    expect(within(rubric).getAllByRole('listitem')).toHaveLength(4)
-    expect(within(rubric).getByText(/The passage backs the claim, with a gap in scope or detail\./)).toBeInTheDocument()
-    expect(within(rubric).queryByRole('listitem', { current: true })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('radio', { name: '3 · Clear' }))
-    expect(within(rubric).getByRole('listitem', { current: true })).toHaveTextContent(/^3 Clear/)
-    expect(screen.getByText('Level 3, Clear: The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'What each level means' })).not.toBeInTheDocument()
+    const clear = screen.getByRole('radio', { name: '3 · Clear' })
+    expect(clear).toHaveAttribute('title', 'The passage backs the claim, with a gap in scope or detail.')
+    fireEvent.click(clear)
+    expect(screen.getByText('3 Clear — The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
   })
 
   it('keeps an undecided claim when evidence is added to it', async () => {
@@ -873,7 +885,7 @@ describe('unsaved labels', () => {
         <Workspace analysisId="a1" />
       </QueryClientProvider>,
     )
-    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+    await screen.findByRole('heading', { name: /Claim 1 of 2/ })
     return view
   }
 

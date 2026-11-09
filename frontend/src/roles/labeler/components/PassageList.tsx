@@ -10,6 +10,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Button, IconButton, Input, Textarea } from '../../../components/ui'
 import {
+  referenceFinished,
+  referenceSummary,
   referencesOf,
   type AddedPassage,
   type Candidate,
@@ -87,11 +89,9 @@ function PassageCard({
         aria-pressed={shown}
         className="w-full rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
-          <span className="font-semibold text-ink">#{c.rank}</span>
-          <span className="truncate">{label}</span>
-          {c.page != null && <span>p.{c.page}</span>}
-          {c.score != null && <span className="tabular-nums">score {c.score.toFixed(2)}</span>}
+        <span className="text-xs font-semibold text-ink">
+          #{c.rank}
+          {c.page != null && <span className="font-normal text-ink-muted"> · p.{c.page}</span>}
         </span>
         <span title={shown ? undefined : c.passage} className={cn('mt-1 block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
           {c.passage}
@@ -204,6 +204,8 @@ export function PassageList({
 }) {
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
+  // true: keep open, false: keep folded. Unset follows the work: open while unfinished or focused.
+  const [forced, setForced] = useState<Record<string, boolean>>({})
   return (
     <section aria-labelledby="passages-title" className="flex flex-col gap-4">
       <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
@@ -229,10 +231,30 @@ export function PassageList({
       {referencesOf(claim, draft).map((id) => {
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)
         const added = draft.added.filter((a) => a.reference_id === id)
+        const finished = referenceFinished(claim, draft, id)
+        const focusedHere = Boolean(
+          focus &&
+            (cands.some((c) => c.cand_id === focus.key) ||
+              added.some((a) => focus.key === `added:${a.reference_id}:${a.passage}`) ||
+              focus.key === `ref:${id}`),
+        )
+        const open = !finished || forced[id] === true || (forced[id] === undefined && focusedHere)
+        const reference = references.find((r) => r.reference_id === id)
         return (
           <section key={id} aria-label={labelOf(id)} data-ask-target={askTarget({ kind: 'reference', id })} className="flex flex-col gap-2">
-            <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>
-            {cands.length > 0 && (
+            {finished ? (
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setForced((all) => ({ ...all, [id]: !open }))}
+                className="rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {referenceSummary(claim, draft, reference, id)}
+              </button>
+            ) : (
+              <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>
+            )}
+            {open && cands.length > 0 && (
               <ul className="flex flex-col gap-2">
                 {cands.map((c) => (
                   <PassageCard
@@ -251,7 +273,7 @@ export function PassageList({
                 ))}
               </ul>
             )}
-            {added.length > 0 && (
+            {open && added.length > 0 && (
               <>
                 <p className="text-sm font-medium text-ink">Passages you added</p>
                 <ul className="flex flex-col gap-2">
@@ -276,7 +298,7 @@ export function PassageList({
                 </ul>
               </>
             )}
-            {grade(id)}
+            {open && grade(id)}
           </section>
         )
       })}

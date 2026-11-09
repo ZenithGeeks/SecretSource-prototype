@@ -584,6 +584,34 @@ export function draftFromSaved(claim: WorkClaim, saved: Session['saved']): Draft
   return draft
 }
 
+/** A reference can fold once every passage is judged and, if any of them were relevant, it has a level. */
+export function referenceFinished(claim: WorkClaim, draft: Draft, referenceId: string): boolean {
+  const cands = claim.candidates.filter((c) => c.reference_id === referenceId)
+  if (cands.some((c) => !draft.cands[c.cand_id])) return false
+  if (relevantPassages(claim, draft, referenceId).length > 0) return Boolean(draft.labels[referenceId]?.evidence)
+  return cands.length > 0 || draft.added.some((a) => a.reference_id === referenceId)
+}
+
+/** "[b40] 3/4 relevant · Clear · Medium" for a folded reference. */
+export function referenceSummary(
+  claim: WorkClaim,
+  draft: Draft,
+  reference: Reference | undefined,
+  referenceId: string,
+): string {
+  const tag = reference?.ref ? `[${reference.ref}]` : (reference?.label ?? referenceId)
+  const total =
+    claim.candidates.filter((c) => c.reference_id === referenceId).length +
+    draft.added.filter((a) => a.reference_id === referenceId).length
+  const level = draft.labels[referenceId]?.evidence
+  const confidence = draft.labels[referenceId]?.confidence
+  const count = `${relevantPassages(claim, draft, referenceId).length}/${total} relevant`
+  const parts = [`${tag} ${count}`]
+  if (level) parts.push(LEVELS[level - 1].name)
+  if (confidence) parts.push(confidence[0].toUpperCase() + confidence.slice(1))
+  return parts.join(' · ')
+}
+
 /** The references this claim is read against: where retrieval looked, plus ones the person added. */
 export function referencesOf(claim: WorkClaim, draft: Draft): string[] {
   return [...new Set([...claim.candidates.map((c) => c.reference_id), ...draft.added.map((a) => a.reference_id)])]

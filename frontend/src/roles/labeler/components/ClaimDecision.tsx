@@ -1,6 +1,6 @@
 /** The first decision for a claim: is it a real claim of the paper? Keep it, fix it, or reject it. */
 
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type { ClaimStatus, Draft, WorkClaim } from '../../../lib/labeling'
 import { askTarget } from '../../../lib/askCursor'
@@ -42,6 +42,9 @@ export function ClaimDecision({
   const name = useId()
   const edit = useId()
   const box = useRef<HTMLTextAreaElement>(null)
+  const [reopened, setReopened] = useState<string | null>(null)
+  const choice = CHOICES.find((item) => item.status === draft.status)
+  const collapsed = Boolean(choice) && reopened !== claim.claim_id
   // Focus the box when Edit is chosen, not when a claim already being edited is opened again:
   // focus there would make the next shortcut key type into the claim.
   const seen = useRef({ claim: claim.claim_id, status: draft.status })
@@ -65,13 +68,36 @@ export function ClaimDecision({
         </p>
       )}
 
-      <p id={`${name}-question`} className="text-sm font-medium text-ink">
-        {QUESTION}
-      </p>
+      {!collapsed && (
+        <p id={`${name}-question`} className="text-sm font-medium text-ink">
+          {QUESTION}
+        </p>
+      )}
+      {collapsed && choice ? (
+        <button
+          type="button"
+          role="radio"
+          aria-checked="true"
+          aria-expanded={false}
+          aria-keyshortcuts={choice.key}
+          onClick={() => setReopened(claim.claim_id)}
+          className={cn(
+            'relative flex min-h-11 flex-col items-start rounded-lg border px-3 py-2 pr-8 text-left',
+            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+            choice.status === 'rejected' ? 'border-refutes bg-refutes-soft text-refutes' : 'border-accent bg-accent-soft text-ink',
+          )}
+        >
+          <span className="text-sm font-medium">{choice.label}</span>
+          <span className="text-xs">{choice.hint}. Click to change.</span>
+          <span className="absolute top-2 right-2">
+            <Kbd>{choice.key}</Kbd>
+          </span>
+        </button>
+      ) : (
       <div
         role="radiogroup"
         aria-label="Decision on this claim"
-        aria-describedby={`${name}-question`}
+        aria-describedby={collapsed ? undefined : `${name}-question`}
         className="grid grid-cols-3 gap-2"
       >
         {CHOICES.map(({ status, label, hint, key }) => (
@@ -81,7 +107,10 @@ export function ClaimDecision({
             role="radio"
             aria-checked={draft.status === status}
             aria-keyshortcuts={key}
-            onClick={() => onChange({ status })}
+            onClick={() => {
+              onChange({ status })
+              setReopened(null)
+            }}
             className={cn(
               'relative flex min-h-11 flex-col items-start rounded-lg border px-3 py-2 pr-8 text-left transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
@@ -102,6 +131,7 @@ export function ClaimDecision({
           </button>
         ))}
       </div>
+      )}
 
       {draft.status === 'edited' && (
         <div className="flex flex-col gap-1.5">

@@ -65,17 +65,11 @@ export function LabelForm({
           </button>
         ))}
       </div>
-      <ul aria-label="What each level means" className="flex flex-col gap-1 text-sm leading-5 text-ink-muted">
-        {LEVELS.map(({ level, name, hint }) => (
-          <li
-            key={level}
-            aria-current={value.evidence === level ? 'true' : undefined}
-            className={cn(value.evidence === level && 'font-medium text-ink')}
-          >
-            <span className="tabular-nums">{level}</span> {name} — {hint}
-          </li>
-        ))}
-      </ul>
+      <p className="text-sm leading-5 text-ink-muted">
+        {value.evidence
+          ? `${value.evidence} ${LEVELS[value.evidence - 1].name} — ${LEVELS[value.evidence - 1].hint}`
+          : 'Pick a level from 1 to 4. Each button’s title says what that level means.'}
+      </p>
       <p className="sr-only" aria-live="polite">
         {value.evidence
           ? `Level ${value.evidence}, ${LEVELS[value.evidence - 1].name}: ${LEVELS[value.evidence - 1].hint}`
