@@ -93,3 +93,35 @@ def test_a_citation_that_stays_unlinked_leaves_no_text_in_the_paragraph():
     assert "OpenAI" not in text and "Guan" not in text and "2023" not in text
     assert "HallusionBench" in text  # a name written before the bracket is not the citation
     assert "Figure 3" in text  # GROBID sometimes tags text with no year as bibr; it stays
+
+
+def test_a_tei_without_a_body_links_nothing():
+    document = ET.fromstring('<TEI xmlns="http://www.tei-c.org/ns/1.0"><text/></TEI>')
+    assert claims._link_author_year_citations(document) == 0
+
+
+def test_references_with_no_id_or_no_authors_are_never_linked():
+    nameless = entry("b1", [], "2021", "No authors")
+    anonymous = (
+        "<biblStruct><analytic><author><persName><surname>Ren</surname></persName></author>"
+        '<title level="a">No id</title></analytic>'
+        '<monogr><imprint><date when="2021"/></imprint></monogr></biblStruct>'
+    )
+    document = ET.fromstring(
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0">'
+        '<text><body><p><ref type="bibr">(Ren, 2021)</ref></p></body>'
+        f"<back><listBibl>{nameless}{anonymous}</listBibl></back></text></TEI>"
+    )
+    assert claims._link_author_year_citations(document) == 0
+
+
+def test_a_citation_that_fits_several_works_equally_is_left_unlinked():
+    document = tei("(Ren, 2021)")
+    assert claims._link_author_year_citations(document) == 0
+    assert targets(document) == [None]
+
+
+def test_a_letter_beyond_the_works_of_that_year_is_left_unlinked():
+    document = tei("(Ren et al., 2021e)")
+    assert claims._link_author_year_citations(document) == 0
+    assert targets(document) == [None]
