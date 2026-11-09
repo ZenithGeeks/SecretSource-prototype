@@ -102,7 +102,14 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       notifications={<PaperBell onOpen={openPaper} />}
     >
       {analysis ? (
-        <Workspace analysisId={analysis} onDirtyChange={setUnsaved} askSlot={claimSlot} onOpenAsk={ask.showExtra} />
+        <Workspace
+          analysisId={analysis}
+          onDirtyChange={setUnsaved}
+          askSlot={claimSlot}
+          onOpenAsk={ask.showExtra}
+          onBack={() => leave(() => setAnalysis(null))()}
+          onOpenPaper={(id) => leave(() => setAnalysis(id))()}
+        />
       ) : screen === 'blind' ? (
         <BlindChecks onOpen={setAnalysis} />
       ) : (

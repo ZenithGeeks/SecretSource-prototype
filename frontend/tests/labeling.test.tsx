@@ -33,6 +33,15 @@ const gateway = vi.hoisted(() => ({
   searched: [] as unknown[],
   found: [] as unknown[],
   failSearch: false,
+  pool: {
+    topics: ['NLP'],
+    me: 'chanya',
+    people: [{ name: 'chanya', topic: 'NLP' }],
+    papers: [
+      { analysis_id: 'a1', title: 'Paper A', topic: 'NLP', claims: 2, judged: 0, team_judged: 0, labelers: ['chanya'], status: 'done', reason: '', mine: true, added_by: 'chanya', subject: '', keywords: [], venue_rank: '', venue_rank_source: '' },
+      { analysis_id: 'a2', title: 'Paper B', topic: 'NLP', claims: 4, judged: 1, team_judged: 1, labelers: ['chanya'], status: 'done', reason: '', mine: false, added_by: 'nuttadon', subject: '', keywords: [], venue_rank: '', venue_rank_source: '' },
+    ],
+  },
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
@@ -48,6 +57,7 @@ vi.mock('../src/lib/api', async (original) => ({
       gateway.posts.push(JSON.parse(String(init.body)))
       return { claims: 1, candidates: 2, labels: 1 }
     }
+    if (path === '/labeling/pool') return gateway.pool
     if (path.startsWith('/labeling/sessions/')) return gateway.session
     throw new Error(`unexpected ${path}`)
   }),
@@ -92,9 +102,12 @@ import {
   emptyDraft,
   emptyLabel,
   isDone,
+  nextPaperInTopic,
+  nextUnfinishedIndex,
   problem,
   readConfidence,
   remaining,
+  saveNextTarget,
   workClaims,
   type Draft,
   type WorkClaim,
@@ -171,6 +184,41 @@ describe('what is left to decide', () => {
     ])
     const unchanged = judged({ status: 'edited', edited: claim.claim, cands: { c1: 'rejected', c2: 'rejected' } })
     expect(remaining(claim, unchanged, refs)).toEqual(['Write the edited claim'])
+  })
+})
+
+describe('the next unfinished claim', () => {
+  const bare = (id: string): WorkClaim => ({
+    claim_id: id, claim: id, sentence: '', section: '', source: null, candidates: [], origin: 'extracted',
+  })
+  const six = ['1', '2', '3', '4', '5', '6'].map(bare)
+  const rejected = (): Draft => ({ ...emptyDraft(), status: 'rejected' })
+  const finished = Object.fromEntries(six.map((c) => [c.claim_id, rejected()]))
+
+  it('goes to the next unfinished claim, wrapping past finished ones', () => {
+    const drafts = { ...finished, '6': emptyDraft() }
+    const saved = { ...finished, '6': emptyDraft() }
+    // Claims 1-5 finished, 6 open. Saving claim 3 (index 2) opens claim 6.
+    expect(nextUnfinishedIndex(six, drafts, saved, [], 2)).toBe(5)
+    expect(saveNextTarget(six, drafts, saved, [], 2)).toEqual({ kind: 'claim', index: 5 })
+  })
+
+  it('says the paper is done when the last unfinished claim is saved', () => {
+    const drafts = { ...finished }
+    const saved = { ...finished, '6': emptyDraft() }
+    expect(saveNextTarget(six, drafts, saved, [], 5)).toEqual({ kind: 'paper-done' })
+  })
+
+  it('moves to the next claim in order when every claim was already finished', () => {
+    const saved = { ...finished }
+    const drafts = { ...finished, '3': { ...rejected(), edited: 'a small fix' } }
+    expect(saveNextTarget(six, drafts, saved, [], 2)).toEqual({ kind: 'claim', index: 3 })
+  })
+
+  it('picks the next paper in the same topic that is not finished', () => {
+    const pool = gateway.pool as Parameters<typeof nextPaperInTopic>[0]
+    expect(nextPaperInTopic(pool, 'a1')?.analysis_id).toBe('a2')
+    expect(nextPaperInTopic({ ...pool, papers: pool.papers.map((p) => ({ ...p, topic: 'CV' })) }, 'a1')).toBeNull()
   })
 })
 
@@ -371,6 +419,38 @@ describe('the workspace', () => {
     expect(typed).toBe(false)
     expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByLabelText('The claim, as it should read')).toHaveValue('Method Y improves recall.')
+  })
+
+  it('saves and opens the next unfinished claim, then says the paper is done', async () => {
+    const onBack = vi.fn()
+    const onOpenPaper = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Workspace analysisId="a1" onBack={onBack} onOpenPaper={onOpenPaper} />
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 2, not started/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and next/ }))
+    // Claim 2 is finished. Claim 1 is still open, so Save and next wraps back to it.
+    expect(await screen.findByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and next/ }))
+    expect(await screen.findByRole('heading', { name: 'This paper is labeled' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next paper in your topic' }))
+    expect(onOpenPaper).toHaveBeenCalledWith('a2')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to papers' }))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('jumps to the first unfinished claim from the progress count', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '1 of 2 claims finished' }))
+    expect(await screen.findByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
   })
 
   it('does not count a finished claim as finished until it is saved', async () => {

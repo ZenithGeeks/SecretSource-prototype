@@ -673,6 +673,86 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
 export const isDone = (claim: WorkClaim, draft: Draft, references: Reference[]) =>
   remaining(claim, draft, references).length === 0
 
+const draftOf = (drafts: Record<string, Draft>, id: string) => drafts[id] ?? emptyDraft()
+
+/** Finished means decided everywhere and written down. An unsaved draft is not finished. */
+export function isSavedDone(
+  claim: WorkClaim,
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+): boolean {
+  const draft = draftOf(drafts, claim.claim_id)
+  return isDone(claim, draft, references) && sameDraft(draft, saved[claim.claim_id])
+}
+
+/** The next claim that is not finished, after `from`, wrapping around. Never `from` itself. */
+export function nextUnfinishedIndex(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+  from: number,
+): number | null {
+  for (let step = 1; step < claims.length; step++) {
+    const index = (from + step) % claims.length
+    if (!isSavedDone(claims[index], drafts, saved, references)) return index
+  }
+  return null
+}
+
+/** The earliest claim that is not finished, for the progress count. */
+export function firstUnfinishedIndex(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+): number | null {
+  const index = claims.findIndex((claim) => !isSavedDone(claim, drafts, saved, references))
+  return index < 0 ? null : index
+}
+
+export type SaveNext = { kind: 'claim'; index: number } | { kind: 'paper-done' } | { kind: 'stay' }
+
+/**
+ * Where "Save and next" goes. An unfinished claim later in the paper wins, then one earlier.
+ * Saving the last unfinished claim says the paper is done. When every claim was already
+ * finished, it moves to the next one in order.
+ */
+export function saveNextTarget(
+  claims: WorkClaim[],
+  drafts: Record<string, Draft>,
+  saved: Record<string, Draft>,
+  references: Reference[],
+  index: number,
+): SaveNext {
+  const open = nextUnfinishedIndex(claims, drafts, saved, references, index)
+  if (open != null) return { kind: 'claim', index: open }
+  const claim = claims[index]
+  if (!claim) return { kind: 'stay' }
+  const draft = draftOf(drafts, claim.claim_id)
+  const wasSavedDone = Boolean(saved[claim.claim_id] && isDone(claim, saved[claim.claim_id], references))
+  if (isDone(claim, draft, references) && !wasSavedDone) return { kind: 'paper-done' }
+  if (index + 1 < claims.length) return { kind: 'claim', index: index + 1 }
+  if (isDone(claim, draft, references)) return { kind: 'paper-done' }
+  return { kind: 'stay' }
+}
+
+/** The next paper in the signed-in person's topic: an unfinished one first, else any other. */
+export function nextPaperInTopic(pool: Pool, analysisId: string): Pool['papers'][number] | null {
+  const topic = pool.people.find((person) => person.name === pool.me)?.topic ?? ''
+  if (!topic) return null
+  const blind = new Set(pool.blind ?? [])
+  const rest = pool.papers.filter(
+    (paper) =>
+      paper.analysis_id !== analysisId &&
+      paper.topic === topic &&
+      paper.status === 'done' &&
+      !blind.has(paper.analysis_id),
+  )
+  return rest.find((paper) => paper.claims > 0 && paper.judged < paper.claims) ?? rest[0] ?? null
+}
+
 const sameAdded = (a: AddedPassage, b: AddedPassage) => a.reference_id === b.reference_id && a.passage === b.passage
 
 /**

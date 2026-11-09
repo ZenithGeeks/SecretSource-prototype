@@ -27,14 +27,18 @@ import {
   draftFromSaved,
   emptyDraft,
   emptyLabel,
+  firstUnfinishedIndex,
   labelingApi,
+  nextPaperInTopic,
   progress,
   readUnsaved,
   referencesOf,
   relevantPassages,
   remaining,
   sameDraft,
+  saveNextTarget,
   problem,
+  usePool,
   useSaveLabels,
   workClaims,
   writeUnsaved,
@@ -120,9 +124,13 @@ type WorkspaceProps = {
   askSlot?: HTMLElement | null
   /** Opens the Ask panel on "This claim", for a passage the labeler asks about. */
   onOpenAsk?: () => void
+  /** Leaves the paper for the list. */
+  onBack?: () => void
+  /** Opens another paper, used when this one is finished. */
+  onOpenPaper?: (id: string) => void
 }
 
-export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk }: WorkspaceProps) {
+export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk, onBack, onOpenPaper }: WorkspaceProps) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
   if (query.error || !query.data) {
@@ -136,7 +144,17 @@ export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk
       </div>
     )
   }
-  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} askSlot={askSlot} onOpenAsk={onOpenAsk} />
+  return (
+    <Body
+      key={analysisId}
+      session={query.data}
+      onDirtyChange={onDirtyChange}
+      askSlot={askSlot}
+      onOpenAsk={onOpenAsk}
+      onBack={onBack}
+      onOpenPaper={onOpenPaper}
+    />
+  )
 }
 
 /** Search the references for each claim added by hand, and add what is found to its passages (#404).
@@ -176,11 +194,15 @@ function Body({
   onDirtyChange,
   askSlot,
   onOpenAsk,
+  onBack,
+  onOpenPaper,
 }: {
   session: Session
   onDirtyChange?: (unsaved: boolean) => void
   askSlot: HTMLElement | null
   onOpenAsk?: () => void
+  onBack?: () => void
+  onOpenPaper?: (id: string) => void
 }) {
   const base = useMemo(() => workClaims(session), [session])
   // What this browser kept from before a reload or an outage, put back on top of what was saved.
@@ -196,6 +218,8 @@ function Body({
   )
   const [drafts, setDrafts] = useState(() => ({ ...saved, ...restored?.drafts }))
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
+  const [paperDone, setPaperDone] = useState(false)
+  const pool = usePool()
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
   const draft = (claim && drafts[claim.claim_id]) || emptyDraft()
@@ -241,6 +265,7 @@ function Body({
     setFocus(next ? firstFocus(next, session) : null)
     setSavedRows(null)
     setPicked(null)
+    setPaperDone(false)
     save.reset()
   }
 
@@ -299,13 +324,16 @@ function Body({
 
   const write = (next: boolean) => {
     if (!claim) return
+    const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
+    const target = saveNextTarget(claims, drafts, saved, cited, index)
     const body = buildSave({ ...claim, source: claimSource }, draft, saved[claim.claim_id])
     save.mutate(body, {
       onSuccess: (rows) => {
         setSaved((all) => ({ ...all, [claim.claim_id]: structuredClone(draft) }))
         setSavedRows(rows.claims + rows.candidates + rows.labels)
-        const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
-        if (next && claims[index + 1]) go(claims[index + 1].claim_id)
+        if (!next) return
+        if (target.kind === 'claim') go(claims[target.index].claim_id)
+        else if (target.kind === 'paper-done') setPaperDone(true)
       },
     })
   }
@@ -558,6 +586,29 @@ function Body({
     </ul>
   )
 
+  const nextPaper = pool.data ? nextPaperInTopic(pool.data, session.analysis_id) : null
+  const paperDoneView = (
+    <div role="status" className="flex flex-col items-start gap-3">
+      <h2 className="font-serif text-lg font-semibold text-ink">This paper is labeled</h2>
+      <p className="text-sm leading-6 text-ink-muted">Every claim is finished and saved.</p>
+      <div className="flex flex-wrap gap-2">
+        {nextPaper && onOpenPaper && (
+          <Button type="button" onClick={() => onOpenPaper(nextPaper.analysis_id)}>
+            Next paper in your topic
+          </Button>
+        )}
+        {onBack && (
+          <Button type="button" variant="ghost" onClick={onBack}>
+            Back to papers
+          </Button>
+        )}
+        <Button type="button" variant="ghost" onClick={() => setPaperDone(false)}>
+          Review claims
+        </Button>
+      </div>
+    </div>
+  )
+
   const panel = (
     <>
       <ClaimDecision claim={claim} draft={draft} position={position + 1} count={claims.length} onChange={patch} />
@@ -599,7 +650,7 @@ function Body({
       saving={save.isPending}
       error={save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null}
       savedRows={savedRows}
-      hasNext={position < claims.length - 1}
+      hasNext={claim != null && saveNextTarget(claims, drafts, saved, cited, position).kind !== 'stay'}
       onSave={write}
       className={className}
     />
@@ -687,11 +738,17 @@ function Body({
 
   const labelPanel = (
     <div className="ml-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
-      <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
-        {legend}
-        {saveBar('border-0 p-0')}
-      </div>
+      {paperDone ? (
+        <div className="p-4">{paperDoneView}</div>
+      ) : (
+        <>
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
+          <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
+            {legend}
+            {saveBar('border-0 p-0')}
+          </div>
+        </>
+      )}
     </div>
   )
 
@@ -719,9 +776,19 @@ function Body({
         <div className="ml-auto flex items-center gap-3 xl:ml-0">
           {wide && viewToggle}
           <div className="w-36">
-            <p className="mb-1 whitespace-nowrap text-xs text-ink-muted tabular-nums">
+            <button
+              type="button"
+              disabled={firstUnfinishedIndex(claims, drafts, saved, cited) == null}
+              onClick={() => {
+                const index = firstUnfinishedIndex(claims, drafts, saved, cited)
+                if (index == null) return
+                setPaperDone(false)
+                select(claims[index].claim_id)
+              }}
+              className="mb-1 w-full whitespace-nowrap text-left text-xs text-ink-muted tabular-nums enabled:hover:text-ink enabled:hover:underline"
+            >
               {done} of {total} claims finished
-            </p>
+            </button>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
               <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
             </div>
@@ -769,8 +836,14 @@ function Body({
           {overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
           {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
           {selection}
-          <div className="flex flex-col gap-5">{panel}</div>
-          {saveBar()}
+          {paperDone ? (
+            paperDoneView
+          ) : (
+            <>
+              <div className="flex flex-col gap-5">{panel}</div>
+              {saveBar()}
+            </>
+          )}
         </div>
       )}
       {/* Drawn in the Ask panel's "This claim" view, but kept here with the claim's state. */}
