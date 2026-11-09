@@ -1,0 +1,8 @@
+{
+  "summary": "2 papers",
+  "clusters": ["All", "Unverified", "Late interaction"],
+  "papers": [
+    { "id": "a-old", "title": "ColBERTv2", "cite": "Santhanam et al. · 2022", "cluster": "Late interaction", "claims": 1, "backed": 0, "contradicted": 0, "linked": [], "sourcesIndexed": 3, "sourcesNotIndexed": 0, "indexed": "yes", "index": "Semantic Scholar" },
+    { "id": "a-new", "title": "Tevatron toolkit", "cite": "Gao et al. · 2022", "cluster": "Late interaction", "claims": 2, "backed": 1, "contradicted": 1, "linked": [], "sourcesIndexed": 2, "sourcesNotIndexed": 0, "indexed": "yes", "index": "Semantic Scholar" }
+  ]
+}
