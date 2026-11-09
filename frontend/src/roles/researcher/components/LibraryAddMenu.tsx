@@ -17,7 +17,7 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false)
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
