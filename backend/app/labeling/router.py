@@ -30,12 +30,13 @@ from fastapi.responses import Response, StreamingResponse
 from app import auth, config
 from app.auth import current_user
 from app.labeling import dspy_export, identity, ledger, pool, review, scopus
-from app.labeling.identity import annotator
+from app.labeling.identity import annotator, is_lead
 from app.labeling.schema import (
     TABS,
     TOPICS,
     AddedClaimIn,
     AskIn,
+    BlindCheckIn,
     PersonTopicIn,
     ReviewIn,
     SaveIn,
@@ -49,7 +50,8 @@ from app.pipeline import verify
 from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/labeling", tags=["labeling"])
+# current_user runs the team check (TEAM_EMAILS); annotator alone reads the token without it.
+router = APIRouter(prefix="/labeling", tags=["labeling"], dependencies=[Depends(current_user)])
 
 ExportScope = Literal["mine", "team"]
 NEXT_PASSAGES = 8  # passages listed for the next unsaved claim
@@ -196,14 +198,15 @@ async def labeler_id(who: str = Depends(annotator), user: str | None = Depends(c
     return user or who
 
 
-def _mine_and_others(rows: dict[str, list[dict]], me: str, paper_id: str) -> dict:
-    """What the account `me` already saved for this paper, and who else labeled which pair."""
+def _mine_and_others(rows: dict[str, list[dict]], me: str, paper_id: str, blind: bool = False) -> dict:
+    """What the account `me` already saved for this paper, and who else labeled which pair.
+    On a blind check nobody else is named: knowing who labeled a pair is a hint (#867)."""
     mine = {
         tab: [r for r in current(tab, rows[tab]) if r["paper_id"] == paper_id and r["annotator_id"] == me]
         for tab in TABS
     }
     others: dict[str, list[str]] = {}
-    for row in current("labels", rows["labels"]):
+    for row in current("labels", rows["labels"]) if not blind else []:
         if row["paper_id"] == paper_id and row["annotator_id"] != me:
             others.setdefault(f"{row['claim_id']}|{row['reference_id']}", []).append(row["annotator"])
     return {"saved": mine, "others": others}
@@ -226,7 +229,19 @@ async def session(
     built = build_session(analysis)
     paper_id = built["paper_id"]
     rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in TABS}
-    return {**built, "annotator": who, **_mine_and_others(rows, me, built["paper_id"])}
+    blind = await _is_blind(analysis["id"], who)
+    return {**built, "annotator": who, "blind": blind, **_mine_and_others(rows, me, paper_id, blind)}
+
+
+async def _is_blind(analysis_id: str, who: str) -> bool:
+    """Whether `who` checks this paper blind."""
+    return analysis_id in await asyncio.to_thread(pool.blind_for, who)
+
+
+async def _refuse_on_blind(analysis_id: str, who: str, what: str) -> None:
+    """403 when `who` checks this paper blind: the judge's opinion would sway the label."""
+    if await _is_blind(analysis_id, who):
+        raise HTTPException(403, f"{what} is off on a blind check, so the judge cannot sway your label")
 
 
 @router.post("/sessions/{analysis_id}/candidates")
@@ -293,8 +308,10 @@ async def pool_state(
     who: str = Depends(annotator),
     user: str | None = Depends(current_user),
     me: str = Depends(labeler_id),
+    lead: bool = Depends(is_lead),
 ):
-    """Topics, who has which, and the papers shared with the team."""
+    """Topics, who has which, the papers shared with the team, and the caller's blind checks.
+    A lead also gets every blind check, to manage them."""
     from app import main
 
     def build() -> dict:
@@ -356,11 +373,15 @@ async def pool_state(
         subjects = scopus.subjects_of(list(doi_of.values()))
         for paper in shared:
             paper.update(subjects.get(doi_of.get(paper["analysis_id"], ""), {"subject": "", "keywords": []}))
+        checks = pool.blind_checks()
         return {
             "topics": TOPICS,
             "me": who,
+            "lead": lead,
             "people": [{"name": n, "topic": topics.get(n, "")} for n in names],
             "papers": shared,
+            "blind": sorted(analysis_id for person, analysis_id in checks if person == who),
+            "blind_checks": [{"name": n, "analysis_id": a} for n, a in checks] if lead else [],
         }
 
     return await asyncio.to_thread(build)
@@ -373,6 +394,21 @@ async def set_person_topic(body: PersonTopicIn, who: str = Depends(annotator)):
     _store()
     await asyncio.to_thread(pool.assign, who, "person", body.name, body.topic)
     return {"name": body.name, "topic": body.topic}
+
+
+@router.put("/blind")
+async def set_blind_check(body: BlindCheckIn, who: str = Depends(annotator), lead: bool = Depends(is_lead)):
+    """Give a person a shared paper to label blind, or take it back. Leads only."""
+    if not lead:
+        raise HTTPException(403, "only a labeling lead can assign blind checks")
+    if body.name not in await asyncio.to_thread(_team):
+        raise HTTPException(422, f"{body.name} is not on the team")
+    if body.analysis_id not in await asyncio.to_thread(pool.pooled):
+        raise HTTPException(422, "that paper is not shared with the team")
+    _store()
+    key = pool.blind_key(body.name, body.analysis_id)
+    await asyncio.to_thread(pool.assign, who, pool.BLIND, key, pool.BLIND if body.on else "")
+    return {"name": body.name, "analysis_id": body.analysis_id, "on": body.on}
 
 
 @router.put("/papers/{analysis_id}/topic")
@@ -685,8 +721,9 @@ async def review_claim(
 
     Each event is `{"type": "finding", "target", "tone", "text"}`, then
     `{"type": "done", "findings": n}`. What it said is kept in the reviews tab. Only a saved claim
-    is reviewed: the person's own decision comes first (docs/labeling.md).
+    is reviewed: the person's own decision comes first (docs/labeling.md). Off on a blind check.
     """
+    await _refuse_on_blind(analysis["id"], who, "Review")
     store = _store()
     built = build_session(analysis)
     paper_id = built["paper_id"]
@@ -862,7 +899,7 @@ async def _review_events(store, stamp: dict, claim: dict, saved: review.Saved):
 
 
 @router.post("/sessions/{analysis_id}/ask")
-async def ask(body: AskIn, analysis: dict = Depends(owned_analysis)):
+async def ask(body: AskIn, analysis: dict = Depends(owned_analysis), who: str = Depends(annotator)):
     """Answer a question from the paper under review, from one of its references, or from one
     passage of a reference. A claim sent with the question is added to it, so the answer reads
     the passage with the claim as the labeler worded it.
@@ -870,6 +907,7 @@ async def ask(body: AskIn, analysis: dict = Depends(owned_analysis)):
     The same answer as the other roles' Ask (assistant.answer): short statements, each checked by
     the judge, as server-sent events.
     """
+    await _refuse_on_blind(analysis["id"], who, "Ask")
     if body.passage and not body.reference_id:
         raise HTTPException(422, "a passage needs reference_id, the paper it is from")
     if not body.reference_id:
@@ -943,13 +981,21 @@ def _by_paper[T](by_analysis: dict[str, T]) -> dict[str, T]:
 
 
 @router.get("/export")
-async def export(tab: str = "labels", scope: ExportScope = "mine", me: str = Depends(labeler_id)):
+async def export(
+    tab: str = "labels",
+    scope: ExportScope = "mine",
+    me: str = Depends(labeler_id),
+    lead: bool = Depends(is_lead),
+):
     """The current rows of one tab as CSV: the latest row per key, without what a person later
     took back (a rejected claim's labels and passages, a passage they added and then removed).
     `dspy_claims` and `dspy_verdicts` give the same rows as DSPy examples (dspy_export.py), as JSONL.
 
     `scope=mine` gives only the caller's rows, so people labeling different papers do not get each
-    other's (#585). `scope=team` gives everyone's, for building the dataset."""
+    other's (#585). `scope=team` gives everyone's, for building the dataset, and only to a lead:
+    with it a blind check would not be blind (#867)."""
+    if scope == "team" and not lead:
+        raise HTTPException(403, "only a labeling lead can download the whole team's labels")
     store = _store()
     if tab in ("dspy_claims", "dspy_verdicts"):
         # Every saved row, not only the current ones: dspy_export reads a label's level from

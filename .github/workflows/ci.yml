@@ -96,11 +96,15 @@ jobs:
       # file marks a venv whose install finished.
       - name: Install
         env:
-          RECIPE: backend-2
+          RECIPE: backend-4
         run: |
           key=$({ cat requirements.txt requirements-dev.txt; python -VV; echo "$RECIPE"; date +%G-%V; } | sha256sum | cut -c1-16)
           venv="$HOME/ci-venvs/backend-$key"
           if [ ! -f "$venv/.complete" ]; then
+            # nas-ci's /tmp is a 512 MB tmpfs and pip unpacks the torch wheel there, so a fresh
+            # install ran out of space. Build on the runner's disk; the tests keep the tmpfs.
+            export TMPDIR="$HOME/ci-tmp"
+            rm -rf "$TMPDIR" && mkdir -p "$TMPDIR"
             rm -rf "$venv"
             python -m venv "$venv"
             "$venv/bin/pip" install torch torchvision --index-url https://download.pytorch.org/whl/cpu
@@ -112,6 +116,8 @@ jobs:
               "$venv/bin/pip" uninstall -y opencv-python
               "$venv/bin/pip" install "opencv-python-headless==$version"
             fi
+            # NLTK looks in <venv>/nltk_data, so app/text.py finds the Punkt model there.
+            "$venv/bin/python" -m nltk.downloader -d "$venv/nltk_data" punkt_tab stopwords
             touch "$venv/.complete"
           fi
           # Each venv holds torch and is on the production host's disk: keep this one and the last.
@@ -183,3 +189,7 @@ jobs:
         run: npm run build
       - name: Bundle size budget
         run: npm run check:bundle
+      # The Vitest run fails below 100% coverage on the Researcher, Labeler and shared files
+      # (vitest.config.ts). No frontend/.env exists here, so login stays off as the tests expect.
+      - name: Test
+        run: npm run test:legacy && npm run test:coverage

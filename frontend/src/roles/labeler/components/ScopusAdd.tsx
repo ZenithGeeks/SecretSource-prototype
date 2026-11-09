@@ -62,6 +62,12 @@ function clampYear(value: string, fallback: number) {
   return Math.min(Math.max(year, FIRST_YEAR), THIS_YEAR)
 }
 
+function emptyMessage(hidden: number, byDoi: boolean): string {
+  if (hidden > 0) return `The venue rank filter hid all ${hidden} papers Scopus sent so far.`
+  if (byDoi) return 'Scopus has no paper with that DOI.'
+  return 'Scopus has no open-access papers for that.'
+}
+
 /** The form as typed: the years stay text until a search, so a half-typed year is not undone. */
 type Form = Omit<ScopusQuery, 'since' | 'until'> & { since: string; until: string }
 
@@ -229,11 +235,7 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-subtle px-4 py-8 text-center">
             <SearchX className="size-5 text-ink-muted" aria-hidden="true" />
             <p className="text-sm font-medium text-ink">
-              {hidden > 0
-                ? `The venue rank filter hid all ${hidden} papers Scopus sent so far.`
-                : byDoi
-                  ? 'Scopus has no paper with that DOI.'
-                  : 'Scopus has no open-access papers for that.'}
+              {emptyMessage(hidden, byDoi)}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {hidden > 0 && search.hasNextPage && (
@@ -286,10 +288,13 @@ export function ScopusAdd({ pool, myTopic }: { pool: Pool; myTopic: string }) {
                   online={online}
                   onAdd={() =>
                     add.mutate(
+                      // A result is only listed after a search, so `query` is set; `form.topic` only satisfies the type.
+                      /* v8 ignore next -- @preserve */
                       { doi: paper.doi, topic: query?.topic ?? form.topic },
                       { onSuccess: () => setAdded((all) => ({ ...all, [paper.doi]: true })) },
                     )
                   }
+                  /* v8 ignore next -- @preserve */
                   onUpload={(file) => upload.mutate({ file, topic: query?.topic ?? form.topic, doi: paper.doi })}
                 />
               ))}

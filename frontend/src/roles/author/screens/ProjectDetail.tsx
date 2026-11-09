@@ -13,6 +13,7 @@ import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/
 import { askTarget } from '../../../lib/askCursor'
 import { checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
+import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
 import { labelAfterCounts, projectStatus, statusLabel, statusTone, VERDICTS } from '../../../lib/verdict'
 import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
@@ -216,14 +217,17 @@ export function ProjectDetail({
     </button>
   )
 
-  const newDraft = async () => {
-    try {
-      const draft = await actions.createDraft({ title: 'Untitled draft', projectId: unsorted ? null : projectId })
-      onOpenEditor(draft.id, 'main.tex', 1)
-    } catch (error) {
-      setToast(`Could not create the draft: ${errorMessage(error)}`)
-    }
-  }
+  // One at a time, so a double click on New draft makes one draft.
+  const creating = useInFlight()
+  const newDraft = () =>
+    creating.run(async () => {
+      try {
+        const draft = await actions.createDraft({ title: 'Untitled draft', projectId: unsorted ? null : projectId })
+        onOpenEditor(draft.id, 'main.tex', 1)
+      } catch (error) {
+        setToast(`Could not create the draft: ${errorMessage(error)}`)
+      }
+    })
 
   /** A deleted draft that was selected hands the selection back to the first one left. */
   const deleteDraft = async (gone: Draft) => {
@@ -249,7 +253,7 @@ export function ProjectDetail({
             <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Unsorted sources</h1>
             <p className="text-sm text-ink-muted">Drafts that are in no project yet, and sources saved to no project.</p>
           </div>
-          <Button onClick={() => void newDraft()} className="self-start sm:self-auto" data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
+          <Button onClick={() => void newDraft()} disabled={creating.busy} className="self-start sm:self-auto" data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
             <Plus className="size-4" aria-hidden="true" />
             New draft
           </Button>
@@ -330,7 +334,7 @@ export function ProjectDetail({
           <p className="text-sm text-ink-muted">{meta}</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <Button onClick={() => void newDraft()} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
+          <Button onClick={() => void newDraft()} disabled={creating.busy} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
             <Plus className="size-4" aria-hidden="true" />
             New draft
           </Button>

@@ -11,6 +11,13 @@ import { count } from './LibraryCount'
 const MARKER =
   'shrink-0 rounded-full border border-dashed border-insufficient px-2 py-px text-xs font-medium text-insufficient'
 
+/** The word beside the bar: the worst standing the paper has. */
+function standingLabel(backed: number, contradicted: number, rest: number) {
+  if (contradicted > 0) return verdictCountLabel('refutes', contradicted)
+  if (backed > 0) return verdictCountLabel('supports', backed)
+  return verdictCountLabel('insufficient', rest)
+}
+
 /** Backed / silent-or-unchecked / contradicted as one thin bar. The words sit beside it, so
  * colour is never the only signal. */
 function StandingBar({ paper }: { paper: LibraryPaper }) {
@@ -31,11 +38,7 @@ function StandingBar({ paper }: { paper: LibraryPaper }) {
         ))}
       </span>
       <span className={cn('text-xs', contradicted > 0 ? 'font-semibold text-refutes' : 'text-ink-muted')}>
-        {contradicted > 0
-          ? verdictCountLabel('refutes', contradicted)
-          : backed > 0
-            ? verdictCountLabel('supports', backed)
-            : verdictCountLabel('insufficient', rest)}
+        {standingLabel(backed, contradicted, rest)}
       </span>
     </span>
   )

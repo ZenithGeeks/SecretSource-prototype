@@ -361,5 +361,71 @@ def test_gaps_lists_every_contradicted_claim_and_every_missing_work_without_home
     assert found["missing"][0]["paper"] == "PLAID (2022)"
 
 
+def paper_citing(analysis_id, cited, paper=None, claims=1, verdicts_per_claim=1):
+    """A finished paper whose claims each cite `cited` and carry a supporting verdict for it."""
+    verdict = {"verdict": "supports", "cited": cited["doi"] or cited["arxiv"], "quote": "", "evidence": []}
+    return {
+        "id": analysis_id,
+        "paper": paper or f"data/papers/{analysis_id}.pdf",
+        "file": f"data/papers/{analysis_id}.pdf",
+        "status": "done",
+        "claims": [
+            {"claim": f"Claim {n} holds.", "citations": [cited], "verdicts": [verdict] * verdicts_per_claim}
+            for n in range(claims)
+        ],
+    }
+
+
+DOI_WORK = {"title": "A Work", "authors": [], "year": "2021", "doi": "10.1000/XYZ", "arxiv": "", "url": ""}
+
+
+def test_an_empty_library_asks_for_a_first_paper():
+    assert researcher.home([])["alert"] == "Analyze a paper to start your library."
+
+
+def test_a_work_cited_by_one_claim_is_not_worth_reading_next():
+    once = {**DOI_WORK, "title": "Cited Once", "doi": "10.1000/once"}
+    one_claim = paper_citing("o1", once)
+    queue = researcher.home(ANALYSES + [one_claim])["queue"]
+    assert queue and not any("Cited Once" in row["paper"] for row in queue)
+
+
+def test_a_doi_is_the_same_work_in_any_case():
+    assert researcher.work_key(DOI_WORK) == "doi:10.1000/xyz"
+
+
+def test_a_paper_analysed_by_its_doi_is_the_node_other_papers_cite():
+    analysed = {
+        "id": "x1",
+        "paper": "10.1000/xyz",
+        "file": "data/papers/x1.pdf",
+        "status": "done",
+        "claims": [],
+    }
+    graph = researcher.graph([analysed, paper_citing("y1", DOI_WORK), paper_citing("z1", DOI_WORK)])
+    assert [node["id"] for node in graph["nodes"] if node.get("cluster") == "Cited"] == []
+    [shared] = [edge for edge in graph["paperEdges"] if (edge["a"], edge["b"]) == ("a:y1", "a:z1")]
+    assert (shared["citations"], shared["similarity"]) == (1, 1.0)
+
+
+def test_the_same_work_cited_twice_in_one_claim_is_one_edge():
+    graph = researcher.graph([paper_citing("y1", DOI_WORK, verdicts_per_claim=2)])
+    cited = [edge for edge in graph["edges"] if edge["relation"] == "backs"]
+    assert len(cited) == 1
+
+
+def test_a_paper_that_cites_itself_is_not_linked_to_itself():
+    own = {**DOI_WORK, "doi": "10.1000/self"}
+    graph = researcher.graph([paper_citing("s1", own, paper="10.1000/self")])
+    assert graph["paperEdges"] == []
+    assert [edge["relation"] for edge in graph["edges"]] == ["asserts", "backs"]
+
+
+def test_consensus_lists_a_work_once_when_two_papers_say_the_same_claim():
+    twins = [paper_citing("t1", DOI_WORK), paper_citing("t2", DOI_WORK)]
+    answer = researcher.consensus("Claim 0 holds", twins)
+    assert len(answer["rows"]) == 1
+
+
 def test_gaps_of_an_empty_library_are_empty():
     assert researcher.gaps([]) == {"notBacked": [], "contradicted": [], "missing": []}

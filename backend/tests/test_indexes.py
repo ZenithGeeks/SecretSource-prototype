@@ -224,3 +224,24 @@ def test_an_openalex_key_is_sent_to_openalex_only(monkeypatch, answers):
 
     assert sent["openalex"]["Authorization"] == "Bearer key-123"
     assert "Authorization" not in sent["crossref"]
+
+
+def test_an_answer_that_is_not_json_is_an_unreachable_index(answers):
+    table, _ = answers
+
+    class NotJson(Answer):
+        def json(self):
+            raise ValueError("Expecting value")
+
+    table["crossref"] = NotJson(200)
+    table["openalex"] = Answer(404)
+
+    with pytest.raises(indexes.IndexUnavailable, match="not JSON"):
+        indexes.find_doi(DOI)
+
+
+def test_openalex_works_returns_the_results_of_the_filter(answers):
+    table, _ = answers
+    table["openalex"] = Answer(200, {"results": [OPENALEX_WORK]})
+
+    assert indexes.openalex_works({"filter": "doi:" + DOI}) == [OPENALEX_WORK]

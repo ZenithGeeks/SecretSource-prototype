@@ -228,7 +228,7 @@ describe('avatar image', () => {
   test('shows the photo once fetched, and revokes the blob URL on change and unmount', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockImplementation(() => Promise.resolve(new Response(new Blob(['png']), { status: 200 }))),
+      vi.fn().mockImplementation(() => Promise.resolve(new Response('png', { status: 200 }))),
     )
     const revoke = vi.mocked(URL.revokeObjectURL)
     revoke.mockClear()
@@ -260,7 +260,7 @@ describe('avatar upload and remove when the preferences PATCH fails', () => {
       if (url.endsWith('/api/user/preferences') && method === 'PATCH') return Promise.resolve(new Response('down', { status: 500 }))
       if (url.endsWith('/api/user/avatar') && method === 'POST') return Promise.resolve(new Response(JSON.stringify({ url: stored }), { status: 200 }))
       if (url.endsWith('/api/user/avatar') && method === 'DELETE') return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }))
-      if (onDisk) return Promise.resolve(new Response(new Blob(['png']), { status: 200 }))
+      if (onDisk) return Promise.resolve(new Response('png', { status: 200 }))
       return Promise.resolve(new Response('no avatar', { status: 404 }))
     })
   }

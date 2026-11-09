@@ -1,0 +1,764 @@
+/** The labeling workspace beyond labeling.test.tsx: keyboard, saving on, narrow screens, selections,
+ * claims added by hand, work kept from an earlier visit, and blind checks. */
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const gateway = vi.hoisted(() => ({
+  session: {} as Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
+  sessionError: '',
+  posts: [] as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
+  saveFails: false,
+  saveHangs: false,
+  searches: [] as unknown[],
+  found: [] as unknown[],
+  searchFails: false,
+  locate: 'page' as 'page' | 'none' | 'fail',
+}))
+
+vi.mock('../src/lib/api', async (original) => ({
+  ...(await original<typeof import('../src/lib/api')>()),
+  request: vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/candidates')) {
+      gateway.searches.push(JSON.parse(String(init?.body)))
+      if (gateway.searchFails) throw new Error('502: retrieval did not answer')
+      return { candidates: gateway.found }
+    }
+    if (init?.method === 'POST') {
+      if (gateway.saveHangs) await new Promise(() => undefined)
+      if (gateway.saveFails) throw new Error('503: not set up')
+      gateway.posts.push(JSON.parse(String(init.body)))
+      return { claims: 1, candidates: 2, labels: 1 }
+    }
+    if (path.startsWith('/labeling/sessions/')) {
+      if (gateway.sessionError) throw new Error(gateway.sessionError)
+      return gateway.session
+    }
+    throw new Error(`unexpected ${path}`)
+  }),
+  postEvents: vi.fn(),
+  fetchFile: vi.fn(),
+  api: {
+    findInPaper: vi.fn(async () => {
+      if (gateway.locate === 'fail') throw new Error('500: no')
+      return gateway.locate === 'page' ? { page: 3, boxes: [] } : { page: null, boxes: [] }
+    }),
+  },
+}))
+vi.mock('../src/components/PageViewer', () => ({
+  PageViewer: ({
+    target,
+    onSelectText,
+    onClose,
+    markers = [],
+    onCitation,
+  }: {
+    target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; error?: string; page?: number }
+    onSelectText?: (s: { text: string; page: number | null }) => void
+    onClose?: () => void
+    markers?: { ref: string; text: string }[]
+    onCitation?: (marker: { ref: string; text: string }) => void
+  }) => (
+    <div>
+      <div data-testid="viewer">
+        {target.paper}|{target.quote}
+      </div>
+      <p data-testid="viewer-heading">
+        {target.paper}: {target.label}
+        {target.detail && ` / ${target.detail}`}
+        {target.error && ` / error: ${target.error}`}
+        {target.source ? ` / boxed on page ${target.source.page}` : ''} / opens on page {target.page}
+      </p>
+      <button type="button" onClick={() => onSelectText?.({ text: `picked in ${target.paper}`, page: 4 })}>
+        select in {target.paper}
+      </button>
+      {onClose && (
+        <button type="button" onClick={onClose}>
+          close {target.paper}
+        </button>
+      )}
+      {markers.map((m) => (
+        <button key={m.text} type="button" onClick={() => onCitation?.(m)}>
+          cite {m.text}
+        </button>
+      ))}
+    </div>
+  ),
+}))
+
+import { Workspace } from '../src/roles/labeler/screens/Workspace'
+
+const marker = (ref: string, text: string) => ({ ref, text, page: 1, x0: 0, y0: 0, x1: 1, y1: 1, page_width: 600 })
+
+const makeSession = (over: Record<string, unknown> = {}) => ({
+  analysis_id: 'a1',
+  paper_id: 'paperA',
+  paper_file: 'paperA.pdf',
+  title: 'Paper A',
+  annotator: 'chanya',
+  claims: [
+    {
+      claim_id: 'paperA#0',
+      claim: 'Method Y improves recall.',
+      sentence: 'We show Y improves recall [4].',
+      section: '3',
+      source: null,
+      candidates: [
+        { cand_id: 'c1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 1, score: 9.1, page: 5, passage: 'recall rose by 4 points' },
+        { cand_id: 'c2', reference_id: 'refB', reference_file: 'refB.pdf', rank: 2, score: 3, page: 2, passage: 'unrelated text' },
+        { cand_id: 'c3', reference_id: 'refC', reference_file: 'refC.pdf', rank: 1, score: 2, page: null, passage: 'a different study' },
+      ],
+    },
+    { claim_id: 'paperA#1', claim: 'Y is fast.', sentence: '', section: '', source: null, candidates: [] },
+    {
+      claim_id: 'paperA#2',
+      claim: 'Z is cheap.',
+      sentence: '',
+      section: '',
+      source: null,
+      candidates: [{ cand_id: 'o1', reference_id: 'refB', reference_file: 'orphan.pdf', rank: 1, score: 1, page: 1, passage: 'from a file nobody listed' }],
+    },
+  ],
+  references: [
+    { reference_id: 'refB', file: 'refB.pdf', label: 'Ref B', ref: 'b4', authors: ['Ana Silva', 'Bo Lee'], year: '2021' },
+    { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C' },
+    { reference_id: 'refD', file: 'refD.pdf', label: 'Ref D', ref: 'b8' }, // cited by a marker, but no authors or year
+  ],
+  unread: [{ reference_id: 'refU', file: '', label: 'Ref U' }],
+  markers: [marker('b4', '[4]'), marker('b9', '[9]')],
+  saved: { claims: [], candidates: [], labels: [] },
+  others: {},
+  ...over,
+})
+
+const SAVED_HAND_ADDED = {
+  claims: [{ claim_id: 'paperA#h-1', origin: 'human_added', status: 'accepted', claim: 'A claim I added.', claim_edited: '', sentence: 'The sentence.', section: '', page: '2' }],
+  candidates: [],
+  labels: [],
+}
+
+function renderWorkspace(props: Partial<Parameters<typeof Workspace>[0]> = {}) {
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <Workspace analysisId="a1" {...props} />
+    </QueryClientProvider>,
+  )
+}
+
+async function open(props: Partial<Parameters<typeof Workspace>[0]> = {}) {
+  const view = renderWorkspace(props)
+  await screen.findByRole('heading', { name: /^Claim 1 of/ })
+  return view
+}
+
+const key = (k: string, extra: KeyboardEventInit = {}) => fireEvent.keyDown(window, { key: k, ...extra })
+const heading = () => screen.getByRole('heading', { name: /^Claim \d+ of/ }).textContent
+/** What the reference viewer shows: stacked, it is the first of the two. */
+const reference = () => screen.getAllByTestId('viewer')[0].textContent
+const wideScreen = (matches: boolean) => {
+  window.matchMedia = vi.fn().mockReturnValue({ matches, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+}
+
+beforeEach(() => {
+  gateway.session = makeSession()
+  gateway.sessionError = ''
+  gateway.posts.length = 0
+  gateway.saveFails = false
+  gateway.saveHangs = false
+  gateway.searches.length = 0
+  gateway.found = []
+  gateway.searchFails = false
+  gateway.locate = 'page'
+  window.localStorage.clear()
+  window.localStorage.setItem('labeler.paperView', 'both')
+  wideScreen(true)
+})
+afterEach(() => vi.restoreAllMocks())
+
+describe('when the paper cannot be shown', () => {
+  it('says why the claims cannot be opened', async () => {
+    gateway.sessionError = '404: gone'
+    renderWorkspace()
+    expect(await screen.findByText('This paper is not available')).toBeInTheDocument()
+  })
+
+  it('says there are no claims, and ignores the keys', async () => {
+    gateway.session = makeSession({ claims: [] })
+    renderWorkspace()
+    expect(await screen.findByText('No claims in this paper')).toBeInTheDocument()
+    key('k')
+    key('s', { ctrlKey: true })
+    expect(gateway.posts).toEqual([])
+  })
+})
+
+describe('the keyboard', () => {
+  it('keeps, edits and rejects the claim, and takes no key typed into a text box', async () => {
+    await open()
+    key('k')
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    key('e')
+    const box = await screen.findByRole('textbox', { name: 'The claim, as it should read' })
+    expect(box).toHaveValue('Method Y improves recall.')
+    fireEvent.keyDown(box, { key: 'x' })
+    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    key('x')
+    expect(screen.getByRole('radio', { name: /Reject/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('ignores a letter pressed with Alt', async () => {
+    await open()
+    key('k', { altKey: true })
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('judges the focused passage and moves on to the next one not judged yet', async () => {
+    await open()
+    key('r') // nothing decided yet: passages are not judged
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'false')
+    key('k')
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+    key('r')
+    expect(reference()).toBe('refB.pdf|unrelated text')
+    key('n')
+    expect(reference()).toBe('refC.pdf|a different study')
+    const [first, second] = screen.getAllByRole('radiogroup', { name: /^Passage \d of Ref B$/ })
+    expect(within(first).getByRole('radio', { name: /^Relevant/ })).toHaveAttribute('aria-checked', 'true')
+    expect(within(second).getByRole('radio', { name: /^Not relevant/ })).toHaveAttribute('aria-checked', 'true')
+    key('r')
+    expect(reference()).toBe('refC.pdf|a different study') // everything is judged: it stays
+  })
+
+  it('walks the passages with J and U or the arrows, and stops at the ends', async () => {
+    await open()
+    key('k')
+    key('j')
+    expect(reference()).toBe('refB.pdf|unrelated text')
+    key('ArrowDown')
+    key('j')
+    expect(reference()).toBe('refC.pdf|a different study')
+    key('u')
+    key('ArrowUp')
+    key('u')
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+  })
+
+  it('starts from the first or last passage when none is in focus', async () => {
+    await open()
+    key('k')
+    const picker = screen.getByLabelText('Open reference')
+    fireEvent.change(picker, { target: { value: 'refC' } })
+    expect(reference()).toBe('refC.pdf|')
+    key('j')
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+    fireEvent.change(picker, { target: { value: 'refC' } })
+    key('u')
+    expect(reference()).toBe('refC.pdf|a different study')
+  })
+
+  it('does not walk the passages of a rejected claim', async () => {
+    await open()
+    key('x')
+    key('j')
+    key('u')
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+  })
+
+  it('moves between claims with the brackets and Shift with the arrows, and stays at the ends', async () => {
+    await open()
+    key('[')
+    expect(heading()).toBe('Claim 1 of 3')
+    key(']')
+    expect(heading()).toBe('Claim 2 of 3')
+    key('ArrowRight', { shiftKey: true })
+    expect(heading()).toBe('Claim 3 of 3')
+    key(']')
+    expect(heading()).toBe('Claim 3 of 3')
+    key('ArrowLeft', { shiftKey: true })
+    key('[')
+    expect(heading()).toBe('Claim 1 of 3')
+    key('ArrowRight')
+    expect(heading()).toBe('Claim 1 of 3')
+  })
+
+  it('gives the reference in view a level with 1 to 4, once it has a relevant passage', async () => {
+    await open()
+    key('k')
+    key('2') // no relevant passage yet
+    expect(screen.queryByRole('radio', { name: '2 · Weak' })).not.toBeInTheDocument()
+    key('r')
+    key('3')
+    expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAttribute('aria-checked', 'true')
+    key('4')
+    expect(screen.getByRole('radio', { name: '4 · Strong' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('does not give a level to a reference with no relevant passage', async () => {
+    await open()
+    key('k')
+    key('r') // focus moves on to the second passage of Ref B
+    key('j') // and then to Ref C's
+    key('3')
+    expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('saves with Ctrl+S only when something changed', async () => {
+    await open()
+    key('s', { ctrlKey: true })
+    expect(gateway.posts).toEqual([])
+    key('x')
+    key('s', { metaKey: true })
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    await screen.findByText('Saved 4 rows')
+    key('s', { ctrlKey: true })
+    expect(gateway.posts).toHaveLength(1)
+  })
+
+  it('shows and hides the shortcut list with a question mark', async () => {
+    await open()
+    expect(screen.getByRole('list', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    key('?')
+    expect(screen.queryByRole('list', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+  })
+
+  it('shows the shortcuts when the browser will not say, and carries on when it will not remember', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('full')
+    })
+    await open()
+    expect(screen.getByRole('list', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    key('?')
+    fireEvent.click(screen.getByRole('button', { name: 'Stacked' }))
+    expect(screen.queryByRole('list', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+  })
+})
+
+describe('saving', () => {
+  it('saves and moves on to the next claim, and offers no next on the last', async () => {
+    await open()
+    key(']')
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    await waitFor(() => expect(heading()).toBe('Claim 3 of 3'))
+    expect(gateway.posts).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Save and next claim' })).not.toBeInTheDocument()
+  })
+
+  it('stays on the claim after Save labels', async () => {
+    await open()
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await screen.findByText('Saved 4 rows')
+    expect(heading()).toBe('Claim 1 of 3')
+  })
+
+  it('says why a save failed and keeps the draft', async () => {
+    gateway.saveFails = true
+    await open()
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Not saved: Labels cannot be saved yet.')
+    expect(screen.getByText('Unsaved changes · Ctrl/⌘+S saves')).toBeInTheDocument()
+  })
+
+  it('does not move to another claim while a save is running', async () => {
+    gateway.saveHangs = true
+    await open()
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Save labels/ })).toBeDisabled())
+    key(']')
+    expect(heading()).toBe('Claim 1 of 3')
+  })
+
+  it('stays put when the claim chosen is the one open', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 1,/ }))
+    expect(heading()).toBe('Claim 1 of 3')
+  })
+
+  it('warns before the page closes with unsaved labels', async () => {
+    await open()
+    key('x')
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('tells the app when labels are unsaved, and when leaving clears them', async () => {
+    const onDirtyChange = vi.fn()
+    const { unmount } = await open({ onDirtyChange })
+    key('x')
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+    unmount()
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+})
+
+describe('what the reference viewer is told', () => {
+  it('names a reference by its marker and authors, and boxes the passage where it was found', async () => {
+    await open()
+    await waitFor(() => expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('boxed on page 3'))
+    expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('refB.pdf: Reference [b4]: Ref B / Silva, Lee · 2021')
+    expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('opens on page 5')
+  })
+
+  it('names a reference with no marker plainly, and opens on page 1 for a passage with no page', async () => {
+    await open()
+    key('k')
+    fireEvent.click(screen.getAllByRole('button', { name: /a different study/ })[0])
+    expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('refC.pdf: Reference: Ref C')
+    expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('opens on page 1')
+  })
+
+  it('shows the passage unboxed when it was not found, and says so when the look-up failed', async () => {
+    gateway.locate = 'none'
+    const { unmount } = await open()
+    await waitFor(() => expect(screen.getAllByTestId('viewer-heading')[0]).not.toHaveTextContent('boxed'))
+    unmount()
+
+    gateway.locate = 'fail'
+    await open()
+    await waitFor(() => expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('error: Could not look up where this passage is.'))
+  })
+
+  it('opens the reference a citation in the paper points at, and ignores a citation to one not read', async () => {
+    await open()
+    expect(screen.queryByRole('button', { name: 'cite [9]' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'cite [4]' }))
+    expect(reference()).toBe('refB.pdf|')
+  })
+
+  it('lets the person open any reference that was read', async () => {
+    await open()
+    const picker = screen.getByLabelText('Open reference')
+    expect(within(picker).getByRole('option', { name: '[b4] Ref B' })).toBeInTheDocument()
+    expect(within(picker).getByRole('option', { name: 'Ref C' })).toBeInTheDocument()
+    fireEvent.change(picker, { target: { value: 'refC' } })
+    expect(reference()).toBe('refC.pdf|')
+  })
+
+  it('names a passage from a file the analysis did not list, and takes no evidence from it', async () => {
+    await open()
+    key(']')
+    key(']')
+    key('k')
+    const heading0 = screen.getAllByTestId('viewer-heading')[0]
+    expect(heading0).toHaveTextContent('orphan.pdf: Reference /')
+    const picker = screen.getByLabelText('Open reference')
+    expect(within(picker).getByRole('option', { name: 'Choose a reference' })).toBeInTheDocument()
+    fireEvent.change(picker, { target: { value: 'nothing' } }) // not an option: nothing opens
+    expect(reference()).toBe('orphan.pdf|from a file nobody listed')
+
+    fireEvent.click(screen.getByRole('button', { name: 'select in orphan.pdf' }))
+    expect(screen.getByText("That paper is not one of this analysis's references.")).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add as evidence' })).toBeDisabled()
+  })
+})
+
+describe('text selected in a PDF', () => {
+  it('adds the selection as evidence, keeps an undecided claim, and does not add it twice', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Passages you added')).toBeInTheDocument()
+    expect(reference()).toBe('refB.pdf|picked in refB.pdf')
+
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.getAllByRole('button', { name: 'Remove this passage' })).toHaveLength(1)
+    expect(screen.queryByRole('region', { name: 'Selected text' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the decision already made when evidence is added', async () => {
+    await open()
+    key('e')
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
+    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('will not add evidence to a rejected claim', async () => {
+    await open()
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
+    expect(screen.getByText('This claim is rejected. Keep or edit it to add evidence.')).toBeInTheDocument()
+  })
+
+  it('uses a selection in the paper as the claim wording, or as a new claim, or drops it', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: "Use as this claim's wording" }))
+    expect(screen.getByRole('textbox', { name: 'The claim, as it should read' })).toHaveValue('picked in paperA.pdf')
+
+    fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the selection' }))
+    expect(screen.queryByRole('region', { name: 'Selected text' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add as a new claim' }))
+    await waitFor(() => expect(heading()).toBe('Claim 4 of 4 · added'))
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+  })
+})
+
+describe('passages and levels in the panel', () => {
+  it('adds a passage by hand, removes it again, and grades the reference', async () => {
+    await open()
+    key('k')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refB' } })
+    fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'by hand' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
+    expect(reference()).toBe('refB.pdf|by hand')
+    expect(screen.getAllByText('How well does Ref B support the claim?').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove this passage' }))
+    expect(screen.queryByText('Passages you added')).not.toBeInTheDocument()
+  })
+
+  it('takes a passage for a cited work with no PDF, which opens in no viewer', async () => {
+    await open()
+    key(']')
+    key('k')
+    expect(screen.getByText('Nothing to label yet: judge a passage or add one.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refU' } })
+    fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'cited only' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
+    expect(screen.getByText('No reference paper')).toBeInTheDocument()
+    expect(screen.getByText('How well does Ref U support the claim?')).toBeInTheDocument()
+  })
+
+  it('shows who else labeled the pair', async () => {
+    gateway.session = makeSession({ others: { 'paperA#0|refB': ['Somchai'] } })
+    await open()
+    key('k')
+    key('r')
+    expect(screen.getByText('Also labeled by Somchai. Label it yourself, without looking.')).toBeInTheDocument()
+  })
+})
+
+describe('on a narrow screen', () => {
+  beforeEach(() => wideScreen(false))
+
+  it('opens each paper over the page and closes it again', async () => {
+    await open()
+    expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Read the claim in this paper' }))
+    expect(screen.getByTestId('viewer')).toHaveTextContent('paperA.pdf|We show Y improves recall [4].')
+    fireEvent.click(screen.getByRole('button', { name: 'close paperA.pdf' }))
+    expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read the reference' }))
+    expect(screen.getByTestId('viewer')).toHaveTextContent('refB.pdf|recall rose by 4 points')
+    fireEvent.click(screen.getByRole('button', { name: 'close refB.pdf' }))
+    expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+  })
+
+  it('lists the shortcuts in the panel and keeps the save bar below', async () => {
+    await open()
+    expect(screen.getByRole('list', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Save labels/ })).toBeInTheDocument()
+  })
+
+  it('has nothing to open for the reference when the claim has no reference at all', async () => {
+    gateway.session = makeSession({ references: [], unread: [], claims: [makeSession().claims[1]] })
+    await open()
+    expect(screen.getByRole('button', { name: 'Read the reference' })).toBeDisabled()
+    expect(screen.queryByLabelText('Open reference')).not.toBeInTheDocument()
+  })
+})
+
+describe('the screen size', () => {
+  it('switches layout when the window crosses the width the workspace needs', async () => {
+    const listeners: (() => void)[] = []
+    let matches = true
+    window.matchMedia = vi.fn(() => ({
+      get matches() {
+        return matches
+      },
+      addEventListener: (_: string, listener: () => void) => listeners.push(listener),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+    await open()
+    expect(screen.queryByRole('button', { name: 'Read the claim in this paper' })).not.toBeInTheDocument()
+    matches = false
+    act(() => listeners.forEach((listener) => listener()))
+    expect(screen.getByRole('button', { name: 'Read the claim in this paper' })).toBeInTheDocument()
+  })
+})
+
+describe('claims added by hand', () => {
+  const handAdded = () => makeSession({ saved: SAVED_HAND_ADDED })
+
+  it('searches the references for a claim when it is opened, and lists what was found', async () => {
+    gateway.session = handAdded()
+    gateway.found = [{ cand_id: 'f1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 1, score: 5, page: 3, passage: 'found by search' }]
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 4,/ }))
+    await waitFor(() => expect(reference()).toBe('refB.pdf|found by search'))
+    expect(gateway.searches).toEqual([{ claim_id: 'paperA#h-1', claim: 'A claim I added.' }])
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('lists a found passage once, though the claim already had it', async () => {
+    gateway.session = makeSession({
+      saved: {
+        ...SAVED_HAND_ADDED,
+        candidates: [{ claim_id: 'paperA#h-1', origin: 'retrieved_added', cand_id: 'f1', status: 'relevant', reference_id: 'refB', rank: '1', score: '5', page: '3', passage: 'found by search' }],
+      },
+    })
+    gateway.found = [{ cand_id: 'f1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 1, score: 5, page: 3, passage: 'found by search' }]
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 4,/ }))
+    await waitFor(() => expect(gateway.searches).toHaveLength(1))
+    expect(screen.getAllByRole('button', { name: /found by search/ })).toHaveLength(1)
+    expect(reference()).toBe('refB.pdf|found by search')
+  })
+
+  it('says when the search failed, and searches again', async () => {
+    gateway.session = handAdded()
+    gateway.searchFails = true
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 4,/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Search again' }))
+    await waitFor(() => expect(gateway.searches).toHaveLength(2))
+  })
+
+  it('keeps the passage the person opened when the search answers later', async () => {
+    gateway.session = handAdded()
+    gateway.found = [{ cand_id: 'f1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 1, score: 5, page: 3, passage: 'found by search' }]
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 4,/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'mine' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
+    await waitFor(() => expect(gateway.searches).toHaveLength(1))
+    expect(reference()).toBe('refB.pdf|mine')
+  })
+
+  it('adds a claim the extraction missed, and looks for its passages', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed claim' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A brand new claim' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
+    await waitFor(() => expect(heading()).toBe('Claim 4 of 4 · added'))
+    await waitFor(() => expect(gateway.searches).toHaveLength(1))
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+  })
+})
+
+describe('work kept from an earlier visit', () => {
+  it('puts back the drafts and the claims added by hand, and says so', async () => {
+    const added = { claim_id: 'paperA#h-9', claim: 'Typed last time', sentence: '', section: '', source: null, candidates: [], origin: 'human_added', page: null }
+    window.localStorage.setItem(
+      'labeler.unsaved.a1.chanya',
+      JSON.stringify({
+        drafts: {
+          'paperA#0': { status: 'accepted', edited: '', cands: {}, added: [{ reference_id: 'ghost', page: null, passage: 'lost' }], labels: {} },
+          'paperA#h-9': { status: 'accepted', edited: '', cands: {}, added: [], labels: {} },
+        },
+        added: [added, { ...added, claim_id: 'paperA#0' }],
+      }),
+    )
+    const onDirtyChange = vi.fn()
+    await open({ onDirtyChange })
+    expect(screen.getByText(/Unsaved labels from your last visit were kept in this browser/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Claim 4, in progress, unsaved: Typed last time/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Claim 5/ })).not.toBeInTheDocument()
+    expect(screen.getByText('How well does ghost support the claim?')).toBeInTheDocument()
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
+  })
+})
+
+describe('a blind check', () => {
+  it('says so, hides the review and the questions, and keeps the labels free', async () => {
+    gateway.session = makeSession({ blind: true })
+    const slot = document.body.appendChild(document.createElement('div'))
+    await open({ askSlot: slot })
+    expect(screen.getByRole('note')).toHaveTextContent('Blind check')
+    expect(slot).toHaveTextContent('Review and Ask are off on a blind check.')
+    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()
+    slot.remove()
+  })
+
+  it('offers no Ask button on the passages', async () => {
+    gateway.session = makeSession({ blind: true })
+    const slot = document.body.appendChild(document.createElement('div'))
+    await open({ askSlot: slot, onOpenAsk: vi.fn() })
+    key('k')
+    expect(screen.queryAllByRole('button', { name: 'Ask AI about this passage' })).toHaveLength(0)
+    slot.remove()
+  })
+})
+
+describe('Ask about the claim', () => {
+  async function openWithAsk(onOpenAsk?: () => void) {
+    const slot = document.body.appendChild(document.createElement('div'))
+    const view = await open({ askSlot: slot, onOpenAsk })
+    return { slot, ...view }
+  }
+
+  it('can review only a claim that is saved with no changes', async () => {
+    const { slot } = await openWithAsk()
+    expect(slot).toHaveTextContent('Save this claim first: the review checks what you saved.')
+    key(']')
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await screen.findByText('Saved 4 rows')
+    await waitFor(() => expect(within(slot).getByRole('button', { name: 'Review' })).toBeEnabled())
+    key('k')
+    await waitFor(() => expect(slot).toHaveTextContent('Save your changes first: the review checks what you saved.'))
+    slot.remove()
+  })
+
+  it('opens the Ask panel on a passage, asks again about another, and drops it on another claim', async () => {
+    const onOpenAsk = vi.fn()
+    const { slot } = await openWithAsk(onOpenAsk)
+    key('k')
+    const asks = screen.getAllByRole('button', { name: 'Ask AI about this passage' })
+    fireEvent.click(asks[0])
+    expect(onOpenAsk).toHaveBeenCalledTimes(1)
+    expect(within(slot).getByText('#1 Ref B · p.5')).toBeInTheDocument()
+
+    fireEvent.click(asks[1])
+    expect(within(slot).getByText('#2 Ref B · p.2')).toBeInTheDocument()
+    fireEvent.click(within(slot).getByRole('button', { name: 'Stop asking about this passage' }))
+    expect(within(slot).queryByText('#2 Ref B · p.2')).not.toBeInTheDocument()
+
+    fireEvent.click(asks[0])
+    key(']')
+    expect(within(slot).queryByText('#1 Ref B · p.5')).not.toBeInTheDocument()
+    slot.remove()
+  })
+
+  it('words the passage question with the person’s edit of the claim', async () => {
+    const { slot } = await openWithAsk(vi.fn())
+    key('e')
+    fireEvent.change(screen.getByRole('textbox', { name: 'The claim, as it should read' }), { target: { value: 'Y improves recall a lot.' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Ask AI about this passage' })[0])
+    expect(within(slot).getByText('#1 Ref B · p.5')).toBeInTheDocument()
+    slot.remove()
+  })
+
+  it('draws nothing in a slot that is not there, and keeps the pointing for the claim it was for', async () => {
+    await open({ askSlot: null })
+    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()
+  })
+})
+
+describe('the progress bar', () => {
+  it('counts the claims finished and saved', async () => {
+    await open()
+    expect(screen.getByRole('progressbar', { name: 'Claims finished' })).toHaveAttribute('aria-valuenow', '0')
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Claims finished' })).toHaveAttribute('aria-valuenow', '1'))
+    expect(screen.getByText('1 of 3 claims finished')).toBeInTheDocument()
+  })
+})

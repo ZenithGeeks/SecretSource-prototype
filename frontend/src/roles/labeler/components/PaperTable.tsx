@@ -86,7 +86,9 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   // Only the person who shared a paper can retry or remove it, so others are told who that is.
   const adder = paper.added_by || 'the person who added it'
   const others = paper.labelers.filter((name) => name !== me)
-  const action = isFinished(paper) ? 'Review' : paper.judged > 0 ? 'Continue' : 'Label'
+  let action = 'Label'
+  if (isFinished(paper)) action = 'Review'
+  else if (paper.judged > 0) action = 'Continue'
   const cell = '@4xl:table-cell @4xl:px-3 @4xl:py-3 @4xl:align-middle'
 
   return (

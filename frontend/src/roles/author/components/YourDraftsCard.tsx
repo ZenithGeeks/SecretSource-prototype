@@ -19,6 +19,7 @@ export function YourDraftsCard({
   currentId,
   onOpen,
   onNew,
+  creating = false,
   onHistory,
   onDelete,
 }: {
@@ -26,6 +27,8 @@ export function YourDraftsCard({
   currentId: string
   onOpen: (id: string) => void
   onNew: () => void
+  /** A new draft is being created: "+ New draft" is disabled until it exists. */
+  creating?: boolean
   onHistory: (draft: Draft) => void
   /** The bin on each row: asks first (the caller's confirm dialog). */
   onDelete?: (draft: Draft) => void
@@ -39,7 +42,7 @@ export function YourDraftsCard({
         id="your-drafts-title"
         title="Your drafts"
         aside={
-          <TextLink onClick={onNew} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
+          <TextLink onClick={onNew} disabled={creating} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
             + New draft
           </TextLink>
         }

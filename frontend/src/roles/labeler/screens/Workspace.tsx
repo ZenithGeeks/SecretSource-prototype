@@ -10,12 +10,12 @@
 
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
-import { Keyboard } from 'lucide-react'
+import { EyeOff, Keyboard } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
-import { Empty, LoadingScreen, Segmented } from '../../../components/ui'
+import { Button, Empty, LoadingScreen, Segmented } from '../../../components/ui'
 import { api, type Citation, type CitationMarker } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import {
@@ -27,14 +27,19 @@ import {
   draftFromSaved,
   emptyDraft,
   emptyLabel,
+  firstUnfinishedIndex,
+  LEVELS,
   labelingApi,
+  nextPaperInTopic,
   progress,
   readUnsaved,
   referencesOf,
   relevantPassages,
   remaining,
   sameDraft,
+  saveNextTarget,
   problem,
+  usePool,
   useSaveLabels,
   workClaims,
   writeUnsaved,
@@ -50,7 +55,7 @@ import { AiCursor } from '../../../components/AiCursor'
 import type { Pointing } from '../../../lib/askCursor'
 import { SplitPane } from '../../../components/SplitPane'
 import { AskPanel, type AskedPassage } from '../components/AskPanel'
-import { ClaimDecision, Kbd } from '../components/ClaimDecision'
+import { ClaimDecision, ClaimSticky, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
 import { LabelForm } from '../components/LabelForm'
 import { PassageList, type Focus } from '../components/PassageList'
@@ -113,6 +118,12 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
 }
 
+/** "[b47]" matches the marker in the claim's sentence, so the two can be read together. */
+function referenceLabel(reference: Reference | null | undefined): string {
+  if (!reference) return 'Reference'
+  return reference.ref ? `Reference [${reference.ref}]: ${reference.label}` : `Reference: ${reference.label}`
+}
+
 type WorkspaceProps = {
   analysisId: string
   onDirtyChange?: (unsaved: boolean) => void
@@ -120,14 +131,37 @@ type WorkspaceProps = {
   askSlot?: HTMLElement | null
   /** Opens the Ask panel on "This claim", for a passage the labeler asks about. */
   onOpenAsk?: () => void
+  /** Leaves the paper for the list. */
+  onBack?: () => void
+  /** Opens another paper, used when this one is finished. */
+  onOpenPaper?: (id: string) => void
 }
 
-export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk }: WorkspaceProps) {
+export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk, onBack, onOpenPaper }: WorkspaceProps) {
   const query = useLabelSession(analysisId)
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
-  if (query.error || !query.data)
-    return <Empty {...problem(query.error)} />
-  return <Body key={analysisId} session={query.data} onDirtyChange={onDirtyChange} askSlot={askSlot} onOpenAsk={onOpenAsk} />
+  if (query.error || !query.data) {
+    const fail = problem(query.error)
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <Empty title={fail.title} hint={fail.hint} />
+        <Button variant="ghost" onClick={() => void query.refetch()}>
+          Try again
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <Body
+      key={analysisId}
+      session={query.data}
+      onDirtyChange={onDirtyChange}
+      askSlot={askSlot}
+      onOpenAsk={onOpenAsk}
+      onBack={onBack}
+      onOpenPaper={onOpenPaper}
+    />
+  )
 }
 
 /** Search the references for each claim added by hand, and add what is found to its passages (#404).
@@ -167,11 +201,15 @@ function Body({
   onDirtyChange,
   askSlot,
   onOpenAsk,
+  onBack,
+  onOpenPaper,
 }: {
   session: Session
   onDirtyChange?: (unsaved: boolean) => void
   askSlot: HTMLElement | null
   onOpenAsk?: () => void
+  onBack?: () => void
+  onOpenPaper?: (id: string) => void
 }) {
   const base = useMemo(() => workClaims(session), [session])
   // What this browser kept from before a reload or an outage, put back on top of what was saved.
@@ -187,6 +225,10 @@ function Body({
   )
   const [drafts, setDrafts] = useState(() => ({ ...saved, ...restored?.drafts }))
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
+  const [paperDone, setPaperDone] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
+  const pool = usePool()
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
   const draft = (claim && drafts[claim.claim_id]) || emptyDraft()
@@ -229,9 +271,13 @@ function Body({
   const go = (id: string) => {
     const next = claims.find((c) => c.claim_id === id)
     setCurrentId(id)
+    // Every id that reaches go() is a listed claim, so `next` is set; the check only satisfies the type.
+    /* v8 ignore next -- @preserve */
     setFocus(next ? firstFocus(next, session) : null)
     setSavedRows(null)
     setPicked(null)
+    setPaperDone(false)
+    setNotice(null)
     save.reset()
   }
 
@@ -255,12 +301,25 @@ function Body({
   }
 
   // Edit starts from the extracted wording, so a small fix is not a full retype.
-  const patch = (change: Partial<Draft>) =>
+  const writeDraft = (change: Partial<Draft>) =>
     setDrafts((all) => {
+      // patch() runs only while a claim with a draft is on screen; `?? emptyDraft()` and `&& claim` only satisfy the types.
+      /* v8 ignore start -- @preserve */
       const before = all[currentId] ?? emptyDraft()
       const start = change.status === 'edited' && !before.edited && claim ? { edited: claim.claim } : {}
+      /* v8 ignore stop -- @preserve */
       return { ...all, [currentId]: { ...before, ...start, ...change } }
     })
+  // A click is not a shortcut, so it drops the one-step undo. Z only restores the last key.
+  const patch = (change: Partial<Draft>) => {
+    delete undos.current[currentId]
+    writeDraft(change)
+  }
+  const keyed = (change: Partial<Draft>, text: string) => {
+    undos.current[currentId] = { draft: structuredClone(draft), focus }
+    writeDraft(change)
+    setNotice(`${text} · Z to undo`)
+  }
 
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
@@ -278,25 +337,28 @@ function Body({
   const [pointing, setPointing] = useState<{ claimId: string; at: Pointing } | null>(null)
   const point = useCallback((at: Pointing | null) => setPointing(at && { claimId: currentId, at }), [currentId])
   // The review reads what was saved, so the person's own decision always comes first.
-  const reviewBlocked = !saved[currentId]?.status
-    ? 'Save this claim first: the review checks what you saved.'
-    : dirty
-      ? 'Save your changes first: the review checks what you saved.'
-      : null
+  let reviewBlocked: string | null = null
+  if (!saved[currentId]?.status) reviewBlocked = 'Save this claim first: the review checks what you saved.'
+  else if (dirty) reviewBlocked = 'Save your changes first: the review checks what you saved.'
   const position = claims.findIndex((c) => c.claim_id === currentId)
   // Cited works with no PDF can still get a passage and a level (#824); they never open in the viewer.
   const cited = [...session.references, ...(session.unread ?? [])]
   const left = claim ? remaining(claim, draft, cited) : []
 
   const write = (next: boolean) => {
+    // Save is offered, and Ctrl+S allowed, only with a claim on screen.
+    /* v8 ignore next -- @preserve */
     if (!claim) return
+    const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
+    const target = saveNextTarget(claims, drafts, saved, cited, index)
     const body = buildSave({ ...claim, source: claimSource }, draft, saved[claim.claim_id])
     save.mutate(body, {
       onSuccess: (rows) => {
         setSaved((all) => ({ ...all, [claim.claim_id]: structuredClone(draft) }))
         setSavedRows(rows.claims + rows.candidates + rows.labels)
-        const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
-        if (next && claims[index + 1]) go(claims[index + 1].claim_id)
+        if (!next) return
+        if (target.kind === 'claim') go(claims[target.index].claim_id)
+        else if (target.kind === 'paper-done') setPaperDone(true)
       },
     })
   }
@@ -349,16 +411,29 @@ function Body({
         toggleShortcuts()
         return
       }
+      if (key === 'z') {
+        const snap = undos.current[currentId]
+        if (!snap) return
+        event.preventDefault()
+        delete undos.current[currentId]
+        setDrafts((all) => ({ ...all, [currentId]: snap.draft }))
+        setFocus(snap.focus)
+        setNotice('Undone')
+        return
+      }
+      const ref = cited.find((r) => r.reference_id === refId)
+      const refTag = ref?.ref ? `[${ref.ref}]` : (ref?.label ?? refId ?? 'Reference')
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
-      if (['k', 'e', 'x', 'r', 'n', '1', '2', '3', '4'].includes(key)) event.preventDefault()
-      if (key === 'k') patch({ status: 'accepted' })
-      else if (key === 'e') patch({ status: 'edited' })
-      else if (key === 'x') patch({ status: 'rejected' })
+      if (['k', 'e', 'x', 'r', 'n', 'l', 'm', 'h', '1', '2', '3', '4'].includes(key)) event.preventDefault()
+      if (key === 'k') keyed({ status: 'accepted' }, 'Claim → Keep')
+      else if (key === 'e') keyed({ status: 'edited' }, 'Claim → Edit')
+      else if (key === 'x') keyed({ status: 'rejected' }, 'Claim → Reject')
       else if (key === 'r' || key === 'n') {
         const current = ordered.find((c) => c.cand_id === focus?.key)
         if (!deciding || !current) return
-        const cands = { ...draft.cands, [current.cand_id]: key === 'r' ? ('relevant' as const) : ('rejected' as const) }
-        patch({ cands })
+        const status = key === 'r' ? ('relevant' as const) : ('rejected' as const)
+        const cands = { ...draft.cands, [current.cand_id]: status }
+        keyed({ cands }, `#${current.rank} ${status === 'relevant' ? 'Relevant' : 'Not relevant'}`)
         const at = ordered.indexOf(current)
         const next = [...ordered.slice(at + 1), ...ordered.slice(0, at)].find((c) => !cands[c.cand_id])
         if (next) focusPassage(next)
@@ -368,7 +443,13 @@ function Body({
       else if (key === '[' || (key === 'ArrowLeft' && event.shiftKey)) stepClaim(-1)
       else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
-        patch({ labels: { ...draft.labels, [refId]: { ...label, evidence: Number(key) as Level } } })
+        const level = Number(key) as Level
+        keyed({ labels: { ...draft.labels, [refId]: { ...label, evidence: level } } }, `${refTag} → ${level} ${LEVELS[level - 1].name}`)
+      } else if (['l', 'm', 'h'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
+        const label = draft.labels[refId] ?? emptyLabel()
+        const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
+        const word = confidence[0].toUpperCase() + confidence.slice(1)
+        keyed({ labels: { ...draft.labels, [refId]: { ...label, confidence } } }, `${refTag} → ${word}`)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -407,8 +488,7 @@ function Body({
     ? {
         paper: focus.file,
         paperRole: 'reference',
-        // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
-        label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
+        label: referenceLabel(shown),
         detail: shown ? byline(shown) : undefined,
         quote: focus.passage || undefined,
         source: found.data && found.data.page ? found.data : null,
@@ -489,6 +569,8 @@ function Body({
   // Adding evidence to an undecided claim keeps it: evidence only belongs to a claim you keep.
   const addEvidence = () => {
     const referenceId = session.references.find((r) => r.file === picked?.file)?.reference_id
+    // The Add button is disabled without a picked text in a listed reference, so this is a guard only.
+    /* v8 ignore next -- @preserve */
     if (!picked || !referenceId) return
     const p: AddedPassage = { reference_id: referenceId, page: picked.page, passage: picked.text.slice(0, 1500) }
     if (!draft.added.some((a) => a.reference_id === p.reference_id && a.passage === p.passage)) {
@@ -497,12 +579,9 @@ function Body({
     }
     setPicked(null)
   }
-  const cannotAdd =
-    draft.status === 'rejected'
-      ? 'This claim is rejected. Keep or edit it to add evidence.'
-      : !session.references.some((r) => r.file === picked?.file)
-        ? 'That paper is not one of this analysis\'s references.'
-        : null
+  let cannotAdd: string | null = null
+  if (draft.status === 'rejected') cannotAdd = 'This claim is rejected. Keep or edit it to add evidence.'
+  else if (!session.references.some((r) => r.file === picked?.file)) cannotAdd = 'That paper is not one of this analysis\'s references.'
 
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
@@ -535,6 +614,8 @@ function Body({
         [']', 'next claim'],
         ['[', 'previous claim'],
         ['1–4', 'level'],
+        ['L M H', 'confidence'],
+        ['Z', 'undo'],
         ['Ctrl/⌘+S', 'save'],
       ].map(([keys, what]) => (
         <li key={keys} className="flex items-center gap-1">
@@ -542,6 +623,36 @@ function Body({
         </li>
       ))}
     </ul>
+  )
+
+  const nextPaper = pool.data ? nextPaperInTopic(pool.data, session.analysis_id) : null
+  const claimWording = draft.status === 'edited' && draft.edited.trim() ? draft.edited : claim.claim
+  // Outside the scrolling list on a wide screen, and pinned above the save bar on a narrow one,
+  // so the claim never sits on top of the passage being judged.
+  const claimPin = (className?: string) =>
+    draft.status ? (
+      <ClaimSticky key={claim.claim_id} text={claimWording} rejected={draft.status === 'rejected'} className={className} />
+    ) : null
+  const paperDoneView = (
+    <div role="status" className="flex flex-col items-start gap-3">
+      <h2 className="font-serif text-lg font-semibold text-ink">This paper is labeled</h2>
+      <p className="text-sm leading-6 text-ink-muted">Every claim is finished and saved.</p>
+      <div className="flex flex-wrap gap-2">
+        {nextPaper && onOpenPaper && (
+          <Button type="button" onClick={() => onOpenPaper(nextPaper.analysis_id)}>
+            Next paper in your topic
+          </Button>
+        )}
+        {onBack && (
+          <Button type="button" variant="ghost" onClick={onBack}>
+            Back to papers
+          </Button>
+        )}
+        <Button type="button" variant="ghost" onClick={() => setPaperDone(false)}>
+          Review claims
+        </Button>
+      </div>
+    </div>
   )
 
   const panel = (
@@ -564,12 +675,14 @@ function Body({
           search={search}
           onSearchAgain={searchAgain}
           grade={grade}
+          // A blind check keeps the judge out of the label, so no Ask on its passages either (#867).
           onAsk={
-            onOpenAsk &&
-            ((passage) => {
-              setAsked((before) => ({ claimId: claim.claim_id, passage, id: (before?.id ?? 0) + 1 }))
-              onOpenAsk()
-            })
+            onOpenAsk && !session.blind
+              ? (passage) => {
+                  setAsked((before) => ({ claimId: claim.claim_id, passage, id: (before?.id ?? 0) + 1 }))
+                  onOpenAsk()
+                }
+              : undefined
           }
         />
       )}
@@ -579,19 +692,32 @@ function Body({
   )
 
   const saveBar = (className?: string) => (
+    <>
+    {notice && (
+      <p role="status" className="rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-ink">
+        {notice}
+      </p>
+    )}
     <SaveBar
       left={left}
       dirty={dirty}
       saving={save.isPending}
       error={save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null}
       savedRows={savedRows}
-      hasNext={position < claims.length - 1}
+      hasNext={claim != null && saveNextTarget(claims, drafts, saved, cited, position).kind !== 'stay'}
       onSave={write}
       className={className}
     />
+    </>
   )
 
-  const askPanel = claim && (
+  // On a blind check the judge must not sway the label, so Review and Ask are replaced (#867).
+  const askPanel = session.blind ? (
+    <p className="flex items-start gap-2 p-1 text-sm text-ink-muted">
+      <EyeOff className="mt-0.5 size-4 shrink-0" aria-hidden />
+      Review and Ask are off on a blind check. Decide from the paper and its references alone.
+    </p>
+  ) : claim && (
     <AskPanel
       key={claim.claim_id}
       analysisId={session.analysis_id}
@@ -667,11 +793,18 @@ function Body({
 
   const labelPanel = (
     <div className="ml-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
-      <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
-        {legend}
-        {saveBar('border-0 p-0')}
-      </div>
+      {paperDone ? (
+        <div className="p-4">{paperDoneView}</div>
+      ) : (
+        <>
+          {claimPin()}
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
+          <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
+            {legend}
+            {saveBar('border-0 p-0')}
+          </div>
+        </>
+      )}
     </div>
   )
 
@@ -699,16 +832,38 @@ function Body({
         <div className="ml-auto flex items-center gap-3 xl:ml-0">
           {wide && viewToggle}
           <div className="w-36">
-            <p className="mb-1 whitespace-nowrap text-xs text-ink-muted tabular-nums">
+            <button
+              type="button"
+              disabled={firstUnfinishedIndex(claims, drafts, saved, cited) == null}
+              onClick={() => {
+                const index = firstUnfinishedIndex(claims, drafts, saved, cited)
+                if (index == null) return
+                setPaperDone(false)
+                select(claims[index].claim_id)
+              }}
+              className="mb-1 w-full whitespace-nowrap text-left text-xs text-ink-muted tabular-nums enabled:hover:text-ink enabled:hover:underline"
+            >
               {done} of {total} claims finished
-            </p>
+            </button>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
+              {/* The bar exists only when a claim does, so `total` is at least 1. */}
+              {/* v8 ignore start -- @preserve */}
               <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+              {/* v8 ignore stop -- @preserve */}
             </div>
           </div>
           {shortcutsButton}
         </div>
       </header>
+      {session.blind && (
+        <div role="note" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5">
+          <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
+          <p className="text-sm font-semibold text-ink">Blind check</p>
+          <p className="min-w-0 flex-1 text-sm text-ink-muted">
+            Someone else labeled this paper. Their labels are hidden, and Review and Ask are off, so label it on your own.
+          </p>
+        </div>
+      )}
       {restored && anyDirty && (
         <p role="status" className="text-sm text-ink-muted">
           Unsaved labels from your last visit were kept in this browser. Save them to keep them for good.
@@ -740,8 +895,17 @@ function Body({
           {overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
           {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
           {selection}
-          <div className="flex flex-col gap-5">{panel}</div>
-          {saveBar()}
+          {paperDone ? (
+            paperDoneView
+          ) : (
+            <>
+              <div className="flex flex-col gap-5">{panel}</div>
+              <div className="sticky bottom-0 z-20 flex flex-col gap-2 bg-canvas pt-2">
+                {claimPin('rounded-xl border border-border-subtle shadow-sm')}
+                {saveBar()}
+              </div>
+            </>
+          )}
         </div>
       )}
       {/* Drawn in the Ask panel's "This claim" view, but kept here with the claim's state. */}
