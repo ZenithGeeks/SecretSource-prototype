@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ResearcherApp } from '../src/roles/researcher/ResearcherApp'
+import { Library } from '../src/roles/researcher/screens/Library'
 import { LibraryAddMenu } from '../src/roles/researcher/components/LibraryAddMenu'
 import { updatedText } from '../src/lib/researcher'
 
@@ -36,7 +37,7 @@ const paper = (over: Record<string, unknown>) => ({
 
 const LIBRARY = {
   summary: '3 papers',
-  clusters: ['Late interaction', 'Unverified', 'Tooling'],
+  clusters: ['All', 'Unverified', 'Late interaction', 'Tooling'],
   papers: [
     paper({}),
     paper({ id: 'a2', title: 'Tevatron toolkit', cite: 'Gao · 2022', cluster: 'Tooling', claims: 4, backed: null, contradicted: null, linked: ['ColBERTv2', 'PLAID'] }),
@@ -120,6 +121,16 @@ describe('project list', () => {
     renderLibrary()
     expect(screen.getByText('Loading your projects…')).toBeInTheDocument()
     await screen.findByRole('heading', { name: 'Library' })
+  })
+
+  it('lists the projects when the host gives no way to analyse a new paper', async () => {
+    gateway()
+    render(
+      <QueryClientProvider client={client()}>
+        <Library onOpenAnalysis={() => {}} />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
   })
 
   it('draws no Add papers menu when there is nothing to add', () => {
@@ -396,10 +407,10 @@ describe('project detail', () => {
     renderLibrary('&project=p1')
     await screen.findByText('ColBERTv2')
     const segments = screen
-      .getAllByRole('button', { pressed: false })
-      .filter((b) => /\d$/.test(b.textContent ?? ''))
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-pressed') && /[0-9]$/.test(b.textContent ?? ''))
     expect(segments.map((b) => b.textContent)).toEqual([
-      'Late interaction 1', 'Has conflicts 1', 'Not analyzed 1', 'Tooling 3',
+      'All 4', 'Has conflicts 1', 'Not analyzed 1', 'Late interaction 1', 'Tooling 3',
     ])
 
     fireEvent.click(screen.getByRole('button', { name: 'Has conflicts 1' }))
