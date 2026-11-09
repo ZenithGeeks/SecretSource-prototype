@@ -686,6 +686,15 @@ describe('a blind check', () => {
     expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument()
     slot.remove()
   })
+
+  it('offers no Ask button on the passages', async () => {
+    gateway.session = makeSession({ blind: true })
+    const slot = document.body.appendChild(document.createElement('div'))
+    await open({ askSlot: slot, onOpenAsk: vi.fn() })
+    key('k')
+    expect(screen.queryAllByRole('button', { name: 'Ask AI about this passage' })).toHaveLength(0)
+    slot.remove()
+  })
 })
 
 describe('Ask about the claim', () => {
