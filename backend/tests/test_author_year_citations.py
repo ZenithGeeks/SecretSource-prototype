@@ -50,6 +50,33 @@ def test_the_letter_after_the_year_picks_the_right_work():
     assert targets(document) == ["#b52", "#b11", "#b12"]
 
 
+def test_one_citation_with_two_letters_links_both_works():
+    # "Nie et al., 2019a,b" in the Vitamin C paper cites two papers; linking only 2019a lost
+    # the fact-verification one (#838).
+    document = tei("(Formal et al., 2021a,b;", "Formal et al., 2021a, b)")
+    assert claims._link_author_year_citations(document) == 2
+    assert targets(document) == ["#b11 #b12", "#b11 #b12"]
+
+
+def test_a_letter_with_no_work_leaves_the_whole_citation_unlinked():
+    document = tei("(Formal et al., 2021a,c)")
+    assert claims._link_author_year_citations(document) == 0
+    assert targets(document) == [None]
+
+
+def test_every_work_of_a_two_letter_citation_becomes_a_marker():
+    document = tei("(Formal et al., 2021a,b)")
+    claims._link_author_year_citations(document)
+    assert claims._body_text(document).split() == ["[b11][b12]"]
+
+
+def test_each_work_of_a_two_letter_citation_gets_its_printed_label():
+    document = tei("(Formal et al., 2021a,b)")
+    claims._link_author_year_citations(document)
+    labels = claims._printed_labels(document)
+    assert set(labels) == {"b11", "b12"}
+
+
 def test_two_authors_or_et_al_tell_works_of_the_same_year_apart():
     document = tei("(Gao and Callan, 2021)", "(Gao et al., 2021)")
     claims._link_author_year_citations(document)

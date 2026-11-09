@@ -770,7 +770,8 @@ def extract_citations(pdf_path: str) -> dict:
 
 # An author-year citation as printed: "Ren et al., 2021b", "Gao and Callan, 2021", "Lee et al. (2021b)".
 AUTHOR_YEAR = re.compile(
-    r"([A-Z][\w'\-]+)(?:\s+(?:and|&)\s+([A-Z][\w'\-]+))?(\s+et\s+al\.?)?[,\s]*\(?((?:19|20)\d\d)([a-z]?)\)?"
+    r"([A-Z][\w'\-]+)(?:\s+(?:and|&)\s+([A-Z][\w'\-]+))?(\s+et\s+al\.?)?[,\s]*\(?((?:19|20)\d\d)"
+    r"((?:[a-z](?:\s*,\s*[a-z]\b)*)?)\)?"
 )
 
 
@@ -810,31 +811,36 @@ def _link_author_year_citations(tei) -> int:
         found = AUTHOR_YEAR.search("".join(ref.itertext()))
         if not found:
             continue
-        name, second, et_al, year, letter = found.groups()
+        name, second, et_al, year, letters = found.groups()
         name = _plain(name)
         candidates = [
             e for e in entries if e[1][0] == name and (e[3] == year or re.search(rf"\b{year}", e[2]))
         ]
         # "Gao and Callan" has exactly two authors with Callan second; "Gao et al." has three or more.
-        if len(candidates) > 1 and not letter:
+        if len(candidates) > 1 and not letters:
             if second:
                 candidates = [e for e in candidates if len(e[1]) == 2 and e[1][1] == _plain(second)]
             elif et_al:
                 candidates = [e for e in candidates if len(e[1]) >= 3]
-        chosen = None
-        if letter:
-            exact = [e for e in candidates if re.search(rf"\b{year}{letter}\b", e[2])]
-            index = ord(letter) - ord("a")
-            if len(exact) == 1:
-                chosen = exact[0]
-            elif len(candidates) > index:
-                chosen = candidates[index]
-        elif len(candidates) == 1:
-            chosen = candidates[0]
-        if chosen:
-            ref.set("target", "#" + chosen[0])
+        # "2019a,b" cites two works at once; each letter picks one, and the ref targets them all.
+        if letters:
+            chosen = [_by_letter(candidates, year, letter) for letter in re.findall(r"[a-z]", letters)]
+        else:
+            chosen = candidates if len(candidates) == 1 else []
+        if chosen and all(chosen):
+            ref.set("target", " ".join(dict.fromkeys(f"#{entry[0]}" for entry in chosen)))
             linked += 1
     return linked
+
+
+def _by_letter(candidates: list[tuple], year: str, letter: str) -> tuple | None:
+    """The work "2021b" means: the entry whose text carries that year and letter, or else the
+    one at that place among the same author's works of the year."""
+    exact = [e for e in candidates if re.search(rf"\b{year}{letter}\b", e[2])]
+    if len(exact) == 1:
+        return exact[0]
+    index = ord(letter) - ord("a")
+    return candidates[index] if len(candidates) > index else None
 
 
 def _references_by_id(tei) -> tuple[dict, int]:
@@ -875,9 +881,10 @@ def _printed_labels(tei) -> dict[str, str]:
         return {}
     seen: dict[str, Counter] = {}
     for ref in body.iter(TEI_TAG + "ref"):
-        ref_id = (ref.get("target") or "").lstrip("#")
         text = _marker_text(ref)
-        if ref.get("type") == "bibr" and ref_id and text:
+        if ref.get("type") != "bibr" or not text:
+            continue
+        for ref_id in _target_ids(ref):
             seen.setdefault(ref_id, Counter())[text] += 1
     return {ref_id: counts.most_common(1)[0][0] for ref_id, counts in seen.items()}
 
@@ -922,17 +929,24 @@ def _citation_markers(tei, references: dict) -> list[dict]:
     sizes = _page_sizes(tei)
     markers = []
     for ref in body.iter(TEI_TAG + "ref"):
-        ref_id = (ref.get("target") or "").lstrip("#")
-        if ref.get("type") != "bibr" or ref_id not in references:
+        if ref.get("type") != "bibr":
             continue
         text = _marker_text(ref)
-        for box in _boxes(ref.get("coords", "")):
-            if box["page"] not in sizes:
+        for ref_id in _target_ids(ref):
+            if ref_id not in references:
                 continue
-            width, height = sizes[box["page"]]
-            markers.append({"ref": ref_id, "text": text, **box,
-                            "page_width": width, "page_height": height})
+            for box in _boxes(ref.get("coords", "")):
+                if box["page"] not in sizes:
+                    continue
+                width, height = sizes[box["page"]]
+                markers.append({"ref": ref_id, "text": text, **box,
+                                "page_width": width, "page_height": height})
     return markers
+
+
+def _target_ids(ref) -> list[str]:
+    """The reference ids a citation points at: "#b31 #b32" when one citation names two works."""
+    return [target.lstrip("#") for target in (ref.get("target") or "").split()]
 
 
 def _outline(tei, pdf_path: str | None = None) -> list[dict]:
@@ -1064,8 +1078,8 @@ def _paragraph_text(paragraph) -> str:
     for child in paragraph:
         text = "".join(child.itertext())
         if child.tag == TEI_TAG + "ref" and child.get("type") == "bibr":
-            target = child.get("target")
-            parts.append("[" + target.lstrip("#") + "]" if target else _without_citation(text))
+            ids = _target_ids(child)
+            parts.append("".join(f"[{ref_id}]" for ref_id in ids) if ids else _without_citation(text))
         else:
             parts.append(text)
         parts.append(child.tail or "")
