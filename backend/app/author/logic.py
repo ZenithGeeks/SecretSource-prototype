@@ -15,7 +15,7 @@ import hashlib
 import html
 import re
 import unicodedata
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from datetime import UTC, datetime
 
@@ -29,13 +29,13 @@ from pylatexenc.latexencode import unicode_to_latex
 
 from app.names import surname
 from app.pipeline.sources import ARXIV_PATTERN
+from app.text import sentence_spans
 
 VERDICTS = ("supports", "refutes", "insufficient", "unavailable", "unchecked")
 NEEDS_WORK = ("refutes", "insufficient")
 
 CITE = re.compile(r"\\(?:cite|citep|citet|parencite|textcite|autocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)\}")
 SECTION = re.compile(r"\\(?:chapter|section|subsection|subsubsection)\*?\{([^}]*)\}")
-SENTENCE_END = re.compile(r"[.!?][\"'”’)}]?(?=\s|$)")
 LEADING_COMMAND = re.compile(r"^\s*(?:\\item\b|\\(?:sub)?paragraph\*?\{[^}]*\})\s*")
 
 
@@ -236,6 +236,7 @@ def find_cites(files: list[dict]) -> list[dict]:
             continue
         content = f.get("content", "")
         line_starts = _line_starts(content)
+        sentence_ends = [end for _, end in sentence_spans(content)]
         section = ""
         for m in re.finditer(r"%.*|" + SECTION.pattern + "|" + CITE.pattern, content):
             if m.group(0).startswith("%"):
@@ -243,7 +244,7 @@ def find_cites(files: list[dict]) -> list[dict]:
             if m.group(0).startswith("\\cite") or "cite" in m.group(0)[:12]:
                 keys = [k.strip() for k in m.group(m.lastindex).split(",") if k.strip()]
                 line = _line_of(line_starts, m.start())
-                sentence = _sentence_around(content, m.start(), m.end())
+                sentence = _sentence_around(content, m.start(), m.end(), sentence_ends)
                 inner = m.group(0).rfind("{") + 1
                 for key in keys:
                     refs.append(
@@ -274,13 +275,13 @@ def _line_of(starts: list[int], offset: int) -> int:
     return bisect_right(starts, offset)
 
 
-def _sentence_around(content: str, start: int, end: int) -> str:
+def _sentence_around(content: str, start: int, end: int, sentence_ends: list[int]) -> str:
     """The sentence a \\cite sits in: back to the previous sentence end, blank line or
-    command line; forward to the next sentence end or blank line."""
+    command line; forward to the next sentence end or blank line. sentence_ends are the
+    content's Punkt sentence ends, worked out once per file."""
     before = content[:start]
-    cut = 0
-    for m in SENTENCE_END.finditer(before):
-        cut = m.end()
+    previous = bisect_right(sentence_ends, start) - 1
+    cut = sentence_ends[previous] if previous >= 0 else 0
     blank = before.rfind("\n\n")
     cut = max(cut, blank + 2 if blank >= 0 else 0)
     # A heading or command line above belongs to no sentence. The \cite's own line is prose
@@ -293,10 +294,8 @@ def _sentence_around(content: str, start: int, end: int) -> str:
         kept.insert(0, line)
     head = "\n".join(kept)
     after = content[end:]
-    stop = len(after)
-    m = SENTENCE_END.search(after)
-    if m:
-        stop = m.end()
+    following = bisect_left(sentence_ends, end)
+    stop = sentence_ends[following] - end if following < len(sentence_ends) else len(after)
     blank_after = after.find("\n\n")
     if blank_after >= 0:
         stop = min(stop, blank_after)

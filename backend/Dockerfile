@@ -11,7 +11,8 @@ ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 # OpenTelemetry and botocore releases for 40+ minutes and then failed on one that no longer builds.
 RUN pip install --no-cache-dir torch torchvision --index-url ${TORCH_INDEX} \
     && pip install --no-cache-dir uv \
-    && uv pip install --system --no-cache -r requirements.txt
+    && uv pip install --system --no-cache -r requirements.txt \
+    && python -m nltk.downloader -d /usr/local/share/nltk_data punkt_tab
 # NUMPY_SPEC, e.g. "<2.4", pins NumPy for a CPU without SSE4.2: NumPy 2.4+ refuses to import
 # there. Empty (the default) keeps whatever requirements.txt resolved. See app/native.py.
 ARG NUMPY_SPEC=
