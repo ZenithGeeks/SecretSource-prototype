@@ -6,7 +6,7 @@
  */
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronRight, MoreVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { ChevronRight, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { ToolbarActions } from '../../../components/AppShell'
@@ -172,12 +172,16 @@ function ProjectCard({
 
       <div className="pointer-events-none flex flex-col gap-3">
         {renaming ? (
+          // The invisible "open project" button (above, position: absolute) paints over any
+          // in-flow sibling here regardless of DOM order, so a click on a button in this form
+          // never reached it — only Enter (a keyboard submit, no hit-testing) worked. Rather
+          // than fight the stacking, there is just the input: Enter saves, Escape cancels.
           <form
             onSubmit={(event) => {
               event.preventDefault()
               void submitRename()
             }}
-            className="pointer-events-auto flex items-center gap-1.5"
+            className="pointer-events-auto"
           >
             <input
               autoFocus
@@ -185,19 +189,9 @@ function ProjectCard({
               disabled={saving}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => event.key === 'Escape' && cancelRename()}
-              className="w-full min-w-0 flex-1 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink outline-none disabled:opacity-60"
+              onBlur={cancelRename}
+              className="w-full min-w-0 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink outline-none disabled:opacity-60"
             />
-            <button
-              type="submit"
-              disabled={saving}
-              aria-label="Save name"
-              className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50"
-            >
-              <Check className="size-4" />
-            </button>
-            <IconButton onClick={cancelRename} disabled={saving} aria-label="Cancel renaming" className="size-7 lg:size-7">
-              <X className="size-4" />
-            </IconButton>
           </form>
         ) : (
           <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
