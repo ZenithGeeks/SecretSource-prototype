@@ -175,3 +175,11 @@ def test_a_citation_in_brackets_is_only_a_marker():
 def test_et_al_does_not_end_a_cited_sentence():
     text = "Shin et al. [b47] propose a search algorithm. We do not."
     assert claims._cited_sentences(text) == ["Shin et al. [b47] propose a search algorithm."]
+
+
+def test_a_citation_of_two_works_written_as_the_subject_keeps_its_names_and_both_markers():
+    document = ET.fromstring(
+        '<p xmlns="http://www.tei-c.org/ns/1.0">'
+        '<ref type="bibr" target="#b31 #b32">Nie et al. (2019a,b)</ref> show it.</p>'
+    )
+    assert claims._paragraph_text(document) == "Nie et al. [b31][b32] show it."
