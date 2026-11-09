@@ -29,6 +29,11 @@ import { Card, Empty } from './ui'
  * from the page the reader opened or closed since. */
 export type SectionJump = { n: string; title: string; page: number; at: number }
 
+/** The standing as a verdict colour for the page viewer; the standings that are not a verdict have none. */
+function verdictOf(standing: Standing): Target['verdict'] {
+  return standing === 'supports' || standing === 'refutes' || standing === 'insufficient' ? standing : undefined
+}
+
 /** A claim the run has finished with: it has an answer, a failure, or nothing to check. */
 function settled(claim: Claim) {
   return (claim.verdicts ?? []).length > 0 || (claim.unchecked ?? []).length > 0 || claim.citations.length === 0
@@ -116,9 +121,7 @@ export function AnalysisView({
           quote: initialTeacherClaim.claim.sentence,
           source: initialTeacherClaim.claim.source,
           page: initialTeacherClaim.claim.source.page,
-          verdict: ['supports', 'refutes', 'insufficient'].includes(initialTeacherClaim.standing)
-            ? initialTeacherClaim.standing as 'supports' | 'refutes' | 'insufficient'
-            : undefined,
+          verdict: verdictOf(initialTeacherClaim.standing),
         }
       : { paper: file, label: 'The paper', source: null, page: 1 }
     : null
@@ -306,10 +309,9 @@ export function AnalysisView({
                       paper: file,
                       label: `Claim ${index + 1} in the submission`,
                       quote: claim.sentence,
+                      /* v8 ignore next -- the condition above already holds a source; this satisfies the type */
                       source: claim.source ?? null,
-                      verdict: ['supports', 'refutes', 'insufficient'].includes(standing)
-                        ? standing as 'supports' | 'refutes' | 'insufficient'
-                        : undefined,
+                      verdict: verdictOf(standing),
                     })
                   : undefined}
                 // A page of the analysed paper carries the claim's section; a cited paper's does not.
