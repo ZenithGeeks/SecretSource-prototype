@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+from app import auth, config
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
@@ -2184,3 +2185,16 @@ def test_scopus_is_asked_again_after_a_server_error(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: replies.pop(0))
     assert scopus._ask_scopus({"query": "x"}) == SCOPUS_REPLY
     assert replies == []
+
+
+def test_an_account_off_the_team_list_cannot_use_the_labeler(api, monkeypatch):
+    # annotator reads the token itself, so the router must also run current_user's team check.
+    _, _, app = api
+    del app.dependency_overrides[labeling.current_user]
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(auth, "_user_for", lambda token: ("user-x", "stranger@example.com"))
+    monkeypatch.setattr(config, "TEAM_EMAILS", frozenset({"chanya@example.com"}))
+
+    response = TestClient(app).get("/labeling/status", headers={"authorization": "Bearer token"})
+
+    assert response.status_code == 403

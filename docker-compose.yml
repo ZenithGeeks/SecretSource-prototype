@@ -132,6 +132,7 @@ services:
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-} # without one, OpenAlex shares a tiny per-IP budget
       SCOPUS_API_KEY: ${SCOPUS_API_KEY:-} # the labeler's Scopus search (app/labeling/scopus.py)
       LABELING_LEADS: ${LABELING_LEADS:-} # e-mails of the labeling leads (#867)
+      TEAM_EMAILS: ${TEAM_EMAILS:-} # e-mails allowed to sign in; empty lets every account in
       CLAIM_LIMIT: ${CLAIM_LIMIT:-20}
       PARALLEL_SOURCES: ${PARALLEL_SOURCES:-3} # cited papers downloaded and indexed at the same time
       PARALLEL_CHECKS: ${PARALLEL_CHECKS:-3} # claims or draft citations judged at once, per worker
