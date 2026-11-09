@@ -1291,14 +1291,13 @@ async def remove_bib_entry(project_id: str, key: str, user: str | None = Depends
         with _locked(PROJECTS, project_id):
             project = _row(PROJECTS, project_id, user, "project")
             bib = project.get("bib") or {"name": "main.bib", "content": ""}
-            entries = logic.parse_bib(bib.get("content", ""))
-            kept = [e for e in entries if e["key"] != key]
-            if len(kept) == len(entries):
+            content, removed = logic.without_bib_entry(bib.get("content", ""), key)
+            if not removed:
                 raise HTTPException(404, f"{key} is not in {bib.get('name')}")
-            bib["content"] = "\n\n".join(logic.serialize_bib(e) for e in kept) + ("\n" if kept else "")
+            bib["content"] = content
             project["bib"] = bib
             _save(PROJECTS, project)
-            return len(kept)
+            return len(logic.parse_bib(content))
 
     return {"removed": key, "entries": await asyncio.to_thread(remove)}
 

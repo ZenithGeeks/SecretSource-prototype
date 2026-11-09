@@ -20,6 +20,8 @@ def surname(name: str) -> str:
     except InvalidNameError:  # "Smith, " or three commas: keep the last word
         return name.rstrip(", ").split()[-1] if name.rstrip(", ") else ""
     last = parts.last
-    if len(last) == 1 and last[0].strip(".").lower() in NAME_SUFFIXES and parts.first:
-        last = parts.first[-1:]
+    if last[-1].strip(".").lower() in NAME_SUFFIXES:
+        # "Vincent van Gogh III" puts the suffix after the surname; "John Smith Jr." leaves
+        # the surname as the last first name.
+        last = last[:-1] or parts.first[-1:] or last
     return " ".join(parts.von + last)

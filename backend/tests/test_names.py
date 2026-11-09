@@ -12,6 +12,8 @@ from app.names import surname
         ("Laurens van der Maaten", "van der Maaten"),
         ("Smith, Jr., John", "Smith"),
         ("John Smith Jr.", "Smith"),
+        ("Vincent van Gogh III", "van Gogh"),
+        ("Jr.", "Jr."),
         ("Wen-tau Yih", "Yih"),
         ("{OpenAI}", "{OpenAI}"),
         ("Smith, ", "Smith"),
