@@ -399,7 +399,7 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
 
     # One timeout or 5xx used to fail the whole analysis, since nothing works without the
     # paper's text. GROBID also answers 503 while all its workers are busy, which passes.
-    for attempt in range(1, GROBID_ATTEMPTS + 1):
+    for attempt in range(1, GROBID_ATTEMPTS + 1):  # pragma: no branch - last attempt breaks
         try:
             response = requests.post(
                 f"{GROBID_URL}/api/{endpoint}",
