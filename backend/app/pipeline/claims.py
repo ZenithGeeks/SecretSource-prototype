@@ -24,7 +24,7 @@ from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
 from app.pipeline.sources import local_pdf, lookup_key, tool_error
-from app.text import split_sentences
+from app.text import english_stopwords, split_sentences
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -106,11 +106,9 @@ MAX_GAP = 3  # page words allowed between two matched words on their own: a foot
 LONG_GAP = 14  # ... when the sentence word after also follows: "(Xin et al., 2021; Xiong et al., 2020)"
 MAX_MISSES = 4  # sentence words in a row that may be missing before we decide it is not here
 MAX_STRETCH = 2.5  # a relaxed match may span at most this many page words per sentence word
-# Short words a relaxed match may not jump to on their own: too common to be evidence.
-STOPWORDS = frozenset(
-    "that with from this than which their these those have been into also more when where "
-    "what while such each both same only over some most many very much".split()
-)
+# Words a relaxed match may not jump to on their own, too common to be evidence: NLTK's
+# English stopwords and these, which papers use as often.
+COMMON_IN_PAPERS = frozenset({"also", "many", "much"})
 
 
 def _token(word: str) -> str:
@@ -167,7 +165,7 @@ def _match_at(words: list[_Word], wanted: list[str], i: int, k: int) -> tuple[li
 
 
 def _content_word(token: str) -> bool:
-    return len(token) >= 4 and token not in STOPWORDS
+    return len(token) >= 4 and token not in english_stopwords() and token not in COMMON_IN_PAPERS
 
 
 def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = False) -> tuple[list[int], int]:

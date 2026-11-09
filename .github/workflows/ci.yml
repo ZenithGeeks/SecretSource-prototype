@@ -96,7 +96,7 @@ jobs:
       # file marks a venv whose install finished.
       - name: Install
         env:
-          RECIPE: backend-3
+          RECIPE: backend-4
         run: |
           key=$({ cat requirements.txt requirements-dev.txt; python -VV; echo "$RECIPE"; date +%G-%V; } | sha256sum | cut -c1-16)
           venv="$HOME/ci-venvs/backend-$key"
@@ -117,7 +117,7 @@ jobs:
               "$venv/bin/pip" install "opencv-python-headless==$version"
             fi
             # NLTK looks in <venv>/nltk_data, so app/text.py finds the Punkt model there.
-            "$venv/bin/python" -m nltk.downloader -d "$venv/nltk_data" punkt_tab
+            "$venv/bin/python" -m nltk.downloader -d "$venv/nltk_data" punkt_tab stopwords
             touch "$venv/.complete"
           fi
           # Each venv holds torch and is on the production host's disk: keep this one and the last.
