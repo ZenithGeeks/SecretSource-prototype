@@ -73,6 +73,7 @@ export function MenuItem({ className, type = 'button', ...props }: ComponentProp
       className={cn(
         'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink',
         'hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent',
+        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
         className,
       )}
       {...props}
@@ -161,7 +162,7 @@ export function VerdictBadge({
       title={title}
       data-verdict={verdict}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
+        'inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
         colorBadges ? PILL[verdict].pill : 'text-ink',
       )}
     >
@@ -170,7 +171,8 @@ export function VerdictBadge({
         data-testid="verdict-dot"
         className={cn('size-1.5 shrink-0 rounded-full', colorBadges ? PILL[verdict].dot : 'bg-current')}
       />
-      {text ?? STANDING_LABELS[verdict]}
+      {/* A long work title is cut with an ellipsis inside its column instead of overflowing it. */}
+      <span className="truncate">{text ?? STANDING_LABELS[verdict]}</span>
     </span>
   )
 }

@@ -77,10 +77,12 @@ function Body({ view }: { view: CommandView }) {
   }
 }
 
-function Callout({ icon: Icon, tone = 'neutral', children }: { icon: ComponentType<{ className?: string }>; tone?: 'neutral' | 'supports' | 'accent'; children: string }) {
+const CALLOUT_ICON = { neutral: 'text-ink-muted', supports: 'text-supports', accent: 'text-accent' }
+
+function Callout({ icon: Icon, tone = 'neutral', children }: { icon: ComponentType<{ className?: string }>; tone?: keyof typeof CALLOUT_ICON; children: string }) {
   return (
     <div className="flex items-start gap-2.5 rounded-xl border border-border-subtle bg-neutral-soft p-3 text-[13px] leading-5 text-ink">
-      <Icon className={cn('mt-0.5 size-4 shrink-0', tone === 'supports' ? 'text-supports' : tone === 'accent' ? 'text-accent' : 'text-ink-muted')} aria-hidden="true" />
+      <Icon className={cn('mt-0.5 size-4 shrink-0', CALLOUT_ICON[tone])} aria-hidden="true" />
       <p className="min-w-0 [overflow-wrap:anywhere]">{children}</p>
     </div>
   )

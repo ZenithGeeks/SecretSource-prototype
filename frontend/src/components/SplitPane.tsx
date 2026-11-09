@@ -13,6 +13,22 @@ const HANDLE_PX = 6 // the separator's width (lg:w-1.5): it sits between the pan
 
 const clamp = (value: number) => Math.min(MAX, Math.max(MIN, value))
 
+/** Where a key sends the handle, or null for a key it does not use. */
+function ratioForKey(key: string, ratio: number): number | null {
+  switch (key) {
+    case 'ArrowLeft':
+      return ratio - STEP
+    case 'ArrowRight':
+      return ratio + STEP
+    case 'Home':
+      return MIN
+    case 'End':
+      return MAX
+    default:
+      return null
+  }
+}
+
 function readRatio(key: string | undefined, fallback: number) {
   if (!key) return fallback
   try {
@@ -63,6 +79,8 @@ export function SplitPane({
   const limit = (value: number, width: number) => Math.min(clamp(value), width ? 1 - (minRight + HANDLE_PX) / width : MAX)
 
   const change = (value: number) => {
+    // Unreachable fallback: change() only runs from the mounted handle.
+    /* v8 ignore next -- @preserve */
     const next = limit(value, container.current?.getBoundingClientRect().width ?? 0)
     setRatio(next)
     writeRatio(storageKey, next)
@@ -71,6 +89,8 @@ export function SplitPane({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const rect = container.current?.getBoundingClientRect()
+    // Unreachable: the handle that was pressed is inside the mounted container.
+    /* v8 ignore next -- @preserve */
     if (!rect) return
     const handle = event.currentTarget
     handle.setPointerCapture(event.pointerId)
@@ -91,16 +111,7 @@ export function SplitPane({
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const next =
-      event.key === 'ArrowLeft'
-        ? ratio - STEP
-        : event.key === 'ArrowRight'
-          ? ratio + STEP
-          : event.key === 'Home'
-            ? MIN
-            : event.key === 'End'
-              ? MAX
-              : null
+    const next = ratioForKey(event.key, ratio)
     if (next === null) return
     event.preventDefault()
     change(next)

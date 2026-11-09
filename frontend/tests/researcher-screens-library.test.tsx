@@ -1,0 +1,581 @@
+/** The researcher Library: the project list, creating, renaming and deleting a project, adding
+ * analysed papers to one, and the paper table's filters. The gateway is a fetch stub. */
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { ResearcherApp } from '../src/roles/researcher/ResearcherApp'
+import { Library } from '../src/roles/researcher/screens/Library'
+import { LibraryAddMenu } from '../src/roles/researcher/components/LibraryAddMenu'
+import { updatedText } from '../src/lib/researcher'
+
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
+vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+  window.history.replaceState(null, '', '/')
+})
+
+const NO_TALLY = { backed: 0, silent: 0, contradicted: 0, unchecked: 0 }
+const PROJECTS = [
+  {
+    id: 'p1', name: 'Retrieval survey', papers: 1, claims: 9, clusters: 1,
+    tally: { backed: 3, silent: 1, contradicted: 1, unchecked: 4 }, updated: new Date().toISOString(),
+  },
+  { id: 'p2', name: 'Empty one', papers: 0, claims: 0, clusters: 0, tally: NO_TALLY, updated: '' },
+  { id: 'unsorted', name: 'Unsorted', papers: 2, claims: 0, clusters: 0, tally: NO_TALLY, updated: '', unsorted: true },
+]
+
+const paper = (over: Record<string, unknown>) => ({
+  id: 'a1', title: 'ColBERTv2', cite: 'Santhanam · 2022', cluster: 'Late interaction', claims: 9,
+  backed: 6, contradicted: 1, linked: [], sourcesIndexed: 3, sourcesNotIndexed: 0, indexed: 'yes', index: '',
+  ...over,
+})
+
+const LIBRARY = {
+  summary: '3 papers',
+  clusters: ['All', 'Unverified', 'Late interaction', 'Tooling'],
+  papers: [
+    paper({}),
+    paper({ id: 'a2', title: 'Tevatron toolkit', cite: 'Gao · 2022', cluster: 'Tooling', claims: 4, backed: null, contradicted: null, linked: ['ColBERTv2', 'PLAID'] }),
+    paper({ id: 'a3', title: 'Backed only', cite: 'Lee · 2021', cluster: 'Tooling', claims: 1, backed: 1, contradicted: 0, sourcesNotIndexed: 2 }),
+    paper({ id: 'a4', title: 'Silent only', cite: 'Kim · 2020', cluster: 'Tooling', claims: 2, backed: 0, contradicted: null, sourcesNotIndexed: 1, indexed: 'no' }),
+  ],
+}
+
+const ANALYSES = [
+  { id: 'a1', paper: 'colbert.pdf', file: 'colbert.pdf', title: 'ColBERTv2', status: 'done', claims: [], stages: [] },
+  { id: 'a5', paper: 'plaid.pdf', file: 'plaid.pdf', title: 'PLAID', status: 'done', claims: [], stages: [] },
+  { id: 'a6', paper: 'raw/new.pdf', file: 'raw/new.pdf', status: 'done', claims: [], stages: [] },
+  { id: 'a7', paper: 'p.pdf', status: 'done', claims: [], stages: [] },
+  { id: 'a8', paper: 'running.pdf', file: 'running.pdf', title: 'Running one', status: 'running', claims: [], stages: [] },
+]
+
+type Call = { method: string; path: string; body: unknown }
+
+function gateway(options: { projects?: unknown; library?: unknown; fail?: string[] } = {}) {
+  const calls: Call[] = []
+  const stub = vi.fn(async (url: string, init?: RequestInit) => {
+    const path = String(url).replace(/^\/api/, '')
+    const method = init?.method ?? 'GET'
+    calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    if (options.fail?.includes(`${method} ${path}`)) return new Response('boom', { status: 500 })
+    if (method === 'GET' && path === '/analyses') return Response.json(ANALYSES)
+    if (method === 'GET' && path.endsWith('/library')) return Response.json(options.library ?? LIBRARY)
+    if (method === 'GET' && path === '/researcher/projects') return Response.json(options.projects ?? PROJECTS)
+    if (method === 'POST' && path === '/researcher/projects') return Response.json({ id: 'new1' })
+    if (method === 'DELETE') return Response.json({ deleted: 'p1' })
+    if (path.startsWith('/researcher/projects')) return Response.json({ id: 'p1' })
+    return Response.json([])
+  })
+  vi.stubGlobal('fetch', stub)
+  return calls
+}
+
+function client() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
+function renderLibrary(search = '') {
+  window.history.replaceState(null, '', `?role=researcher&screen=library${search}`)
+  return render(
+    <QueryClientProvider client={client()}>
+      <ResearcherApp />
+    </QueryClientProvider>,
+  )
+}
+
+describe('project list', () => {
+  it('shows each project with its counts, tally bar and update time', async () => {
+    gateway()
+    renderLibrary()
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+    expect(screen.getByText('3 papers · 9 claims')).toBeInTheDocument()
+    expect(screen.getByText('1 paper · 9 claims')).toBeInTheDocument()
+    expect(screen.getByText('2 papers · not in a project yet')).toBeInTheDocument()
+    expect(screen.getByText('Updated today')).toBeInTheDocument()
+    expect(screen.getByText('New analyses land here')).toBeInTheDocument()
+    // A project with no claims has no tally bar to draw.
+    expect(document.querySelectorAll('.h-2.w-full').length).toBe(1)
+  })
+
+  it('opens a project when its card is clicked', async () => {
+    gateway()
+    renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Retrieval survey' }))
+    expect(await screen.findByRole('heading', { name: 'Retrieval survey' })).toBeInTheDocument()
+    expect(await screen.findByText('Tevatron toolkit')).toBeInTheDocument()
+  })
+
+  it('says the library could not load when the projects call fails', async () => {
+    gateway({ fail: ['GET /researcher/projects'] })
+    renderLibrary()
+    expect(await screen.findByText('Your library could not load')).toBeInTheDocument()
+  })
+
+  it('shows a loading screen until the projects arrive', async () => {
+    gateway()
+    renderLibrary()
+    expect(screen.getByText('Loading your projects…')).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Library' })
+  })
+
+  it('lists the projects when the host gives no way to analyse a new paper', async () => {
+    gateway()
+    render(
+      <QueryClientProvider client={client()}>
+        <Library onOpenAnalysis={() => {}} />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+  })
+
+  it('draws no Add papers menu when there is nothing to add', () => {
+    const { container } = render(<LibraryAddMenu items={[]} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('the Add papers menu closes on Escape and on a click outside it', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    const add = screen.getByRole('button', { name: 'Add papers' })
+    fireEvent.click(add)
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    fireEvent.click(add)
+    fireEvent.mouseDown(screen.getByRole('menu'))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('opens Analyses from the Analyze a new paper menu item', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Analyze a new paper/ }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('analyses')
+  })
+})
+
+describe('new project', () => {
+  it('opens from ?new=1, and Escape closes it', async () => {
+    gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'Create project' })).toBeDisabled()
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('opens from the New project button and Cancel closes it', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('the dashed tile also opens it, and clicking the scrim closes it', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.click(screen.getByText('+ New project'))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(dialog.firstElementChild!)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('creates the project with a trimmed name and opens it', async () => {
+    const calls = gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. Retrieval survey'), { target: { value: '  Graphs  ' } })
+    fireEvent.change(within(dialog).getByPlaceholderText('What is this project about?'), { target: { value: ' notes ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: 'POST', path: '/researcher/projects', body: { name: 'Graphs', description: 'notes' },
+      }),
+    )
+    await waitFor(() => expect(calls.some((c) => c.path === '/researcher/projects/new1/library')).toBe(true))
+  })
+
+  it('keeps the dialog open and says so when creating fails', async () => {
+    gateway({ fail: ['POST /researcher/projects'] })
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. Retrieval survey'), { target: { value: 'Graphs' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not create the project. Try again.'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('does not create a project from a blank name', async () => {
+    const calls = gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. Retrieval survey'), { target: { value: '   ' } })
+    fireEvent.submit(dialog.querySelector('form')!)
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+})
+
+describe('renaming and deleting', () => {
+  async function openMenu(name = 'Retrieval survey') {
+    const card = (await screen.findByText(name)).closest('.relative')! as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Project actions' }))
+    return card
+  }
+
+  it('Unsorted has no project menu', async () => {
+    gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Unsorted')).closest('.relative')! as HTMLElement
+    expect(within(card).queryByRole('button', { name: 'Project actions' })).not.toBeInTheDocument()
+  })
+
+  it('the menu closes on a click outside and on Escape', async () => {
+    gateway()
+    renderLibrary()
+    await openMenu()
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    await openMenu()
+    fireEvent.mouseDown(screen.getByRole('menu'))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Enter' })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('Rename saves the trimmed name on Enter', async () => {
+    const calls = gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.change(input, { target: { value: ' Renamed ' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() =>
+      expect(calls).toContainEqual({ method: 'PATCH', path: '/researcher/projects/p1', body: { name: 'Renamed' } }),
+    )
+    await waitFor(() => expect(screen.queryByDisplayValue('Renamed')).not.toBeInTheDocument())
+  })
+
+  it('stays in edit mode and says so when the rename fails', async () => {
+    gateway({ fail: ['PATCH /researcher/projects/p1'] })
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.change(input, { target: { value: 'Renamed' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not rename the project. Try again.'))
+    expect(screen.getByDisplayValue('Renamed')).toBeEnabled()
+  })
+
+  it('Rename with an unchanged or blank name sends nothing and leaves edit mode', async () => {
+    const calls = gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    fireEvent.submit(screen.getByDisplayValue('Retrieval survey').closest('form')!)
+    expect(screen.queryByDisplayValue('Retrieval survey')).not.toBeInTheDocument()
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.change(input, { target: { value: '  ' } })
+    fireEvent.submit(input.closest('form')!)
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+  })
+
+  it('Escape and leaving the field cancel the rename and restore the name', async () => {
+    gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    let input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.change(input, { target: { value: 'half typed' } })
+    fireEvent.keyDown(input, { key: 'a' })
+    expect(screen.getByDisplayValue('half typed')).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.getByText('Retrieval survey')).toBeInTheDocument()
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    expect(screen.getByDisplayValue('Retrieval survey')).toBeInTheDocument()
+    input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.blur(input)
+    expect(screen.getByText('Retrieval survey')).toBeInTheDocument()
+  })
+
+  it('Delete project asks first, then removes only the project', async () => {
+    const calls = gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Delete "Retrieval survey"?')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Its 1 paper move back to Unsorted/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Delete project' })[0])
+    await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', path: '/researcher/projects/p1', body: undefined }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('Cancel, Escape and the scrim dismiss the delete dialog', async () => {
+    gateway()
+    renderLibrary()
+    for (const dismiss of [
+      (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })),
+      (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' }),
+      (dialog: HTMLElement) => fireEvent.click(dialog.firstElementChild!),
+    ]) {
+      await openMenu()
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+      dismiss(screen.getByRole('dialog'))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    }
+  })
+
+  it('keeps the dialog shut against Escape and the scrim while the delete is running', async () => {
+    let finish!: () => void
+    const calls = gateway()
+    const stub = vi.mocked(fetch)
+    const inner = stub.getMockImplementation()!
+    stub.mockImplementation(async (url, init) => {
+      if (init?.method === 'DELETE') await new Promise<void>((resolve) => (finish = resolve))
+      return inner(url, init)
+    })
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Delete project' })[0])
+    await screen.findByRole('button', { name: 'Deleting…' })
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    fireEvent.click(dialog.firstElementChild!)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await act(async () => finish())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(true)
+  })
+})
+
+describe('project detail', () => {
+  it('shows a loading screen, then the papers with their standing and index notes', async () => {
+    let release!: () => void
+    gateway()
+    const stub = vi.mocked(fetch)
+    const inner = stub.getMockImplementation()!
+    stub.mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/library')) await new Promise<void>((resolve) => (release = resolve))
+      return inner(url, init)
+    })
+    renderLibrary('&project=p1')
+    expect(await screen.findByText('Loading this project…')).toBeInTheDocument()
+    release()
+    expect(await screen.findByRole('heading', { name: 'Retrieval survey' })).toBeInTheDocument()
+    expect(screen.getByText('4 papers · 16 claims · 12 checked')).toBeInTheDocument()
+    expect(screen.getByText('Linked to ColBERTv2, PLAID')).toBeInTheDocument()
+    expect(screen.getAllByText('Sources not in a public index')).toHaveLength(2)
+    expect(screen.getByText('Not found in a public index')).toBeInTheDocument()
+    expect(screen.getByText('1 contradicts')).toBeInTheDocument()
+    expect(screen.getAllByText(/back it|backs it/).length).toBeGreaterThan(0)
+  })
+
+  it('names a project the list does not know "Project"', async () => {
+    gateway()
+    renderLibrary('&project=gone')
+    expect(await screen.findByRole('heading', { name: 'Project' })).toBeInTheDocument()
+  })
+
+  it('says the project could not load when its library call fails', async () => {
+    gateway({ fail: ['GET /researcher/projects/p1/library'] })
+    renderLibrary('&project=p1')
+    expect(await screen.findByText('This project could not load')).toBeInTheDocument()
+  })
+
+  it('goes back to the project list', async () => {
+    gateway()
+    renderLibrary('&project=p1')
+    fireEvent.click(await screen.findByRole('button', { name: /← Projects/ }))
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+  })
+
+  it('opens the analysis behind a paper row', async () => {
+    gateway()
+    renderLibrary('&project=p1')
+    fireEvent.click((await screen.findByText('Silent only')).closest('button')!)
+    expect(new URLSearchParams(window.location.search).get('analysis')).toBe('a4')
+  })
+
+  it('filters by segment, with Has conflicts second and Unverified shown as Not analyzed', async () => {
+    gateway()
+    renderLibrary('&project=p1')
+    await screen.findByText('ColBERTv2')
+    const segments = screen
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-pressed') && /[0-9]$/.test(b.textContent ?? ''))
+    expect(segments.map((b) => b.textContent)).toEqual([
+      'All 4', 'Has conflicts 1', 'Not analyzed 1', 'Late interaction 1', 'Tooling 3',
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Has conflicts 1' }))
+    expect(screen.getByText('ColBERTv2')).toBeInTheDocument()
+    expect(screen.queryByText('Tevatron toolkit')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not analyzed 1' }))
+    expect(screen.getByText('Tevatron toolkit')).toBeInTheDocument()
+    expect(screen.queryByText('ColBERTv2')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tooling 3' }))
+    expect(screen.getByText('Backed only')).toBeInTheDocument()
+    expect(screen.queryByText('ColBERTv2')).not.toBeInTheDocument()
+  })
+
+  it('filters by the typed text, and starts from ?q=', async () => {
+    gateway()
+    renderLibrary('&project=p1&q=gao')
+    expect(await screen.findByText('Tevatron toolkit')).toBeInTheDocument()
+    expect(screen.queryByText('ColBERTv2')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter papers' }), { target: { value: 'zzz' } })
+    expect(screen.getByText('No papers match.')).toBeInTheDocument()
+  })
+
+  it('folds rows past seven behind Show all', async () => {
+    const many = Array.from({ length: 9 }, (_, i) => paper({ id: `m${i}`, title: `Paper ${i}`, cluster: '' }))
+    gateway({ library: { summary: '', clusters: [], papers: many } })
+    renderLibrary('&project=p1')
+    await screen.findByText('Paper 0')
+    expect(screen.queryByText('Paper 8')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 9 papers' }))
+    expect(screen.getByText('Paper 8')).toBeInTheDocument()
+    // No clusters, so no Cluster column and no segment buttons besides the conflicts one.
+    expect(screen.queryByText('Cluster')).not.toBeInTheDocument()
+  })
+
+  it('says a project with no papers is empty', async () => {
+    gateway({ library: { summary: '', clusters: [], papers: [] } })
+    renderLibrary('&project=p2')
+    expect(await screen.findByText('No papers in this project yet.')).toBeInTheDocument()
+  })
+
+  it('lists only the analysed-papers action in a real project, and none for Unsorted', async () => {
+    gateway()
+    const first = renderLibrary('&project=p1')
+    await screen.findByText('ColBERTv2')
+    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2)
+    first.unmount()
+
+    renderLibrary('&project=unsorted')
+    await screen.findByText('ColBERTv2')
+    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1)
+  })
+})
+
+describe('adding analysed papers', () => {
+  async function openPicker() {
+    renderLibrary('&project=p1')
+    await screen.findByText('ColBERTv2')
+    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /From your analysed papers/ }))
+    return screen.findByRole('dialog')
+  }
+
+  it('lists finished analyses not yet in the project, with a title or file name', async () => {
+    gateway()
+    const dialog = await openPicker()
+    // a1 is already in the project and a8 is still running.
+    expect(within(dialog).queryByText('ColBERTv2')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Running one')).not.toBeInTheDocument()
+    expect(within(dialog).getByText('PLAID')).toBeInTheDocument()
+    expect(within(dialog).getByText('new.pdf')).toBeInTheDocument()
+    expect(within(dialog).getByText('p.pdf')).toBeInTheDocument()
+  })
+
+  it('adds one paper and disables the other Add buttons meanwhile', async () => {
+    let finish!: () => void
+    const calls = gateway()
+    const stub = vi.mocked(fetch)
+    const inner = stub.getMockImplementation()!
+    stub.mockImplementation(async (url, init) => {
+      if (init?.method === 'POST' && String(url).endsWith('/papers')) await new Promise<void>((r) => (finish = r))
+      return inner(url, init)
+    })
+    const dialog = await openPicker()
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Add' })[0])
+    await within(dialog).findByRole('button', { name: 'Adding…' })
+    expect(within(dialog).getAllByRole('button', { name: 'Add' })[0]).toBeDisabled()
+    await act(async () => finish())
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: 'POST', path: '/researcher/projects/p1/papers', body: { analysis_id: 'a5' },
+      }),
+    )
+    await waitFor(() => expect(within(dialog).queryByRole('button', { name: 'Adding…' })).not.toBeInTheDocument())
+  })
+
+  it('shows the empty message while the analyses are still loading', async () => {
+    gateway()
+    const stub = vi.mocked(fetch)
+    const answer = stub.getMockImplementation()!
+    stub.mockImplementation(async (url, init) =>
+      String(url) === '/api/analyses' ? new Promise<Response>(() => {}) : answer(url, init),
+    )
+    const dialog = await openPicker()
+    expect(within(dialog).getByText('Every analysed paper is already in this project.')).toBeInTheDocument()
+  })
+
+  it('says so when every analysed paper is already in the project', async () => {
+    gateway({ library: { ...LIBRARY, papers: [paper({ id: 'a1' }), paper({ id: 'a5', title: 'B' }), paper({ id: 'a6', title: 'C' }), paper({ id: 'a7', title: 'D' })] } })
+    const dialog = await openPicker()
+    expect(within(dialog).getByText('Every analysed paper is already in this project.')).toBeInTheDocument()
+  })
+
+  it('closes with Done, Escape or the scrim', async () => {
+    gateway()
+    for (const dismiss of [
+      (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Done' })),
+      (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' }),
+      (dialog: HTMLElement) => fireEvent.click(dialog.firstElementChild!),
+    ]) {
+      const dialog = await openPicker()
+      dismiss(dialog)
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      document.body.innerHTML = ''
+    }
+  })
+})
+
+describe('updatedText', () => {
+  const base = { id: 'p', name: 'P', papers: 0, claims: 0, clusters: 0, tally: NO_TALLY }
+  const ago = (days: number) => new Date(Date.now() - days * 86_400_000 - 1000).toISOString()
+
+  it('words each age', () => {
+    expect(updatedText({ ...base, updated: ago(0) })).toBe('Updated today')
+    expect(updatedText({ ...base, updated: ago(1) })).toBe('Updated yesterday')
+    expect(updatedText({ ...base, updated: ago(5) })).toBe('Updated 5 days ago')
+    expect(updatedText({ ...base, updated: '' })).toBe('')
+    expect(updatedText({ ...base, updated: '', unsorted: true })).toBe('New analyses land here')
+  })
+})

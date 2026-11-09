@@ -1,0 +1,8 @@
+{
+  "id": "a-new",
+  "paper": "10.1145/new-paper",
+  "status": "running",
+  "file": "new-paper.pdf",
+  "claims": [],
+  "stages": [{ "stage": "queued", "message": "Waiting for a worker", "at": 1760000000 }]
+}

@@ -62,11 +62,14 @@ export function NewProjectMenu({
   onNewProject,
   onUpload,
   onWrite,
+  writing = false,
   onAddBibliography,
 }: {
   onNewProject: () => void
   onUpload: () => void
   onWrite: () => void
+  /** "Write a draft" is creating one: the item is disabled until it exists. */
+  writing?: boolean
   onAddBibliography: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -118,7 +121,7 @@ export function NewProjectMenu({
             <FileUp className="size-4 text-accent" aria-hidden="true" />
             Upload .tex or .zip
           </MenuItem>
-          <MenuItem role="menuitem" onClick={item(onWrite)} data-ask-target={askTarget({ kind: 'action', id: 'write-draft' })} className="px-3 font-normal">
+          <MenuItem role="menuitem" onClick={item(onWrite)} disabled={writing} data-ask-target={askTarget({ kind: 'action', id: 'write-draft' })} className="px-3 font-normal">
             <FileText className="size-4 text-accent" aria-hidden="true" />
             Write a draft
           </MenuItem>
@@ -138,7 +141,18 @@ export function NewProjectMenu({
 }
 
 /** Home with no drafts yet (Redesign state/LaTeX projects empty). */
-export function NoDraftsCard({ onUpload, onWrite, onAddBibliography }: { onUpload: () => void; onWrite: () => void; onAddBibliography: () => void }) {
+export function NoDraftsCard({
+  onUpload,
+  onWrite,
+  writing = false,
+  onAddBibliography,
+}: {
+  onUpload: () => void
+  onWrite: () => void
+  /** "Write a draft" is creating one: disabled until it exists. */
+  writing?: boolean
+  onAddBibliography: () => void
+}) {
   return (
     <Card className="flex flex-col items-center gap-3 rounded-2xl px-6 py-10 text-center">
       <span className="flex size-11 items-center justify-center rounded-full bg-accent-soft">
@@ -150,7 +164,7 @@ export function NoDraftsCard({ onUpload, onWrite, onAddBibliography }: { onUploa
         <Button onClick={onUpload} data-ask-target={askTarget({ kind: 'action', id: 'upload' })}>
           Upload .tex or .zip
         </Button>
-        <TextButton onClick={onWrite} className={`text-sm ${LINK}`} data-ask-target={askTarget({ kind: 'action', id: 'write-draft' })}>
+        <TextButton onClick={onWrite} disabled={writing} className={`text-sm ${LINK}`} data-ask-target={askTarget({ kind: 'action', id: 'write-draft' })}>
           Write a draft
         </TextButton>
         <TextButton onClick={onAddBibliography} className={`text-sm ${LINK}`} data-ask-target={askTarget({ kind: 'action', id: 'add-bibliography' })}>

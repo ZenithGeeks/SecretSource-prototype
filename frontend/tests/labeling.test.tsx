@@ -33,6 +33,15 @@ const gateway = vi.hoisted(() => ({
   searched: [] as unknown[],
   found: [] as unknown[],
   failSearch: false,
+  pool: {
+    topics: ['NLP'],
+    me: 'chanya',
+    people: [{ name: 'chanya', topic: 'NLP' }],
+    papers: [
+      { analysis_id: 'a1', title: 'Paper A', topic: 'NLP', claims: 2, judged: 0, team_judged: 0, labelers: ['chanya'], status: 'done', reason: '', mine: true, added_by: 'chanya', subject: '', keywords: [], venue_rank: '', venue_rank_source: '' },
+      { analysis_id: 'a2', title: 'Paper B', topic: 'NLP', claims: 4, judged: 1, team_judged: 1, labelers: ['chanya'], status: 'done', reason: '', mine: false, added_by: 'nuttadon', subject: '', keywords: [], venue_rank: '', venue_rank_source: '' },
+    ],
+  },
 }))
 
 vi.mock('../src/lib/api', async (original) => ({
@@ -48,6 +57,7 @@ vi.mock('../src/lib/api', async (original) => ({
       gateway.posts.push(JSON.parse(String(init.body)))
       return { claims: 1, candidates: 2, labels: 1 }
     }
+    if (path === '/labeling/pool') return gateway.pool
     if (path.startsWith('/labeling/sessions/')) return gateway.session
     throw new Error(`unexpected ${path}`)
   }),
@@ -87,10 +97,19 @@ import {
   bestCandidate,
   buildSave,
   byline,
+  cloudflareBlocked,
   draftFromSaved,
   emptyDraft,
+  emptyLabel,
   isDone,
+  nextPaperInTopic,
+  nextUnfinishedIndex,
+  problem,
+  readConfidence,
+  referenceFinished,
+  referenceSummary,
   remaining,
+  saveNextTarget,
   workClaims,
   type Draft,
   type WorkClaim,
@@ -101,6 +120,21 @@ import { Workspace } from '../src/roles/labeler/screens/Workspace'
 const claim: WorkClaim = { ...gateway.session.claims[0], origin: 'extracted' }
 const refs = gateway.session.references
 const judged = (over: Partial<Draft>): Draft => ({ ...emptyDraft(), ...over })
+
+describe('a failed labeling call', () => {
+  const challenge = '403: <!DOCTYPE html><html><title>Just a moment...</title><body>cf-mitigated</body></html>'
+
+  it('shows a reload message for a Cloudflare challenge and keeps a gateway 403 as access', () => {
+    expect(cloudflareBlocked(challenge)).toBe(true)
+    expect(cloudflareBlocked('403: Just a moment...')).toBe(true)
+    expect(cloudflareBlocked('403: {"detail":"this account is not on the labeling team"}')).toBe(false)
+    expect(cloudflareBlocked('403: ')).toBe(false)
+    expect(problem(new Error(challenge))).toMatchObject({
+      title: "The site's protection blocked this request",
+    })
+    expect(problem(new Error('403: {"detail":"no access"}')).title).toBe("You can't use the labeler")
+  })
+})
 
 describe('what is left to decide', () => {
   it('asks for a decision on the claim first', () => {
@@ -122,12 +156,83 @@ describe('what is left to decide', () => {
     expect(isDone(claim, done, refs)).toBe(true)
   })
 
+  it('does not treat an unset confidence as Medium', () => {
+    expect(emptyLabel().confidence).toBeNull()
+    const leveled = judged({
+      status: 'accepted',
+      cands: { c1: 'relevant', c2: 'rejected' },
+      labels: { refB: { evidence: 3, rationale: '', confidence: null } },
+    })
+    expect(remaining(claim, leveled, refs)).toEqual(['Give [b4] a confidence'])
+    expect(buildSave(claim, leveled).labels[0].confidence).toBe('')
+    expect(readConfidence('')).toBeNull()
+    expect(readConfidence(undefined)).toBe('medium')
+    expect(readConfidence('high')).toBe('high')
+    const back = draftFromSaved(claim, {
+      claims: [],
+      candidates: [],
+      labels: [
+        { claim_id: 'paperA#0', reference_id: 'refB', evidence: '3', rationale: '', confidence: '' },
+        { claim_id: 'paperA#0', reference_id: 'refOld', evidence: '2', rationale: '', confidence: 'medium' },
+      ],
+    })
+    expect(back.labels.refB.confidence).toBeNull()
+    expect(back.labels.refOld.confidence).toBe('medium')
+  })
+
+  it('folds a reference once its passages are judged and it has a level', () => {
+    const open = judged({ status: 'accepted', cands: { c1: 'relevant' } })
+    expect(referenceFinished(claim, open, 'refB')).toBe(false)
+    const done = judged({
+      status: 'accepted',
+      cands: { c1: 'relevant', c2: 'rejected' },
+      labels: { refB: { evidence: 3, rationale: '', confidence: 'medium' } },
+    })
+    expect(referenceFinished(claim, done, 'refB')).toBe(true)
+    expect(referenceSummary(claim, done, refs[0], 'refB')).toBe('[b4] 1/2 relevant · Clear · Medium')
+  })
+
   it('wants the new wording of an edited claim', () => {
     expect(remaining(claim, judged({ status: 'edited', cands: { c1: 'rejected', c2: 'rejected' } }), refs)).toEqual([
       'Write the edited claim',
     ])
     const unchanged = judged({ status: 'edited', edited: claim.claim, cands: { c1: 'rejected', c2: 'rejected' } })
     expect(remaining(claim, unchanged, refs)).toEqual(['Write the edited claim'])
+  })
+})
+
+describe('the next unfinished claim', () => {
+  const bare = (id: string): WorkClaim => ({
+    claim_id: id, claim: id, sentence: '', section: '', source: null, candidates: [], origin: 'extracted',
+  })
+  const six = ['1', '2', '3', '4', '5', '6'].map(bare)
+  const rejected = (): Draft => ({ ...emptyDraft(), status: 'rejected' })
+  const finished = Object.fromEntries(six.map((c) => [c.claim_id, rejected()]))
+
+  it('goes to the next unfinished claim, wrapping past finished ones', () => {
+    const drafts = { ...finished, '6': emptyDraft() }
+    const saved = { ...finished, '6': emptyDraft() }
+    // Claims 1-5 finished, 6 open. Saving claim 3 (index 2) opens claim 6.
+    expect(nextUnfinishedIndex(six, drafts, saved, [], 2)).toBe(5)
+    expect(saveNextTarget(six, drafts, saved, [], 2)).toEqual({ kind: 'claim', index: 5 })
+  })
+
+  it('says the paper is done when the last unfinished claim is saved', () => {
+    const drafts = { ...finished }
+    const saved = { ...finished, '6': emptyDraft() }
+    expect(saveNextTarget(six, drafts, saved, [], 5)).toEqual({ kind: 'paper-done' })
+  })
+
+  it('moves to the next claim in order when every claim was already finished', () => {
+    const saved = { ...finished }
+    const drafts = { ...finished, '3': { ...rejected(), edited: 'a small fix' } }
+    expect(saveNextTarget(six, drafts, saved, [], 2)).toEqual({ kind: 'claim', index: 3 })
+  })
+
+  it('picks the next paper in the same topic that is not finished', () => {
+    const pool = gateway.pool as Parameters<typeof nextPaperInTopic>[0]
+    expect(nextPaperInTopic(pool, 'a1')?.analysis_id).toBe('a2')
+    expect(nextPaperInTopic({ ...pool, papers: pool.papers.map((p) => ({ ...p, topic: 'CV' })) }, 'a1')).toBeNull()
   })
 })
 
@@ -210,6 +315,10 @@ describe('the workspace', () => {
     fireEvent.click(relevant1)
     fireEvent.click(notRelevant2)
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    expect(screen.getByRole('radio', { name: /^Low/ })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('radio', { name: /^Medium/ })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(/Give \[b4\] a confidence/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /^Medium/ }))
     expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
@@ -217,7 +326,7 @@ describe('the workspace', () => {
     expect(gateway.posts[0]).toMatchObject({
       claims: [{ claim_id: 'paperA#0', status: 'accepted' }],
       candidates: [{ cand_id: 'c1', status: 'relevant' }, { cand_id: 'c2', status: 'rejected' }],
-      labels: [{ reference_id: 'refB', evidence: 3, spans: ['recall rose by 4 points'] }],
+      labels: [{ reference_id: 'refB', evidence: 3, confidence: 'medium', spans: ['recall rose by 4 points'] }],
     })
     expect(await screen.findByText('Saved 4 rows')).toBeInTheDocument()
   })
@@ -233,6 +342,49 @@ describe('the workspace', () => {
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
     fireEvent.keyDown(window, { key: '4' })
     expect(screen.getByRole('radio', { name: /4 · Strong/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('keeps the claim in view after a decision, and shows an edited wording', async () => {
+    await open()
+    expect(screen.queryByRole('region', { name: 'Claim being judged' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    const pin = screen.getByRole('region', { name: 'Claim being judged' })
+    expect(pin).toHaveTextContent('Method Y improves recall.')
+    expect(pin.querySelector('.line-clamp-2')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show the full claim' }))
+    expect(pin.querySelector('.line-clamp-2')).toBeNull()
+
+    fireEvent.keyDown(window, { key: 'e' })
+    fireEvent.change(screen.getByLabelText('The claim, as it should read'), { target: { value: 'Y raises recall.' } })
+    expect(screen.getByRole('region', { name: 'Claim being judged' })).toHaveTextContent('Y raises recall.')
+  })
+
+  it('pins the claim above the save bar on a narrow screen', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByRole('region', { name: 'Claim being judged' }).parentElement).toHaveClass('sticky')
+  })
+
+  it('says what a shortcut just did, and Z undoes that one step', async () => {
+    await open()
+    fireEvent.keyDown(window, { key: 'k' })
+    expect(screen.getByRole('status')).toHaveTextContent('Claim → Keep · Z to undo')
+    fireEvent.keyDown(window, { key: 'r' })
+    expect(screen.getByRole('status')).toHaveTextContent('#1 Relevant · Z to undo')
+    expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('unrelated text')
+    fireEvent.keyDown(window, { key: 'z' })
+    expect(screen.getByRole('status')).toHaveTextContent('Undone')
+    expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('recall rose by 4 points')
+    fireEvent.keyDown(window, { key: 'z' })
+    expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.keyDown(window, { key: 'r' })
+    fireEvent.keyDown(window, { key: '4' })
+    expect(screen.getByRole('status')).toHaveTextContent('[b4] → 4 Strong · Z to undo')
+    expect(screen.getByRole('radio', { name: /4 · Strong/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Keys 1–4 set the level here')).toBeInTheDocument()
   })
 
   it('keys 1-4 do nothing while the reference shown has no relevant passage', async () => {
@@ -326,12 +478,46 @@ describe('the workspace', () => {
     expect(screen.getByLabelText('The claim, as it should read')).toHaveValue('Method Y improves recall.')
   })
 
+  it('saves and opens the next unfinished claim, then says the paper is done', async () => {
+    const onBack = vi.fn()
+    const onOpenPaper = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Workspace analysisId="a1" onBack={onBack} onOpenPaper={onOpenPaper} />
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+    fireEvent.click(screen.getByRole('button', { name: /^Claim 2, not started/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and next/ }))
+    // Claim 2 is finished. Claim 1 is still open, so Save and next wraps back to it.
+    expect(await screen.findByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save and next/ }))
+    expect(await screen.findByRole('heading', { name: 'This paper is labeled' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next paper in your topic' }))
+    expect(onOpenPaper).toHaveBeenCalledWith('a2')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to papers' }))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('jumps to the first unfinished claim from the progress count', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '1 of 2 claims finished' }))
+    expect(await screen.findByRole('heading', { name: /Claim 2 of 2/ })).toBeInTheDocument()
+  })
+
   it('does not count a finished claim as finished until it is saved', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
     fireEvent.click(screen.getAllByRole('radio', { name: /^Not relevant/ })[1])
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    fireEvent.keyDown(window, { key: 'h' })
+    expect(screen.getByRole('radio', { name: /^High/ })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
     expect(screen.getByText('0 of 2 claims finished')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ })).toBeInTheDocument()
@@ -524,17 +710,15 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /Reject/ })).toHaveTextContent('No, it is not a claim of this paper.')
   })
 
-  it('lists what every level means under the picker, with the chosen one marked', async () => {
+  it('puts a level’s meaning on its button, and one line for the chosen level', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
-    const rubric = screen.getByRole('list', { name: 'What each level means' })
-    expect(within(rubric).getAllByRole('listitem')).toHaveLength(4)
-    expect(within(rubric).getByText(/The passage backs the claim, with a gap in scope or detail\./)).toBeInTheDocument()
-    expect(within(rubric).queryByRole('listitem', { current: true })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('radio', { name: '3 · Clear' }))
-    expect(within(rubric).getByRole('listitem', { current: true })).toHaveTextContent(/^3 Clear/)
-    expect(screen.getByText('Level 3, Clear: The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'What each level means' })).not.toBeInTheDocument()
+    const clear = screen.getByRole('radio', { name: '3 · Clear' })
+    expect(clear).toHaveAttribute('title', 'The passage backs the claim, with a gap in scope or detail.')
+    fireEvent.click(clear)
+    expect(screen.getByText('3 Clear — The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
   })
 
   it('keeps an undecided claim when evidence is added to it', async () => {
@@ -744,7 +928,7 @@ describe('unsaved labels', () => {
         <Workspace analysisId="a1" />
       </QueryClientProvider>,
     )
-    await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
+    await screen.findByRole('heading', { name: /Claim 1 of 2/ })
     return view
   }
 

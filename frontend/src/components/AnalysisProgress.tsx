@@ -13,33 +13,31 @@ import { useState } from 'react'
 import { useNow } from '../lib/timeAgo'
 
 import type { Claim, Stage } from '../lib/api'
-import type { Progress, StepState } from '../lib/progress'
-import { duration, summarise } from '../lib/progress'
+import type { Progress, Step, StepState } from '../lib/progress'
+import { count, duration, summarise } from '../lib/progress'
 import { cn } from '../lib/utils'
 import { PipelineStages } from './PipelineStages'
 import { TextButton } from './ui'
-
-const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
-
 
 type Tile = { key: string; label: string; detail: string; state: StepState }
 
 /** The run's five steps, folded into the four the reader sees: the paper is read, then its claims
  * are found, planning and checking are one "match citations", figures and audit one "weigh". */
 function tilesOf(progress: Progress, stages: Stage[]): Tile[] {
-  const step = (key: string) => progress.steps.find((item) => item.key === key)
+  // summarise always returns all five steps.
+  const step = Object.fromEntries(progress.steps.map((item) => [item.key, item])) as Record<string, Step>
   const fold = (...keys: string[]): StepState => {
-    const states = keys.map((key) => step(key)?.state ?? 'todo')
+    const states = keys.map((key) => step[key].state)
     if (states.includes('failed')) return 'failed'
     if (states.includes('current')) return 'current'
     if (states.every((state) => state === 'done' || state === 'skipped')) return 'done'
     return states.includes('done') ? 'current' : 'todo'
   }
-  const read = step('read')
-  const reading: StepState = stages.some((s) => s.stage === 'extracting' || s.stage === 'extracted')
-    ? 'done'
-    : read?.state ?? 'todo'
-  const claims: StepState = read?.state === 'done' ? 'done' : reading === 'done' ? (read?.state === 'failed' ? 'failed' : 'current') : 'todo'
+  const read = step.read
+  const reading: StepState = stages.some((s) => s.stage === 'extracting' || s.stage === 'extracted') ? 'done' : read.state
+  let claims: StepState = 'todo'
+  if (read.state === 'done') claims = 'done'
+  else if (reading === 'done') claims = read.state === 'failed' ? 'failed' : 'current'
   const matching = fold('plan', 'check')
   const weighing = fold('figures', 'audit')
   const found = progress.checksTotal !== null
@@ -48,7 +46,7 @@ function tilesOf(progress: Progress, stages: Stage[]): Tile[] {
   const waiting = (state: StepState) => (state === 'todo' ? 'Waiting' : '')
   return [
     { key: 'read', label: 'Read the paper', detail: waiting(reading), state: reading },
-    { key: 'claims', label: 'Find the claims', detail: read?.detail || waiting(claims), state: claims },
+    { key: 'claims', label: 'Find the claims', detail: read.detail || waiting(claims), state: claims },
     { key: 'match', label: 'Match citations', detail: found || waiting(matching), state: matching },
     { key: 'weigh', label: 'Weigh the evidence', detail: waiting(weighing), state: weighing },
   ]
@@ -124,13 +122,17 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
 
   // A finished run is one quiet line; its details open on request.
   if (!running && !details) {
-    const parts = [
-      count(progress.claims, 'claim'),
-      checked ? count(progress.checksDone, 'check') : 'sources not checked',
+    // These count checks (one per claim and cited work), not claims, unlike the tiles below.
+    const outcomes = [
       progress.verdicts.supports ? `${progress.verdicts.supports} backed` : '',
       progress.verdicts.refutes ? `${progress.verdicts.refutes} contradicted` : '',
       progress.verdicts.insufficient ? `${progress.verdicts.insufficient} silent` : '',
-      progress.failed ? `${progress.failed} couldn't check` : '',
+      progress.failed ? `${progress.failed} couldn't run` : '',
+    ].filter(Boolean)
+    const checks = count(progress.checksDone, 'source check')
+    const parts = [
+      count(progress.claims, 'claim'),
+      checked ? (outcomes.length ? `${checks}: ${outcomes.join(', ')}` : checks) : 'sources not checked',
       elapsed,
     ].filter(Boolean)
     return (
@@ -151,7 +153,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
             </span>
           ))}
         </p>
-        <TextButton onClick={() => setDetails(true)} className="flex items-center gap-1 text-xs">
+        <TextButton onClick={() => setDetails(true)} aria-expanded={false} className="flex items-center gap-1 text-xs">
           Details
           <ChevronRight className="size-3.5" />
         </TextButton>
@@ -176,7 +178,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
         {running ? (
           <p className="text-[13px] text-ink-muted tabular-nums">{percent}%</p>
         ) : (
-          <TextButton onClick={() => setDetails(false)} className="text-xs">
+          <TextButton onClick={() => setDetails(false)} aria-expanded className="text-xs">
             Hide details
           </TextButton>
         )}

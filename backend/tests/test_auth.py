@@ -41,3 +41,67 @@ def test_the_signed_in_user_is_the_acting_user_inside_the_route(monkeypatch):
     response = TestClient(app).get("/who", headers={"authorization": "Bearer token"})
 
     assert response.json() == {"acting": "user-a"}
+
+
+def _who_app() -> TestClient:
+    app = FastAPI()
+
+    @app.get("/who")
+    async def who(user: str | None = Depends(current_user)):
+        return {"user": user}
+
+    return TestClient(app)
+
+
+def _signed_in_as(monkeypatch, email: str, team: frozenset[str]) -> None:
+    from app import config
+
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(auth, "_user_for", lambda token: ("user-a", email))
+    monkeypatch.setattr(config, "TEAM_EMAILS", team)
+
+
+def test_an_account_on_the_team_list_gets_in(monkeypatch):
+    _signed_in_as(monkeypatch, "Ada@Example.com", frozenset({"ada@example.com"}))
+
+    response = _who_app().get("/who", headers={"authorization": "Bearer token"})
+
+    assert response.json() == {"user": "user-a"}
+
+
+def test_an_account_off_the_team_list_is_refused(monkeypatch):
+    _signed_in_as(monkeypatch, "stranger@example.com", frozenset({"ada@example.com"}))
+
+    response = _who_app().get("/who", headers={"authorization": "Bearer token"})
+
+    assert response.status_code == 403
+    assert "stranger@example.com" in response.json()["detail"]
+
+
+def test_an_empty_team_list_lets_every_account_in(monkeypatch):
+    _signed_in_as(monkeypatch, "stranger@example.com", frozenset())
+
+    response = _who_app().get("/who", headers={"authorization": "Bearer token"})
+
+    assert response.json() == {"user": "user-a"}
+
+
+def test_a_lookup_is_cached_with_its_email(monkeypatch):
+    calls = []
+
+    class Answer:
+        user = type("User", (), {"id": "user-b", "email": "bo@example.com"})()
+
+    class Auth:
+        def get_user(self, token):
+            calls.append(token)
+            return Answer()
+
+    from app import store
+
+    monkeypatch.setattr(store, "_supabase", lambda: type("Client", (), {"auth": Auth()})())
+    auth._cache.clear()
+
+    assert auth._user_for("fresh-token") == ("user-b", "bo@example.com")
+    assert auth._user_id_for("fresh-token") == "user-b"
+    assert calls == ["fresh-token"]

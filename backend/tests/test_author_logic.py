@@ -384,3 +384,52 @@ def test_the_report_never_prints_a_raw_error_page():
     html = logic.report_html({"title": "T"}, {"version": 1, "citations": [citation]})
     assert "the server sent an error page (Just a moment...)" in html
     assert "DOCTYPE" not in html
+
+
+def test_a_half_typed_entry_does_not_hide_the_entries_after_it():
+    text = (
+        '@string{sigir = "SIGIR"}\n'
+        "@article{broken, title={Unclosed\n\n"
+        "@misc{after, booktitle=sigir, year=2020}\n"
+    )
+    entries = logic.parse_bib(text)
+    assert [(e["key"], e["fields"].get("booktitle")) for e in entries] == [("after", "SIGIR")]
+
+
+def test_saved_bibtex_escapes_braces_accents_and_authors():
+    entry = logic.bibtex_for({"title": "{X} ~ y", "authorsList": ["Jan Müller"], "year": 2020})
+    assert entry.startswith("@inproceedings{muller2020,")
+    assert r'author = {Jan M\"uller}' in entry
+    assert r"title = {\{X\} {\textasciitilde} y}" in entry
+    assert logic.bib_surnames(logic.latex_escape("Jan Müller")) == ["Müller"]
+
+
+def test_repeated_keys_and_fields_keep_their_entry_without_extra_braces():
+    text = "@article{d, title={one}}\n@article{d, title={two}}\n@article{f, year={1}, year={2}}"
+    entries = logic.parse_bib(text)
+    titles = [(e["key"], e["fields"].get("title")) for e in entries]
+    assert titles == [("d", "one"), ("d", "two"), ("f", None)]
+
+
+def test_removing_an_entry_leaves_the_rest_of_the_file_as_written():
+    text = (
+        '@string{conf = "SIGIR"}\n'
+        "% my note\n"
+        "@article{gone, title={x}}\n\n"
+        "@misc(kept,\n    Title = conf, year=2020)\n"
+        "@article{m1, title={a} year={2020}}\n"
+    )
+    content, removed = logic.without_bib_entry(text, "gone")
+    assert removed == 1
+    assert content == (
+        '@string{conf = "SIGIR"}\n'
+        "% my note\n\n"
+        "@misc(kept,\n    Title = conf, year=2020)\n"
+        "@article{m1, title={a} year={2020}}\n"
+    )
+    assert logic.without_bib_entry(text, "absent") == (text, 0)
+
+
+def test_plain_text_keeps_the_words_inside_formatting_commands():
+    latex = r"We use \texttt{BERT} and \mbox{two words}, see \href{http://x}{here}."
+    assert logic.plain_text(latex) == "We use BERT and two words, see http://xhere."

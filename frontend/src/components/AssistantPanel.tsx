@@ -8,7 +8,7 @@
 
 import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
 import { MotionConfig } from 'framer-motion'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
@@ -18,7 +18,7 @@ import { STAMPS } from '../lib/stamps'
 import { OFFLINE_REASON, useFeature } from '../lib/features'
 import { cn } from '../lib/utils'
 import { askTarget, type Pointing } from '../lib/askCursor'
-import { parseCommand, type PaperRef } from '../lib/askCommands'
+import { parseCommand, type PaperRef, type Parsed } from '../lib/askCommands'
 import { AiCursor } from './AiCursor'
 import { AnswerActions } from './AnswerActions'
 import { AskInput } from './AskInput'
@@ -28,7 +28,7 @@ import { Mascot } from './Mascot'
 import type { Target } from './PageViewer'
 import { Stamp } from './Stamp'
 import { ThinkingState } from './ThinkingState'
-import { IconButton, Segmented } from './ui'
+import { Button, IconButton, Segmented } from './ui'
 
 /** What the chip says the question is about. `library` cannot be removed: it is the default. */
 export type AskAbout = { kind: 'paper' | 'node' | 'library'; label: string }
@@ -44,6 +44,12 @@ function ComposerChip({ label, disabled, onClick }: { label: string; disabled: b
       {label}
     </button>
   )
+}
+
+const PLACEHOLDER: Record<AskAbout['kind'], string> = {
+  library: 'Ask about your library, / for commands, @ for a paper…',
+  paper: 'Ask about this paper, / for commands…',
+  node: 'Ask about this node, / for commands…',
 }
 
 const NOTE = 'Each statement is checked against the passage it cites. A statement no passage backs is marked, not hidden.'
@@ -288,6 +294,51 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
   )
 }
 
+/** Below lg the panel covers the whole screen. */
+const PHONE = '(max-width: 1023px)'
+const isPhone = () => window.matchMedia?.(PHONE).matches ?? false
+
+/** Moves focus into the panel when a reader opens it and back to what opened it when it closes.
+ * On a phone, where the panel covers the screen, it is announced as a modal dialog. */
+function usePanelFocus(root: RefObject<HTMLElement | null>) {
+  // A layout effect, so it reads the opener before a child's effect moves focus inside the panel
+  // (Do it focuses a request a screen typed in), and that child's focus wins.
+  useLayoutEffect(() => {
+    const panel = root.current
+    /* v8 ignore next -- the ref is set before effects run; the guard only narrows the type */
+    if (!panel) return
+    const active = document.activeElement
+    // A panel restored open on page load leaves focus where it is; only a click or key opened it.
+    const opener = active instanceof HTMLElement && active !== document.body ? active : null
+    if (opener) panel.querySelector<HTMLElement>('input, textarea, button')?.focus()
+    if (isPhone()) {
+      panel.setAttribute('role', 'dialog')
+      panel.setAttribute('aria-modal', 'true')
+    }
+    return () => {
+      if (opener?.isConnected) opener.focus()
+    }
+  }, [root])
+}
+
+/** On a phone, Tab past the last control comes back to the first, so focus stays on the panel
+ * that covers the screen. Dialogs it opens (a source, Connect agent) sit outside it and trap
+ * their own focus. */
+function keepTabInside(event: KeyboardEvent<HTMLElement>) {
+  if (event.key !== 'Tab' || !isPhone()) return
+  const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button, input, textarea, a[href], [tabindex="0"]')]
+    .filter((element) => !element.hasAttribute('disabled') && element.offsetParent !== null)
+  const first = controls[0]
+  const last = controls.at(-1)
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last?.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first?.focus()
+  }
+}
+
 export function AssistantPanel({
   role,
   assistant,
@@ -358,6 +409,10 @@ export function AssistantPanel({
   }
   const end = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLFormElement>(null)
+  const root = useRef<HTMLElement>(null)
+  usePanelFocus(root)
+  // A /submit_analysis waiting for Start.
+  const [toStart, setToStart] = useState<{ question: string; parsed: Extract<Parsed, { name: string }> } | null>(null)
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
   const askOnline = useFeature('ask')
@@ -390,6 +445,8 @@ export function AssistantPanel({
     }
     const parsed = parseCommand(question, papers, context.analysis)
     if ('error' in parsed) assistant.refuse(question, parsed.error)
+    // Starting an analysis spends minutes of LLM budget, so it waits for Start.
+    else if (parsed.name === 'submit_analysis') setToStart({ question, parsed })
     else void assistant.run(question, parsed)
   }
 
@@ -406,7 +463,13 @@ export function AssistantPanel({
 
   return (
     <aside
+      ref={root}
       aria-label="Ask"
+      // Escape closes the panel, unless a menu inside it (the @ and / list) used the key first.
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !event.defaultPrevented) onClose()
+        keepTabInside(event)
+      }}
       className={cn(
         'fixed inset-0 z-50 flex flex-col bg-surface lg:static lg:z-auto lg:h-full lg:border-l lg:border-border-subtle',
         className,
@@ -515,6 +578,29 @@ export function AssistantPanel({
               </div>
 
               <div className="px-5 pb-4">
+                {toStart && (
+                  <div role="alert" className="mb-3 flex flex-col gap-2 rounded-xl border border-insufficient/40 bg-insufficient-soft p-3 text-[13px] text-ink">
+                    <p>
+                      Start checking <span className="font-medium">{String(toStart.parsed.args.paper)}</span>? It takes
+                      about 4 minutes and uses the team&apos;s LLM budget.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        className="px-3 py-1.5 text-[13px]"
+                        onClick={() => {
+                          void assistant.run(toStart.question, toStart.parsed)
+                          setToStart(null)
+                        }}
+                      >
+                        Start
+                      </Button>
+                      <Button type="button" variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setToStart(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <form
                   ref={composer}
                   onSubmit={(event) => {
@@ -528,15 +614,7 @@ export function AssistantPanel({
                     onChange={setDraft}
                     papers={papers}
                     disabled={answering}
-                    placeholder={
-                      answering
-                        ? 'Answering… Stop keeps what’s here'
-                        : about.kind === 'library'
-                          ? 'Ask about your library, / for commands, @ for a paper…'
-                          : about.kind === 'paper'
-                            ? 'Ask about this paper, / for commands…'
-                            : 'Ask about this node, / for commands…'
-                    }
+                    placeholder={answering ? 'Answering… Stop keeps what’s here' : PLACEHOLDER[about.kind]}
                   />
                   <div className="flex items-center gap-1.5">
                     {/* Shortcuts into the field's own @ and / menus. */}
@@ -565,9 +643,9 @@ export function AssistantPanel({
                   </div>
                 </form>
                 {askOnline ? (
-                  <p className="mt-2 text-[11px] leading-4 text-ink-muted">{NOTE}</p>
+                  <p className="mt-2 text-xs text-ink-muted">{NOTE}</p>
                 ) : (
-                  <p role="status" className="mt-2 text-[11px] leading-4 text-refutes">
+                  <p role="status" className="mt-2 text-xs text-refutes">
                     {OFFLINE_REASON.ask}
                   </p>
                 )}

@@ -1,141 +1,232 @@
-# Annotation guideline, round 1
+# Annotation guideline, round 2
 
-How to label claims in the Labeler role for round 1 (SCRUM-70). `docs/labeling.md` covers the tool
-itself. This page covers the judgment: what each level means and what to do with the hard cases.
-Open questions that are not decided yet are listed at the end.
+How to label claims and their evidence in the Labeler role. `docs/labeling.md` covers the tool.
+This page covers the judgment: what a claim is, what kind it is, what counts as evidence, and how
+to grade the evidence against the claim.
 
-## What you grade
+Round 1 (SCRUM-70) is in the git history of this file. Round 2 changes three things, because the
+round 1 labels could not be scored cleanly:
 
-For each claim you decide two things:
+- **Level 3 had no clear edge.** It said "backs it, with a gap", but not which gaps. Labelers put
+  pairs with large gaps at 3, and the judge called most of them insufficient. On the 9 November
+  test run the judge said "supports" on 35% of level-3 pairs and 60% of level-4 pairs. A second
+  labeler then reviewed the 58 computer-vision pairs the judge missed and agreed with the judge on
+  55, which were changed to level 2 (dataset v1.1). Section 7 now lists the gaps that level 3
+  allows. Every other gap is level 2.
+- **The label did not say what kind of claim it was.** A result claim needs a result as evidence.
+  A background claim does not. Each claim now gets a type (section 3) and a citation intent
+  (section 4).
+- **Evidence had no standard.** Section 5 says which passages count, how many, and where they may
+  come from.
 
-1. Is the claim right as written? **Keep** it, **Edit** it to match the paper's sentence, or
-   **Reject** it. Fix the claim before you grade it. The level is for the claim as you saved it.
-2. For each reference the claim cites, how well do the reference's passages back the part of the
-   claim that reference is cited for? Mark each passage **Relevant** or **Not relevant**, then give
-   the reference a level from 1 to 4 and a reason.
+## 1. The task
 
-Grade only what the citation is for. In "Existing language models are generally implemented with
-Transformers [b37], which require memory and compute that increases quadratically in sequence
-length", [b37] is "Attention Is All You Need". It is cited for the Transformer and its cost. Whether
-most language models today are Transformers is not something a 2017 paper can show, so that part is
-not graded against it.
+For each claim, and each reference it cites: find the smallest set of passages in the reference
+that settles what the citation is for, and grade how well they back it.
 
-## The four levels
+## 2. What counts as a claim
+
+A claim is one statement in the citing paper that credits a cited work with something a reader
+could check in that work. Keep a claim only if it passes all five tests.
+
+| Test | Means | Fails when |
+|---|---|---|
+| Attributable | Some part of it is credited to the cited work | It states the citing paper's own result ("our model reaches 74.0") |
+| Checkable | The cited work could show it true or false | It is an opinion, a plan or a judgment ("X is a promising direction") |
+| Atomic | It says one thing | It joins two facts with "and" that could each be true or false alone |
+| Faithful | It says what the paper's sentence says, no more | Extraction widened it ("13 tasks from BEIR" became "BEIR has 13 tasks") |
+| Self-contained | It reads without the paragraph around it | It has "this method", "it", "the former" |
+
+Fix a claim before you grade it:
+
+- **Split** a claim that fails *atomic* into one claim per fact, each with the citations that
+  belong to it. "ColBERT is a late-interaction model [b3] that compresses its index 6-10x [b4]"
+  becomes two claims.
+- **Edit** a claim that fails *faithful* or *self-contained* back to the paper's sentence, with the
+  pronoun replaced by what it names.
+- **Reject** a claim that fails *attributable* or *checkable*.
+
+## 3. Claim type
+
+Pick the one type that matches what the citation is for. The type tells you where in the
+reference the evidence should be. The types follow the scientific-zoning scheme CoreSC (Liakata
+et al., 2010), merged into six that our claims actually use.
+
+| Type | The claim says the cited work... | Example | Evidence usually in |
+|---|---|---|---|
+| Result | found or measured something | "BLIP-2 outperforms Flamingo80B by 8.7% on zero-shot VQAv2 [b5]" | Results, tables, figures, abstract |
+| Comparison | is better, worse, faster or different than another | "Transformers train faster than recurrent models [b12]" | Results, tables |
+| Method | proposed or works in a certain way | "ColBERT scores passages by late interaction [b3]" | Method section |
+| Resource | made a dataset, benchmark, model or tool with certain properties | "BEIR covers 18 datasets [b54]" | Dataset section, intro, tables |
+| Background | states a fact about the field or the world | "Self-attention cost grows quadratically with length [b37]" | Intro, method |
+| Claim or hypothesis | argued, proposed or hypothesized something, not shown | "[b9] argues that scale alone yields reasoning" | Intro, discussion |
+
+Two checks follow from the type:
+
+- A **result** or **comparison** claim needs evidence that reports the result: a results
+  sentence, a table cell or a figure. The cited paper's introduction saying "we show that X" is
+  acceptable only when it gives the same numbers or the same direction as the results.
+- A **claim or hypothesis** is backed when the cited work argues it. It does not need to be shown.
+  If the citing paper turns a hypothesis into a finding ("[b9] showed..."), that is a modality gap
+  (section 6).
+
+## 4. Citation intent
+
+Decide what the citation is for before you look at passages. This follows SciCite (Cohan et al.,
+2019), plus one class our pipeline already uses.
+
+| Intent | Meaning | Graded? |
+|---|---|---|
+| Background | The cited work is the source of a fact or idea | Yes |
+| Method | The citing paper uses or builds on the cited work's method | Yes, for what the claim says about the method |
+| Result comparison | The citing paper compares its results with the cited work's | Yes, for the cited work's side only |
+| Names only | The citation just identifies a dataset, metric, tool or model the paper uses ("we train on MS MARCO [b12]") | No. Keep the claim only if it says something about the thing named |
+
+Grade only the part of the claim the citation is for. In "Existing language models are generally
+implemented with Transformers [b37], which require memory that grows quadratically", the 2017
+Transformer paper is cited for the Transformer and its cost. It is not graded on whether most
+language models today are Transformers.
+
+## 5. Evidence: which passages count
+
+A passage is evidence only if it meets all of these rules. The first three follow how SciFact
+(Wadden et al., 2020) defines a rationale.
+
+1. **From the cited work itself.** Not from another paper, the abstract on a website, or memory.
+2. **Minimal.** The fewest sentences that together settle the claim, at most three. Remove any
+   sentence the decision does not need.
+3. **Sufficient.** A reader given only these sentences and the claim reaches your level.
+4. **Verbatim and whole.** Copy complete sentences as printed. For a table, name the table, row and
+   column in the reason ("Table 2, BEIR row, nDCG@10"). For a figure, add the caption and say what
+   the figure shows ("Figure 3, red curve passes 0.8 at 10k steps").
+5. **The cited work's own statement.** A sentence where the cited work describes *other* papers (its
+   related work) is not evidence that the cited work showed it. It is evidence only for a
+   background claim that the cited work states.
+6. **Matches the claim type.** See section 3: a result claim needs a result.
+7. **Located.** Record where it came from: abstract, introduction, method, results, discussion,
+   table or figure.
+
+Mark every passage in the list as relevant or not relevant, even when you have found enough. Add a
+passage retrieval did not list when you find better evidence in the PDF. Added passages show us
+what retrieval misses.
+
+When no passage meets the rules, the level is 1 and the reason says what you looked for and where.
+
+## 6. Comparing the claim with the evidence
+
+Do not compare words. Compare these seven parts of what is said. Each row is a place where a claim
+can drift from its source. The first five are what round 1's "checks before you save" covered.
+Quantifiers and modality are new.
+
+| Part | Check | Claim | Evidence | Gap |
+|---|---|---|---|---|
+| Entities | Same method, dataset, model, metric | "on MS MARCO" | "on TREC-DL" | Major |
+| Numbers and units | Same value, unit and rounding | "8.7%" | "8.7 points" | Major if the meaning differs |
+| Comparison and direction | Same order, same side of each relation | "A is derived from B" | "B is derived from A" | Contradicts |
+| Polarity | Same affirmed or negated | "does not need labels" | "needs few labels" | Major |
+| Quantifiers and scope | Same "all", "most", "some"; same setting | "on visual question answering" | "on zero-shot VQAv2" | Minor if one case of a family, else major |
+| Modality | Same certainty | "shows", "proves" | "suggests", "may" | Major when the claim is stronger |
+| Conditions and time | Same conditions, same time | "always converges" | "converges with warm-up" | Major |
+
+Hedges ("may", "suggests", "appears to") carry the authors' certainty (Hyland, 1998). A citing claim
+that drops a hedge reports more than the source found. Medical citation studies count this as one
+of the common quotation errors (Jergas and Baethge, 2015).
+
+Part-of-speech tags are not the right tool here: a noun or a verb can carry any of these seven
+parts. What matters is the content in each slot, not its grammatical class.
+
+## 7. The four levels
 
 | Level | Name | Use it when |
 |---|---|---|
-| 4 | Strong | A passage states what the citation is for, directly and fully. |
-| 3 | Clear | A passage backs it, but covers less than the claim says (fewer cases, a narrower setting) or leaves a detail out. |
-| 2 | Weak | A passage is related but indirect, vague, or backs only part of it. |
-| 1 | No support | No passage backs it, or a passage says something different. |
+| 4 | Strong | The evidence states what the citation is for, with every part in section 6 the same. A paraphrase is fine. |
+| 3 | Clear, minor gap | Every part matches except one or more **minor gaps** from the list below. |
+| 2 | Weak | At least one **major gap**: related evidence that does not settle the claim. |
+| 1 | No support | No evidence meets section 5, or the evidence **contradicts** the claim. Start the reason with "Contradicts:" for a contradiction. |
 
-The examples below use passages from the BLIP-2 paper (arXiv 2301.12597) and "Attention Is All You
-Need" (arXiv 1706.03762).
+Minor gaps, the only ones level 3 allows:
 
-- **4.** Claim: "BLIP-2 outperforms Flamingo80B by 8.7% on zero-shot VQAv2 with 54x fewer trainable
-  parameters." Passage: "our model outperforms Flamingo80B by 8.7% on zero-shot VQAv2 with 54x fewer
-  trainable parameters." Every number and the direction match.
-- **3.** Claim: "BLIP-2 outperforms Flamingo80B on visual question answering with far fewer
-  trainable parameters." Same passage. It backs the claim for one benchmark, zero-shot VQAv2, and
-  the claim says visual question answering in general. If the passage saying that on OK-VQA
-  "BLIP-2 comes secondary to Flamingo80B" is listed too, it says something different about the
-  general claim, and the level is 1.
-- **2.** Claim: "Transformers train faster than recurrent models because they can be
-  parallelized." Passage from "Attention Is All You Need": "This inherently sequential nature
-  precludes parallelization within training examples, which becomes critical at longer sequence
-  lengths." It says recurrent models cannot be parallelized. It does not say Transformers train
-  faster.
-- **1 (no support).** The Transformer claim above, against the four passages retrieval found: one on
-  restricting self-attention to a neighbourhood, and three from the introduction about RNNs. None
-  states the quadratic cost. If you find the passage that does, add it and grade again.
-- **1 (says something else).** Claim: "BLIP-2 trails Flamingo80B on zero-shot VQAv2." The BLIP-2
-  passage above says the opposite. Start the reason with "Contradicts:" (see open question 1).
+- The claim leaves out a detail the evidence gives (a condition that does not change the truth, a
+  second dataset, a standard deviation).
+- The claim rounds a number in the usual way ("about 9%" for 8.7%).
+- The claim names one case where the evidence shows that case among others.
+- The claim uses a common synonym or a general term for the same thing ("retrieval model" for "dense
+  retriever").
 
-When you are between two levels, pick the lower one and say why in the reason. Set **confidence** to
-low when you are unsure of the field or the passage is hard to read, high when the passage settles
-it, and medium otherwise.
+Every other gap is major: a wider scope, a stronger modality, a missing condition that changes the
+truth, a different entity, a number that does not match, or a claim that needs two references
+together.
 
-## How levels are scored
+When you are between two levels, pick the lower one and say why. Set confidence to low when you
+are unsure of the field or the evidence is hard to read, high when the evidence settles it, and
+medium otherwise.
 
-`backend/app/evaluation.py` turns levels into yes or no: 3 or 4 means the source supports the claim,
-1 or 2 means it does not. The judge's "supports" counts as yes; "refutes" and "insufficient" count as
-no. So the line between 2 and 3 matters most. Ask: would a careful reader accept this passage as the
-source for what the citation is for? Yes is 3 or 4. No is 1 or 2.
+`backend/app/evaluation.py` counts 3 or 4 as supported. The judge's prompt
+(`backend/app/pipeline/verify.py`) has to accept the same minor gaps and no others, so the two
+sides use one line.
 
-Two people label each pair, and agreement is measured with weighted kappa (`human_agreement` in
-`evaluation.py`). Do not talk about a pair with the other labeler before you both save it.
+## 8. Agreement and adjudication
 
-## Checks before you save
+Labels are only as good as two people's agreement on them.
 
-Before 3 or 4, check each of these against the passage. If any differs, the level is 1.
-- every number;
-- every comparison: more or less, higher or lower, easier or harder;
-- which item a value belongs to: the row and column of a table, the series of a figure, the item
-  "respectively" pairs it with;
-- which side of a relation each thing is on: "A is derived from B" is not "B is derived from A".
+1. **Calibration.** Before a round, every labeler grades the same 20 pairs. The group discusses
+   every pair where levels differ by more than one, and adds a hard case below when a rule was
+   unclear.
+2. **Double labels.** At least 25% of each round's pairs, and at least 100 pairs, get two labelers
+   who do not see each other's label.
+3. **The bar.** Report Cohen's kappa on supported vs not supported, and Krippendorff's alpha on
+   the 1-4 levels as ordinal data. Accept the round when kappa is at least 0.6 ("substantial" in
+   Landis and Koch, 1977) and alpha at least 0.667 (Krippendorff's lowest bar for tentative
+   conclusions). Below that, fix the guideline and recalibrate before more labeling.
+4. **Adjudication.** A pair where the two labelers fall on different sides of the 2-3 line goes to
+   a third labeler, who sees both reasons. The third label decides. All three labels are kept.
+5. **Version.** Every label records the guideline round it was made under.
 
-A claim that leaves out details the passage gives is not contradicted by that. A claim may use other
-words than the passage; grade whether it means the same thing.
+The judge is compared with people on the same pairs. Human agreement is its ceiling: the judge is
+not expected to agree with a labeler more often than two labelers agree with each other.
 
-## Tables, figures and text
+## 9. Fields the labeler needs to record
 
-The passage list shows text from the reference. Evidence can also sit in a table or a figure.
+Round 2 asks for these per label. Until the tool has a field for one, write it in the reason in
+this order: `type; intent; location; gaps`.
 
-- **Table.** Read the value from its row and column. Mark the passage that holds the table, or add
-  it with "Add a passage retrieval missed" if it is not listed. In the reason, name the table and
-  the cell, for example "Table 2, BEIR row, nDCG@10".
-- **Figure.** If only a figure shows it, add its caption as the passage and name the figure in the
-  reason, for example "Figure 3, red curve passes 0.8 at 10k steps". Grade from what the figure shows,
-  not only from the caption.
-- **Text.** Grade the sentence or sentences that say it.
+| Field | Values |
+|---|---|
+| Claim type | result, comparison, method, resource, background, claim or hypothesis |
+| Citation intent | background, method, result comparison, names only |
+| Evidence location | abstract, introduction, method, results, discussion, table, figure |
+| Gaps | none, or the parts from section 6 that differ, each minor or major |
+| Contradicts | yes or no |
 
-The tool does not record whether evidence came from text, a table or a figure (open question 2).
-Until it does, the reason is the only place that says so. Always name the table or figure.
+## 10. Hard cases
 
-## Hard cases
+- **Time words.** "Existing", "current", "recent" and "generally" in a claim mean the time of the
+  citing paper. A cited paper describing what was common before it does not contradict such a claim.
+- **One claim, several citations.** Grade each reference for its own part. When a sentence credits
+  two references with the same thing, grade both against all of it. When a claim is only true with
+  both references together, each one alone is level 2.
+- **No open copy of the reference.** No passages means no level. Do not grade from memory or from
+  an abstract on the web.
+- **A secondary citation.** The cited work repeats a finding from another paper ("as [12] showed,
+  ..."). For a result claim this is level 2: the cited work is not the source. For a background
+  claim it is evidence.
+- **A survey or a book.** Grade against the sentence that states it, as for any other reference.
+  A whole chapter "about" the topic is not evidence.
+- **The citing paper's own result with a citation for the benchmark.** "Our model reaches 74.0 on
+  MMVet [b8]" credits MMVet only as the benchmark: intent is names only, and the claim is rejected
+  unless it says something about MMVet itself.
 
-- **Time words.** "Existing", "current", "recent", "today" and "generally" in a claim mean the time
-  the citing paper was written, not the time of the cited paper. A cited paper describing what was
-  common before it does not contradict such a claim. Grade only what the citation is for (see the
-  Transformer example).
-- **Citations that only name what the paper used.** In "We train on MS MARCO [b12] with AdamW
-  [b7]", the citations only credit the dataset and the optimizer. The pipeline does not check these
-  (#475) and lists the claim as "names only". Keep the claim if it is a real claim about the paper.
-  Mark a reference's passages relevant only if one describes the thing named, then grade that.
-  See open question 3.
-- **One claim, several citations.** Grade each reference on its own, for the part it is cited for.
-  "Optimized late interaction engines [b45][b31] enable scaling to millions of documents" credits
-  both papers with the same thing, so both are graded against all of it. A sentence that cites
-  different papers for different parts gives each paper its own part.
-- **No open copy of the reference.** A reference the system could not download has no passages, so
-  it cannot get a level. Leave it without one. Do not grade from memory or from an abstract on the
-  web. If you know where an open copy is, say so in the claim's reason so it can be added later.
-- **The claim misreads its sentence.** Claim extraction sometimes rewrites a sentence into a claim
-  that says more than the authors did. For example, "13 diverse retrieval and semantic similarity
-  tasks from BEIR [b54]" became "BEIR is a benchmark consisting of 13 tasks". BEIR has more than 13.
-  Edit the claim back to what the sentence says, then grade the edited claim.
-- **The claim states the citing paper's own result.** "Our model reaches 74.0 on MMVet" cites
-  nothing about MMVet's results. Grade only what the citation is for (here, that MMVet is the
-  benchmark named), or reject the claim if nothing in it is credited to the reference.
+## References
 
-## Open questions
-
-Decisions for the lead (Vitawat) before round 1 starts. The guideline above takes no position on
-them beyond the temporary rule stated.
-
-1. **Contradicts vs no support.** Level 1 covers both, so the judge's "refutes" is never scored
-   against people. Until the tool has a separate choice, this guideline asks labelers to start the
-   reason with "Contradicts:" when a passage says the opposite. Is that enough, or should the tool
-   get a fifth choice before round 1?
-2. **Modality field.** SCRUM-67, SCRUM-79 and SCRUM-84 set 75 table and 75 figure targets, but no row
-   records the modality. Add a text, table or figure choice per label before round 1, or count them
-   from the reasons afterwards?
-3. **Names-only claims.** Should labelers keep them and grade only what the citation names, as
-   written above, or reject them so they do not count toward the 80 claims?
-4. **Unit of "80 claims".** 80 claims, or 80 (claim, reference) pairs? #423 needs about 50
-   double-labeled pairs.
-5. **Agreement bar.** What weighted kappa is good enough to start round 2, and who settles the pairs
-   two labelers disagree on?
-6. **AI review.** The Review button shows the judge's verdict before a label is final. Should round 1
-   labelers use it, given that labels made after a review are flagged `ai_reviewed` and reported
-   apart?
+- Cohan, A., Ammar, W., van Zuylen, M., and Cady, F. (2019). Structural scaffolds for citation
+  intent classification in scientific publications. NAACL.
+- Hyland, K. (1998). *Hedging in Scientific Research Articles*. John Benjamins.
+- Jergas, H., and Baethge, C. (2015). Quotation accuracy in medical journal articles: a systematic
+  review and meta-analysis. *PeerJ* 3:e1364.
+- Krippendorff, K. (2004). *Content Analysis: An Introduction to Its Methodology*, 2nd ed. Sage.
+- Landis, J. R., and Koch, G. G. (1977). The measurement of observer agreement for categorical data.
+  *Biometrics* 33(1).
+- Liakata, M., Teufel, S., Siddharthan, A., and Batchelor, C. (2010). Corpora for the
+  conceptualisation and zoning of scientific papers. LREC.
+- Wadden, D., Lin, S., Lo, K., Wang, L. L., van Zuylen, M., Cohan, A., and Hajishirzi, H. (2020).
+  Fact or fiction: verifying scientific claims. EMNLP.

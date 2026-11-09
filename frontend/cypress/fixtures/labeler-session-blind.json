@@ -1,0 +1,25 @@
+{
+  "analysis_id": "cv1",
+  "paper_id": "cv1",
+  "paper_file": "cv1.pdf",
+  "title": "A CV paper to check blind",
+  "annotator": "Chanya",
+  "blind": true,
+  "claims": [
+    {
+      "claim_id": "cv1#0",
+      "claim": "The detector runs in real time.",
+      "sentence": "",
+      "section": "",
+      "source": null,
+      "candidates": [
+        { "cand_id": "d1", "reference_id": "refC", "reference_file": "refC.pdf", "rank": 1, "score": 7.2, "page": 2, "passage": "30 frames per second on a laptop GPU" }
+      ]
+    }
+  ],
+  "references": [
+    { "reference_id": "refC", "file": "refC.pdf", "label": "Ref C", "ref": "b2", "authors": ["Kim"], "year": "2020" }
+  ],
+  "saved": { "claims": [], "candidates": [], "labels": [] },
+  "others": {}
+}

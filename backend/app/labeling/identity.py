@@ -51,6 +51,22 @@ async def annotator(request: Request) -> str:
     return name or email.split("@")[0]
 
 
+async def is_lead(request: Request) -> bool:
+    """FastAPI dependency: whether the signed-in person is a labeling lead (LABELING_LEADS).
+
+    Matched on the account's e-mail, which the person cannot change, not on the name.
+    """
+    from app.config import LABELING_LEADS
+
+    if not auth._supabase_configured():
+        return True
+    token = auth._token(request)
+    if not token:
+        raise HTTPException(401, "sign in to use SecretSource")
+    _name, email = await asyncio.to_thread(_profile, token)
+    return email.lower() in LABELING_LEADS
+
+
 def annotator_for(user_id: str | None) -> str:
     """The labeler's name for an account id, for callers with no Supabase token (the MCP server).
 

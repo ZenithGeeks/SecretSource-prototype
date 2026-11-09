@@ -12,10 +12,23 @@ entry, or no check yet). The same five words are the frontend's `Verdict` union.
 """
 
 import hashlib
+import html
 import re
 import unicodedata
+from bisect import bisect_right
 from collections import Counter
 from datetime import UTC, datetime
+
+import bibtexparser
+from bibtexparser.middlewares import RemoveEnclosingMiddleware
+from bibtexparser.middlewares.names import split_multiple_persons_names
+from bibtexparser.model import DuplicateBlockKeyBlock, DuplicateFieldKeyBlock, Entry, Field
+from bibtexparser.writer import BibtexFormat
+from pylatexenc.latex2text import LatexNodes2Text
+from pylatexenc.latexencode import unicode_to_latex
+
+from app.names import surname
+from app.pipeline.sources import ARXIV_PATTERN
 
 VERDICTS = ("supports", "refutes", "insufficient", "unavailable", "unchecked")
 NEEDS_WORK = ("refutes", "insufficient")
@@ -47,93 +60,54 @@ def now_iso() -> str:
 
 
 def parse_bib(text: str) -> list[dict]:
-    """The entries of a .bib file: `{"type", "key", "fields", "line"}` each, in file order.
-    Values in braces (nested ones too), in quotes, or bare (numbers, @string names). @comment,
-    @preamble and @string blocks are skipped. Tolerant: a broken entry ends the scan rather
-    than raising, because a half-typed .bib in the editor is a normal state."""
+    """The entries of a .bib file: `{"type", "key", "fields", "line"}` each, in file order,
+    read by bibtexparser. A half-typed entry is a normal state in the editor: bibtexparser
+    skips that block and reads the rest."""
+    library = bibtexparser.parse_string(text)
     entries: list[dict] = []
-    i = 0
-    while True:
-        at = text.find("@", i)
-        if at < 0:
-            break
-        m = re.match(r"@\s*([A-Za-z]+)\s*[{(]", text[at:])
-        if not m:
-            i = at + 1
-            continue
-        kind = m.group(1).lower()
-        start = at + m.end()
-        end = _matching_brace(text, at + m.end() - 1)
-        if end < 0:
-            break
-        body = text[start:end]
-        i = end + 1
-        if kind in ("comment", "preamble", "string"):
-            continue
-        comma = body.find(",")
-        key = body[:comma].strip() if comma >= 0 else body.strip()
-        fields = _fields(body[comma + 1 :]) if comma >= 0 else {}
-        entries.append({"type": kind, "key": key, "fields": fields, "line": text.count("\n", 0, at) + 1})
+    for block in library.blocks:
+        if entry := _entry_of(block, library):
+            fields = {field.key.lower(): " ".join(str(field.value).split()) for field in entry.fields}
+            kind, line = entry.entry_type.lower(), entry.start_line + 1  # bibtexparser counts from 0
+            entries.append({"type": kind, "key": entry.key, "fields": fields, "line": line})
     return entries
 
 
-def _matching_brace(text: str, open_at: int) -> int:
-    """Index of the brace that closes the one at `open_at`, or -1."""
-    closer = "}" if text[open_at] == "{" else ")"
-    depth = 0
-    for j in range(open_at, len(text)):
-        c = text[j]
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0 and closer == "}":
-                return j
-        elif c == closer and depth == 0:
-            return j
-    return -1
+def _entry_of(block, library) -> Entry | None:
+    """The entry a block holds, or None for @comment, @preamble, @string and failed blocks.
+
+    bibtexparser sets aside an entry whose key or a field repeats, before its middlewares run;
+    it is kept here (the lint reports a repeated key), with the braces around its values removed.
+    """
+    if isinstance(block, DuplicateBlockKeyBlock | DuplicateFieldKeyBlock) and block.ignore_error_block:
+        return RemoveEnclosingMiddleware().transform_entry(block.ignore_error_block, library)
+    return block if isinstance(block, Entry) else None
 
 
-def _fields(body: str) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    j = 0
-    n = len(body)
-    while j < n:
-        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*", body[j:])
-        if not m:
-            break
-        name = m.group(1).lower()
-        j += m.end()
-        if j >= n:
-            break
-        if body[j] == "{":
-            end = _matching_brace(body, j)
-            if end < 0:
-                break
-            value = body[j + 1 : end]
-            j = end + 1
-        elif body[j] == '"':
-            end = body.find('"', j + 1)
-            if end < 0:
-                break
-            value = body[j + 1 : end]
-            j = end + 1
-        else:
-            m2 = re.match(r"[^,}]*", body[j:])
-            value = m2.group(0)
-            j += m2.end()
-        fields[name] = re.sub(r"\s+", " ", value.strip())
-        m3 = re.match(r"\s*,", body[j:])
-        j += m3.end() if m3 else 0
-    return fields
+def without_bib_entry(text: str, key: str) -> tuple[str, int]:
+    """The .bib text with every entry under `key` cut out, and how many were cut. The rest of
+    the file stays byte for byte, comments and @string blocks included."""
+    library = bibtexparser.parse_string(text)
+    removed = 0
+    for block in library.blocks:
+        entry = _entry_of(block, library)
+        if entry is not None and entry.key == key:
+            text = text.replace(block.raw, "", 1)
+            removed += 1
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return (text + "\n" if text else ""), removed
+
+
+BIB_FORMAT = BibtexFormat()
+BIB_FORMAT.indent = "  "
+BIB_FORMAT.trailing_comma = True
 
 
 def serialize_bib(entry: dict) -> str:
-    lines = [f"@{entry['type']}{{{entry['key']},"]
-    for name, value in entry["fields"].items():
-        lines.append(f"  {name} = {{{value}}},")
-    lines.append("}")
-    return "\n".join(lines)
+    """One entry as BibTeX text, each value in braces."""
+    fields = [Field(name, value) for name, value in entry["fields"].items()]
+    block = Entry(entry["type"], entry["key"], fields)
+    return bibtexparser.write_string(bibtexparser.Library([block]), bibtex_format=BIB_FORMAT).strip()
 
 
 def bib_entries(files: list[dict]) -> list[dict]:
@@ -162,8 +136,8 @@ def lookup_identifier(entry: dict | None, pdfs: dict[str, str] | None = None) ->
     if doi := bib_doi(f):
         return doi
     eprint = f.get("eprint") or f.get("arxiv")
-    if eprint and re.search(r"\d{4}\.\d{4,5}", eprint):
-        return re.search(r"\d{4}\.\d{4,5}(v\d+)?", eprint).group(0)
+    if eprint and (arxiv := ARXIV_PATTERN.search(eprint)):
+        return arxiv.group(0)
     if f.get("url"):
         return f["url"].strip()
     return bib_title(f) or None
@@ -183,34 +157,11 @@ def bib_doi(fields: dict) -> str:
     return re.sub(r"\\([_&%#$])", r"\1", doi).replace("{", "").replace("}", "")
 
 
-NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
-# An accent written as a LaTeX command, \v{c}, {\H{o}}, \"u or \'e, keeps only its letter.
-LATEX_ACCENT = re.compile(r"\\(?:[a-zA-Z](?=\{)|[`'^\"~=.])\s*\{?(\\?[A-Za-z])\}?")
-LATEX_LETTERS = {"o": "o", "O": "O", "l": "l", "L": "L", "ss": "ss", "ae": "ae", "i": "i", "j": "j"}
-
-
 def bib_surnames(author: str) -> list[str]:
     """The surnames in a BibTeX author field, in order. "Khattab, Omar and Zaharia, Matei" and
     "Omar Khattab and Matei Zaharia" both give ["Khattab", "Zaharia"]; "Haji{\\v{c}}" gives
-    "Hajic", and "John Smith Jr." gives "Smith"."""
-    names = [n.strip() for n in re.split(r"\s+and\s+", _latex_letters(author), flags=re.I) if n.strip()]
-    surnames = []
-    for name in names:
-        if "," in name:
-            surname = name.split(",")[0]
-        else:
-            words = [w for w in name.split() if w.strip(".").lower() not in NAME_SUFFIXES] or [name]
-            surname = words[-1]
-        surnames.append(re.sub(r"[{}\\'\"`^~]", "", surname).strip())
-    return surnames
-
-
-def _latex_letters(text: str) -> str:
-    """Text with LaTeX accent and letter commands replaced by plain letters."""
-    text = LATEX_ACCENT.sub(r"\1", text)
-    return re.sub(
-        r"\\(ss|ae|[oOlLij])(?![A-Za-z])\s*", lambda m: LATEX_LETTERS[m.group(1)], text
-    )
+    "Hajič", and "John Smith Jr." gives "Smith"."""
+    return [_latex_to_text(surname(name)).strip() for name in split_multiple_persons_names(author)]
 
 
 def short_authors(author: str) -> str:
@@ -320,14 +271,7 @@ def _line_starts(content: str) -> list[int]:
 
 
 def _line_of(starts: list[int], offset: int) -> int:
-    lo, hi = 0, len(starts) - 1
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if starts[mid] <= offset:
-            lo = mid
-        else:
-            hi = mid - 1
-    return lo + 1
+    return bisect_right(starts, offset)
 
 
 def _sentence_around(content: str, start: int, end: int) -> str:
@@ -399,6 +343,12 @@ def plain_text(latex: str) -> str:
     s = re.sub(r"[{}]", "", s)
     s = re.sub(r"\s+([.,;:])", r"\1", s)
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _latex_to_text(latex: str) -> str:
+    """A name in plain Unicode: "Haji{\\v{c}}" is "Hajič". Only for names: pylatexenc drops
+    the argument of commands like \\texttt and \\mbox, so plain_text keeps its own rules."""
+    return LatexNodes2Text().latex_to_text(latex)
 
 
 def parse_project(files: list[dict]) -> dict:
@@ -710,10 +660,8 @@ def compare(current: list[dict], previous: list[dict]) -> list[dict]:
 
 def bib_key_for(authors: list[str], year: str | int | None, taken: set[str] | None = None) -> str:
     """ "santhanam2022", made unique against `taken` with a letter suffix."""
-    surname = ""
-    if authors:
-        surname = re.sub(r"[^a-z]", "", (authors[0].split()[-1] if authors[0] else "").lower())
-    base = f"{surname or 'source'}{year or ''}"
+    first = _last_word(surname(authors[0])) if authors else ""
+    base = f"{first or 'source'}{year or ''}"
     key, suffix = base, "b"
     while taken and key in taken:
         key = base + suffix
@@ -722,7 +670,8 @@ def bib_key_for(authors: list[str], year: str | int | None, taken: set[str] | No
 
 
 def latex_escape(text: str) -> str:
-    return re.sub(r"([&%$#_])", r"\\\1", text)
+    """Text safe inside a BibTeX value: "A & B" is "A \\& B" and "Müller" is "M\\"uller"."""
+    return unicode_to_latex(text, unknown_char_policy="keep")  # a character with no LaTeX form stays
 
 
 def bibtex_for(result: dict, key: str | None = None) -> str:
@@ -732,7 +681,7 @@ def bibtex_for(result: dict, key: str | None = None) -> str:
     kind = "article" if any(w in venue for w in ("journal", "transactions", "letters")) else "inproceedings"
     fields = {
         "title": latex_escape(result.get("title", "")),
-        "author": " and ".join(result.get("authorsList", [])),
+        "author": " and ".join(latex_escape(name) for name in result.get("authorsList", [])),
         "year": str(result.get("year") or ""),
     }
     if result.get("venue"):
@@ -750,7 +699,7 @@ def bibtex_for(result: dict, key: str | None = None) -> str:
 
 
 def _esc(text: object) -> str:
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return html.escape(str(text))
 
 
 VERDICT_WORDS = {

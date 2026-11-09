@@ -344,7 +344,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
     }
     if (parts[3] === 'report') {
       if (!checksOf(gateway, draft.id).some((c) => c.status === 'done')) return fail(409, 'check the draft first, then export its report')
-      return new Response(new Blob(['%PDF-1.4 fake'], { type: 'application/pdf' }), { status: 200, headers: { 'Content-Type': 'application/pdf' } })
+      return new Response('%PDF-1.4 fake', { status: 200, headers: { 'Content-Type': 'application/pdf' } })
     }
   }
 

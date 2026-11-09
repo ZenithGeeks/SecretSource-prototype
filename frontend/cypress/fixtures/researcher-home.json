@@ -1,0 +1,11 @@
+{
+  "alert": "1 paper disagrees with something in your library.",
+  "conflicts": [
+    { "claim": "Late interaction beats single-vector retrieval.", "paper": "colbert-v2.pdf", "for": ["PLAID"], "against": ["BEIR"], "analysis": "a-old", "claimIndex": 0 }
+  ],
+  "conflictsTotal": 1,
+  "queue": [
+    { "paper": "PLAID (2022)", "note": "Cited by 3", "identifier": "10.1145/plaid", "analysis": "a-old" }
+  ],
+  "library": { "papers": 2, "claims": 3, "verified": 2, "tally": { "backed": 1, "silent": 1, "contradicted": 1, "unchecked": 0 } }
+}

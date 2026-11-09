@@ -9,11 +9,11 @@
 
 import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { paperName } from '../lib/api'
 import type { Analysis, Claim } from '../lib/api'
-import { countsOf, ranked, standingOf, verdictCountLabel } from '../lib/claims'
+import { countsOf, opensByDefault, ranked, standingOf, verdictCountLabel } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { sectionName, sectionOfPage } from '../lib/outline'
 import { useAnalysis } from '../lib/useAnalysis'
@@ -28,6 +28,11 @@ import { Card, Empty } from './ui'
 /** A section picked in the table of contents, to open at its page. `at` tells a newer pick
  * from the page the reader opened or closed since. */
 export type SectionJump = { n: string; title: string; page: number; at: number }
+
+/** The standing as a verdict colour for the page viewer; the standings that are not a verdict have none. */
+function verdictOf(standing: Standing): Target['verdict'] {
+  return standing === 'supports' || standing === 'refutes' || standing === 'insufficient' ? standing : undefined
+}
 
 /** A claim the run has finished with: it has an answer, a failure, or nothing to check. */
 function settled(claim: Claim) {
@@ -101,6 +106,8 @@ export function AnalysisView({
   const shown = (filter ? standings.filter((entry) => entry.standing === filter) : standings).filter(
     (entry) => !section || entry.claim.section === section,
   )
+  // Ranked worst first, so the first claim that needs nothing starts the settled group.
+  const settledFrom = shown.findIndex((entry) => !opensByDefault(entry.standing))
 
   const sectionTarget = jump && file && jump.at > opened.at
     ? { paper: file, label: `Section ${jump.n} · ${jump.title}`, source: null, page: jump.page, section: jump.n }
@@ -114,9 +121,7 @@ export function AnalysisView({
           quote: initialTeacherClaim.claim.sentence,
           source: initialTeacherClaim.claim.source,
           page: initialTeacherClaim.claim.source.page,
-          verdict: ['supports', 'refutes', 'insufficient'].includes(initialTeacherClaim.standing)
-            ? initialTeacherClaim.standing as 'supports' | 'refutes' | 'insufficient'
-            : undefined,
+          verdict: verdictOf(initialTeacherClaim.standing),
         }
       : { paper: file, label: 'The paper', source: null, page: 1 }
     : null
@@ -285,31 +290,34 @@ export function AnalysisView({
           {section && shown.length === 0 && standings.length > 0 && (
             <p className="px-1 text-sm text-ink-muted">No claims come from this section.</p>
           )}
-          {(teacher || !running) && shown.map(({ claim, index, standing }) => (
-            <ClaimCard
-              key={index}
-              claim={claim}
-              index={index}
-              standing={standing}
-              paper={file}
-              section={claim.section ? sectionName(outline, claim.section) : undefined}
-              figures={analysis.data.figures}
-              references={analysis.data.references}
-              actions={renderClaimActions?.(claim, index)}
-              onSelect={presentation === 'teacher' && file && claim.source
-                ? () => setTarget({
-                    paper: file,
-                    label: `Claim ${index + 1} in the submission`,
-                    quote: claim.sentence,
-                    source: claim.source ?? null,
-                    verdict: ['supports', 'refutes', 'insufficient'].includes(standing)
-                      ? standing as 'supports' | 'refutes' | 'insufficient'
-                      : undefined,
-                  })
-                : undefined}
-              // A page of the analysed paper carries the claim's section; a cited paper's does not.
-              onShow={(next) => setTarget(next.paper === file ? { ...next, section: claim.section } : next)}
-            />
+          {(teacher || !running) && shown.map(({ claim, index, standing }, i) => (
+            <Fragment key={index}>
+              {!teacher && i > 0 && i === settledFrom && <h2 className="type-title pt-3">Settled</h2>}
+              <ClaimCard
+                claim={claim}
+                index={index}
+                standing={standing}
+                paper={file}
+                section={claim.section ? sectionName(outline, claim.section) : undefined}
+                figures={analysis.data.figures}
+                references={analysis.data.references}
+                analysisId={teacher ? undefined : analysis.data.id}
+                disputes={analysis.data.disputes}
+                actions={renderClaimActions?.(claim, index)}
+                onSelect={presentation === 'teacher' && file && claim.source
+                  ? () => setTarget({
+                      paper: file,
+                      label: `Claim ${index + 1} in the submission`,
+                      quote: claim.sentence,
+                      /* v8 ignore next -- the condition above already holds a source; this satisfies the type */
+                      source: claim.source ?? null,
+                      verdict: verdictOf(standing),
+                    })
+                  : undefined}
+                // A page of the analysed paper carries the claim's section; a cited paper's does not.
+                onShow={(next) => setTarget(next.paper === file ? { ...next, section: claim.section } : next)}
+              />
+            </Fragment>
           ))}
         </section>
 

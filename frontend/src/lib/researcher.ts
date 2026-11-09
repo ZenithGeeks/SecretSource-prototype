@@ -12,6 +12,7 @@ export type ClaimTally = Record<ClaimStanding, number>
 
 export type Conflict = {
   claim: string
+  paper?: string // short title of the analysed paper that makes the claim
   for: string[] // papers backing the claim
   against: string[] // papers contradicting it
   analysis: string // the analysis the claim is in
@@ -34,7 +35,8 @@ export type LibrarySummary = {
 
 export type ResearcherHome = {
   alert: string // the one-line "what changed" under the greeting
-  conflicts: Conflict[]
+  conflicts: Conflict[] // the newest few
+  conflictsTotal?: number // all of them; older gateways leave it out
   queue: QueueEntry[]
   library: LibrarySummary
 }

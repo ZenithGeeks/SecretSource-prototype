@@ -108,10 +108,10 @@ type SummaryProps = {
 function headline(counts: Record<Standing, number>) {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
   if (counts.refutes) {
-    return `${counts.refutes} ${plural(counts.refutes, 'citation contradicts what the paper says it shows', 'citations contradict what the paper says they show')}`
+    return `${counts.refutes} ${plural(counts.refutes, 'claim is', 'claims are')} contradicted by a work they cite`
   }
   if (counts.insufficient) {
-    return `${counts.insufficient} ${plural(counts.insufficient, 'cited work does', 'cited works do')} not settle what the paper says`
+    return `${counts.insufficient} ${plural(counts.insufficient, 'claim is', 'claims are')} not settled by the works they cite`
   }
   if (counts.unchecked) {
     return `${counts.unchecked} ${plural(counts.unchecked, 'claim', 'claims')} could not be checked`
@@ -236,7 +236,6 @@ function TeacherSummary({
   onOpenPaper,
   onTeacherFeedback,
 }: SummaryProps & { paperLabel?: string; onTeacherFeedback?: () => void }) {
-  const teacherMode = true
   const [copied, setCopied] = useState(false)
 
   async function copyMarkdown() {
@@ -262,29 +261,27 @@ function TeacherSummary({
           {paper && onOpenPaper && (
             <Button variant="ghost" onClick={onOpenPaper} title="Read the paper here, page by page">
               <FileText className="size-4" />
-              {teacherMode ? 'PDF' : 'The PDF'}
+              PDF
             </Button>
           )}
-          {teacherMode && onTeacherFeedback && (
+          {onTeacherFeedback && (
             <Button className="bg-accent-soft text-ink hover:bg-accent-soft" variant="ghost" onClick={onTeacherFeedback} title="Write feedback for the student">
               <MessageSquarePlus className="size-4" />
               Feedback
             </Button>
           )}
-          <>
-            <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">
-              <Copy className="size-4" />
-              {copied ? 'Copied' : teacherMode ? 'Copy all' : 'Copy'}
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
-              title="Download the claims, their verdicts and their pages as CSV"
-            >
-              <Download className="size-4" />
-              CSV
-            </Button>
-          </>
+          <Button variant="ghost" onClick={copyMarkdown} title="Copy every claim and verdict as markdown">
+            <Copy className="size-4" />
+            {copied ? 'Copied' : 'Copy all'}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => downloadText('claims.csv', toCsv(claims), 'text/csv;charset=utf-8')}
+            title="Download the claims, their verdicts and their pages as CSV"
+          >
+            <Download className="size-4" />
+            CSV
+          </Button>
         </div>
       </div>
 

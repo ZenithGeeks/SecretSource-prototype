@@ -272,6 +272,7 @@ export function PageViewer({
   // The page is as wide as the panel, so it follows the panel's size (and the expand button).
   useEffect(() => {
     const node = scroller.current
+    /* v8 ignore next -- the scroller is always mounted when effects run; this satisfies the type */
     if (!node) return
     const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width))
     observer.observe(node)
@@ -282,6 +283,7 @@ export function PageViewer({
   // before pdf.js has drawn them, so it cannot be used for this.
   useEffect(() => {
     const node = scroller.current
+    /* v8 ignore next -- the scroller is always mounted when effects run; this satisfies the type */
     if (!node) return
     const observer = new MutationObserver(() => nameLinks(node))
     observer.observe(node, { childList: true, subtree: true })
@@ -415,7 +417,7 @@ export function PageViewer({
               compactQuote ? 'space-y-0.5 py-2' : 'max-h-32 space-y-1.5 overflow-y-auto py-3',
             )}
           >
-            <h3 className="type-label text-ink-muted">Quoted passage · page {page}</h3>
+            <h3 className="type-label text-ink-muted">Quoted passage · page {targetPage(target)}</h3>
             <blockquote
               title={compactQuote ? target.quote : undefined}
               className={cn(

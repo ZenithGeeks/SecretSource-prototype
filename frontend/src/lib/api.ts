@@ -157,12 +157,16 @@ export type Analysis = {
   references?: Record<string, Citation> // the references the paper's markers point to (#47)
   markers?: CitationMarker[] // missing on analyses from before #47
   outline?: OutlineEntry[] // missing on analyses from before #152
+  disputes?: Dispute[] // the owner's disagreements with single verdicts (#856)
   stages: Stage[]
 }
 
+/** The owner disagrees with the verdict `source` gave for claim `claim`. */
+export type Dispute = { claim: number; source: string; note: string; at: number }
+
 /** "colbert_server/papers/x.pdf" -> "x.pdf": the gateway serves papers by file name. */
 export function paperName(file: string) {
-  return file.split('/').pop() ?? file
+  return file.slice(file.lastIndexOf('/') + 1)
 }
 
 /** Where the gateway lives. Empty (the default) means same-origin behind a reverse proxy, as
@@ -174,7 +178,7 @@ export const API_BASE = import.meta.env.VITE_GATEWAY_URL ?? ''
  * name travels: the gateway builds the directory from the paper and rejects anything that
  * is not a figure-<n>. */
 export function figureImageUrl(paper: string, image: string) {
-  const file = image.split('/').pop()?.replace(/\.png$/, '') ?? ''  // figures.py writes as_posix()
+  const file = image.slice(image.lastIndexOf('/') + 1).replace(/\.png$/, '')  // figures.py writes as_posix()
   return `${API_BASE}/api/papers/${encodeURIComponent(paper)}/figures/${encodeURIComponent(file)}.png`
 }
 
@@ -248,6 +252,13 @@ export const api = {
   /** "error" when it ended at once (still queued); "stopping" when the worker ends it after its current step. */
   stopAnalysis: (id: string) =>
     request<{ id: string; status: 'error' | 'stopping' }>(`/analyses/${id}/stop`, { method: 'POST' }),
+
+  disputeVerdict: (id: string, claim: number, source: string, note: string) =>
+    request<Dispute>(`/analyses/${id}/disputes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claim, source, note }),
+    }),
 
   startAnalysis: (paper: string, verify: boolean) =>
     request<{ id: string }>('/analyses', {

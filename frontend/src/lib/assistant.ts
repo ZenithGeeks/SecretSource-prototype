@@ -53,7 +53,8 @@ type ChatMessage = { role: 'user'; text: string } | { role: 'assistant'; stateme
 
 export type AnswerEvent =
   | ({ type: 'statement' } & Pick<Statement, 'index' | 'text' | 'source' | 'page'>)
-  | ({ type: 'verdict' } & Required<Pick<Statement, 'index' | 'verdict' | 'quote' | 'reasoning'>>)
+  // `page` comes only when the statement had none: the page of the passage the judge quoted.
+  | ({ type: 'verdict' } & Required<Pick<Statement, 'index' | 'verdict' | 'quote' | 'reasoning'>> & Pick<Statement, 'page'>)
   | { type: 'done'; statements: number }
   | { type: 'error'; message: string }
 
@@ -153,6 +154,7 @@ export function useAssistant() {
   useEffect(() => () => controller.current?.abort(), [])
 
   function remember(id: string | null) {
+    /* v8 ignore next -- ask() runs from an event, after the mount effect has set hydrated */
     if (!hydrated.current) return
     saveAskChat(userId, id)
   }
@@ -160,12 +162,18 @@ export function useAssistant() {
   const updateTurn = (id: number, change: (turn: Turn) => Turn) =>
     setTurns((all) => all.map((turn) => (turn.id === id ? change(turn) : turn)))
 
-  /** Asks `question`. `retry` replaces the failed turn at the end instead of adding another. */
-  async function ask(question: string, context: AskContext, retry = false) {
+  /** Ends the answer in flight and starts the next one's controller. `isCurrent` turns false once
+   * the reader moves on, so a late reply can tell it is no longer wanted. */
+  function startAnswer() {
     controller.current?.abort()
     const abort = new AbortController()
     controller.current = abort
-    const isCurrent = () => controller.current === abort
+    return { abort, isCurrent: () => controller.current === abort }
+  }
+
+  /** Asks `question`. `retry` replaces the failed turn at the end instead of adding another. */
+  async function ask(question: string, context: AskContext, retry = false) {
+    const { abort, isCurrent } = startAnswer()
     const turn: Turn = { id: nextTurnId++, question, statements: [], status: 'answering' }
     setTurns((all) => [...(retry ? all.slice(0, -1) : all), turn])
     try {
@@ -199,10 +207,7 @@ export function useAssistant() {
 
   /** Runs a /command: its tool's result becomes this turn's statements or note. Not saved in the chat. */
   async function run(question: string, command: Extract<Parsed, { name: string }>) {
-    controller.current?.abort()
-    const abort = new AbortController()
-    controller.current = abort
-    const isCurrent = () => controller.current === abort
+    const { abort, isCurrent } = startAnswer()
     const turn: Turn = { id: nextTurnId++, question, statements: [], status: 'answering', command: `/${command.name}` }
     setTurns((all) => [...all, turn])
     try {
@@ -242,6 +247,7 @@ export function useAssistant() {
       setTurns([])
       setOpening(false)
       setOpenFailed(false)
+      /* v8 ignore next -- every caller runs after the mount effect has set hydrated */
       if (hydrated.current) saveAskChat(userId, id)
     },
     [stop, userId],

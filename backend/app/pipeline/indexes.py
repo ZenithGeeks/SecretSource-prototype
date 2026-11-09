@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from app import store
 from app.config import OPENALEX_API_KEY, UNPAYWALL_EMAIL
+from app.names import surname
 from app.pipeline.sources import USER_AGENT, Fits, titles_match
 
 CROSSREF_URL = "https://api.crossref.org/works"
@@ -192,6 +193,6 @@ def _openalex_record(work: dict) -> IndexRecord:
     return IndexRecord(
         title=work.get("title") or "",
         year=work.get("publication_year"),
-        first_author=name.split()[-1] if name else "",
+        first_author=surname(name),
         index="openalex",
     )

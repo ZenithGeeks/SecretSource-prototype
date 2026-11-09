@@ -255,4 +255,31 @@ describe('the Ask input', () => {
     expect(await screen.findByText(/Name a paper with @/)).toBeInTheDocument()
     expect(calls).toHaveLength(1)
   })
+
+  it('waits for Start before /submit_analysis starts a paid run, and Cancel sends nothing', async () => {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/health')) return Response.json({})
+        calls.push(url)
+        return Response.json({ id: 'new1' })
+      }),
+    )
+    render(<Panel />)
+
+    fireEvent.change(field(), { target: { value: '/submit_analysis 2004.12832' } })
+    await act(async () => fireEvent.submit(field().closest('form')!))
+    expect(screen.getByRole('alert')).toHaveTextContent('Start checking 2004.12832?')
+    expect(calls).toEqual([])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(calls).toEqual([])
+
+    fireEvent.change(field(), { target: { value: '/submit_analysis 2004.12832' } })
+    await act(async () => fireEvent.submit(field().closest('form')!))
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Start' })))
+    expect(calls).toEqual([expect.stringContaining('/agent/tools/submit_analysis')])
+  })
 })

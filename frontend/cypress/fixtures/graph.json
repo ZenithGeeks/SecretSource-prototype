@@ -1,0 +1,15 @@
+{
+  "clusters": ["Analysed", "Cited"],
+  "nodes": [
+    { "id": "a:1", "kind": "paper", "label": "ColBERT", "year": "’20", "cluster": "Analysed", "indexed": "yes", "index": "arXiv" },
+    { "id": "a:2", "kind": "paper", "label": "BEIR", "year": "’21", "cluster": "Cited", "indexed": "yes", "index": "arXiv" },
+    { "id": "c:1", "kind": "claim", "label": "Late interaction beats single-vector retrieval." }
+  ],
+  "edges": [
+    { "id": "e1", "source": "a:1", "target": "c:1", "relation": "asserts" },
+    { "id": "e2", "source": "a:2", "target": "c:1", "relation": "contradicts", "quote": "It does not." }
+  ],
+  "paperEdges": [
+    { "id": "p1", "a": "a:1", "b": "a:2", "similarity": 0.8, "sharedPassages": 0, "citations": 3, "cites": true, "passages": [] }
+  ]
+}

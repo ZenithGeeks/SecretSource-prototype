@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   puts: [] as { path: string; body: unknown }[],
@@ -15,6 +15,8 @@ const gateway = vi.hoisted(() => ({
   pool: {
     topics: ['CV', 'NLP', 'SE', 'HPC'],
     me: 'Chanya',
+    lead: false as boolean,
+    blind: [] as string[],
     people: [
       { name: 'Chanya', topic: 'NLP' },
       { name: 'Nuttadon', topic: '' },
@@ -76,11 +78,13 @@ import { Queue } from '../src/roles/labeler/screens/Queue'
 
 const onOpen = vi.fn()
 
+const onShowBlind = vi.fn()
+
 function renderQueue() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <Queue onOpen={onOpen} />
+      <Queue onOpen={onOpen} onShowBlind={onShowBlind} />
     </QueryClientProvider>,
   )
 }
@@ -401,6 +405,11 @@ describe('the labeler queue', () => {
   })
 
   it('downloads the whole team only when asked, under its own file name', async () => {
+    const before = gateway.pool
+    gateway.pool = { ...before, lead: true }
+    onTestFinished(() => {
+      gateway.pool = before
+    })
     const saved: string[] = []
     URL.createObjectURL = vi.fn(() => 'blob:x')
     URL.revokeObjectURL = vi.fn()
@@ -414,6 +423,25 @@ describe('the labeler queue', () => {
     fireEvent.click(button)
     await waitFor(() => expect(saved).toEqual(['evidence_labels_team.csv']))
     expect(gateway.fetched.at(-1)).toContain('tab=labels&scope=team')
+  })
+
+  it('offers the whole team download only to a lead', async () => {
+    renderQueue()
+    await screen.findByRole('button', { name: 'Download labels CSV' })
+    expect(screen.queryByRole('radio', { name: 'Whole team' })).not.toBeInTheDocument()
+  })
+
+  it('keeps papers checked blind out of the list and points to them', async () => {
+    const before = gateway.pool
+    gateway.pool = { ...before, blind: ['x1'] }
+    onTestFinished(() => {
+      gateway.pool = before
+    })
+    renderQueue()
+    await screen.findByRole('table')
+    expect(screen.queryByText('HPC paper')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open blind checks' }))
+    expect(onShowBlind).toHaveBeenCalled()
   })
 
   it('says so, in plain words, when a download fails', async () => {
@@ -436,6 +464,17 @@ describe('the labeler queue', () => {
     renderQueue()
     expect(await screen.findByText("You can't use the labeler")).toBeInTheDocument()
     expect(screen.queryByText(/LABELING_ALLOWED|detail/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  it('tells a Cloudflare challenge apart from a real access denial', async () => {
+    gateway.statusError =
+      '403: <!DOCTYPE html><html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>'
+    renderQueue()
+    expect(await screen.findByText("The site's protection blocked this request")).toBeInTheDocument()
+    expect(screen.getByText(/Reload the page, or open \/api\/health/)).toBeInTheDocument()
+    expect(screen.queryByText("You can't use the labeler")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Just a moment|<!DOCTYPE/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 

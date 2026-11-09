@@ -1,55 +1,20 @@
 # Constraints
 
-Last reviewed: 2026-10-17 by @EarthWittawat
+Last reviewed: 2026-11-09 by @EarthWittawat
 
-This file holds the numbers a change must not break: running cost, verdict quality and
+This file holds the numbers a change must not break: LLM token use, verdict quality and
 analysis time.
 Do not weaken a number here to make a change pass; change it in its own pull request, with
 the reason.
 
-## Cost budget
+## Running cost
 
-An active user should cost us less than half of what the closest paid tool charges.
-scite, which also shows whether a citation supports a claim, is $20 a month on monthly
-billing (SciSpace Premium is the same, Consensus about $10). Half leaves room for a paid
-LLM and for users who do not pay.
+The system runs on our own machines (see [Where the system runs](#where-the-system-runs)), so an
+analysis has no per-run hosting cost. The one cost that grows with use is LLM tokens.
 
-An active user is someone who starts at least one analysis in the month.
-
-| Rule | Number | Why this number |
+| Metric | Rule | Checked by |
 | --- | --- | --- |
-| Cost per active user per month | at most $10 | half of scite's $20 monthly price |
-| Analyses per active user per month | plan for 20 | a thesis student checking a draft and its main sources each week |
-| Cost per analysis, Cloud Run plus LLM priced as if paid | at most $0.50 | $10 divided by 20 analyses |
-| Services that bill with no traffic | none | idle settings cost $4.51 a day from 2 to 16 Oct 2026 with no analyses |
-
-The LLM is priced at Gemini 2.5 Flash list prices ($0.30 input, $2.50 output per million
-tokens) even though Qwen on 9arm is free to us today, so the budget still holds if we have
-to pay for one.
-
-## How it is checked
-
-| Rule | Checked by | Runs |
-| --- | --- | --- |
-| Cost per analysis, idle settings | `python deploy/cost/report.py --days 7` | by hand, once a week; it warns and does not block |
-| Services that bill with no traffic | the same report, line "Bills with no traffic" | once a week |
-| ColPali GPU left on | Cloud Scheduler job `gpu-guard-colpali` and the alert "GPU Cloud Run service billed continuously" | every hour, in Google Cloud |
-| Gateway left on | Cloud Scheduler job `scale-guard-gateway` | every hour, in Google Cloud |
-
-A Cloud Billing budget alert would be the better outside check, but the project bills to a
-university account we cannot change. Ask its admin for one before relying on the report
-alone.
-
-## Measured, not yet within budget
-
-| Metric | Today | Direction |
-| --- | --- | --- |
-| Cost per analysis, Cloud Run only | about $1.11 (Cloud Run spend on 15 and 16 Oct 2026 divided by the analyses those days; README "Cost and speed") | must fall to $0.50 |
-| LLM tokens per analysis | each analysis record has `llm_tokens` from SCRUM-326 on, keyed like `judge_prompt` | must not grow without a reason in the PR |
-
-The largest part was the ColPali GPU, about $0.75 of the $1.11. Since #446 checks leave it out
-by default; measure again with the report a week after that deploy. The README section "Cost
-and speed" lists what else would close the gap.
+| LLM tokens per analysis | must not grow without a reason in the PR | each analysis record has `llm_tokens` from SCRUM-326 on, keyed like `judge_prompt` |
 
 ## Verdict quality
 
@@ -151,25 +116,14 @@ Neither runs in CI: both need the LLM gateway and a GPU, which the shared CI run
 
 ## Where the system runs
 
-From 17 Oct 2026 the system is developed and run on the local stack only, until it is
-finished. Then it is deployed to Google Cloud in one planned release.
+Production runs on our own machines with Docker Compose, not on Google Cloud.
 
-| Rule | Number | Why |
-| --- | --- | --- |
-| Cloud Run services serving traffic | 0 (gateway, colbert, colpali and grobid at manual scaling, 0 instances) | each deploy and each idle GPU or CPU minute costs money on a university account, and the design is still changing |
-| Deploys to Google Cloud | none until the release | a half-finished pipeline in production gives teammates and testers wrong verdicts |
+| Machine | Runs |
+| --- | --- |
+| Mini PC | `web`, `gateway`, `redis` (the analysis queue) and the papers folder, reached through a Cloudflare tunnel |
+| PC with an RTX 5070 Ti | GROBID, ColBERT, ColPali and the workers |
 
-What was switched off on 17 Oct 2026, and how to turn it back on at release time:
-
-| What | Off with | On again with |
-| --- | --- | --- |
-| Cloud Run services | `gcloud run services update <svc> --region asia-southeast1 --scaling=0` | `--scaling=auto --min=0` and the old max (gateway 1, colpali 2, colbert 10, grobid 3) |
-| Cloud Scheduler `scale-guard-gateway`, `gpu-guard-colpali` | `gcloud scheduler jobs pause` | `gcloud scheduler jobs resume`, after the services are back on automatic scaling |
-| Workflows `deploy-gateway`, `deploy` | `gh workflow disable` | `gh workflow enable` |
-
-Checked by `gcloud run services list` (every service shows manual scaling with 0 instances)
-and `gh workflow list --all`. A change that needs a cloud deploy before the release needs
-an entry under Exceptions first.
+Ask before any Cloud Run or other Google Cloud deploy.
 
 ## Exceptions
 

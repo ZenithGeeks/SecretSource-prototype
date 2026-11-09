@@ -12,9 +12,9 @@ vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { G
 const HOME = {
   alert: '3 new papers disagree with something in your library.',
   conflicts: [
-    { claim: 'Residual compression loses no quality', for: ['ColBERTv2'], against: [], analysis: 'a1', claimIndex: 0 },
-    { claim: 'Late interaction wins', for: ['PLAID'], against: ['BEIR'], analysis: 'a1', claimIndex: 1 },
+    { claim: 'Late interaction wins', paper: 'ColBERTv2', for: ['PLAID', 'A very long cited work title'], against: ['BEIR'], analysis: 'a1', claimIndex: 1 },
   ],
+  conflictsTotal: 28,
   queue: [{ paper: 'PLAID (2022)', note: 'Cited by 3', identifier: '10.1/plaid', analysis: 'a1' }],
   library: { papers: 9, claims: 53, verified: 40, tally: { backed: 28, silent: 7, contradicted: 1, unchecked: 17 } },
 }
@@ -53,14 +53,32 @@ test('Analyze is the only primary button in the analyze card', async () => {
   expect(primary.map((b) => b.textContent)).toEqual(['Analyze'])
 })
 
-test('the library legend uses the count words and conflicts say what is missing', async () => {
+test('the library legend uses the count words', async () => {
   renderHome()
   const library = within(await screen.findByRole('region', { name: 'Your library' }))
   expect(library.getByText('back it')).toBeInTheDocument()
   expect(library.getByText('silent')).toBeInTheDocument()
   expect(library.getByText('contradicts')).toBeInTheDocument() // 1, singular
   expect(library.getByText('not checked')).toBeInTheDocument()
-  expect(screen.getByText('No counter-evidence yet')).toBeInTheDocument()
+})
+
+test('the conflicts card counts every conflict and gives each cited work its own pill', async () => {
+  renderHome()
+  expect(await screen.findByRole('button', { name: 'All 28 in Library' })).toBeInTheDocument()
+  expect(screen.getByTitle('BEIR')).toHaveAttribute('data-verdict', 'refutes')
+  expect(screen.getByTitle('PLAID')).toHaveAttribute('data-verdict', 'supports')
+  expect(screen.getByTitle('A very long cited work title')).toHaveAttribute('data-verdict', 'supports')
+})
+
+test('a dropped file that is not a PDF says why nothing happened', async () => {
+  renderHome()
+  const card = await screen.findByRole('region', { name: 'Analyze a paper' })
+  const file = new File(['x'], 'notes.txt', { type: 'text/plain' })
+  fireEvent.drop(card, { dataTransfer: { files: [file] } })
+  expect(screen.getByRole('alert')).toHaveTextContent('Only PDF files can be analyzed')
+
+  fireEvent.change(screen.getByLabelText('Paper to analyze'), { target: { value: '10.1/x' } })
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 
 test('Analyze on a queued paper puts its identifier in the analyze box', async () => {

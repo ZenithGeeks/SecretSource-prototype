@@ -26,3 +26,9 @@ dist-ssr
 # local env (Supabase keys)
 .env
 .env.local
+
+# Cypress
+cypress/videos
+cypress/screenshots
+coverage/
+coverage-*/
