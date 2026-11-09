@@ -15,7 +15,9 @@ from fastapi import HTTPException
 from google.adk.tools import ToolContext
 
 from app import assistant, researcher
+from app.author import logic
 from app.labeling import router as labeling
+from app.names import surname
 from app.pipeline.claims import locate
 
 MAX_SENTENCES = assistant.MAX_STATEMENTS  # one judge call each, so the same cap as an answer
@@ -280,15 +282,18 @@ async def bibtex(analysis_id: str, tool_context: ToolContext) -> dict:
 
 def _entry_key(authors: list[str], year: str, title: str) -> str:
     """Surname of the first author, the year and the title's first word: "khattab2020colbert"."""
-    surname = authors[0].split()[-1] if authors else "anon"
+    first_author = surname(authors[0]) if authors else "anon"
     first_word = (re.findall(r"[A-Za-z]+", title) or ["untitled"])[0]
-    return re.sub(r"[^a-z0-9]", "", f"{surname}{year}{first_word}".lower())
+    return re.sub(r"[^a-z0-9]", "", f"{first_author}{year}{first_word}".lower())
 
 
 def _entry(key: str, title: str, authors: list[str], year: str) -> str:
-    fields = [("title", title), ("author", " and ".join(authors)), ("year", str(year))]
-    body = ",\n".join(f"  {name} = {{{value}}}" for name, value in fields if value)
-    return f"@misc{{{key},\n{body}\n}}"
+    fields = {
+        "title": logic.latex_escape(title),
+        "author": " and ".join(logic.latex_escape(name) for name in authors),
+        "year": str(year),
+    }
+    return logic.serialize_bib({"type": "misc", "key": key, "fields": {k: v for k, v in fields.items() if v}})
 
 
 async def submit_analysis(paper: str, tool_context: ToolContext) -> dict:

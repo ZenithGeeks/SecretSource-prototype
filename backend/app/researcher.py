@@ -11,6 +11,7 @@ import hashlib
 import re
 from collections import Counter, defaultdict
 
+from app.names import surname
 from app.pipeline.claims import _tokens
 from app.pipeline.sources import ARXIV_PATTERN, ARXIV_VERSION
 from app.pipeline.verify import checked_citations
@@ -82,8 +83,8 @@ def cite(authors: list[str], year: str, comma: bool = False) -> str:
     """ "Han et al. 2025", from the authors and year. Empty when there are no authors."""
     if not authors:
         return year
-    surname = authors[0].split()[-1]
-    who = f"{surname} et al." if len(authors) > 1 else surname
+    first_author = surname(authors[0])
+    who = f"{first_author} et al." if len(authors) > 1 else first_author
     return f"{who}{',' if comma else ''} {year}".strip()
 
 
