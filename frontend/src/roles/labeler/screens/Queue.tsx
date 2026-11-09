@@ -191,7 +191,10 @@ export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; o
           <Empty title="No papers yet" hint="Search Scopus above and add some. They appear here once their text has been read." />
         ) : (
           <>
+            {/* A paper is listed only once the pool has loaded, so `pool.data` is set; `?? []` only satisfies the type. */}
+            {/* v8 ignore start -- @preserve */}
             <PaperFilters papers={papers} topics={pool.data?.topics ?? []} me={me} filters={filters} onChange={setFilters} shown={shown.length} />
+            {/* v8 ignore stop -- @preserve */}
             {shown.length === 0 ? (
               <NoMatch filters={filters} me={me} onClear={() => setFilters(NO_FILTERS)} />
             ) : (

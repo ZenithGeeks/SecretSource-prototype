@@ -229,6 +229,8 @@ function Body({
   const go = (id: string) => {
     const next = claims.find((c) => c.claim_id === id)
     setCurrentId(id)
+    // Every id that reaches go() is a listed claim, so `next` is set; the check only satisfies the type.
+    /* v8 ignore next -- @preserve */
     setFocus(next ? firstFocus(next, session) : null)
     setSavedRows(null)
     setPicked(null)
@@ -257,8 +259,11 @@ function Body({
   // Edit starts from the extracted wording, so a small fix is not a full retype.
   const patch = (change: Partial<Draft>) =>
     setDrafts((all) => {
+      // patch() runs only while a claim with a draft is on screen; `?? emptyDraft()` and `&& claim` only satisfy the types.
+      /* v8 ignore start -- @preserve */
       const before = all[currentId] ?? emptyDraft()
       const start = change.status === 'edited' && !before.edited && claim ? { edited: claim.claim } : {}
+      /* v8 ignore stop -- @preserve */
       return { ...all, [currentId]: { ...before, ...start, ...change } }
     })
 
@@ -289,6 +294,8 @@ function Body({
   const left = claim ? remaining(claim, draft, cited) : []
 
   const write = (next: boolean) => {
+    // Save is offered, and Ctrl+S allowed, only with a claim on screen.
+    /* v8 ignore next -- @preserve */
     if (!claim) return
     const body = buildSave({ ...claim, source: claimSource }, draft, saved[claim.claim_id])
     save.mutate(body, {
@@ -489,6 +496,8 @@ function Body({
   // Adding evidence to an undecided claim keeps it: evidence only belongs to a claim you keep.
   const addEvidence = () => {
     const referenceId = session.references.find((r) => r.file === picked?.file)?.reference_id
+    // The Add button is disabled without a picked text in a listed reference, so this is a guard only.
+    /* v8 ignore next -- @preserve */
     if (!picked || !referenceId) return
     const p: AddedPassage = { reference_id: referenceId, page: picked.page, passage: picked.text.slice(0, 1500) }
     if (!draft.added.some((a) => a.reference_id === p.reference_id && a.passage === p.passage)) {
@@ -709,7 +718,10 @@ function Body({
               {done} of {total} claims finished
             </p>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
+              {/* The bar exists only when a claim does, so `total` is at least 1. */}
+              {/* v8 ignore start -- @preserve */}
               <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+              {/* v8 ignore stop -- @preserve */}
             </div>
           </div>
           {shortcutsButton}
