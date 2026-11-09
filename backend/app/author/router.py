@@ -13,6 +13,7 @@ configured a token is mandatory, without it every caller shares the ownerless sp
 """
 
 import asyncio
+import contextlib
 import io
 import json
 import logging
@@ -269,9 +270,111 @@ class FileIn(BaseModel):
 UNTITLED = "Untitled draft"
 UNTITLED_PROJECT = "Untitled project"
 MAX_TITLE = 120
-# One gateway instance serves the app (see agent_runs.py); a rename and a file write each read
-# the whole draft row and write it back, so they take this lock to not undo one another.
-DRAFT_WRITES = threading.Lock()
+
+
+class RowLocks:
+    """One lock per key, made on first use and dropped once nobody holds or waits for it, so the
+    registry stays as small as the writes in progress.
+
+    Every route that reads a whole project, draft or source row and writes it back does both
+    under that row's lock, so two writes cannot undo one another, and re-reads the row there, so
+    a write that lost the race to a delete answers 404 instead of bringing the row back
+    (SCRUM-477). The locks are this process's: one gateway process serves the app today
+    (--max-instances 1, one uvicorn process; see agent_runs.py). A second process would need a
+    check in the store, such as a compare-and-set on a revision."""
+
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._held: dict[tuple, list] = {}  # key -> [lock, holders and waiters]
+
+    def __len__(self) -> int:
+        with self._guard:
+            return len(self._held)
+
+    @contextlib.contextmanager
+    def hold(self, *keys: tuple, timeout: float | None = None, busy=TimeoutError):
+        """Holds the lock of every key, taken in sorted order whatever order they are given in,
+        so two requests that need the same rows can never wait on one another.
+
+        With a `timeout`, the locks not all taken within it (one deadline for the whole hold,
+        however many keys) raise `busy()` instead of waiting on: the waits run in
+        asyncio.to_thread's small pool, which a stuck holder must not use up. Every lock taken so
+        far is released first, on that path as on every other."""
+        ordered = sorted(set(keys))
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._guard:
+            entries = [self._held.setdefault(key, [threading.Lock(), 0]) for key in ordered]
+            for entry in entries:
+                entry[1] += 1
+        taken = []
+        try:
+            for entry in entries:
+                wait = -1 if deadline is None else max(0.0, deadline - time.monotonic())
+                if not entry[0].acquire(timeout=wait):
+                    raise busy()
+                taken.append(entry[0])
+            yield
+        finally:
+            for lock in reversed(taken):
+                lock.release()
+            with self._guard:
+                for key, entry in zip(ordered, entries, strict=True):
+                    entry[1] -= 1
+                    if entry[1] == 0:
+                        del self._held[key]
+
+
+ROW_LOCKS = RowLocks()
+# Sorted keys take a project before a draft before a source: the order a route that writes more
+# than one of them (a PDF on a draft's project, a project's delete) must take them in.
+_RANK = {PROJECTS: 0, DRAFTS: 1, SOURCES: 2}
+# How long a route waits for a row another write holds. A write takes a few store calls, so this
+# is only reached when something is stuck; the request then answers instead of hanging.
+LOCK_TIMEOUT_S = 10.0
+BUSY = "This is busy with another change. Try again in a moment."
+DRAFT_BUSY = "The draft is busy with another change. Try again in a moment."
+
+
+def _busy() -> HTTPException:
+    """The answer when a row's lock is not free in time: the screens show the detail inline."""
+    return HTTPException(503, BUSY)
+
+
+def _draft_busy() -> HTTPException:
+    """The same for an editor's file write: a 409, so the editor reads the draft again and retries,
+    or offers its conflict choice, as it does for a write another tab got in first."""
+    return HTTPException(409, DRAFT_BUSY)
+
+
+def _row_key(table: str, row_id: str) -> tuple:
+    """A row's key in ROW_LOCKS: ranked by table (see _RANK), so sorted keys keep the order."""
+    return (_RANK[table], table, row_id)
+
+
+def _hold(*keys: tuple, busy=_busy):
+    return ROW_LOCKS.hold(*keys, timeout=LOCK_TIMEOUT_S, busy=busy)
+
+
+def _locked(table: str, *row_ids: str | None, busy=_busy):
+    """The locks of these rows of one table (None ids are skipped)."""
+    return _hold(*(_row_key(table, row_id) for row_id in row_ids if row_id), busy=busy)
+
+
+def _locked_rows(projects: tuple = (), drafts: tuple = (), sources: tuple = ()):
+    """The locks of rows of several tables at once, in the fixed order (see _RANK)."""
+    wanted = ((PROJECTS, projects), (DRAFTS, drafts), (SOURCES, sources))
+    return _hold(*(_row_key(table, i) for table, ids in wanted for i in ids if i))
+
+
+def _title_key(table: str, user: str | None) -> tuple:
+    """The owner's key for picking a free name in `table` (a draft's or project's "Untitled …
+    N", a source's bib key): reading the names taken and saving the new row are one step, so
+    two at once never get the same one. Ranked before every row, so it is taken first."""
+    return (-1, f"titles:{table}", str(user))
+
+
+def _titles_locked(table: str, user: str | None):
+    return _hold(_title_key(table, user))
 
 
 def _clean_title(title: str, empty: str = "a draft needs a title", noun: str = "a draft title") -> str:
@@ -308,14 +411,27 @@ def _untitled(user: str | None) -> str:
 
 def _new_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
     """A new draft. No title, or the bare default the app sends for a blank draft, gets the
-    next free "Untitled draft N"; an upload's file name longer than MAX_TITLE is cut."""
-    now = logic.now_iso()
+    next free "Untitled draft N"; an upload's file name longer than MAX_TITLE is cut. Picked and
+    saved under the owner's title lock, so two at once get two numbers. A draft made in a project
+    holds the project's lock too, so it cannot land in a project a delete is removing."""
     wanted = " ".join(title.split())[:MAX_TITLE]
+    default = not wanted or wanted == UNTITLED
+    keys = [_title_key(DRAFTS, user)] if default else []
+    if project_id:
+        keys.append(_row_key(PROJECTS, project_id))
+    with _hold(*keys):
+        if project_id:
+            _row(PROJECTS, project_id, user, "project")
+        return _insert_draft(user, _untitled(user) if default else wanted, project_id, files)
+
+
+def _insert_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
+    now = logic.now_iso()
     draft = {
         "id": _new_id(),
         "owner": user,
         "projectId": project_id,
-        "title": wanted if wanted and wanted != UNTITLED else _untitled(user),
+        "title": title,
         "version": 1,
         "files": files,
         "pdfs": {},
@@ -376,8 +492,7 @@ async def list_drafts(user: str | None = Depends(current_user)):
 
 @router.post("/drafts")
 async def create_draft(request: DraftIn, user: str | None = Depends(current_user)):
-    if request.projectId:
-        await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
+    # _new_draft checks the project under its lock (404 when it is not the caller's).
     files = [
         {"name": _safe_name(f["name"]), "kind": _kind_of(f["name"]), "content": str(f.get("content", ""))}
         for f in (request.files or [])
@@ -390,6 +505,8 @@ async def create_draft(request: DraftIn, user: str | None = Depends(current_user
 async def upload_draft(
     file: UploadFile = FILE_UPLOAD, projectId: str | None = None, user: str | None = Depends(current_user)
 ):
+    # Checked before the upload is parsed, so a wrong project fails fast; _new_draft checks it
+    # again under the project lock.
     if projectId:
         await asyncio.to_thread(_row, PROJECTS, projectId, user, "project")
     files = _text_files_from_upload(file.filename or "draft.tex", await file.read())
@@ -410,13 +527,14 @@ async def update_draft(draft_id: str, request: DraftIn, user: str | None = Depen
     `updated` (what the editor's writes are checked against) and `edited` stay as they were:
     a rename never makes an open editor's next write a conflict."""
     title = _clean_title(request.title) if request.title is not None else None
-    if request.projectId:
-        await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
 
     def rename() -> dict:
-        # Read and written under the lock a file write takes, so an autosave landing between
-        # the two is not put back to the text this rename read.
-        with DRAFT_WRITES:
+        # Read and written under the draft's lock, so an autosave landing between the two is
+        # not put back to the text this rename read. A move also holds the project's, so it
+        # cannot land in a project a delete is removing.
+        with _locked_rows(projects=(request.projectId,), drafts=(draft_id,)):
+            if request.projectId:
+                _row(PROJECTS, request.projectId, user, "project")
             draft = _row(DRAFTS, draft_id, user, "draft")
             if title is not None:
                 draft["title"] = title
@@ -435,7 +553,15 @@ async def delete_draft(draft_id: str, user: str | None = Depends(current_user)):
     for run in await asyncio.to_thread(_checks_of, draft_id, user):
         if run.get("status") != "running":
             await gateway._delete_one(run["id"])
-    await asyncio.to_thread(store.delete_author_row, DRAFTS, draft_id)
+
+    def remove() -> None:
+        # Under the draft's lock: a write in flight either lands before this (and is deleted with
+        # the row) or re-reads the row after it and answers 404, so it never brings it back.
+        with _locked(DRAFTS, draft_id):
+            _row(DRAFTS, draft_id, user, "draft")
+            store.delete_author_row(DRAFTS, draft_id)
+
+    await asyncio.to_thread(remove)
     return {"deleted": draft_id}
 
 
@@ -448,9 +574,9 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
         raise HTTPException(413, "a draft file must be under 2MB")
 
     def write() -> dict:
-        # The check against `updated` and the write are one step under DRAFT_WRITES, so a
-        # rename or another write cannot land between them.
-        with DRAFT_WRITES:
+        # The check against `updated` and the write are one step under the draft's lock, so a
+        # rename or another write cannot land between them. A lock not free in time is a 409.
+        with _locked(DRAFTS, draft_id, busy=_draft_busy):
             draft = _row(DRAFTS, draft_id, user, "draft")
             if request.updated is not None and request.updated != draft.get("updated"):
                 raise HTTPException(409, "the draft was changed elsewhere since this editor last saved it")
@@ -467,24 +593,31 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
 
 @router.delete("/drafts/{draft_id}/files/{name:path}")
 async def delete_file(draft_id: str, name: str, user: str | None = Depends(current_user)):
-    draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    before = len(draft["files"])
-    draft["files"] = [f for f in draft["files"] if f["name"] != name]
-    if len(draft["files"]) == before:
-        raise HTTPException(404, "no such file")
-    if not draft["files"]:
-        raise HTTPException(400, "a draft keeps at least one file")
-    await asyncio.to_thread(_save, DRAFTS, draft)
-    return await _draft_answer(draft, user)
+    def remove() -> dict:
+        with _locked(DRAFTS, draft_id):
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            before = len(draft["files"])
+            draft["files"] = [f for f in draft["files"] if f["name"] != name]
+            if len(draft["files"]) == before:
+                raise HTTPException(404, "no such file")
+            if not draft["files"]:
+                raise HTTPException(400, "a draft keeps at least one file")
+            return _save(DRAFTS, draft)
+
+    return await _draft_answer(await asyncio.to_thread(remove), user)
 
 
 @router.post("/drafts/{draft_id}/save")
 async def save_draft(draft_id: str, user: str | None = Depends(current_user)):
     """Ctrl/Cmd+S: a new version. The check history shows one row per version checked."""
-    draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
-    _bump_version(draft)
-    await asyncio.to_thread(_save, DRAFTS, draft)
-    return await _draft_answer(draft, user)
+
+    def save() -> dict:
+        with _locked(DRAFTS, draft_id):
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            _bump_version(draft)
+            return _save(DRAFTS, draft)
+
+    return await _draft_answer(await asyncio.to_thread(save), user)
 
 
 def _bump_version(draft: dict) -> None:
@@ -496,6 +629,16 @@ def _bump_version(draft: dict) -> None:
 def _unsaved(draft: dict) -> bool:
     """Edits written by the editor since the last version was saved (Ctrl+S or a check)."""
     return logic.content_hash(draft.get("files", [])) != draft.get("savedHash")
+
+
+def _save_unsaved(draft_id: str, user: str | None) -> dict:
+    """The draft as it is now, with a new version saved first when it has unsaved edits."""
+    with _locked(DRAFTS, draft_id):
+        draft = _row(DRAFTS, draft_id, user, "draft")
+        if _unsaved(draft):
+            _bump_version(draft)
+            _save(DRAFTS, draft)
+        return draft
 
 
 @router.get("/drafts/{draft_id}/parse")
@@ -526,14 +669,32 @@ async def upload_citation_pdf(
     if not content.startswith(b"%PDF"):
         raise HTTPException(400, "that is not a PDF")
     path = await asyncio.to_thread(gateway.save_upload, content, file.filename)
-    project = await asyncio.to_thread(_project_of, draft, user)
-    if project:
-        _attach_pdf(project, key, path.name)
-        await asyncio.to_thread(_save, PROJECTS, project)
-    else:
-        _attach_pdf(draft, key, path.name)
-        await asyncio.to_thread(_save, DRAFTS, draft)
+    await asyncio.to_thread(
+        _attach_to_draft_or_project, draft_id, draft.get("projectId"), user, key, path.name
+    )
     return {"key": key, "pdf": path.name}
+
+
+def _attach_to_draft_or_project(
+    draft_id: str, project_id: str | None, user: str | None, key: str, pdf: str
+) -> None:
+    """The PDF on the draft's project, or on the draft when it has none: both rows re-read under
+    their locks (project first, see _RANK). The upload took a while, so the draft may have moved
+    meanwhile; then this goes again with the project it is in now."""
+    while True:
+        with _locked_rows(projects=(project_id,), drafts=(draft_id,)):
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            if draft.get("projectId") != project_id:
+                project_id = draft.get("projectId")
+                continue
+            project = _project_of(draft, user)
+            if project:
+                _attach_pdf(project, key, pdf)
+                _save(PROJECTS, project)
+            else:
+                _attach_pdf(draft, key, pdf)
+                _save(DRAFTS, draft)
+            return
 
 
 # --- draft checks -----------------------------------------------------------------------
@@ -697,10 +858,10 @@ async def start_draft_check(draft_id: str, user: str | None = Depends(current_us
     gateway.streams[check_id] = asyncio.Queue()
     try:
         # A check runs on a saved version: unsaved edits are saved first (as Ctrl+S would),
-        # so the history's "vN" names exactly the content that was checked.
-        if _unsaved(draft):
-            _bump_version(draft)
-            await asyncio.to_thread(_save, DRAFTS, draft)
+        # so the history's "vN" names exactly the content that was checked. The row is read
+        # again under its lock here, after the guard above: the copy read at the top may be
+        # older than an autosave that landed since, and saving it would put the older text back.
+        draft = await asyncio.to_thread(_save_unsaved, draft_id, user)
         project = await asyncio.to_thread(_project_of, draft, user)
         run["version"] = int(draft.get("version", 1))
         # the draft's files plus the project's .bib: what "unchanged since the previous check" compares
@@ -973,11 +1134,21 @@ def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, li
 
 
 def _new_project(user: str | None, name: str, bib_name: str | None, bib: str | None) -> dict:
+    """A new project. No name gets the next free "Untitled project N", picked and saved under
+    the owner's title lock so two at once get two numbers."""
+    if name.strip():
+        return _insert_project(user, name.strip(), bib_name, bib)
+    with _titles_locked(PROJECTS, user):
+        taken = {p.get("name") for p in _rows(PROJECTS, user)}
+        return _insert_project(user, _first_free(UNTITLED_PROJECT, taken), bib_name, bib)
+
+
+def _insert_project(user: str | None, name: str, bib_name: str | None, bib: str | None) -> dict:
     now = logic.now_iso()
     project = {
         "id": _new_id(),
         "owner": user,
-        "name": name.strip() or "Untitled project",
+        "name": name,
         "bib": {"name": bib_name or "main.bib", "content": bib or ""},
         "pdfs": {},
         "created": now,
@@ -1000,11 +1171,7 @@ async def list_projects(user: str | None = Depends(current_user)):
 async def create_project(request: ProjectIn, user: str | None = Depends(current_user)):
     """+ New project. No name (or a blank one) gets the next free "Untitled project N"; a
     name follows the draft title rules."""
-    if (request.name or "").strip():
-        name = _clean_name(request.name or "")
-    else:
-        projects = await asyncio.to_thread(_rows, PROJECTS, user)
-        name = _first_free(UNTITLED_PROJECT, {p.get("name") for p in projects})
+    name = _clean_name(request.name or "") if (request.name or "").strip() else ""
     project = await asyncio.to_thread(_new_project, user, name, request.bibName, request.bib)
     return _project_view(project, [], {})
 
@@ -1053,15 +1220,20 @@ async def get_project(project_id: str, user: str | None = Depends(current_user))
 @router.patch("/projects/{project_id}")
 async def update_project(project_id: str, request: ProjectIn, user: str | None = Depends(current_user)):
     name = _clean_name(request.name) if request.name is not None else None
-    project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
-    if name is not None:
-        project["name"] = name
-    if request.bib is not None:
-        project["bib"] = {
-            "name": request.bibName or project.get("bib", {}).get("name") or "main.bib",
-            "content": request.bib,
-        }
-    await asyncio.to_thread(_save, PROJECTS, project)
+
+    def update() -> dict:
+        with _locked(PROJECTS, project_id):
+            project = _row(PROJECTS, project_id, user, "project")
+            if name is not None:
+                project["name"] = name
+            if request.bib is not None:
+                project["bib"] = {
+                    "name": request.bibName or project.get("bib", {}).get("name") or "main.bib",
+                    "content": request.bib,
+                }
+            return _save(PROJECTS, project)
+
+    project = await asyncio.to_thread(update)
     return _project_view(project, await asyncio.to_thread(_rows, DRAFTS, user), {})
 
 
@@ -1071,24 +1243,33 @@ async def delete_project(project_id: str, user: str | None = Depends(current_use
     files stay in the papers store, but nothing points at them any more). Its drafts and saved
     sources stay and become unsorted: a source left pointing at a deleted project would show
     up nowhere."""
-    await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
 
-    def unsort_drafts() -> None:
-        # Under the lock a file write takes, and without touching `updated`, as update_draft
-        # moves a draft: an open editor's next autosave neither conflicts nor puts the draft
-        # back in the deleted project.
-        with DRAFT_WRITES:
-            for draft in _rows(DRAFTS, user):
-                if draft.get("projectId") == project_id:
-                    draft["projectId"] = None
-                    store.save_author_row(DRAFTS, draft)
+    def remove() -> None:
+        # The whole delete holds the project's lock, so nothing moves a draft or a source into
+        # it meanwhile (every such write takes the project's lock too). Its drafts and sources
+        # are listed under it, then all their locks are taken in one step before anything is
+        # changed, so a lock not free in time stops the delete before it has unsorted any of
+        # them. Each is re-read under its lock. A draft keeps its `updated`, as update_draft
+        # moves one: an open editor's next autosave neither conflicts nor puts the draft back
+        # in the deleted project.
+        with _locked(PROJECTS, project_id):
+            _row(PROJECTS, project_id, user, "project")
+            drafts = [d["id"] for d in _rows(DRAFTS, user) if d.get("projectId") == project_id]
+            sources = [s["id"] for s in _rows(SOURCES, user) if s.get("projectId") == project_id]
+            with _locked_rows(drafts=tuple(drafts), sources=tuple(sources)):
+                for draft_id in drafts:
+                    draft = store.load_author_row(DRAFTS, draft_id)
+                    if draft and draft.get("projectId") == project_id:
+                        draft["projectId"] = None
+                        store.save_author_row(DRAFTS, draft)
+                for source_id in sources:
+                    source = store.load_author_row(SOURCES, source_id)
+                    if source and source.get("projectId") == project_id:
+                        source["projectId"] = None
+                        _save(SOURCES, source)
+                store.delete_author_row(PROJECTS, project_id)
 
-    await asyncio.to_thread(unsort_drafts)
-    for source in await asyncio.to_thread(_rows, SOURCES, user):
-        if source.get("projectId") == project_id:
-            source["projectId"] = None
-            await asyncio.to_thread(_save, SOURCES, source)
-    await asyncio.to_thread(store.delete_author_row, PROJECTS, project_id)
+    await asyncio.to_thread(remove)
     return {"deleted": project_id}
 
 
@@ -1105,29 +1286,41 @@ async def lint_project(project_id: str, user: str | None = Depends(current_user)
 @router.delete("/projects/{project_id}/bib/{key}")
 async def remove_bib_entry(project_id: str, key: str, user: str | None = Depends(current_user)):
     """ "Remove" on a never-cited entry: drops every entry with that key from the .bib."""
-    project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
-    bib = project.get("bib") or {"name": "main.bib", "content": ""}
-    entries = logic.parse_bib(bib.get("content", ""))
-    kept = [e for e in entries if e["key"] != key]
-    if len(kept) == len(entries):
-        raise HTTPException(404, f"{key} is not in {bib.get('name')}")
-    bib["content"] = "\n\n".join(logic.serialize_bib(e) for e in kept) + ("\n" if kept else "")
-    project["bib"] = bib
-    await asyncio.to_thread(_save, PROJECTS, project)
-    return {"removed": key, "entries": len(kept)}
+
+    def remove() -> int:
+        with _locked(PROJECTS, project_id):
+            project = _row(PROJECTS, project_id, user, "project")
+            bib = project.get("bib") or {"name": "main.bib", "content": ""}
+            entries = logic.parse_bib(bib.get("content", ""))
+            kept = [e for e in entries if e["key"] != key]
+            if len(kept) == len(entries):
+                raise HTTPException(404, f"{key} is not in {bib.get('name')}")
+            bib["content"] = "\n\n".join(logic.serialize_bib(e) for e in kept) + ("\n" if kept else "")
+            project["bib"] = bib
+            _save(PROJECTS, project)
+            return len(kept)
+
+    return {"removed": key, "entries": await asyncio.to_thread(remove)}
 
 
 @router.post("/projects/{project_id}/bib/{key}/pdf")
 async def upload_project_pdf(
     project_id: str, key: str, file: UploadFile = FILE_UPLOAD, user: str | None = Depends(current_user)
 ):
-    project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
+    await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
     content = await file.read()
     if not content.startswith(b"%PDF"):
         raise HTTPException(400, "that is not a PDF")
     path = await asyncio.to_thread(_gateway().save_upload, content, file.filename)
-    _attach_pdf(project, key, path.name)
-    await asyncio.to_thread(_save, PROJECTS, project)
+
+    def attach() -> None:
+        # Re-read under the lock: the upload took a while, and the .bib may have changed since.
+        with _locked(PROJECTS, project_id):
+            project = _row(PROJECTS, project_id, user, "project")
+            _attach_pdf(project, key, path.name)
+            _save(PROJECTS, project)
+
+    await asyncio.to_thread(attach)
     return {"key": key, "pdf": path.name}
 
 
@@ -1300,22 +1493,34 @@ async def list_sources(project: str | None = None, user: str | None = Depends(cu
 @router.post("/sources")
 async def save_source(request: SourceIn, user: str | None = Depends(current_user)):
     """Save a work into a project or, with no project, into Unsorted sources."""
-    if request.projectId:
-        await asyncio.to_thread(_row, PROJECTS, request.projectId, user, "project")
     data = request.model_dump()
-    taken = {s.get("key") for s in await asyncio.to_thread(_rows, SOURCES, user)}
-    data["key"] = data["key"] or logic.bib_key_for(data["authorsList"], data["year"], taken)
-    data["bibtex"] = data["bibtex"] or logic.bibtex_for(data, data["key"])
-    now = logic.now_iso()
-    source = {"id": _new_id(), "owner": user, **data, "savedAt": now, "created": now, "updated": now}
-    await asyncio.to_thread(store.save_author_row, SOURCES, source)
-    return _source_view(source, {})
+
+    def insert() -> dict:
+        # The owner's key lock, so two saves at once never pick the same bib key, and the
+        # project's, so the source cannot land in a project a delete is removing.
+        project_key = [_row_key(PROJECTS, request.projectId)] if request.projectId else []
+        with _hold(_title_key(SOURCES, user), *project_key):
+            if request.projectId:
+                _row(PROJECTS, request.projectId, user, "project")
+            taken = {s.get("key") for s in _rows(SOURCES, user)}
+            data["key"] = data["key"] or logic.bib_key_for(data["authorsList"], data["year"], taken)
+            data["bibtex"] = data["bibtex"] or logic.bibtex_for(data, data["key"])
+            now = logic.now_iso()
+            source = {"id": _new_id(), "owner": user, **data, "savedAt": now, "created": now, "updated": now}
+            store.save_author_row(SOURCES, source)
+            return source
+
+    return _source_view(await asyncio.to_thread(insert), {})
 
 
 @router.delete("/sources/{source_id}")
 async def delete_source(source_id: str, user: str | None = Depends(current_user)):
-    await asyncio.to_thread(_row, SOURCES, source_id, user, "source")
-    await asyncio.to_thread(store.delete_author_row, SOURCES, source_id)
+    def remove() -> None:
+        with _locked(SOURCES, source_id):
+            _row(SOURCES, source_id, user, "source")
+            store.delete_author_row(SOURCES, source_id)
+
+    await asyncio.to_thread(remove)
     return {"deleted": source_id}
 
 
@@ -1331,17 +1536,25 @@ async def add_source_to_bib(source_id: str, request: MoveIn, user: str | None = 
     project_id = request.projectId or source.get("projectId")
     if not project_id:
         raise HTTPException(400, "pick a project to add the entry to")
-    project = await asyncio.to_thread(_row, PROJECTS, project_id, user, "project")
-    bib = project.get("bib") or {"name": "main.bib", "content": ""}
-    keys = {e["key"] for e in logic.parse_bib(bib.get("content", ""))}
-    if source.get("key") in keys:
-        raise HTTPException(409, f"{source['key']} is already in {bib['name']}")
-    bib["content"] = (bib.get("content", "").rstrip() + "\n\n" + source["bibtex"] + "\n").lstrip()
-    project["bib"] = bib
-    await asyncio.to_thread(_save, PROJECTS, project)
-    if source.get("projectId") != project_id:
-        source["projectId"] = project_id
-        await asyncio.to_thread(_save, SOURCES, source)
+
+    def add() -> tuple[dict, dict]:
+        # The project and the source, both re-read under their locks (project first).
+        with _locked_rows(projects=(project_id,), sources=(source_id,)):
+            source = _row(SOURCES, source_id, user, "source")
+            project = _row(PROJECTS, project_id, user, "project")
+            bib = project.get("bib") or {"name": "main.bib", "content": ""}
+            keys = {e["key"] for e in logic.parse_bib(bib.get("content", ""))}
+            if source.get("key") in keys:
+                raise HTTPException(409, f"{source['key']} is already in {bib['name']}")
+            bib["content"] = (bib.get("content", "").rstrip() + "\n\n" + source["bibtex"] + "\n").lstrip()
+            project["bib"] = bib
+            _save(PROJECTS, project)
+            if source.get("projectId") != project_id:
+                source["projectId"] = project_id
+                _save(SOURCES, source)
+            return source, project
+
+    source, project = await asyncio.to_thread(add)
     return _source_view(source, {project_id: project})
 
 
@@ -1349,14 +1562,19 @@ async def add_source_to_bib(source_id: str, request: MoveIn, user: str | None = 
 async def upload_source_pdf(
     source_id: str, file: UploadFile = FILE_UPLOAD, user: str | None = Depends(current_user)
 ):
-    source = await asyncio.to_thread(_row, SOURCES, source_id, user, "source")
+    await asyncio.to_thread(_row, SOURCES, source_id, user, "source")
     content = await file.read()
     if not content.startswith(b"%PDF"):
         raise HTTPException(400, "that is not a PDF")
     path = await asyncio.to_thread(_gateway().save_upload, content, file.filename)
-    source["pdf"] = path.name
-    await asyncio.to_thread(_save, SOURCES, source)
-    return _source_view(source, {})
+
+    def attach() -> dict:
+        with _locked(SOURCES, source_id):
+            source = _row(SOURCES, source_id, user, "source")
+            source["pdf"] = path.name
+            return _save(SOURCES, source)
+
+    return _source_view(await asyncio.to_thread(attach), {})
 
 
 # --- Your data --------------------------------------------------------------------------

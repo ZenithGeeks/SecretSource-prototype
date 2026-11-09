@@ -25,6 +25,7 @@ export function TextLink({
   onClick?: () => void
   className?: string
   title?: string
+  disabled?: boolean
   'aria-label'?: string
   'aria-disabled'?: boolean
   'data-ask-target'?: string

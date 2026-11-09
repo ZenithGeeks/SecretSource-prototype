@@ -25,6 +25,7 @@ import { shortMessage } from '../../../lib/citations'
 import { SETTINGS_DEFAULTS, greeting, useSettings } from '../../../lib/settings'
 import { useAuth } from '../../../lib/useAuth'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorDrafts, useAuthorParse, useDraftChecks, useLibrary, useProjectLint, useStartCheck } from '../../../lib/useAuthor'
+import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
 import { isOpenIssue, settledHint } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
@@ -114,7 +115,13 @@ export function Home({
     }
   }
 
-  const write = () => void newDraft('Untitled draft').then((d) => d && onOpenEditor({ draftId: d.id, file: 'main.tex', line: 1 }))
+  // "Write a draft" / "+ New draft": one at a time, so a double click makes one draft.
+  const creating = useInFlight()
+  const write = () =>
+    void creating.run(async () => {
+      const d = await newDraft('Untitled draft')
+      if (d) onOpenEditor({ draftId: d.id, file: 'main.tex', line: 1 })
+    })
 
   const addBibliography = async (file: File) => {
     const name = file.name.endsWith('.bib') ? file.name : `${file.name.replace(/\.[^.]+$/, '')}.bib`
@@ -145,7 +152,7 @@ export function Home({
   return (
     <>
       <ToolbarActions>
-        <NewProjectMenu onNewProject={() => onNewProject?.()} onUpload={pickDraft} onWrite={write} onAddBibliography={pickBibliography} />
+        <NewProjectMenu onNewProject={() => onNewProject?.()} onUpload={pickDraft} onWrite={write} writing={creating.busy} onAddBibliography={pickBibliography} />
       </ToolbarActions>
       {inputs}
       {drafts.isError ? (
@@ -153,7 +160,7 @@ export function Home({
       ) : drafts.data.length === 0 || !draftId ? (
         <FadeIn className="mx-auto flex w-full max-w-[960px] min-w-0 flex-col gap-7 pt-4">
           <Greeting summary="Upload a .tex file or write one, and every \cite gets checked against its source." />
-          <NoDraftsCard onUpload={pickDraft} onWrite={write} onAddBibliography={pickBibliography} />
+          <NoDraftsCard onUpload={pickDraft} onWrite={write} writing={creating.busy} onAddBibliography={pickBibliography} />
         </FadeIn>
       ) : (
         <HomeBody
@@ -166,6 +173,7 @@ export function Home({
           onOpenHistory={onOpenHistory}
           onTargetChange={onTargetChange}
           onNewDraft={write}
+          creatingDraft={creating.busy}
         />
       )}
       <Toast message={toast} onClose={closeToast} />
@@ -182,6 +190,7 @@ function HomeBody({
   onOpenHistory,
   onTargetChange,
   onNewDraft,
+  creatingDraft,
 }: {
   draftId: string
   drafts: Draft[]
@@ -191,6 +200,8 @@ function HomeBody({
   onOpenHistory: (draft: Draft) => void
   onTargetChange?: (open: boolean) => void
   onNewDraft: () => void
+  /** "+ New draft" is creating one: its link is disabled. */
+  creatingDraft: boolean
 }) {
   const draft = useAuthorDraft(draftId)
   const projectId = draft.data?.projectId ?? null
@@ -375,7 +386,7 @@ function HomeBody({
               onShow={showTarget}
             />
           </div>
-          <YourDraftsCard drafts={drafts} currentId={current.id} onOpen={(id) => onOpenEditor({ draftId: id })} onNew={onNewDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
+          <YourDraftsCard drafts={drafts} currentId={current.id} onOpen={(id) => onOpenEditor({ draftId: id })} onNew={onNewDraft} creating={creatingDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
         </div>
         {target && (
           <div className="min-w-0 xl:sticky xl:top-6 xl:z-20 xl:self-start">
