@@ -12,6 +12,7 @@ import re
 from collections import Counter, defaultdict
 
 from app.pipeline.claims import _tokens
+from app.pipeline.sources import ARXIV_PATTERN, ARXIV_VERSION
 from app.pipeline.verify import checked_citations
 
 UNSORTED = "unsorted"  # the project that holds every paper not put in a project
@@ -119,8 +120,8 @@ def analysis_keys(analysis: dict) -> set[str]:
     if re.fullmatch(r"10\.\d{4,9}/\S+", paper):
         keys.add("doi:" + paper.lower())
     for candidate in (paper, stem):
-        if re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", candidate):
-            keys.add("arxiv:" + re.sub(r"v\d+$", "", candidate))
+        if ARXIV_PATTERN.fullmatch(candidate):
+            keys.add("arxiv:" + ARXIV_VERSION.sub("", candidate))
     if analysis.get("title"):
         keys.add("title:" + " ".join(_tokens(analysis["title"])))
     return keys
