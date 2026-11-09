@@ -46,11 +46,10 @@ function quotePage(verdict: Verdict) {
 
 /** "vidore/colqwen2-v1.0" -> "ColQwen2 v1.0": the reader wants the model, not the repo path. */
 function modelName(checkpoint: string) {
-  const name = checkpoint.split('/').pop() ?? checkpoint
+  const name = checkpoint.slice(checkpoint.lastIndexOf('/') + 1)
   return name.replace(/^col/i, 'Col').replace(/-v/, ' v')
 }
 
-/** What the paper calls a visual hit: "Figure 3" where it has a name, "page 7" otherwise. */
 /** What to write under a crop: the caption when it already names the figure, the label
  * with the caption after it when it does not, the label alone when there is no caption. */
 function captionOf(hit: Hit) {
@@ -60,6 +59,7 @@ function captionOf(hit: Hit) {
   return caption.toLowerCase().startsWith(label.toLowerCase()) ? caption : `${label}: ${caption}`
 }
 
+/** What the paper calls a visual hit: "Figure 3" where it has a name, "page 7" otherwise. */
 function hitName(hit: { page: number; label?: string }) {
   return hit.label && hit.label.trim() ? hit.label : `page ${hit.page}`
 }
@@ -180,12 +180,11 @@ function shortRef(citation: Citation) {
 /** Look the text up in the cited paper, then show it, located or not. */
 async function showInCitedPaper(
   verdict: Verdict,
-  onShow: ((target: Target) => void) | undefined,
+  onShow: (target: Target) => void,
   label: string,
   quote: string,
   page?: number,
 ) {
-  if (!onShow) return
   // The page comes from the retrieved passage, which can start on the page before the quote;
   // when the quote is not on it, look through the whole paper.
   let found = await api.findInPaper(verdict.source, quote, page).catch(() => null)
@@ -414,7 +413,7 @@ function Answer({
           bar={VERDICT_BAR[verdict.verdict]}
           label={`What the cited paper says${page ? ` · page ${page}` : ''}`}
           action={onShow ? 'Show in cited paper' : undefined}
-          onAction={() => showInCitedPaper(verdict, onShow, `Deciding quote in ${verdict.source}`, verdict.quote, page)}
+          onAction={onShow && (() => showInCitedPaper(verdict, onShow, `Deciding quote in ${verdict.source}`, verdict.quote, page))}
         >
           “{verdict.quote}”
         </EvidencePanel>
@@ -565,7 +564,12 @@ export function ClaimCard({
   const primary = verdicts.find((v) => v.verdict === standing) ?? verdicts[0]
   const primaryCitation = primary ? claim.citations.find((c) => answersFor(claim, c).verdict === primary) : undefined
   const primaryPage = primary?.quote ? quotePage(primary) : undefined
-  const primaryName = primaryCitation ? shortRef(primaryCitation) : primary?.source
+  const primaryName = primaryCitation ? shortRef(primaryCitation) : (primary?.source ?? '')
+  const place = claim.source
+  const showInPaper =
+    paper && onShow && place
+      ? () => onShow({ paper, label: `Claim ${index + 1} in this paper`, quote: sentence, source: place })
+      : undefined
 
   const toggle = () => {
     setOpen(!open)
@@ -640,16 +644,8 @@ export function ClaimCard({
             <EvidencePanel
               bar="bg-accent"
               label={`This paper${claim.source ? ` · page ${claim.source.page}` : ''}`}
-              action={paper && onShow && claim.source ? 'Show in paper' : undefined}
-              onAction={() =>
-                paper &&
-                onShow?.({
-                  paper,
-                  label: `Claim ${index + 1} in this paper`,
-                  quote: sentence,
-                  source: claim.source ?? null,
-                })
-              }
+              action={showInPaper ? 'Show in paper' : undefined}
+              onAction={showInPaper}
             >
               “{withFigureLinks(sentence, ownFigures, openFigure)}”
             </EvidencePanel>
@@ -659,15 +655,15 @@ export function ClaimCard({
               bar={VERDICT_BAR[primary.verdict]}
               label={`${primaryName}${primaryPage ? ` · page ${primaryPage}` : ''}`}
               action={onShow ? 'Show in cited paper' : undefined}
-              onAction={() =>
+              onAction={onShow && (() =>
                 showInCitedPaper(primary, onShow, `Deciding quote in ${primary.source}`, primary.quote, primaryPage)
-              }
+              )}
             >
               “{primary.quote}”
             </EvidencePanel>
           )}
           {primary && !primary.quote && (
-            <EvidencePanel bar={VERDICT_BAR[primary.verdict]} label={primaryName ?? 'The cited paper'}>
+            <EvidencePanel bar={VERDICT_BAR[primary.verdict]} label={primaryName}>
               <span className="not-italic text-ink-muted">
                 No passage in the cited paper matched this claim.
               </span>
