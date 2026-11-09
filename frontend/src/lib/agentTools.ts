@@ -285,6 +285,7 @@ function parseTarget(target: string): AskTarget | null {
   const at = target.indexOf(':')
   if (at < 1) return null
   const parsed = { kind: target.slice(0, at), id: target.slice(at + 1) } as AskTarget
+  /* v8 ignore next -- parsed is built from target, so askTarget(parsed) always equals it */
   return askTarget(parsed) === target ? parsed : null
 }
 

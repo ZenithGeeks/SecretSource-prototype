@@ -154,6 +154,7 @@ export function useAssistant() {
   useEffect(() => () => controller.current?.abort(), [])
 
   function remember(id: string | null) {
+    /* v8 ignore next -- ask() runs from an event, after the mount effect has set hydrated */
     if (!hydrated.current) return
     saveAskChat(userId, id)
   }
@@ -243,6 +244,7 @@ export function useAssistant() {
       setTurns([])
       setOpening(false)
       setOpenFailed(false)
+      /* v8 ignore next -- every caller runs after the mount effect has set hydrated */
       if (hydrated.current) saveAskChat(userId, id)
     },
     [stop, userId],

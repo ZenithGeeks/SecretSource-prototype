@@ -297,6 +297,7 @@ const isPhone = () => window.matchMedia?.(PHONE).matches ?? false
 function usePanelFocus(root: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const panel = root.current
+    /* v8 ignore next -- the ref is set before effects run; the guard only narrows the type */
     if (!panel) return
     const active = document.activeElement
     // A panel restored open on page load leaves focus where it is; only a click or key opened it.

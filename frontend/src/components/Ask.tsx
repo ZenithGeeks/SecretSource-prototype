@@ -135,6 +135,7 @@ export function useAsk({
       titles={titles}
       papers={papers}
       canNarrow={canNarrow}
+      /* v8 ignore next -- the chip, and so this button, shows only when there is a paper or node */
       onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
       onClose={() => setOpenSaved(false)}
       onShowSource={(target) => void showSource(target)}
