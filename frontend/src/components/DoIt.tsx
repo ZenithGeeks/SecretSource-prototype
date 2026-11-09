@@ -68,6 +68,7 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
   }
 
   const goBack = () => {
+    /* v8 ignore next -- the button shows only while start is set; the guard narrows the type */
     if (!start) return
     if (start.analysis && actions.openPaper) actions.openPaper(start.analysis)
     else actions.openScreen(start.screen)
