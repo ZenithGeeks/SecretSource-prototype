@@ -84,6 +84,10 @@ function AssignBlindChecks({ pool }: { pool: Pool }) {
   const duplicate = checks.some((c) => c.name === name && c.analysis_id === paperId)
   const sameTopic = Boolean(chosen && pool.people.find((p) => p.name === name)?.topic === chosen.topic)
   const canAssign = Boolean(name && paperId) && !alreadyLabeled && !duplicate && !blind.isPending
+  let note = ''
+  if (alreadyLabeled) note = `${name} already labeled this paper, so it cannot be a blind check for them.`
+  else if (duplicate) note = `${name} already has this paper as a blind check.`
+  else if (sameTopic) note = 'Same topic as this person: allowed, but a paper from another topic tells more.'
 
   return (
     <Card className="flex flex-col gap-4">
@@ -133,13 +137,7 @@ function AssignBlindChecks({ pool }: { pool: Pool }) {
         </Button>
       </form>
       <p aria-live="polite" className="-mt-2 min-h-5 text-xs text-ink-muted">
-        {alreadyLabeled
-          ? `${name} already labeled this paper, so it cannot be a blind check for them.`
-          : duplicate
-            ? `${name} already has this paper as a blind check.`
-            : sameTopic
-              ? 'Same topic as this person: allowed, but a paper from another topic tells more.'
-              : ''}
+        {note}
       </p>
       {blind.error && (
         <p role="alert" className="-mt-2 text-sm text-refutes">

@@ -113,6 +113,12 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
 }
 
+/** "[b47]" matches the marker in the claim's sentence, so the two can be read together. */
+function referenceLabel(reference: Reference | null | undefined): string {
+  if (!reference) return 'Reference'
+  return reference.ref ? `Reference [${reference.ref}]: ${reference.label}` : `Reference: ${reference.label}`
+}
+
 type WorkspaceProps = {
   analysisId: string
   onDirtyChange?: (unsaved: boolean) => void
@@ -283,11 +289,9 @@ function Body({
   const [pointing, setPointing] = useState<{ claimId: string; at: Pointing } | null>(null)
   const point = useCallback((at: Pointing | null) => setPointing(at && { claimId: currentId, at }), [currentId])
   // The review reads what was saved, so the person's own decision always comes first.
-  const reviewBlocked = !saved[currentId]?.status
-    ? 'Save this claim first: the review checks what you saved.'
-    : dirty
-      ? 'Save your changes first: the review checks what you saved.'
-      : null
+  let reviewBlocked: string | null = null
+  if (!saved[currentId]?.status) reviewBlocked = 'Save this claim first: the review checks what you saved.'
+  else if (dirty) reviewBlocked = 'Save your changes first: the review checks what you saved.'
   const position = claims.findIndex((c) => c.claim_id === currentId)
   // Cited works with no PDF can still get a passage and a level (#824); they never open in the viewer.
   const cited = [...session.references, ...(session.unread ?? [])]
@@ -414,8 +418,7 @@ function Body({
     ? {
         paper: focus.file,
         paperRole: 'reference',
-        // "[b47]" matches the marker in the claim's sentence, so the two can be read together.
-        label: !shown ? 'Reference' : shown.ref ? `Reference [${shown.ref}]: ${shown.label}` : `Reference: ${shown.label}`,
+        label: referenceLabel(shown),
         detail: shown ? byline(shown) : undefined,
         quote: focus.passage || undefined,
         source: found.data && found.data.page ? found.data : null,
@@ -506,12 +509,9 @@ function Body({
     }
     setPicked(null)
   }
-  const cannotAdd =
-    draft.status === 'rejected'
-      ? 'This claim is rejected. Keep or edit it to add evidence.'
-      : !session.references.some((r) => r.file === picked?.file)
-        ? 'That paper is not one of this analysis\'s references.'
-        : null
+  let cannotAdd: string | null = null
+  if (draft.status === 'rejected') cannotAdd = 'This claim is rejected. Keep or edit it to add evidence.'
+  else if (!session.references.some((r) => r.file === picked?.file)) cannotAdd = 'That paper is not one of this analysis\'s references.'
 
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
