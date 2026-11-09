@@ -33,9 +33,13 @@ export function LabelForm({
   const sure = useId()
   return (
     <fieldset
-      className={cn('flex flex-col gap-3 rounded-lg border p-3', active ? 'border-accent' : 'border-border-subtle')}
+      className={cn(
+        'flex flex-col gap-3 rounded-lg border p-3',
+        active ? 'border-accent bg-accent-soft/40 ring-2 ring-accent' : 'border-border-subtle',
+      )}
     >
       <legend className="px-1 text-sm font-medium text-ink">How well does {title} support the claim?</legend>
+      {active && <p className="text-xs font-medium text-accent">Keys 1–4 set the level here</p>}
       {others.length > 0 && (
         <p className="text-sm text-ink-muted">Also labeled by {others.join(', ')}. Label it yourself, without looking.</p>
       )}
@@ -69,11 +73,6 @@ export function LabelForm({
         {value.evidence
           ? `${value.evidence} ${LEVELS[value.evidence - 1].name} — ${LEVELS[value.evidence - 1].hint}`
           : 'Pick a level from 1 to 4. Each button’s title says what that level means.'}
-      </p>
-      <p className="sr-only" aria-live="polite">
-        {value.evidence
-          ? `Level ${value.evidence}, ${LEVELS[value.evidence - 1].name}: ${LEVELS[value.evidence - 1].hint}`
-          : 'Pick 1–4, or press the number key.'}
       </p>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={why} className="text-sm font-medium text-ink">

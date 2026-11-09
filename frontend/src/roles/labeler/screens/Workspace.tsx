@@ -28,6 +28,7 @@ import {
   emptyDraft,
   emptyLabel,
   firstUnfinishedIndex,
+  LEVELS,
   labelingApi,
   nextPaperInTopic,
   progress,
@@ -219,6 +220,8 @@ function Body({
   const [drafts, setDrafts] = useState(() => ({ ...saved, ...restored?.drafts }))
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
   const [paperDone, setPaperDone] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
   const pool = usePool()
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
@@ -266,6 +269,7 @@ function Body({
     setSavedRows(null)
     setPicked(null)
     setPaperDone(false)
+    setNotice(null)
     save.reset()
   }
 
@@ -289,12 +293,22 @@ function Body({
   }
 
   // Edit starts from the extracted wording, so a small fix is not a full retype.
-  const patch = (change: Partial<Draft>) =>
+  const writeDraft = (change: Partial<Draft>) =>
     setDrafts((all) => {
       const before = all[currentId] ?? emptyDraft()
       const start = change.status === 'edited' && !before.edited && claim ? { edited: claim.claim } : {}
       return { ...all, [currentId]: { ...before, ...start, ...change } }
     })
+  // A click is not a shortcut, so it drops the one-step undo. Z only restores the last key.
+  const patch = (change: Partial<Draft>) => {
+    delete undos.current[currentId]
+    writeDraft(change)
+  }
+  const keyed = (change: Partial<Draft>, text: string) => {
+    undos.current[currentId] = { draft: structuredClone(draft), focus }
+    writeDraft(change)
+    setNotice(`${text} · Z to undo`)
+  }
 
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
@@ -386,16 +400,29 @@ function Body({
         toggleShortcuts()
         return
       }
+      if (key === 'z') {
+        const snap = undos.current[currentId]
+        if (!snap) return
+        event.preventDefault()
+        delete undos.current[currentId]
+        setDrafts((all) => ({ ...all, [currentId]: snap.draft }))
+        setFocus(snap.focus)
+        setNotice('Undone')
+        return
+      }
+      const ref = cited.find((r) => r.reference_id === refId)
+      const refTag = ref?.ref ? `[${ref.ref}]` : (ref?.label ?? refId ?? 'Reference')
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
       if (['k', 'e', 'x', 'r', 'n', 'l', 'm', 'h', '1', '2', '3', '4'].includes(key)) event.preventDefault()
-      if (key === 'k') patch({ status: 'accepted' })
-      else if (key === 'e') patch({ status: 'edited' })
-      else if (key === 'x') patch({ status: 'rejected' })
+      if (key === 'k') keyed({ status: 'accepted' }, 'Claim → Keep')
+      else if (key === 'e') keyed({ status: 'edited' }, 'Claim → Edit')
+      else if (key === 'x') keyed({ status: 'rejected' }, 'Claim → Reject')
       else if (key === 'r' || key === 'n') {
         const current = ordered.find((c) => c.cand_id === focus?.key)
         if (!deciding || !current) return
-        const cands = { ...draft.cands, [current.cand_id]: key === 'r' ? ('relevant' as const) : ('rejected' as const) }
-        patch({ cands })
+        const status = key === 'r' ? ('relevant' as const) : ('rejected' as const)
+        const cands = { ...draft.cands, [current.cand_id]: status }
+        keyed({ cands }, `#${current.rank} ${status === 'relevant' ? 'Relevant' : 'Not relevant'}`)
         const at = ordered.indexOf(current)
         const next = [...ordered.slice(at + 1), ...ordered.slice(0, at)].find((c) => !cands[c.cand_id])
         if (next) focusPassage(next)
@@ -405,11 +432,13 @@ function Body({
       else if (key === '[' || (key === 'ArrowLeft' && event.shiftKey)) stepClaim(-1)
       else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
-        patch({ labels: { ...draft.labels, [refId]: { ...label, evidence: Number(key) as Level } } })
+        const level = Number(key) as Level
+        keyed({ labels: { ...draft.labels, [refId]: { ...label, evidence: level } } }, `${refTag} → ${level} ${LEVELS[level - 1].name}`)
       } else if (['l', 'm', 'h'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
         const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
-        patch({ labels: { ...draft.labels, [refId]: { ...label, confidence } } })
+        const word = confidence[0].toUpperCase() + confidence.slice(1)
+        keyed({ labels: { ...draft.labels, [refId]: { ...label, confidence } } }, `${refTag} → ${word}`)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -577,6 +606,7 @@ function Body({
         ['[', 'previous claim'],
         ['1–4', 'level'],
         ['L M H', 'confidence'],
+        ['Z', 'undo'],
         ['Ctrl/⌘+S', 'save'],
       ].map(([keys, what]) => (
         <li key={keys} className="flex items-center gap-1">
@@ -644,6 +674,12 @@ function Body({
   )
 
   const saveBar = (className?: string) => (
+    <>
+    {notice && (
+      <p role="status" className="rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-ink">
+        {notice}
+      </p>
+    )}
     <SaveBar
       left={left}
       dirty={dirty}
@@ -654,6 +690,7 @@ function Body({
       onSave={write}
       className={className}
     />
+    </>
   )
 
   // On a blind check the judge must not sway the label, so Review and Ask are replaced (#867).

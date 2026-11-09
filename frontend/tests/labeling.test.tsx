@@ -344,6 +344,27 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /4 · Strong/ })).toHaveAttribute('aria-checked', 'true')
   })
 
+  it('says what a shortcut just did, and Z undoes that one step', async () => {
+    await open()
+    fireEvent.keyDown(window, { key: 'k' })
+    expect(screen.getByRole('status')).toHaveTextContent('Claim → Keep · Z to undo')
+    fireEvent.keyDown(window, { key: 'r' })
+    expect(screen.getByRole('status')).toHaveTextContent('#1 Relevant · Z to undo')
+    expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('unrelated text')
+    fireEvent.keyDown(window, { key: 'z' })
+    expect(screen.getByRole('status')).toHaveTextContent('Undone')
+    expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getAllByTestId('viewer')[0]).toHaveTextContent('recall rose by 4 points')
+    fireEvent.keyDown(window, { key: 'z' })
+    expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.keyDown(window, { key: 'r' })
+    fireEvent.keyDown(window, { key: '4' })
+    expect(screen.getByRole('status')).toHaveTextContent('[b4] → 4 Strong · Z to undo')
+    expect(screen.getByRole('radio', { name: /4 · Strong/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Keys 1–4 set the level here')).toBeInTheDocument()
+  })
+
   it('keys 1-4 do nothing while the reference shown has no relevant passage', async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
