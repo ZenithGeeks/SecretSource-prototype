@@ -124,6 +124,8 @@ SCOPUS_API_KEY = os.getenv("SCOPUS_API_KEY", "")
 # E-mails of the labeling leads, comma-separated. Only a lead downloads the whole team's labels
 # or gives someone a paper to check blind (#867). With login off everyone is a lead.
 LABELING_LEADS = frozenset(e.strip().lower() for e in os.getenv("LABELING_LEADS", "").split(",") if e.strip())
+# E-mails allowed to sign in, comma-separated. Anyone else gets a 403. Empty lets every account in.
+TEAM_EMAILS = frozenset(e.strip().lower() for e in os.getenv("TEAM_EMAILS", "").split(",") if e.strip())
 
 CLAIM_LIMIT = int(os.getenv("CLAIM_LIMIT", "20"))  # claims kept per paper. 0 keeps all
 

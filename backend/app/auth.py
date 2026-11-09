@@ -34,7 +34,7 @@ from fastapi import HTTPException, Request
 
 CACHE_SECONDS = 300
 
-_cache: dict[str, tuple[str, float]] = {}  # sha256(token) -> (user id, expiry)
+_cache: dict[str, tuple[str, str, float]] = {}  # sha256(token) -> (user id, email, expiry)
 _ids_by_email: dict[str, tuple[str, float]] = {}  # email -> (user id, expiry)
 _cache_lock = threading.Lock()
 
@@ -48,14 +48,14 @@ def _token(request: Request) -> str:
     return header[7:].strip() if header.lower().startswith("bearer ") else ""
 
 
-def _user_id_for(token: str) -> str | None:
-    """The user id Supabase gives for this token, or None if it is not a valid session."""
+def _user_for(token: str) -> tuple[str, str] | None:
+    """The user id and email Supabase gives for this token, or None if it is not a valid session."""
     key = hashlib.sha256(token.encode()).hexdigest()
     now = time.monotonic()
     with _cache_lock:
         cached = _cache.get(key)
-        if cached and cached[1] > now:
-            return cached[0]
+        if cached and cached[2] > now:
+            return cached[0], cached[1]
 
     from app import store
 
@@ -66,9 +66,16 @@ def _user_id_for(token: str) -> str | None:
     user = getattr(answer, "user", None)
     if user is None:
         return None
+    email = user.email or ""
     with _cache_lock:
-        _cache[key] = (user.id, now + CACHE_SECONDS)
-    return user.id
+        _cache[key] = (user.id, email, now + CACHE_SECONDS)
+    return user.id, email
+
+
+def _user_id_for(token: str) -> str | None:
+    """The user id Supabase gives for this token, or None if it is not a valid session."""
+    user = _user_for(token)
+    return user[0] if user else None
 
 
 # The signed-in user the current request or job works for. app.llm sends it with each LLM call,
@@ -86,8 +93,25 @@ async def current_user(request: Request) -> str | None:
     user_id = await asyncio.to_thread(_user_id_for, token)
     if user_id is None:
         raise HTTPException(401, "the session has expired, sign in again")
+    await _check_team(token)
     acting_user.set(user_id)
     return user_id
+
+
+async def _check_team(token: str) -> None:
+    """Refuse an account whose email is not on TEAM_EMAILS. An empty list lets everyone in.
+
+    The site has no Cloudflare Access in front of it, so anyone with a Google account can sign
+    in; this keeps them from starting analyses that spend the shared LLM budget.
+    """
+    from app.config import TEAM_EMAILS
+
+    if not TEAM_EMAILS:
+        return
+    user = await asyncio.to_thread(_user_for, token)  # cached by the lookup just before
+    email = user[1].lower() if user else ""
+    if email not in TEAM_EMAILS:
+        raise HTTPException(403, f"{email or 'this account'} is not on the SecretSource team list")
 
 
 async def gatehouse_user(request: Request) -> str | None:

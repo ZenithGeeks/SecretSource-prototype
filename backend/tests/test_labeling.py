@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+from app import auth, config
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
@@ -1961,3 +1962,16 @@ def test_an_agent_cannot_read_labels_of_an_unsaved_claim_or_a_claim_that_is_not_
 
     assert unsaved.value.status_code == 409
     assert missing.value.status_code == 404
+
+
+def test_an_account_off_the_team_list_cannot_use_the_labeler(api, monkeypatch):
+    # annotator reads the token itself, so the router must also run current_user's team check.
+    _, _, app = api
+    del app.dependency_overrides[labeling.current_user]
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(auth, "_user_for", lambda token: ("user-x", "stranger@example.com"))
+    monkeypatch.setattr(config, "TEAM_EMAILS", frozenset({"chanya@example.com"}))
+
+    response = TestClient(app).get("/labeling/status", headers={"authorization": "Bearer token"})
+
+    assert response.status_code == 403

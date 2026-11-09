@@ -50,7 +50,8 @@ from app.pipeline import verify
 from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/labeling", tags=["labeling"])
+# current_user runs the team check (TEAM_EMAILS); annotator alone reads the token without it.
+router = APIRouter(prefix="/labeling", tags=["labeling"], dependencies=[Depends(current_user)])
 
 ExportScope = Literal["mine", "team"]
 NEXT_PASSAGES = 8  # passages listed for the next unsaved claim
