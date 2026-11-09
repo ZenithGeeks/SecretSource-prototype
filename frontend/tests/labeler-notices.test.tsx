@@ -9,6 +9,8 @@ import { usePaperNotices } from '../src/roles/labeler/usePaperNotices'
 
 const notice = vi.hoisted(() => ({ show: vi.fn() }))
 vi.mock('../src/lib/desktopNotice', () => ({ showDoneNotice: notice.show }))
+// A local .env with Supabase set would otherwise turn login on and stop the pool request.
+vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 
 afterEach(() => {
   vi.unstubAllGlobals()
