@@ -113,7 +113,7 @@ describe('what the agent can send', () => {
 
     const line = await screen.findByText('Stopped: out of budget')
     expect(line).toHaveClass('text-refutes')
-    expect(screen.getByRole('status')).toHaveTextContent('Done. The reply is below.')
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Done. The reply is below.'))
   })
 
   it('shows a step it has no words for by its own name', async () => {
@@ -150,7 +150,7 @@ describe('what the agent can send', () => {
     sendMessage('Open the graph')
 
     expect(await screen.findByText('The agent could not be reached. Try again.')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Done. The reply is below.')
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Done. The reply is below.'))
   })
 
   it('sends a result to the results route even when no session event came first', async () => {
