@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import type { Role } from '../lib/roles'
 import { accountApi, MEMORIES_KEY } from '../lib/accountApi'
-import { avatarPhotoUrl } from '../lib/avatar'
+import { avatarPhotoUrl, initials } from '../lib/avatar'
 import { downloadText } from '../lib/csv'
 import { askNoticePermission, canNotify, noticesBlocked } from '../lib/desktopNotice'
 import { researcherApi } from '../lib/researcher'
@@ -30,20 +30,11 @@ import { Avatar, Row, Section, Select, Toggle } from './settings'
 import { Button } from './ui'
 
 function Notice({ text }: { text: string }) {
-  // Unreachable: every caller renders Notice only with text.
-  /* v8 ignore next -- @preserve */
-  if (!text) return null
   return (
     <p role="status" className="w-full rounded-lg bg-accent-soft px-3 py-2 text-xs text-ink">
       {text}
     </p>
   )
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
 const AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
