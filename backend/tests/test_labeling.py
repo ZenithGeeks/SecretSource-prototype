@@ -198,6 +198,19 @@ def test_save_label_and_read_it_back_as_mine_with_others_listed(api):
     assert other["others"] == {"paperA-0123456789ab#0|refB-aaaaaaaaaaaa": ["chanya"]}
 
 
+def test_an_unset_confidence_is_stored_empty_and_an_omitted_one_stays_medium(api):
+    client, db, _ = api
+    label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 3}
+    assert client.post("/labeling/sessions/a1/save", json={"labels": [label]}).status_code == 200
+    assert db.tabs["labels"][0]["confidence"] == "medium"  # an older client leaves the field out
+    unset = client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "confidence": ""}]})
+    assert unset.status_code == 200
+    assert db.tabs["labels"][-1]["confidence"] == ""
+    assert client.get("/labeling/sessions/a1").json()["saved"]["labels"][0]["confidence"] == ""
+    bad = client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "confidence": "skipped"}]})
+    assert bad.status_code == 422
+
+
 def test_rows_belong_to_the_account_not_to_the_name(api):
     client, db, app = api
     claim = {"claim_id": "paperA-0123456789ab#0", "origin": "extracted", "status": "accepted", "claim": "x"}

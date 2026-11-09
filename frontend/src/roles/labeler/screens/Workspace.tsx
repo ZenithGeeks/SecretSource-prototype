@@ -359,7 +359,7 @@ function Body({
         return
       }
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
-      if (['k', 'e', 'x', 'r', 'n', '1', '2', '3', '4'].includes(key)) event.preventDefault()
+      if (['k', 'e', 'x', 'r', 'n', 'l', 'm', 'h', '1', '2', '3', '4'].includes(key)) event.preventDefault()
       if (key === 'k') patch({ status: 'accepted' })
       else if (key === 'e') patch({ status: 'edited' })
       else if (key === 'x') patch({ status: 'rejected' })
@@ -378,6 +378,10 @@ function Body({
       else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
         patch({ labels: { ...draft.labels, [refId]: { ...label, evidence: Number(key) as Level } } })
+      } else if (['l', 'm', 'h'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
+        const label = draft.labels[refId] ?? emptyLabel()
+        const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
+        patch({ labels: { ...draft.labels, [refId]: { ...label, confidence } } })
       }
     }
     window.addEventListener('keydown', onKey)
@@ -544,6 +548,7 @@ function Body({
         [']', 'next claim'],
         ['[', 'previous claim'],
         ['1–4', 'level'],
+        ['L M H', 'confidence'],
         ['Ctrl/⌘+S', 'save'],
       ].map(([keys, what]) => (
         <li key={keys} className="flex items-center gap-1">

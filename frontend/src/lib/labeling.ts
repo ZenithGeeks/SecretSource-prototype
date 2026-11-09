@@ -111,7 +111,9 @@ export type Save = {
     evidence: Level
     rationale: string
     spans: string[]
-    confidence: Confidence
+    /** "" when the labeler saved a level without choosing. Omitted on an old client, which the
+     * gateway still stores as medium. */
+    confidence: Confidence | ''
   }[]
 }
 
@@ -497,7 +499,7 @@ export const askLabeling = (
 
 export type AddedPassage = { reference_id: string; page: number | null; passage: string }
 
-export type LabelDraft = { evidence: Level | null; rationale: string; confidence: Confidence }
+export type LabelDraft = { evidence: Level | null; rationale: string; confidence: Confidence | null }
 
 export type Draft = {
   status: ClaimStatus | null // null: not judged yet
@@ -513,7 +515,16 @@ export type Draft = {
 export type WorkClaim = SessionClaim & { origin: 'extracted' | 'human_added'; page?: number | null }
 
 export const emptyDraft = (): Draft => ({ status: null, edited: '', cands: {}, added: [], labels: {} })
-export const emptyLabel = (): LabelDraft => ({ evidence: null, rationale: '', confidence: 'medium' })
+/** Confidence starts unset. Medium is a real answer, so a skipped one must not look like one. */
+export const emptyLabel = (): LabelDraft => ({ evidence: null, rationale: '', confidence: null })
+
+/** '' is a saved level whose confidence was never chosen. A missing value is an older row: the
+ * gateway used to store Medium when the field was left out, so those rows still load as Medium. */
+export function readConfidence(value: string | undefined): Confidence | null {
+  if (value === 'low' || value === 'medium' || value === 'high') return value
+  if (value === '') return null
+  return 'medium'
+}
 
 const numberOrNull = (value: string | undefined) => (value && !Number.isNaN(Number(value)) ? Number(value) : null)
 
@@ -567,7 +578,7 @@ export function draftFromSaved(claim: WorkClaim, saved: Session['saved']): Draft
     draft.labels[r.reference_id] = {
       evidence: Number(r.evidence) as Level,
       rationale: r.rationale,
-      confidence: (r.confidence || 'medium') as Confidence,
+      confidence: readConfidence(r.confidence),
     }
   }
   return draft
@@ -649,8 +660,11 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
   const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
   if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
   for (const id of referencesOf(claim, draft)) {
-    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) {
-      left.push(`Give ${references.find((r) => r.reference_id === id)?.label ?? id} a level`)
+    const ref = references.find((r) => r.reference_id === id)
+    const title = ref?.label ?? id
+    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push(`Give ${title} a level`)
+    else if (draft.labels[id]?.evidence && !draft.labels[id]?.confidence) {
+      left.push(`Give ${ref?.ref ? `[${ref.ref}]` : title} a confidence`)
     }
   }
   return left
@@ -741,7 +755,7 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
       evidence: label.evidence,
       rationale: label.rationale.trim(),
       spans: relevantPassages(claim, draft, id).slice(0, 10),
-      confidence: label.confidence,
+      confidence: label.confidence ?? '',
     })
   }
   return save

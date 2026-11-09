@@ -5,6 +5,13 @@ import { useId } from 'react'
 import { Textarea } from '../../../components/ui'
 import { emptyLabel, LEVELS, type Confidence, type LabelDraft, type Level } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
+import { Kbd } from './ClaimDecision'
+
+const SURE: { value: Confidence; label: string; key: string }[] = [
+  { value: 'low', label: 'Low', key: 'L' },
+  { value: 'medium', label: 'Medium', key: 'M' },
+  { value: 'high', label: 'High', key: 'H' },
+]
 
 export function LabelForm({
   title,
@@ -86,20 +93,32 @@ export function LabelForm({
           maxLength={2000}
         />
       </div>
-      <div className="flex items-center gap-2">
-        <label htmlFor={sure} className="text-sm font-medium text-ink">
+      <div className="flex flex-col gap-1.5">
+        <span id={sure} className="text-sm font-medium text-ink">
           How sure are you?
-        </label>
-        <select
-          id={sure}
-          value={value.confidence}
-          onChange={(event) => onChange({ ...value, confidence: event.target.value as Confidence })}
-          className="rounded-lg border border-border-subtle bg-canvas px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
+        </span>
+        <div role="radiogroup" aria-labelledby={sure} className="grid grid-cols-3 gap-1.5">
+          {SURE.map(({ value: sureValue, label, key }) => (
+            <button
+              key={sureValue}
+              type="button"
+              role="radio"
+              aria-checked={value.confidence === sureValue}
+              aria-keyshortcuts={key}
+              onClick={() => onChange({ ...value, confidence: sureValue })}
+              className={cn(
+                'flex min-h-11 items-center justify-center gap-1.5 rounded-lg border px-2 text-sm font-medium',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                value.confidence === sureValue
+                  ? 'border-accent bg-accent-soft text-ink'
+                  : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
+              )}
+            >
+              {label}
+              <Kbd>{key}</Kbd>
+            </button>
+          ))}
+        </div>
       </div>
     </fieldset>
   )

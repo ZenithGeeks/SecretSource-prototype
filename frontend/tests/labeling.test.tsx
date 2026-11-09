@@ -90,8 +90,10 @@ import {
   cloudflareBlocked,
   draftFromSaved,
   emptyDraft,
+  emptyLabel,
   isDone,
   problem,
+  readConfidence,
   remaining,
   workClaims,
   type Draft,
@@ -137,6 +139,30 @@ describe('what is left to decide', () => {
       labels: { refB: { evidence: 3, rationale: '', confidence: 'medium' } },
     })
     expect(isDone(claim, done, refs)).toBe(true)
+  })
+
+  it('does not treat an unset confidence as Medium', () => {
+    expect(emptyLabel().confidence).toBeNull()
+    const leveled = judged({
+      status: 'accepted',
+      cands: { c1: 'relevant', c2: 'rejected' },
+      labels: { refB: { evidence: 3, rationale: '', confidence: null } },
+    })
+    expect(remaining(claim, leveled, refs)).toEqual(['Give [b4] a confidence'])
+    expect(buildSave(claim, leveled).labels[0].confidence).toBe('')
+    expect(readConfidence('')).toBeNull()
+    expect(readConfidence(undefined)).toBe('medium')
+    expect(readConfidence('high')).toBe('high')
+    const back = draftFromSaved(claim, {
+      claims: [],
+      candidates: [],
+      labels: [
+        { claim_id: 'paperA#0', reference_id: 'refB', evidence: '3', rationale: '', confidence: '' },
+        { claim_id: 'paperA#0', reference_id: 'refOld', evidence: '2', rationale: '', confidence: 'medium' },
+      ],
+    })
+    expect(back.labels.refB.confidence).toBeNull()
+    expect(back.labels.refOld.confidence).toBe('medium')
   })
 
   it('wants the new wording of an edited claim', () => {
@@ -227,6 +253,10 @@ describe('the workspace', () => {
     fireEvent.click(relevant1)
     fireEvent.click(notRelevant2)
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    expect(screen.getByRole('radio', { name: /^Low/ })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('radio', { name: /^Medium/ })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(/Give \[b4\] a confidence/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /^Medium/ }))
     expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
@@ -234,7 +264,7 @@ describe('the workspace', () => {
     expect(gateway.posts[0]).toMatchObject({
       claims: [{ claim_id: 'paperA#0', status: 'accepted' }],
       candidates: [{ cand_id: 'c1', status: 'relevant' }, { cand_id: 'c2', status: 'rejected' }],
-      labels: [{ reference_id: 'refB', evidence: 3, spans: ['recall rose by 4 points'] }],
+      labels: [{ reference_id: 'refB', evidence: 3, confidence: 'medium', spans: ['recall rose by 4 points'] }],
     })
     expect(await screen.findByText('Saved 4 rows')).toBeInTheDocument()
   })
@@ -349,6 +379,8 @@ describe('the workspace', () => {
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
     fireEvent.click(screen.getAllByRole('radio', { name: /^Not relevant/ })[1])
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
+    fireEvent.keyDown(window, { key: 'h' })
+    expect(screen.getByRole('radio', { name: /^High/ })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
     expect(screen.getByText('0 of 2 claims finished')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ })).toBeInTheDocument()
