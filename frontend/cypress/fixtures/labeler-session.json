@@ -1,0 +1,32 @@
+{
+  "analysis_id": "nlp1",
+  "paper_id": "nlp1",
+  "paper_file": "nlp1.pdf",
+  "title": "Late interaction retrieval",
+  "annotator": "Chanya",
+  "claims": [
+    {
+      "claim_id": "nlp1#0",
+      "claim": "Late interaction improves recall.",
+      "sentence": "We show late interaction improves recall.",
+      "section": "3",
+      "source": null,
+      "candidates": [
+        { "cand_id": "c1", "reference_id": "refB", "reference_file": "refB.pdf", "rank": 1, "score": 9.1, "page": 5, "passage": "recall rose by 4 points" }
+      ]
+    },
+    {
+      "claim_id": "nlp1#1",
+      "claim": "Compression keeps quality.",
+      "sentence": "",
+      "section": "",
+      "source": null,
+      "candidates": []
+    }
+  ],
+  "references": [
+    { "reference_id": "refB", "file": "refB.pdf", "label": "Ref B", "ref": "b4", "authors": ["Ana Silva", "Bo Lee"], "year": "2021" }
+  ],
+  "saved": { "claims": [], "candidates": [], "labels": [] },
+  "others": {}
+}
