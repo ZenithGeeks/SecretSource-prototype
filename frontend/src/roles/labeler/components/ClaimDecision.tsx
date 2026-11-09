@@ -14,6 +14,40 @@ const CHOICES: { status: ClaimStatus; label: string; hint: string; key: string }
 ]
 const QUESTION = 'Is this a claim the paper makes?'
 
+/** The claim (or its edited wording) pinned so it stays in view while the passages scroll. */
+export function ClaimSticky({
+  text,
+  rejected,
+  className,
+}: {
+  text: string
+  rejected?: boolean
+  className?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <section aria-label="Claim being judged" className={cn('border-b border-border-subtle bg-surface px-4 py-2', className)}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Hide the claim' : 'Show the full claim'}
+        onClick={() => setExpanded((open) => !open)}
+        className="w-full rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <span
+          className={cn(
+            'block text-sm leading-5 text-ink',
+            !expanded && 'line-clamp-2',
+            rejected && 'line-through opacity-70',
+          )}
+        >
+          {text}
+        </span>
+      </button>
+    </section>
+  )
+}
+
 /** A key cap. Hidden from screen readers by default: the button carries `aria-keyshortcuts`. */
 export function Kbd({ children, hidden = true }: { children: string; hidden?: boolean }) {
   return (
@@ -59,9 +93,9 @@ export function ClaimDecision({
         Claim {position} of {count}
         {claim.origin === 'human_added' && <span className="text-sm font-normal text-accent"> · added</span>}
       </h3>
-      <p className={cn('text-[15px] leading-6 text-ink', draft.status === 'rejected' && 'line-through opacity-70')}>
-        {claim.claim}
-      </p>
+      {!draft.status && (
+        <p className="text-[15px] leading-6 text-ink">{claim.claim}</p>
+      )}
       {claim.sentence && claim.sentence !== claim.claim && (
         <p className="border-l-2 border-border-subtle pl-3 text-[13px] leading-5 text-ink-muted">
           The paper says: “{claim.sentence}”

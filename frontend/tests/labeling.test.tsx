@@ -344,6 +344,28 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /4 · Strong/ })).toHaveAttribute('aria-checked', 'true')
   })
 
+  it('keeps the claim in view after a decision, and shows an edited wording', async () => {
+    await open()
+    expect(screen.queryByRole('region', { name: 'Claim being judged' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    const pin = screen.getByRole('region', { name: 'Claim being judged' })
+    expect(pin).toHaveTextContent('Method Y improves recall.')
+    expect(pin.querySelector('.line-clamp-2')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show the full claim' }))
+    expect(pin.querySelector('.line-clamp-2')).toBeNull()
+
+    fireEvent.keyDown(window, { key: 'e' })
+    fireEvent.change(screen.getByLabelText('The claim, as it should read'), { target: { value: 'Y raises recall.' } })
+    expect(screen.getByRole('region', { name: 'Claim being judged' })).toHaveTextContent('Y raises recall.')
+  })
+
+  it('pins the claim above the save bar on a narrow screen', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByRole('region', { name: 'Claim being judged' }).parentElement).toHaveClass('sticky')
+  })
+
   it('says what a shortcut just did, and Z undoes that one step', async () => {
     await open()
     fireEvent.keyDown(window, { key: 'k' })

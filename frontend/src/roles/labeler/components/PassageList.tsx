@@ -79,7 +79,7 @@ function PassageCard({
       ref={ref}
       data-ask-target={askTarget({ kind: 'passage', id: c.cand_id })}
       className={cn(
-        'rounded-lg border p-3 transition-colors',
+        'scroll-mb-48 rounded-lg border p-3 transition-colors',
         shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
       )}
     >
@@ -143,7 +143,7 @@ function AddedCard({
     <li
       ref={ref}
       className={cn(
-        'flex flex-col rounded-lg border p-3',
+        'scroll-mb-48 flex flex-col rounded-lg border p-3',
         shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
       )}
     >

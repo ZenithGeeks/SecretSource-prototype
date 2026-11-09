@@ -55,7 +55,7 @@ import { AiCursor } from '../../../components/AiCursor'
 import type { Pointing } from '../../../lib/askCursor'
 import { SplitPane } from '../../../components/SplitPane'
 import { AskPanel, type AskedPassage } from '../components/AskPanel'
-import { ClaimDecision, Kbd } from '../components/ClaimDecision'
+import { ClaimDecision, ClaimSticky, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
 import { LabelForm } from '../components/LabelForm'
 import { PassageList, type Focus } from '../components/PassageList'
@@ -617,6 +617,13 @@ function Body({
   )
 
   const nextPaper = pool.data ? nextPaperInTopic(pool.data, session.analysis_id) : null
+  const claimWording = draft.status === 'edited' && draft.edited.trim() ? draft.edited : claim.claim
+  // Outside the scrolling list on a wide screen, and pinned above the save bar on a narrow one,
+  // so the claim never sits on top of the passage being judged.
+  const claimPin = (className?: string) =>
+    draft.status ? (
+      <ClaimSticky key={claim.claim_id} text={claimWording} rejected={draft.status === 'rejected'} className={className} />
+    ) : null
   const paperDoneView = (
     <div role="status" className="flex flex-col items-start gap-3">
       <h2 className="font-serif text-lg font-semibold text-ink">This paper is labeled</h2>
@@ -779,6 +786,7 @@ function Body({
         <div className="p-4">{paperDoneView}</div>
       ) : (
         <>
+          {claimPin()}
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
           <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
             {legend}
@@ -878,7 +886,10 @@ function Body({
           ) : (
             <>
               <div className="flex flex-col gap-5">{panel}</div>
-              {saveBar()}
+              <div className="sticky bottom-0 z-20 flex flex-col gap-2 bg-canvas pt-2">
+                {claimPin('rounded-xl border border-border-subtle shadow-sm')}
+                {saveBar()}
+              </div>
             </>
           )}
         </div>
