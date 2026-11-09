@@ -112,6 +112,14 @@ class PersonTopicIn(TopicIn):
     name: str = Field(min_length=1, max_length=80)
 
 
+class BlindCheckIn(BaseModel):
+    """A lead giving `name` the paper `analysis_id` to label blind, or taking it back."""
+
+    name: str = Field(min_length=1, max_length=80)
+    analysis_id: str = Field(min_length=1, max_length=80)
+    on: bool = True
+
+
 CLAIM_ID = r"^(?:[A-Za-z0-9._-]+#\d{1,4}|[A-Za-z0-9._-]+#h-[a-z0-9]{6,12})$"
 TEXT = 4000  # keeps one row small; nothing a person types needs more
 

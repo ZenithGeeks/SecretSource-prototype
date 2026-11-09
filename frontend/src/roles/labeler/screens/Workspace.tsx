@@ -10,7 +10,7 @@
 
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
-import { Keyboard } from 'lucide-react'
+import { EyeOff, Keyboard } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -591,7 +591,13 @@ function Body({
     />
   )
 
-  const askPanel = claim && (
+  // On a blind check the judge must not sway the label, so Review and Ask are replaced (#867).
+  const askPanel = session.blind ? (
+    <p className="flex items-start gap-2 p-1 text-sm text-ink-muted">
+      <EyeOff className="mt-0.5 size-4 shrink-0" aria-hidden />
+      Review and Ask are off on a blind check. Decide from the paper and its references alone.
+    </p>
+  ) : claim && (
     <AskPanel
       key={claim.claim_id}
       analysisId={session.analysis_id}
@@ -709,6 +715,15 @@ function Body({
           {shortcutsButton}
         </div>
       </header>
+      {session.blind && (
+        <div role="note" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5">
+          <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
+          <p className="text-sm font-semibold text-ink">Blind check</p>
+          <p className="min-w-0 flex-1 text-sm text-ink-muted">
+            Someone else labeled this paper. Their labels are hidden, and Review and Ask are off, so label it on your own.
+          </p>
+        </div>
+      )}
       {restored && anyDirty && (
         <p role="status" className="text-sm text-ink-muted">
           Unsaved labels from your last visit were kept in this browser. Save them to keep them for good.

@@ -1,6 +1,6 @@
 /** Papers to label: the ones the team brought in from Scopus, and whether the database is ready. */
 
-import { Download, Loader2, TriangleAlert } from 'lucide-react'
+import { Download, EyeOff, Loader2, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
@@ -47,7 +47,7 @@ function Setup({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
+export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; onShowBlind: () => void }) {
   const status = useLabelStatus()
   const pool = usePool()
   const [downloading, setDownloading] = useState<Export | null>(null)
@@ -74,8 +74,11 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
   }
 
   const myTopic = pool.data?.people.find((p) => p.name === pool.data?.me)?.topic ?? ''
+  // A paper the viewer checks blind lives only under Blind checks, so the two lists never mix (#867).
+  const blind = new Set(pool.data?.blind ?? [])
+  const lead = pool.data?.lead ?? false
   // Papers of the viewer's own topic first, then by topic; within a topic, unfinished before finished.
-  const papers = [...(pool.data?.papers ?? [])].sort(
+  const papers = [...(pool.data?.papers ?? [])].filter((paper) => !blind.has(paper.analysis_id)).sort(
     (a, b) =>
       Number(b.topic === myTopic) - Number(a.topic === myTopic) ||
       a.topic.localeCompare(b.topic) ||
@@ -97,23 +100,26 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          <div role="radiogroup" aria-label="Whose labels to download" className="flex rounded-lg border border-border-subtle p-0.5">
-            {SCOPES.map((option) => (
-              <button
-                key={option.scope}
-                type="button"
-                role="radio"
-                aria-checked={scope === option.scope}
-                onClick={() => setScope(option.scope)}
-                className={cn(
-                  'min-h-9 rounded-md px-3 text-sm',
-                  scope === option.scope ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          {/* Only a lead may download the whole team's labels: with them a blind check would not be blind. */}
+          {lead && (
+            <div role="radiogroup" aria-label="Whose labels to download" className="flex rounded-lg border border-border-subtle p-0.5">
+              {SCOPES.map((option) => (
+                <button
+                  key={option.scope}
+                  type="button"
+                  role="radio"
+                  aria-checked={scope === option.scope}
+                  onClick={() => setScope(option.scope)}
+                  className={cn(
+                    'min-h-9 rounded-md px-3 text-sm',
+                    scope === option.scope ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
           {DOWNLOADS.map(({ tab, file, label }) => (
             <Button
               key={tab}
@@ -122,7 +128,7 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
               onClick={() => {
                 setDownloading(tab)
                 setDownloadError(null)
-                download(tab, file, scope)
+                download(tab, file, lead ? scope : 'mine')
                   .catch(setDownloadError)
                   .finally(() => setDownloading(null))
               }}
@@ -145,6 +151,18 @@ export function Queue({ onOpen }: { onOpen: (id: string) => void }) {
           Set <code>SUPABASE_URL</code> and <code>SUPABASE_SERVICE_ROLE_KEY</code> in the gateway's <code>.env</code>, run the{' '}
           <code>labeling_rows</code> migration, then reload.
         </Setup>
+      )}
+
+      {blind.size > 0 && (
+        <Card className="flex flex-wrap items-center gap-3 py-3">
+          <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
+          <p className="min-w-0 flex-1 text-sm text-ink">
+            You have {blind.size} {blind.size === 1 ? 'paper' : 'papers'} to check blind. They are kept apart from this list.
+          </p>
+          <Button variant="ghost" onClick={onShowBlind} className="min-h-10">
+            Open blind checks
+          </Button>
+        </Card>
       )}
 
       {pool.data && <TeamTopics pool={pool.data} />}
