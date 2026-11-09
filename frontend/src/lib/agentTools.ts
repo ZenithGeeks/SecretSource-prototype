@@ -5,7 +5,7 @@
  * for the person: one approval step, then Apply or Switch. Cancel changes nothing.
  */
 
-import { askTarget, type AskTarget, type Pointing } from './askCursor'
+import type { AskTarget, Pointing } from './askCursor'
 import type { Role } from './roles'
 
 /** What the role's app lets the agent do: open its screens and papers, and change role. */
@@ -284,9 +284,7 @@ function find(target: string) {
 function parseTarget(target: string): AskTarget | null {
   const at = target.indexOf(':')
   if (at < 1) return null
-  const parsed = { kind: target.slice(0, at), id: target.slice(at + 1) } as AskTarget
-  /* v8 ignore next -- parsed is built from target, so askTarget(parsed) always equals it */
-  return askTarget(parsed) === target ? parsed : null
+  return { kind: target.slice(0, at), id: target.slice(at + 1) } as AskTarget
 }
 
 function labelOf(element: HTMLElement) {
