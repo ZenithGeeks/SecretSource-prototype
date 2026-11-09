@@ -1720,5 +1720,5 @@ async def metrics(request: Request):
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - starts the server, never runs under pytest
     uvicorn.run(app, host="0.0.0.0", port=PORT)
