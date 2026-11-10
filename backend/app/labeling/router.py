@@ -47,6 +47,7 @@ from app.labeling.schema import (
     current,
 )
 from app.pipeline import verify
+from app.pipeline.sources import lookup_key
 from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ def build_session(analysis: dict) -> dict:
                 "section": claim.get("section", ""),
                 "source": claim.get("source"),
                 "candidates": candidates,
+                "unchecked": _unchecked(claim),
             }
         )
     return {
@@ -163,6 +165,28 @@ def build_session(analysis: dict) -> dict:
         # Where the paper cites each reference, so a click on "[12]" can open that reference.
         "markers": analysis.get("markers") or [],
     }
+
+
+def _unchecked(claim: dict) -> list[dict]:
+    """The claim's citations the analysis did not check, each with why, so a reference with no
+    passages is not taken for a search that found nothing (#836). "named" is a work the paper only
+    names, a method or dataset it uses; the rest are verify.unchecked_reason values."""
+    named = set(claim.get("named") or [])
+    failed = {row["source"]: row["reason"] for row in claim.get("unchecked") or []}
+    rows = []
+    for citation in claim.get("citations") or []:
+        source = lookup_key(citation)
+        if reason := "named" if source in named else failed.get(source):
+            label = citation.get("title") or source
+            rows.append({"ref": citation.get("ref", ""), "label": label, "reason": reason})
+    return rows
+
+
+def _extracted_claim(analysis: dict, paper_id: str, claim_id: str) -> dict | None:
+    """The analysis claim behind an id like "<paper_id>#3", or None."""
+    index = claim_id.removeprefix(f"{paper_id}#")
+    claims = analysis.get("claims", [])
+    return claims[int(index)] if index.isdigit() and int(index) < len(claims) else None
 
 
 def _unread_references(analysis: dict, read: list[dict]) -> list[dict]:
@@ -248,16 +272,23 @@ async def _refuse_on_blind(analysis_id: str, who: str, what: str) -> None:
 async def added_claim_candidates(
     body: AddedClaimIn, analysis: dict = Depends(owned_analysis), _who: str = Depends(annotator)
 ):
-    """Passages retrieval finds in each reference paper for a claim added by hand (#404).
+    """Passages retrieval finds for a claim the analysis has none for.
 
-    The same search the analysis ran for its own claims, so the labeler has passages to judge
-    instead of reading every reference for them. The references are already in the ColBERT
-    index from the analysis, and are searched at the same time.
+    A claim added by hand (#404) is searched in every reference paper. An extracted claim is
+    searched in the papers it cites that have a PDF: one that only names a work was never checked,
+    though another claim may have downloaded that work (#836). The same search the analysis ran
+    for its own claims, so the labeler has passages to judge instead of reading every reference.
+    The references are already in the ColBERT index from the analysis, and are searched at once.
     """
     built = build_session(analysis)
-    if not body.claim_id.startswith(f"{built['paper_id']}#h-"):
-        raise HTTPException(422, f"{body.claim_id} is not a claim added by hand to this paper")
-    references = built["references"]
+    paper_id = built["paper_id"]
+    if body.claim_id.startswith(f"{paper_id}#h-"):
+        references = built["references"]
+    elif (claim := _extracted_claim(analysis, paper_id, body.claim_id)) is not None:
+        cited = {citation.get("ref") for citation in claim.get("citations") or []} - {"", None}
+        references = [r for r in built["references"] if r["ref"] in cited]
+    else:
+        raise HTTPException(422, f"{body.claim_id} is not a claim of this paper")
     try:
         found = await asyncio.gather(
             *(asyncio.to_thread(verify.evidence_from, body.claim, r["file"]) for r in references)
@@ -672,9 +703,9 @@ async def save(
                 passage=hit["passage"],
             )
         elif item.origin == "retrieved_added":
-            # Found live for a hand-added claim, so not in the analysis to check against. The
-            # id is rebuilt here from what is stored, as the candidates route built it.
-            if "#h-" not in item.claim_id or item.reference_id not in references:
+            # Found live, so not in the analysis to check against. The id is rebuilt here from
+            # what is stored, as the candidates route built it.
+            if item.reference_id not in references:
                 raise HTTPException(422, f"unknown passage for {item.claim_id}")
             row["cand_id"] = _candidate_id(item.claim_id, item.reference_id, item.rank or 0, item.passage)
         else:
