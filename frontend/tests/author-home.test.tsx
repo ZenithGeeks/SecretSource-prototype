@@ -139,6 +139,15 @@ describe('Author Home', () => {
     expect(scroll).toHaveBeenLastCalledWith(expect.objectContaining({ block: 'center' }))
   })
 
+  test('nothing to centre does nothing: no element yet, or one that cannot scroll', () => {
+    expect(() => centreInView(null)).not.toThrow()
+    const element = document.createElement('div')
+    Object.defineProperty(element, 'scrollIntoView', { value: undefined })
+    const measured = vi.spyOn(element, 'getBoundingClientRect')
+    centreInView(element)
+    expect(measured).not.toHaveBeenCalled()
+  })
+
   test('the Evidence panel follows the rows and its pager cycles the open issues only', async () => {
     renderHome()
     expect(await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })).toBeInTheDocument()
