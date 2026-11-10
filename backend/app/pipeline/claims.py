@@ -1322,10 +1322,13 @@ def _mark_named_citations(title: str, claims: list[dict]) -> None:
         # The model and the sentence must both say the claim is about this paper's own work.
         if not _says_own_work(claim["sentence"] or claim["claim"], title):
             continue
+        sentence = claim["sentence"] or claim["claim"]
         claim["named"] = [
             source
             for index, citation in enumerate(claim["citations"])
-            if index in named_indexes and (source := lookup_key(citation))
+            if index in named_indexes
+            and not _says_what_it_did(sentence, citation.get("ref", ""))
+            and (source := lookup_key(citation))
         ]
 
 
@@ -1342,6 +1345,37 @@ def _says_own_work(sentence: str, title: str) -> bool:
     """
     name = title.split(":")[0].strip() if ":" in title else ""
     return bool(OWN_WORK.search(sentence) or (name and name.lower() in sentence.lower()))
+
+
+# "[b39] find that ...", "[b8][b16] show ...": a verb of finding right after the marker.
+FINDING_VERB = re.compile(
+    r"^\s*(?:find|finds|found|show|shows|showed|shown|report|reports|reported|demonstrate|"
+    r"demonstrates|demonstrated|observe|observes|observed|argue|argues|argued|suggest|suggests|"
+    r"suggested|prove|proves|proved)\b",
+    re.IGNORECASE,
+)
+# "..., which is known to boost WSC task performance [b22]": in the clause before the marker.
+KNOWN_TO = re.compile(
+    r"\b(?:is|are|was|were|has been|have been)\s+(?:known|shown|reported|found|demonstrated)\s+to\b[^.;]*$",
+    re.IGNORECASE,
+)
+# "Unlike other natural logic systems [b8][b16], ...": the marker is in the opening "unlike" clause.
+UNLIKE = re.compile(r"^\s*(?:but\s+|and\s+)?unlike\b[^,;]*$", re.IGNORECASE)
+LEADING_MARKERS = re.compile(r"^(?:\s*\[b\d+\])+")
+
+
+def _says_what_it_did(sentence: str, ref: str) -> bool:
+    """Whether the sentence states what the cited work found, is known for, or does differently.
+
+    The cited work can then show that part true or false, so the citation is checked even in a
+    sentence about this paper (#907). The role model named "While [b39] find ..., we hypothesize".
+    Only these patterns are caught; the model still decides the rest.
+    """
+    at = sentence.find(f"[{ref}]")
+    if not ref or at < 0:
+        return False
+    before, after = sentence[:at], LEADING_MARKERS.sub("", sentence[at + len(ref) + 2 :])
+    return bool(FINDING_VERB.match(after) or KNOWN_TO.search(before) or UNLIKE.match(before))
 
 
 def _cited_claim(extracted, references: dict, cited: list[str], pdf_path: str) -> dict:
