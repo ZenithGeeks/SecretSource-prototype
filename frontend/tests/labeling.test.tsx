@@ -102,6 +102,7 @@ import {
   emptyDraft,
   emptyLabel,
   isDone,
+  isSavedDone,
   nextPaperInTopic,
   nextUnfinishedIndex,
   problem,
@@ -133,6 +134,21 @@ describe('a failed labeling call', () => {
       title: "The site's protection blocked this request",
     })
     expect(problem(new Error('403: {"detail":"no access"}')).title).toBe("You can't use the labeler")
+  })
+
+  it.each([
+    '403: <html><body>challenge</body></html>',
+    '403: proxy <html><body>challenge</body></html>',
+    '403: cf-mitigated',
+    '403: challenge-platform',
+    '403: /cdn-cgi/challenge',
+    '403: Attention required',
+  ])('recognizes a protection page marker in %s', (message) => {
+    expect(cloudflareBlocked(message)).toBe(true)
+  })
+
+  it('leaves valid JSON without a gateway detail as an ordinary denial', () => {
+    expect(cloudflareBlocked('403: {"error":"denied"}')).toBe(false)
   })
 })
 
@@ -192,6 +208,22 @@ describe('what is left to decide', () => {
     expect(referenceSummary(claim, done, refs[0], 'refB')).toBe('[b4] 1/2 relevant · Clear · Medium')
   })
 
+  it('finishes a reference with no relevant passages and checks hand-added passages when there are no candidates', () => {
+    const rejected = judged({ status: 'accepted', cands: { c1: 'rejected', c2: 'rejected' } })
+    expect(referenceFinished(claim, rejected, 'refB')).toBe(true)
+
+    const noCandidates = { ...claim, candidates: [] }
+    const added = [{ reference_id: 'other', page: 1, passage: 'other reference' }]
+    expect(referenceFinished(noCandidates, { ...emptyDraft(), added }, 'refB')).toBe(false)
+  })
+
+  it('summarizes a reference without a marker, level or known label', () => {
+    expect(referenceSummary({ ...claim, candidates: [] }, emptyDraft(), { reference_id: 'refB', file: 'refB.pdf', label: 'Ref B' }, 'refB'))
+      .toBe('Ref B 0/0 relevant')
+    expect(referenceSummary({ ...claim, candidates: [] }, emptyDraft(), undefined, 'unknown'))
+      .toBe('unknown 0/0 relevant')
+  })
+
   it('wants the new wording of an edited claim', () => {
     expect(remaining(claim, judged({ status: 'edited', cands: { c1: 'rejected', c2: 'rejected' } }), refs)).toEqual([
       'Write the edited claim',
@@ -229,10 +261,19 @@ describe('the next unfinished claim', () => {
     expect(saveNextTarget(six, drafts, saved, [], 2)).toEqual({ kind: 'claim', index: 3 })
   })
 
+  it('stays when there is no current claim and uses an empty draft for missing progress', () => {
+    expect(saveNextTarget([], {}, {}, [], 0)).toEqual({ kind: 'stay' })
+    expect(isSavedDone(bare('missing'), {}, {}, [])).toBe(false)
+    const incomplete = { ...claim, claim_id: 'incomplete', candidates: claim.candidates.slice(0, 1) }
+    expect(saveNextTarget([incomplete], { incomplete: { ...emptyDraft(), status: 'accepted' } }, {}, [], 0))
+      .toEqual({ kind: 'stay' })
+  })
+
   it('picks the next paper in the same topic that is not finished', () => {
     const pool = gateway.pool as Parameters<typeof nextPaperInTopic>[0]
     expect(nextPaperInTopic(pool, 'a1')?.analysis_id).toBe('a2')
     expect(nextPaperInTopic({ ...pool, papers: pool.papers.map((p) => ({ ...p, topic: 'CV' })) }, 'a1')).toBeNull()
+    expect(nextPaperInTopic({ ...pool, people: [] }, 'a1')).toBeNull()
   })
 })
 

@@ -1,7 +1,6 @@
 ﻿import {
   AlertCircle,
   ArrowUpRight,
-  BookOpen,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
@@ -19,7 +18,6 @@ import { useAuth } from '../../../lib/useAuth'
 import { useSettings } from '../../../lib/settings'
 import type { MostMisusedSource, TeacherHomeAssignment, TeacherHomeSubmission } from '../../../lib/teacher'
 import type { TeacherRoute } from '../../../lib/teacherRoutes'
-import { homeRouteForAction } from '../../../lib/teacherSelectors'
 import { useTeacherGoogleConnection, useTeacherHome } from '../../../lib/useTeacher'
 import { InitialAvatar, LoadingState, StatusPill } from '../components/TeacherUi'
 
@@ -70,10 +68,10 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
   }
 
   const data = home.data
-  const submissions = data.submissions.filter((submission) =>
-    submission.state === 'submitted' && submission.reviewStatus !== 'analysis-ready',
-  )
-  const reviewCount = data.reviewQueueCount ?? submissions.length
+  const submitted = data.submissions.filter((submission) => submission.state === 'submitted' || submission.state === 'returned')
+  const pendingSubmissions = submitted.filter((submission) => submission.reviewStatus !== 'analysis-ready')
+  const reviewCount = data.reviewQueueCount ?? pendingSubmissions.length
+  const submissions = reviewCount === 0 ? submitted : pendingSubmissions
   const assignments = data.dueSoon ?? []
   const reviewGroups = groupSubmissionsByCourse(submissions, assignments, data.courseId, data.course)
   const metadata = session?.user.user_metadata ?? {}
@@ -122,13 +120,12 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
         </div>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-3" aria-label="Quick actions">
+      <section className="grid gap-3 sm:grid-cols-2" aria-label="Quick actions">
         <QuickAction icon={FileCheck2} title="Check student essays" detail="Review submitted work and citation checks" onClick={() => openEssayCheck()} />
-        <QuickAction icon={BookOpen} title="Make reading questions" detail="Create questions from a research paper" onClick={() => onOpen(homeRouteForAction('reading-questions'))} />
         <QuickAction
           icon={CalendarClock}
           title="Due soon"
-          detail={`${assignments.length} assignments · next 7 days and overdue`}
+          detail={assignments.length ? `${assignments.length} assignments · next 7 days and overdue` : connection.isPending ? 'Checking Classroom connection…' : connection.isError ? 'Classroom connection status unavailable.' : connection.data?.connected ? 'Nothing due soon. Good job!' : 'Connect Google Classroom to see upcoming assignments.'}
           onClick={() => assignments[0]
             ? onOpen({ screen: 'assignment-detail', courseId: assignments[0].courseId, assignmentId: assignments[0].id })
             : onOpen({ screen: 'classes' })}
@@ -136,13 +133,16 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
       </section>
 
       <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.75fr)_minmax(260px,1fr)]" aria-label="Essay to review">
-        <div className="space-y-3">
+        <div className={reviewCount === 0 && connection.data?.connected ? 'space-y-3 rounded-xl border border-border-subtle bg-surface p-3' : 'space-y-3'}>
+          {reviewCount === 0 && connection.data?.connected && (
+            <p className="px-1 py-1 text-sm font-medium text-ink">You have nothing to review. Good job!</p>
+          )}
           {reviewGroups.length === 0 ? (
             <Card className="overflow-hidden p-0">
               <div className="border-b border-border-subtle px-4 py-3">
                 <h2 className="text-[14px] font-semibold">Essay to review</h2>
               </div>
-              <div className="p-5"><Empty title="Nothing to review" hint="New submitted essays will appear here." /></div>
+              <div className="p-5"><Empty title={connection.isPending ? 'Checking Classroom connection' : connection.isError ? 'Connection status unavailable' : connection.data?.connected ? 'No submitted essays yet' : 'Connect Google Classroom'} hint={connection.data?.connected ? 'New submitted essays will appear here.' : connection.isPending || connection.isError ? 'Check your Classroom connection below.' : 'Connect Google Classroom and new submitted essays will appear here.'} /></div>
             </Card>
           ) : reviewGroups.map((group) => {
             const expanded = expandedCourseIds.has(group.id)
@@ -240,7 +240,7 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
           })}
         </div>
 
-        <MostMisusedSourceCard source={data.mostMisusedSource} />
+        <MostMisusedSourceCard sources={data.mostMisusedSources ?? (data.mostMisusedSource ? [data.mostMisusedSource] : [])} />
       </section>
 
       <ClassroomSync
@@ -363,8 +363,8 @@ function ReviewRow({ submission, dueAt, onOpen }: {
   dueAt: string | null
   onOpen: () => void
 }) {
-  const label = submission.reviewStatus === 'analysis-ready' ? 'Analysis on file' : 'Not checked'
-  const tone = submission.reviewStatus === 'analysis-ready' ? 'success' : 'neutral'
+  const label = submission.reviewStatus === 'analysis-ready' ? 'Reviewed' : submission.reviewStatus === 'analysis-running' ? 'Checking' : 'Not checked'
+  const tone = submission.reviewStatus === 'analysis-ready' ? 'success' : submission.reviewStatus === 'analysis-running' ? 'warning' : 'neutral'
   const fallbackYear = parseHomeDate(dueAt)?.getFullYear()
   const dueDate = formatHomeDate(dueAt)
   const submittedDate = formatHomeDate(submission.submittedAt, fallbackYear)
@@ -381,24 +381,27 @@ function ReviewRow({ submission, dueAt, onOpen }: {
         <span className="block truncate text-[12px] font-medium text-ink">{submission.studentName}</span>
         <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{details}</span>
       </span>
-      <span className="hidden sm:block"><StatusPill label={label} tone={tone} /></span>
+      <span><StatusPill label={label} tone={tone} /></span>
       <ChevronRight className="size-3.5 shrink-0 text-ink-muted" />
     </button>
   )
 }
 
-function MostMisusedSourceCard({ source }: { source?: MostMisusedSource | null }) {
+function MostMisusedSourceCard({ sources }: { sources: MostMisusedSource[] }) {
   return (
     <Card className="space-y-2.5">
-      <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-refutes">Most misused source</h2>
-      {source ? (
-        <>
-          <h3 className="text-[14px] font-semibold text-ink">{source.title}</h3>
-          <p className="text-[12px] leading-[18px] text-ink-muted">{source.detail}</p>
-        </>
+      <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-refutes">Most misused sources</h2>
+      {sources.length ? (
+        <ol className="space-y-3">
+          {sources.map((source, index) => <li key={`${source.title}-${index}`} className="flex items-start gap-3">
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-refutes-soft text-xs font-semibold text-refutes">{index + 1}</span>
+            <div className="min-w-0"><h3 className="break-words text-[13px] font-semibold text-ink">{source.title}</h3><p className="mt-1 text-[12px] leading-[18px] text-ink-muted">{source.count != null ? `${source.count} ${source.count === 1 ? 'essay' : 'essays'} flagged` : source.detail}</p></div>
+          </li>)}
+        </ol>
       ) : (
         <p className="text-[12px] leading-[18px] text-ink-muted">A frequently misused source will appear here when review data is available.</p>
       )}
+      {sources.length > 0 && <p className="text-[11px] leading-4 text-ink-muted">Based on teacher decisions where available and automated findings otherwise.</p>}
     </Card>
   )
 }

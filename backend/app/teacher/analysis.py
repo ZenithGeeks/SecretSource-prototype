@@ -190,18 +190,19 @@ class TeacherEssayAnalysisService:
 
     def save_feedback(
         self, owner: str, course_id: str, coursework_id: str, submission_id: str,
-        feedback_text: str, citation_ids: list[str] | tuple[str, ...], sharing_options: dict[str, Any] | None = None,
+        feedback_text: str, citation_ids: list[str] | tuple[str, ...], sharing_options: dict[str, Any] | None = None, subject: str | None = None,
     ) -> TeacherFeedback:
         submission = self._submission(owner, course_id, coursework_id, submission_id)
+        existing = self.repository.get_feedback(owner, course_id, coursework_id, submission_id) if subject is None else None
         feedback = TeacherFeedback(
             owner, course_id, coursework_id, submission_id, submission.student_id,
-            feedback_text, "draft", None, tuple(citation_ids), sharing_options or {},
+            feedback_text, "draft", None, tuple(citation_ids), sharing_options or {}, subject if subject is not None else (existing.subject if existing else ""),
         )
         self.repository.save_feedback(feedback)
         return feedback
 
     def send_feedback(
-        self, owner: str, course_id: str, coursework_id: str, submission_id: str, report_html: str | None = None
+        self, owner: str, course_id: str, coursework_id: str, submission_id: str, report_html: str | None = None, subject: str | None = None
     ) -> TeacherFeedback:
         """Email the saved teacher feedback and its student-ready HTML report through Gmail."""
         submission = self._submission(owner, course_id, coursework_id, submission_id)
@@ -218,13 +219,13 @@ class TeacherEssayAnalysisService:
             raise ValueError("Gmail feedback delivery is unavailable; reconnect Google with Gmail sending access")
         self.client.send_feedback_email(
             submission.student_email,
-            f"Essay feedback for {coursework_id}",
+            (subject or feedback.subject).strip() or "Essay feedback",
             feedback.feedback_text,
             report_html,
         )
         sent = TeacherFeedback(
             owner, course_id, coursework_id, submission_id, submission.student_id,
-            feedback.feedback_text, "sent", self._now(), feedback.citation_ids, feedback.sharing_options,
+            feedback.feedback_text, "sent", self._now(), feedback.citation_ids, feedback.sharing_options, subject if subject is not None else feedback.subject,
         )
         self.repository.save_feedback(sent)
         return sent
@@ -320,6 +321,7 @@ class TeacherEssayAnalysisService:
         locations = {review["id"]: review["sourceLocation"] for review in reviews}
         return {
             "body": feedback.feedback_text if feedback is not None else "",
+            "subject": feedback.subject if feedback is not None else "",
             "preview": feedback.feedback_text if feedback is not None else "",
             "citedPages": [locations[citation_id] for citation_id in citation_ids if locations.get(citation_id)],
             "citationIds": citation_ids,

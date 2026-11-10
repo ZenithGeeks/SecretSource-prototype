@@ -20,7 +20,7 @@ import { SettingsModal } from '../src/components/SettingsModal'
 import { resetSettings } from '../src/lib/settings'
 import { resetTeacherPreferences } from '../src/lib/teacherPreferences'
 import { resetTeacherStore } from '../src/lib/teacherStore'
-import { MOCK_TEACHER_WORKSPACE } from '../src/mocks/teacher'
+import { MOCK_TEACHER_HOME, MOCK_TEACHER_WORKSPACE } from '../src/mocks/teacher'
 import { teacherApi } from '../src/lib/teacher'
 
 function renderWithQuery(ui: ReactNode) {
@@ -42,7 +42,25 @@ afterEach(() => {
 })
 
 describe('Teacher home and class pages', () => {
-  test('Home opens the essay and reading-question routes from quick actions', async () => {
+  test('Home shows checked essays and celebrates an empty review and due queue', async () => {
+    vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: true, email: 'teacher@example.edu' })
+    vi.spyOn(teacherApi, 'getHome').mockResolvedValue({ ...MOCK_TEACHER_HOME, reviewQueueCount: 0, dueSoon: [], submissions: [MOCK_TEACHER_HOME.submissions[0]!] })
+    renderWithQuery(<Home onOpen={vi.fn()} />)
+    expect(await screen.findByText('You have nothing to review. Good job!')).toBeInTheDocument()
+    expect(screen.getByText('Nothing due soon. Good job!')).toBeInTheDocument()
+    expect(screen.getByText('Reviewed')).toBeInTheDocument()
+  })
+
+  test('Home explains how to start when Classroom is disconnected', async () => {
+    vi.spyOn(teacherApi, 'getGoogleConnection').mockResolvedValue({ connected: false, email: null })
+    vi.spyOn(teacherApi, 'getHome').mockResolvedValue({ ...MOCK_TEACHER_HOME, reviewQueueCount: 0, dueSoon: [], submissions: [] })
+    renderWithQuery(<Home onOpen={vi.fn()} />)
+    expect(await screen.findByText('Connect Google Classroom and new submitted essays will appear here.')).toBeInTheDocument()
+    expect(screen.getByText('Connect Google Classroom to see upcoming assignments.')).toBeInTheDocument()
+    expect(screen.queryByText('You have nothing to review. Good job!')).not.toBeInTheDocument()
+  })
+
+  test('Home opens essay reviews and does not show the reading-question action', async () => {
     const onOpen = vi.fn()
     renderWithQuery(<Home onOpen={onOpen} />)
 
@@ -55,8 +73,7 @@ describe('Teacher home and class pages', () => {
       assignmentId: 'assignment-essay',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Make reading questions/ }))
-    expect(onOpen).toHaveBeenCalledWith({ screen: 'reading-questions', paperId: 'paper-colbert' })
+    expect(screen.queryByRole('button', { name: /Make reading questions/ })).not.toBeInTheDocument()
   })
 
 
@@ -279,7 +296,7 @@ describe('Teacher review and worksheet pages', () => {
     expect(await screen.findByRole('heading', { name: 'Anan P.' })).toBeInTheDocument()
     expect(screen.getAllByText(/essay-2\.docx/).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Check essay' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Feedback to student' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Email message to the student' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send to student' })).toBeInTheDocument()
   })
@@ -306,6 +323,28 @@ describe('Teacher review and worksheet pages', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Delivery unavailable')
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Send email' })).toBeEnabled()
+  })
+
+  test('Feedback dialog keeps the subject focused while editing', () => {
+    renderWithQuery(<FeedbackDialog open studentName="Anan" recipientEmail="anan@example.edu" senderEmail="teacher@example.edu" deliveryReady deliveryIssue="" preview="Feedback" onClose={vi.fn()} onSend={vi.fn()} />)
+    const subject = screen.getByRole('textbox', { name: 'Email subject' })
+    subject.focus()
+    fireEvent.change(subject, { target: { value: 'First' } })
+    expect(subject).toHaveFocus()
+    fireEvent.change(subject, { target: { value: 'First revision' } })
+    expect(subject).toHaveFocus()
+    expect(subject).toHaveValue('First revision')
+  })
+
+  test('Feedback dialog sends the chosen subject and confirms the email was sent', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    renderWithQuery(<FeedbackDialog open studentName="Anan" recipientEmail="anan@example.edu" senderEmail="teacher@example.edu" deliveryReady deliveryIssue="" preview={'Hello Anan,\nPlease revise.'} defaultSubject="Essay feedback" onClose={vi.fn()} onSend={onSend} />)
+    expect(screen.getByText('Email message to the student')).toBeInTheDocument()
+    expect(screen.getByText(/Hello Anan/)).toHaveTextContent('Please revise.')
+    fireEvent.change(screen.getByLabelText('Email subject'), { target: { value: 'Your essay review' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send email' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('anan@example.edu')
+    expect(onSend).toHaveBeenCalledWith('Your essay review')
   })
 
   test('Reading Questions opens the source and edits then removes a local question', async () => {
@@ -442,18 +481,16 @@ describe('Teacher application routing', () => {
     expect(screen.getByRole('button', { name: /Alex/ })).toHaveClass('border-accent')
   })
 
-  test('TeacherApp keeps Reading Questions available from Home without a Library tab', async () => {
+  test('TeacherApp Home does not show the reading questions action', async () => {
     window.history.replaceState(null, '', '/?role=teacher&screen=classes')
     renderWithQuery(<TeacherApp />)
 
     expect(await screen.findByRole('heading', { name: 'Classes' })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('classes')
     fireEvent.click(screen.getByRole('button', { name: 'Home' }))
-    fireEvent.click(await screen.findByRole('button', { name: /Make reading questions/ }))
-
-    expect(await screen.findByRole('heading', { name: /^Reading questions/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Check student essays/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Make reading questions/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Library')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Answer key' })).toBeInTheDocument()
-    expect(new URLSearchParams(window.location.search).get('screen')).toBe('reading-questions')
+    expect(new URLSearchParams(window.location.search).get('screen')).toBe('home')
   })
 })

@@ -174,7 +174,7 @@ describe('draftFromSaved', () => {
       cands: { c1: 'relevant', c2: 'rejected' },
       added: [{ reference_id: 'refB', page: 3, passage: 'mine' }],
       labels: {
-        refB: { evidence: 3, rationale: 'why', confidence: 'medium' },
+        refB: { evidence: 3, rationale: 'why', confidence: null },
         refC: { evidence: 4, rationale: '', confidence: 'high' },
       },
     })
@@ -268,7 +268,7 @@ describe('remaining', () => {
     expect(remaining(c, judged, [])).toEqual(['Give zz a level'])
   })
 
-  it('is satisfied by a level on the reference', () => {
+  it('requires confidence as well as a level on the reference', () => {
     const c = claim({ candidates: [cand('c1')] })
     const draft: Draft = {
       ...emptyDraft(),
@@ -276,7 +276,8 @@ describe('remaining', () => {
       cands: { c1: 'relevant' },
       labels: { refB: { ...emptyLabel(), evidence: 3 } },
     }
-    expect(remaining(c, draft, [])).toEqual([])
+    expect(remaining(c, draft, [])).toEqual(['Give refB a confidence'])
+    expect(remaining(c, { ...draft, labels: { refB: { ...draft.labels.refB, confidence: 'medium' } } }, [])).toEqual([])
   })
 })
 

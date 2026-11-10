@@ -2,7 +2,7 @@
  * analysed papers to one, and the paper table's filters. The gateway is a fetch stub. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -552,18 +552,16 @@ describe('adding analysed papers', () => {
     expect(within(dialog).getByText('Every analysed paper is already in this project.')).toBeInTheDocument()
   })
 
-  it('closes with Done, Escape or the scrim', async () => {
+  it.each([
+    ['Done', (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))],
+    ['Escape', (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' })],
+    ['the scrim', (dialog: HTMLElement) => fireEvent.click(dialog.firstElementChild!)],
+  ] as const)('closes with %s', async (_name, dismiss) => {
     gateway()
-    for (const dismiss of [
-      (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Done' })),
-      (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' }),
-      (dialog: HTMLElement) => fireEvent.click(dialog.firstElementChild!),
-    ]) {
-      const dialog = await openPicker()
-      dismiss(dialog)
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-      document.body.innerHTML = ''
-    }
+    const dialog = await openPicker()
+    dismiss(dialog)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    cleanup()
   })
 })
 

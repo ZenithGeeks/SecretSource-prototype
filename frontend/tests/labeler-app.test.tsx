@@ -94,6 +94,7 @@ const sidebar = () => screen.getAllByRole('navigation', { name: 'Main' })[0]
 describe('the Labeler shell', () => {
   beforeEach(() => {
     window.localStorage.clear() // drafts a test left unsaved
+    pool.blind = ['b1']
     window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
   })
   afterEach(() => {
@@ -125,6 +126,26 @@ describe('the Labeler shell', () => {
     expect(await screen.findByText('Method Y improves recall.')).toBeInTheDocument()
 
     fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
+    expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
+    expect(window.location.search).toBe('')
+  })
+
+  it('can open the next paper when labeling ends, then return to the papers list', async () => {
+    pool.blind = []
+    renderApp('?analysis=a1')
+    await screen.findByText('Method Y improves recall.')
+
+    fireEvent.keyDown(window, { key: 'x' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    expect(await screen.findByText('This paper is labeled')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next paper in your topic' }))
+    expect(await screen.findByRole('heading', { name: 'Claim 1 of 1' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('analysis')).toBe('b1')
+
+    fireEvent.keyDown(window, { key: 'x' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    expect(await screen.findByText('This paper is labeled')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to papers' }))
     expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
     expect(window.location.search).toBe('')
   })

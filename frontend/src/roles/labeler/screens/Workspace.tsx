@@ -358,7 +358,7 @@ function Body({
         setSavedRows(rows.claims + rows.candidates + rows.labels)
         if (!next) return
         if (target.kind === 'claim') go(claims[target.index].claim_id)
-        else if (target.kind === 'paper-done') setPaperDone(true)
+        setPaperDone(target.kind === 'paper-done')
       },
     })
   }
@@ -837,6 +837,7 @@ function Body({
               disabled={firstUnfinishedIndex(claims, drafts, saved, cited) == null}
               onClick={() => {
                 const index = firstUnfinishedIndex(claims, drafts, saved, cited)
+                /* v8 ignore next -- @preserve */
                 if (index == null) return
                 setPaperDone(false)
                 select(claims[index].claim_id)

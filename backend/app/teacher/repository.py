@@ -83,6 +83,7 @@ def _feedback_from_row(row: dict[str, Any]) -> TeacherFeedback:
         feedback_text=row["feedback_text"], status=row["status"], sent_at=_datetime_or_none(row.get("sent_at")),
         citation_ids=tuple(row.get("citation_ids") or ()),
         sharing_options=dict(row.get("sharing_options") or {}),
+        subject=str(row.get("subject") or ""),
     )
 
 

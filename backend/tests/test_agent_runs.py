@@ -202,8 +202,13 @@ def tool_names(agent) -> list[str]:
 
 
 def test_each_role_has_its_own_agent_and_each_can_ask_to_switch_role():
-    assert set(screen.ROLE_AGENTS) == {"researcher", "labeler", "writer"}
-    assert all("switch_role" in tool_names(agent) for agent in screen.ROLE_AGENTS.values())
+    assert set(screen.ROLE_AGENTS) == {"researcher", "labeler", "writer", "teacher"}
+    assert all(
+        "switch_role" in tool_names(screen.ROLE_AGENTS[role]) for role in ("researcher", "labeler", "writer")
+    )
+    assert {"teacher_classes", "teacher_assignments", "teacher_submissions", "teacher_essay_review"} <= set(
+        tool_names(screen.teacher_agent)
+    )
     # The MCP server lists SCREEN_TOOLS and takes SCREEN_TOOL_NAMES: a coding agent has no role.
     assert "switch_role" not in screen.SCREEN_TOOL_NAMES
     assert "switch_role" in screen.BROWSER_TOOL_NAMES
@@ -339,4 +344,13 @@ def test_going_on_in_someone_elses_conversation_is_a_404(api):
 
 def test_a_role_without_an_agent_is_refused(api):
     client, _, _ = api
-    assert client.post("/agent/runs", json={"message": "hi", "role": "teacher"}).status_code == 422
+    assert client.post("/agent/runs", json={"message": "hi", "role": "unknown"}).status_code == 422
+
+
+def test_teacher_agent_answers_with_the_scripted_model(api, monkeypatch):
+    client, model, _ = api
+    monkeypatch.setattr(screen.teacher_agent, "model", model)
+    model.replies = ["Here are your classes."]
+    response = client.post("/agent/runs", json={"message": "Show my classes", "role": "teacher"})
+    assert response.status_code == 200
+    assert {"type": "say", "text": "Here are your classes."} in events(response)
