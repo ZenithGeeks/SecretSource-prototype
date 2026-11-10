@@ -3,13 +3,91 @@
 from __future__ import annotations
 
 import base64
+import io
+import multiprocessing
 from collections.abc import Callable, Iterable
 from email.message import EmailMessage
 from time import sleep as default_sleep
 from typing import Any
 
+PDF_RENDER_TIMEOUT_SECONDS = 5
+PDF_MAX_PAGES = 100
+PDF_MAX_BYTES = 10 * 1024 * 1024
+PDF_MAX_HTML_CHARS = 1_000_000
+
+
+class FeedbackPdfError(ValueError):
+    """A feedback report was invalid or could not be rendered within its limits."""
+
 GOOGLE_DOCUMENT_MIME_TYPE = "application/vnd.google-apps.document"
 PDF_MIME_TYPE = "application/pdf"
+
+
+def _render_feedback_pdf(html: str) -> bytes:
+    import pymupdf
+
+    output = io.BytesIO()
+    writer = pymupdf.DocumentWriter(output)
+    story = pymupdf.Story(html=html)
+    page = pymupdf.paper_rect("a4")
+    content = page + (48, 48, -48, -48)
+    for _ in range(PDF_MAX_PAGES):
+        device = writer.begin_page(page)
+        more, filled = story.place(content)
+        filled_rect = pymupdf.Rect(filled)
+        if more and (filled_rect.is_empty or filled_rect.width <= 0 or filled_rect.height <= 0):
+            raise ValueError("feedback report layout made no progress")
+        story.draw(device)
+        writer.end_page()
+        if len(output.getbuffer()) > PDF_MAX_BYTES:
+            raise ValueError("feedback report exceeds the PDF size limit")
+        if not more:
+            break
+    else:
+        raise ValueError("feedback report exceeds the page limit")
+    writer.close()
+    return output.getvalue()
+
+
+def _feedback_pdf_worker(html: str, connection: Any) -> None:
+    try:
+        connection.send((True, _render_feedback_pdf(html)))
+    except Exception as error:
+        connection.send((False, str(error)))
+    finally:
+        connection.close()
+
+
+def _feedback_pdf(html: str) -> bytes:
+    """Render bounded HTML in a killable process so pathological layouts cannot hang a worker."""
+    if len(html) > PDF_MAX_HTML_CHARS:
+        raise ValueError("feedback report exceeds the HTML size limit")
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe(duplex=False)
+    process = context.Process(target=_feedback_pdf_worker, args=(html, child), daemon=True)
+    process.start()
+    child.close()
+    try:
+        if not parent.poll(PDF_RENDER_TIMEOUT_SECONDS):
+            process.terminate()
+            process.join(timeout=1)
+            raise FeedbackPdfError("feedback report rendering timed out; shorten or simplify the report")
+        success, result = parent.recv()
+        process.join(timeout=1)
+        if not success:
+            raise FeedbackPdfError(result)
+        if len(result) > PDF_MAX_BYTES:
+            raise FeedbackPdfError("feedback report exceeds the PDF size limit")
+        return result
+    except FeedbackPdfError:
+        raise
+    except Exception as error:
+        raise FeedbackPdfError("feedback report could not be rendered") from error
+    finally:
+        parent.close()
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=1)
 
 
 class GoogleApiError(RuntimeError):
@@ -157,7 +235,7 @@ class GoogleClassroomClient:
         message["Subject"] = subject
         message.set_content(body)
         if report_html:
-            message.add_attachment(report_html.encode("utf-8"), maintype="text", subtype="html", filename="essay-feedback.html")
+            message.add_attachment(_feedback_pdf(report_html), maintype="application", subtype="pdf", filename="essay-feedback.pdf")
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
         return self._execute(lambda: self.gmail.users().messages().send(userId="me", body={"raw": raw}))
     def patch_assigned_grade(self, course_id: str, coursework_id: str, submission_id: str, grade: float):

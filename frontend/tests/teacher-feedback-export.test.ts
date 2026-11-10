@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultFeedbackSharing, teacherFeedbackCsv, teacherFeedbackMarkdown } from '../src/lib/teacherFeedbackExport'
+import { defaultFeedbackSharing, resolveFeedbackSharing, teacherFeedbackCsv, teacherFeedbackMarkdown } from '../src/lib/teacherFeedbackExport'
+import { teacherFeedbackPdfHtml } from '../src/lib/teacherFeedbackPdf'
 
 describe('teacher feedback exports', () => {
-  it('defaults automated findings and evidence on, with teacher-only fields private', () => {
+  it('keeps teacher decisions and notes private by default', () => {
     expect(defaultFeedbackSharing).toEqual({ automated: true, evidence: true, teacherDecision: false, teacherNote: false })
+  })
+
+  it('keeps private defaults when loading a legacy draft with missing or partial sharing settings', () => {
+    expect(resolveFeedbackSharing()).toEqual(defaultFeedbackSharing)
+    expect(resolveFeedbackSharing({ automated: false })).toEqual({
+      automated: false, evidence: true, teacherDecision: false, teacherNote: false,
+    })
+    expect(resolveFeedbackSharing({ teacherDecision: true })).toEqual({
+      automated: true, evidence: true, teacherDecision: true, teacherNote: false,
+    })
   })
 
   it('writes feedback as structured Markdown and CSV', () => {
@@ -32,5 +43,24 @@ describe('teacher feedback exports', () => {
     expect(markdown).toContain('**What the source says**')
     expect(teacherFeedbackCsv(report)).toContain('"Student","Course","Assignment","Submission","Teacher feedback"')
     expect(teacherFeedbackCsv(report)).toContain('Sleep study')
+  })
+
+  it('includes shared teacher decisions and notes in the PDF report', () => {
+    const html = teacherFeedbackPdfHtml({
+      course: 'Writing', assignment: 'Essay', student: 'Student', feedback: 'Please revise.',
+      claims: [{ claim: 'A claim', standing: 'supports', judgment: 'Supports', teacherDecision: 'Contradicts', teacherNote: 'Check the evidence.' }],
+    })
+    expect(html).toContain('Contradicts')
+    expect(html).toContain('Check the evidence.')
+  })
+
+  it('uses the shared teacher decision for the citation label and identifies the automated result separately', () => {
+    const html = teacherFeedbackPdfHtml({
+      course: 'Writing', assignment: 'Essay', student: 'Student', feedback: 'Please revise.',
+      claims: [{ claim: 'A claim', standing: 'unchecked', judgment: 'Not checked', teacherDecision: 'Contradicts' }],
+    })
+    expect(html).toContain('Teacher decision: Contradicts')
+    expect(html).toContain('Automated result: Not checked')
+    expect(html).toContain('teacher-decision contradicts')
   })
 })

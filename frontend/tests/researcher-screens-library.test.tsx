@@ -2,7 +2,7 @@
  * analysed papers to one, and the paper table's filters. The gateway is a fetch stub. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -165,6 +165,54 @@ describe('project list', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /Analyze a new paper/ }))
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('analyses')
+  })
+
+  it('filters the project grid by name, leaving Unsorted and the New-project tile on screen', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'retrieval' } })
+    expect(screen.getByRole('button', { name: 'Open Retrieval survey' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Empty one' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Unsorted' })).toBeInTheDocument()
+    expect(screen.getByText('+ New project')).toBeInTheDocument()
+  })
+
+  it('says so, but still keeps Unsorted and the New-project tile, when no project matches', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'nonexistent' } })
+    expect(screen.getByText('No project matches "nonexistent".')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Unsorted' })).toBeInTheDocument()
+    expect(screen.getByText('+ New project')).toBeInTheDocument()
+  })
+
+  it('sorts by name and by paper count, with Unsorted always last', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    const order = () =>
+      screen
+        .getAllByRole('button', { name: /^Open / })
+        .map((b) => b.getAttribute('aria-label'))
+        .filter((label) => label !== 'Open the menu')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }))
+    expect(order()).toEqual(['Open Empty one', 'Open Retrieval survey', 'Open Unsorted'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Papers' }))
+    expect(order()).toEqual(['Open Retrieval survey', 'Open Empty one', 'Open Unsorted'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' }))
+    expect(order()).toEqual(['Open Retrieval survey', 'Open Empty one', 'Open Unsorted'])
+  })
+
+  it('hides the filter and sort row when there are no named projects to filter', async () => {
+    gateway({ projects: PROJECTS.filter((p) => p.unsorted) })
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    expect(screen.queryByRole('textbox', { name: 'Filter projects' })).not.toBeInTheDocument()
   })
 })
 
@@ -552,18 +600,16 @@ describe('adding analysed papers', () => {
     expect(within(dialog).getByText('Every analysed paper is already in this project.')).toBeInTheDocument()
   })
 
-  it('closes with Done, Escape or the scrim', async () => {
+  it.each([
+    ['Done', (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))],
+    ['Escape', (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' })],
+    ['the scrim', (dialog: HTMLElement) => fireEvent.click(dialog.firstElementChild!)],
+  ] as const)('closes with %s', async (_name, dismiss) => {
     gateway()
-    for (const dismiss of [
-      (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Done' })),
-      (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' }),
-      (dialog: HTMLElement) => fireEvent.click(dialog.firstElementChild!),
-    ]) {
-      const dialog = await openPicker()
-      dismiss(dialog)
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-      document.body.innerHTML = ''
-    }
+    const dialog = await openPicker()
+    dismiss(dialog)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    cleanup()
   })
 })
 

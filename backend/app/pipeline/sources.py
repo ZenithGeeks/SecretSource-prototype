@@ -301,6 +301,41 @@ def _arxiv_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     raise Unresolvable(f"arXiv knows no paper by that title: {title}")
 
 
+def arxiv_titles(arxiv_ids: list[str]) -> dict[str, str]:
+    """{id as given: title} from arXiv, in one request for all the ids.
+
+    "2204.02311" and "2204.02311v3" are asked for once and both get the title. Empty when
+    arXiv does not answer: the lookup goes by the id, so the analysis goes on without titles.
+    """
+    import xml.etree.ElementTree as ET
+
+    import requests
+
+    bare_ids = sorted({ARXIV_VERSION.sub("", arxiv_id) for arxiv_id in arxiv_ids})
+    if not bare_ids:
+        return {}
+    try:
+        response = requests.get(
+            ARXIV_API,
+            params={"id_list": ",".join(bare_ids), "max_results": len(bare_ids)},
+            headers=USER_AGENT,
+            timeout=60,
+        )
+        response.raise_for_status()
+        feed = ET.fromstring(response.text)
+    except (requests.RequestException, ET.ParseError):
+        return {}
+    found = {}
+    for entry in feed.iter(f"{ATOM}entry"):
+        bare_id = ARXIV_VERSION.sub("", (entry.findtext(f"{ATOM}id") or "").split("/abs/")[-1])
+        found[bare_id] = " ".join((entry.findtext(f"{ATOM}title") or "").split())
+    return {
+        arxiv_id: found[bare_id]
+        for arxiv_id in arxiv_ids
+        if (bare_id := ARXIV_VERSION.sub("", arxiv_id)) in found
+    }
+
+
 def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     found = _semantic_scholar("/search", {"query": title, "fields": S2_FIELDS, "limit": 5})
     others = []

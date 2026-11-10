@@ -374,7 +374,7 @@ describe('the Teacher presentation', () => {
     expect(screen.getByTestId('viewer')).toHaveTextContent('Claim 1 in the submission')
   })
 
-  it('shows the roster label, the feedback button and the controls it is given', () => {
+  it('shows the roster label and claim controls without a Feedback toolbar button', () => {
     const onTeacherFeedback = vi.fn()
     view({
       presentation: 'teacher',
@@ -383,8 +383,8 @@ describe('the Teacher presentation', () => {
       renderClaimActions: (_claim, index) => <button>Review {index + 1}</button>,
     })
     expect(screen.getByText('Ann · essay.pdf')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Feedback' }))
-    expect(onTeacherFeedback).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Feedback' })).not.toBeInTheDocument()
+    expect(onTeacherFeedback).not.toHaveBeenCalled()
     expect(screen.getAllByRole('button', { name: /^Review/ })).toHaveLength(1) // only the open claim shows its controls
   })
 

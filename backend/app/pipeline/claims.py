@@ -23,7 +23,8 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import local_pdf, lookup_key, tool_error
+from app.pipeline.sources import arxiv_titles, local_pdf, lookup_key, tool_error
+from app.text import english_stopwords, split_sentences
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -105,11 +106,9 @@ MAX_GAP = 3  # page words allowed between two matched words on their own: a foot
 LONG_GAP = 14  # ... when the sentence word after also follows: "(Xin et al., 2021; Xiong et al., 2020)"
 MAX_MISSES = 4  # sentence words in a row that may be missing before we decide it is not here
 MAX_STRETCH = 2.5  # a relaxed match may span at most this many page words per sentence word
-# Short words a relaxed match may not jump to on their own: too common to be evidence.
-STOPWORDS = frozenset(
-    "that with from this than which their these those have been into also more when where "
-    "what while such each both same only over some most many very much".split()
-)
+# Words a relaxed match may not jump to on their own, too common to be evidence: NLTK's
+# English stopwords and these, which papers use as often.
+COMMON_IN_PAPERS = frozenset({"also", "many", "much"})
 
 
 def _token(word: str) -> str:
@@ -166,7 +165,7 @@ def _match_at(words: list[_Word], wanted: list[str], i: int, k: int) -> tuple[li
 
 
 def _content_word(token: str) -> bool:
-    return len(token) >= 4 and token not in STOPWORDS
+    return len(token) >= 4 and token not in english_stopwords() and token not in COMMON_IN_PAPERS
 
 
 def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = False) -> tuple[list[int], int]:
@@ -533,11 +532,22 @@ def _title_lines(reference):
 
 
 def _raw_title(reference) -> str:
-    """The reference's title as GROBID wrote it, before the preprint note is removed."""
-    for title in _title_lines(reference):
-        if title and not _looks_like_authors(title):
-            return title
-    return ""
+    """The reference's title as GROBID wrote it, before the preprint note is removed.
+
+    When a long author list runs into the article title, GROBID can leave the real title in a
+    note, and the next title line is the venue (#908). The note is read only then: other notes
+    hold a venue or a page range.
+    """
+    article, *others = _title_lines(reference)
+    if article and _looks_like_authors(article) and (note := _plain_note(reference)):
+        return note
+    return next((title for title in (article, *others) if title and not _looks_like_authors(title)), "")
+
+
+def _plain_note(reference) -> str:
+    """The reference's note without a type, on one line, or ""."""
+    note = reference.find("tei:note", TEI_NAMESPACE)
+    return _one_line(note.text or "") if note is not None and not note.get("type") else ""
 
 
 def _title_of(reference) -> str:
@@ -864,6 +874,18 @@ def _references_by_id(tei) -> tuple[dict, int]:
     return references, dropped
 
 
+def _fill_arxiv_titles(references: dict) -> None:
+    """Give a title to each reference that has an arXiv id but no title.
+
+    With dozens of authors (Gopher, PaLM) GROBID runs the title into a note and leaves the
+    title empty. The id still finds the PDF, but a reader saw only "2112.11446" (#840).
+    """
+    untitled = [ref for ref in references.values() if ref["arxiv"] and not ref["title"]]
+    titles = arxiv_titles([ref["arxiv"] for ref in untitled])
+    for ref in untitled:
+        ref["title"] = titles.get(ref["arxiv"], "")
+
+
 def _marker_text(ref) -> str:
     """A citation marker as printed, without the punctuation of a list: "[5," is "5"."""
     return "".join(ref.itertext()).strip().strip("[](),;").strip()
@@ -1073,13 +1095,18 @@ def _section_of(source: dict | None, headings: list[dict], sizes: dict[int, tupl
 
 def _paragraph_text(paragraph) -> str:
     """Paragraph text with each citation <ref target="#b12"> rendered as [b12]. A citation
-    with no target leaves no citation text behind (#481)."""
+    with no target leaves no citation text behind (#481). One written into the sentence,
+    "Shin et al. (2020) propose", keeps its names: "Shin et al. [b47] propose" (#835)."""
     parts = [paragraph.text or ""]
     for child in paragraph:
         text = "".join(child.itertext())
         if child.tag == TEI_TAG + "ref" and child.get("type") == "bibr":
             ids = _target_ids(child)
-            parts.append("".join(f"[{ref_id}]" for ref_id in ids) if ids else _without_citation(text))
+            markers = "".join(f"[{ref_id}]" for ref_id in ids)
+            if ids and (narrative := NARRATIVE_CITATION.fullmatch(text.strip())):
+                parts.append(f"{narrative['names']} {markers}")
+            else:
+                parts.append(markers or _without_citation(text))
         else:
             parts.append(text)
         parts.append(child.tail or "")
@@ -1087,6 +1114,8 @@ def _paragraph_text(paragraph) -> str:
 
 
 CITATION_YEAR = re.compile(r"\b(?:19|20)\d\d")
+# Names outside the brackets and only the year inside: "Li and Liang (2021)", "Nie et al. (2019a,b)"
+NARRATIVE_CITATION = re.compile(r"(?P<names>[^()\[\];]+?)\s*\((?:19|20)\d\d[a-z]?(?:,\s*[a-z])*\)")
 
 
 def _without_citation(text: str) -> str:
@@ -1119,7 +1148,7 @@ def _without_markers(text: str) -> str:
 
 
 def _cited_sentences(paper_text: str) -> list[str]:
-    return [s for s in re.split(r"(?<=[.!?])\s+", paper_text) if MARKER.search(s)]
+    return [s for s in split_sentences(paper_text) if MARKER.search(s)]
 
 
 def _citing_windows(paper_text: str, size: int = CITING_CHARS) -> list[str]:
@@ -1293,10 +1322,13 @@ def _mark_named_citations(title: str, claims: list[dict]) -> None:
         # The model and the sentence must both say the claim is about this paper's own work.
         if not _says_own_work(claim["sentence"] or claim["claim"], title):
             continue
+        sentence = claim["sentence"] or claim["claim"]
         claim["named"] = [
             source
             for index, citation in enumerate(claim["citations"])
-            if index in named_indexes and (source := lookup_key(citation))
+            if index in named_indexes
+            and not _says_what_it_did(sentence, citation.get("ref", ""))
+            and (source := lookup_key(citation))
         ]
 
 
@@ -1313,6 +1345,37 @@ def _says_own_work(sentence: str, title: str) -> bool:
     """
     name = title.split(":")[0].strip() if ":" in title else ""
     return bool(OWN_WORK.search(sentence) or (name and name.lower() in sentence.lower()))
+
+
+# "[b39] find that ...", "[b8][b16] show ...": a verb of finding right after the marker.
+FINDING_VERB = re.compile(
+    r"^\s*(?:find|finds|found|show|shows|showed|shown|report|reports|reported|demonstrate|"
+    r"demonstrates|demonstrated|observe|observes|observed|argue|argues|argued|suggest|suggests|"
+    r"suggested|prove|proves|proved)\b",
+    re.IGNORECASE,
+)
+# "..., which is known to boost WSC task performance [b22]": in the clause before the marker.
+KNOWN_TO = re.compile(
+    r"\b(?:is|are|was|were|has been|have been)\s+(?:known|shown|reported|found|demonstrated)\s+to\b[^.;]*$",
+    re.IGNORECASE,
+)
+# "Unlike other natural logic systems [b8][b16], ...": the marker is in the opening "unlike" clause.
+UNLIKE = re.compile(r"^\s*(?:but\s+|and\s+)?unlike\b[^,;]*$", re.IGNORECASE)
+LEADING_MARKERS = re.compile(r"^(?:\s*\[b\d+\])+")
+
+
+def _says_what_it_did(sentence: str, ref: str) -> bool:
+    """Whether the sentence states what the cited work found, is known for, or does differently.
+
+    The cited work can then show that part true or false, so the citation is checked even in a
+    sentence about this paper (#907). The role model named "While [b39] find ..., we hypothesize".
+    Only these patterns are caught; the model still decides the rest.
+    """
+    at = sentence.find(f"[{ref}]")
+    if not ref or at < 0:
+        return False
+    before, after = sentence[:at], LEADING_MARKERS.sub("", sentence[at + len(ref) + 2 :])
+    return bool(FINDING_VERB.match(after) or KNOWN_TO.search(before) or UNLIKE.match(before))
 
 
 def _cited_claim(extracted, references: dict, cited: list[str], pdf_path: str) -> dict:
@@ -1408,6 +1471,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref", "head"))
         _link_author_year_citations(tei)
         references, dropped = _references_by_id(tei)
+        _fill_arxiv_titles(references)
         markers = _citation_markers(tei, references)
         paper_text = _body_text(tei)
         if _cited_claim_extractor is None:

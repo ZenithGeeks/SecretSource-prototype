@@ -139,7 +139,8 @@ class CandidateIn(BaseModel):
     claim_id: str = Field(pattern=CLAIM_ID)
     reference_id: str = Field(max_length=200)
     # retrieved: found by the analysis, for an extracted claim. retrieved_added: found by the live
-    # search for a claim added by hand. human_added: a passage the person selected.
+    # search, for a claim added by hand or one the analysis has no passages for (#836).
+    # human_added: a passage the person selected.
     origin: Literal["retrieved", "retrieved_added", "human_added"]
     status: Literal["relevant", "rejected"]
     # A retrieved row sends only cand_id: save copies the rest from the analysis. The other two

@@ -152,3 +152,34 @@ def test_a_letter_beyond_the_works_of_that_year_is_left_unlinked():
     document = tei("(Ren et al., 2021e)")
     assert claims._link_author_year_citations(document) == 0
     assert targets(document) == [None]
+
+
+def paragraph(*citations: str) -> ET.Element:
+    refs = "".join(f'<ref type="bibr" target="#b{i}">{text}</ref> x. ' for i, text in enumerate(citations))
+    return ET.fromstring(f'<p xmlns="http://www.tei-c.org/ns/1.0">{refs}</p>')
+
+
+def test_a_citation_written_as_the_subject_keeps_its_names():
+    # "Shin et al. (2020) propose ..." lost its subject once the marker was removed (#835)
+    citations = paragraph("Shin et al. (2020)", "Li and Liang (2021)", "Nie et al. (2019a,b)")
+    text = claims._paragraph_text(citations)
+    assert text.split(" x. ")[:3] == ["Shin et al. [b0]", "Li and Liang [b1]", "Nie et al. [b2]"]
+
+
+def test_a_citation_in_brackets_is_only_a_marker():
+    citations = paragraph("(Peters et al., 2018)", "(Jiang et al., 2020;", "Shin et al., 2020)", "[12]")
+    text = claims._paragraph_text(citations)
+    assert text.split(" x. ")[:4] == ["[b0]", "[b1]", "[b2]", "[b3]"]
+
+
+def test_et_al_does_not_end_a_cited_sentence():
+    text = "Shin et al. [b47] propose a search algorithm. We do not."
+    assert claims._cited_sentences(text) == ["Shin et al. [b47] propose a search algorithm."]
+
+
+def test_a_citation_of_two_works_written_as_the_subject_keeps_its_names_and_both_markers():
+    document = ET.fromstring(
+        '<p xmlns="http://www.tei-c.org/ns/1.0">'
+        '<ref type="bibr" target="#b31 #b32">Nie et al. (2019a,b)</ref> show it.</p>'
+    )
+    assert claims._paragraph_text(document) == "Nie et al. [b31][b32] show it."

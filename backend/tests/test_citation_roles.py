@@ -74,3 +74,24 @@ def test_the_library_tally_leaves_out_claims_that_only_name_what_they_use():
     assert researcher.tally([{"claims": [own, silent]}]) == {
         "backed": 0, "silent": 1, "contradicted": 0, "unchecked": 0,
     }
+
+
+def _cited(sentence, *refs):
+    citations = [{"title": ref, "ref": ref} for ref in refs]
+    return {"claim": sentence, "sentence": sentence, "citations": citations}
+
+
+def test_a_citation_that_says_what_the_cited_work_found_is_checked(monkeypatch):
+    # Power of Scale and ProoFVer (#907): the sentence is about this paper and about the cited
+    # work at once. The model named every citation, so none was checked.
+    found = [
+        _cited("While [b39] find this objective more effective, we hypothesize it is a poor fit.", "b39"),
+        _cited("We include DPR data, which is known to boost WSC task performance[b22].", "b22"),
+        _cited("Unlike other natural logic systems [b8][b16], we combine spans.", "b8", "b16"),
+        _cited("We use a RoBERTa-large [b36] model finetuned on MultiNLI [b66].", "b36", "b66"),
+    ]
+    _roles(monkeypatch, [{0}, {0}, {0, 1}, {0, 1}])
+
+    claims._mark_named_citations(TITLE, found)
+
+    assert [claim["named"] for claim in found] == [[], [], [], ["b36", "b66"]]

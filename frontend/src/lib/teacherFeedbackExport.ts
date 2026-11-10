@@ -15,6 +15,10 @@ export const defaultFeedbackSharing: FeedbackSharingOptions = {
   teacherNote: false,
 }
 
+export function resolveFeedbackSharing(options: Partial<FeedbackSharingOptions> = {}): FeedbackSharingOptions {
+  return { ...defaultFeedbackSharing, ...options }
+}
+
 export type FeedbackSharingByCitation = Record<string, Partial<FeedbackSharingOptions>>
 
 export type TeacherFeedbackExportClaim = {
@@ -32,6 +36,7 @@ export type TeacherFeedbackExportClaim = {
 }
 
 export type TeacherFeedbackReport = {
+  title?: string
   course: string
   assignment: string
   fileName?: string

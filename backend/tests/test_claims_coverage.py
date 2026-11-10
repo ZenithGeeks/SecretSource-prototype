@@ -691,3 +691,22 @@ def test_a_grobid_failure_comes_back_as_an_error(monkeypatch):
     result = claims.extract_claims_with_citations("paper.pdf")
 
     assert (result["status"], result["message"]) == ("error", "GROBID is down")
+
+
+def test_a_reference_with_an_arxiv_id_and_no_title_gets_the_title_from_arxiv(monkeypatch):
+    # GROBID leaves the title empty when a long author list runs into it (#840).
+    asked = []
+    monkeypatch.setattr(
+        claims, "arxiv_titles", lambda ids: asked.append(ids) or {"2112.11446": "Scaling Language Models"}
+    )
+    references = {
+        "b0": {"title": "", "arxiv": "2112.11446"},
+        "b1": {"title": "ColBERT", "arxiv": "2004.12832"},
+        "b2": {"title": "", "arxiv": "2203.15556"},
+    }
+
+    claims._fill_arxiv_titles(references)
+
+    assert asked == [["2112.11446", "2203.15556"]]
+    titles = [reference["title"] for reference in references.values()]
+    assert titles == ["Scaling Language Models", "ColBERT", ""]

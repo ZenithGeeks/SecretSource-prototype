@@ -1,6 +1,6 @@
-/** ResultsSummary: the researcher's headline, bar and count tiles; the Teacher's toolbar. */
+/** ResultsSummary: the researcher's headline, bar and count tiles, plus the Teacher's review counts. */
 
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({ downloadText: vi.fn(), pdf: { url: undefined as string | undefined, failed: false } }))
@@ -175,37 +175,15 @@ describe('the Teacher summary', () => {
     expect(onFilter).toHaveBeenLastCalledWith(null)
   })
 
-  it('shows the PDF and Feedback buttons only with something to open', () => {
+  it('keeps PDF, Feedback and export actions out of the Teacher summary', () => {
     const onOpenPaper = vi.fn()
     const onTeacherFeedback = vi.fn()
-    const { unmount } = teacher(['supports'], { onOpenPaper, onTeacherFeedback })
-    fireEvent.click(screen.getByRole('button', { name: 'PDF' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Feedback' }))
-    expect(onOpenPaper).toHaveBeenCalledTimes(1)
-    expect(onTeacherFeedback).toHaveBeenCalledTimes(1)
-    unmount()
-    teacher(['supports'])
+    teacher(['supports'], { onOpenPaper, onTeacherFeedback })
     expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Feedback' })).not.toBeInTheDocument()
-  })
-
-  it('copies the claims as markdown and says so for a moment', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout'] })
-    teacher(['supports'])
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Copy all' }))
-    })
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('# Claims in mine.pdf'))
-    expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument()
-    act(() => {
-      vi.advanceTimersByTime(2000)
-    })
-    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
-  })
-
-  it('downloads the claims as CSV', () => {
-    teacher(['supports'])
-    fireEvent.click(screen.getByRole('button', { name: 'CSV' }))
-    expect(gateway.downloadText).toHaveBeenCalledWith('claims.csv', expect.any(String), 'text/csv;charset=utf-8')
+    expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
+    expect(onOpenPaper).not.toHaveBeenCalled()
+    expect(onTeacherFeedback).not.toHaveBeenCalled()
   })
 })

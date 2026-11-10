@@ -3,16 +3,15 @@ import { useRef, useState } from 'react'
 
 import { AnalysisView } from '../../../components/AnalysisView'
 import { Button, Card, Empty } from '../../../components/ui'
-import { API_BASE, fetchFile, paperName, type Analysis, type Claim } from '../../../lib/api'
+import { paperName, requestBlob, type Analysis, type Claim } from '../../../lib/api'
 import { downloadText } from '../../../lib/csv'
-import { feedbackPreview, toggleFeedbackReview } from '../../../lib/teacherSelectors'
+import { toggleFeedbackReview } from '../../../lib/teacherSelectors'
 import { teacherRemoteEnabled, type EssayReview, type ProfessorReviewOutcome } from '../../../lib/teacher'
 import {
-  cropSubmissionPassages,
-  printTeacherFeedbackReport,
   teacherFeedbackMarkdown,
   teacherFeedbackCsv,
   defaultFeedbackSharing,
+  resolveFeedbackSharing,
   type FeedbackSharingByCitation,
   type FeedbackSharingOptions,
   type TeacherFeedbackReport,
@@ -35,20 +34,15 @@ import { TeacherDialog } from '../components/TeacherDialog'
 import { FeedbackDialog } from './FeedbackDialog'
 import { EssayCheckActions } from './EssayCheckActions'
 
-async function buildFeedbackData(analysis: Analysis | undefined, reviews: EssayReview[], selectedIds: string[], sharingOptions: FeedbackSharingByCitation, student: string, course: string, assignment: string, feedback: string, fileName?: string, includeCrops = false): Promise<TeacherFeedbackReport> {
+async function buildFeedbackData(analysis: Analysis | undefined, reviews: EssayReview[], selectedIds: string[], sharingOptions: FeedbackSharingByCitation, student: string, course: string, assignment: string, feedback: string, fileName?: string): Promise<TeacherFeedbackReport> {
   if (!analysis) return { course, assignment, fileName, student, feedback, claims: [] }
   const selected = analysis.claims.flatMap((claim, claimIndex) => claim.citations.flatMap((citation, citationIndex) => {
     const id = reviewIdFor(claim, claimIndex, citationIndex)
     const review = reviews.find((item) => item.id === id)
-    return selectedIds.includes(id) && review ? [{ claim, citation, review, options: { ...defaultFeedbackSharing, ...sharingOptions[id] } }] : []
+    return selectedIds.includes(id) && review ? [{ claim, citation, review, options: resolveFeedbackSharing(sharingOptions[id]) }] : []
   }))
   const pdfName = paperName(analysis.file ?? fileName ?? 'submission.pdf')
-  const pdf = includeCrops && selected.some(({ claim }) => claim.source)
-    ? await fetchFile(`${API_BASE}/api/papers/${encodeURIComponent(pdfName)}`)
-    : null
-  const pdfBytes = pdf ? await pdf.arrayBuffer() : undefined
-  const crops = pdfBytes ? await cropSubmissionPassages(pdfBytes, selected.map(({ claim }) => claim.source)) : []
-  const claims = selected.map(({ claim, citation, review, options }, index) => ({
+  const claims = selected.map(({ claim, citation, review, options }) => ({
     claim: claim.claim,
     sentence: claim.sentence,
     sourcePage: claim.source?.page,
@@ -64,14 +58,8 @@ async function buildFeedbackData(analysis: Analysis | undefined, reviews: EssayR
     reasoning: options.automated ? review.explanation : undefined,
     evidence: options.evidence ? review.sourceQuote : undefined,
     sourceName: citation.title || citation.doi || citation.url,
-    cropDataUrl: crops[index],
   }))
   return { course, assignment, fileName: fileName ?? pdfName, student, feedback, claims }
-}
-
-async function buildFeedbackHtml(analysis: Analysis, reviews: EssayReview[], selectedIds: string[], sharingOptions: FeedbackSharingByCitation, student: string, course: string, assignment: string, feedback: string, fileName: string) {
-  const report = await buildFeedbackData(analysis, reviews, selectedIds, sharingOptions, student, course, assignment, feedback, fileName, true)
-  return teacherFeedbackPdfHtml(report)
 }
 
 function reviewIdFor(claim: Claim, claimIndex: number, citationIndex: number) {
@@ -99,9 +87,10 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
   const googleConnection = useTeacherGoogleConnection()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [recheckOpen, setRecheckOpen] = useState(false)
-  const [draftState, setDraftState] = useState<{ key: string; body: string; citationIds: string[]; sharingOptions: FeedbackSharingByCitation }>({ key: '', body: '', citationIds: [], sharingOptions: {} })
+  const [draftState, setDraftState] = useState<{ key: string; body: string; subject: string; citationIds: string[]; sharingOptions: FeedbackSharingByCitation }>({ key: '', body: '', subject: '', citationIds: [], sharingOptions: {} })
   const [notice, setNotice] = useState('')
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [reportTitle, setReportTitle] = useState('Essay feedback')
   const analysisData = useAnalysis(essay.data?.analysis?.id ?? null)
   const feedbackRef = useRef<HTMLDivElement>(null)
 
@@ -136,8 +125,8 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
   const recheckBusy = analyze.isPending || analysis?.status === 'running'
   const draft = draftState.key === draftKey
     ? draftState
-    : { key: draftKey, body: data.feedback.body, citationIds: data.feedback.citationIds, sharingOptions: data.feedback.sharingOptions ?? {} }
-  const { body, citationIds, sharingOptions } = draft
+    : { key: draftKey, body: data.feedback.body, subject: data.feedback.subject || `Essay feedback: ${assignmentLabel}`, citationIds: data.feedback.citationIds, sharingOptions: data.feedback.sharingOptions ?? {} }
+  const { body, subject, citationIds, sharingOptions } = draft
   const gmailScope = 'https://www.googleapis.com/auth/gmail.send'
   const classroomEmailScope = 'https://www.googleapis.com/auth/classroom.profile.emails'
   const missingClassroomEmailScope = Boolean(
@@ -172,7 +161,6 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
   const changeDraft = (patch: Partial<Omit<typeof draft, 'key'>>) => setDraftState({ ...draft, ...patch, key: draftKey })
   const changeSharing = (reviewId: string, key: keyof FeedbackSharingOptions, value: boolean) =>
     changeDraft({ sharingOptions: { ...sharingOptions, [reviewId]: { ...defaultFeedbackSharing, ...sharingOptions[reviewId], [key]: value } } })
-  const preview = feedbackPreview(body, data.reviews.filter((review) => citationIds.includes(review.id)).map((review) => review.sourceLocation))
 
   const handleReviewChange = (review: EssayReview, outcome: ProfessorReviewOutcome, note = review.professorReview.note) => {
     updateReview.mutate({ courseId, assignmentId, studentId, reviewId: review.id, outcome, note })
@@ -202,7 +190,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
 
   const save = async () => {
     try {
-      await saveFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds, sharingOptions })
+      await saveFeedback.mutateAsync({ courseId, assignmentId, studentId, body, subject, citationIds, sharingOptions })
       setNotice('Feedback draft saved.')
     } catch (error) {
       setNotice(error instanceof Error ? `Could not save feedback: ${error.message}` : 'Could not save feedback.')
@@ -210,31 +198,32 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
     window.setTimeout(() => setNotice(''), 2500)
   }
 
-  const send = async () => {
+  const send = async (subject: string) => {
     if (!deliveryReady) throw new Error(deliveryIssue)
-    await saveFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds, sharingOptions })
-    const reportHtml = analysisData.data?.status === 'done'
-      ? await buildFeedbackHtml(analysisData.data, data.reviews, citationIds, sharingOptions, data.student.name, data.assignment.course, data.assignment.name, body, data.student.fileName)
-      : undefined
-    await sendFeedback.mutateAsync({ courseId, assignmentId, studentId, body, citationIds, sharingOptions, reportHtml })
+    await saveFeedback.mutateAsync({ courseId, assignmentId, studentId, body, subject, citationIds, sharingOptions })
+    const reportAnalysis = analysisData.data?.status === 'done' ? analysisData.data : undefined
+    const reportHtml = teacherFeedbackPdfHtml({ ...await buildFeedbackData(reportAnalysis, data.reviews, citationIds, sharingOptions, data.student.name, data.assignment.course, data.assignment.name, body, data.student.fileName), title: reportTitle })
+    await sendFeedback.mutateAsync({ courseId, assignmentId, studentId, body, subject, citationIds, sharingOptions, reportHtml })
   }
 
   const exportFeedbackPdf = async () => {
     const reportAnalysis = analysisData.data
     if (!data.analysis?.id || !reportAnalysis || reportAnalysis.status !== 'done') return
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      setNotice('Allow pop-ups for this site to export the feedback PDF.')
-      return
-    }
     setExportingPdf(true)
     setNotice('')
     try {
-      const report = await buildFeedbackHtml(reportAnalysis, data.reviews, citationIds, sharingOptions, data.student.name, data.assignment.course, data.assignment.name, body, data.student.fileName)
-      await printTeacherFeedbackReport(printWindow, report)
-      setNotice('Feedback report opened for printing. Choose Save as PDF in the print dialog.')
+      const report = await buildFeedbackData(reportAnalysis, data.reviews, citationIds, sharingOptions, data.student.name, data.assignment.course, data.assignment.name, body, data.student.fileName)
+      const pdf = await requestBlob('/teacher/feedback/report.pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reportHtml: teacherFeedbackPdfHtml({ ...report, title: reportTitle }) }) })
+      const url = URL.createObjectURL(pdf)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'essay-feedback.pdf'
+      document.body.append(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+      setNotice('Feedback PDF downloaded.')
     } catch (error) {
-      printWindow.close()
       setNotice(error instanceof Error ? `Could not prepare feedback PDF: ${error.message}` : 'Could not prepare feedback PDF.')
     } finally {
       setExportingPdf(false)
@@ -275,7 +264,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
                 </select>
               </label>
               <label className="space-y-1 text-xs font-medium text-ink-muted">
-                <span>Private teacher note</span>
+                <span>Teacher note</span>
                 <input aria-label={`Teacher note for ${title}`} defaultValue={review.professorReview.note} disabled={updateReview.isPending} onBlur={(event) => handleReviewChange(review, review.professorReview.outcome, event.currentTarget.value)} placeholder="Add a note about your decision" className="w-full rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted" />
               </label>
             </div>
@@ -359,6 +348,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
         paperLabel={`${data.student.name} - ${data.student.fileName}`}
         onTeacherFeedback={() => feedbackRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         renderClaimActions={renderClaimActions}
+        teacherDecisions={{ supports: data.reviews.filter((review) => review.professorReview.outcome === 'supports').length, contradicts: data.reviews.filter((review) => review.professorReview.outcome === 'contradicts').length, inconclusive: data.reviews.filter((review) => review.professorReview.outcome === 'inconclusive').length, notReviewed: data.reviews.filter((review) => review.professorReview.outcome === 'not-reviewed').length }}
       />}
 
       <div ref={feedbackRef} className="scroll-mt-6">
@@ -372,22 +362,29 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
             </div>
             <MessageSquarePlus className="mt-1 size-5 shrink-0 text-accent" aria-hidden="true" />
           </div>
-          <label className="sr-only" htmlFor="teacher-feedback-body">Feedback to student</label>
-          <textarea id="teacher-feedback-body" value={body} onChange={(event) => changeDraft({ body: event.target.value })} rows={6} aria-label="Feedback to student" className="w-full resize-y rounded-xl border border-border-subtle bg-surface px-4 py-3 text-sm leading-6 text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent" placeholder="Write feedback for the student..." />
+          <label className="text-sm font-medium text-ink" htmlFor="teacher-report-title">Feedback report title</label>
+          <input id="teacher-report-title" value={reportTitle} maxLength={150} onChange={(event) => setReportTitle(event.target.value)} className="w-full rounded-xl border border-border-subtle bg-surface px-4 py-2 text-sm text-ink" />
+          <label className="text-sm font-medium text-ink" htmlFor="teacher-email-subject">Email subject</label>
+          <input id="teacher-email-subject" value={subject} maxLength={200} onChange={(event) => changeDraft({ subject: event.target.value })} className="w-full rounded-xl border border-border-subtle bg-surface px-4 py-2 text-sm text-ink" />
+          <label className="text-sm font-medium text-ink" htmlFor="teacher-feedback-body">Email message to the student</label>
+          <textarea id="teacher-feedback-body" value={body} onChange={(event) => changeDraft({ body: event.target.value })} rows={6} className="w-full resize-y rounded-xl border border-border-subtle bg-surface px-4 py-3 text-sm leading-6 text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent" placeholder="Write feedback for the student..." />
           <div className="rounded-xl border border-border-subtle/70 bg-surface/65 px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Student preview</p>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink">{body.trim() || 'Your written feedback will appear here.'}</p>
             {citationIds.length > 0 && <div className="mt-3 space-y-3 border-t border-border-subtle pt-3">
               {data.reviews.filter((review) => citationIds.includes(review.id)).map((review) => {
-                const options = { ...defaultFeedbackSharing, ...sharingOptions[review.id] }
+                const options = resolveFeedbackSharing(sharingOptions[review.id])
                 const result = review.standing === 'supports' ? 'Supports' : review.standing === 'refutes' ? 'Contradicts' : review.standing === 'unchecked' ? 'Not checked' : 'Inconclusive'
-                return <div key={review.id} className="space-y-1 text-sm">
+                const teacherOutcome = review.professorReview.outcome
+                const teacherDecision = teacherOutcome === 'supports' ? 'Supports' : teacherOutcome === 'contradicts' ? 'Contradicts' : 'Inconclusive'
+                const decisionTone = teacherOutcome === 'supports' ? 'bg-supports-soft text-supports ring-supports/20' : teacherOutcome === 'contradicts' ? 'bg-refutes-soft text-refutes ring-refutes/20' : 'bg-insufficient-soft text-insufficient ring-insufficient/20'
+                return <div key={review.id} className="space-y-2 text-sm">
                   <p className="font-medium text-ink">{review.claim}</p>
                   <p className="text-xs text-ink-muted">{review.citation}{review.sourceLocation ? ` · ${review.sourceLocation}` : ''}</p>
                   {options.automated && <p className="text-xs text-ink-muted">Automated finding: {result}{review.explanation ? ` — ${review.explanation}` : ''}</p>}
                   {options.evidence && review.sourceQuote && <blockquote className="border-l-2 border-accent/50 pl-3 text-xs text-ink-muted">{review.sourceQuote}</blockquote>}
-                  {options.teacherDecision && review.professorReview.outcome !== 'not-reviewed' && <p className="text-xs text-ink-muted">Teacher decision: {review.professorReview.outcome}</p>}
-                  {options.teacherNote && review.professorReview.note && <p className="text-xs text-ink-muted">Teacher note: {review.professorReview.note}</p>}
+                  {options.teacherDecision && teacherOutcome !== 'not-reviewed' && <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${decisionTone}`}>Teacher decision: {teacherDecision}</span>}
+                  {options.teacherNote && review.professorReview.note && <p className="rounded-lg bg-canvas px-3 py-2 text-xs leading-5 text-ink"><span className="font-semibold">Teacher note:</span> {review.professorReview.note}</p>}
                 </div>
               })}
             </div>}
@@ -403,14 +400,14 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
                 onDownloadReport={() => void exportFeedbackPdf()}
                 onDownloadCsv={() => void exportFeedbackCsv()}
                 onSend={() => setFeedbackOpen(true)}
-                reportDisabled={data.analysis?.status !== 'done' || analysisData.isPending}
+                reportDisabled={data.analysis?.status !== 'done' || analysisData.isPending || updateReview.isPending}
                 reportBusy={exportingPdf}
-                sendDisabled={!body.trim() || saveFeedback.isPending || sendFeedback.isPending}
+                sendDisabled={!body.trim() || saveFeedback.isPending || sendFeedback.isPending || updateReview.isPending}
                 compact
               />
             </div>
           </div>
-          <p className="text-xs leading-5 text-ink-muted">Only selected citations and checked fields appear in the student report. Automated findings and source evidence are included by default; final decisions and teacher notes stay private until you choose to share them.</p>
+          <p className="text-xs leading-5 text-ink-muted">Only selected citations and checked fields appear in the student report. Teacher decisions and notes are included by default; uncheck either field to keep it private.</p>
         </section>
       </Card>
       </div>
@@ -422,7 +419,10 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
         senderEmail={googleConnection.data?.email}
         deliveryReady={deliveryReady}
         deliveryIssue={deliveryIssue}
-        preview={preview}
+        preview={body}
+        defaultSubject={`Essay feedback: ${assignmentLabel}`}
+        subject={subject}
+        onSubjectChange={(value) => changeDraft({ subject: value })}
         onClose={() => setFeedbackOpen(false)}
         onSend={send}
         onRefreshClassroom={missingClassroomEmailScope ? undefined : () => refreshClassroom.mutate(courseId)}

@@ -65,11 +65,13 @@ function OverviewTab({ workspace, onOpenAssignment, onCheckEssays, onOpenClasswo
 }) {
   const stats = workspaceStats(workspace)
   const people = workspace.people.filter((person) => person.role === 'Student').slice(0, 5)
-  const nextToReview = workspace.assignments.find((assignment) => assignment.pendingReviewCount > 0) ?? workspace.assignments[0]
+  const nextToReview = workspace.assignments.find((assignment) => assignment.pendingReviewCount > 0)
   const firstSubmission = nextToReview
-    ? workspace.submissions.find((submission) => submission.assignmentId === nextToReview.id && submission.state !== 'missing' && submission.attachments.length > 0)
+    ? workspace.submissions.find((submission) => submission.assignmentId === nextToReview.id && submission.state !== 'missing' && submission.reviewStatus !== 'analysis-ready' && submission.attachments.length > 0)
     : undefined
   const recent = workspace.assignments.slice(0, 3)
+  const reviewedCount = workspace.assignments.reduce((sum, assignment) => sum + (assignment.reviewedCount ?? Math.max(0, assignment.submittedCount - assignment.pendingReviewCount)), 0)
+  const pendingReviewCount = workspace.assignments.reduce((sum, assignment) => sum + assignment.pendingReviewCount, 0)
 
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,640px)_minmax(250px,1fr)]">
@@ -77,16 +79,16 @@ function OverviewTab({ workspace, onOpenAssignment, onCheckEssays, onOpenClasswo
         <Card className="flex flex-wrap items-center justify-between gap-4 p-4">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Needs you</p>
-            {nextToReview ? <><h2 className="mt-2 font-serif text-[22px] font-semibold">{nextToReview.title}</h2><p className="mt-1 text-[11px] text-ink-muted">Due {nextToReview.dueAt} · {nextToReview.submittedCount} of {nextToReview.enrolledCount} submitted · {nextToReview.pendingReviewCount} not reviewed</p></> : <><h2 className="mt-2 font-serif text-[22px] font-semibold">You’re all caught up</h2><p className="mt-1 text-[11px] text-ink-muted">New work that needs review will show up here.</p></>}
+            {nextToReview ? <><h2 className="mt-2 font-serif text-[22px] font-semibold">{nextToReview.title}</h2><p className="mt-1 text-[11px] text-ink-muted">Due {formatClassroomDate(nextToReview.dueAt)} · {nextToReview.submittedCount} of {nextToReview.enrolledCount} submitted · {nextToReview.pendingReviewCount} to review</p></> : <><h2 className="mt-2 font-serif text-[22px] font-semibold text-emerald-800">You have nothing to review. Good job!</h2><p className="mt-1 text-[11px] text-ink-muted">{reviewedCount ? `${reviewedCount} submitted ${reviewedCount === 1 ? 'essay is' : 'essays are'} reviewed.` : 'New submitted essays will appear here.'}</p></>}
           </div>
-          {nextToReview && <Button type="button" onClick={() => firstSubmission && onCheckEssays(nextToReview.id, firstSubmission.studentId)} disabled={!firstSubmission}>Check {nextToReview.pendingReviewCount || nextToReview.submittedCount} essays</Button>}
+          {nextToReview && <Button type="button" onClick={() => firstSubmission && onCheckEssays(nextToReview.id, firstSubmission.studentId)} disabled={!firstSubmission}>Check {nextToReview.pendingReviewCount} {nextToReview.pendingReviewCount === 1 ? 'essay' : 'essays'}</Button>}
         </Card>
 
         <Card className="overflow-hidden p-0">
           <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3"><h2 className="text-[13px] font-semibold">Recent classwork</h2><TextButton onClick={onOpenClasswork} className="text-[11px]">See all</TextButton></div>
           {recent.length ? <div className="divide-y divide-border-subtle">{recent.map((assignment) => <button key={assignment.id} type="button" onClick={() => onOpenAssignment(assignment.id)} className="flex min-h-[61px] w-full items-center gap-3 px-4 py-2 text-left hover:bg-canvas">
-            <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium">{assignment.title}</span><span className="mt-1 block text-[10px] text-ink-muted">Due {assignment.dueAt}</span></span>
-            <span className="text-right text-[10px] text-ink-muted">{assignment.submittedCount} of {assignment.enrolledCount} submitted</span><ArrowUpRight className="size-3.5 shrink-0 text-ink-muted" />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium">{assignment.title}</span><span className="mt-1 block text-[10px] text-ink-muted">Due {formatClassroomDate(assignment.dueAt)}</span></span>
+            <span className="flex items-center gap-2">{assignment.submittedCount > 0 && assignment.pendingReviewCount === 0 ? <StatusPill label="Reviewed" tone="success" /> : <span className="text-right text-[10px] text-ink-muted">{assignment.pendingReviewCount ? `${assignment.pendingReviewCount} to review` : 'No submissions'}</span>}<ArrowUpRight className="size-3.5 shrink-0 text-ink-muted" /></span>
           </button>)}</div> : <div className="p-4"><Empty title="No classwork yet" hint="Assignments from Classroom will appear here." /></div>}
         </Card>
 
@@ -109,8 +111,13 @@ function OverviewTab({ workspace, onOpenAssignment, onCheckEssays, onOpenClasswo
           {workspace.materials.some((material) => !material.accessible) && <StatusPill label="1 file needs Drive access" tone="warning" />}
         </Card>
 
-        <Card className="space-y-2 p-4"><h2 className="text-[13px] font-semibold">Grades &amp; submissions</h2><p className="text-[11px]">{stats.returned} returned · {Math.max(0, stats.submissions - stats.returned)} pending</p><p className="text-[10px] text-ink-muted">Read-only, from Classroom</p></Card>
+        <Card className="space-y-2 p-4"><h2 className="text-[13px] font-semibold">Grades &amp; submissions</h2><p className="text-[11px]">{reviewedCount} reviewed · {pendingReviewCount} to review</p><p className="text-[10px] text-ink-muted">{stats.returned} returned in Classroom. Grades stay read-only.</p></Card>
       </div>
     </div>
   )
+}
+
+function formatClassroomDate(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
 }

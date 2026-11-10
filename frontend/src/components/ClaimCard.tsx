@@ -638,7 +638,7 @@ export function ClaimCard({
       )}
 
       {(claim.sentence || primary) && (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className={cn('grid gap-3', claim.sentence && primary?.quote ? 'md:grid-cols-2' : 'md:grid-cols-1')}>
           {/* The paper's own words are evidence; the paraphrase above them is not (#46). */}
           {claim.sentence && (
             <EvidencePanel
