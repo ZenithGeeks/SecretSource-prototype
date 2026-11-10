@@ -2,6 +2,7 @@
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type cytoscape from 'cytoscape'
+import { toast } from 'sonner'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { fitReadable } from '../src/lib/graphFit'
@@ -31,6 +32,35 @@ describe('GraphSegmented', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Beta' }))
     expect(onChange).toHaveBeenCalledWith('b')
   })
+
+  test('only the checked option is a tab stop, and the arrow keys move the choice and the focus', () => {
+    const onChange = vi.fn()
+    render(
+      <GraphSegmented
+        label="Mode"
+        value="a"
+        options={[{ key: 'a', label: 'Alpha' }, { key: 'b', label: 'Beta' }, { key: 'c', label: 'Gamma' }]}
+        onChange={onChange}
+      />,
+    )
+    const [alpha, beta, gamma] = screen.getAllByRole('radio')
+    expect([alpha, beta, gamma].map((radio) => radio.tabIndex)).toEqual([0, -1, -1])
+
+    fireEvent.keyDown(alpha, { key: 'ArrowRight' })
+    expect(onChange).toHaveBeenLastCalledWith('b')
+    expect(beta).toHaveFocus()
+    fireEvent.keyDown(alpha, { key: 'ArrowLeft' }) // wraps to the last one
+    expect(onChange).toHaveBeenLastCalledWith('c')
+    expect(gamma).toHaveFocus()
+    fireEvent.keyDown(alpha, { key: 'ArrowDown' })
+    expect(onChange).toHaveBeenLastCalledWith('b')
+    fireEvent.keyDown(alpha, { key: 'ArrowUp' })
+    expect(onChange).toHaveBeenLastCalledWith('c')
+
+    onChange.mockClear()
+    fireEvent.keyDown(alpha, { key: 'a' })
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })
 
 const COLORS: LegendColors = {
@@ -40,7 +70,7 @@ const COLORS: LegendColors = {
 describe('graph legends', () => {
   test('the claims legend names claim colours and edge styles', () => {
     render(<GraphClaimsLegend colors={COLORS} notIndexed={0} />)
-    for (const text of ['Claim', 'contradict', 'silent', 'back it', 'Edge', 'backs it', 'contradicts', 'origin']) {
+    for (const text of ['Claim', 'contradicted', 'silent', 'backed', 'Edge', 'backs it', 'contradicts', 'origin']) {
       expect(screen.getByText(text)).toBeInTheDocument()
     }
     expect(screen.queryByText(/not in a public index/)).toBeNull()
@@ -166,6 +196,15 @@ describe('GraphClaimDetail', () => {
     expect(text).toContain('Lost paper ’21 — backs: "It does."')
   })
 
+  test('Copy evidence says so when the clipboard is not available', async () => {
+    const error = vi.spyOn(toast, 'error')
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('blocked'))
+    open('c:1')
+    fireEvent.click(screen.getByRole('button', { name: 'Copy evidence' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not copy. Select the text and copy it by hand.'))
+    expect(screen.getByRole('button', { name: 'Copy evidence' })).toHaveAttribute('title', 'Copy evidence')
+  })
+
   test('Copied goes back to Copy evidence after a moment', async () => {
     vi.useFakeTimers()
     open('c:1')
@@ -237,14 +276,14 @@ describe('GraphPairDetail', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  test('Open both side by side opens one tab per paper', () => {
-    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+  test('each paper gets its own link that opens in a new tab', () => {
     open(EDGE)
-    fireEvent.click(screen.getByRole('button', { name: /Open both side by side/ }))
-    expect(opened.mock.calls.map((c) => c[0])).toEqual([
+    const links = screen.getAllByRole('link', { name: /in a new tab/ })
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
       expect.stringContaining('analysis=1'),
       expect.stringContaining('analysis=3'),
     ])
+    expect(links.every((a) => a.getAttribute('target') === '_blank')).toBe(true)
   })
 })
 

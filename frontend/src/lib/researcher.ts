@@ -4,6 +4,7 @@
  */
 
 import { request } from './api'
+import type { Standing } from './claims'
 
 export type ClaimStanding = 'backed' | 'silent' | 'contradicted' | 'unchecked'
 
@@ -107,6 +108,15 @@ export type Project = {
  * (claims view) or paper-to-paper links (papers view).
  */
 export type GraphRelation = 'asserts' | 'backs' | 'contradicts' | 'silent' | 'unchecked'
+
+/** The pill a graph relation gets: the same words everywhere a standing is shown. */
+export const RELATION_STANDING: Record<GraphRelation, Standing> = {
+  asserts: 'unchecked',
+  backs: 'supports',
+  contradicts: 'refutes',
+  silent: 'insufficient',
+  unchecked: 'unchecked',
+}
 
 /**
  * Whether a public index (Semantic Scholar, arXiv, Unpaywall) knew a cited work: 'yes', 'no',

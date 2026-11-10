@@ -21,13 +21,16 @@ import { AlertCircle, CheckCircle2, GitFork, HelpCircle, Maximize2, Search, Zoom
 import { type ComponentType, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 
-import { Empty, LoadingScreen } from '../../../components/ui'
-import type { GraphEdge, GraphRelation, KnowledgeGraph } from '../../../lib/researcher'
+import { Empty, ErrorState, LoadingScreen } from '../../../components/ui'
+import { errorMessage } from '../../../lib/author'
+import { type GraphEdge, type GraphRelation, type KnowledgeGraph, RELATION_STANDING } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
 import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { fitReadable } from '../../../lib/graphFit'
 import { cn } from '../../../lib/utils'
+import { GraphClaimList } from '../components/GraphClaimList'
+import { GraphPairList } from '../components/GraphPairList'
 import { GraphClaimDetail, GraphPairDetail } from '../components/GraphDetail'
 import { GraphClaimsLegend, GraphPapersLegend } from '../components/GraphLegend'
 import { GraphSegmented } from '../components/GraphSegmented'
@@ -151,7 +154,7 @@ type View = 'claims' | 'papers'
 type PapersFilter = 'all' | 'strong' | 'citations'
 
 function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.StylesheetJson {
-  const { ink, inkMuted, surface, border, accent, accentSoft } = pal
+  const { ink, inkMuted, surface, accent, accentSoft } = pal
   const colors = clusterColors(pal)
   const base: cytoscape.StylesheetJson = [
     {
@@ -221,7 +224,7 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
     base.push(
       {
         selector: 'edge[kind="paper"]',
-        style: { 'line-color': border, width: 'mapData(similarity, 0.3, 1, 1.5, 6)' as unknown as number },
+        style: { 'line-color': inkMuted, opacity: 0.55, width: 'mapData(similarity, 0.3, 1, 1.5, 6)' as unknown as number },
       },
       { selector: 'edge[?cites]', style: { 'line-style': 'dashed' } },
       { selector: 'edge.selected', style: { 'line-color': accent, width: 5, opacity: 1 } },
@@ -297,8 +300,9 @@ function InsightTile({ insight, active, onToggle }: { insight: Insight; active: 
       type="button"
       onClick={onToggle}
       aria-pressed={active}
+      disabled={count === 0}
       className={cn(
-        'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border bg-surface px-3.5 py-2.5 text-left transition-colors',
+        'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border bg-surface px-3.5 py-2.5 text-left transition-colors disabled:cursor-default disabled:opacity-60',
         active ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent/50',
       )}
     >
@@ -325,7 +329,7 @@ function GraphCanvas({
   askPanel?: ReactNode
   onSelectNode?: (node: SelectedNode | null) => void
 }) {
-  const { data: graph, isError } = useKnowledgeGraph()
+  const { data: graph, isError, error, refetch } = useKnowledgeGraph()
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
@@ -359,6 +363,14 @@ function GraphCanvas({
   const [hovered, setHovered] = useState<string | null>(null)
   // With Ask open the right panel has two tabs; Ask is the one the reader just opened.
   const [side, setSide] = useState<'details' | 'ask'>('ask')
+  // Choosing a claim or a link is asking to see it: switch to Details even when Ask was the tab showing.
+  // (Adjusting state while rendering, the pattern react.dev gives for state that follows other state.)
+  const selection = claimSel ?? pairSel
+  const [shown, setShown] = useState(selection)
+  if (selection !== shown) {
+    setShown(selection)
+    if (selection) setSide('details')
+  }
 
   useEffect(() => {
     const node = view === 'claims' && claimSel ? graph?.nodes.find((n) => n.id === claimSel) : undefined
@@ -374,6 +386,14 @@ function GraphCanvas({
 
   const insights = useMemo(() => (graph ? computeInsights(graph) : []), [graph])
   const activeInsight = insights.find((i) => i.key === insightKey)
+  const claimRows = useMemo(() => {
+    if (!graph) return []
+    const byClaim: Record<string, GraphEdge[]> = {}
+    for (const e of graph.edges) (byClaim[e.target] ??= []).push(e)
+    return graph.nodes
+      .filter((n) => n.kind === 'claim')
+      .map((n) => ({ id: n.id, label: n.label, standing: RELATION_STANDING[claimStanding(byClaim[n.id] ?? [])] }))
+  }, [graph])
 
   // The backend builds paper nodes oldest-first, so the last "Analysed" one is the most
   // recently uploaded paper — where the view opens centred, so a fresh upload is what greets
@@ -496,15 +516,25 @@ function GraphCanvas({
     ) : (
       content
     )
-  if (isError) return withAsk(<Empty title="The graph could not load" hint="Refresh the page to try again." />)
+  if (isError) {
+    return withAsk(<ErrorState title="The graph could not load" message={errorMessage(error)} onRetry={() => refetch()} />)
+  }
   if (!graph) return withAsk(<LoadingScreen label="Loading the graph…" />)
   if (emptyMessage && graph.nodes.length === 0) return withAsk(<Empty title={emptyMessage.title} hint={emptyMessage.hint} />)
 
   const title = view === 'claims' ? 'What rests on what' : 'How your library relates'
   const subtitle =
     view === 'claims'
-      ? 'Claims and the papers that back, contradict, or ignore them. Click a claim to follow it back to the evidence it was born from.'
-      : 'Dashed = a paper you analysed cites the other. Solid = two of your papers cite the same works. Thicker = more in common. Click a link to compare a pair.'
+      ? 'Claims and the papers that back, contradict, or ignore them. Choose a claim to see its evidence.'
+      : 'Choose a link to compare a pair of papers. The key in the corner says what the lines mean.'
+  const names = Object.fromEntries(graph.nodes.map((n) => [n.id, n.label]))
+  const pairRows = graph.paperEdges
+    .filter((e) => (pFilter === 'strong' ? e.similarity >= 0.5 : pFilter === 'citations' ? e.cites : true))
+    .map((e) => ({
+      id: e.id,
+      label: `${names[e.a]} and ${names[e.b]}`,
+      relation: e.cites ? 'One cites the other' : `${e.citations} cited ${e.citations === 1 ? 'work' : 'works'} in common`,
+    }))
   const paperCount = graph.nodes.filter((n) => n.kind === 'paper').length
   const claimCount = graph.nodes.filter((n) => n.kind === 'claim').length
   const notIndexed = graph.nodes.filter((n) => n.kind === 'paper' && n.indexed === 'no').length
@@ -520,7 +550,7 @@ function GraphCanvas({
     <>
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex flex-col gap-1.5">
-          <h1 className="font-serif text-[30px] leading-9 font-semibold tracking-[-0.01em] text-ink">{title}</h1>
+          <h1 className="type-display text-ink">{title}</h1>
           <p className="max-w-3xl text-[15px] leading-6 text-ink-muted">{subtitle}</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-3 sm:justify-end">
@@ -573,7 +603,7 @@ function GraphCanvas({
             short window. The role shell is `wide` for Graph, so it also uses the screen width. */}
         <div
           ref={setCanvas}
-          className="relative min-h-[560px] min-w-0 flex-1 overflow-hidden rounded-[14px] border border-border-subtle bg-canvas lg:h-[calc(100dvh-22rem)]"
+          className="relative min-h-[420px] min-w-0 flex-1 sm:min-h-[560px] overflow-hidden rounded-[14px] border border-border-subtle bg-canvas lg:h-[calc(100dvh-22rem)]"
         >
           {/* Zoom and fit, so a dense library can be opened up and re-framed. */}
           <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-[10px] border border-border-subtle bg-surface">
@@ -593,14 +623,15 @@ function GraphCanvas({
                   if (factor === 0) cy.fit(undefined, 40)
                   else cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
                 }}
-                className="flex size-8 items-center justify-center text-ink-muted hover:bg-accent-soft hover:text-ink"
+                className="flex size-8 items-center justify-center text-ink-muted hover:bg-accent-soft hover:text-ink pointer-coarse:size-11"
               >
-                <Icon className="size-4" />
+                <Icon aria-hidden="true" className="size-4" />
               </button>
             ))}
           </div>
           {view === 'claims' && (
-            <div className="absolute left-3 top-3 z-10 flex w-[220px] items-center gap-2 rounded-[9px] border border-border-subtle bg-surface px-2.5 py-[7px]">
+            // On a phone the zoom column takes the right edge, so the filter shrinks to fit beside it.
+            <div className="absolute left-3 top-3 z-10 flex w-[min(220px,calc(100%-6rem))] items-center gap-2 rounded-[9px] border border-border-subtle bg-surface px-2.5 py-[7px] focus-within:ring-2 focus-within:ring-accent/40">
               <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
               <input
                 value={filter}
@@ -733,6 +764,11 @@ function GraphCanvas({
           detail
         )}
       </div>
+
+      {/* The canvas can only be read and driven with a pointer; the same claims as a list are for keyboards,
+          screen readers and anyone who wants the contradicted ones first. */}
+      {view === 'claims' && <GraphClaimList rows={claimRows} selectedId={claimSel} onSelect={setClaimSel} />}
+      {view === 'papers' && <GraphPairList rows={pairRows} selectedId={pairSel} onSelect={setPairSel} />}
     </>
   )
 }

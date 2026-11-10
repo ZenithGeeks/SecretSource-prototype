@@ -7,6 +7,7 @@ import { ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../components/ui'
+import { useMenuKeys } from '../../../lib/useMenuKeys'
 
 export type LibraryAddItem = { label: string; hint: string; onSelect: () => void }
 
@@ -22,10 +23,11 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
+  const onKeyDown = useMenuKeys(open, () => setOpen(false), root)
 
   if (items.length === 0) return null
   return (
-    <div ref={root} className="relative" onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
+    <div ref={root} className="relative" onKeyDown={onKeyDown}>
       <Button
         type="button"
         aria-haspopup="menu"
@@ -51,7 +53,7 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
                 setOpen(false)
                 item.onSelect()
               }}
-              className="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-accent-soft focus-visible:bg-accent-soft focus-visible:outline-none"
+              className="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-accent-soft focus-visible:bg-accent-soft focus-visible:outline-none pointer-coarse:min-h-11"
             >
               <span className="text-[13px] font-medium text-ink">{item.label}</span>
               <span className="text-xs text-ink-muted">{item.hint}</span>
