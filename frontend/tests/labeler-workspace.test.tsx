@@ -798,3 +798,63 @@ describe('the progress bar', () => {
     expect(screen.getByText('1 of 3 claims finished')).toBeInTheDocument()
   })
 })
+
+describe('a claim with no passages', () => {
+  const TOP500 = { ref: 'b23', label: 'Top500', reason: 'not-downloadable', url: 'https://www.top500.org/', doi: '', year: '2021' }
+  const bare = (over: Record<string, unknown> = {}) => ({
+    claim_id: 'paperA#0',
+    claim: 'GPU systems make up six of the ten fastest.',
+    sentence: 'GPU-based systems make up six of the ten most powerful HPC systems.',
+    section: '1',
+    source: null,
+    candidates: [],
+    ...over,
+  })
+  const papersShown = () => screen.getAllByTestId('viewer').map((viewer) => viewer.textContent)
+
+  it('lists the work it cites that could not be read, and opens no reference another claim cites', async () => {
+    // Ref B is the analysis's first reference, read for some other claim.
+    gateway.session = makeSession({ claims: [bare({ cited: ['b23'], unchecked: [TOP500] })] })
+    await open()
+    const pane = within(screen.getByRole('region', { name: 'Reference not found' }))
+    expect(pane.getByRole('listitem')).toHaveTextContent('[b23] Top500 (2021)')
+    expect(pane.getByRole('listitem')).toHaveTextContent('Not read: the PDF would not download')
+    expect(pane.getByRole('link', { name: /top500\.org/ })).toHaveAttribute('href', 'https://www.top500.org/')
+    expect(papersShown()).toEqual(['paperA.pdf|GPU-based systems make up six of the ten most powerful HPC systems.'])
+    expect(screen.queryByText('No reference paper')).toBeNull()
+  })
+
+  it('opens the reference it cites that has a PDF, on page 1, not the analysis’s first one', async () => {
+    gateway.session = makeSession({ claims: [bare({ cited: ['b23', 'b8'], unchecked: [TOP500] })] })
+    await open()
+    expect(reference()).toBe('refD.pdf|')
+    expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('refD.pdf: Reference [b8]: Ref D / opens on page 1')
+    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+  })
+
+  it('goes by the markers in its sentence when the gateway is older than the list of what it cites', async () => {
+    gateway.session = makeSession({ claims: [bare({ sentence: 'Six of the ten fastest are GPU systems [b8].' })] })
+    await open()
+    expect(reference()).toBe('refD.pdf|')
+  })
+
+  it('says "No reference paper" when it cites nothing, and a claim with passages still opens its own reference', async () => {
+    await open()
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+    key(']')
+    expect(heading()).toBe('Claim 2 of 3')
+    expect(screen.getByText('No reference paper')).toBeInTheDocument()
+    expect(screen.getByText('This claim cites no paper.')).toBeInTheDocument()
+    expect(papersShown()).toEqual(['paperA.pdf|Y is fast.'])
+    key('[')
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+  })
+
+  it('still opens any read reference from the list', async () => {
+    gateway.session = makeSession({ claims: [bare({ cited: ['b23'], unchecked: [TOP500] })] })
+    await open()
+    fireEvent.change(screen.getByLabelText('Open reference'), { target: { value: 'refB' } })
+    expect(reference()).toBe('refB.pdf|')
+    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+  })
+})

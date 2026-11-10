@@ -21,6 +21,7 @@ import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
   bestCandidate,
+  citedReferences,
   buildSave,
   byline,
   displayOrder,
@@ -37,6 +38,7 @@ import {
   relevantPassages,
   remaining,
   sameDraft,
+  unresolvedCitations,
   saveNextTarget,
   problem,
   usePool,
@@ -61,6 +63,7 @@ import { LabelForm } from '../components/LabelForm'
 import { PassageList, type Focus } from '../components/PassageList'
 import { SaveBar } from '../components/SaveBar'
 import { SelectionBar, type Picked } from '../components/SelectionBar'
+import { UnresolvedReferences } from '../components/UnresolvedReferences'
 
 const VIEWER_HEIGHT = 'h-[60vh]'
 
@@ -114,7 +117,10 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   // an extracted claim's first passage is already the one retrieval ranked first.
   const c = claim.origin === 'human_added' ? bestCandidate(claim, session.references) : claim.candidates[0]
   if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id }
-  const ref = session.references[0]
+  // No passages: the first reference the claim itself cites that has a PDF, at page 1. Never the
+  // analysis's first reference, which may be one this claim does not cite. With none, nothing
+  // opens and the pane lists the claim's unresolved citations instead.
+  const ref = citedReferences(claim, session.references)[0]
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
 }
 
@@ -281,9 +287,9 @@ function Body({
     save.reset()
   }
 
-  // A claim added by hand has no passages until its search answers, so it opens on the first
-  // reference at page 1 (a `ref:` focus). When the passages arrive, open the best one, once per
-  // claim. A passage the person opened is kept; reading that first page is not.
+  // A claim added by hand has no passages until its search answers, so it opens on nothing, or
+  // on a reference its sentence cites at page 1 (a `ref:` focus). When the passages arrive, open
+  // the best one, once per claim. A passage the person opened is kept; reading that first page is not.
   const autoOpened = useRef(new Set<string>())
   useEffect(() => {
     if (claim?.origin !== 'human_added' || autoOpened.current.has(claim.claim_id)) return
@@ -785,7 +791,7 @@ function Body({
           Stacked: the reference on top, since it is the paper being judged. */}
       <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
         {side && viewer(left_, 'paper')}
-        {right ? viewer(right, 'reference') : <Empty title="No reference paper" hint="No cited paper was read for this analysis." />}
+        {right ? viewer(right, 'reference') : <UnresolvedReferences citations={unresolvedCitations(claim, session)} />}
         {both && viewer(left_, 'paper')}
       </div>
     </div>

@@ -1713,10 +1713,43 @@ def test_a_claim_says_why_its_citations_were_not_checked(api):
     checked, named = client.get("/labeling/sessions/a1").json()["claims"]
 
     assert checked["unchecked"] == []
+    links = {"url": "", "doi": "", "year": "2020"}
     assert named["unchecked"] == [
-        {"ref": "b39", "label": "T5 paper", "reason": "named"},
-        {"ref": "b49", "label": "SuperGLUE", "reason": "named"},
-        {"ref": "b4", "label": "NeurIPS", "reason": "no-open-access"},
+        {"ref": "b39", "label": "T5 paper", "reason": "named", **links},
+        {"ref": "b49", "label": "SuperGLUE", "reason": "named", **links},
+        {"ref": "b4", "label": "NeurIPS", "reason": "no-open-access", **links},
+    ]
+
+
+def test_an_unchecked_citation_carries_its_own_link_doi_and_year(api):
+    """A web page has no PDF to open, so the labeler links to where the reference list points."""
+    client, _, app = api
+    top500 = {"ref": "b23", "title": "Top500", "url": "https://www.top500.org/", "doi": "", "year": "2021"}
+    with_doi = {"ref": "b7", "title": "Kokkos", "url": "", "doi": "10.1016/j.jpdc.2014.07.003", "year": 2014}
+    bare = {"ref": "b9", "title": "A talk"}
+    app.dependency_overrides[labeling.owned_analysis] = lambda: {
+        **ANALYSIS,
+        "claims": [
+            {
+                "claim": "GPUs make up six of the ten fastest systems.",
+                "citations": [top500, with_doi, bare],
+                "unchecked": [
+                    {"source": "Top500", "reason": "not-downloadable", "message": "no address"},
+                    {"source": "10.1016/j.jpdc.2014.07.003", "reason": "no-open-access", "message": "none"},
+                    {"source": "A talk", "reason": "unresolvable", "message": "not found"},
+                ],
+            }
+        ],
+    }
+
+    (claim,) = client.get("/labeling/sessions/a1").json()["claims"]
+
+    assert claim["unchecked"] == [
+        {"ref": "b23", "label": "Top500", "reason": "not-downloadable",
+         "url": "https://www.top500.org/", "doi": "", "year": "2021"},
+        {"ref": "b7", "label": "Kokkos", "reason": "no-open-access",
+         "url": "", "doi": "10.1016/j.jpdc.2014.07.003", "year": "2014"},
+        {"ref": "b9", "label": "A talk", "reason": "unresolvable", "url": "", "doi": "", "year": ""},
     ]
 
 
