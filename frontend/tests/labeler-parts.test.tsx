@@ -191,11 +191,11 @@ describe('LabelForm', () => {
     const onChange = vi.fn()
     render(<LabelForm title="Ref B" active label={{ ...emptyLabel(), evidence: 3 }} others={['Somchai', 'Ann']} onChange={onChange} />)
     expect(screen.getByText('Also labeled by Somchai, Ann. Label it yourself, without looking.')).toBeInTheDocument()
-    expect(screen.getByText('Level 3, Clear: The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
+    expect(screen.getByText('3 Clear — The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'because' } })
     expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: 3, rationale: 'because' })
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'high' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'High' }))
     expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: 3, confidence: 'high' })
     fireEvent.click(screen.getByRole('radio', { name: '4 · Strong' }))
     expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: 4 })
@@ -203,7 +203,7 @@ describe('LabelForm', () => {
 
   it('asks for a level when there is no label yet', () => {
     render(<LabelForm title="Ref B" active={false} label={undefined} others={[]} onChange={vi.fn()} />)
-    expect(screen.getByText('Pick 1–4, or press the number key.')).toBeInTheDocument()
+    expect(screen.getByText('Pick a level from 1 to 4. Each button’s title says what that level means.')).toBeInTheDocument()
   })
 })
 

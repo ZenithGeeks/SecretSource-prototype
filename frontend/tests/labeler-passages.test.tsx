@@ -55,12 +55,11 @@ afterEach(() => {
 })
 
 describe('the passages of a claim', () => {
-  it('lists each passage under its reference with page and score, and the grade form', () => {
+  it('lists each passage under its reference with page and the grade form', () => {
     setup()
     const section = screen.getByRole('region', { name: 'Ref B' })
-    expect(within(section).getByText('p.4')).toBeInTheDocument()
-    expect(within(section).getByText('score 2.50')).toBeInTheDocument()
-    expect(within(section).getAllByText(/^#\d$/).map((n) => n.textContent)).toEqual(['#1', '#2'])
+    expect(within(section).getByRole('button', { name: /text of c1/ })).toHaveTextContent(/p\.\s*4/)
+    expect(within(section).getAllByRole('button', { name: /text of c[12]/ })).toHaveLength(2)
     expect(within(section).getByText('grade for refB')).toBeInTheDocument()
   })
 

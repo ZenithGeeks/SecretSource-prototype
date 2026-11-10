@@ -338,14 +338,17 @@ describe('the keyboard', () => {
 })
 
 describe('saving', () => {
-  it('saves and moves on to the next claim, and offers no next on the last', async () => {
+  it('saves to the next unfinished claim and wraps to the first unfinished claim', async () => {
     await open()
     key(']')
     key('x')
     fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
     await waitFor(() => expect(heading()).toBe('Claim 3 of 3'))
     expect(gateway.posts).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: 'Save and next claim' })).not.toBeInTheDocument()
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    await waitFor(() => expect(heading()).toBe('Claim 1 of 3'))
+    expect(gateway.posts).toHaveLength(2)
   })
 
   it('stays on the claim after Save labels', async () => {
