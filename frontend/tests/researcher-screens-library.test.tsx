@@ -166,6 +166,54 @@ describe('project list', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('analyses')
   })
+
+  it('filters the project grid by name, leaving Unsorted and the New-project tile on screen', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'retrieval' } })
+    expect(screen.getByRole('button', { name: 'Open Retrieval survey' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Empty one' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Unsorted' })).toBeInTheDocument()
+    expect(screen.getByText('+ New project')).toBeInTheDocument()
+  })
+
+  it('says so, but still keeps Unsorted and the New-project tile, when no project matches', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'nonexistent' } })
+    expect(screen.getByText('No project matches "nonexistent".')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Unsorted' })).toBeInTheDocument()
+    expect(screen.getByText('+ New project')).toBeInTheDocument()
+  })
+
+  it('sorts by name and by paper count, with Unsorted always last', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    const order = () =>
+      screen
+        .getAllByRole('button', { name: /^Open / })
+        .map((b) => b.getAttribute('aria-label'))
+        .filter((label) => label !== 'Open the menu')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }))
+    expect(order()).toEqual(['Open Empty one', 'Open Retrieval survey', 'Open Unsorted'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Papers' }))
+    expect(order()).toEqual(['Open Retrieval survey', 'Open Empty one', 'Open Unsorted'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' }))
+    expect(order()).toEqual(['Open Retrieval survey', 'Open Empty one', 'Open Unsorted'])
+  })
+
+  it('hides the filter and sort row when there are no named projects to filter', async () => {
+    gateway({ projects: PROJECTS.filter((p) => p.unsorted) })
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    expect(screen.queryByRole('textbox', { name: 'Filter projects' })).not.toBeInTheDocument()
+  })
 })
 
 describe('new project', () => {

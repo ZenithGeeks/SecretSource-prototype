@@ -356,23 +356,24 @@ function ProjectsLanding({
         </div>
       )}
 
-      {q && shown.length === 0 ? (
-        <p className="text-sm text-ink-muted">No project matches "{query}".</p>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {visible.map((p) => (
-            <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
-          ))}
-          <button
-            type="button"
-            onClick={onNew}
-            className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
-          >
-            <span className="font-serif text-base font-semibold text-accent">+ New project</span>
-            <span className="text-xs text-ink-muted">Start a new group of papers</span>
-          </button>
-        </div>
-      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {/* A name filter with no real-project match still leaves Unsorted and "+ New project"
+            on screen — this replaces only the real-project cards, never the whole grid. */}
+        {q && shown.length === 0 && (
+          <p className="text-sm text-ink-muted sm:col-span-2">No project matches "{query}".</p>
+        )}
+        {visible.map((p) => (
+          <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
+        ))}
+        <button
+          type="button"
+          onClick={onNew}
+          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
+        >
+          <span className="font-serif text-base font-semibold text-accent">+ New project</span>
+          <span className="text-xs text-ink-muted">Start a new group of papers</span>
+        </button>
+      </div>
 
       <AnimatePresence>
         {deleting && (
