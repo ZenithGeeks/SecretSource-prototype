@@ -329,6 +329,13 @@ describe('Graph · claims view', () => {
     expect(within(list).getAllByRole('button')[0]).toHaveAttribute('aria-pressed', 'true')
   })
 
+  test('in the papers view the faded look comes after the edge look, so edges still dim', () => {
+    open()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    const selectors = (h.props as CytoscapeProps).stylesheet.map((rule) => rule.selector)
+    expect(selectors.lastIndexOf('edge.faded')).toBeGreaterThan(selectors.indexOf('edge[kind="paper"]'))
+  })
+
   test('has no claim list in the papers view, but a list of links that follows the filter', () => {
     open()
     fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))

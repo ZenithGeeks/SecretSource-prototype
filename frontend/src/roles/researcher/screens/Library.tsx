@@ -67,7 +67,15 @@ function Modal({ titleId, onClose, children }: { titleId: string; onClose: () =>
   // Read while rendering: by the time an effect runs, the dialog's autoFocus field already has focus.
   const root = useRef<HTMLDivElement>(null)
   const [opener] = useState(() => document.activeElement as HTMLElement | null)
-  useEffect(() => () => opener?.focus(), [opener])
+  // After a tick: React's development StrictMode unmounts and remounts at once, which must not take focus away.
+  useEffect(
+    () => () => {
+      setTimeout(() => {
+        if (!root.current?.isConnected) opener?.focus()
+      })
+    },
+    [opener],
+  )
   // A dialog opened from a menu has nothing of its own to focus: take focus so Escape and Tab work at once.
   useEffect(() => {
     if (!root.current?.contains(document.activeElement)) root.current?.focus()
@@ -132,10 +140,10 @@ function ProjectMenu({
     document.addEventListener('mousedown', away)
     return () => document.removeEventListener('mousedown', away)
   }, [open])
-  const onKeyDown = useMenuKeys(open, () => setOpen(false), root)
+  const menu = useMenuKeys(open, () => setOpen(false), root)
 
   return (
-    <div ref={root} onKeyDown={onKeyDown} className="pointer-events-auto relative">
+    <div ref={root} onKeyDown={menu.onKeyDown} onBlur={menu.onBlur} className="pointer-events-auto relative">
       <IconButton
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -153,6 +161,7 @@ function ProjectMenu({
           <MenuItem
             role="menuitem"
             onClick={() => {
+              menu.returnFocus()
               setOpen(false)
               onRename()
             }}
@@ -164,6 +173,7 @@ function ProjectMenu({
           <MenuItem
             role="menuitem"
             onClick={() => {
+              menu.returnFocus()
               setOpen(false)
               onDelete()
             }}
@@ -194,16 +204,19 @@ function ProjectCard({
     : `${count(project.papers, 'paper')} · ${count(project.claims, 'claim')}`
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(project.name)
+  // What is in the field right now, readable by a blur that fires while the field is being removed.
+  const typed = useRef(project.name)
   const [saving, setSaving] = useState(false)
 
   const cancelRename = () => {
     setRenaming(false)
     setDraft(project.name)
+    typed.current = project.name
   }
   const submitRename = async () => {
     // Enter and the blur it can cause both land here; the second one must not save twice.
     if (saving) return
-    const name = draft.trim()
+    const name = typed.current.trim()
     if (!name || name === project.name) return cancelRename()
     setSaving(true)
     try {
@@ -241,7 +254,10 @@ function ProjectCard({
               aria-label="Project name"
               value={draft}
               disabled={saving}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                typed.current = event.target.value
+              }}
               onKeyDown={(event) => event.key === 'Escape' && cancelRename()}
               onBlur={() => void submitRename()}
               className="w-full min-w-0 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"

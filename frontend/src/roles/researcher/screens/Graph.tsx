@@ -227,6 +227,8 @@ function stylesheet(pal: Palette, clusters: string[], view: View): cytoscape.Sty
         style: { 'line-color': inkMuted, opacity: 0.55, width: 'mapData(similarity, 0.3, 1, 1.5, 6)' as unknown as number },
       },
       { selector: 'edge[?cites]', style: { 'line-style': 'dashed' } },
+      // After the rule above, which sets an opacity of its own and would otherwise win over `.faded`.
+      { selector: 'edge.faded', style: { opacity: 0.12 } },
       { selector: 'edge.selected', style: { 'line-color': accent, width: 5, opacity: 1 } },
     )
   }

@@ -23,11 +23,11 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
-  const onKeyDown = useMenuKeys(open, () => setOpen(false), root)
+  const menu = useMenuKeys(open, () => setOpen(false), root)
 
   if (items.length === 0) return null
   return (
-    <div ref={root} className="relative" onKeyDown={onKeyDown}>
+    <div ref={root} className="relative" onKeyDown={menu.onKeyDown} onBlur={menu.onBlur}>
       <Button
         type="button"
         aria-haspopup="menu"
@@ -50,6 +50,7 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
               type="button"
               role="menuitem"
               onClick={() => {
+                menu.returnFocus()
                 setOpen(false)
                 item.onSelect()
               }}

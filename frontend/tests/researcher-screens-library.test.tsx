@@ -3,6 +3,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -781,7 +782,63 @@ describe('dialog focus', () => {
     const dialog = await screen.findByRole('dialog', { name: 'New project' })
     fireEvent.keyDown(dialog, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'New project' })).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New project' })).toHaveFocus())
+  })
+
+  it('a dialog opened from a menu gives focus back to the menu button, not to the item that went away', async () => {
+    gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    const button = within(card).getByRole('button', { name: 'Project actions' })
+    fireEvent.click(button)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(button).toHaveFocus())
+  })
+
+  it('under StrictMode, the dialog that mounts twice keeps focus inside itself', async () => {
+    gateway()
+    window.history.replaceState(null, '', '?role=researcher&screen=library&new=1')
+    render(
+      <StrictMode>
+        <QueryClientProvider client={client()}>
+          <ResearcherApp />
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    await new Promise((resolve) => setTimeout(resolve, 20)) // let the deferred focus restore run
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+  })
+
+  it('the project menu closes when focus leaves it, and stays open while focus moves inside it', async () => {
+    gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Project actions' }))
+    const [rename, remove] = screen.getAllByRole('menuitem')
+    fireEvent.blur(rename, { relatedTarget: remove })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.blur(remove, { relatedTarget: document.body })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('an Escape that cancels a rename wins over a blur that arrives while the field is removed', async () => {
+    const calls = gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Project actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByRole('textbox', { name: 'Project name' })
+    fireEvent.change(input, { target: { value: 'half typed' } })
+    // Some browsers blur a focused field as they remove it, in the same turn as the Escape.
+    input.addEventListener('keydown', () => queueMicrotask(() => fireEvent.blur(input)), { once: true })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await Promise.resolve()
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    expect(screen.getByText('Retrieval survey')).toBeInTheDocument()
   })
 })
 

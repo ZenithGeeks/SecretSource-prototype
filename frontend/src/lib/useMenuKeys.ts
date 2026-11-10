@@ -1,20 +1,26 @@
 /** Keyboard behavior for a dropdown menu (the WAI-ARIA menu button pattern): the first item takes
- * focus when the menu opens, the arrow keys, Home and End move between items, and Escape closes
- * the menu and puts focus back on the button that opened it. */
+ * focus when the menu opens, the arrow keys, Home and End move between items, Escape closes the
+ * menu and puts focus back on the button that opened it, and leaving the menu closes it.
+ * `returnFocus` is for an item that opens something else: call it first, so what opens
+ * remembers the button, not an item that is about to disappear. */
 
-import { type KeyboardEvent, type RefObject, useEffect } from 'react'
+import { type FocusEvent, type KeyboardEvent, type RefObject, useEffect } from 'react'
+
+const TRIGGER = '[aria-haspopup="menu"]'
 
 export function useMenuKeys(open: boolean, close: () => void, root: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
   }, [open, root])
 
-  // The handler goes on the element that holds the button and the menu, so currentTarget is that element.
-  return (event: KeyboardEvent<HTMLElement>) => {
+  const returnFocus = () => root.current?.querySelector<HTMLElement>(TRIGGER)?.focus()
+
+  // The handlers go on the element that holds the button and the menu, so currentTarget is that element.
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!open) return
     if (event.key === 'Escape') {
       close()
-      event.currentTarget.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus()
+      event.currentTarget.querySelector<HTMLElement>(TRIGGER)?.focus()
       return
     }
     const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]
@@ -29,4 +35,10 @@ export function useMenuKeys(open: boolean, close: () => void, root: RefObject<HT
     event.preventDefault()
     target.focus()
   }
+
+  const onBlur = (event: FocusEvent<HTMLElement>) => {
+    if (open && !event.currentTarget.contains(event.relatedTarget)) close()
+  }
+
+  return { onKeyDown, onBlur, returnFocus }
 }

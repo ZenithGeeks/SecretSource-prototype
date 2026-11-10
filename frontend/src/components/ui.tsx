@@ -57,7 +57,7 @@ export function TextButton({ className, type = 'button', ...props }: ComponentPr
     <button
       type={type}
       className={cn(
-        'rounded font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 pointer-coarse:min-h-11',
+        'rounded font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50',
         className,
       )}
       {...props}
