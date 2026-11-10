@@ -20,3 +20,6 @@ deploy/tls-proxy/certs/
 
 # Supabase CLI link state (supabase link): project ref and pooler URL, per machine
 supabase/.temp/
+
+# pytest-cov data from a local run of the backend tests
+.coverage
