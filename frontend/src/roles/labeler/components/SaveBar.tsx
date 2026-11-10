@@ -24,6 +24,10 @@ export function SaveBar({
   onSave: (next: boolean) => void
   className?: string
 }) {
+  let status = 'Nothing changed'
+  if (dirty) status = 'Unsaved changes · Ctrl/⌘+S saves'
+  else if (savedRows != null) status = `Saved ${savedRows} row${savedRows === 1 ? '' : 's'}`
+
   return (
     <div className={cn('sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3', className)}>
       {left.length > 0 ? (
@@ -53,11 +57,7 @@ export function SaveBar({
           </Button>
         )}
         <span aria-live="polite" className="text-xs text-ink-muted">
-          {dirty
-            ? 'Unsaved changes · Ctrl/⌘+S saves'
-            : savedRows != null
-              ? `Saved ${savedRows} row${savedRows === 1 ? '' : 's'}`
-              : 'Nothing changed'}
+          {status}
         </span>
       </div>
     </div>

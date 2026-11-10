@@ -32,14 +32,10 @@ import { GraphClaimDetail, GraphPairDetail } from '../components/GraphDetail'
 import { GraphClaimsLegend, GraphPapersLegend } from '../components/GraphLegend'
 import { GraphSegmented } from '../components/GraphSegmented'
 
-let _colaReady = false
-if (!_colaReady) {
-  try {
-    cytoscape.use(cola)
-  } catch {
-    /* already registered */
-  }
-  _colaReady = true
+try {
+  cytoscape.use(cola)
+} catch {
+  /* already registered */
 }
 
 type Palette = {
@@ -412,7 +408,7 @@ function GraphCanvas({
         ...shown.map((n, i) => ({
           data:
             n.kind === 'paper'
-              ? { ...n, short: paperShort(n), weight: deg[n.id] ?? 1 }
+              ? { ...n, short: paperShort(n), weight: deg[n.id] }
               : { ...n, standing: claimStanding(claimEdges[n.id] ?? []) },
           position: cachedPositions?.[n.id] ?? seedPosition(i, shown.length),
         })),

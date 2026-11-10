@@ -146,7 +146,11 @@ export function SettingsModal({
   // unreachable) content too, not silently leave stale settings on screen.
   const activeVisible = active && visibleTabs.some((t) => t.id === active.id)
   const viewingLabel = ROLE_NAV.find((r) => r.id === viewingRole)?.label ?? ''
-  const groupLabel = (g: SettingsTabDef['group']) => (g === 'general' ? 'General' : g === 'role' ? 'Role' : viewingLabel)
+  const groupLabel = (group: SettingsTabDef['group']) => {
+    if (group === 'general') return 'General'
+    if (group === 'role') return 'Role'
+    return viewingLabel
+  }
 
   // Previewing a role re-anchors to its Account tab and drops the search: the query was
   // typed against the old role's labels (or matched only the role itself), so keeping it

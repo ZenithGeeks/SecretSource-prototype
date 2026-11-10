@@ -132,3 +132,91 @@ def test_the_runner_scores_the_split_and_writes_one_row_per_pair(monkeypatch, tm
         rows = list(csv.DictReader(file))
     assert [r["verdict"] for r in rows] == ["supports", "supports"]
     assert [r["verdict_from"] for r in rows] == ["text", "figure"]
+
+
+def test_pairs_keep_each_labeled_passage_once():
+    rows = [
+        {**label("c1", "ada", 4), "spans": json.dumps(["first passage", ""])},
+        {**label("c1", "bo", 3), "spans": json.dumps(["first passage", "second passage"])},
+    ]
+
+    (pair,) = evaluation.pairs_from_labels(rows)
+
+    assert pair.spans == ["first passage", "second passage"]
+
+
+def test_level_confusion_counts_each_labelers_level_under_the_verdict():
+    levels = [{"ada": 3}, {"ada": 3, "bo": 4}, {"ada": 1}]
+
+    table = evaluation.level_confusion(levels, ["insufficient", "supports", "supports"])
+
+    assert table == {"insufficient": {1: 0, 2: 0, 3: 1, 4: 0}, "supports": {1: 1, 2: 0, 3: 1, 4: 1}}
+
+
+def write_labels(path, rows):
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_the_runner_reports_retrieval_recall_and_quote_grounding(monkeypatch, tmp_path, capsys):
+    import eval_verdicts
+
+    labels = tmp_path / "labels.csv"
+    passage = "ColBERT stores one vector per token and compresses them to cut the index size"
+    write_labels(
+        labels,
+        [
+            {**label("c1", "ada", 4), "spans": json.dumps([passage])},
+            {**label("c2", "ada", 3), "spans": json.dumps(["a passage retrieval never finds"])},
+        ],
+    )
+
+    def verify_claim(claim, source):
+        quote = "compresses them to cut the index size" if claim == "claim c1" else "words not in it"
+        return {"status": "ok", "verdict": "supports", "quote": quote, "evidence": [{"text": passage}]}
+
+    monkeypatch.setattr(eval_verdicts.verify, "verify_claim", verify_claim)
+    out = tmp_path / "verdicts.csv"
+    monkeypatch.setattr(sys, "argv", ["eval_verdicts.py", str(labels), "--out", str(out)])
+
+    eval_verdicts.main()
+
+    report = json.loads(capsys.readouterr().out)
+    recall = report[f"retrieval_recall_at_{eval_verdicts.verify.EVIDENCE_COUNT}"]
+    assert recall == {"pairs": 2, "share": 0.5}  # c2's labeled passage was not retrieved
+    assert report["quote_grounding"] == {"pairs": 2, "share": 0.5}  # c2's quote is made up
+    assert report["levels"]["supports"] == {"1": 0, "2": 0, "3": 1, "4": 1}
+
+
+def test_the_runner_can_judge_the_labeled_passages_instead(monkeypatch, tmp_path, capsys):
+    import eval_verdicts
+
+    labels = tmp_path / "labels.csv"
+    write_labels(
+        labels,
+        [
+            {**label("c1", "ada", 4), "spans": json.dumps(["the labeled passage"])},
+            {**label("c2", "ada", 1), "spans": "[]"},  # nothing to judge on
+        ],
+    )
+    judged = []
+
+    def judge_passages(claim, passages):
+        judged.append((claim, passages))
+        return {"verdict": "supports", "quote": "the labeled passage", "reasoning": ""}
+
+    monkeypatch.setattr(eval_verdicts.verify, "judge_passages", judge_passages)
+    out = tmp_path / "verdicts.csv"
+    argv = ["eval_verdicts.py", str(labels), "--out", str(out), "--passages", "labeled"]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    eval_verdicts.main()
+
+    assert judged == [("claim c1", ["the labeled passage"])]
+    report = json.loads(capsys.readouterr().out)
+    assert report["errors"] == 1 and report["judge"]["true_positive"] == 1
+    assert report["settings"]["passages"] == "labeled"
+    assert report["quote_grounding"] == {"pairs": 1, "share": 1.0}
+    assert report[f"retrieval_recall_at_{eval_verdicts.verify.EVIDENCE_COUNT}"]["pairs"] == 0

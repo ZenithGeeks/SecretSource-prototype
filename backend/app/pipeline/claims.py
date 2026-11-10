@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pydantic
@@ -23,6 +24,7 @@ from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
 from app.pipeline.sources import local_pdf, lookup_key, tool_error
+from app.text import english_stopwords, split_sentences
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
 TEI_TAG = "{http://www.tei-c.org/ns/1.0}"
@@ -104,11 +106,9 @@ MAX_GAP = 3  # page words allowed between two matched words on their own: a foot
 LONG_GAP = 14  # ... when the sentence word after also follows: "(Xin et al., 2021; Xiong et al., 2020)"
 MAX_MISSES = 4  # sentence words in a row that may be missing before we decide it is not here
 MAX_STRETCH = 2.5  # a relaxed match may span at most this many page words per sentence word
-# Short words a relaxed match may not jump to on their own: too common to be evidence.
-STOPWORDS = frozenset(
-    "that with from this than which their these those have been into also more when where "
-    "what while such each both same only over some most many very much".split()
-)
+# Words a relaxed match may not jump to on their own, too common to be evidence: NLTK's
+# English stopwords and these, which papers use as often.
+COMMON_IN_PAPERS = frozenset({"also", "many", "much"})
 
 
 def _token(word: str) -> str:
@@ -165,7 +165,7 @@ def _match_at(words: list[_Word], wanted: list[str], i: int, k: int) -> tuple[li
 
 
 def _content_word(token: str) -> bool:
-    return len(token) >= 4 and token not in STOPWORDS
+    return len(token) >= 4 and token not in english_stopwords() and token not in COMMON_IN_PAPERS
 
 
 def _align(words: list[_Word], wanted: list[str], start: int, relaxed: bool = False) -> tuple[list[int], int]:
@@ -399,7 +399,7 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
 
     # One timeout or 5xx used to fail the whole analysis, since nothing works without the
     # paper's text. GROBID also answers 503 while all its workers are busy, which passes.
-    for attempt in range(1, GROBID_ATTEMPTS + 1):
+    for attempt in range(1, GROBID_ATTEMPTS + 1):  # pragma: no branch - last attempt breaks
         try:
             response = requests.post(
                 f"{GROBID_URL}/api/{endpoint}",
@@ -524,11 +524,16 @@ def _cleaned_title(title: str) -> str:
     return cleaned or original
 
 
-def _raw_title(reference) -> str:
-    """The reference's title as GROBID wrote it, before the preprint note is removed."""
+def _title_lines(reference):
+    """The text at each of TITLE_PATHS, on one line; empty where the path is missing."""
     for path in TITLE_PATHS:
         found = reference.find(path, TEI_NAMESPACE)
-        title = _one_line(found.text or "") if found is not None else ""
+        yield _one_line(found.text or "") if found is not None else ""
+
+
+def _raw_title(reference) -> str:
+    """The reference's title as GROBID wrote it, before the preprint note is removed."""
+    for title in _title_lines(reference):
         if title and not _looks_like_authors(title):
             return title
     return ""
@@ -602,9 +607,7 @@ def _arxiv_in_reference_titles(reference) -> str:
     on the monogr or journal line while the article title is the work's real title.
     The displayed title stays the article's. The id is read from either line.
     """
-    for path in TITLE_PATHS:
-        found = reference.find(path, TEI_NAMESPACE)
-        title = _one_line(found.text or "") if found is not None else ""
+    for title in _title_lines(reference):
         if title and (arxiv := _arxiv_from_title(title)):
             return arxiv
     return ""
@@ -627,14 +630,13 @@ def _parse_reference(reference) -> dict:
     date = reference.find(".//tei:date[@when]", TEI_NAMESPACE)
     url = _url_of(reference)
     in_url = ARXIV_IN_URL.search(url)
-    raw_title = _raw_title(reference)
     # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so, and
     # failing that a title line still may ("arXiv preprint arXiv:2303.12712"), including the
     # journal line when the article title is separate. Read that before cleaning.
     tagged = _identifier(reference, "arXiv").replace("arXiv:", "").strip()
     arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_in_reference_titles(reference)
     return {
-        "title": _cleaned_title(raw_title) if raw_title else "",
+        "title": _title_of(reference),
         "authors": [_full_name(person) for person in reference.findall(".//tei:persName", TEI_NAMESPACE)],
         "year": date.get("when", "")[:4] if date is not None else "",
         "doi": _identifier(reference, "DOI"),
@@ -663,6 +665,18 @@ def _paper_header(tei) -> dict:
     }
 
 
+def _horizontal_spans(page) -> list[dict]:
+    """The non-blank text spans of a page that run left to right."""
+    return [
+        span
+        for block in page.get_text("dict")["blocks"]
+        for line in block.get("lines", [])
+        if line["dir"] == (1.0, 0.0)
+        for span in line["spans"]
+        if span["text"].strip()
+    ]
+
+
 def _printed_title(pdf_path: str) -> str:
     """The title as printed on page 1: the largest horizontal text in the top half of the page.
 
@@ -677,11 +691,8 @@ def _printed_title(pdf_path: str) -> str:
             half = page.rect.height / 2
             spans = [
                 (span["size"], span["bbox"][1], span["bbox"][0], span["text"])
-                for block in page.get_text("dict")["blocks"]
-                for line in block.get("lines", [])
-                if line["dir"] == (1.0, 0.0)
-                for span in line["spans"]
-                if span["text"].strip() and span["bbox"][3] < half
+                for span in _horizontal_spans(page)
+                if span["bbox"][3] < half
             ]
     except Exception:
         return ""
@@ -758,7 +769,8 @@ def extract_citations(pdf_path: str) -> dict:
 
 # An author-year citation as printed: "Ren et al., 2021b", "Gao and Callan, 2021", "Lee et al. (2021b)".
 AUTHOR_YEAR = re.compile(
-    r"([A-Z][\w'\-]+)(?:\s+(?:and|&)\s+([A-Z][\w'\-]+))?(\s+et\s+al\.?)?[,\s]*\(?((?:19|20)\d\d)([a-z]?)\)?"
+    r"([A-Z][\w'\-]+)(?:\s+(?:and|&)\s+([A-Z][\w'\-]+))?(\s+et\s+al\.?)?[,\s]*\(?((?:19|20)\d\d)"
+    r"((?:[a-z](?:\s*,\s*[a-z]\b)*)?)\)?"
 )
 
 
@@ -798,31 +810,36 @@ def _link_author_year_citations(tei) -> int:
         found = AUTHOR_YEAR.search("".join(ref.itertext()))
         if not found:
             continue
-        name, second, et_al, year, letter = found.groups()
+        name, second, et_al, year, letters = found.groups()
         name = _plain(name)
         candidates = [
             e for e in entries if e[1][0] == name and (e[3] == year or re.search(rf"\b{year}", e[2]))
         ]
         # "Gao and Callan" has exactly two authors with Callan second; "Gao et al." has three or more.
-        if len(candidates) > 1 and not letter:
+        if len(candidates) > 1 and not letters:
             if second:
                 candidates = [e for e in candidates if len(e[1]) == 2 and e[1][1] == _plain(second)]
             elif et_al:
                 candidates = [e for e in candidates if len(e[1]) >= 3]
-        chosen = None
-        if letter:
-            exact = [e for e in candidates if re.search(rf"\b{year}{letter}\b", e[2])]
-            index = ord(letter) - ord("a")
-            if len(exact) == 1:
-                chosen = exact[0]
-            elif len(candidates) > index:
-                chosen = candidates[index]
-        elif len(candidates) == 1:
-            chosen = candidates[0]
-        if chosen:
-            ref.set("target", "#" + chosen[0])
+        # "2019a,b" cites two works at once; each letter picks one, and the ref targets them all.
+        if letters:
+            chosen = [_by_letter(candidates, year, letter) for letter in re.findall(r"[a-z]", letters)]
+        else:
+            chosen = candidates if len(candidates) == 1 else []
+        if chosen and all(chosen):
+            ref.set("target", " ".join(dict.fromkeys(f"#{entry[0]}" for entry in chosen)))
             linked += 1
     return linked
+
+
+def _by_letter(candidates: list[tuple], year: str, letter: str) -> tuple | None:
+    """The work "2021b" means: the entry whose text carries that year and letter, or else the
+    one at that place among the same author's works of the year."""
+    exact = [e for e in candidates if re.search(rf"\b{year}{letter}\b", e[2])]
+    if len(exact) == 1:
+        return exact[0]
+    index = ord(letter) - ord("a")
+    return candidates[index] if len(candidates) > index else None
 
 
 def _references_by_id(tei) -> tuple[dict, int]:
@@ -863,9 +880,10 @@ def _printed_labels(tei) -> dict[str, str]:
         return {}
     seen: dict[str, Counter] = {}
     for ref in body.iter(TEI_TAG + "ref"):
-        ref_id = (ref.get("target") or "").lstrip("#")
         text = _marker_text(ref)
-        if ref.get("type") == "bibr" and ref_id and text:
+        if ref.get("type") != "bibr" or not text:
+            continue
+        for ref_id in _target_ids(ref):
             seen.setdefault(ref_id, Counter())[text] += 1
     return {ref_id: counts.most_common(1)[0][0] for ref_id, counts in seen.items()}
 
@@ -910,17 +928,24 @@ def _citation_markers(tei, references: dict) -> list[dict]:
     sizes = _page_sizes(tei)
     markers = []
     for ref in body.iter(TEI_TAG + "ref"):
-        ref_id = (ref.get("target") or "").lstrip("#")
-        if ref.get("type") != "bibr" or ref_id not in references:
+        if ref.get("type") != "bibr":
             continue
         text = _marker_text(ref)
-        for box in _boxes(ref.get("coords", "")):
-            if box["page"] not in sizes:
+        for ref_id in _target_ids(ref):
+            if ref_id not in references:
                 continue
-            width, height = sizes[box["page"]]
-            markers.append({"ref": ref_id, "text": text, **box,
-                            "page_width": width, "page_height": height})
+            for box in _boxes(ref.get("coords", "")):
+                if box["page"] not in sizes:
+                    continue
+                width, height = sizes[box["page"]]
+                markers.append({"ref": ref_id, "text": text, **box,
+                                "page_width": width, "page_height": height})
     return markers
+
+
+def _target_ids(ref) -> list[str]:
+    """The reference ids a citation points at: "#b31 #b32" when one citation names two works."""
+    return [target.lstrip("#") for target in (ref.get("target") or "").split()]
 
 
 def _outline(tei, pdf_path: str | None = None) -> list[dict]:
@@ -967,22 +992,11 @@ def _first_section_from_pdf(first: dict, pdf_path: str) -> list[dict]:
         if not 1 <= first["page"] <= document.page_count:
             return []
 
-        def spans(page_number: int) -> list[dict]:
-            page = document[page_number - 1]
-            return [
-                span
-                for block in page.get_text("dict")["blocks"]
-                for line in block.get("lines", [])
-                if line["dir"] == (1.0, 0.0)
-                for span in line["spans"]
-                if span["text"].strip()
-            ]
-
         box = first["boxes"][0]
         style = next(
             (
                 (span["font"], span["size"])
-                for span in spans(first["page"])
+                for span in _horizontal_spans(document[first["page"] - 1])
                 if abs(span["bbox"][1] - box["y0"]) < 3 and span["bbox"][0] <= box["x1"]
             ),
             None,
@@ -991,7 +1005,7 @@ def _first_section_from_pdf(first: dict, pdf_path: str) -> list[dict]:
             return []
         for page_number in range(1, first["page"] + 1):
             rows: dict[int, list[dict]] = {}
-            for span in spans(page_number):
+            for span in _horizontal_spans(document[page_number - 1]):
                 if span["font"] == style[0] and abs(span["size"] - style[1]) < 0.3:
                     rows.setdefault(round(span["bbox"][1]), []).append(span)
             for y, row in sorted(rows.items()):
@@ -1058,13 +1072,18 @@ def _section_of(source: dict | None, headings: list[dict], sizes: dict[int, tupl
 
 def _paragraph_text(paragraph) -> str:
     """Paragraph text with each citation <ref target="#b12"> rendered as [b12]. A citation
-    with no target leaves no citation text behind (#481)."""
+    with no target leaves no citation text behind (#481). One written into the sentence,
+    "Shin et al. (2020) propose", keeps its names: "Shin et al. [b47] propose" (#835)."""
     parts = [paragraph.text or ""]
     for child in paragraph:
         text = "".join(child.itertext())
         if child.tag == TEI_TAG + "ref" and child.get("type") == "bibr":
-            target = child.get("target")
-            parts.append("[" + target.lstrip("#") + "]" if target else _without_citation(text))
+            ids = _target_ids(child)
+            markers = "".join(f"[{ref_id}]" for ref_id in ids)
+            if ids and (narrative := NARRATIVE_CITATION.fullmatch(text.strip())):
+                parts.append(f"{narrative['names']} {markers}")
+            else:
+                parts.append(markers or _without_citation(text))
         else:
             parts.append(text)
         parts.append(child.tail or "")
@@ -1072,6 +1091,8 @@ def _paragraph_text(paragraph) -> str:
 
 
 CITATION_YEAR = re.compile(r"\b(?:19|20)\d\d")
+# Names outside the brackets and only the year inside: "Li and Liang (2021)", "Nie et al. (2019a,b)"
+NARRATIVE_CITATION = re.compile(r"(?P<names>[^()\[\];]+?)\s*\((?:19|20)\d\d[a-z]?(?:,\s*[a-z])*\)")
 
 
 def _without_citation(text: str) -> str:
@@ -1098,8 +1119,13 @@ MARKER = re.compile(r"\[(b\d+)\]")
 SENTENCE_MATCH = 0.6  # loose: the model paraphrases whitespace and drops the markers
 
 
+def _without_markers(text: str) -> str:
+    """The text with its [bN] markers, and the space before each, taken out."""
+    return re.sub(r"\s*\[b\d+\]", "", text).strip()
+
+
 def _cited_sentences(paper_text: str) -> list[str]:
-    return [s for s in re.split(r"(?<=[.!?])\s+", paper_text) if MARKER.search(s)]
+    return [s for s in split_sentences(paper_text) if MARKER.search(s)]
 
 
 def _citing_windows(paper_text: str, size: int = CITING_CHARS) -> list[str]:
@@ -1119,8 +1145,6 @@ def _markers_for(claim: str, sentence: str, cited: list[str]) -> list[str]:
     Taken from the claim if the model kept them. Otherwise recovered from the paper's own
     copy of the sentence: the text is the source we trust, the model's output only points at it.
     """
-    from difflib import SequenceMatcher
-
     if found := list(dict.fromkeys(MARKER.findall(claim))):
         return found
     if not sentence or not cited:
@@ -1239,7 +1263,7 @@ def _claims_with_citations(claims: list[dict]) -> str:
     for number, claim in enumerate(claims, 1):
         if not claim["citations"]:
             continue
-        sentence = re.sub(r"\s*\[b\d+\]", "", claim["sentence"] or claim["claim"]).strip()
+        sentence = _without_markers(claim["sentence"] or claim["claim"])
         lines.append(f"{number}. {sentence}")
         for position, citation in enumerate(claim["citations"], 1):
             year = f" ({citation['year']})" if citation.get("year") else ""
@@ -1300,9 +1324,9 @@ def _says_own_work(sentence: str, title: str) -> bool:
 def _cited_claim(extracted, references: dict, cited: list[str], pdf_path: str) -> dict:
     raw_claim, sentence = extracted.claim, extracted.sentence
     marker_ids = _markers_for(raw_claim, sentence, cited)
-    source = locate(pdf_path, re.sub(r"\s*\[b\d+\]", "", sentence).strip()) if sentence else None
+    source = locate(pdf_path, _without_markers(sentence)) if sentence else None
     return {
-        "claim": re.sub(r"\s*\[b\d+\]", "", raw_claim).strip(),
+        "claim": _without_markers(raw_claim),
         "citations": [references[i] for i in marker_ids if i in references],
         "sentence": sentence,
         "source": source,  # None when the sentence could not be found in the PDF
@@ -1337,8 +1361,6 @@ def _same_assertion(one: str, other: str) -> bool:
     Numbers must agree first: "improves by 5%" vs "15%" is a different claim in a
     near-identical string.
     """
-    from difflib import SequenceMatcher
-
     if NUMBER.findall(one) != NUMBER.findall(other):
         return False
     return SequenceMatcher(None, one.split(), other.split()).ratio() >= NEAR_DUPLICATE

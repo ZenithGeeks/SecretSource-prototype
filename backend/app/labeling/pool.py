@@ -54,6 +54,24 @@ def people() -> dict[str, str]:
     return {r["key"]: r["topic"] for r in rows() if r["kind"] == "person" and r["topic"]}
 
 
+BLIND = "blind"  # the `topic` of a blind-check row that is on; "" takes it back
+
+
+def blind_key(name: str, analysis_id: str) -> str:
+    """The assignment key of one person's blind check of one paper."""
+    return f"{name}|{analysis_id}"
+
+
+def blind_checks() -> list[tuple[str, str]]:
+    """(person name, analysis id) for every blind check that is on."""
+    return [tuple(r["key"].rsplit("|", 1)) for r in rows() if r["kind"] == BLIND and r["topic"]]
+
+
+def blind_for(name: str) -> set[str]:
+    """The analyses `name` checks blind: someone else labeled them, and they must not see how."""
+    return {analysis_id for person, analysis_id in blind_checks() if person == name}
+
+
 def uploaded_dois() -> dict[str, str]:
     """analysis id -> DOI, for each shared paper whose PDF was uploaded by hand."""
     return {r["key"]: r["doi"] for r in rows() if r["kind"] == "paper" and r["topic"] and r.get("doi")}

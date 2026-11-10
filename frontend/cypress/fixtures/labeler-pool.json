@@ -1,0 +1,47 @@
+{
+  "topics": ["CV", "NLP", "SE", "HPC"],
+  "me": "Chanya",
+  "lead": false,
+  "blind": [],
+  "blind_checks": [],
+  "people": [
+    { "name": "Chanya", "topic": "" },
+    { "name": "Somchai", "topic": "CV" }
+  ],
+  "papers": [
+    {
+      "analysis_id": "nlp1",
+      "title": "Late interaction retrieval",
+      "topic": "NLP",
+      "claims": 2,
+      "judged": 0,
+      "team_judged": 0,
+      "labelers": [],
+      "status": "done",
+      "reason": "",
+      "mine": false,
+      "added_by": "Somchai",
+      "subject": "Information Retrieval",
+      "keywords": ["ColBERT"],
+      "venue_rank": "A*",
+      "venue_rank_source": "CORE 2026"
+    },
+    {
+      "analysis_id": "cv1",
+      "title": "A CV paper to check blind",
+      "topic": "CV",
+      "claims": 1,
+      "judged": 0,
+      "team_judged": 1,
+      "labelers": ["Somchai"],
+      "status": "done",
+      "reason": "",
+      "mine": false,
+      "added_by": "Somchai",
+      "subject": "",
+      "keywords": [],
+      "venue_rank": "",
+      "venue_rank_source": ""
+    }
+  ]
+}

@@ -46,6 +46,12 @@ function ComposerChip({ label, disabled, onClick }: { label: string; disabled: b
   )
 }
 
+const PLACEHOLDER: Record<AskAbout['kind'], string> = {
+  library: 'Ask about your library, / for commands, @ for a paper…',
+  paper: 'Ask about this paper, / for commands…',
+  node: 'Ask about this node, / for commands…',
+}
+
 const NOTE = 'Each statement is checked against the passage it cites. A statement no passage backs is marked, not hidden.'
 
 /** "3 of 4 backed · 1 contradicted" once every check is in, "Checking 1 of 3" until then. */
@@ -297,6 +303,7 @@ const isPhone = () => window.matchMedia?.(PHONE).matches ?? false
 function usePanelFocus(root: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const panel = root.current
+    /* v8 ignore next -- the ref is set before effects run; the guard only narrows the type */
     if (!panel) return
     const active = document.activeElement
     // A panel restored open on page load leaves focus where it is; only a click or key opened it.
@@ -593,15 +600,7 @@ export function AssistantPanel({
                     onChange={setDraft}
                     papers={papers}
                     disabled={answering}
-                    placeholder={
-                      answering
-                        ? 'Answering… Stop keeps what’s here'
-                        : about.kind === 'library'
-                          ? 'Ask about your library, / for commands, @ for a paper…'
-                          : about.kind === 'paper'
-                            ? 'Ask about this paper, / for commands…'
-                            : 'Ask about this node, / for commands…'
-                    }
+                    placeholder={answering ? 'Answering… Stop keeps what’s here' : PLACEHOLDER[about.kind]}
                   />
                   <div className="flex items-center gap-1.5">
                     {/* Shortcuts into the field's own @ and / menus. */}

@@ -8,6 +8,12 @@ reference PDF in PAPERS_DIR, so this scores retrieval and the judge together. It
 analysis needs (ColBERT, the LLM), so run it where the worker runs. The judge's answers are
 cached, so a second run with the same settings gives the same verdicts.
 
+With `--passages labeled` the judge reads the passages the labelers marked relevant instead, with
+no retrieval, so the two runs side by side tell a retrieval miss from a judge miss. Besides the
+judge's scores, the report has each verdict against each 1-4 level (`levels`), how often a
+labeled passage was among the ones retrieved (`retrieval`), and how often the judge's quote is in
+the passages it was given (`quote_grounding`).
+
 With PHOENIX_COLLECTOR_ENDPOINT set, the run is also an experiment in Phoenix: every labeled pair is a
 dataset example (its split as a Phoenix split, its topic in the metadata), each verdict is a run,
 and each run gets a `correct` evaluation. Runs on the same labels share one dataset, so their
@@ -24,8 +30,9 @@ from pathlib import Path
 
 import requests
 from app.config import PAPERS_DIR, PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
-from app.evaluation import Pair, human_agreement, judge_scores, pairs_from_labels
+from app.evaluation import Pair, human_agreement, judge_scores, level_confusion, pairs_from_labels
 from app.pipeline import verify
+from app.pipeline.audit import _grounded  # the analysis audit's test of "is this text in the evidence"
 
 
 def main() -> None:
@@ -33,6 +40,12 @@ def main() -> None:
     parser.add_argument("labels", type=Path, help="the labels CSV export")
     parser.add_argument("--split", default="test", help='which split to score ("" for all rows)')
     parser.add_argument("--out", type=Path, default=Path("verdicts.csv"), help="per-pair results")
+    parser.add_argument(
+        "--passages",
+        choices=["retrieved", "labeled"],
+        default="retrieved",
+        help="judge on the passages retrieval finds, or on the ones the labelers marked relevant",
+    )
     args = parser.parse_args()
 
     with args.labels.open(newline="", encoding="utf-8") as file:
@@ -47,11 +60,11 @@ def main() -> None:
         file=sys.stderr,
     )
 
+    retrieving = args.passages == "retrieved"
     results = []
     for number, pair in enumerate(scored, 1):
-        source = PAPERS_DIR / f"{pair.reference_id}.pdf"
         started = datetime.now(UTC).isoformat()
-        result = verify.verify_claim(pair.claim, source.as_posix())
+        result = check(pair, args.passages)
         verdict = result.get("verdict") if result.get("status") == "ok" else "error"
         verdict_from = result.get("verdict_from", "none") if verdict != "error" else "none"
         results.append(
@@ -62,6 +75,9 @@ def main() -> None:
                 "verdict": verdict,
                 "verdict_from": verdict_from,
                 "topic": topics[pair.claim_id, pair.reference_id],
+                "levels": pair.levels,
+                "labeled_retrieved": labeled_retrieved(pair, result) if retrieving else None,
+                "quote_grounded": quote_grounded(result) if verdict != "error" else None,
                 "started": started,
                 "ended": datetime.now(UTC).isoformat(),
             }
@@ -71,7 +87,16 @@ def main() -> None:
     with args.out.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
             file,
-            fieldnames=["claim_id", "reference_id", "topic", "gold", "verdict", "verdict_from"],
+            fieldnames=[
+                "claim_id",
+                "reference_id",
+                "topic",
+                "gold",
+                "verdict",
+                "verdict_from",
+                "labeled_retrieved",
+                "quote_grounded",
+            ],
             extrasaction="ignore",
         )
         writer.writeheader()
@@ -79,7 +104,7 @@ def main() -> None:
 
     judged = [r for r in results if r["verdict"] != "error"]
     report = {
-        "settings": settings(),
+        "settings": settings(args.passages),
         "errors": len(results) - len(judged),
         "judge": judge_scores([r["gold"] for r in judged], [r["verdict"] == "supports" for r in judged]),
         # The text judge and the figure judge are scored apart (SCRUM-80).
@@ -97,6 +122,9 @@ def main() -> None:
             )
             for topic in sorted({r["topic"] for r in judged})
         },
+        "levels": level_confusion([r["levels"] for r in judged], [r["verdict"] for r in judged]),
+        f"retrieval_recall_at_{verify.EVIDENCE_COUNT}": share([r["labeled_retrieved"] for r in results]),
+        "quote_grounding": share([r["quote_grounded"] for r in judged]),
         "humans": human_agreement(pairs),
     }
     print(json.dumps(report, indent=2))
@@ -104,12 +132,47 @@ def main() -> None:
         record_experiment(every_pair, topics, results, args.split, report)
 
 
-def settings() -> dict:
-    """What the verdicts depend on, so two runs can be compared: the model, how many passages
-    the judge reads, and a hash of verify.py, which holds the judge's prompt."""
+def check(pair: Pair, passages: str) -> dict:
+    """The judge's result on one pair, with the passages it read under `evidence`."""
+    if passages == "retrieved":
+        return verify.verify_claim(pair.claim, (PAPERS_DIR / f"{pair.reference_id}.pdf").as_posix())
+    if not pair.spans:
+        return {"status": "error", "message": "no passage was marked relevant"}
+    try:
+        verdict = verify.judge_passages(pair.claim, pair.spans)
+    except Exception as error:  # as verify_claim does, one failed call becomes an error row
+        print(f"{pair.claim_id}: {error!r}", file=sys.stderr)
+        return {"status": "error", "message": str(error)}
+    return {"status": "ok", **verdict, "evidence": [{"text": span} for span in pair.spans]}
+
+
+def labeled_retrieved(pair: Pair, result: dict) -> bool | None:
+    """Was a passage a labeler marked relevant among the ones retrieval gave the judge?"""
+    if not pair.spans or result.get("status") != "ok":
+        return None
+    retrieved = {"evidence": result.get("evidence", [])}
+    return any(_grounded(span, retrieved) for span in pair.spans)
+
+
+def quote_grounded(result: dict) -> bool | None:
+    """Is the judge's quote in the passages or captions it was given? None with no quote."""
+    quote = result.get("quote") or ""
+    return _grounded(quote, result) if quote.strip() else None
+
+
+def share(flags: list[bool | None]) -> dict:
+    """How many pairs a yes/no applies to, and the share of them that are yes."""
+    counted = [flag for flag in flags if flag is not None]
+    return {"pairs": len(counted), "share": sum(counted) / len(counted) if counted else 0.0}
+
+
+def settings(passages: str) -> dict:
+    """What the verdicts depend on, so two runs can be compared: the model, which passages and
+    how many the judge reads, and a hash of verify.py, which holds the judge's prompt."""
     source = Path(verify.__file__).read_bytes()
     return {
         "model": VLLM_MODEL,
+        "passages": passages,
         "evidence_count": verify.EVIDENCE_COUNT,
         "verify_py_sha256": hashlib.sha256(source).hexdigest()[:12],
     }
@@ -129,7 +192,7 @@ def record_experiment(
     }
     settings = report["settings"]
     body = {
-        "name": f"{settings['model']} verify {settings['verify_py_sha256']}",
+        "name": f"{settings['model']} verify {settings['verify_py_sha256']} {settings['passages']}",
         "description": f"eval_verdicts.py on split {split or 'all'}",
         "metadata": {**settings, "split": split, "judge": report["judge"]},
         "splits": [split] if split else None,
@@ -141,7 +204,12 @@ def record_experiment(
         error = result["verdict"] == "error"
         run = {
             "dataset_example_id": example_ids[result["claim_id"], result["reference_id"]],
-            "output": {"verdict": result["verdict"], "verdict_from": result["verdict_from"]},
+            "output": {
+                "verdict": result["verdict"],
+                "verdict_from": result["verdict_from"],
+                "labeled_retrieved": result["labeled_retrieved"],
+                "quote_grounded": result["quote_grounded"],
+            },
             "repetition_number": 1,
             "start_time": result["started"],
             "end_time": result["ended"],

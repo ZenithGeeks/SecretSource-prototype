@@ -28,6 +28,7 @@
  *    Only a real syntax error — an unclosed group, a missing \end{document} — is reported.
  *    `renderIsolated` goes one step further: when the whole file fails, it renders the body
  *    section by section, so only the broken block becomes an inline error with its line.
+ *    Every render goes through `sanitizePreview` (previewSanitize.ts) before anyone sees it.
  * 3. `SECRETSOURCE_MACROS` adds the commands the chapter still needs as LaTeX.js custom
  *    macros (\footnote, \url, \eqref, \pageref, \caption, \includegraphics as the draft's
  *    image or a sized box naming it, the placeholder). LaTeX.js copies the *enumerable*
@@ -41,6 +42,7 @@
 
 import type { BibEntry } from './bibtex'
 import type { Verdict } from '../types/draftCheck'
+import { sanitizePreview, withoutUntrustedLoads } from './previewSanitize'
 
 export const MARKER_OPEN = '⟦c:'
 export const MARKER_CLOSE = '⟧'
@@ -125,7 +127,7 @@ export const REWRITES: readonly { construct: string; shownAs: string }[] = [
   { construct: 'theorem-like environments (theorem, lemma, proof, definition, remark, corollary)', shownAs: 'a bold heading and the text' },
   { construct: '\\footnote, \\thanks', shownAs: 'the note in superscript brackets' },
   { construct: '\\eqref, \\pageref', shownAs: '(label) / ?' },
-  { construct: '\\url, \\href', shownAs: 'a link' },
+  { construct: '\\url, \\href', shownAs: 'a link for http, https, mailto or a #fragment; otherwise plain text' },
   { construct: '\\includegraphics[width=0.49\\textwidth | 5cm | scale=0.5]{file}', shownAs: 'the image at that width when the draft has it, else a box of that width saying "Image not uploaded: file" (drafts keep no images yet)' },
   { construct: 'a block of the body that will not compile (an unclosed group, …)', shownAs: 'an inline error with its line where the block stood; the other sections still render' },
 ]
@@ -521,6 +523,113 @@ export function graphicWidth(options: string): string {
   return ''
 }
 
+/** Commands that draw an image file: the `{file}` after any `*`, `<overlay>` and any number of
+ * `[…]` options (\includegraphics[a][b]{…} is graphicx's bounding box form). */
+const IMAGE_COMMANDS = ['includegraphics', 'adjincludegraphics', 'includesvg', 'includestandalone', 'includepdf', 'pgfimage', 'pgfuseimage', 'epsfbox', 'epsffile']
+/** Commands that name their file in a key, `file=` or `figure=` in either: \epsfig{file=…,width=…}. */
+const IMAGE_KEY_COMMANDS = ['epsfig', 'psfig']
+
+/** `text` without its `%` comments, each with the end of its line and the next line's indent, as
+ * TeX skips them. A `%` after an odd run of backslashes is a character: `\%` is a percent sign,
+ * `\\%` a line break and then a comment. */
+function withoutComments(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '\\') {
+      out += text.slice(i, i + 2)
+      i += 1
+    } else if (text[i] === '%') {
+      const eol = text.indexOf('\n', i)
+      if (eol === -1) break
+      i = eol
+      while (text[i + 1] === ' ' || text[i + 1] === '\t') i += 1
+    } else {
+      out += text[i]
+    }
+  }
+  return out
+}
+
+/** Where the spaces, newlines and comments from `at` end. */
+function skipBlank(text: string, at: number): number {
+  let i = at
+  for (;;) {
+    while (i < text.length && /\s/.test(text[i])) i += 1
+    if (text[i] !== '%') return i
+    const eol = text.indexOf('\n', i)
+    if (eol === -1) return text.length
+    i = eol + 1
+  }
+}
+
+/** Whether the character at `at` is escaped by an odd run of backslashes before it. */
+function isEscaped(text: string, at: number): boolean {
+  let n = 0
+  for (let i = at - 1; i >= 0 && text[i] === '\\'; i -= 1) n += 1
+  return n % 2 === 1
+}
+
+/** Whether `at` is inside a `%` comment, which runs from an unescaped `%` to the end of the line. */
+function inComment(text: string, at: number): boolean {
+  for (let i = text.lastIndexOf('\n', at - 1) + 1; i < at; i += 1) {
+    if (text[i] === '\\') i += 1
+    else if (text[i] === '%') return true
+  }
+  return false
+}
+
+/** An image command's arguments after its name at `from`, as TeX reads them: blanks and comments
+ * may come between the parts. Null when the `{file}` group is missing or never closes. */
+function imageArguments(text: string, from: number): { options: string[]; file: string; end: number } | null {
+  let i = skipBlank(text, from)
+  if (text[i] === '*') i = skipBlank(text, i + 1)
+  const overlay = /^<[^>\n]*>/.exec(text.slice(i, i + 200))
+  if (overlay) i = skipBlank(text, i + overlay[0].length)
+  const options: string[] = []
+  while (text[i] === '[') {
+    const close = groupEnd(text, i)
+    if (close === -1) return null
+    options.push(withoutComments(text.slice(i + 1, close)))
+    i = skipBlank(text, close + 1)
+  }
+  if (text[i] !== '{') return null
+  const close = groupEnd(text, i)
+  if (close === -1) return null
+  return { options, file: withoutComments(text.slice(i + 1, close)), end: close + 1 }
+}
+
+/**
+ * Every command that would draw an image file becomes \ssgraphic{path}{width}: the path and the
+ * width as text, escaped, so an `_` or `%` in a file name is a character and not math or a comment
+ * (an unescaped `_` stopped LaTeX.js with "group argument expected"). SECRETSOURCE_MACROS draws
+ * the draft's own image or a box naming the file, so no path ever reaches graphicx, which sets an
+ * <img src> while parsing and so would fetch it (SCRUM-471). The width is read only from a single
+ * `[…]`: with two, graphicx reads them as bounding box corners. An overpic environment is its
+ * image alone; the \put labels drawn over it are left out.
+ */
+function rewriteGraphics(source: string): string {
+  const s = replaceCommands(source, ['pgfdeclareimage'], () => '', () => ({ count: 2, optional: true }))
+  const names = [...IMAGE_COMMANDS, ...IMAGE_KEY_COMMANDS].join('|')
+  const pattern = new RegExp(`\\\\(?:(${names})(?![A-Za-z@])|begin\\{(overpic)\\})`, 'g')
+  const OVERPIC_END = '\\end{overpic}'
+  let out = ''
+  let last = 0
+  for (let m = pattern.exec(s); m; m = pattern.exec(s)) {
+    if (isEscaped(s, m.index) || inComment(s, m.index)) continue
+    const found = imageArguments(s, m.index + m[0].length)
+    if (!found) continue
+    const keyed = IMAGE_KEY_COMMANDS.includes(m[1])
+    const file = keyed ? (/(?:^|,)\s*(?:file|figure)\s*=\s*([^,]*)/.exec(found.file)?.[1] ?? '').replace(/^\{(.*)\}$/s, '$1') : found.file
+    const width = keyed ? graphicWidth(found.file) : found.options.length === 1 ? graphicWidth(found.options[0]) : ''
+    const close = m[2] ? s.indexOf(OVERPIC_END, found.end) : -1
+    const end = close === -1 ? found.end : close + OVERPIC_END.length
+    out += s.slice(last, m.index) + sameLines(s.slice(m.index, end), `\\ssgraphic{${escapeText(file.trim())}}{${escapeText(width)}}`)
+    last = end
+    pattern.lastIndex = end
+  }
+  return out + s.slice(last)
+}
+
 function rewriteEnvironments(source: string, bibitems: string[]): string {
   let s = source
   // thebibliography: its own numbered list, which the \cite numbers then follow
@@ -583,12 +692,7 @@ function rewriteEnvironments(source: string, bibitems: string[]): string {
   // floats: a centered block, \includegraphics inside becomes the custom box
   s = s.replace(/\\begin\{(figure\*?|table\*?|subfigure|wrapfigure|minipage|center)\}(?:\[[^\]]*\])?(?:\{[^}]*\})*/g, (whole) => sameLines(whole, '\\begin{center}'))
   s = s.replace(/\\end\{(figure\*?|table\*?|subfigure|wrapfigure|minipage)\}/g, '\\end{center}')
-  // \includegraphics: the path and the width as text, escaped, so an `_` or `%` in a file name
-  // is a character and not math or a comment (an unescaped `_` stopped LaTeX.js with "group
-  // argument expected"); SECRETSOURCE_MACROS draws the image or a box naming it.
-  s = s.replace(/\\includegraphics\*?(\[[^\]]*\])?\{([^}]*)\}/g, (whole, options: string | undefined, file: string) =>
-    sameLines(whole, `\\ssgraphic{${escapeText(file.trim())}}{${escapeText(graphicWidth(options ?? ''))}}`),
-  )
+  s = rewriteGraphics(s)
   s = s.replace(/\\captionof\{[^}]*\}/g, '\\caption')
   // theorem-like: a bold heading, then the text
   for (const env of THEOREM_ENVS) {
@@ -640,8 +744,6 @@ Macros.prototype.url = function (this: { g: Generator }, text: Node) {
   const a = this.g.create('a') as HTMLAnchorElement
   const href = text.textContent ?? ''
   a.href = href
-  a.target = '_blank'
-  a.rel = 'noreferrer'
   a.textContent = href
   return [a]
 }
@@ -907,13 +1009,17 @@ export async function renderLatex(source: string, options: { images?: ImageMap }
     unknown.push({ what: entry.what, lines: applied.lines })
     current = applied.source
   }
+  const trusted = new Set(options.images?.values())
   for (let attempt = 0; ; attempt += 1) {
     try {
       previewStats.parses += 1
       const generator = new HtmlGenerator({ hyphenate: false, CustomMacros })
-      const doc = parse(current, { generator })
+      // An \includegraphics that rewriteGraphics missed, or source that skipped preparePreview,
+      // is drawn as \ssgraphic draws it: graphicx would set an <img src> to the path.
+      generator.createImage = (_width, _height, file) => graphic(generator, plain(String(file ?? '')), '', options.images)
       const root = document.createElement('div')
-      root.appendChild(doc.domFragment())
+      withoutUntrustedLoads(trusted, () => root.appendChild(parse(current, { generator }).domFragment()))
+      sanitizePreview(root, trusted)
       return { root, unknown }
     } catch (error) {
       const e = error as { message?: string; location?: { start?: { line?: number } } }

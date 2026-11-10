@@ -1,0 +1,32 @@
+{
+  "id": "a-new",
+  "paper": "10.1145/new-paper",
+  "status": "done",
+  "file": "new-paper.pdf",
+  "title": "A New Retrieval Paper",
+  "claims": [
+    {
+      "claim": "Late interaction beats single-vector retrieval.",
+      "citations": [{ "title": "BEIR", "authors": ["Thakur"], "year": "2021", "doi": "10.1/beir", "arxiv": "", "url": "" }],
+      "verdicts": [
+        { "verdict": "refutes", "quote": "Dense models won on three of four tasks.", "reasoning": "BEIR reports the opposite ordering.", "source": "beir.pdf", "evidence": [], "pages": [] }
+      ],
+      "unchecked": []
+    },
+    {
+      "claim": "Index size shrinks tenfold with residual compression.",
+      "citations": [{ "title": "PLAID", "authors": ["Santhanam"], "year": "2022", "doi": "10.1/plaid", "arxiv": "", "url": "" }],
+      "verdicts": [
+        { "verdict": "supports", "quote": "Residual compression cuts the index to a tenth.", "reasoning": "PLAID states the same ratio.", "source": "plaid.pdf", "evidence": [], "pages": [] }
+      ],
+      "unchecked": []
+    }
+  ],
+  "stages": [
+    { "stage": "queued", "at": 1760000000 },
+    { "stage": "extracted", "claims": 2, "at": 1760000010 },
+    { "stage": "verified", "claim": 0, "source": "beir.pdf", "verdict": "refutes", "at": 1760000020 },
+    { "stage": "verified", "claim": 1, "source": "plaid.pdf", "verdict": "supports", "at": 1760000030 },
+    { "stage": "done", "at": 1760000040 }
+  ]
+}

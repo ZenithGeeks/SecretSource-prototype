@@ -50,6 +50,33 @@ def test_the_letter_after_the_year_picks_the_right_work():
     assert targets(document) == ["#b52", "#b11", "#b12"]
 
 
+def test_one_citation_with_two_letters_links_both_works():
+    # "Nie et al., 2019a,b" in the Vitamin C paper cites two papers; linking only 2019a lost
+    # the fact-verification one (#838).
+    document = tei("(Formal et al., 2021a,b;", "Formal et al., 2021a, b)")
+    assert claims._link_author_year_citations(document) == 2
+    assert targets(document) == ["#b11 #b12", "#b11 #b12"]
+
+
+def test_a_letter_with_no_work_leaves_the_whole_citation_unlinked():
+    document = tei("(Formal et al., 2021a,c)")
+    assert claims._link_author_year_citations(document) == 0
+    assert targets(document) == [None]
+
+
+def test_every_work_of_a_two_letter_citation_becomes_a_marker():
+    document = tei("(Formal et al., 2021a,b)")
+    claims._link_author_year_citations(document)
+    assert claims._body_text(document).split() == ["[b11][b12]"]
+
+
+def test_each_work_of_a_two_letter_citation_gets_its_printed_label():
+    document = tei("(Formal et al., 2021a,b)")
+    claims._link_author_year_citations(document)
+    labels = claims._printed_labels(document)
+    assert set(labels) == {"b11", "b12"}
+
+
 def test_two_authors_or_et_al_tell_works_of_the_same_year_apart():
     document = tei("(Gao and Callan, 2021)", "(Gao et al., 2021)")
     claims._link_author_year_citations(document)
@@ -93,3 +120,66 @@ def test_a_citation_that_stays_unlinked_leaves_no_text_in_the_paragraph():
     assert "OpenAI" not in text and "Guan" not in text and "2023" not in text
     assert "HallusionBench" in text  # a name written before the bracket is not the citation
     assert "Figure 3" in text  # GROBID sometimes tags text with no year as bibr; it stays
+
+
+def test_a_tei_without_a_body_links_nothing():
+    document = ET.fromstring('<TEI xmlns="http://www.tei-c.org/ns/1.0"><text/></TEI>')
+    assert claims._link_author_year_citations(document) == 0
+
+
+def test_references_with_no_id_or_no_authors_are_never_linked():
+    nameless = entry("b1", [], "2021", "No authors")
+    anonymous = (
+        "<biblStruct><analytic><author><persName><surname>Ren</surname></persName></author>"
+        '<title level="a">No id</title></analytic>'
+        '<monogr><imprint><date when="2021"/></imprint></monogr></biblStruct>'
+    )
+    document = ET.fromstring(
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0">'
+        '<text><body><p><ref type="bibr">(Ren, 2021)</ref></p></body>'
+        f"<back><listBibl>{nameless}{anonymous}</listBibl></back></text></TEI>"
+    )
+    assert claims._link_author_year_citations(document) == 0
+
+
+def test_a_citation_that_fits_several_works_equally_is_left_unlinked():
+    document = tei("(Ren, 2021)")
+    assert claims._link_author_year_citations(document) == 0
+    assert targets(document) == [None]
+
+
+def test_a_letter_beyond_the_works_of_that_year_is_left_unlinked():
+    document = tei("(Ren et al., 2021e)")
+    assert claims._link_author_year_citations(document) == 0
+    assert targets(document) == [None]
+
+
+def paragraph(*citations: str) -> ET.Element:
+    refs = "".join(f'<ref type="bibr" target="#b{i}">{text}</ref> x. ' for i, text in enumerate(citations))
+    return ET.fromstring(f'<p xmlns="http://www.tei-c.org/ns/1.0">{refs}</p>')
+
+
+def test_a_citation_written_as_the_subject_keeps_its_names():
+    # "Shin et al. (2020) propose ..." lost its subject once the marker was removed (#835)
+    citations = paragraph("Shin et al. (2020)", "Li and Liang (2021)", "Nie et al. (2019a,b)")
+    text = claims._paragraph_text(citations)
+    assert text.split(" x. ")[:3] == ["Shin et al. [b0]", "Li and Liang [b1]", "Nie et al. [b2]"]
+
+
+def test_a_citation_in_brackets_is_only_a_marker():
+    citations = paragraph("(Peters et al., 2018)", "(Jiang et al., 2020;", "Shin et al., 2020)", "[12]")
+    text = claims._paragraph_text(citations)
+    assert text.split(" x. ")[:4] == ["[b0]", "[b1]", "[b2]", "[b3]"]
+
+
+def test_et_al_does_not_end_a_cited_sentence():
+    text = "Shin et al. [b47] propose a search algorithm. We do not."
+    assert claims._cited_sentences(text) == ["Shin et al. [b47] propose a search algorithm."]
+
+
+def test_a_citation_of_two_works_written_as_the_subject_keeps_its_names_and_both_markers():
+    document = ET.fromstring(
+        '<p xmlns="http://www.tei-c.org/ns/1.0">'
+        '<ref type="bibr" target="#b31 #b32">Nie et al. (2019a,b)</ref> show it.</p>'
+    )
+    assert claims._paragraph_text(document) == "Nie et al. [b31][b32] show it."

@@ -33,7 +33,8 @@ function sourceName(claims: Claim[], claimIndex: number | undefined, source: str
   return citation ? reference(citation) : source
 }
 
-const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
+/** "1 claim", "2 claims". */
+export const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 export function summarise(stages: Stage[], claims: Claim[], status: string, now = Date.now() / 1000): Progress {
   const has = (name: Stage['stage']) => stages.some((s) => s.stage === name)

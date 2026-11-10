@@ -1,0 +1,18 @@
+{
+  "id": "a-old",
+  "paper": "10.1/colbert",
+  "status": "done",
+  "file": "colbert-v2.pdf",
+  "title": "ColBERTv2",
+  "claims": [
+    {
+      "claim": "Late interaction generalizes across domains.",
+      "citations": [{ "title": "BEIR", "authors": ["Thakur"], "year": "2021", "doi": "10.1/beir", "arxiv": "", "url": "" }],
+      "verdicts": [
+        { "verdict": "insufficient", "quote": "", "reasoning": "BEIR does not test ColBERT.", "source": "beir.pdf", "evidence": [], "pages": [] }
+      ],
+      "unchecked": []
+    }
+  ],
+  "stages": [{ "stage": "done", "at": 1750000000 }]
+}

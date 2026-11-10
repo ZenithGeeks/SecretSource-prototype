@@ -9,6 +9,7 @@ The labels grade only how well the source backs the claim (1 no support, 2 weak,
 "supports" is its "supported". "refutes" and "insufficient" both count as not supported.
 """
 
+import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
@@ -25,6 +26,7 @@ class Pair:
     claim: str
     split: str
     levels: dict[str, int] = field(default_factory=dict)  # labeler id -> 1-4
+    spans: list[str] = field(default_factory=list)  # passages any labeler marked relevant
 
     def gold(self) -> bool | None:
         """Whether the labelers say the source supports the claim, by majority. None on a tie."""
@@ -50,6 +52,9 @@ def pairs_from_labels(rows: list[dict]) -> list[Pair]:
             Pair(row["paper_id"], row["claim_id"], row["reference_id"], row["claim"], row.get("split", "")),
         )
         pair.levels[row.get("annotator_id") or row["annotator"]] = int(row["evidence"])
+        for span in json.loads(row.get("spans") or "[]"):
+            if span and span not in pair.spans:
+                pair.spans.append(span)
     return list(pairs.values())
 
 
@@ -86,6 +91,19 @@ def judge_scores(gold: list[bool], predicted: list[bool]) -> dict[str, float]:
         "false_positive": fp,
         "false_negative": fn,
     }
+
+
+def level_confusion(levels: list[dict[str, int]], verdicts: list[str]) -> dict[str, dict[int, int]]:
+    """How often each verdict met each 1-4 level, one count per labeler.
+
+    The binary score hides where the judge and the labelers part: a "Clear" pair (level 3)
+    judged "insufficient" and a "No support" pair judged "supports" each count as one miss.
+    """
+    table = {verdict: dict.fromkeys(range(1, 5), 0) for verdict in sorted(set(verdicts))}
+    for pair_levels, verdict in zip(levels, verdicts, strict=True):
+        for level in pair_levels.values():
+            table[verdict][level] += 1
+    return table
 
 
 def human_agreement(pairs: list[Pair]) -> dict[str, float]:

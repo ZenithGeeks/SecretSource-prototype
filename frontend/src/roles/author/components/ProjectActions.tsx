@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button, IconButton, Input, MenuItem, TextButton } from '../../../components/ui'
 import { MAX_TITLE } from '../../../lib/draftSave'
+import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
 
 const BACKDROP_MOTION = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.15 } }
@@ -166,7 +167,9 @@ export function NewProjectDialog({
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  // One submit at a time: a double click or Enter twice makes one project (SCRUM-477).
+  const creating = useInFlight()
+  const busy = creating.busy
   const cancel = () => !busy && onCancel()
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="new-project-title" onKeyDown={(e) => e.key === 'Escape' && cancel()} className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -175,10 +178,10 @@ export function NewProjectDialog({
         {...PANEL_MOTION}
         onSubmit={async (event) => {
           event.preventDefault()
-          setBusy(true)
-          const refused = await onCreate(oneLine(name))
-          setBusy(false)
-          if (refused) setError(refused)
+          await creating.run(async () => {
+            const refused = await onCreate(oneLine(name))
+            if (refused) setError(refused)
+          })
         }}
         className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >

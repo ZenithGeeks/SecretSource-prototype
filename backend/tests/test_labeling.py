@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+from app import auth, config
 from app.labeling import dspy_export, ledger, pool, scopus
 from app.labeling import router as labeling
 from app.labeling.schema import ALL_TABS, current
@@ -73,6 +74,7 @@ def api(monkeypatch):
     app.dependency_overrides[labeling.mine_analysis] = lambda: ANALYSIS
     app.dependency_overrides[labeling.annotator] = lambda: "chanya"
     app.dependency_overrides[labeling.current_user] = lambda: None
+    app.dependency_overrides[labeling.is_lead] = lambda: True  # a test of a non-lead says so
     return TestClient(app), db, app
 
 
@@ -144,7 +146,8 @@ def test_session_asks_the_store_only_for_that_papers_rows(api):
     db.append("claims", [_claim("chanya", "other-paper#0", paper="other-paper")])
     db.reads.clear()
     s = client.get("/labeling/sessions/a1").json()
-    assert sorted(db.reads) == sorted(
+    # The assignments (who checks what blind) are one small cached read of their own.
+    assert sorted(r for r in db.reads if r[0] != "assignments") == sorted(
         (tab, "paperA-0123456789ab") for tab in ("claims", "candidates", "labels")
     )
     assert [r["claim_id"] for r in s["saved"]["claims"]] == ["paperA-0123456789ab#0"]
@@ -194,6 +197,19 @@ def test_save_label_and_read_it_back_as_mine_with_others_listed(api):
     other = client.get("/labeling/sessions/a1").json()
     assert other["saved"]["labels"] == []
     assert other["others"] == {"paperA-0123456789ab#0|refB-aaaaaaaaaaaa": ["chanya"]}
+
+
+def test_an_unset_confidence_is_stored_empty_and_an_omitted_one_stays_medium(api):
+    client, db, _ = api
+    label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 3}
+    assert client.post("/labeling/sessions/a1/save", json={"labels": [label]}).status_code == 200
+    assert db.tabs["labels"][0]["confidence"] == "medium"  # an older client leaves the field out
+    unset = client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "confidence": ""}]})
+    assert unset.status_code == 200
+    assert db.tabs["labels"][-1]["confidence"] == ""
+    assert client.get("/labeling/sessions/a1").json()["saved"]["labels"][0]["confidence"] == ""
+    bad = client.post("/labeling/sessions/a1/save", json={"labels": [{**label, "confidence": "skipped"}]})
+    assert bad.status_code == 422
 
 
 def test_rows_belong_to_the_account_not_to_the_name(api):
@@ -480,6 +496,62 @@ def test_export_drops_what_a_person_took_back(api):
     assert c1 not in client.get("/labeling/export?tab=labels").text
 
 
+def test_only_a_lead_downloads_the_whole_teams_labels(api):
+    client, _, app = api
+    app.dependency_overrides[labeling.is_lead] = lambda: False
+    assert client.get("/labeling/export?tab=labels&scope=team").status_code == 403
+    assert client.get("/labeling/export?tab=labels").status_code == 200  # your own rows stay open
+    assert client.get("/labeling/pool").json()["lead"] is False
+
+
+def _blind_round(api, monkeypatch):
+    """Paper a1 shared under NLP, and somchai given it as a blind check by the lead chanya."""
+    from app import main
+
+    monkeypatch.setattr(main.analyses, "get", lambda i: ANALYSIS)
+    monkeypatch.setattr(labeling, "_team", lambda: ["chanya", "somchai"])
+    client, db, app = api
+    app.dependency_overrides[labeling.is_lead] = lambda: True
+    client.put("/labeling/papers/a1/topic", json={"topic": "NLP"})
+    label = {"claim_id": "paperA-0123456789ab#0", "reference_id": "refB-aaaaaaaaaaaa", "evidence": 3}
+    client.post("/labeling/sessions/a1/save", json={"labels": [label]})
+    assert client.put("/labeling/blind", json={"name": "somchai", "analysis_id": "a1"}).status_code == 200
+    return client, db, app
+
+
+def test_a_lead_gives_a_person_a_blind_check_and_can_take_it_back(api, monkeypatch):
+    client, _, app = _blind_round(api, monkeypatch)
+    assert client.get("/labeling/pool").json()["blind_checks"] == [{"name": "somchai", "analysis_id": "a1"}]
+    app.dependency_overrides[labeling.annotator] = lambda: "somchai"
+    app.dependency_overrides[labeling.is_lead] = lambda: False
+    state = client.get("/labeling/pool").json()
+    assert state["blind"] == ["a1"]
+    assert state["blind_checks"] == []  # only a lead sees everyone's
+    assert client.put("/labeling/blind", json={"name": "chanya", "analysis_id": "a1"}).status_code == 403
+    app.dependency_overrides[labeling.is_lead] = lambda: True
+    client.put("/labeling/blind", json={"name": "somchai", "analysis_id": "a1", "on": False})
+    assert client.get("/labeling/pool").json()["blind"] == []
+
+
+def test_a_blind_check_needs_a_team_member_and_a_shared_paper(api, monkeypatch):
+    client, _, _ = _blind_round(api, monkeypatch)
+    assert client.put("/labeling/blind", json={"name": "stranger", "analysis_id": "a1"}).status_code == 422
+    assert client.put("/labeling/blind", json={"name": "somchai", "analysis_id": "nope"}).status_code == 422
+
+
+def test_a_blind_check_hides_other_labelers_and_turns_off_review_and_ask(api, monkeypatch):
+    client, _, app = _blind_round(api, monkeypatch)
+    app.dependency_overrides[labeling.annotator] = lambda: "somchai"
+    session = client.get("/labeling/sessions/a1").json()
+    assert session["blind"] is True
+    assert session["others"] == {}  # chanya's label exists, but is not even named
+    review = client.post("/labeling/sessions/a1/review", json={"claim_id": "paperA-0123456789ab#0"})
+    assert review.status_code == 403
+    assert client.post("/labeling/sessions/a1/ask", json={"question": "What does it say?"}).status_code == 403
+    app.dependency_overrides[labeling.annotator] = lambda: "nuttanon"  # not on a blind check
+    assert client.get("/labeling/sessions/a1").json()["others"] != {}
+
+
 def test_a_person_gets_a_topic_and_it_can_be_taken_back(api):
     client, db, _ = api
     assert client.put("/labeling/people", json={"name": "chanya", "topic": "NLP"}).status_code == 200
@@ -703,6 +775,8 @@ def test_a_doi_keeps_its_own_parentheses_and_never_ends_in_a_backslash():
     assert scopus.doi_in("10.1002/(SICI)1097-4571(199806)") == "10.1002/(SICI)1097-4571(199806)"
     assert scopus.doi_in(f"see ({wiley[:31]}).") == "10.1002/(SICI)1097-4571(199806)"
     assert scopus.doi_in("(doi 10.1145/3784828.3785017)") == "10.1145/3784828.3785017"
+    assert scopus.doi_in(f"see {wiley}.") == wiley  # "<" and ">" are part of it
+    assert scopus.doi_in("<https://doi.org/10.1145/3784828.3785017>") == "10.1145/3784828.3785017"
     # A backslash would escape the closing quote of DOI("...") and Scopus would refuse the query.
     assert scopus.build_query("HPC", "10.1145/x\\", 2020) == 'DOI("10.1145/x")'
 
@@ -1903,3 +1977,239 @@ def test_an_agent_cannot_read_labels_of_an_unsaved_claim_or_a_claim_that_is_not_
 
     assert unsaved.value.status_code == 409
     assert missing.value.status_code == 404
+
+
+# Gaps in the router: the status line, the team list, odd pool rows, search errors and failed streams
+
+
+def test_status_says_who_is_labeling_and_what_is_set_up(api, monkeypatch):
+    from app import auth
+
+    client, _, _ = api
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(labeling.config, "SCOPUS_API_KEY", "")
+    assert client.get("/labeling/status").json() == {
+        "annotator": "chanya",
+        "configured": True,
+        "scopus": False,
+    }
+
+
+def test_a_verdict_with_no_source_file_adds_no_reference_or_passage():
+    verdicts = [{"cited": "Ref B", "evidence": []}]
+    analysis = {**ANALYSIS, "claims": [{"claim": "Y is fast.", "verdicts": verdicts}]}
+    built = labeling.build_session(analysis)
+    assert built["references"] == [] and built["claims"][0]["candidates"] == []
+
+
+def _accounts(list_users):
+    return SimpleNamespace(auth=SimpleNamespace(admin=SimpleNamespace(list_users=list_users)))
+
+
+def test_team_is_every_account_by_its_name_or_the_start_of_its_email(monkeypatch):
+    from app import auth, store
+
+    named = SimpleNamespace(user_metadata={"full_name": " Somchai "}, email="s@example.com")
+    unnamed = SimpleNamespace(user_metadata=None, email="chanya@example.com")
+    nameless = SimpleNamespace(user_metadata={}, email=None)
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(store, "_supabase", lambda: _accounts(lambda: [named, unnamed, nameless]))
+    assert labeling._team() == ["Somchai", "chanya"]
+
+
+def test_team_is_empty_without_login_or_when_supabase_cannot_list(monkeypatch):
+    from app import auth, store
+
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: False)
+    assert labeling._team() == []
+
+    def refuse():
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(store, "_supabase", lambda: _accounts(refuse))
+    assert labeling._team() == []
+
+
+def test_pool_leaves_out_a_paper_that_is_gone_and_a_finished_one_with_no_claims(api, monkeypatch):
+    from app import main
+
+    client, _, _ = api
+    empty = {
+        "id": "empty",
+        "paper": "x",
+        "status": "done",
+        "claims": [],
+        "file": "data/papers/e-0123456789ab.pdf",
+    }
+    monkeypatch.setattr(main.analyses, "get", lambda i: {"empty": empty}.get(i))
+    for analysis_id in ("gone", "empty"):
+        pool.assign("chanya", "paper", analysis_id, "CV", "x")
+    assert client.get("/labeling/pool").json()["papers"] == []
+
+
+def test_sharing_a_paper_by_doi_looks_up_its_venue_rank(api, monkeypatch):
+    client, db, app = api
+    app.dependency_overrides[labeling.mine_analysis] = lambda: {**ANALYSIS, "id": "d1", "paper": "10.1234/x"}
+    monkeypatch.setattr(scopus, "rank_of", lambda doi: {"system": "CORE", "value": "B", "year": 2026})
+    assert client.put("/labeling/papers/d1/topic", json={"topic": "NLP"}).status_code == 200
+    assert db.tabs["assignments"][-1]["venue_rank"] == "B"
+
+
+@pytest.mark.parametrize(
+    ("error", "detail"),
+    [
+        (requests.HTTPError("HTTP 500", response=ScopusReply(status=500)), "Scopus answered HTTP 500"),
+        (requests.HTTPError("HTTP ?"), "Scopus answered HTTP 0"),
+        (requests.ConnectionError("refused"), "Scopus could not be reached"),
+    ],
+)
+def test_scopus_search_errors_become_a_502(api, monkeypatch, error, detail):
+    client, _, _ = api
+
+    def search(*args):
+        raise error
+
+    monkeypatch.setattr(scopus, "search", search)
+    response = client.get("/labeling/scopus/search", params={"topic": "NLP"})
+    assert (response.status_code, response.json()["detail"]) == (502, detail)
+
+
+def test_a_passage_on_a_claim_of_another_paper_is_refused(api):
+    client, _, _ = api
+    stray = {
+        "claim_id": "other-0123456789ab#0",
+        "reference_id": REF_B,
+        "origin": "retrieved",
+        "status": "relevant",
+    }
+    response = client.post("/labeling/sessions/a1/save", json={"candidates": [stray]})
+    assert response.status_code == 422 and "unknown claim" in response.json()["detail"]
+
+
+def test_progress_has_no_next_claim_once_every_claim_is_saved(api, agent):
+    client, _, _ = api
+    claims = [{"claim_id": c, "origin": "extracted", "status": "accepted", "claim": "x"} for c in (C0, C1)]
+    client.post("/labeling/sessions/a1/save", json={"claims": claims})
+    done = asyncio.run(labeling.progress_for("a1", None))
+    assert (done["saved"], done["next_unsaved"]) == (2, None)
+
+
+def test_a_review_that_breaks_partway_ends_in_an_error_event_and_is_not_kept(api, monkeypatch):
+    client, db, _ = api
+    _save_claim(client)
+
+    async def broken(claim, saved):
+        raise RuntimeError("judge exploded")
+        yield  # makes this an async generator
+
+    monkeypatch.setattr(labeling.review, "review", broken)
+    events = _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
+    assert events == [{"type": "error", "message": "the review stopped partway; try again"}]
+    assert db.tabs["reviews"] == []
+
+
+def test_ask_without_a_reference_reads_the_paper_under_review(api, monkeypatch):
+    from app import assistant
+
+    client, _, _ = api
+    opened = []
+
+    def prepare(pdf):
+        opened.append(pdf)
+        return {"status": "ok", "path": pdf}
+
+    async def answer(question, paper=None, papers=None, passages=None):
+        yield {"type": "done", "statements": 0}
+
+    monkeypatch.setattr(verify, "prepare_source", prepare)
+    monkeypatch.setattr(assistant, "answer", answer)
+    _events(client.post("/labeling/sessions/a1/ask", json={"question": "What is the aim?"}))
+    assert opened == [ANALYSIS["file"]]
+
+
+def test_ask_says_so_when_the_paper_cannot_be_read(api, monkeypatch):
+    client, _, _ = api
+    monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "failed"})
+    events = _events(client.post("/labeling/sessions/a1/ask", json={"question": "q"}))
+    assert events == [{"type": "error", "message": "this paper could not be read"}]
+
+
+def test_ask_that_breaks_partway_ends_in_an_error_event(api, monkeypatch):
+    from app import assistant
+
+    client, _, _ = api
+
+    async def answer(question, paper=None, papers=None, passages=None):
+        yield {"type": "statement", "text": "one"}
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(verify, "prepare_source", lambda pdf: {"status": "ok", "path": pdf})
+    monkeypatch.setattr(assistant, "answer", answer)
+    events = _events(client.post("/labeling/sessions/a1/ask", json={"question": "q"}))
+    assert events[-1] == {"type": "error", "message": "the answer stopped partway; try again"}
+
+
+def test_papers_without_a_file_or_a_row_have_no_paper_id(monkeypatch):
+    from app import main
+
+    rows = {"a": {"id": "a", "file": "data/papers/p-0123456789ab.pdf"}, "b": {"id": "b"}}
+    monkeypatch.setattr(main, "lookup", lambda i: rows.get(i))
+    assert labeling._by_paper({"a": 1, "b": 2, "gone": 3}) == {"p-0123456789ab": 1}
+
+
+def test_export_of_an_unknown_tab_is_a_404(api):
+    client, _, _ = api
+    assert client.get("/labeling/export", params={"tab": "nope"}).status_code == 404
+
+
+# Gaps in scopus.py
+
+
+def test_ranking_one_paper_needs_a_scopus_key(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "")
+    with pytest.raises(scopus.NotConfigured):
+        scopus.rank_of("10.1/x")
+
+
+def test_a_doi_with_a_filter_separator_is_not_asked_of_openalex(monkeypatch):
+    from app.pipeline import indexes
+
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: pytest.fail("OpenAlex was asked"))
+    assert scopus._openalex_entries("10.1/a,b") == []
+    assert scopus.openalex_details(["10.1/a,b", "10.1/c|d"]) == {}
+
+
+def test_a_failing_openalex_gives_no_record_for_a_doi_scopus_lacks(monkeypatch):
+    from app.pipeline import indexes
+
+    def down(params):
+        raise indexes._IndexError("HTTP 503")
+
+    monkeypatch.setattr(indexes, "openalex_works", down)
+    assert scopus._openalex_entries("10.1/x") == []
+
+
+def test_a_latest_year_with_no_subject_percentile_has_no_quartile():
+    assert scopus._citescore_quartile(serial("1111-1111", None, {"2025": ("Complete", [])})) is None
+
+
+def test_scopus_is_asked_again_after_a_server_error(monkeypatch):
+    monkeypatch.setattr(scopus.config, "SCOPUS_API_KEY", "k")
+    replies = [ScopusReply(status=503), ScopusReply()]
+    monkeypatch.setattr(requests, "get", lambda *a, **k: replies.pop(0))
+    assert scopus._ask_scopus({"query": "x"}) == SCOPUS_REPLY
+    assert replies == []
+
+
+def test_an_account_off_the_team_list_cannot_use_the_labeler(api, monkeypatch):
+    # annotator reads the token itself, so the router must also run current_user's team check.
+    _, _, app = api
+    del app.dependency_overrides[labeling.current_user]
+    monkeypatch.setattr(auth, "_supabase_configured", lambda: True)
+    monkeypatch.setattr(auth, "_user_for", lambda token: ("user-x", "stranger@example.com"))
+    monkeypatch.setattr(config, "TEAM_EMAILS", frozenset({"chanya@example.com"}))
+
+    response = TestClient(app).get("/labeling/status", headers={"authorization": "Bearer token"})
+
+    assert response.status_code == 403

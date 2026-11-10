@@ -230,6 +230,8 @@ function Question({
       void runCommand(question, controller.current.signal)
       return
     }
+    // The answer is never null once a question is asked; the check only satisfies the type of setAnswer.
+    /* v8 ignore next -- @preserve */
     const update = (change: (a: Answer) => Answer) => setAnswer((a) => (a ? change(a) : a))
     askLabeling(
       analysisId,
@@ -365,7 +367,10 @@ function AnswerView({ answer, reading }: { answer: Answer; reading: string }) {
           ))}
         </ol>
       )}
+      {/* A view always comes with its command; the fallback only satisfies the type. */}
+      {/* v8 ignore start -- @preserve */}
       {answer.view && <CommandResult view={answer.view} command={answer.command ?? 'command'} />}
+      {/* v8 ignore stop -- @preserve */}
       {answer.note && <p className="text-xs leading-5 text-ink-muted">{answer.note}</p>}
       {answer.status === 'done' && statements.length === 0 && !answer.note && !answer.view && <p className="text-ink-muted">No passage in it answers that.</p>}
       {answer.status === 'failed' && (

@@ -290,25 +290,13 @@ Then open http://localhost:6006. Traces are kept in the `phoenix-data` volume.
 
 ## Deploy
 
-`.github/workflows/deploy-gateway.yml` builds and deploys only the gateway to Google Cloud Run,
-on every push to `main` that touches `backend/**`. It refuses to deploy when the `REDIS_URL`
-repository secret is empty, because a gateway with no Redis would answer every `POST /analyses`
-with `503`.
-
-The worker that drains the queue is not part of that deploy. It runs on `ss-core`, as the
-compose service `worker` in the compose project `secretsource-worker`, kept up and scaled by
-hand.
+The gateway runs on the mini PC as a compose service. Build its image, load it there, and run
+`docker compose up -d --no-deps --force-recreate gateway web`. The workers run on the PC as the
+compose service `worker`, scaled by hand, with `REDIS_URL` pointing at the mini PC's Redis.
 
 The gateway and the worker must see the same `data/papers`: the gateway saves uploads there and
-serves pages and figures from it, and the worker reads the PDFs and writes the figures. Both mount
-the Cloud Storage bucket `gcp-edu-471706-papers`:
-
-- Cloud Run: a `cloud-storage` volume mounted at `/app/data/papers` (`deploy/cloudrun.sh` adds it;
-  `gcloud run deploy` in `deploy-gateway.yml` keeps it).
-- ss-core: `gcsfuse` mounts the bucket at `PAPERS_HOST_DIR` (`/var/lib/docker/app-data/papers`)
-  from `/etc/fstab`, with the service-account key in `backend/secrets/service-auth.json` and
-  `allow_other,implicit_dirs`. A systemd drop-in (`RequiresMountsFor=`) starts Docker only after
-  the mount, so the worker never binds the empty folder underneath.
+serves pages and figures from it, and the worker reads the PDFs and writes the figures. The folder
+lives on the mini PC and is shared over NFS, and the PC's workers mount that share.
 
 Without the shared folder, every uploaded PDF ends with "no paper found matching the title".
 
@@ -591,8 +579,7 @@ newest paper first:
 
 Questions about the caller's papers, answered as short statements that the judge checks before
 they count (`app/assistant.py`). A chat is an ADK session (`app/chats.py`), kept in Postgres when
-`SESSION_DB_URL` is set and in memory otherwise, where a restart loses it. Cloud Run needs the
-`SESSION_DB_URL` repo secret for that reason. Another user's chat is a `404`.
+`SESSION_DB_URL` is set and in memory otherwise, where a restart loses it. Another user's chat is a `404`.
 
 | Route | Does |
 | --- | --- |

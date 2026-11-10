@@ -42,6 +42,13 @@ function useElapsed(running: boolean) {
   return seconds
 }
 
+/** What a screen reader hears about the run. */
+function runStatus(running: boolean, stopped: boolean, replied: boolean) {
+  if (running) return 'Working'
+  if (stopped) return 'Stopped'
+  return replied ? 'Done. The reply is below.' : ''
+}
+
 export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onConnectAgent?: () => void }) {
   const [pointing, setPointing] = useState<Pointing | null>(null)
   const agent = useScreenAgent(actions, setPointing)
@@ -52,7 +59,7 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
   const end = useRef<HTMLDivElement>(null)
   const now = placeNow(actions.screen)
   // A run that took the person somewhere else offers the way back once it ends.
-  const moved = !agent.running && start && (start.screen !== now.screen || start.analysis !== now.analysis)
+  const wayBack = !agent.running && start && (start.screen !== now.screen || start.analysis !== now.analysis) ? start : null
   const last = agent.lines.at(-1)
 
   useEffect(() => {
@@ -67,17 +74,16 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
     void agent.send(message.trim())
   }
 
-  const goBack = () => {
-    if (!start) return
-    if (start.analysis && actions.openPaper) actions.openPaper(start.analysis)
-    else actions.openScreen(start.screen)
+  const goBack = (place: Place) => {
+    if (place.analysis && actions.openPaper) actions.openPaper(place.analysis)
+    else actions.openScreen(place.screen)
     setStart(null)
   }
 
   return (
     <>
       <p role="status" className="sr-only">
-        {agent.running ? 'Working' : stopped ? 'Stopped' : last?.kind === 'agent' || last?.kind === 'error' ? 'Done. The reply is below.' : ''}
+        {runStatus(agent.running, stopped, last?.kind === 'agent' || last?.kind === 'error')}
       </p>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
         {agent.lines.length === 0 && (
@@ -116,10 +122,10 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
           </p>
         )}
         {stopped && !agent.running && <p className="text-[13px] leading-5 text-ink">Stopped. Nothing was changed.</p>}
-        {moved && (
+        {wayBack && (
           <button
             type="button"
-            onClick={goBack}
+            onClick={() => goBack(wayBack)}
             className="flex min-h-9 items-center gap-1.5 self-start rounded-lg px-2 text-[13px] font-medium text-accent hover:bg-accent-soft"
           >
             <ChevronLeft className="size-4" aria-hidden="true" />

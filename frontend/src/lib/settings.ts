@@ -105,7 +105,9 @@ export function applyTheme(theme: ThemeChoice = settings.theme): void {
  * Settings modal lets it be cleared. Given the hour, it says the part of the day that is. */
 export function greeting(displayName: string, hour?: number): string {
   const name = displayName.trim()
-  const part = hour === undefined || hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+  let part = 'evening'
+  if (hour === undefined || hour < 12) part = 'morning'
+  else if (hour < 18) part = 'afternoon'
   return name ? `Good ${part}, ${name}` : `Good ${part}`
 }
 

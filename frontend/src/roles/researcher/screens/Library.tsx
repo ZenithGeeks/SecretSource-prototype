@@ -6,13 +6,14 @@
  */
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronRight, MoreVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { ChevronRight, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { ToolbarActions } from '../../../components/AppShell'
 import { Button, Empty, FadeIn, IconButton, Input, LoadingScreen, MenuItem } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
-import type { ClaimStanding, ClaimTally, Project } from '../../../lib/researcher'
+import type { ClaimStanding, ClaimTally, LibraryPaper, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
@@ -159,6 +160,8 @@ function ProjectCard({
     try {
       await onRename(project.id, name)
       setRenaming(false)
+    } catch {
+      toast.error('Could not rename the project. Try again.')
     } finally {
       setSaving(false)
     }
@@ -172,12 +175,16 @@ function ProjectCard({
 
       <div className="pointer-events-none flex flex-col gap-3">
         {renaming ? (
+          // The invisible "open project" button (above, position: absolute) paints over any
+          // in-flow sibling here regardless of DOM order, so a click on a button in this form
+          // never reached it — only Enter (a keyboard submit, no hit-testing) worked. Rather
+          // than fight the stacking, there is just the input: Enter saves, Escape cancels.
           <form
             onSubmit={(event) => {
               event.preventDefault()
               void submitRename()
             }}
-            className="pointer-events-auto flex items-center gap-1.5"
+            className="pointer-events-auto"
           >
             <input
               autoFocus
@@ -185,19 +192,9 @@ function ProjectCard({
               disabled={saving}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => event.key === 'Escape' && cancelRename()}
-              className="w-full min-w-0 flex-1 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink outline-none disabled:opacity-60"
+              onBlur={cancelRename}
+              className="w-full min-w-0 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink outline-none disabled:opacity-60"
             />
-            <button
-              type="submit"
-              disabled={saving}
-              aria-label="Save name"
-              className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50"
-            >
-              <Check className="size-4" />
-            </button>
-            <IconButton onClick={cancelRename} disabled={saving} aria-label="Cancel renaming" className="size-7 lg:size-7">
-              <X className="size-4" />
-            </IconButton>
           </form>
         ) : (
           <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
@@ -396,6 +393,14 @@ function AddPapersDialog({
   )
 }
 
+/** Whether a paper shows under a filter segment: "All", "Unverified", "Conflicts" or a cluster name. */
+function inFilter(paper: LibraryPaper, filter: string) {
+  if (filter === 'All') return true
+  if (filter === 'Unverified') return paper.backed === null
+  if (filter === 'Conflicts') return (paper.contradicted ?? 0) > 0
+  return paper.cluster === filter
+}
+
 function ProjectDetail({
   projectId,
   projectName,
@@ -426,12 +431,11 @@ function ProjectDetail({
 
   // The filter keys are the gateway's ("All", "Unverified", cluster names); the words are ours.
   // "Has conflicts" sits right after "All", as designed.
-  const countFor = (key: string) =>
-    key === 'All'
-      ? library.papers.length
-      : key === 'Unverified'
-        ? notAnalyzed
-        : library.papers.filter((p) => p.cluster === key).length
+  const countFor = (key: string) => {
+    if (key === 'All') return library.papers.length
+    if (key === 'Unverified') return notAnalyzed
+    return library.papers.filter((p) => p.cluster === key).length
+  }
   const [first, ...others] = library.clusters
   const segments = [
     ...(first === undefined ? [] : [{ key: first, label: first, n: countFor(first) }]),
@@ -441,20 +445,8 @@ function ProjectDetail({
 
   const q = query.trim().toLowerCase()
   const shown = library.papers
-    .filter((p) =>
-      filter === 'All'
-        ? true
-        : filter === 'Unverified'
-          ? p.backed === null
-          : filter === 'Conflicts'
-            ? (p.contradicted ?? 0) > 0
-            : p.cluster === filter,
-    )
-    .filter((p) =>
-      q === ''
-        ? true
-        : `${p.title} ${p.cite} ${p.cluster} ${p.linked.join(' ')}`.toLowerCase().includes(q),
-    )
+    .filter((p) => inFilter(p, filter))
+    .filter((p) => q === '' || `${p.title} ${p.cite} ${p.cluster} ${p.linked.join(' ')}`.toLowerCase().includes(q))
 
   const items: LibraryAddItem[] = [
     ...(unsorted
@@ -634,8 +626,14 @@ export function Library({
           <NewProjectDialog
             onCancel={() => setShowNew(false)}
             onCreate={async (name, description) => {
-              setShowNew(false)
-              setOpenId(await createProject(name, description))
+              try {
+                const id = await createProject(name, description)
+                setShowNew(false)
+                setOpenId(id)
+              } catch {
+                // The dialog stays open so the typed name is not lost.
+                toast.error('Could not create the project. Try again.')
+              }
             }}
           />
         )}

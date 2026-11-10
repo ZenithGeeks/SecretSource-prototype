@@ -22,11 +22,12 @@ import { AskButton } from './AskButton'
 import type { AskAbout } from './AssistantPanel'
 import { AssistantPanel } from './AssistantPanel'
 
-type AssistantPanelProps = ComponentProps<typeof AssistantPanel>
 import { DoIt } from './DoIt'
 import { PageViewer, type Target } from './PageViewer'
 import { SourceDialog } from './SourceDialog'
 import { useAgentConnection } from './useAgentConnection'
+
+type AssistantPanelProps = ComponentProps<typeof AssistantPanel>
 
 /** A graph node the reader selected, which a question can be about. */
 export type AskNode = { id: string; label: string }
@@ -84,7 +85,7 @@ export function useAsk({
   }
   // The paper or node whose chip the reader removed: questions about it go to the whole
   // library. Opening a different paper or node brings the chip back.
-  const [cleared, setCleared] = useState<string | null>(null)
+  const [cleared, setCleared] = useState<string>()
   const [source, setSource] = useState<Target | null>(null)
   const { data: analyses = [] } = useAnalyses()
   const agent = useAgentConnection(actions)
@@ -135,7 +136,7 @@ export function useAsk({
       titles={titles}
       papers={papers}
       canNarrow={canNarrow}
-      onClearAbout={() => setCleared(asked ?? askedNode?.id ?? null)}
+      onClearAbout={() => setCleared(asked ?? askedNode?.id)}
       onClose={() => setOpenSaved(false)}
       onShowSource={(target) => void showSource(target)}
       doIt={actions && <DoIt actions={actions} onConnectAgent={agent.bridge.connected ? undefined : agent.openConnect} />}
