@@ -130,11 +130,14 @@ jobs:
       # encoder as well and does exercise Store.search, including an empty paper list. It imports
       # the real store module, so ColBERT needs pypdf (the backend venv does not otherwise).
       # Each service runs from its own folder, because both have a server.py and a store.py.
+      # The pipeline, labeling, researcher and gateway modules are at 100% statement and branch
+      # coverage (#872); the gate keeps new code there. Other modules are not measured yet.
       - name: Test
         env:
           REDIS_URL: redis://127.0.0.1:1/0
         run: |
-          "$VENV/bin/python" -m pytest -q
+          "$VENV/bin/python" -m pytest -q --cov=app.pipeline --cov=app.labeling --cov=app.researcher \
+            --cov=app.main --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=100
           (cd ../services/colbert && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
           (cd ../services/colpali && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
 
