@@ -8,7 +8,7 @@ import { FeedbackDialog } from '../src/roles/teacher/screens/FeedbackDialog'
 const counts = { refutes: 0, insufficient: 0, supports: 0, unchecked: 0, uncited: 0 }
 
 describe('Essay Check action placement', () => {
-  it('shows the PDF, Copy All, and CSV actions in the teacher summary header', () => {
+  it('keeps analysis export actions out of the teacher summary header', () => {
     render(
       <ResultsSummary
         claims={[]}
@@ -22,9 +22,9 @@ describe('Essay Check action placement', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'Copy all' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'CSV' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
   })
 
   it('keeps feedback copy, report export, and send actions together in the bottom row', () => {

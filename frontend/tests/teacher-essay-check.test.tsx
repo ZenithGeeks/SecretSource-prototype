@@ -169,7 +169,7 @@ describe('Teacher essay check', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Back/ }))
     expect(onBack).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'CSV' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Download CSV' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Human final decision for Source paper' })).toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: 'Human final decision for Source paper' }), { target: { value: 'contradicts' } })
     expect(mocks.updateReview).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'contradicts', reviewId: 'claim-0:10.1234/source:0' }))

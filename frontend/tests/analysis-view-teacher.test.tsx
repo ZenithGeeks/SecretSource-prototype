@@ -57,6 +57,6 @@ describe('teacher presentation of the shared analysis workflow', () => {
     expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'PDF' })).not.toBeInTheDocument()
-    expect(screen.getByText(/source backs it/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1 source backs it' })).toBeInTheDocument()
   })
 })
