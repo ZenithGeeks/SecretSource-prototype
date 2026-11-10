@@ -313,3 +313,34 @@ def test_a_doi_is_quoted_in_the_lookup_paths(monkeypatch):
         "DOI:10.1000/a",
         "DOI:10.1002/%28SICI%291097-4571%28199806%2949%3A8%3C693%3A%3AAID-ASI4%3E3.0.CO%3B2-0",
     ]
+
+
+ARXIV_FEED = """<feed xmlns="http://www.w3.org/2005/Atom">
+<entry><id>http://arxiv.org/abs/2112.11446v2</id>
+<title>Scaling Language Models: Methods, Analysis
+  &amp; Insights from Training Gopher</title></entry>
+<entry><id>http://arxiv.org/abs/2204.02311v5</id>
+<title>PaLM: Scaling Language Modeling with Pathways</title></entry>
+</feed>"""
+
+
+def test_arxiv_titles_asks_once_for_all_the_ids(web):
+    replies, asked = web
+    replies.append(Reply(text=ARXIV_FEED))
+
+    titles = sources.arxiv_titles(["2112.11446", "2204.02311v3"])
+
+    assert titles == {
+        "2112.11446": "Scaling Language Models: Methods, Analysis & Insights from Training Gopher",
+        "2204.02311v3": "PaLM: Scaling Language Modeling with Pathways",
+    }
+    assert asked == [sources.ARXIV_API]
+
+
+def test_arxiv_titles_is_empty_when_arxiv_does_not_answer(web):
+    replies, asked = web
+    replies.append(requests.ConnectionError("down"))
+
+    assert sources.arxiv_titles(["2112.11446"]) == {}
+    assert sources.arxiv_titles([]) == {}
+    assert len(asked) == 1

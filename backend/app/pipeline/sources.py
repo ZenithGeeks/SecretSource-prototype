@@ -301,6 +301,38 @@ def _arxiv_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     raise Unresolvable(f"arXiv knows no paper by that title: {title}")
 
 
+def arxiv_titles(arxiv_ids: list[str]) -> dict[str, str]:
+    """{id as given: title} from arXiv, in one request for all the ids.
+
+    Empty when arXiv does not answer. The title only names the reference for a reader;
+    the lookup goes by the id, so the analysis goes on without it.
+    """
+    import xml.etree.ElementTree as ET
+
+    import requests
+
+    if not arxiv_ids:
+        return {}
+    given = {ARXIV_VERSION.sub("", arxiv_id): arxiv_id for arxiv_id in arxiv_ids}
+    try:
+        response = requests.get(
+            ARXIV_API,
+            params={"id_list": ",".join(given), "max_results": len(given)},
+            headers=USER_AGENT,
+            timeout=60,
+        )
+        response.raise_for_status()
+        feed = ET.fromstring(response.text)
+    except (requests.RequestException, ET.ParseError):
+        return {}
+    titles = {}
+    for entry in feed.iter(f"{ATOM}entry"):
+        arxiv_id = ARXIV_VERSION.sub("", (entry.findtext(f"{ATOM}id") or "").split("/abs/")[-1])
+        if arxiv_id in given:
+            titles[given[arxiv_id]] = " ".join((entry.findtext(f"{ATOM}title") or "").split())
+    return titles
+
+
 def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     found = _semantic_scholar("/search", {"query": title, "fields": S2_FIELDS, "limit": 5})
     others = []

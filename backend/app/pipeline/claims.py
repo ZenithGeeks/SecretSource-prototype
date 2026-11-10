@@ -23,7 +23,7 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import local_pdf, lookup_key, tool_error
+from app.pipeline.sources import arxiv_titles, local_pdf, lookup_key, tool_error
 from app.text import english_stopwords, split_sentences
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
@@ -863,6 +863,18 @@ def _references_by_id(tei) -> tuple[dict, int]:
     return references, dropped
 
 
+def _fill_arxiv_titles(references: dict) -> None:
+    """Give a title to each reference that has an arXiv id but no title.
+
+    With dozens of authors (Gopher, PaLM) GROBID runs the title into a note and leaves the
+    title empty. The id still finds the PDF, but a reader saw only "2112.11446" (#840).
+    """
+    untitled = [ref for ref in references.values() if ref["arxiv"] and not ref["title"]]
+    titles = arxiv_titles([ref["arxiv"] for ref in untitled])
+    for ref in untitled:
+        ref["title"] = titles.get(ref["arxiv"], "")
+
+
 def _marker_text(ref) -> str:
     """A citation marker as printed, without the punctuation of a list: "[5," is "5"."""
     return "".join(ref.itertext()).strip().strip("[](),;").strip()
@@ -1414,6 +1426,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         tei = _grobid_pdf("processFulltextDocument", pdf_path, coordinates=("ref", "head"))
         _link_author_year_citations(tei)
         references, dropped = _references_by_id(tei)
+        _fill_arxiv_titles(references)
         markers = _citation_markers(tei, references)
         paper_text = _body_text(tei)
         if _cited_claim_extractor is None:
