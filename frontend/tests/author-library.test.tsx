@@ -224,6 +224,9 @@ describe('Author Library', () => {
     expect(checkedAtLabel(new Date(2026, 10, 8, 14, 48).toISOString(), now)).toEqual({ text: 'checked 12 min ago', title: 'checked 14:48, 8 Nov' })
     expect(checkedAtLabel(new Date(2026, 10, 8, 13, 5).toISOString(), now)).toEqual({ text: 'checked 13:05, 8 Nov', title: 'checked 2 h ago' })
     expect(checkedAtLabel(new Date(2025, 0, 2, 9, 7).toISOString(), now).text).toBe('checked 09:07, 2 Jan 2025')
+    // a time that does not parse is no "checked NaN:NaN, NaN undefined"
+    expect(checkedAtLabel('not a date', now)).toEqual({ text: 'not checked yet', title: '' })
+    expect(checkedAtLabel('', now).text).not.toMatch(/NaN|undefined/)
   })
 
   test('the check history sits below the drafts at full width, not in a column beside them (#721)', async () => {

@@ -131,10 +131,12 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 /**
  * When a check in the history finished, so several checks of one version tell apart: "checked
  * 12 min ago" within the hour, otherwise the local time, "checked 13:27, 8 Nov" (with the
- * year when it is not this one). `title` is the other form, for a tooltip.
+ * year when it is not this one). `title` is the other form, for a tooltip. A time that does
+ * not parse reads "not checked yet", as timeAgo's checkedLabel does, not "checked NaN:NaN".
  */
 export function checkedAtLabel(iso: string, now = Date.now()): { text: string; title: string } {
   const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return { text: checkedLabel(null), title: '' }
   const pad = (n: number) => String(n).padStart(2, '0')
   const year = at.getFullYear() === new Date(now).getFullYear() ? '' : ` ${at.getFullYear()}`
   const exact = `checked ${pad(at.getHours())}:${pad(at.getMinutes())}, ${at.getDate()} ${MONTHS[at.getMonth()]}${year}`
