@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button, Card, MenuItem, TextButton } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
+import { LINK } from '../hover'
 
 function FileInput({
   accept,
@@ -163,10 +164,10 @@ export function NoDraftsCard({
         <Button onClick={onUpload} data-ask-target={askTarget({ kind: 'action', id: 'upload' })}>
           Upload .tex or .zip
         </Button>
-        <TextButton onClick={onWrite} disabled={writing} className="text-sm" data-ask-target={askTarget({ kind: 'action', id: 'write-draft' })}>
+        <TextButton onClick={onWrite} disabled={writing} className={`text-sm ${LINK}`} data-ask-target={askTarget({ kind: 'action', id: 'write-draft' })}>
           Write a draft
         </TextButton>
-        <TextButton onClick={onAddBibliography} className="text-sm" data-ask-target={askTarget({ kind: 'action', id: 'add-bibliography' })}>
+        <TextButton onClick={onAddBibliography} className={`text-sm ${LINK}`} data-ask-target={askTarget({ kind: 'action', id: 'add-bibliography' })}>
           Add bibliography
         </TextButton>
       </div>

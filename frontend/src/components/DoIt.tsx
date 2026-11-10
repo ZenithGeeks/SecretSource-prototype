@@ -49,13 +49,37 @@ function runStatus(running: boolean, stopped: boolean, replied: boolean) {
   return replied ? 'Done. The reply is below.' : ''
 }
 
-export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onConnectAgent?: () => void }) {
+export function DoIt({
+  actions,
+  onConnectAgent,
+  prefill,
+  onPrefilled,
+}: {
+  actions: ScreenActions
+  onConnectAgent?: () => void
+  /** A request a screen typed in for the person to read and send (useAsk's askToDo); a new `n` types it again. */
+  prefill?: { text: string; n: number }
+  /** The prefill is in the field: the owner drops it, so a later mount does not type it again. */
+  onPrefilled?: () => void
+}) {
   const [pointing, setPointing] = useState<Pointing | null>(null)
   const agent = useScreenAgent(actions, setPointing)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(prefill?.text ?? '')
+  const [seenPrefill, setSeenPrefill] = useState(prefill?.n)
+  if (prefill && seenPrefill !== prefill.n) {
+    setSeenPrefill(prefill.n)
+    setDraft(prefill.text)
+  }
   const [stopped, setStopped] = useState(false)
   const [start, setStart] = useState<Place | null>(null)
   const elapsed = useElapsed(agent.running)
+  const field = useRef<HTMLInputElement>(null)
+  // The person reads what was typed in, then sends it; the field takes the focus for that.
+  useEffect(() => {
+    if (!prefill) return
+    field.current?.focus()
+    onPrefilled?.()
+  }, [prefill, onPrefilled])
   const end = useRef<HTMLDivElement>(null)
   const now = placeNow(actions.screen)
   // A run that took the person somewhere else offers the way back once it ends.
@@ -143,6 +167,7 @@ export function DoIt({ actions, onConnectAgent }: { actions: ScreenActions; onCo
           className="flex items-center gap-2 rounded-xl border border-border-subtle bg-neutral-soft py-1.5 pr-1.5 pl-3"
         >
           <input
+            ref={field}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             disabled={agent.running}

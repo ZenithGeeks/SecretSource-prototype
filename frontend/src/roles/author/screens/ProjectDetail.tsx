@@ -1,8 +1,8 @@
 /**
  * Library → Project detail (Figma 597:4404): a breadcrumb back to the Library, the drafts in
- * the project, and the check history of the selected draft — one row per check run with its
- * counts, a "since vN" box between runs, and "Compare vN with vN-1" that lists what changed
- * citation by citation. "unsorted" shows the drafts in no project and the unsorted sources.
+ * the project, then below them at full width the check history of the selected draft — one
+ * row per check run with when it finished and its counts, a "since vN" box between runs, and
+ * "Compare vN with vN-1" that lists what changed citation by citation. "unsorted" shows the drafts in no project and the unsorted sources.
  */
 
 import { AnimatePresence } from 'framer-motion'
@@ -11,7 +11,7 @@ import { useCallback, useState } from 'react'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
-import { checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
+import { checkedAtLabel, checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
@@ -20,10 +20,12 @@ import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/dr
 import { CardHead, TextLink } from '../components/CardHead'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { DeleteDraftButton, DeleteDraftDialog } from '../components/DeleteDraftButton'
+import { MoveDraftMenu } from '../components/MoveDraft'
 import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { CitationBadge } from '../components/Verdicts'
+import { FOCUS, HIGHLIGHT, LINK } from '../hover'
 
 export const UNSORTED = 'unsorted'
 
@@ -75,6 +77,17 @@ function hasChanges(delta: CheckDelta | null): boolean {
   return Boolean(delta && (delta.addedCitations !== 0 || delta.fixedIssues !== 0 || delta.newIssues !== 0))
 }
 
+/** A history row's time: exact (relative in the tooltip), or relative within the hour. */
+function CheckedAt({ iso }: { iso: string | null }) {
+  if (!iso) return <>{checkedLabel(iso)}</>
+  const { text, title } = checkedAtLabel(iso)
+  return (
+    <time dateTime={iso} title={title}>
+      {text}
+    </time>
+  )
+}
+
 function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: CheckRun[]; onOpenEditor: () => void }) {
   const [comparing, setComparing] = useState<string | null>(null)
   const done = runs.filter((r) => r.status === 'done')
@@ -99,7 +112,7 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
                 <Clock className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-medium text-ink">
-                    v{run.version} · {checkedLabel(run.finishedAt)}
+                    v{run.version} · <CheckedAt iso={run.finishedAt} />
                   </p>
                   <p className="text-xs text-ink-muted">{countsLine(run)}</p>
                 </div>
@@ -162,7 +175,7 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
                 type="button"
                 aria-label={`Delete ${source.title}`}
                 onClick={() => void actions.deleteSource(source.id).catch((error) => onToast(`Could not delete: ${errorMessage(error)}`))}
-                className="rounded text-ink-muted hover:text-refutes"
+                className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
               </button>
@@ -211,9 +224,9 @@ export function ProjectDetail({
       type="button"
       onClick={onBack}
       data-ask-target={askTarget({ kind: 'action', id: 'back-to-library' })}
-      className="flex items-center gap-1.5 self-start text-[13px]"
+      className={`flex items-center gap-1.5 self-start text-[13px] font-medium text-accent ${LINK}`}
     >
-      <span className="font-medium text-accent hover:underline">← Library</span>
+      ← Library
     </button>
   )
 
@@ -258,13 +271,15 @@ export function ProjectDetail({
             New draft
           </Button>
         </header>
-        <div className="grid items-start gap-4 lg:grid-cols-[2fr_3fr]">
+        {/* Drafts, then their check history at full width (#721): side by side the history was squeezed. */}
+        <div className="flex flex-col gap-4">
           <DraftList
             drafts={unfiled}
             selected={unfiledCurrent?.id ?? null}
             onSelect={setSelectedDraft}
             onOpenEditor={onOpenEditor}
             onDelete={setDeletingDraft}
+            onNotice={setToast}
             title="Drafts in no project"
           />
           {unfiledCurrent ? (
@@ -342,13 +357,15 @@ export function ProjectDetail({
         </div>
       </header>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[2fr_3fr]">
+      {/* Drafts, then their check history at full width (#721): side by side the history was squeezed. */}
+      <div className="flex flex-col gap-4">
         <DraftList
           drafts={detail.draftList}
           selected={current?.id ?? null}
           onSelect={setSelectedDraft}
           onOpenEditor={onOpenEditor}
           onDelete={setDeletingDraft}
+          onNotice={setToast}
           title="Drafts in this project"
         />
         {current ? (
@@ -421,6 +438,7 @@ function DraftList({
   onSelect,
   onOpenEditor,
   onDelete,
+  onNotice,
   title,
 }: {
   drafts: Draft[]
@@ -429,6 +447,8 @@ function DraftList({
   onOpenEditor: (id: string) => void
   /** The bin on each row: asks first. */
   onDelete: (draft: Draft) => void
+  /** How a "Move to…" went. */
+  onNotice: (message: string) => void
   title: string
 }) {
   return (
@@ -446,7 +466,7 @@ function DraftList({
                 onDoubleClick={() => onOpenEditor(draft.id)}
                 aria-current={draft.id === selected ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
-                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', draft.id === selected && 'bg-accent-soft/60')}
+                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', FOCUS, draft.id === selected && 'bg-accent-soft/60')}
               >
                 <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -459,6 +479,7 @@ function DraftList({
                   {statusLabel(draft.status)}
                 </span>
               </button>
+              <MoveDraftMenu draft={draft} onNotice={onNotice} />
               <DeleteDraftButton draft={draft} onDelete={onDelete} />
             </li>
           ))}

@@ -13,6 +13,7 @@ import { statusLabel, statusTone } from '../../../lib/verdict'
 import type { Draft } from '../../../types/draftCheck'
 import { CardHead, TextLink } from './CardHead'
 import { DeleteDraftButton } from './DeleteDraftButton'
+import { FOCUS } from '../hover'
 
 export function YourDraftsCard({
   drafts,
@@ -60,6 +61,7 @@ export function YourDraftsCard({
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn(
                   'flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40',
+                  FOCUS,
                   draft.id === currentId && 'bg-accent-soft/60',
                 )}
               >

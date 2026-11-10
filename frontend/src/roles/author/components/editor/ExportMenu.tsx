@@ -5,7 +5,7 @@
  * Escape or a click outside closes and focus goes back to the button.
  */
 
-import { Loader2 } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import { cn } from '../../../../lib/utils'
@@ -114,12 +114,16 @@ export function ExportMenu({
           setOpen((v) => !v)
         }}
         onKeyDown={onButtonKey}
+        aria-label="Export"
+        title="Export"
+        // Button's ghost look (components/ui): an icon while the top bar (an @container) is narrow.
         className={cn(
-          'border-b-2 border-transparent px-1 pt-[19px] pb-[15px] text-[15px] font-medium text-ink transition-colors hover:text-accent',
-          open && 'text-accent',
+          'inline-flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent @5xl:px-4',
+          open && 'bg-accent-soft text-ink',
         )}
       >
-        Export <span aria-hidden="true" className="text-xs">▾</span>
+        <Download className="size-4" aria-hidden="true" />
+        <span className="hidden @5xl:inline">Export</span>
       </button>
       {open && (
         <div

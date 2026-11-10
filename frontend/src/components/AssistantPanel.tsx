@@ -8,7 +8,7 @@
 
 import { ArrowUp, ChevronLeft, ChevronRight, Clock, FileText, Library as LibraryIcon, Plus, SearchX, Sparkles, Square, X, CircleAlert } from 'lucide-react'
 import { MotionConfig } from 'framer-motion'
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 
 import type { Assistant, AskContext, ChatSummary, Statement, StatementVerdict, Turn } from '../lib/assistant'
 import { listChats, sourceLabel, sourceTarget, whenLabel } from '../lib/assistant'
@@ -301,7 +301,9 @@ const isPhone = () => window.matchMedia?.(PHONE).matches ?? false
 /** Moves focus into the panel when a reader opens it and back to what opened it when it closes.
  * On a phone, where the panel covers the screen, it is announced as a modal dialog. */
 function usePanelFocus(root: RefObject<HTMLElement | null>) {
-  useEffect(() => {
+  // A layout effect, so it reads the opener before a child's effect moves focus inside the panel
+  // (Do it focuses a request a screen typed in), and that child's focus wins.
+  useLayoutEffect(() => {
     const panel = root.current
     /* v8 ignore next -- the ref is set before effects run; the guard only narrows the type */
     if (!panel) return
@@ -351,6 +353,7 @@ export function AssistantPanel({
   doIt,
   extra,
   initialMode,
+  doRequest,
   className,
 }: {
   /** Whose Quip (components/Mascot) the header and the empty chat show. */
@@ -374,6 +377,8 @@ export function AssistantPanel({
   extra?: { label: string; content: ReactNode }
   /** Which mode to open on. A role switch lands on Do it so the conversation is still there. */
   initialMode?: 'answer' | 'extra' | 'do'
+  /** Bumped when a screen hands Do it a request (useAsk's askToDo): the panel turns to Do it. */
+  doRequest?: number
   className?: string
 }) {
   const userId = useAskUserId()
@@ -387,6 +392,15 @@ export function AssistantPanel({
   if (modeFor !== userId) {
     setModeFor(userId)
     setChosen(loadAskMode(userId) ?? (extra ? 'extra' : 'answer'))
+  }
+  // Starts unseen, so a panel that opens with a request in hand turns to Do it too.
+  const [seenRequest, setSeenRequest] = useState<number | undefined>(undefined)
+  if (seenRequest !== doRequest) {
+    setSeenRequest(doRequest)
+    if (doRequest !== undefined) {
+      setChosen('do')
+      setView('chat')
+    }
   }
   const mode = (chosen === 'extra' && !extra) || (chosen === 'do' && !doIt) ? 'answer' : chosen
   function chooseMode(next: AskPanelMode) {

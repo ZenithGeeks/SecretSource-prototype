@@ -294,7 +294,8 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         if (title.length > 120) return fail(400, 'a draft title is at most 120 characters')
         draft.title = title
       }
-      if ('projectId' in (body ?? {})) draft.projectId = (body?.projectId as string) || null
+      // As DraftIn: a project's id moves the draft there, "" to Unsorted, null leaves it where it is.
+      if (body?.projectId !== undefined && body.projectId !== null) draft.projectId = (body.projectId as string) || null
       return json(draftView(gateway, draft))
     }
     if (parts.length === 3 && method === 'DELETE') {

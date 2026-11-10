@@ -5,12 +5,13 @@
 
 import { motion } from 'framer-motion'
 import { Check, MoreVertical, Pencil, Trash2, Upload, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Button, IconButton, Input, MenuItem, TextButton } from '../../../components/ui'
 import { MAX_TITLE } from '../../../lib/draftSave'
 import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
+import { FOCUS, LINK } from '../hover'
 
 const BACKDROP_MOTION = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.15 } }
 const PANEL_MOTION = {
@@ -136,7 +137,7 @@ export function ProjectNameField({
           type="submit"
           disabled={saving}
           aria-label="Save name"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50"
+          className={`flex size-7 shrink-0 items-center justify-center rounded-lg bg-supports-soft text-supports hover:opacity-90 disabled:opacity-50 ${FOCUS}`}
         >
           <Check className="size-4" />
         </button>
@@ -154,16 +155,20 @@ export function ProjectNameField({
 }
 
 /** "+ New project": an empty project by name ("Untitled project N" when left empty), or the
- * import a project used to start from. Esc or the scrim cancels. */
+ * import a project used to start from. Esc or the scrim cancels. `children` go under the name
+ * (MoveDraft's "Add existing drafts"). A second Enter while it is creating sends nothing. */
 export function NewProjectDialog({
   onCancel,
   onCreate,
   onImport,
+  children,
 }: {
   onCancel: () => void
   /** Resolves to the gateway's refusal, or null once the project exists. */
   onCreate: (name: string) => Promise<string | null>
-  onImport: () => void
+  /** None hides "Import a .bib or an Overleaf .zip". */
+  onImport?: () => void
+  children?: ReactNode
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -212,11 +217,17 @@ export function NewProjectDialog({
           </p>
         )}
 
+        {children}
+
         <div className="mt-5 flex items-center justify-between gap-2">
-          <TextButton onClick={onImport} disabled={busy} className="flex items-center gap-1.5 text-[13px]">
-            <Upload className="size-3.5" aria-hidden="true" />
-            Import a .bib or an Overleaf .zip
-          </TextButton>
+          {onImport ? (
+            <TextButton onClick={onImport} disabled={busy} className={`flex items-center gap-1.5 text-[13px] ${LINK}`}>
+              <Upload className="size-3.5" aria-hidden="true" />
+              Import a .bib or an Overleaf .zip
+            </TextButton>
+          ) : (
+            <span />
+          )}
           <span className="flex gap-2">
             <Button type="button" variant="ghost" onClick={cancel} disabled={busy}>
               Cancel

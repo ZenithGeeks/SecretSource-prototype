@@ -8,7 +8,9 @@
  */
 
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+
+import { useNow } from '../lib/timeAgo'
 
 import type { Claim, Stage } from '../lib/api'
 import type { Progress, Step, StepState } from '../lib/progress'
@@ -16,17 +18,6 @@ import { count, duration, summarise } from '../lib/progress'
 import { cn } from '../lib/utils'
 import { PipelineStages } from './PipelineStages'
 import { TextButton } from './ui'
-
-/** The current time, ticking every second while `live`, so the elapsed time moves. */
-function useNow(live: boolean) {
-  const [now, setNow] = useState(() => Date.now() / 1000)
-  useEffect(() => {
-    if (!live) return
-    const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000)
-    return () => window.clearInterval(timer)
-  }, [live])
-  return now
-}
 
 type Tile = { key: string; label: string; detail: string; state: StepState }
 
@@ -121,7 +112,8 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
   const running = status === 'running'
   const [details, setDetails] = useState(false)
   const [allSteps, setAllSteps] = useState(false)
-  const now = useNow(running)
+  // In seconds, ticking every second while running, so the elapsed time moves.
+  const now = useNow(1000, running) / 1000
   if (!stages.length) return null
 
   const progress = summarise(stages, claims, status, now)

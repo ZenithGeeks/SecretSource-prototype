@@ -7,17 +7,12 @@ import { Loader2 } from 'lucide-react'
 import { Card, Empty, ErrorState } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { errorMessage } from '../../../lib/author'
+import { WARNING_TITLE } from '../../../lib/latexProject'
 import { cn } from '../../../lib/utils'
 import type { ParseResult, ParseWarning, ParseWarningType, ProjectLint } from '../../../types/draftCheck'
 import type { EditorTarget } from '../editorTarget'
 import { CardHead, TextLink } from './CardHead'
-
-const WARNING_TITLE: Record<ParseWarningType, string> = {
-  'missing-key': 'Missing bib key',
-  'duplicate-key': 'Duplicate key',
-  'unused-entry': 'Unused entry',
-  'no-doi-url': 'No DOI or URL',
-}
+import { FOCUS } from '../hover'
 
 /** A missing key breaks the check (contradicted colour), a duplicate may read the wrong source
  * (silent colour); the other two are only notes. */
@@ -97,7 +92,7 @@ export function BibliographyCard({
                       type="button"
                       onClick={() => openAt(w)}
                       data-ask-target={askTarget({ kind: 'action', id: `fix-warning-${index + 1}` })}
-                      className="flex w-full min-w-0 flex-col items-start gap-0.5 px-5 py-2.5 text-left hover:bg-accent-soft/40"
+                      className={`flex w-full min-w-0 flex-col items-start gap-0.5 px-5 py-2.5 text-left hover:bg-accent-soft/40 ${FOCUS}`}
                       aria-label={`${WARNING_TITLE[w.type]}: ${w.detail}${elsewhere ? ` in ${elsewhere}` : ''}. Open ${w.file} line ${w.line} in the editor`}
                     >
                       <span className={cn('text-[13px]', WARNING_TONE[w.type])}>{WARNING_TITLE[w.type]}</span>

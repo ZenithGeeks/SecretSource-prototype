@@ -1,6 +1,8 @@
 /**
  * The popover that opens on a flagged [n] in the preview (Figma 565:3957): the verdict
- * badge, the source, why, the passage, "Keep mine", and the pager. "Keep mine" is Draft
+ * badge, the source, why, the passage, "Ask AI how to fix" (Ask's Do it mode, prefilled; it
+ * stands in for the design's "Replace with \cite{…}" until Ask can edit), "Keep mine", and the
+ * pager. "Keep mine" is Draft
  * check's "Override · add note" — it opens the same note field and ends in the same gateway
  * call.
  *
@@ -8,7 +10,7 @@
  * closes it and focus goes back to the marker that opened it.
  */
 
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../../components/ui'
@@ -16,6 +18,7 @@ import { shortMessage } from '../../../../lib/citations'
 import type { Citation } from '../../../../types/draftCheck'
 import { sourceLabel } from '../../labels'
 import { AuditNote, CitationBadge } from '../Verdicts'
+import { LINK } from '../../hover'
 
 export type PopoverAnchor = { top: number; left: number; width: number; height: number }
 
@@ -29,6 +32,7 @@ export function IssuePopover({
   containerWidth,
   numberOf,
   onKeepMine,
+  onAskToFix,
   onNext,
   onClose,
 }: {
@@ -41,6 +45,8 @@ export function IssuePopover({
   /** The reference number a key has in the preview, or null when it is not in the .bib yet. */
   numberOf: (key: string) => number | null
   onKeepMine: (note: string) => void
+  /** Opens Ask's Do it mode with this citation and its issue; none hides the button. */
+  onAskToFix?: () => void
   onNext: () => void
   onClose: () => void
 }) {
@@ -127,6 +133,12 @@ export function IssuePopover({
         </form>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
+          {onAskToFix && (
+            <Button className="px-3 py-1.5 text-[13px]" onClick={onAskToFix}>
+              <Sparkles className="size-4" aria-hidden="true" />
+              Ask AI how to fix
+            </Button>
+          )}
           <Button variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setNoteOpen(true)}>
             Keep mine
           </Button>
@@ -136,7 +148,7 @@ export function IssuePopover({
         type="button"
         onClick={onNext}
         disabled={total === 0}
-        className="flex items-center gap-1 self-start rounded text-[11px] text-accent hover:underline disabled:text-ink-muted disabled:no-underline"
+        className={`flex items-center gap-1 self-start text-[11px] text-accent disabled:text-ink-muted ${LINK}`}
       >
         {pager} · next
         <ChevronRight className="size-3" aria-hidden="true" />

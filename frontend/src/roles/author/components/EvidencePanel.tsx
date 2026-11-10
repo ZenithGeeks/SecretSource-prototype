@@ -22,6 +22,7 @@ import type { Citation, DraftStatus } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
 import { AuditNote, CitationBadge } from './Verdicts'
+import { LINK } from '../hover'
 
 export function EvidencePanel({
   citation,
@@ -99,7 +100,7 @@ export function EvidencePanel({
             disabled={issues.length === 0}
             aria-label={issues.length ? `${pager}. Show the next issue` : pager}
             data-ask-target={askTarget({ kind: 'action', id: 'next-issue' })}
-            className="flex items-center gap-1 rounded text-xs text-accent hover:underline disabled:cursor-default disabled:text-ink-muted disabled:no-underline"
+            className={`flex items-center gap-1 text-xs text-accent disabled:cursor-default disabled:text-ink-muted ${LINK}`}
           >
             {pager}
             <ChevronRight className="size-3.5" aria-hidden="true" />

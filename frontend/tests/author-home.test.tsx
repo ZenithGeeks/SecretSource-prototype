@@ -10,6 +10,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { ReactNode } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { centreInView } from '../src/lib/centreInView'
 import { resetSettings, updateSettings } from '../src/lib/settings'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
@@ -92,6 +93,59 @@ describe('Author Home', () => {
 
     fireEvent.click(card.getByRole('button', { name: 'All' }))
     expect(await card.findByText('8 citations')).toBeInTheDocument()
+  })
+
+  test('a row or the pager brings the Evidence panel to the middle of the screen, showing that citation (#721)', async () => {
+    const calls: { panel: string | null; options: ScrollIntoViewOptions }[] = []
+    const scroll = vi.fn(function (this: Element, options: ScrollIntoViewOptions) {
+      calls.push({ panel: this.querySelector('h2, h3')?.textContent ?? null, options })
+    })
+    Element.prototype.scrollIntoView = scroll as unknown as Element['scrollIntoView']
+    try {
+      renderHome()
+      await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+      expect(scroll).not.toHaveBeenCalled() // opening Home does not jump
+
+      const rows = await rowsOf()
+      fireEvent.click(rows.find((row) => !row.textContent?.includes('khattab2020'))!)
+      await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
+      // after the panel shows the row's citation, so its new height is the one centred
+      expect(calls[0].panel).toMatch(/^Evidence · /)
+      expect(calls[0].panel).not.toBe('Evidence · Khattab & Zaharia, 2020')
+      expect(calls[0].options).toEqual({ block: 'center', behavior: 'smooth' })
+
+      fireEvent.click(screen.getByRole('button', { name: /of 3 issues/ }))
+      await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2))
+
+      // reduced motion: no smooth scroll
+      vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query, addEventListener() {}, removeEventListener() {} }))
+      fireEvent.click(rows[0])
+      await waitFor(() => expect(scroll).toHaveBeenCalledTimes(3))
+      expect(calls[2].options).toEqual({ block: 'center', behavior: 'auto' })
+    } finally {
+      Element.prototype.scrollIntoView = () => undefined
+    }
+  })
+
+  test('a panel taller than the screen goes to the top instead, so its start is not cut off', () => {
+    const element = document.createElement('div')
+    const scroll = vi.fn()
+    element.scrollIntoView = scroll
+    element.getBoundingClientRect = () => ({ height: window.innerHeight + 1 }) as DOMRect
+    centreInView(element)
+    expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }))
+    element.getBoundingClientRect = () => ({ height: 100 }) as DOMRect
+    centreInView(element)
+    expect(scroll).toHaveBeenLastCalledWith(expect.objectContaining({ block: 'center' }))
+  })
+
+  test('nothing to centre does nothing: no element yet, or one that cannot scroll', () => {
+    expect(() => centreInView(null)).not.toThrow()
+    const element = document.createElement('div')
+    Object.defineProperty(element, 'scrollIntoView', { value: undefined })
+    const measured = vi.spyOn(element, 'getBoundingClientRect')
+    centreInView(element)
+    expect(measured).not.toHaveBeenCalled()
   })
 
   test('the Evidence panel follows the rows and its pager cycles the open issues only', async () => {

@@ -9,6 +9,7 @@
 import { useAuthorDrafts, useLibrary } from '../../../lib/useAuthor'
 import { cn } from '../../../lib/utils'
 import type { Draft, Project } from '../../../types/draftCheck'
+import { FOCUS, LINK } from '../hover'
 
 /** How many rows the section shows; the rest are in the Library. */
 export const RECENT_LIMIT = 5
@@ -68,7 +69,7 @@ export function RecentProjects({
           onClick={onNew}
           data-closes-menu
           aria-label="New project"
-          className="rounded px-1 text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+          className={`text-xs font-medium text-accent ${LINK}`}
         >
           + New
         </button>
@@ -88,6 +89,7 @@ export function RecentProjects({
                   title={`${project.name} · ${status.label}`}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[13px] leading-[18px] lg:py-[7px]',
+                    FOCUS,
                     active ? 'bg-accent-soft font-medium text-accent' : 'text-ink hover:bg-accent-soft/60',
                   )}
                 >

@@ -1,10 +1,12 @@
-/** The file bar above the editor: one tab per project file, a dot on the unsaved ones, and
- * "+ file", which turns into a small name field. */
+/** The file bar above the editor: one tab per project file, a red dot on those with open
+ * issues from the last check, an amber one on a .bib with parse warnings, a muted dot on the
+ * unsaved ones, and "+ file", which turns into a small name field. */
 
 import { useState } from 'react'
 
 import { cn } from '../../../../lib/utils'
 import type { ProjectFile } from '../../../../types/draftCheck'
+import { FOCUS, HIGHLIGHT } from '../../hover'
 
 export function FileTabs({
   files,
@@ -12,7 +14,9 @@ export function FileTabs({
   onSelect,
   onAdd,
 }: {
-  files: ProjectFile[]
+  /** `issues`: the file's open issues (lib/verdict isOpenIssue); `problems`: a .bib's parse
+   * warnings, entry by entry (lib/latexProject bibProblems). */
+  files: (ProjectFile & { issues?: number; problems?: number })[]
   active: string
   onSelect: (name: string) => void
   onAdd: (name: string) => void
@@ -55,13 +59,30 @@ export function FileTabs({
               }}
               className={cn(
                 'flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-3.5 py-2 font-mono text-[12px] whitespace-nowrap',
-                selected ? 'bg-surface font-medium text-ink' : 'text-ink-muted hover:text-ink',
+                FOCUS,
+                selected ? 'bg-surface font-medium text-ink' : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
               )}
             >
               {file.name}
-              {file.dirty && (
-                <span className="size-1.5 rounded-full bg-refutes" role="img" aria-label="unsaved changes" />
-              )}
+              {/* Red is for the check's verdicts (Figma A2), so unsaved typing is the muted dot. */}
+              {file.issues ? (
+                <span
+                  className="size-1.5 rounded-full bg-refutes"
+                  role="img"
+                  aria-label={`${file.issues} open issue${file.issues === 1 ? '' : 's'}`}
+                  title={`${file.issues} open issue${file.issues === 1 ? '' : 's'}`}
+                />
+              ) : null}
+              {/* A .bib's parse warnings take their own (amber) colour, as in the gutter. */}
+              {file.problems ? (
+                <span
+                  className="size-1.5 rounded-full bg-insufficient"
+                  role="img"
+                  aria-label={`${file.problems} bib problem${file.problems === 1 ? '' : 's'}`}
+                  title={`${file.problems} bib problem${file.problems === 1 ? '' : 's'}`}
+                />
+              ) : null}
+              {file.dirty && <span className="size-1.5 rounded-full bg-ink-muted" role="img" aria-label="unsaved changes" title="Unsaved changes" />}
             </button>
           )
         })}
@@ -93,12 +114,12 @@ export function FileTabs({
               {error}
             </span>
           )}
-          <button type="submit" className="rounded px-1.5 py-0.5 text-xs text-accent hover:underline">
+          <button type="submit" className={`rounded px-1.5 py-0.5 text-xs text-accent ${HIGHLIGHT}`}>
             Add
           </button>
         </form>
       ) : (
-        <button type="button" onClick={() => setAdding(true)} className="shrink-0 px-3.5 py-2 text-xs text-accent hover:underline">
+        <button type="button" onClick={() => setAdding(true)} className={`shrink-0 px-3.5 py-2 text-xs text-accent ${HIGHLIGHT}`}>
           + file
         </button>
       )}

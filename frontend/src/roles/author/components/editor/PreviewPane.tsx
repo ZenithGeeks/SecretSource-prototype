@@ -38,6 +38,7 @@ import { isOpenIssue } from '../../../../lib/verdict'
 import type { Citation } from '../../../../types/draftCheck'
 import { IssuePopover, type PopoverAnchor } from './IssuePopover'
 import previewCss from './preview.css?inline'
+import { HIGHLIGHT } from '../../hover'
 
 const RENDER_DELAY_MS = 300
 const FONT_STYLE_ID = 'ss-preview-fonts'
@@ -82,6 +83,7 @@ export function PreviewPane({
   verdictColors,
   onToggleVerdictColors,
   onKeepMine,
+  onAskToFix,
 }: {
   content: string
   /** The open file's citations, in line order. */
@@ -93,6 +95,8 @@ export function PreviewPane({
   verdictColors: boolean
   onToggleVerdictColors: () => void
   onKeepMine: (citation: Citation, note: string) => void
+  /** Hands the flagged citation to Ask's Do it mode; none hides "Ask AI how to fix". */
+  onAskToFix?: (citation: Citation) => void
 }) {
   const debounced = useDebounced(content, RENDER_DELAY_MS)
   const prepared = useMemo(() => preparePreview(debounced), [debounced])
@@ -249,7 +253,7 @@ export function PreviewPane({
         <span className="text-[12px] font-medium text-ink">Live preview</span>
         <span className="hidden text-ink-muted sm:inline">rendered with LaTeX.js · updates as you type</span>
         {rendering && <Loader2 className="size-3.5 animate-spin text-ink-muted" aria-label="Rendering" />}
-        <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className="ml-auto rounded text-accent hover:underline">
+        <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className={`ml-auto rounded px-1 text-accent ${HIGHLIGHT}`}>
           verdict colors {verdictColors ? 'on' : 'off'}
         </button>
       </div>
@@ -300,6 +304,13 @@ export function PreviewPane({
               onKeepMine(current, note)
               close()
             }}
+            onAskToFix={
+              onAskToFix &&
+              (() => {
+                onAskToFix(current)
+                close()
+              })
+            }
             onNext={next}
             onClose={close}
           />

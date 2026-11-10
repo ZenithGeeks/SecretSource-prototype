@@ -18,11 +18,13 @@ import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
-import { NewProjectDialog, ProjectMenu, ProjectNameField } from '../components/ProjectActions'
+import { NewProjectWithDrafts } from '../components/MoveDraft'
+import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { issues } from '../labels'
 import { DeleteProjectDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
+import { FOCUS, HIGHLIGHT } from '../hover'
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
@@ -62,7 +64,7 @@ function ProjectCard({
         onClick={onOpen}
         aria-label={`Open ${project.name}`}
         data-ask-target={askTarget({ kind: 'project', id: project.id })}
-        className="absolute inset-0 rounded-xl"
+        className={`absolute inset-0 rounded-xl ${FOCUS}`}
       />
       <div className="pointer-events-none flex flex-col gap-3">
         {renaming ? (
@@ -118,14 +120,18 @@ export function Library({
   const [deleting, setDeleting] = useState<Project | null>(null)
 
   if (projectId) {
+    // The toast stays: a project just created or imported here says so on its own page.
     return (
-      <ProjectDetail
-        projectId={projectId}
-        initialDraft={draftId ?? null}
-        onBack={() => onOpenProject(null)}
-        onOpenEditor={onOpenEditor}
-        onDraftDeleted={onDraftDeleted}
-      />
+      <>
+        <ProjectDetail
+          projectId={projectId}
+          initialDraft={draftId ?? null}
+          onBack={() => onOpenProject(null)}
+          onOpenEditor={onOpenEditor}
+          onDraftDeleted={onDraftDeleted}
+        />
+        <Toast message={toast} onClose={closeToast} />
+      </>
     )
   }
 
@@ -143,17 +149,6 @@ export function Library({
   }
 
   /** "+ New project" by name: an empty project, opened right away. */
-  const createProject = async (name: string): Promise<string | null> => {
-    try {
-      const project = await actions.createProject(name ? { name } : {})
-      setCreating(false)
-      onOpenProject(project.id)
-      return null
-    } catch (error) {
-      return errorMessage(error)
-    }
-  }
-
   const renameProject = async (projectId: string, name: string): Promise<string | null> => {
     try {
       await actions.updateProject(projectId, { name })
@@ -314,7 +309,7 @@ export function Library({
           type="button"
           onClick={() => onOpenProject(UNSORTED)}
           data-ask-target={askTarget({ kind: 'project', id: UNSORTED })}
-          className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent"
+          className={`flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent ${FOCUS}`}
         >
           <p className="font-serif text-base font-semibold text-ink">Unsorted sources</p>
           <p className="text-[13px] text-ink-muted">
@@ -336,7 +331,7 @@ export function Library({
           type="button"
           onClick={() => setCreating(true)}
           data-ask-target={askTarget({ kind: 'action', id: 'new-project' })}
-          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
+          className={`flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft ${FOCUS}`}
         >
           <span className="font-serif text-base font-semibold text-accent">+ New project</span>
           <span className="text-xs text-ink-muted">An empty project, or import a .bib or an Overleaf .zip</span>
@@ -412,7 +407,7 @@ export function Library({
                       if (!window.confirm(`Delete ${source.title} from your saved sources? This cannot be undone.`)) return
                       void actions.deleteSource(source.id).catch((error) => setToast(`Could not delete: ${errorMessage(error)}`))
                     }}
-                    className="shrink-0 rounded text-ink-muted hover:text-refutes"
+                    className={`shrink-0 rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />
                   </button>
@@ -425,9 +420,13 @@ export function Library({
 
       <AnimatePresence>
         {creating && (
-          <NewProjectDialog
+          <NewProjectWithDrafts
             onCancel={() => setCreating(false)}
-            onCreate={createProject}
+            onCreated={(projectId, notice) => {
+              setCreating(false)
+              setToast(notice)
+              onOpenProject(projectId)
+            }}
             onImport={() => {
               setCreating(false)
               importInput.current?.click()

@@ -133,6 +133,13 @@ export function useLibrary() {
   return useQuery({ queryKey: AUTHOR_KEYS.library, queryFn: authorApi.getLibrary })
 }
 
+/** A project's name from the Library list (the sidebar holds it already); undefined while it
+ * loads, for no project, and for one that is not in the list. */
+export function useProjectName(projectId: string | null | undefined): string | undefined {
+  const library = useLibrary()
+  return projectId ? library.data?.projects.find((p) => p.id === projectId)?.name : undefined
+}
+
 export function useAuthorProjects() {
   return useQuery({ queryKey: AUTHOR_KEYS.projects, queryFn: authorApi.listProjects })
 }
