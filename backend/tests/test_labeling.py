@@ -1668,16 +1668,74 @@ def test_a_hand_added_claim_gets_passages_from_each_reference(api, monkeypatch):
     assert second["rank"] == 2
 
 
-def test_only_hand_added_claims_are_searched_live(api, monkeypatch):
+def test_only_claims_of_this_paper_are_searched_live(api, monkeypatch):
     client, _, _ = api
     monkeypatch.setattr(labeling.verify, "evidence_from", lambda claim, source_name: [])
-    extracted = client.post(
-        "/labeling/sessions/a1/candidates", json={"claim_id": "paperA-0123456789ab#0", "claim": "x"}
+    no_such_claim = client.post(
+        "/labeling/sessions/a1/candidates", json={"claim_id": "paperA-0123456789ab#9", "claim": "x"}
     )
     other_paper = client.post(
         "/labeling/sessions/a1/candidates", json={"claim_id": "paperB#h-abc12345", "claim": "x"}
     )
-    assert extracted.status_code == 422 and other_paper.status_code == 422
+    assert no_such_claim.status_code == 422 and other_paper.status_code == 422
+
+
+# Power of Scale (#836): claim 0 checked T5 and has its PDF; claim 1 only names T5 and SuperGLUE,
+# so they were never checked, and GPT-3's lookup failed.
+T5 = {"ref": "b39", "title": "T5 paper", "doi": "", "arxiv": "", "url": "", "authors": [], "year": "2020"}
+SUPERGLUE = {**T5, "ref": "b49", "title": "SuperGLUE"}
+GPT3 = {**T5, "ref": "b4", "title": "NeurIPS"}
+NAMED_ONLY = {
+    **ANALYSIS,
+    "claims": [
+        {
+            "claim": "T5-XXL beats GPT-3.",
+            "citations": [T5],
+            "verdicts": [
+                {"source": "t5-aaaaaaaaaaaa.pdf", "cited": "T5 paper", "evidence": [{"text": "t", "page": 1}]}
+            ],
+        },
+        {
+            "claim": "We cast all tasks as text generation.",
+            "citations": [T5, SUPERGLUE, GPT3],
+            "named": ["T5 paper", "SuperGLUE"],
+            "unchecked": [{"source": "NeurIPS", "reason": "no-open-access", "message": "no open-access PDF"}],
+        },
+    ],
+}
+NAMED_CLAIM = "paperA-0123456789ab#1"
+
+
+def test_a_claim_says_why_its_citations_were_not_checked(api):
+    client, _, app = api
+    app.dependency_overrides[labeling.owned_analysis] = lambda: NAMED_ONLY
+
+    checked, named = client.get("/labeling/sessions/a1").json()["claims"]
+
+    assert checked["unchecked"] == []
+    assert named["unchecked"] == [
+        {"ref": "b39", "label": "T5 paper", "reason": "named"},
+        {"ref": "b49", "label": "SuperGLUE", "reason": "named"},
+        {"ref": "b4", "label": "NeurIPS", "reason": "no-open-access"},
+    ]
+
+
+def test_an_extracted_claim_is_searched_in_the_references_it_cites_that_have_a_pdf(api, monkeypatch):
+    client, _, app = api
+    app.dependency_overrides[labeling.owned_analysis] = lambda: NAMED_ONLY
+    searched = []
+    monkeypatch.setattr(
+        labeling.verify,
+        "evidence_from",
+        lambda claim, source_name: searched.append(source_name) or [{"text": "text-to-text", "page": 2}],
+    )
+
+    found = client.post("/labeling/sessions/a1/candidates", json={"claim_id": NAMED_CLAIM, "claim": "x"})
+
+    assert found.status_code == 200
+    assert searched == ["t5-aaaaaaaaaaaa.pdf"]
+    [candidate] = found.json()["candidates"]
+    assert candidate["cand_id"] == labeling._candidate_id(NAMED_CLAIM, "t5-aaaaaaaaaaaa", 1, "text-to-text")
 
 
 def test_a_retrieval_outage_is_a_502_not_a_crash(api, monkeypatch):
@@ -1717,10 +1775,11 @@ def test_save_keeps_a_passage_found_for_a_hand_added_claim(api):
     assert row["origin"] == "retrieved_added" and row["rank"] == "1" and row["page"] == "3"
     assert row["cand_id"] == labeling._candidate_id(HAND_ADDED, "refB-aaaaaaaaaaaa", 1, "Y doubles recall")
 
+    # The live search also runs for an extracted claim with no passages (#836).
     on_extracted = {**passage, "claim_id": "paperA-0123456789ab#0"}
+    assert client.post("/labeling/sessions/a1/save", json={"candidates": [on_extracted]}).status_code == 200
     unknown_paper = {**passage, "reference_id": "refZ"}
-    for bad in (on_extracted, unknown_paper):
-        assert client.post("/labeling/sessions/a1/save", json={"candidates": [bad]}).status_code == 422
+    assert client.post("/labeling/sessions/a1/save", json={"candidates": [unknown_paper]}).status_code == 422
 
 
 # The AI review of a saved claim (review.py)
