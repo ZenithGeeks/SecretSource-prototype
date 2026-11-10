@@ -270,6 +270,13 @@ function analyseItems(onAddPaper?: () => void): LibraryAddItem[] {
   ]
 }
 
+type ProjectSort = 'updated' | 'name' | 'papers'
+const SORTS: { key: ProjectSort; label: string }[] = [
+  { key: 'updated', label: 'Recent' },
+  { key: 'name', label: 'Name' },
+  { key: 'papers', label: 'Papers' },
+]
+
 function ProjectsLanding({
   projects,
   onOpen,
@@ -285,6 +292,23 @@ function ProjectsLanding({
   const claims = projects.reduce((sum, p) => sum + p.claims, 0)
   const { renameProject, deleteProject } = useResearcherActions()
   const [deleting, setDeleting] = useState<Project | null>(null)
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<ProjectSort>('updated')
+
+  // Unsorted is a system bucket, not a project someone named or organized: it is left out of
+  // the filter/sort and always stays last, the same place it always has been.
+  const unsorted = projects.find((p) => p.unsorted)
+  const q = query.trim().toLowerCase()
+  const shown = projects
+    .filter((p) => !p.unsorted)
+    .filter((p) => !q || p.name.toLowerCase().includes(q))
+    .sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name)
+      if (sort === 'papers') return b.papers - a.papers
+      return new Date(b.updated).getTime() - new Date(a.updated).getTime()
+    })
+  const visible = unsorted ? [...shown, unsorted] : shown
+
   return (
     <>
       <ToolbarActions>
@@ -304,8 +328,41 @@ function ProjectsLanding({
         </Button>
       </header>
 
+      {projects.some((p) => !p.unsorted) && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter projects by name"
+            aria-label="Filter projects"
+            className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
+          />
+          <div className="flex flex-wrap gap-0.5 rounded-[9px] bg-neutral-soft p-0.5">
+            {SORTS.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                aria-pressed={sort === s.key}
+                onClick={() => setSort(s.key)}
+                className={cn(
+                  'rounded-lg px-3 py-[5px] text-[13px] font-medium',
+                  sort === s.key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
-        {projects.map((p) => (
+        {/* A name filter with no real-project match still leaves Unsorted and "+ New project"
+            on screen — this replaces only the real-project cards, never the whole grid. */}
+        {q && shown.length === 0 && (
+          <p className="text-sm text-ink-muted sm:col-span-2">No project matches "{query}".</p>
+        )}
+        {visible.map((p) => (
           <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
         ))}
         <button
