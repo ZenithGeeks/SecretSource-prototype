@@ -191,6 +191,15 @@ describe('when the paper cannot be shown', () => {
     key('s', { ctrlKey: true })
     expect(gateway.posts).toEqual([])
   })
+
+  it('retries opening the session after an error', async () => {
+    gateway.sessionError = '503: not set up'
+    renderWorkspace()
+    const retry = await screen.findByRole('button', { name: 'Try again' })
+    gateway.sessionError = ''
+    fireEvent.click(retry)
+    expect(await screen.findByRole('heading', { name: 'Claim 1 of 3' })).toBeInTheDocument()
+  })
 })
 
 describe('the keyboard', () => {
@@ -303,6 +312,18 @@ describe('the keyboard', () => {
     expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAttribute('aria-checked', 'false')
   })
 
+  it('sets the reference confidence with the L, M and H shortcuts', async () => {
+    await open()
+    key('k')
+    key('r')
+    key('l')
+    expect(screen.getByRole('radio', { name: 'Low' })).toHaveAttribute('aria-checked', 'true')
+    key('m')
+    expect(screen.getByRole('radio', { name: 'Medium' })).toHaveAttribute('aria-checked', 'true')
+    key('h')
+    expect(screen.getByRole('radio', { name: 'High' })).toHaveAttribute('aria-checked', 'true')
+  })
+
   it('saves with Ctrl+S only when something changed', async () => {
     await open()
     key('s', { ctrlKey: true })
@@ -338,6 +359,18 @@ describe('the keyboard', () => {
 })
 
 describe('saving', () => {
+  it('can reopen the claim list after finishing the paper', async () => {
+    wideScreen(false)
+    const onlyClaim = makeSession().claims[1]
+    gateway.session = makeSession({ claims: [onlyClaim] })
+    await open()
+    key('x')
+    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    expect(await screen.findByText('This paper is labeled')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Review claims' }))
+    expect(screen.getByRole('heading', { name: 'Claim 1 of 1' })).toBeInTheDocument()
+  })
+
   it('saves to the next unfinished claim and wraps to the first unfinished claim', async () => {
     await open()
     key(']')

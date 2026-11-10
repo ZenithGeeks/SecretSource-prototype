@@ -63,6 +63,25 @@ describe('the passages of a claim', () => {
     expect(within(section).getByText('grade for refB')).toBeInTheDocument()
   })
 
+  it('lets a finished reference fold and reopen its passages', () => {
+    setup({
+      draft: {
+        ...emptyDraft(),
+        cands: { c1: 'relevant', c2: 'rejected' },
+        labels: { refB: { evidence: 3, rationale: '', confidence: 'high' } },
+      },
+    })
+    const section = screen.getByRole('region', { name: 'Ref B' })
+    const summary = within(section).getByRole('button', { name: /1\/2 relevant/ })
+    expect(summary).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(summary)
+    expect(summary).toHaveAttribute('aria-expanded', 'true')
+    expect(within(section).getByRole('button', { name: /text of c1/ })).toBeInTheDocument()
+    fireEvent.click(summary)
+    expect(summary).toHaveAttribute('aria-expanded', 'false')
+    expect(within(section).queryByRole('button', { name: /text of c1/ })).not.toBeInTheDocument()
+  })
+
   it('focuses a passage and judges it', () => {
     const props = setup()
     fireEvent.click(screen.getByRole('button', { name: /text of c1/ }))

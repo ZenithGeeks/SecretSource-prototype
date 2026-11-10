@@ -131,7 +131,7 @@ export function ClaimDecision({
       <div
         role="radiogroup"
         aria-label="Decision on this claim"
-        aria-describedby={collapsed ? undefined : `${name}-question`}
+        aria-describedby={`${name}-question`}
         className="grid grid-cols-3 gap-2"
       >
         {CHOICES.map(({ status, label, hint, key }) => (

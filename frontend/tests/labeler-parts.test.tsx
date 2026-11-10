@@ -184,6 +184,23 @@ describe('ClaimDecision', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'The claim, as it should read' }), { target: { value: 'Mine, better' } })
     expect(onChange).toHaveBeenCalledWith({ edited: 'Mine, better' })
   })
+
+  it('reopens a saved decision so it can be changed', () => {
+    const onChange = vi.fn()
+    render(<ClaimDecision claim={claim('c1', 'Original.')} position={1} count={2} draft={{ ...emptyDraft(), status: 'accepted' }} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByRole('radiogroup', { name: 'Decision on this claim' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Decision on this claim' })).toHaveAttribute('aria-describedby')
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    expect(onChange).toHaveBeenCalledWith({ status: 'rejected' })
+  })
+
+  it('reopens a rejected decision with its rejected choice selected', () => {
+    render(<ClaimDecision claim={claim('c1', 'Original.')} position={1} count={2} draft={{ ...emptyDraft(), status: 'rejected' }} onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('radio', { name: /Reject/ }))
+    expect(screen.getByRole('radiogroup', { name: 'Decision on this claim' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Reject/ })).toHaveAttribute('aria-checked', 'true')
+  })
 })
 
 describe('LabelForm', () => {
