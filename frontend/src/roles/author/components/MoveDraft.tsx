@@ -6,7 +6,8 @@
  *  - "Move to…" on a draft's row in Unsorted or a project lists the other projects, Unsorted,
  *    and "New project…", then asks to confirm.
  * Either way a draft that cites keys only its old project's .bib defines is warned about first
- * (MoveWarning): after the move those keys are missing, as when a project is deleted. Lists,
+ * (MoveWarning): after the move those keys are missing, as when a project is deleted. A .bib
+ * that cannot be read blocks the move until a retry reads it, rather than passing as "none". Lists,
  * counts, Recent projects and the projects' .bib use refresh after a move (useAuthorActions
  * updateDraft invalidates them). Nothing is sent twice: the dialog and the confirm are disabled
  * while a move is on its way.
@@ -17,12 +18,12 @@ import { AnimatePresence } from 'framer-motion'
 import { FolderInput } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
-import { Button, IconButton, MenuItem } from '../../../components/ui'
+import { Button, IconButton, MenuItem, TextButton } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { authorApi, errorMessage } from '../../../lib/author'
 import { keysLostByMove } from '../../../lib/latexProject'
 import { AUTHOR_KEYS, useAuthorActions, useAuthorDrafts, useAuthorProjects } from '../../../lib/useAuthor'
-import type { Draft, ProjectDetail } from '../../../types/draftCheck'
+import type { Draft } from '../../../types/draftCheck'
 import { NewProjectDialog } from './ProjectActions'
 
 type Actions = ReturnType<typeof useAuthorActions>
@@ -36,35 +37,53 @@ async function moveDrafts(actions: Actions, drafts: Pick<Draft, 'id' | 'title'>[
 
 /** The drafts among `drafts` that would lose keys by moving to `to` (a project's id; null for
  * Unsorted or a project that does not exist yet), each with those keys and where they were. */
-function useLostKeys(drafts: Draft[], to: string | null): { lost: Lost[]; pending: boolean } {
+function useLostKeys(drafts: Draft[], to: string | null): LostKeysCheck {
   const ids = [...new Set([...drafts.map((d) => d.projectId).filter((id): id is string => Boolean(id)), ...(to ? [to] : [])])]
   const projects = useQueries({
     queries: ids.map((id) => ({ queryKey: AUTHOR_KEYS.project(id), queryFn: () => authorApi.getProject(id) })),
   })
   const projectOf = (id: string | null) => (id ? projects[ids.indexOf(id)]?.data : undefined)
   // Until both .bib files are in, the answer would be "nothing lost" whatever the truth is.
-  const pending = projects.some((q) => q.isPending)
-  const lost = drafts
-    .filter((d) => d.projectId && d.projectId !== to)
-    .map((d) => {
-      const from = projectOf(d.projectId)
-      return { draft: d, from, keys: keysLostByMove(d.files, from?.bib, projectOf(to)?.bib) }
-    })
-    .filter((l) => l.keys.length > 0)
-  return { lost, pending }
+  // A retry counts as checking again, not as failed.
+  const pending = projects.some((q) => q.isPending || (q.isError && q.isFetching))
+  // A .bib that could not be read would say "nothing lost" too: the move waits for a retry.
+  const failed = !pending && projects.some((q) => q.isError)
+  const retry = () => {
+    for (const q of projects) if (q.isError) void q.refetch()
+  }
+  const lost = drafts.flatMap((d) => {
+    const from = d.projectId !== to ? projectOf(d.projectId) : undefined
+    const keys = keysLostByMove(d.files, from?.bib, projectOf(to)?.bib)
+    // Keys are only lost from a project that has a .bib.
+    return from?.bib && keys.length > 0 ? [{ draft: d, project: from.name, bib: from.bib.name, keys }] : []
+  })
+  return { lost, pending, failed, retry }
 }
 
-type Lost = { draft: Draft; from: ProjectDetail | undefined; keys: string[] }
+/** A draft, the keys it would lose, and the project and .bib that define them. */
+type Lost = { draft: Draft; project: string; bib: string; keys: string[] }
+type LostKeysCheck = { lost: Lost[]; pending: boolean; failed: boolean; retry: () => void }
 
-/** Says which cited keys a move leaves behind in the old project's .bib; nothing when none. */
-function MoveWarning({ check: { lost, pending } }: { check: { lost: Lost[]; pending: boolean } }) {
+/** Says which cited keys a move leaves behind in the old project's .bib; nothing when none.
+ * When the .bib files could not be read it says so, with Retry, instead of saying nothing. */
+function MoveWarning({ check: { lost, pending, failed, retry } }: { check: LostKeysCheck }) {
   if (pending) return <p className="mt-3 text-xs text-ink-muted">Checking which \cite keys the move leaves behind…</p>
+  if (failed) {
+    return (
+      <p role="alert" className="mt-3 text-xs text-refutes">
+        Couldn’t check which \cite keys the move leaves behind.{' '}
+        <TextButton onClick={retry} className="text-xs">
+          Retry
+        </TextButton>
+      </p>
+    )
+  }
   if (lost.length === 0) return null
   return (
     <div role="status" className="mt-3 rounded-lg border border-insufficient bg-insufficient-soft px-3 py-2 text-xs text-insufficient">
-      {lost.map(({ draft, from, keys }) => (
+      {lost.map(({ draft, project, bib, keys }) => (
         <p key={draft.id}>
-          {draft.title} cites {keys.map((k) => `\\cite{${k}}`).join(', ')}, defined only in {from?.name ?? 'its project'}’s {from?.bib?.name ?? '.bib'}.
+          {draft.title} cites {keys.map((k) => `\\cite{${k}}`).join(', ')}, defined only in {project}’s {bib}.
         </p>
       ))}
       <p className="mt-1">After the move these keys show as missing until their entries are in the new project’s .bib or the draft’s own.</p>
@@ -81,7 +100,7 @@ function ExistingDraftsPicker({
 }: {
   selected: string[]
   onChange: (ids: string[]) => void
-  check: { lost: Lost[]; pending: boolean }
+  check: LostKeysCheck
   disabled?: boolean
 }) {
   const drafts = useAuthorDrafts().data ?? []
@@ -144,6 +163,7 @@ export function NewProjectWithDrafts({
       onImport={onImport}
       onCreate={async (name) => {
         if (check.pending) return 'Still checking the chosen drafts’ .bib files. Try again in a moment.'
+        if (check.failed) return 'Couldn’t check the chosen drafts’ .bib files. Retry the check, or untick those drafts.'
         setBusy(true)
         try {
           const project = await actions.createProject(name ? { name } : {})
@@ -232,7 +252,7 @@ export function MoveDraftMenu({ draft, onNotice, onCreated }: { draft: Draft; on
           <Button type="button" variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setTarget(null)} disabled={moving}>
             Cancel
           </Button>
-          <Button type="button" className="px-3 py-1.5 text-[13px]" onClick={() => void move()} disabled={moving || check.pending} aria-busy={moving} autoFocus>
+          <Button type="button" className="px-3 py-1.5 text-[13px]" onClick={() => void move()} disabled={moving || check.pending || check.failed} aria-busy={moving} autoFocus>
             {moving ? 'Moving…' : 'Move'}
           </Button>
         </div>
