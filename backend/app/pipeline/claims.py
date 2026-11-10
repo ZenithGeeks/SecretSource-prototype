@@ -532,11 +532,22 @@ def _title_lines(reference):
 
 
 def _raw_title(reference) -> str:
-    """The reference's title as GROBID wrote it, before the preprint note is removed."""
-    for title in _title_lines(reference):
-        if title and not _looks_like_authors(title):
-            return title
-    return ""
+    """The reference's title as GROBID wrote it, before the preprint note is removed.
+
+    When a long author list runs into the article title, GROBID can leave the real title in a
+    note, and the next title line is the venue (#908). The note is read only then: other notes
+    hold a venue or a page range.
+    """
+    article, *others = _title_lines(reference)
+    if article and _looks_like_authors(article) and (note := _plain_note(reference)):
+        return note
+    return next((title for title in (article, *others) if title and not _looks_like_authors(title)), "")
+
+
+def _plain_note(reference) -> str:
+    """The reference's note without a type, on one line, or ""."""
+    note = reference.find("tei:note", TEI_NAMESPACE)
+    return _one_line(note.text or "") if note is not None and not note.get("type") else ""
 
 
 def _title_of(reference) -> str:
