@@ -189,3 +189,38 @@ def test_a_year_range_after_an_arxiv_marker_is_not_an_id():
 def test_issued_arxiv_ids_still_count():
     for arxiv_id in ("2303.12712", "0704.0001", "1412.1234"):
         assert claims._parse_reference(bibl(f"arXiv:{arxiv_id}"))["arxiv"] == arxiv_id
+
+
+def reference(inner: str) -> ET.Element:
+    return ET.fromstring(f'<biblStruct xmlns="http://www.tei-c.org/ns/1.0">{inner}</biblStruct>')
+
+
+def test_a_title_left_in_a_note_wins_over_the_venue():
+    # GPT-3 in Power of Scale (#908): the end of the author list is the article title, the venue
+    # is the monograph title, and the real title is in the note.
+    gpt3 = reference(
+        '<analytic><title level="a">Alec Radford, Ilya Sutskever, and Dario Amodei</title></analytic>'
+        '<monogr><title level="m">Advances in Neural Information Processing Systems</title></monogr>'
+        "<note>Language models are few-shot learners</note>"
+    )
+
+    assert claims._parse_reference(gpt3)["title"] == "Language models are few-shot learners"
+
+
+def test_a_note_is_not_read_when_the_article_title_is_real():
+    paper = reference(
+        '<analytic><title level="a">Dense passage retrieval</title></analytic>'
+        "<monogr/><note>In Proceedings of EMNLP</note>"
+    )
+
+    assert claims._parse_reference(paper)["title"] == "Dense passage retrieval"
+
+
+def test_a_typed_note_is_not_taken_for_a_title():
+    report = reference(
+        '<analytic><title level="a">Alec Radford, Ilya Sutskever, and Dario Amodei</title></analytic>'
+        '<monogr><title level="m">OpenAI blog</title></monogr>'
+        '<note type="report_type">Technical report</note>'
+    )
+
+    assert claims._parse_reference(report)["title"] == "OpenAI blog"
