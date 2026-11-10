@@ -328,11 +328,13 @@ def test_arxiv_titles_asks_once_for_all_the_ids(web):
     replies, asked = web
     replies.append(Reply(text=ARXIV_FEED))
 
-    titles = sources.arxiv_titles(["2112.11446", "2204.02311v3"])
+    titles = sources.arxiv_titles(["2112.11446", "2204.02311", "2204.02311v3"])
 
+    palm = "PaLM: Scaling Language Modeling with Pathways"
     assert titles == {
         "2112.11446": "Scaling Language Models: Methods, Analysis & Insights from Training Gopher",
-        "2204.02311v3": "PaLM: Scaling Language Modeling with Pathways",
+        "2204.02311": palm,
+        "2204.02311v3": palm,
     }
     assert asked == [sources.ARXIV_API]
 
