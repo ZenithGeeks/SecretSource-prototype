@@ -191,19 +191,35 @@ function ProfileMenu({
   )
 }
 
-/** "Analyses > group-norm-2018.pdf": the last item is the current page. */
-function Breadcrumb({ items }: { items: string[] }) {
+/** One part of the trail: plain text, or text with an action that takes the reader back there. */
+export type Crumb = string | { label: string; onSelect: () => void }
+
+/** "Analyses > group-norm-2018.pdf": the last item is the current page. A part with an action is a
+ * button, except the last, which is where the reader already is. */
+function Breadcrumb({ items }: { items: Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
       <ol className="flex items-center gap-2 text-[13px] text-ink-muted">
         {items.map((item, i) => {
           const last = i === items.length - 1
+          const label = typeof item === 'string' ? item : item.label
+          const goBack = typeof item === 'string' || last ? null : item.onSelect
           return (
-            <li key={`${i}-${item}`} className="flex min-w-0 items-center gap-2">
+            <li key={`${i}-${label}`} className="flex min-w-0 items-center gap-2">
               {i > 0 && <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />}
-              <span aria-current={last ? 'page' : undefined} className={cn('truncate', last && 'font-medium text-ink')}>
-                {item}
-              </span>
+              {goBack ? (
+                <button
+                  type="button"
+                  onClick={goBack}
+                  className="truncate hover:text-ink hover:underline focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11"
+                >
+                  {label}
+                </button>
+              ) : (
+                <span aria-current={last ? 'page' : undefined} className={cn('truncate', last && 'font-medium text-ink')}>
+                  {label}
+                </span>
+              )}
             </li>
           )
         })}
@@ -245,7 +261,7 @@ export function AppShell<K extends string>({
   showProfileMenu?: boolean
   sidebar?: ReactNode
   /** Shows the sticky toolbar with this trail on its left (last item = current page). */
-  breadcrumb?: string[]
+  breadcrumb?: Crumb[]
   wide?: boolean | 'full'
   foldable?: boolean
   /** A button next to the brand (the labeler's bell). It shows on the phone top bar and in the

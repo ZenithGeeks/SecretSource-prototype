@@ -2,7 +2,7 @@
  * sidebar, phone top bar or toolbar. The default shell every other screen uses keeps all three,
  * and moving between the two keeps the panel mounted, so a Do it run in it goes on. */
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { Home, Library } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { expect, test, vi } from 'vitest'
@@ -81,4 +81,29 @@ test('moving between the default shell and a bare one keeps the panel mounted', 
   expect(screen.getByLabelText('Panel field')).toBe(field)
   expect(field.value).toBe('kept')
   expect(mounts).toBe(1)
+})
+
+test('a breadcrumb part with an action is a button, and the last part is text even if it has one', () => {
+  const back = vi.fn()
+  const stay = vi.fn()
+  render(
+    <AppShell
+      nav={NAV}
+      active="home"
+      onNavigate={() => {}}
+      role="Author"
+      roleIcon={Home}
+      breadcrumb={[{ label: 'Library', onSelect: back }, 'Projects', { label: 'Current', onSelect: stay }]}
+    >
+      <p>content</p>
+    </AppShell>,
+  )
+  const trail = screen.getByRole('navigation', { name: 'Breadcrumb' })
+  fireEvent.click(within(trail).getByRole('button', { name: 'Library' }))
+  expect(back).toHaveBeenCalledOnce()
+  // A plain string and the last part are not buttons; the last one marks the current page.
+  expect(within(trail).queryByRole('button', { name: 'Projects' })).toBeNull()
+  expect(within(trail).queryByRole('button', { name: 'Current' })).toBeNull()
+  expect(within(trail).getByText('Current')).toHaveAttribute('aria-current', 'page')
+  expect(stay).not.toHaveBeenCalled()
 })
