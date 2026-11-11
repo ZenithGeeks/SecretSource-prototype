@@ -51,17 +51,21 @@ type Palette = {
   supports: string
   refutes: string
   insufficient: string
+  /** Paper-cluster hues. None is red, green or amber: those already mean contradicted, backed and silent. */
+  cluster: string[]
 }
 
 const LIGHT: Palette = {
   ink: '#1E1A22', inkMuted: '#6B6370', surface: '#FFFDF9', border: '#E4DDD1',
   accent: '#6A2E6F', accentSoft: '#F1E4F2', supports: '#2F6B45', refutes: '#A33A2E',
   insufficient: '#8A6414',
+  cluster: ['#6A2E6F', '#2B5F9E', '#1F7A86', '#5C6270', '#8A5A3C'],
 }
 const DARK: Palette = {
   ink: '#F2EEF4', inkMuted: '#B3AAB8', surface: '#2A262D', border: '#423C46',
   accent: '#C98FC4', accentSoft: '#3D2F42', supports: '#7FD39B', refutes: '#E08A76',
   insufficient: '#D8B45F',
+  cluster: ['#C98FC4', '#7FAAE0', '#6CC3CF', '#A7AEBB', '#D0A07E'],
 }
 
 /** Follows the app theme from `useSettings()`, the same source the rest of the app reads: the
@@ -82,7 +86,7 @@ function usePalette(): { pal: Palette; dark: boolean } {
 
 /** Cluster → colour, cycled in cluster order so new clusters stay distinguishable. */
 function clusterColors(pal: Palette): string[] {
-  return [pal.accent, pal.supports, pal.insufficient, pal.inkMuted, pal.refutes]
+  return pal.cluster
 }
 
 /** A short node label for the canvas — the full title would overlap everything. Cuts on a word
@@ -304,13 +308,13 @@ function InsightTile({ insight, active, onToggle }: { insight: Insight; active: 
       aria-pressed={active}
       disabled={count === 0}
       className={cn(
-        'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border bg-surface px-3.5 py-2.5 text-left transition-colors disabled:cursor-default disabled:opacity-60',
+        'flex min-w-0 items-center gap-2 rounded-full border bg-surface py-1.5 pl-3 pr-3.5 text-left transition-colors disabled:cursor-default disabled:opacity-60 pointer-coarse:min-h-11',
         active ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent/50',
       )}
     >
       <Icon className={cn('size-4 shrink-0', tone)} />
       <span className={cn('font-mono text-[15px] leading-5 tracking-[-0.01em]', tone)}>{count}</span>
-      <span className="min-w-0 flex-1 text-xs leading-4 text-ink-muted">{label}</span>
+      <span className="min-w-0 text-xs leading-4 text-ink-muted">{label}</span>
     </button>
   )
 }
@@ -587,7 +591,7 @@ function GraphCanvas({
       )}
 
       {view === 'claims' && (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex flex-wrap gap-2">
           {insights.map((insight) => (
             <InsightTile
               key={insight.key}

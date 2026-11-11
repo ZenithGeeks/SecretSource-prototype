@@ -2,8 +2,8 @@
  * Researcher role router: which researcher screen is showing, rendered inside the shared
  * AppShell with the researcher nav. `?screen=` deep-links one and `?analysis=` opens that
  * analysis on Analyses (formerly History: `?screen=history` still opens it, and the URL is
- * rewritten to `analyses`). field-consensus now lives inside the Graph tab as a Consensus toggle, so
- * it lights the Graph nav and the `field-consensus` screen opens the Graph with that tab active.
+ * rewritten to `analyses`). "Ask the field" (`?screen=field-consensus`) has its own nav item; it is
+ * the Graph component on its Consensus tab, with the Graph | Ask the field switch left out.
  *
  * Analyses is where a paper gets analyzed (Figma row "Analyze a paper"): the form and the
  * results in main. The recent analyses list sits under the nav on every screen. Home's "Analyze a paper" action and
@@ -14,7 +14,7 @@
  */
 
 import { MotionConfig } from 'framer-motion'
-import { Home as HomeIcon, Library as LibraryIcon, ListChecks, Microscope, Waypoints } from 'lucide-react'
+import { Home as HomeIcon, Library as LibraryIcon, ListChecks, MessageSquareQuote, Microscope, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
@@ -28,37 +28,28 @@ import { Graph } from './screens/Graph'
 import { Home } from './screens/Home'
 import { Library } from './screens/Library'
 
-type NavKey = 'home' | 'analyses' | 'library' | 'graph'
-// field-consensus is screen-only — reachable and deep-linkable, but with no nav entry of its
-// own. Settings is a modal (Figma 22), opened from the profile menu, not a screen.
-export type ResearcherScreen = NavKey | 'field-consensus'
+// Settings is a modal (Figma 22), opened from the profile menu, not a screen.
+type NavKey = 'home' | 'analyses' | 'library' | 'graph' | 'field-consensus'
+export type ResearcherScreen = NavKey
 
 const NAV: NavEntry<NavKey>[] = [
   { key: 'home', label: 'Home', icon: HomeIcon },
   { key: 'analyses', label: 'Analyses', icon: ListChecks },
   { key: 'library', label: 'Library', icon: LibraryIcon },
   { key: 'graph', label: 'Graph', icon: Waypoints },
+  { key: 'field-consensus', label: 'Ask the field', icon: MessageSquareQuote },
 ]
 
 const NAV_LABEL = Object.fromEntries(NAV.map((entry) => [entry.key, entry.label])) as Record<NavKey, string>
 
-// Which nav item lights for each screen. field-consensus lives in the Graph tab as a Consensus
-// toggle, so it lights Graph. Settings is a modal and lights nothing; the profile button carries
-// its own active state.
-const NAV_FOR: Record<ResearcherScreen, NavKey> = {
-  home: 'home',
-  library: 'library',
-  'field-consensus': 'graph',
-  graph: 'graph',
-  analyses: 'analyses',
-}
+const SCREENS = new Set<string>(NAV.map((entry) => entry.key))
 
 function initialScreen(): ResearcherScreen {
   const params = new URLSearchParams(window.location.search)
   const s = params.get('screen')
   // Old links say `history`; the screen is called Analyses now.
   if (s === 'history') return 'analyses'
-  if (s && s in NAV_FOR) return s as ResearcherScreen
+  if (s && SCREENS.has(s)) return s as ResearcherScreen
   return params.get('analysis') ? 'analyses' : 'home'
 }
 
@@ -124,7 +115,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
       ? history.selectedName
         ? ['Analyses', history.selectedName]
         : ['Analyses']
-      : [NAV_LABEL[NAV_FOR[screen]]]
+      : [NAV_LABEL[screen]]
 
   return (
     // reducedMotion="user": every fade and slide on these screens stops for people who ask the OS for less motion.
@@ -132,7 +123,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
     <div className="redesign-app">
     <AppShell
       nav={NAV}
-      active={NAV_FOR[screen]}
+      active={screen}
       onNavigate={navigate}
       role="Researcher"
       roleIcon={Microscope}
@@ -155,6 +146,10 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
       {(screen === 'graph' || screen === 'field-consensus') && (
         <Graph
           onOpenAnalysis={openAnalysis}
+          // The two have their own nav items, so the Graph | Ask the field switch is left out.
+          // key: moving between them in the nav remounts Graph on the right tab.
+          key={screen}
+          hideTabs
           initialTab={screen === 'field-consensus' ? 'consensus' : 'graph'}
           emptyMessage={NOTHING_TO_GRAPH}
           askPanel={ask.panel}

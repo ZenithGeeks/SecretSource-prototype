@@ -140,10 +140,12 @@ describe('project list', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('the Add papers menu closes on Escape and on a click outside it', async () => {
-    gateway()
-    renderLibrary()
-    await screen.findByRole('heading', { name: 'Library' })
+  it('the Add papers menu closes on Escape and on a click outside it', () => {
+    const items = [
+      { label: 'One', hint: 'first', onSelect: vi.fn() },
+      { label: 'Two', hint: 'second', onSelect: vi.fn() },
+    ]
+    render(<LibraryAddMenu items={items} />)
     const add = screen.getByRole('button', { name: 'Add papers' })
     fireEvent.click(add)
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
@@ -158,13 +160,21 @@ describe('project list', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('opens Analyses from the Analyze a new paper menu item', async () => {
+  it('a single way to add is the button itself, with its hint on hover, not a one-item menu', () => {
+    const onSelect = vi.fn()
+    render(<LibraryAddMenu items={[{ label: 'Analyze a new paper', hint: 'DOI, arXiv ID, link or PDF', onSelect }]} />)
+    expect(screen.queryByRole('button', { name: 'Add papers' })).not.toBeInTheDocument()
+    const only = screen.getByRole('button', { name: 'Analyze a new paper' })
+    expect(only).toHaveAttribute('title', 'DOI, arXiv ID, link or PDF')
+    fireEvent.click(only)
+    expect(onSelect).toHaveBeenCalledOnce()
+  })
+
+  it('opens Analyses from the Analyze a new paper button', async () => {
     gateway()
     renderLibrary()
     await screen.findByRole('heading', { name: 'Library' })
-    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Analyze a new paper/ }))
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze a new paper' }))
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('analyses')
   })
 
@@ -538,8 +548,9 @@ describe('project detail', () => {
 
     renderLibrary('&project=unsorted')
     await screen.findByText('ColBERTv2')
-    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
-    expect(screen.getAllByRole('menuitem')).toHaveLength(1)
+    // One action left, so it is a plain button.
+    expect(screen.queryByRole('button', { name: 'Add papers' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Analyze a new paper' })).toBeInTheDocument()
   })
 })
 
@@ -771,6 +782,20 @@ describe('dialog focus', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     fireEvent.keyDown(dialog, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('Shift+Tab from the dialog itself wraps to its last stop instead of leaving it', async () => {
+    gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' })
+    dialog.focus()
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(cancel).toHaveFocus()
+    // Plain Tab from the dialog itself is the browser's: it goes to the first stop on its own.
+    dialog.focus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(cancel).not.toHaveFocus()
   })
 
   it('focus goes back to the button that opened the dialog', async () => {

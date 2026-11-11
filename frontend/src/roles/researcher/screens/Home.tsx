@@ -5,6 +5,7 @@
  * analysis that cites it, and a queued paper's Analyze puts its identifier in the Analyze input.
  */
 
+import { TriangleAlert } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
@@ -18,12 +19,13 @@ import { useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
 import type { ResearcherScreen } from '../ResearcherApp'
 import { HomeAnalyzeCard } from '../components/HomeAnalyzeCard'
+import { StandingKey } from '../components/StandingKey'
 
-/** Display order for the library tally; the bar and legend both follow it. */
+/** Display order for the library tally; the bar and legend both follow it, worst first like the Graph key. */
 const STANDINGS: { key: ClaimStanding; kind: Standing; color: string }[] = [
-  { key: 'backed', kind: 'supports', color: 'bg-supports' },
-  { key: 'silent', kind: 'insufficient', color: 'bg-insufficient' },
   { key: 'contradicted', kind: 'refutes', color: 'bg-refutes' },
+  { key: 'silent', kind: 'insufficient', color: 'bg-insufficient' },
+  { key: 'backed', kind: 'supports', color: 'bg-supports' },
   { key: 'unchecked', kind: 'unchecked', color: 'bg-neutral' },
 ]
 
@@ -53,6 +55,8 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
 }
 
 const CARD = 'rounded-2xl border border-border-subtle bg-surface shadow-sm'
+// The reading queue is a to-do list, not a finding: no shadow, so Conflicts is the card that lifts.
+const QUIET_CARD = 'rounded-2xl border border-border-subtle bg-surface'
 const CARD_TITLE = 'text-[15px] font-semibold tracking-tight text-ink'
 
 export function Home({
@@ -116,8 +120,15 @@ export function Home({
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         {/* Conflicts */}
-        <Card className={cn(CARD, 'min-w-0 flex-1 p-0 pt-[18px] pb-1.5')}>
-          <div className="flex items-center px-5 pb-2.5">
+        <Card
+          className={cn(
+            CARD,
+            'min-w-0 flex-1 p-0 pt-[18px] pb-1.5',
+            conflictsTotal > 0 && 'border-refutes/40 shadow-md',
+          )}
+        >
+          <div className="flex items-center gap-2 px-5 pb-2.5">
+            {conflictsTotal > 0 && <TriangleAlert aria-hidden="true" className="size-4 shrink-0 text-refutes" />}
             <h2 className={cn(CARD_TITLE, 'flex-1')}>Conflicts in your library</h2>
             {conflictsTotal > home.conflicts.length && (
               <TextButton onClick={() => onOpen('library')} className="text-[13px]">
@@ -160,7 +171,7 @@ export function Home({
         </Card>
 
         {/* Reading queue */}
-        <Card className={cn(CARD, 'p-0 pt-[18px] pb-1.5 lg:w-[340px] lg:shrink-0')}>
+        <Card className={cn(QUIET_CARD, 'p-0 pt-[18px] pb-1.5 lg:w-[340px] lg:shrink-0')}>
           <div className="flex items-center px-5 pb-2.5">
             <h2 className={cn(CARD_TITLE, 'flex-1')}>Reading queue</h2>
             <span className="text-[13px] font-medium text-ink-muted">{home.queue.length}</span>
@@ -212,6 +223,7 @@ export function Home({
           </TextButton>
         </div>
         <TallyBar tally={home.library.tally} />
+        <StandingKey />
       </section>
     </FadeIn>
   )

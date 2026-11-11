@@ -34,12 +34,13 @@ import { cn } from '../../../lib/utils'
 import { LibraryAddMenu, type LibraryAddItem } from '../components/LibraryAddMenu'
 import { count } from '../components/LibraryCount'
 import { LibraryPaperTable } from '../components/LibraryPaperTable'
+import { StandingKey } from '../components/StandingKey'
 
-/** Display order + colour for a project's claim tally bar. */
+/** Display order + colour for a project's claim tally bar: worst first, as on Home and the Graph key. */
 const STANDINGS: { key: ClaimStanding; color: string }[] = [
-  { key: 'backed', color: 'bg-supports' },
-  { key: 'silent', color: 'bg-insufficient' },
   { key: 'contradicted', color: 'bg-refutes' },
+  { key: 'silent', color: 'bg-insufficient' },
+  { key: 'backed', color: 'bg-supports' },
   { key: 'unchecked', color: 'bg-neutral' },
 ]
 
@@ -85,8 +86,10 @@ function Modal({ titleId, onClose, children }: { titleId: string; onClose: () =>
     if (event.key === 'Escape') return onClose()
     if (event.key !== 'Tab') return
     const stops = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)]
-    const edge = event.shiftKey ? stops[0] : stops[stops.length - 1]
-    if (document.activeElement !== edge) return
+    // Shift+Tab from the dialog itself (a dialog opened from a menu starts there) would leave it too.
+    const atStart = document.activeElement === stops[0] || document.activeElement === event.currentTarget
+    const atEnd = document.activeElement === stops[stops.length - 1]
+    if (!(event.shiftKey ? atStart : atEnd)) return
     event.preventDefault()
     stops[event.shiftKey ? stops.length - 1 : 0].focus()
   }
@@ -629,6 +632,8 @@ function ProjectDetail({
           className="flex-wrap"
         />
       </div>
+
+      <StandingKey />
 
       <LibraryPaperTable
         papers={shown}
