@@ -8,7 +8,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api, API_BASE, fetchFile, postEvents, request, type CitationMarker, type Source } from './api'
+import { api, API_BASE, fetchFile, postEvents, reasonText, request, type CitationMarker, type Source } from './api'
 import type { AnswerEvent } from './assistant'
 
 export type Level = 1 | 2 | 3 | 4
@@ -34,6 +34,11 @@ export type Candidate = {
   passage: string
 }
 
+/** A citation the analysis did not check, with why: "named" (the paper only names the work) or
+ * one of api.ts's Reason codes. `url`, `doi` and `year` are the reference list's own, '' when it
+ * had none; they are missing from a gateway older than these fields. */
+export type UncheckedCitation = { ref: string; label: string; reason: string; url?: string; doi?: string; year?: string }
+
 export type SessionClaim = {
   claim_id: string
   claim: string
@@ -41,6 +46,11 @@ export type SessionClaim = {
   section: string
   source: Source | null
   candidates: Candidate[]
+  /** The citations that were not checked. Missing from a gateway older than this field. */
+  unchecked?: UncheckedCitation[]
+  /** The "b23"s the claim cites, in its order. Missing from a gateway older than this field,
+   * and from a claim added by hand. */
+  cited?: string[]
 }
 
 /** A cited paper. `label` is its title, or the arXiv id or DOI when the citation list had none;
@@ -636,13 +646,61 @@ export function displayOrder(claim: WorkClaim): Candidate[] {
   return papers.flatMap((id) => claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank))
 }
 
+/** What a sentence cites in brackets: "[b47]" and "[b4, b9]" give b47, b4 and b9. */
+const sentenceMarkers = (sentence: string): string[] =>
+  [...sentence.matchAll(/\[([^\]]+)\]/g)].flatMap((m) => m[1].split(/[,;]/).map((part) => part.trim()))
+
+/** The "b23"s a claim cites, in its order: the gateway's list, or the markers in its sentence
+ * when the gateway is older than that list or the claim was added by hand. */
+export const citedRefs = (claim: SessionClaim): string[] => claim.cited ?? sentenceMarkers(claim.sentence)
+
+/** The references a claim cites that have a PDF, in the order it cites them. A claim with no
+ * passages opens the first of these, never a reference only another claim cites. */
+export function citedReferences(claim: SessionClaim, references: Reference[]): Reference[] {
+  return citedRefs(claim).flatMap((ref) => references.find((r) => r.ref === ref) ?? [])
+}
+
+/** A cited work with no PDF to open, as the reference pane lists it. */
+export type Unresolved = { ref: string; label: string; year: string; reason: string; links: { text: string; href: string }[] }
+
+/** Why a citation was not read, in plain words: api.ts's wording, plus the labeler's own "named". */
+export const uncheckedReason = (reason: string): string =>
+  reason === 'named' ? 'the paper only names it, so it was not checked' : reasonText(reason)
+
+// Only http(s): the link comes from a PDF's reference list, so any other scheme is not followed.
+const webLink = (url: string | undefined) => (url && /^https?:\/\//i.test(url) ? [{ text: url, href: url }] : [])
+const doiLink = (doi: string | undefined) =>
+  doi ? [{ text: `doi:${doi}`, href: `https://doi.org/${doi.split('/').map(encodeURIComponent).join('/')}` }] : []
+
+/**
+ * The works a claim cites that have no PDF here: the citations the analysis did not check, then
+ * any other cited work that was never read (nothing to look it up by). One that does have a PDF,
+ * read for another claim, is left out: it opens instead. Empty when the claim cites nothing, or
+ * everything it cites can be opened.
+ */
+export function unresolvedCitations(claim: SessionClaim, session: Pick<Session, 'references' | 'unread'>): Unresolved[] {
+  const readable = new Set(session.references.flatMap((r) => r.ref ?? []))
+  const unchecked = (claim.unchecked ?? []).filter((row) => !readable.has(row.ref))
+  const listed = new Set(unchecked.map((row) => row.ref))
+  const cited = new Set(claim.cited ?? [])
+  const unread = (session.unread ?? []).filter((r) => r.ref && cited.has(r.ref) && !listed.has(r.ref))
+  return [
+    ...unchecked.map((row) => ({
+      ref: row.ref,
+      label: row.label,
+      year: row.year ?? '',
+      reason: uncheckedReason(row.reason),
+      links: [...doiLink(row.doi), ...webLink(row.url)],
+    })),
+    ...unread.map((r) => ({ ref: r.ref!, label: r.label, year: r.year ?? '', reason: uncheckedReason('unresolvable'), links: [] })),
+  ]
+}
+
 /** The passage to open first for a claim: the top-scoring one, taken from a reference its sentence
  * cites ("[b47]" or "[b4, b9]") when the search found that reference. The scores are raw ColBERT
  * scores for one query, so they can be compared across references. */
 export function bestCandidate(claim: WorkClaim, references: Reference[]): Candidate | undefined {
-  const markers = new Set(
-    [...claim.sentence.matchAll(/\[([^\]]+)\]/g)].flatMap((m) => m[1].split(/[,;]/).map((part) => part.trim())),
-  )
+  const markers = new Set(sentenceMarkers(claim.sentence))
   const cited = new Set(references.filter((r) => r.ref && markers.has(r.ref)).map((r) => r.reference_id))
   const byScore = [...claim.candidates].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
   return byScore.find((c) => cited.has(c.reference_id)) ?? byScore[0]

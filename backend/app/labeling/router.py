@@ -152,6 +152,9 @@ def build_session(analysis: dict) -> dict:
                 "source": claim.get("source"),
                 "candidates": candidates,
                 "unchecked": _unchecked(claim),
+                # The "b23"s this claim cites, in the order it cites them, so the labeler opens
+                # one of its own references and never another claim's.
+                "cited": [ref for citation in claim.get("citations") or [] if (ref := citation.get("ref"))],
             }
         )
     return {
@@ -170,15 +173,25 @@ def build_session(analysis: dict) -> dict:
 def _unchecked(claim: dict) -> list[dict]:
     """The claim's citations the analysis did not check, each with why, so a reference with no
     passages is not taken for a search that found nothing (#836). "named" is a work the paper only
-    names, a method or dataset it uses; the rest are verify.unchecked_reason values."""
+    names, a method or dataset it uses; the rest are verify.unchecked_reason values. `url`, `doi`
+    and `year` are the citation's own, "" when the reference list had none, so the labeler can
+    still open a work that has no PDF here."""
     named = set(claim.get("named") or [])
     failed = {row["source"]: row["reason"] for row in claim.get("unchecked") or []}
     rows = []
     for citation in claim.get("citations") or []:
         source = lookup_key(citation)
         if reason := "named" if source in named else failed.get(source):
-            label = citation.get("title") or source
-            rows.append({"ref": citation.get("ref", ""), "label": label, "reason": reason})
+            rows.append(
+                {
+                    "ref": citation.get("ref", ""),
+                    "label": citation.get("title") or source,
+                    "reason": reason,
+                    "url": citation.get("url") or "",
+                    "doi": citation.get("doi") or "",
+                    "year": str(citation.get("year") or ""),
+                }
+            )
     return rows
 
 
