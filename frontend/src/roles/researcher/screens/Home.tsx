@@ -14,6 +14,7 @@ import { errorMessage } from '../../../lib/author'
 import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
+import { stepRows } from '../../../lib/stepRows'
 import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { useAuth } from '../../../lib/useAuth'
 import { useResearcherHome } from '../../../lib/useResearcher'
@@ -145,7 +146,7 @@ export function Home({
                 : 'No claim in your papers is contradicted by its sources.'}
             </p>
           )}
-          <ul>
+          <ul onKeyDown={stepRows}>
             {home.conflicts.map((c) => (
               <li key={`${c.analysis}-${c.claimIndex}`} className="border-t border-border-subtle">
                 <button
@@ -185,7 +186,7 @@ export function Home({
               Works that your papers cite more than once show up here.
             </p>
           )}
-          <ul>
+          <ul onKeyDown={stepRows}>
             {home.queue.map((entry) => (
               <li key={entry.paper} className="flex items-center gap-2.5 border-t border-border-subtle py-2.5 pl-5 pr-3.5">
                 <button

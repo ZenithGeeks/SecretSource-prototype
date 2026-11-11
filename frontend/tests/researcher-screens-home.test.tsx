@@ -156,6 +156,41 @@ describe('Home', () => {
     expect(onOpen).toHaveBeenCalledWith('library')
   })
 
+  it('Up and Down step through the conflicts and the reading queue, and stop at the ends', async () => {
+    gateway({
+      home: {
+        ...EMPTY_HOME,
+        library: { ...EMPTY_HOME.library, papers: 3 },
+        conflicts: [
+          { claim: 'First claim', for: [], against: ['X'], analysis: 'a1', claimIndex: 0 },
+          { claim: 'Second claim', for: ['Y'], against: [], analysis: 'a2', claimIndex: 0 },
+        ],
+        queue: [
+          { paper: 'One', note: 'Cited by 2', identifier: '10.1/one', analysis: 'a1' },
+          { paper: 'Two', note: 'Cited by 2', identifier: '10.1/two', analysis: 'a2' },
+        ],
+      },
+    })
+    renderHome()
+    const first = (await screen.findByText('First claim')).closest('button')!
+    const second = screen.getByText('Second claim').closest('button')!
+    first.focus()
+    fireEvent.keyDown(first, { key: 'ArrowUp' })
+    expect(first).toHaveFocus()
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(second).toHaveFocus()
+    fireEvent.keyDown(second, { key: 'ArrowDown' })
+    expect(second).toHaveFocus()
+    fireEvent.keyDown(second, { key: 'Enter' })
+    expect(second).toHaveFocus()
+
+    // From the Analyze… button of the first queued paper, Down goes to the next paper's row.
+    const analyzeOne = screen.getByRole('button', { name: /^Analyze One/ })
+    analyzeOne.focus()
+    fireEvent.keyDown(analyzeOne, { key: 'ArrowDown' })
+    expect(screen.getByText('Two').closest('button')).toHaveFocus()
+  })
+
   it('All N in Library goes to the Library screen when more conflicts exist than are listed', async () => {
     gateway({ home: { ...EMPTY_HOME, conflictsTotal: 5 } })
     const { onOpen } = renderHome()
