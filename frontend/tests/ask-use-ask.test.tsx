@@ -5,7 +5,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -58,7 +58,12 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 
-afterEach(() => vi.unstubAllGlobals())
+// Unmount first. The setup file's cleanup runs after this hook, so unstubbing alone would leave the
+// viewer mounted without matchMedia, and a late render would throw "window.matchMedia is not a function".
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 type Props = Parameters<typeof useAsk>[0]
 
