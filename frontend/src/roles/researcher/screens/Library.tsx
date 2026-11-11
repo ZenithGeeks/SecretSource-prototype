@@ -412,14 +412,14 @@ function ProjectsLanding({
         </Button>
       </header>
 
-      {projects.some((p) => !p.unsorted) && (
+      {projects.filter((p) => !p.unsorted).length >= 2 && (
         <div className="flex flex-wrap items-center gap-3">
           <Input
             ref={filterInput}
             aria-keyshortcuts="/"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter projects by name"
+            placeholder="Filter projects (press /)"
             aria-label="Filter projects"
             className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
           />
@@ -637,7 +637,7 @@ function ProjectDetail({
           aria-keyshortcuts="/"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by title, author or claim"
+          placeholder="Filter papers (press /)"
           aria-label="Filter papers"
           data-ask-target={askTarget({ kind: 'field', id: 'library-filter' })}
           className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"

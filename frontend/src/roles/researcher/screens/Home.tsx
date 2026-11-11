@@ -207,7 +207,7 @@ export function Home({
                   }}
                   className="shrink-0 rounded-[9px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] font-medium text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11"
                 >
-                  Analyze
+                  Analyze…
                 </button>
               </li>
             ))}

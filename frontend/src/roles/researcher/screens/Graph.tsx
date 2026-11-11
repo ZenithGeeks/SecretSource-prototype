@@ -383,6 +383,16 @@ function GraphCanvas({
     if (selection) setSide('details')
   }
 
+  // The address names the view and the chosen claim or link, so a refresh or a shared link comes back to it.
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search)
+    const keep = (name: string, value: string | null) => (value ? next.set(name, value) : next.delete(name))
+    keep('view', view === 'papers' ? 'papers' : null)
+    keep('claim', claimSel)
+    keep('pair', pairSel)
+    window.history.replaceState(null, '', `?${next}`)
+  }, [view, claimSel, pairSel])
+
   useEffect(() => {
     const node = view === 'claims' && claimSel ? graph?.nodes.find((n) => n.id === claimSel) : undefined
     onSelectNode?.(node ? { id: node.id, label: node.label } : null)
@@ -539,6 +549,10 @@ function GraphCanvas({
       ? 'Claims and the papers that back, contradict, or ignore them. Choose a claim to see its evidence.'
       : 'Choose a link to compare a pair of papers. The key in the corner says what the lines mean.'
   const names = Object.fromEntries(graph.nodes.map((n) => [n.id, n.label]))
+  // The list follows what the canvas shows: the filter text and the pressed finding both narrow it.
+  const listedClaims = claimRows
+    .filter((row) => !filter.trim() || row.label.toLowerCase().includes(filter.trim().toLowerCase()))
+    .filter((row) => !activeInsight || activeInsight.ids.has(row.id))
   const pairRows = graph.paperEdges
     .filter((e) => (pFilter === 'strong' ? e.similarity >= 0.5 : pFilter === 'citations' ? e.cites : true))
     .map((e) => ({
@@ -659,7 +673,7 @@ function GraphCanvas({
                 aria-keyshortcuts="/"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter claims…"
+                placeholder="Filter claims (press /)"
                 aria-label="Filter claims"
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
               />
@@ -800,7 +814,9 @@ function GraphCanvas({
 
       {/* The canvas can only be read and driven with a pointer; the same claims as a list are for keyboards,
           screen readers and anyone who wants the contradicted ones first. */}
-      {view === 'claims' && <GraphClaimList rows={claimRows} selectedId={claimSel} onSelect={setClaimSel} />}
+      {view === 'claims' && (
+        <GraphClaimList rows={listedClaims} total={claimRows.length} selectedId={claimSel} onSelect={setClaimSel} />
+      )}
       {view === 'papers' && <GraphPairList rows={pairRows} selectedId={pairSel} onSelect={setPairSel} />}
     </>
   )
