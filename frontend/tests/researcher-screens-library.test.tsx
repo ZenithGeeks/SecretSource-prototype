@@ -626,7 +626,7 @@ describe('adding analysed papers', () => {
     expect(within(dialog).getByText('p.pdf')).toBeInTheDocument()
   })
 
-  it('adds one paper and disables the other Add buttons meanwhile', async () => {
+  it('adds the chosen papers one after the other, and turns the controls off meanwhile', async () => {
     let finish!: () => void
     const calls = gateway()
     const stub = vi.mocked(fetch)
@@ -636,16 +636,58 @@ describe('adding analysed papers', () => {
       return inner(url, init)
     })
     const dialog = await openPicker()
-    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Add' })[0])
+    await within(dialog).findByRole('checkbox', { name: 'PLAID' })
+    const add = () => within(dialog).getByRole('button', { name: /^Add( \d)?/ })
+    expect(add()).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'PLAID' }))
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'new.pdf' }))
+    expect(add()).toHaveTextContent('Add 2 papers')
+    fireEvent.click(add())
     await within(dialog).findByRole('button', { name: 'Adding…' })
-    expect(within(dialog).getAllByRole('button', { name: 'Add' })[0]).toBeDisabled()
+    expect(within(dialog).getByRole('checkbox', { name: 'PLAID' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Select all' })).toBeDisabled()
+    await act(async () => finish())
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/papers'))).toHaveLength(1))
     await act(async () => finish())
     await waitFor(() =>
-      expect(calls).toContainEqual({
-        method: 'POST', path: '/researcher/projects/p1/papers', body: { analysis_id: 'a5' },
-      }),
+      expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/papers')).map((c) => c.body)).toEqual([
+        { analysis_id: 'a5' },
+        { analysis_id: 'a6' },
+      ]),
     )
     await waitFor(() => expect(within(dialog).queryByRole('button', { name: 'Adding…' })).not.toBeInTheDocument())
+  })
+
+  it('Select all chooses every paper in the list and Clear takes them back', async () => {
+    gateway()
+    const dialog = await openPicker()
+    const boxes = () => within(dialog).getAllByRole('checkbox')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Select all' }))
+    expect(boxes().every((box) => (box as HTMLInputElement).checked)).toBe(true)
+    expect(within(dialog).getByRole('button', { name: 'Add 3 papers' })).toBeEnabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Clear' }))
+    expect(boxes().some((box) => (box as HTMLInputElement).checked)).toBe(false)
+    fireEvent.click(boxes()[0])
+    fireEvent.click(boxes()[0])
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled()
+  })
+
+  it('keeps the papers that failed chosen, names them, and still adds the others', async () => {
+    const calls = gateway()
+    const error = vi.spyOn(toast, 'error')
+    const stub = vi.mocked(fetch)
+    const inner = stub.getMockImplementation()!
+    stub.mockImplementation(async (url, init) => {
+      if (init?.method === 'POST' && String(init.body).includes('a5')) return new Response('{}', { status: 500 })
+      return inner(url, init)
+    })
+    const dialog = await openPicker()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Select all' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add 3 papers' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not add PLAID. Try again.'))
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/papers'))).toHaveLength(2)
+    expect(within(dialog).getByRole('checkbox', { name: 'PLAID' })).toBeChecked()
+    expect(within(dialog).getByRole('button', { name: 'Add 1 paper' })).toBeEnabled()
   })
 
   it('says no paper is analysed yet while the analyses are still loading', async () => {
@@ -941,8 +983,9 @@ describe('failures say so', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add papers' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /From your analysed papers/ }))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click((await within(dialog).findAllByRole('button', { name: /^Add$/ }))[0])
-    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not add the paper. Try again.'))
+    fireEvent.click(await within(dialog).findByRole('checkbox', { name: 'PLAID' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add 1 paper' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not add PLAID. Try again.'))
   })
 })
 

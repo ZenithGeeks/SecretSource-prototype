@@ -475,9 +475,36 @@ function AddPapersDialog({
 }) {
   const analyses = useAnalyses().data ?? []
   const { addToProject } = useResearcherActions()
-  const [adding, setAdding] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
+  const [adding, setAdding] = useState(false)
   const titleId = useId()
   const choices = analyses.filter((a) => a.status === 'done' && !inProject.has(a.id))
+  const nameOf = (a: (typeof choices)[number]) => a.title || paperName(a.file ?? a.paper)
+  const allChosen = choices.length > 0 && choices.every((a) => chosen.has(a.id))
+
+  const toggle = (id: string) =>
+    setChosen((now) => {
+      const next = new Set(now)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+
+  // One call per paper, one after the other, so a failure on one does not stop the rest. The ones
+  // that failed stay chosen, ready for another try.
+  const addChosen = async () => {
+    setAdding(true)
+    const failed: typeof choices = []
+    for (const analysis of choices.filter((a) => chosen.has(a.id))) {
+      try {
+        await addToProject(projectId, analysis.id)
+      } catch {
+        failed.push(analysis)
+      }
+    }
+    setChosen(new Set(failed.map((a) => a.id)))
+    if (failed.length > 0) toast.error(`Could not add ${failed.map(nameOf).join(', ')}. Try again.`)
+    setAdding(false)
+  }
 
   return (
     <Modal titleId={titleId} onClose={onClose}>
@@ -486,7 +513,7 @@ function AddPapersDialog({
         className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
         <h2 id={titleId} className="type-title text-ink">Add papers</h2>
-        <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in Analyses first.</p>
+        <p className="mt-1 text-[13px] text-ink-muted">Choose the papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
           {choices.length === 0 && (
             <li className="py-3 text-sm text-ink-muted">
@@ -496,33 +523,37 @@ function AddPapersDialog({
             </li>
           )}
           {choices.map((analysis) => (
-            <li key={analysis.id} className="flex items-center gap-3 border-t border-border-subtle py-2.5 first:border-t-0">
-              <span className="min-w-0 flex-1 truncate text-sm text-ink">
-                {analysis.title || paperName(analysis.file ?? analysis.paper)}
-              </span>
-              <Button
-                variant="ghost"
-                disabled={adding !== null}
-                onClick={async () => {
-                  setAdding(analysis.id)
-                  try {
-                    await addToProject(projectId, analysis.id)
-                  } catch {
-                    toast.error('Could not add the paper. Try again.')
-                  } finally {
-                    setAdding(null)
-                  }
-                }}
-              >
-                <Plus className="size-4" />
-                {adding === analysis.id ? 'Adding…' : 'Add'}
-              </Button>
+            <li key={analysis.id} className="border-t border-border-subtle first:border-t-0">
+              <label className="flex items-center gap-3 py-2.5 pointer-coarse:min-h-11">
+                <input
+                  type="checkbox"
+                  checked={chosen.has(analysis.id)}
+                  disabled={adding}
+                  onChange={() => toggle(analysis.id)}
+                  className="size-4"
+                />
+                <span className="min-w-0 flex-1 truncate text-sm text-ink">{nameOf(analysis)}</span>
+              </label>
             </li>
           ))}
         </ul>
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex items-center justify-end gap-2">
+          {choices.length > 1 && (
+            <Button
+              variant="ghost"
+              disabled={adding}
+              onClick={() => setChosen(allChosen ? new Set() : new Set(choices.map((a) => a.id)))}
+              className="mr-auto"
+            >
+              {allChosen ? 'Clear' : 'Select all'}
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose}>
             Done
+          </Button>
+          <Button disabled={adding || chosen.size === 0} onClick={() => void addChosen()}>
+            <Plus className="size-4" />
+            {adding ? 'Adding…' : chosen.size ? `Add ${count(chosen.size, 'paper')}` : 'Add'}
           </Button>
         </div>
       </motion.div>
