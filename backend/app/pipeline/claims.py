@@ -540,13 +540,20 @@ def _raw_title(reference) -> str:
 
     A journal's name is not the work's title: a reference list that gives authors, journal and
     year but no title was looked up as "Future Generation Computer Systems" (#937). The journal
-    line is read as the title only when it is a preprint note ("arXiv preprint arXiv:2303.12712").
+    line is still read as the title when it is a preprint note ("arXiv preprint
+    arXiv:2303.12712"), or when the reference has a link or a DOI: GROBID also writes a web
+    resource there ("FFmpeg-Developers. ffmpeg tool"), and that work has something to go by.
     """
     article, book, journal = _title_lines(reference)
     if article and _looks_like_authors(article) and (note := _plain_note(reference)):
         return note
-    own = (article, book, journal if _is_preprint_note(journal) else "")
+    own = (article, book, journal if _is_preprint_note(journal) or _has_link(reference) else "")
     return next((title for title in own if title and not _looks_like_authors(title)), "")
+
+
+def _has_link(reference) -> bool:
+    """Whether the reference gives a link or a DOI."""
+    return bool(_url_of(reference) or _identifier(reference, "DOI"))
 
 
 def _is_preprint_note(journal_line: str) -> bool:
@@ -555,10 +562,11 @@ def _is_preprint_note(journal_line: str) -> bool:
 
 
 def _venue_of(reference) -> str:
-    """The journal the reference names, or "" when it names none. PDFs of a journal's papers
-    are not found by its name, so this is kept apart from the title."""
+    """The journal the reference names, or "" when it names none or its journal line was read
+    as the title. PDFs of a journal's papers are not found by its name, so this is kept apart
+    from the title."""
     *_, journal = _title_lines(reference)
-    return "" if _is_preprint_note(journal) else journal
+    return "" if _is_preprint_note(journal) or _raw_title(reference) == journal else journal
 
 
 def _plain_note(reference) -> str:

@@ -313,6 +313,40 @@ def test_a_preprint_note_on_the_journal_line_is_not_a_venue():
     assert parsed["venue"] == ""
 
 
+def test_a_journal_line_beside_a_link_is_still_the_title():
+    # arXiv 2409.12191 [b28]: software, with its maker and name on the journal line and a link.
+    # The line is not a journal there, and the link is something to look the work up by.
+    software = ET.fromstring(
+        '<biblStruct xmlns="http://www.tei-c.org/ns/1.0">'
+        '<analytic><title/><ptr target="http://ffmpeg.org/"/></analytic>'
+        '<monogr><title level="j">FFmpeg-Developers. ffmpeg tool</title>'
+        '<imprint><date type="published" when="2024">2024</date></imprint></monogr>'
+        "</biblStruct>"
+    )
+
+    parsed = claims._parse_reference(software)
+
+    assert parsed["title"] == "FFmpeg-Developers. ffmpeg tool"
+    assert parsed["venue"] == ""
+    assert parsed["authors"] == []
+    assert parsed["year"] == "2024"
+    assert sources.lookup_key(parsed) == "FFmpeg-Developers. ffmpeg tool"
+
+
+def test_a_journal_line_beside_a_doi_is_still_the_title():
+    with_doi = ET.fromstring(
+        '<biblStruct xmlns="http://www.tei-c.org/ns/1.0"><analytic/>'
+        '<monogr><title level="j">Journal of Instrumentation</title>'
+        '<idno type="DOI">10.1088/1748-0221/3/08/S08004</idno></monogr></biblStruct>'
+    )
+
+    parsed = claims._parse_reference(with_doi)
+
+    assert parsed["title"] == "Journal of Instrumentation"
+    assert parsed["venue"] == ""
+    assert sources.lookup_key(parsed) == "10.1088/1748-0221/3/08/S08004"
+
+
 def test_the_citation_roles_listing_names_a_work_by_its_venue_when_it_has_no_title():
     claim = {
         "claim": "Flow-level models are accurate.",
