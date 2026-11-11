@@ -371,6 +371,74 @@ def _with_an_unread_citation() -> dict:
     return {**ANALYSIS, "claims": [first, ANALYSIS["claims"][1]]}
 
 
+def _citing(*citations: dict) -> dict:
+    """ANALYSIS whose second claim cites these works, none of which was read."""
+    second = {**ANALYSIS["claims"][1], "sentence": "Y is fast [b9].", "citations": list(citations)}
+    return {**ANALYSIS, "claims": [ANALYSIS["claims"][0], second]}
+
+
+VENUE_ONLY = {
+    "ref": "b9",
+    "label": "10",
+    "title": "",
+    "venue": "ACM Transactions on Modeling and Computer Simulation (TOMACS)",
+    "authors": ["P Velho", "L M Schnorr", "H Casanova", "A Legrand"],
+    "year": "2013",
+    "doi": "",
+    "arxiv": "",
+    "url": "",
+}
+
+
+def test_a_cited_work_with_no_title_is_listed_by_its_authors_and_venue():
+    # #937: the reference list gave no article title, so the work was not looked up.
+    session = labeling.build_session(_citing(VENUE_ONLY))
+
+    assert session["claims"][1]["cited"] == ["b9"]
+    assert session["claims"][1]["unchecked"] == []
+    assert session["unread"] == [
+        {
+            "reference_id": "unread-b9",
+            "file": "",
+            "label": "Velho et al., ACM Transactions on Modeling and Computer Simulation (TOMACS)",
+            "ref": "b9",
+            "authors": ["P Velho", "L M Schnorr", "H Casanova", "A Legrand"],
+            "year": "2013",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("authors", "year", "label"),
+    [
+        ([], "2008", "Journal of Instrumentation"),
+        (["H B Newman"], "", "Newman, Journal of Instrumentation"),
+        (["H B Newman", "I C Legrand"], "2001", "Newman and Legrand, Journal of Instrumentation"),
+    ],
+)
+def test_a_titleless_work_is_labelled_with_the_authors_it_has(authors, year, label):
+    work = {
+        **VENUE_ONLY,
+        "ref": "b2",
+        "venue": "Journal of Instrumentation",
+        "authors": authors,
+        "year": year,
+    }
+
+    [unread] = labeling.build_session(_citing(work))["unread"]
+
+    assert unread["label"] == label
+    assert unread["year"] == year
+
+
+def test_a_work_with_neither_title_nor_venue_keeps_its_printed_number():
+    work = {**VENUE_ONLY, "venue": "", "url": "https://example.org/x"}
+
+    [unread] = labeling.build_session(_citing(work))["unread"]
+
+    assert unread["label"] == "10"
+
+
 def test_session_lists_cited_works_that_have_no_pdf():
     session = labeling.build_session(_with_an_unread_citation())
 
