@@ -549,6 +549,19 @@ unknown project.
 Body `{"analysis_id": "..."}`. Puts one of the caller's analyses in the project and returns the
 project. `404` when the analysis or project is not the caller's.
 
+#### `DELETE /researcher/projects/{id}`
+
+Deletes the project only; its papers go back to `unsorted`. The project is hidden, not removed:
+it stays for 7 days (`PROJECT_RESTORE_DAYS`) and can be restored. The next delete by the same
+owner removes the ones older than that for good. "Delete all" removes them at once. Returns
+`{"deleted": id}`; `404` for an unknown or already deleted project.
+
+#### `POST /researcher/projects/{id}/restore`
+
+Brings a deleted project back with its name, description and papers, and returns it. Does
+nothing for a project that is not deleted. `404` for an unknown project or one the caller does
+not own.
+
 #### `POST /researcher/consensus`
 
 Body `{"question": "..."}`. What the works cited in the caller's papers say about the question,

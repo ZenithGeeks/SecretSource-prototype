@@ -197,6 +197,10 @@ export const researcherApi = {
 
   deleteProject: (projectId: string) =>
     request<{ deleted: string }>(`/researcher/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
+
+  /** Bring a deleted project back, with its name, description and papers. */
+  restoreProject: (projectId: string) =>
+    request<Project>(`/researcher/projects/${encodeURIComponent(projectId)}/restore`, { method: 'POST' }),
 }
 
 /** "Updated today", "Updated 3 days ago", from a project's ISO time. */

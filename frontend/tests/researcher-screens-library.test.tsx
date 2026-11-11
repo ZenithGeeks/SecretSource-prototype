@@ -452,6 +452,36 @@ describe('renaming and deleting', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('after a delete an Undo toast stays for 10 seconds and brings the project back', async () => {
+    const calls = gateway()
+    const message = vi.spyOn(toast, 'message')
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Delete project' })[0])
+    await waitFor(() => expect(message).toHaveBeenCalled())
+    const [text, options] = message.mock.calls.at(-1)!
+    expect(text).toBe('Deleted "Retrieval survey"')
+    expect(options).toMatchObject({ duration: 10_000, action: { label: 'Undo' } })
+    const undo = (options as { action: { onClick: () => Promise<unknown> } }).action.onClick
+    await undo()
+    expect(calls).toContainEqual({ method: 'POST', path: '/researcher/projects/p1/restore', body: undefined })
+  })
+
+  it('says so when Undo cannot bring the project back', async () => {
+    gateway({ fail: ['POST /researcher/projects/p1/restore'] })
+    const message = vi.spyOn(toast, 'message')
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Delete project' })[0])
+    await waitFor(() => expect(message).toHaveBeenCalled())
+    const undo = (message.mock.calls.at(-1)![1] as { action: { onClick: () => Promise<unknown> } }).action.onClick
+    await undo()
+    expect(error).toHaveBeenCalledWith('Could not bring back "Retrieval survey". Try again.')
+  })
+
   it('Cancel, Escape and the scrim dismiss the delete dialog', async () => {
     gateway()
     renderLibrary()

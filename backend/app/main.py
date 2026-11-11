@@ -46,7 +46,7 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1289,14 +1289,41 @@ async def rename_project(
     return await asyncio.to_thread(_with_visible, user, projected)
 
 
+# How long a deleted project can still be restored. The row stays until the next delete by the
+# same owner after that, which removes it for good.
+PROJECT_RESTORE_DAYS = 7
+
+
 @app.delete("/researcher/projects/{project_id}")
 async def delete_project(project_id: str, user: str | None = Depends(current_user)):
     """Deletes the project only — its papers are not touched. A paper with no project left is
-    Unsorted again, the same way it was before anyone filed it (researcher.py's _unsorted())."""
+    Unsorted again, the same way it was before anyone filed it (researcher.py's _unsorted()).
+
+    The project is hidden, not removed: it can be restored for PROJECT_RESTORE_DAYS days."""
     stored = await asyncio.to_thread(store.load_projects, user)
-    _project(project_id, stored)
-    await asyncio.to_thread(store.delete_project, project_id)
+    project = _project(project_id, stored)
+    now = datetime.now(UTC)
+    project["deleted"] = now.isoformat()
+    await asyncio.to_thread(store.save_project, project)
+    expired = (now - timedelta(days=PROJECT_RESTORE_DAYS)).isoformat()
+    await asyncio.to_thread(store.purge_deleted_projects, user, expired)
     return {"deleted": project_id}
+
+
+@app.post("/researcher/projects/{project_id}/restore")
+async def restore_project(project_id: str, user: str | None = Depends(current_user)):
+    """Brings a deleted project back with its name, description and paper list. Restoring a
+    project that is not deleted changes nothing, so a retry is safe."""
+    stored = await asyncio.to_thread(store.load_projects, user, True)
+    project = _project(project_id, stored)
+    if project.pop("deleted", None):
+        project["updated"] = datetime.now(UTC).isoformat()
+        await asyncio.to_thread(store.save_project, project)
+
+    def projected(rows: list[dict]) -> dict:
+        return researcher.projects([project], rows)[0]
+
+    return await asyncio.to_thread(_with_visible, user, projected)
 
 
 @app.get("/researcher/projects/{project_id}/library")

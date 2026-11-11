@@ -60,6 +60,9 @@ const PANEL_MOTION = {
   transition: { duration: 0.15 },
 }
 
+/** How long the Undo toast after deleting a project stays up. */
+const UNDO_MS = 10_000
+
 const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled)'
 
 /** The shell of the three dialogs: a scrim that closes it, Escape, and a Tab key that stays inside
@@ -372,7 +375,7 @@ function ProjectsLanding({
 }) {
   const papers = projects.reduce((sum, p) => sum + p.papers, 0)
   const claims = projects.reduce((sum, p) => sum + p.claims, 0)
-  const { renameProject, deleteProject } = useResearcherActions()
+  const { renameProject, deleteProject, restoreProject } = useResearcherActions()
   const [deleting, setDeleting] = useState<Project | null>(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<ProjectSort>('updated')
@@ -453,8 +456,17 @@ function ProjectsLanding({
             project={deleting}
             onCancel={() => setDeleting(null)}
             onConfirm={async () => {
-              await deleteProject(deleting.id)
+              const { id, name } = deleting
+              await deleteProject(id)
               setDeleting(null)
+              // The gateway keeps the project for a while, so a wrong click can be undone.
+              toast.message(`Deleted "${name}"`, {
+                duration: UNDO_MS,
+                action: {
+                  label: 'Undo',
+                  onClick: () => restoreProject(id).catch(() => toast.error(`Could not bring back "${name}". Try again.`)),
+                },
+              })
             }}
           />
         )}

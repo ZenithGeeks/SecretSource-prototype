@@ -179,11 +179,13 @@ describe('researcherApi', () => {
     await researcherApi.addToProject('a/b', 'x')
     await researcherApi.renameProject('a/b', 'N')
     await researcherApi.deleteProject('a/b')
+    await researcherApi.restoreProject('a/b')
     expect(calls.map((c) => [c.init?.method ?? 'GET', c.url])).toEqual([
       ['GET', '/api/researcher/projects/a%2Fb/library'],
       ['POST', '/api/researcher/projects/a%2Fb/papers'],
       ['PATCH', '/api/researcher/projects/a%2Fb'],
       ['DELETE', '/api/researcher/projects/a%2Fb'],
+      ['POST', '/api/researcher/projects/a%2Fb/restore'],
     ])
     expect(JSON.parse(String(calls[1].init!.body))).toEqual({ analysis_id: 'x' })
   })
