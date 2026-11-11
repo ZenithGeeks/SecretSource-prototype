@@ -178,7 +178,7 @@ describe('project list', () => {
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('analyses')
   })
 
-  it('filters the project grid by name, leaving Unsorted and the New-project tile on screen', async () => {
+  it('filters the project grid by name, leaving Unsorted and the New project button on screen', async () => {
     gateway()
     renderLibrary()
     await screen.findByRole('heading', { name: 'Library' })
@@ -186,17 +186,17 @@ describe('project list', () => {
     expect(screen.getByRole('button', { name: /^Open Retrieval survey, / })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Open Empty one, / })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Open Unsorted, / })).toBeInTheDocument()
-    expect(screen.getByText('+ New project')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
   })
 
-  it('says so, but still keeps Unsorted and the New-project tile, when no project matches', async () => {
+  it('says so, but still keeps Unsorted and the New project button, when no project matches', async () => {
     gateway()
     renderLibrary()
     await screen.findByRole('heading', { name: 'Library' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'nonexistent' } })
     expect(screen.getByText('No project matches "nonexistent".')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Open Unsorted, / })).toBeInTheDocument()
-    expect(screen.getByText('+ New project')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New project' })).toBeInTheDocument()
   })
 
   it('sorts by name and by paper count, with Unsorted always last', async () => {
@@ -247,14 +247,31 @@ describe('new project', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
-  it('the dashed tile also opens it, and clicking the scrim closes it', async () => {
+  it('clicking the scrim closes it', async () => {
     gateway()
     renderLibrary()
     await screen.findByRole('heading', { name: 'Library' })
-    fireEvent.click(screen.getByText('+ New project'))
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     const dialog = screen.getByRole('dialog')
     fireEvent.click(dialog.firstElementChild!)
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('refuses a name another project already has, whatever its case, and says why', async () => {
+    const calls = gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    const name = within(dialog).getByPlaceholderText('e.g. Retrieval survey')
+    fireEvent.change(name, { target: { value: ' retrieval SURVEY ' } })
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('A project called "retrieval SURVEY" already exists')
+    expect(name).toHaveAttribute('aria-invalid', 'true')
+    expect(within(dialog).getByRole('button', { name: 'Create project' })).toBeEnabled()
+    fireEvent.submit(name.closest('form')!)
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+
+    fireEvent.change(name, { target: { value: 'Another' } })
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    expect(name).toHaveAttribute('aria-invalid', 'false')
   })
 
   it('creates the project with a trimmed name and opens it', async () => {
@@ -891,5 +908,49 @@ describe('failures say so', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click((await within(dialog).findAllByRole('button', { name: /^Add$/ }))[0])
     await waitFor(() => expect(error).toHaveBeenCalledWith('Could not add the paper. Try again.'))
+  })
+})
+
+describe('browser history and the / shortcut', () => {
+  it('opening a project adds a history entry, Back returns to the list and Forward reopens it', async () => {
+    gateway()
+    renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.click(screen.getByRole('button', { name: /^Open Retrieval survey, / }))
+    expect(await screen.findByRole('heading', { name: 'Retrieval survey' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('project')).toBe('p1')
+
+    act(() => {
+      window.history.back()
+    })
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('project')).toBeNull()
+
+    act(() => {
+      window.history.forward()
+    })
+    expect(await screen.findByRole('heading', { name: 'Retrieval survey' })).toBeInTheDocument()
+  })
+
+  it('← Projects goes back to the list and drops the project from the URL', async () => {
+    gateway()
+    renderLibrary('&project=p1')
+    fireEvent.click(await screen.findByRole('button', { name: /← Projects/ }))
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('project')).toBeNull()
+  })
+
+  it('/ focuses the project filter, and the paper filter inside a project', async () => {
+    gateway()
+    const first = renderLibrary()
+    await screen.findByRole('heading', { name: 'Library' })
+    fireEvent.keyDown(document.body, { key: '/' })
+    expect(screen.getByRole('textbox', { name: 'Filter projects' })).toHaveFocus()
+    first.unmount()
+
+    renderLibrary('&project=p1')
+    await screen.findByText('ColBERTv2')
+    fireEvent.keyDown(document.body, { key: '/' })
+    expect(screen.getByRole('textbox', { name: 'Filter papers' })).toHaveFocus()
   })
 })

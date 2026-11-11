@@ -14,6 +14,7 @@ import { errorMessage } from '../../../lib/author'
 import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { useAuth } from '../../../lib/useAuth'
 import { useResearcherHome } from '../../../lib/useResearcher'
 import { cn } from '../../../lib/utils'
@@ -71,6 +72,7 @@ export function Home({
   const { session } = useAuth()
   const [reference, setReference] = useState('')
   const analyzeInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(analyzeInput)
   // One element for the three states of this screen, so the card (and what is typed in it) stays mounted.
   const analyze = (
     <HomeAnalyzeCard

@@ -30,6 +30,7 @@ import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
 import { askTarget } from '../../../lib/askCursor'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { cn } from '../../../lib/utils'
 import { LibraryAddMenu, type LibraryAddItem } from '../components/LibraryAddMenu'
 import { count } from '../components/LibraryCount'
@@ -367,6 +368,8 @@ function ProjectsLanding({
   const [deleting, setDeleting] = useState<Project | null>(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<ProjectSort>('updated')
+  const filterInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(filterInput)
 
   // Unsorted is a system bucket, not a project someone named or organized: it is left out of
   // the filter/sort and always stays last, the same place it always has been.
@@ -404,6 +407,8 @@ function ProjectsLanding({
       {projects.some((p) => !p.unsorted) && (
         <div className="flex flex-wrap items-center gap-3">
           <Input
+            ref={filterInput}
+            aria-keyshortcuts="/"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter projects by name"
@@ -428,14 +433,6 @@ function ProjectsLanding({
         {visible.map((p) => (
           <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
         ))}
-        <button
-          type="button"
-          onClick={onNew}
-          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
-        >
-          <span className="font-serif text-base font-semibold text-accent">+ New project</span>
-          <span className="text-xs text-ink-muted">Start a new group of papers</span>
-        </button>
       </div>
 
       <AnimatePresence>
@@ -542,6 +539,8 @@ function ProjectDetail({
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [picking, setPicking] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const filterInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(filterInput)
   const { data: library, isError, error, refetch } = useResearcherLibrary(projectId)
   if (isError) {
     return (
@@ -616,6 +615,8 @@ function ProjectDetail({
       {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-3">
         <Input
+          ref={filterInput}
+          aria-keyshortcuts="/"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter by title, author or claim"
@@ -651,16 +652,22 @@ function ProjectDetail({
 /** The "New project" modal (Figma: New project modal). Scrim + card; Esc or backdrop cancels,
  * Enter/Create submits when a name is present. */
 function NewProjectDialog({
+  existing,
   onCancel,
   onCreate,
 }: {
+  /** Names already in use, so a second project cannot be given the same one. */
+  existing: string[]
   onCancel: () => void
   onCreate: (name: string, description: string) => void
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const n = name.trim()
+  const taken = existing.some((other) => other.toLowerCase() === n.toLowerCase())
   const titleId = useId()
   const nameId = useId()
+  const takenId = useId()
   const descriptionId = useId()
   return (
     <Modal titleId={titleId} onClose={onCancel}>
@@ -668,8 +675,7 @@ function NewProjectDialog({
         {...PANEL_MOTION}
         onSubmit={(e) => {
           e.preventDefault()
-          const n = name.trim()
-          if (n) onCreate(n, description.trim())
+          if (n && !taken) onCreate(n, description.trim())
         }}
         className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
@@ -685,8 +691,15 @@ function NewProjectDialog({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Retrieval survey"
+          aria-invalid={taken}
+          aria-describedby={taken ? takenId : undefined}
           className="mt-1.5 w-full"
         />
+        {taken && (
+          <p id={takenId} role="alert" className="mt-1.5 text-[13px] text-refutes">
+            A project called "{n}" already exists. Choose another name.
+          </p>
+        )}
 
         <label htmlFor={descriptionId} className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
         <Textarea
@@ -726,6 +739,19 @@ export function Library({
   )
   const { data: projects, isError, error, refetch } = useProjects()
   const { createProject } = useResearcherActions()
+  // Opening or leaving a project adds a history entry, so the browser's Back button leaves it too.
+  const openProject = (id: string | null) => {
+    const params = new URLSearchParams(window.location.search)
+    if (id) params.set('project', id)
+    else params.delete('project')
+    window.history.pushState(null, '', `?${params}`)
+    setOpenId(id)
+  }
+  useEffect(() => {
+    const onPop = () => setOpenId(new URLSearchParams(window.location.search).get('project'))
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   if (isError) {
     return (
       <>
@@ -743,7 +769,7 @@ export function Library({
         projectId={openId}
         projectName={project?.name ?? 'Project'}
         unsorted={Boolean(project?.unsorted)}
-        onBack={() => setOpenId(null)}
+        onBack={() => openProject(null)}
         onAddPaper={onAddPaper}
         onOpenAnalysis={onOpenAnalysis}
       />
@@ -751,16 +777,17 @@ export function Library({
   }
   return (
     <FadeIn className="flex flex-col gap-6">
-      <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} onAddPaper={onAddPaper} />
+      <ProjectsLanding projects={projects} onOpen={openProject} onNew={() => setShowNew(true)} onAddPaper={onAddPaper} />
       <AnimatePresence>
         {showNew && (
           <NewProjectDialog
+            existing={projects.map((p) => p.name)}
             onCancel={() => setShowNew(false)}
             onCreate={async (name, description) => {
               try {
                 const id = await createProject(name, description)
                 setShowNew(false)
-                setOpenId(id)
+                openProject(id)
               } catch {
                 // The dialog stays open so the typed name is not lost.
                 toast.error('Could not create the project. Try again.')

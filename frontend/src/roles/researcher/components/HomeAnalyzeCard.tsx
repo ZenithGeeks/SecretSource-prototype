@@ -117,6 +117,7 @@ export function HomeAnalyzeCard({
             }}
             placeholder="Paste a DOI, arXiv ID or link, or drop a PDF here"
             aria-label="Paper to analyze"
+            aria-keyshortcuts="/"
             className="min-w-0 flex-1 bg-transparent py-1 text-[15px] text-ink placeholder:text-ink-muted focus:outline-none"
           />
         </span>

@@ -7,16 +7,19 @@
  */
 
 import { Search } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { Button, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
 import { errorMessage } from '../../../lib/author'
 import { useFieldConsensus } from '../../../lib/useResearcher'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { FieldCountTiles, FieldVerdictTable } from '../components/FieldResults'
 
 export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
+  const questionInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(questionInput)
   const { data: consensus, isError, isPending, error, refetch } = useFieldConsensus(question)
 
   return (
@@ -35,6 +38,8 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
       >
         <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         <input
+          ref={questionInput}
+          aria-keyshortcuts="/"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder="e.g. does late interaction generalize out of domain?"

@@ -369,6 +369,25 @@ describe('Graph · claims view', () => {
     expect(tiles.every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
   })
 
+  test('pressing an insight tile says what it counts, and pressing it again clears that line', () => {
+    open()
+    const tile = screen
+      .getAllByRole('button')
+      .find((b) => b.hasAttribute('aria-pressed') && !(b as HTMLButtonElement).disabled && /rest on a single source|circular|no primary|agrees on/.test(b.textContent ?? ''))!
+    fireEvent.click(tile)
+    expect(screen.getByText(/The other claims are dimmed on the graph\./)).toBeInTheDocument()
+    fireEvent.click(tile)
+    expect(screen.queryByText(/The other claims are dimmed on the graph\./)).not.toBeInTheDocument()
+  })
+
+  test('"Strong links only" says what a strong link is', () => {
+    open()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    expect(screen.queryByText(/Strong links join two papers/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Strong links only' }))
+    expect(screen.getByText(/at least half of all the works they cite are cited by both/)).toBeInTheDocument()
+  })
+
   test('shows the claims legend', () => {
     open()
     expect(screen.getByText(/1 not in a public index/)).toBeInTheDocument()
@@ -540,6 +559,13 @@ describe('Graph · layout and the position cache', () => {
     expect(center).toHaveBeenCalledTimes(1)
     const saved = JSON.parse(localStorage.getItem('ss-graph-positions-v1') ?? '{}')
     expect(Object.values(saved)[0]).toEqual(expect.objectContaining({ 'a:1': { x: expect.any(Number), y: expect.any(Number) } }))
+  })
+
+  test('says the graph is being arranged until the layout settles', () => {
+    open()
+    expect(screen.getByRole('status')).toHaveTextContent('Arranging the graph…')
+    layoutstop()
+    expect(screen.queryByText('Arranging the graph…')).not.toBeInTheDocument()
   })
 
   test('does not centre when the latest upload is not drawn in this view', () => {

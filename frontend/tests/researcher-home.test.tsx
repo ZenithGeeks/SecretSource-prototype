@@ -73,6 +73,19 @@ test('the library card explains the verdict words in a key that opens on demand'
   expect(region.getByText(/says something that goes against this claim/)).toBeInTheDocument()
 })
 
+test('/ puts focus in the analyze box, except while typing in a field', async () => {
+  renderHome()
+  const box = await screen.findByLabelText('Paper to analyze')
+  expect(box).toHaveAttribute('aria-keyshortcuts', '/')
+  fireEvent.keyDown(document.body, { key: '/' })
+  expect(box).toHaveFocus()
+  box.blur()
+  fireEvent.keyDown(document.body, { key: '/', ctrlKey: true })
+  expect(box).not.toHaveFocus()
+  fireEvent.keyDown(box, { key: '/' })
+  expect((box as HTMLInputElement).value).toBe('')
+})
+
 test('the conflicts card counts every conflict and gives each cited work its own pill', async () => {
   renderHome()
   expect(await screen.findByRole('button', { name: 'All 28 in Library' })).toBeInTheDocument()
