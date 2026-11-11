@@ -138,7 +138,8 @@ describe('PreviewPane', () => {
     expect(alert).toHaveTextContent(/Line 1[89]: /)
     expect(alert).toHaveTextContent('that part is left out, the rest of the page is shown')
     expect(alert).not.toHaveTextContent('last good render')
-    expect(page().querySelector('.ss-block-error')?.textContent).toMatch(/^Line 1[89]: .* · this part is left out of the preview$/)
+    // The alert is React state; the page is rewritten a moment later, so wait for it.
+    await waitFor(() => expect(page().querySelector('.ss-block-error')?.textContent).toMatch(/^Line 1[89]: .* · this part is left out of the preview$/), { timeout: 15000 })
     // the broken section is gone; its subsection, numbered as in the whole file, still renders
     expect([...page().querySelectorAll('h2, h3')].map((h) => h.textContent?.replace(/\s+/g, ' '))).toEqual(['1.1 Distillation', 'References'])
   }, 20000)
