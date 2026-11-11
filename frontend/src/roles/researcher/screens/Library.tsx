@@ -488,7 +488,13 @@ function AddPapersDialog({
         <h2 id={titleId} className="type-title text-ink">Add papers</h2>
         <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
-          {choices.length === 0 && <li className="py-3 text-sm text-ink-muted">Every analysed paper is already in this project.</li>}
+          {choices.length === 0 && (
+            <li className="py-3 text-sm text-ink-muted">
+              {analyses.some((a) => a.status === 'done')
+                ? 'Every analysed paper is already in this project.'
+                : 'No paper is analysed yet. Analyse one in Analyses first.'}
+            </li>
+          )}
           {choices.map((analysis) => (
             <li key={analysis.id} className="flex items-center gap-3 border-t border-border-subtle py-2.5 first:border-t-0">
               <span className="min-w-0 flex-1 truncate text-sm text-ink">

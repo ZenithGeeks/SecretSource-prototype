@@ -140,7 +140,9 @@ export function Home({
           </div>
           {home.conflicts.length === 0 && (
             <p className="border-t border-border-subtle px-5 py-3 text-sm text-ink-muted">
-              No claim in your papers is contradicted by its sources.
+              {home.library.papers === 0
+                ? 'Nothing is checked yet. Analyze a paper above and any conflict shows up here.'
+                : 'No claim in your papers is contradicted by its sources.'}
             </p>
           )}
           <ul>

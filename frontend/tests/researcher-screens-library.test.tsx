@@ -648,7 +648,7 @@ describe('adding analysed papers', () => {
     await waitFor(() => expect(within(dialog).queryByRole('button', { name: 'Adding…' })).not.toBeInTheDocument())
   })
 
-  it('shows the empty message while the analyses are still loading', async () => {
+  it('says no paper is analysed yet while the analyses are still loading', async () => {
     gateway()
     const stub = vi.mocked(fetch)
     const answer = stub.getMockImplementation()!
@@ -656,7 +656,7 @@ describe('adding analysed papers', () => {
       String(url) === '/api/analyses' ? new Promise<Response>(() => {}) : answer(url, init),
     )
     const dialog = await openPicker()
-    expect(within(dialog).getByText('Every analysed paper is already in this project.')).toBeInTheDocument()
+    expect(within(dialog).getByText('No paper is analysed yet. Analyse one in Analyses first.')).toBeInTheDocument()
   })
 
   it('says so when every analysed paper is already in the project', async () => {

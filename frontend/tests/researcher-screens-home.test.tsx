@@ -85,9 +85,17 @@ describe('Home', () => {
     gateway()
     renderHome()
     expect(screen.getByText('Loading your library…')).toBeInTheDocument()
-    expect(await screen.findByText('No claim in your papers is contradicted by its sources.')).toBeInTheDocument()
+    // An empty library says nothing is checked yet, not that everything is fine.
+    expect(await screen.findByText(/Nothing is checked yet\. Analyze a paper above/)).toBeInTheDocument()
+    expect(screen.queryByText('No claim in your papers is contradicted by its sources.')).not.toBeInTheDocument()
     expect(screen.getByText('Works that your papers cite more than once show up here.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /in Library$/ })).not.toBeInTheDocument()
+  })
+
+  it('says no claim is contradicted only once there are papers to check', async () => {
+    gateway({ home: { ...EMPTY_HOME, library: { ...EMPTY_HOME.library, papers: 3, claims: 12 } } })
+    renderHome()
+    expect(await screen.findByText('No claim in your papers is contradicted by its sources.')).toBeInTheDocument()
   })
 
   it('shows the gateway error and retries on request', async () => {
