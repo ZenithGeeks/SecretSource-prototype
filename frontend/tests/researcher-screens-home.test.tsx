@@ -85,9 +85,17 @@ describe('Home', () => {
     gateway()
     renderHome()
     expect(screen.getByText('Loading your library…')).toBeInTheDocument()
-    expect(await screen.findByText('No claim in your papers is contradicted by its sources.')).toBeInTheDocument()
+    // An empty library says nothing is checked yet, not that everything is fine.
+    expect(await screen.findByText(/Nothing is checked yet\. Analyze a paper above/)).toBeInTheDocument()
+    expect(screen.queryByText('No claim in your papers is contradicted by its sources.')).not.toBeInTheDocument()
     expect(screen.getByText('Works that your papers cite more than once show up here.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /in Library$/ })).not.toBeInTheDocument()
+  })
+
+  it('says no claim is contradicted only once there are papers to check', async () => {
+    gateway({ home: { ...EMPTY_HOME, library: { ...EMPTY_HOME.library, papers: 3, claims: 12 } } })
+    renderHome()
+    expect(await screen.findByText('No claim in your papers is contradicted by its sources.')).toBeInTheDocument()
   })
 
   it('shows the gateway error and retries on request', async () => {
@@ -199,7 +207,7 @@ describe('Analyze card', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('queue is full')
   })
 
-  it('Upload PDF opens the file picker, and a chosen PDF is uploaded', async () => {
+  it('Upload PDF opens the file picker, and a chosen PDF waits for Analyze', async () => {
     const calls = gateway()
     const { onOpenAnalysis } = renderHome()
     const region = await card()
@@ -209,8 +217,50 @@ describe('Analyze card', () => {
     expect(click).toHaveBeenCalled()
 
     fireEvent.change(input, { target: { files: [pdf()] } })
+    // Held with its name; nothing is sent until Analyze.
+    expect(within(region).getByText('paper.pdf')).toBeInTheDocument()
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(false)
+    fireEvent.click(within(region).getByRole('button', { name: 'Analyze' }))
     await waitFor(() => expect(onOpenAnalysis).toHaveBeenCalledWith('new-1'))
     expect(calls.some((c) => c.path === '/analyses/upload?verify=true')).toBe(true)
+  })
+
+  it('while a run is starting the button and the Remove control are off, so it cannot start twice', async () => {
+    gateway()
+    renderHome()
+    const region = await card()
+    const answer = vi.mocked(fetch).getMockImplementation()!
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (init?.method === 'POST') await held
+      return answer(url, init)
+    })
+    fireEvent.change(region.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [pdf()] } })
+    fireEvent.click(within(region).getByRole('button', { name: 'Analyze' }))
+    await waitFor(() => expect(within(region).getByRole('button', { name: 'Analyze' })).toBeDisabled())
+    expect(within(region).getByRole('button', { name: 'Remove paper.pdf' })).toBeDisabled()
+    release()
+    await waitFor(() => expect(within(region).queryByText('paper.pdf')).not.toBeInTheDocument())
+  })
+
+  it('a held PDF can be removed, and typing a reference replaces it', async () => {
+    const calls = gateway()
+    renderHome()
+    const region = await card()
+    const input = region.querySelector<HTMLInputElement>('input[type="file"]')!
+    fireEvent.change(input, { target: { files: [pdf()] } })
+    expect(within(region).getByRole('button', { name: 'Analyze' })).toBeEnabled()
+    fireEvent.click(within(region).getByRole('button', { name: 'Remove paper.pdf' }))
+    expect(within(region).queryByText('paper.pdf')).not.toBeInTheDocument()
+    expect(within(region).getByRole('button', { name: 'Analyze' })).toBeDisabled()
+
+    fireEvent.change(input, { target: { files: [pdf()] } })
+    fireEvent.change(screen.getByLabelText('Paper to analyze'), { target: { value: '10.1/q' } })
+    expect(within(region).queryByText('paper.pdf')).not.toBeInTheDocument()
+    fireEvent.click(within(region).getByRole('button', { name: 'Analyze' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/analyses')).toBe(true))
+    expect(calls.some((c) => c.path.startsWith('/analyses/upload'))).toBe(false)
   })
 
   it('a chosen file that is not a PDF is refused with a reason', async () => {
@@ -232,7 +282,7 @@ describe('Analyze card', () => {
     expect(calls.some((c) => c.init?.method === 'POST')).toBe(false)
   })
 
-  it('a dropped PDF is uploaded, and the card highlights while a file is over it', async () => {
+  it('a dropped PDF is held, not sent, and the card highlights while a file is over it', async () => {
     gateway()
     const { onOpenAnalysis } = renderHome()
     const region = await card()
@@ -241,6 +291,9 @@ describe('Analyze card', () => {
     fireEvent.dragLeave(region)
     expect(region.className).not.toContain('border-accent bg-accent-soft')
     fireEvent.drop(region, { dataTransfer: { files: [pdf()] } })
+    expect(within(region).getByText('paper.pdf')).toBeInTheDocument()
+    expect(onOpenAnalysis).not.toHaveBeenCalled()
+    fireEvent.click(within(region).getByRole('button', { name: 'Analyze' }))
     await waitFor(() => expect(onOpenAnalysis).toHaveBeenCalledWith('new-1'))
   })
 

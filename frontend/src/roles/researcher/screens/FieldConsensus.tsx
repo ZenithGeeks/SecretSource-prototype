@@ -7,22 +7,28 @@
  */
 
 import { Search } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { Button, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
 import { errorMessage } from '../../../lib/author'
 import { useFieldConsensus } from '../../../lib/useResearcher'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { FieldCountTiles, FieldVerdictTable } from '../components/FieldResults'
 
 export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
+  const questionInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(questionInput)
   const { data: consensus, isError, isPending, error, refetch } = useFieldConsensus(question)
 
   return (
     <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pt-4 pb-12">
       <header>
         <h1 className="type-display text-ink">What does your library say?</h1>
+        <p className="mt-2 text-[15px] leading-6 text-ink-muted">
+          Ask one question. Claims in your papers that use the same words show how their cited works answer it.
+        </p>
       </header>
 
       <form
@@ -35,9 +41,11 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
       >
         <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         <input
+          ref={questionInput}
+          aria-keyshortcuts="/"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="e.g. does late interaction generalize out of domain?"
+          placeholder="e.g. does late interaction generalize out of domain? (press /)"
           aria-label="Your question"
           className="min-w-0 flex-1 bg-transparent text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted"
         />

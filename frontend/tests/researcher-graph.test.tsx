@@ -6,11 +6,14 @@
  */
 
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { beforeAll, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 
 import type { FieldConsensus as ConsensusData, KnowledgeGraph } from '../src/lib/researcher'
 import { FieldConsensus } from '../src/roles/researcher/screens/FieldConsensus'
 import { Graph } from '../src/roles/researcher/screens/Graph'
+
+// The graph writes its view and selection to the address; start every test from a bare one.
+afterEach(() => window.history.replaceState(null, '', '/'))
 
 vi.mock('react-cytoscapejs', () => ({ default: () => <div data-testid="cytoscape-canvas" /> }))
 

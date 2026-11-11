@@ -37,11 +37,12 @@ vi.mock('../src/components/Ask', () => ({
 vi.mock('../src/roles/researcher/screens/Graph', () => ({
   Graph: (props: {
     initialTab: string
+    hideTabs?: boolean
     askPanel: unknown
     onSelectNode: (node: { id: string; label: string } | null) => void
     onOpenAnalysis: (id: string) => void
   }) => (
-    <div data-testid="graph" data-tab={props.initialTab}>
+    <div data-testid="graph" data-tab={props.initialTab} data-hide-tabs={String(!!props.hideTabs)}>
       {props.askPanel as never}
       <button onClick={() => props.onSelectNode({ id: 'n1', label: 'Node one' })}>select node</button>
       <button onClick={() => props.onOpenAnalysis('a1')}>open from graph</button>
@@ -116,11 +117,22 @@ describe('Graph and Ask the field', () => {
     expect(screen.getAllByText('ASK-PANEL')).toHaveLength(1)
   })
 
-  it('field-consensus opens the Consensus tab of the same Graph screen', () => {
+  it('Ask the field has its own nav item and opens the Consensus tab without the Graph switch', () => {
     renderApp('?role=researcher&screen=field-consensus')
     expect(screen.getByTestId('graph')).toHaveAttribute('data-tab', 'consensus')
-    expect(mainNav().getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('graph')).toHaveAttribute('data-hide-tabs', 'true')
+    expect(mainNav().getByRole('button', { name: 'Ask the field' })).toHaveAttribute('aria-current', 'page')
+    expect(mainNav().getByRole('button', { name: 'Graph' })).not.toHaveAttribute('aria-current')
+    expect(within(breadcrumb()).getByText('Ask the field')).toBeInTheDocument()
     expect(param('screen')).toBe('field-consensus')
+  })
+
+  it('moves between Graph and Ask the field from the nav, on the right tab each time', () => {
+    renderApp('?role=researcher&screen=graph')
+    fireEvent.click(mainNav().getByRole('button', { name: 'Ask the field' }))
+    expect(screen.getByTestId('graph')).toHaveAttribute('data-tab', 'consensus')
+    fireEvent.click(mainNav().getByRole('button', { name: 'Graph' }))
+    expect(screen.getByTestId('graph')).toHaveAttribute('data-tab', 'graph')
   })
 
   it('a node selected on the graph is what Ask is about, and only while on the graph', () => {
@@ -130,6 +142,32 @@ describe('Graph and Ask the field', () => {
     expect(lastAsk().node).toEqual({ id: 'n1', label: 'Node one' })
     fireEvent.click(mainNav().getByRole('button', { name: 'Home' }))
     expect(lastAsk().node).toBeNull()
+  })
+
+  it('Back and Forward move between the screens the reader visited', async () => {
+    renderApp('?role=researcher&screen=graph')
+    fireEvent.click(mainNav().getByRole('button', { name: 'Library' }))
+    expect(param('screen')).toBe('library')
+    act(() => {
+      window.history.back()
+    })
+    await waitFor(() => expect(screen.getByTestId('graph')).toBeInTheDocument())
+    expect(param('screen')).toBe('graph')
+    act(() => {
+      window.history.forward()
+    })
+    await waitFor(() => expect(within(breadcrumb()).getByText('Library')).toBeInTheDocument())
+    expect(screen.queryByTestId('graph')).not.toBeInTheDocument()
+  })
+
+  it('Back to an analysis entry reopens that analysis', async () => {
+    renderApp('?role=researcher&screen=graph')
+    window.history.pushState(null, '', '?role=researcher&screen=analyses&analysis=a1')
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await waitFor(() => expect(lastAsk().analysis).toBe('a1'))
+    expect(param('screen')).toBe('analyses')
   })
 
   it('opening a paper from the graph shows it on Analyses', async () => {
@@ -144,7 +182,7 @@ describe('Graph and Ask the field', () => {
 describe('Ask actions', () => {
   it('can open any nav screen and a paper', async () => {
     renderApp('?role=researcher&screen=home')
-    expect(lastAsk().actions.screens).toEqual(['home', 'analyses', 'library', 'graph'])
+    expect(lastAsk().actions.screens).toEqual(['home', 'analyses', 'library', 'graph', 'field-consensus'])
 
     act(() => lastAsk().actions.openScreen('library'))
     expect(param('screen')).toBe('library')
@@ -169,8 +207,7 @@ describe('Ask actions', () => {
 describe('shell', () => {
   it('the Library hands Analyze a new paper to Analyses', async () => {
     renderApp('?role=researcher&screen=library')
-    fireEvent.click(await screen.findByRole('button', { name: 'Add papers' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Analyze a new paper/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyze a new paper' }))
     expect(param('screen')).toBe('analyses')
     expect(within(breadcrumb()).getByText('Analyses')).toBeInTheDocument()
   })

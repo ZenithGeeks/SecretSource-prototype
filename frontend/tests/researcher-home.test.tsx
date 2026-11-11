@@ -55,11 +55,35 @@ test('Analyze is the only primary button in the analyze card', async () => {
 
 test('the library legend uses the count words', async () => {
   renderHome()
-  const library = within(await screen.findByRole('region', { name: 'Your library' }))
+  const region = within(await screen.findByRole('region', { name: 'Your library' }))
+  const library = within(region.getByRole('list'))
   expect(library.getByText('back it')).toBeInTheDocument()
   expect(library.getByText('silent')).toBeInTheDocument()
   expect(library.getByText('contradicts')).toBeInTheDocument() // 1, singular
   expect(library.getByText('not checked')).toBeInTheDocument()
+})
+
+test('the library card explains the verdict words in a key that opens on demand', async () => {
+  renderHome()
+  const region = within(await screen.findByRole('region', { name: 'Your library' }))
+  const summary = region.getByText('What do these mean?')
+  expect(summary.closest('details')).not.toHaveAttribute('open')
+  fireEvent.click(summary)
+  expect(region.getByText('contradicted')).toBeInTheDocument()
+  expect(region.getByText(/says something that goes against this claim/)).toBeInTheDocument()
+})
+
+test('/ puts focus in the analyze box, except while typing in a field', async () => {
+  renderHome()
+  const box = await screen.findByLabelText('Paper to analyze')
+  expect(box).toHaveAttribute('aria-keyshortcuts', '/')
+  fireEvent.keyDown(document.body, { key: '/' })
+  expect(box).toHaveFocus()
+  box.blur()
+  fireEvent.keyDown(document.body, { key: '/', ctrlKey: true })
+  expect(box).not.toHaveFocus()
+  fireEvent.keyDown(box, { key: '/' })
+  expect((box as HTMLInputElement).value).toBe('')
 })
 
 test('the conflicts card counts every conflict and gives each cited work its own pill', async () => {

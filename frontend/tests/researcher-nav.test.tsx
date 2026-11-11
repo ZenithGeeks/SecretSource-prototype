@@ -30,7 +30,7 @@ for (const param of ['history', 'analyses']) {
   test(`?screen=${param} opens Analyses, the active nav item`, () => {
     renderAt(`?role=researcher&screen=${param}`)
     const nav = within(screen.getByRole('navigation', { name: 'Main' }))
-    expect(nav.getAllByRole('button').map((b) => b.textContent)).toEqual(['Home', 'Analyses', 'Library', 'Graph'])
+    expect(nav.getAllByRole('button').map((b) => b.textContent)).toEqual(['Home', 'Analyses', 'Library', 'Graph', 'Ask the field'])
     expect(nav.getByRole('button', { name: 'Analyses' })).toHaveAttribute('aria-current', 'page')
     expect(nav.queryByRole('button', { name: 'History' })).not.toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('analyses')

@@ -216,3 +216,14 @@ describe('useKnowledgeGraph', () => {
     await waitFor(() => expect(result.current.data).toEqual(graph))
   })
 })
+
+describe('the / shortcut', () => {
+  it('puts focus in the question box', () => {
+    gateway(answer())
+    renderField()
+    const box = screen.getByLabelText('Your question')
+    expect(box).toHaveAttribute('aria-keyshortcuts', '/')
+    fireEvent.keyDown(document.body, { key: '/' })
+    expect(box).toHaveFocus()
+  })
+})

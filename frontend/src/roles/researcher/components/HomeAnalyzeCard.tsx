@@ -1,11 +1,13 @@
 /**
- * Researcher Home's "Analyze a paper" card: a reference input (DOI, arXiv ID, link) or a dropped
- * PDF, one primary Analyze button, and the deep-check switch. Same calls as the Analyses form
- * (api.startAnalysis / api.uploadAnalysis with the `verify` flag); once the run starts, Home opens it.
+ * Researcher Home's "Analyze a paper" card: a reference input (DOI, arXiv ID, link) or a PDF, one
+ * primary Analyze button, and the deep-check switch. A picked or dropped PDF is held under the
+ * form with its name until Analyze is pressed, so a 4 minute run never starts by accident. Same
+ * calls as the Analyses form (api.startAnalysis / api.uploadAnalysis with the `verify` flag); once
+ * the run starts, Home opens it.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CircleAlert, FileUp, Loader2, Search } from 'lucide-react'
+import { CircleAlert, FileText, FileUp, Loader2, Search, X } from 'lucide-react'
 import { type ReactNode, type RefObject, useRef, useState } from 'react'
 
 import { Toggle } from '../../../components/settings'
@@ -39,6 +41,7 @@ export function HomeAnalyzeCard({
   const [verify, setVerify] = useState(true)
   const [dragging, setDragging] = useState(false)
   const [notPdf, setNotPdf] = useState(false)
+  const [staged, setStaged] = useState<File | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
   const online = useFeature('analyses')
@@ -47,6 +50,7 @@ export function HomeAnalyzeCard({
     mutationFn: (input: string | File) =>
       typeof input === 'string' ? api.startAnalysis(input, verify) : api.uploadAnalysis(input, verify),
     onSuccess: ({ id }) => {
+      setStaged(null)
       onReferenceChange('')
       queryClient.invalidateQueries({ queryKey: ['analyses'] })
       onStarted(id)
@@ -57,7 +61,18 @@ export function HomeAnalyzeCard({
     if (!file) return
     const isPdf = file.type === 'application/pdf'
     setNotPdf(!isPdf)
-    if (isPdf && online) start.mutate(file)
+    if (isPdf && online) {
+      setStaged(file)
+      onReferenceChange('')
+    }
+  }
+
+  // A typed or queued reference wins over a held file; choosing a file clears the box.
+  const typed = reference.trim()
+  const heldFile = typed ? null : staged
+  const startRun = () => {
+    if (typed) start.mutate(typed)
+    else if (heldFile) start.mutate(heldFile)
   }
 
   return (
@@ -87,7 +102,7 @@ export function HomeAnalyzeCard({
         className="flex flex-wrap items-center gap-2.5 rounded-xl border border-border-subtle bg-surface py-1.5 pl-3.5 pr-1.5 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30"
         onSubmit={(event) => {
           event.preventDefault()
-          if (reference.trim()) start.mutate(reference.trim())
+          startRun()
         }}
       >
         <span className="flex min-w-0 flex-1 basis-60 items-center gap-2.5">
@@ -97,10 +112,12 @@ export function HomeAnalyzeCard({
             value={reference}
             onChange={(event) => {
               setNotPdf(false)
+              setStaged(null)
               onReferenceChange(event.target.value)
             }}
             placeholder="Paste a DOI, arXiv ID or link, or drop a PDF here"
             aria-label="Paper to analyze"
+            aria-keyshortcuts="/"
             className="min-w-0 flex-1 bg-transparent py-1 text-[15px] text-ink placeholder:text-ink-muted focus:outline-none"
           />
         </span>
@@ -117,7 +134,7 @@ export function HomeAnalyzeCard({
           <Button
             type="submit"
             className="rounded-[9px] px-4 py-[7px] text-sm pointer-coarse:min-h-11"
-            disabled={!reference.trim() || !online || start.isPending}
+            disabled={(!typed && !heldFile) || !online || start.isPending}
           >
             {start.isPending && <Loader2 className="size-4 animate-spin" />}
             Analyze
@@ -134,6 +151,23 @@ export function HomeAnalyzeCard({
           }}
         />
       </form>
+      {heldFile && (
+        <p className="flex min-w-0 items-center gap-2 text-[13px] text-ink">
+          <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
+          <span title={heldFile.name} className="min-w-0 truncate">
+            {heldFile.name}
+          </span>
+          <button
+            type="button"
+            onClick={() => setStaged(null)}
+            disabled={start.isPending}
+            aria-label={`Remove ${heldFile.name}`}
+            className="inline-flex shrink-0 items-center rounded-md p-1 text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center"
+          >
+            <X aria-hidden="true" className="size-4" />
+          </button>
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
         <Toggle on={verify} onChange={setVerify} aria-labelledby="home-deep-check home-deep-check-time" />
         <span id="home-deep-check" className="text-ink">

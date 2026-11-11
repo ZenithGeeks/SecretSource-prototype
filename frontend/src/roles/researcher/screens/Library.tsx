@@ -30,16 +30,18 @@ import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
 import { askTarget } from '../../../lib/askCursor'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { cn } from '../../../lib/utils'
 import { LibraryAddMenu, type LibraryAddItem } from '../components/LibraryAddMenu'
 import { count } from '../components/LibraryCount'
 import { LibraryPaperTable } from '../components/LibraryPaperTable'
+import { StandingKey } from '../components/StandingKey'
 
-/** Display order + colour for a project's claim tally bar. */
+/** Display order + colour for a project's claim tally bar: worst first, as on Home and the Graph key. */
 const STANDINGS: { key: ClaimStanding; color: string }[] = [
-  { key: 'backed', color: 'bg-supports' },
-  { key: 'silent', color: 'bg-insufficient' },
   { key: 'contradicted', color: 'bg-refutes' },
+  { key: 'silent', color: 'bg-insufficient' },
+  { key: 'backed', color: 'bg-supports' },
   { key: 'unchecked', color: 'bg-neutral' },
 ]
 
@@ -85,8 +87,10 @@ function Modal({ titleId, onClose, children }: { titleId: string; onClose: () =>
     if (event.key === 'Escape') return onClose()
     if (event.key !== 'Tab') return
     const stops = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)]
-    const edge = event.shiftKey ? stops[0] : stops[stops.length - 1]
-    if (document.activeElement !== edge) return
+    // Shift+Tab from the dialog itself (a dialog opened from a menu starts there) would leave it too.
+    const atStart = document.activeElement === stops[0] || document.activeElement === event.currentTarget
+    const atEnd = document.activeElement === stops[stops.length - 1]
+    if (!(event.shiftKey ? atStart : atEnd)) return
     event.preventDefault()
     stops[event.shiftKey ? stops.length - 1 : 0].focus()
   }
@@ -190,11 +194,14 @@ function ProjectMenu({
 
 function ProjectCard({
   project,
+  otherNames,
   onOpen,
   onRename,
   onRequestDelete,
 }: {
   project: Project
+  /** Names of the other projects, so a rename cannot copy one. */
+  otherNames: string[]
   onOpen: (id: string) => void
   onRename: (id: string, name: string) => Promise<unknown>
   onRequestDelete: (project: Project) => void
@@ -218,6 +225,11 @@ function ProjectCard({
     if (saving) return
     const name = typed.current.trim()
     if (!name || name === project.name) return cancelRename()
+    if (otherNames.some((other) => other.toLowerCase() === name.toLowerCase())) {
+      // Stay in the field so the name can be changed.
+      toast.error(`A project called "${name}" already exists. Choose another name.`)
+      return
+    }
     setSaving(true)
     try {
       await onRename(project.id, name)
@@ -364,6 +376,8 @@ function ProjectsLanding({
   const [deleting, setDeleting] = useState<Project | null>(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<ProjectSort>('updated')
+  const filterInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(filterInput)
 
   // Unsorted is a system bucket, not a project someone named or organized: it is left out of
   // the filter/sort and always stays last, the same place it always has been.
@@ -398,12 +412,14 @@ function ProjectsLanding({
         </Button>
       </header>
 
-      {projects.some((p) => !p.unsorted) && (
+      {projects.filter((p) => !p.unsorted).length >= 2 && (
         <div className="flex flex-wrap items-center gap-3">
           <Input
+            ref={filterInput}
+            aria-keyshortcuts="/"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter projects by name"
+            placeholder="Filter projects (press /)"
             aria-label="Filter projects"
             className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
           />
@@ -423,16 +439,12 @@ function ProjectsLanding({
           <p className="text-sm text-ink-muted sm:col-span-2">No project matches "{query}".</p>
         )}
         {visible.map((p) => (
-          <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
+          <ProjectCard
+            key={p.id}
+            project={p}
+            otherNames={projects.filter((other) => other.id !== p.id).map((other) => other.name)}
+            onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
         ))}
-        <button
-          type="button"
-          onClick={onNew}
-          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft"
-        >
-          <span className="font-serif text-base font-semibold text-accent">+ New project</span>
-          <span className="text-xs text-ink-muted">Start a new group of papers</span>
-        </button>
       </div>
 
       <AnimatePresence>
@@ -476,7 +488,13 @@ function AddPapersDialog({
         <h2 id={titleId} className="type-title text-ink">Add papers</h2>
         <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
-          {choices.length === 0 && <li className="py-3 text-sm text-ink-muted">Every analysed paper is already in this project.</li>}
+          {choices.length === 0 && (
+            <li className="py-3 text-sm text-ink-muted">
+              {analyses.some((a) => a.status === 'done')
+                ? 'Every analysed paper is already in this project.'
+                : 'No paper is analysed yet. Analyse one in Analyses first.'}
+            </li>
+          )}
           {choices.map((analysis) => (
             <li key={analysis.id} className="flex items-center gap-3 border-t border-border-subtle py-2.5 first:border-t-0">
               <span className="min-w-0 flex-1 truncate text-sm text-ink">
@@ -539,6 +557,8 @@ function ProjectDetail({
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [picking, setPicking] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const filterInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(filterInput)
   const { data: library, isError, error, refetch } = useResearcherLibrary(projectId)
   if (isError) {
     return (
@@ -613,9 +633,11 @@ function ProjectDetail({
       {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-3">
         <Input
+          ref={filterInput}
+          aria-keyshortcuts="/"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by title, author or claim"
+          placeholder="Filter papers (press /)"
           aria-label="Filter papers"
           data-ask-target={askTarget({ kind: 'field', id: 'library-filter' })}
           className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
@@ -629,6 +651,8 @@ function ProjectDetail({
           className="flex-wrap"
         />
       </div>
+
+      <StandingKey />
 
       <LibraryPaperTable
         papers={shown}
@@ -646,16 +670,25 @@ function ProjectDetail({
 /** The "New project" modal (Figma: New project modal). Scrim + card; Esc or backdrop cancels,
  * Enter/Create submits when a name is present. */
 function NewProjectDialog({
+  existing,
+  busy,
   onCancel,
   onCreate,
 }: {
+  /** A create is in flight: the button is off so a second click or Enter cannot make a second project. */
+  busy: boolean
+  /** Names already in use, so a second project cannot be given the same one. */
+  existing: string[]
   onCancel: () => void
   onCreate: (name: string, description: string) => void
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const n = name.trim()
+  const taken = existing.some((other) => other.toLowerCase() === n.toLowerCase())
   const titleId = useId()
   const nameId = useId()
+  const takenId = useId()
   const descriptionId = useId()
   return (
     <Modal titleId={titleId} onClose={onCancel}>
@@ -663,8 +696,7 @@ function NewProjectDialog({
         {...PANEL_MOTION}
         onSubmit={(e) => {
           e.preventDefault()
-          const n = name.trim()
-          if (n) onCreate(n, description.trim())
+          if (n && !taken && !busy) onCreate(n, description.trim())
         }}
         className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
@@ -680,8 +712,15 @@ function NewProjectDialog({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Retrieval survey"
+          aria-invalid={taken}
+          aria-describedby={taken ? takenId : undefined}
           className="mt-1.5 w-full"
         />
+        {taken && (
+          <p id={takenId} role="alert" className="mt-1.5 text-[13px] text-refutes">
+            A project called "{n}" already exists. Choose another name.
+          </p>
+        )}
 
         <label htmlFor={descriptionId} className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
         <Textarea
@@ -697,8 +736,8 @@ function NewProjectDialog({
           <Button type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!name.trim()}>
-            Create project
+          <Button type="submit" disabled={!name.trim() || busy}>
+            {busy ? 'Creating…' : 'Create project'}
           </Button>
         </div>
       </motion.form>
@@ -721,6 +760,20 @@ export function Library({
   )
   const { data: projects, isError, error, refetch } = useProjects()
   const { createProject } = useResearcherActions()
+  const [creating, setCreating] = useState(false)
+  // Opening or leaving a project adds a history entry, so the browser's Back button leaves it too.
+  const openProject = (id: string | null) => {
+    const params = new URLSearchParams(window.location.search)
+    if (id) params.set('project', id)
+    else params.delete('project')
+    window.history.pushState(null, '', `?${params}`)
+    setOpenId(id)
+  }
+  useEffect(() => {
+    const onPop = () => setOpenId(new URLSearchParams(window.location.search).get('project'))
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   if (isError) {
     return (
       <>
@@ -738,7 +791,7 @@ export function Library({
         projectId={openId}
         projectName={project?.name ?? 'Project'}
         unsorted={Boolean(project?.unsorted)}
-        onBack={() => setOpenId(null)}
+        onBack={() => openProject(null)}
         onAddPaper={onAddPaper}
         onOpenAnalysis={onOpenAnalysis}
       />
@@ -746,19 +799,24 @@ export function Library({
   }
   return (
     <FadeIn className="flex flex-col gap-6">
-      <ProjectsLanding projects={projects} onOpen={setOpenId} onNew={() => setShowNew(true)} onAddPaper={onAddPaper} />
+      <ProjectsLanding projects={projects} onOpen={openProject} onNew={() => setShowNew(true)} onAddPaper={onAddPaper} />
       <AnimatePresence>
         {showNew && (
           <NewProjectDialog
+            existing={projects.map((p) => p.name)}
+            busy={creating}
             onCancel={() => setShowNew(false)}
             onCreate={async (name, description) => {
+              setCreating(true)
               try {
                 const id = await createProject(name, description)
                 setShowNew(false)
-                setOpenId(id)
+                openProject(id)
               } catch {
                 // The dialog stays open so the typed name is not lost.
                 toast.error('Could not create the project. Try again.')
+              } finally {
+                setCreating(false)
               }
             }}
           />

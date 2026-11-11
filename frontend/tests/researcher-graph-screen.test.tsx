@@ -369,6 +369,91 @@ describe('Graph · claims view', () => {
     expect(tiles.every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
   })
 
+  test('pressing an insight tile says what it counts, and pressing it again clears that line', () => {
+    open()
+    const tile = screen
+      .getAllByRole('button')
+      .find((b) => b.hasAttribute('aria-pressed') && !(b as HTMLButtonElement).disabled && /rest on a single source|circular|no primary|agrees on/.test(b.textContent ?? ''))!
+    fireEvent.click(tile)
+    expect(screen.getByText(/The other claims are dimmed on the graph\./)).toBeInTheDocument()
+    fireEvent.click(tile)
+    expect(screen.queryByText(/The other claims are dimmed on the graph\./)).not.toBeInTheDocument()
+  })
+
+  test('"Strong links only" says what a strong link is', () => {
+    open()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    expect(screen.queryByText(/Strong links join two papers/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Strong links only' }))
+    expect(screen.getByText(/at least half of all the works they cite are cited by both/)).toBeInTheDocument()
+  })
+
+  test('the claim list follows the filter and the pressed finding, and says how many are left', () => {
+    open()
+    const list = () => screen.getByText(/Claims as a list/).closest('details')!
+    const all = within(list()).getAllByRole('button').length
+    expect(all).toBeGreaterThan(1)
+    expect(screen.getByText(`Claims as a list · ${all}`)).toBeInTheDocument()
+
+    const first = within(list()).getAllByRole('button')[0].textContent!
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter claims' }), { target: { value: first.slice(0, 12).toUpperCase() } })
+    const left = within(list()).getAllByRole('button').length
+    expect(left).toBeLessThanOrEqual(all)
+    expect(screen.getByText(new RegExp(`Claims as a list · (${left} of ${all}|${all})`))).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter claims' }), { target: { value: 'zzzz no such claim' } })
+    expect(within(list()).queryAllByRole('button')).toHaveLength(0)
+    expect(screen.getByText('No claim matches the filter.')).toBeInTheDocument()
+    expect(screen.getByText(`Claims as a list · 0 of ${all}`)).toBeInTheDocument()
+  })
+
+  test('a pressed finding narrows the claim list to the claims it counts', () => {
+    open()
+    const list = () => screen.getByText(/Claims as a list/).closest('details')!
+    const all = within(list()).getAllByRole('button').length
+    const tile = screen
+      .getAllByRole('button')
+      .find((b) => b.hasAttribute('aria-pressed') && !(b as HTMLButtonElement).disabled && /single source|no primary|agrees on/.test(b.textContent ?? ''))!
+    fireEvent.click(tile)
+    expect(within(list()).getAllByRole('button').length).toBeLessThan(all)
+  })
+
+  test('Up and Down step through the claim list and stop at its ends', () => {
+    open()
+    const rows = within(screen.getByText(/Claims as a list/).closest('details')!).getAllByRole('button')
+    rows[0].focus()
+    fireEvent.keyDown(rows[0], { key: 'ArrowUp' })
+    expect(rows[0]).toHaveFocus()
+    fireEvent.keyDown(rows[0], { key: 'ArrowDown' })
+    expect(rows[1]).toHaveFocus()
+    fireEvent.keyDown(rows[1], { key: 'ArrowUp' })
+    expect(rows[0]).toHaveFocus()
+    rows.at(-1)!.focus()
+    fireEvent.keyDown(rows.at(-1)!, { key: 'ArrowDown' })
+    expect(rows.at(-1)).toHaveFocus()
+    fireEvent.keyDown(rows.at(-1)!, { key: 'Enter' })
+    expect(rows.at(-1)).toHaveFocus()
+  })
+
+  test('the address follows the view and the chosen claim or link', () => {
+    open()
+    const query = () => new URLSearchParams(window.location.search)
+    fireEvent.click(screen.getByText(/Claims as a list/).closest('details')!.querySelector('button')!)
+    expect(query().get('claim')).not.toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    expect(query().get('view')).toBe('papers')
+    fireEvent.click(screen.getByRole('radio', { name: 'Claims' }))
+    expect(query().get('view')).toBeNull()
+  })
+
+  test('/ puts focus in the claims filter', () => {
+    open()
+    const filter = screen.getByRole('textbox', { name: 'Filter claims' })
+    expect(filter).toHaveAttribute('aria-keyshortcuts', '/')
+    fireEvent.keyDown(document.body, { key: '/' })
+    expect(filter).toHaveFocus()
+  })
+
   test('shows the claims legend', () => {
     open()
     expect(screen.getByText(/1 not in a public index/)).toBeInTheDocument()
@@ -540,6 +625,13 @@ describe('Graph · layout and the position cache', () => {
     expect(center).toHaveBeenCalledTimes(1)
     const saved = JSON.parse(localStorage.getItem('ss-graph-positions-v1') ?? '{}')
     expect(Object.values(saved)[0]).toEqual(expect.objectContaining({ 'a:1': { x: expect.any(Number), y: expect.any(Number) } }))
+  })
+
+  test('says the graph is being arranged until the layout settles', () => {
+    open()
+    expect(screen.getByRole('status')).toHaveTextContent('Arranging the graph…')
+    layoutstop()
+    expect(screen.queryByText('Arranging the graph…')).not.toBeInTheDocument()
   })
 
   test('does not centre when the latest upload is not drawn in this view', () => {

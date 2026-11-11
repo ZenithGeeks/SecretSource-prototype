@@ -25,6 +25,7 @@ import { Empty, ErrorState, LoadingScreen } from '../../../components/ui'
 import { errorMessage } from '../../../lib/author'
 import { type GraphEdge, type GraphRelation, type KnowledgeGraph, RELATION_STANDING } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { fitReadable } from '../../../lib/graphFit'
@@ -51,17 +52,21 @@ type Palette = {
   supports: string
   refutes: string
   insufficient: string
+  /** Paper-cluster hues. None is red, green or amber: those already mean contradicted, backed and silent. */
+  cluster: string[]
 }
 
 const LIGHT: Palette = {
   ink: '#1E1A22', inkMuted: '#6B6370', surface: '#FFFDF9', border: '#E4DDD1',
   accent: '#6A2E6F', accentSoft: '#F1E4F2', supports: '#2F6B45', refutes: '#A33A2E',
   insufficient: '#8A6414',
+  cluster: ['#6A2E6F', '#2B5F9E', '#1F7A86', '#5C6270', '#8A5A3C'],
 }
 const DARK: Palette = {
   ink: '#F2EEF4', inkMuted: '#B3AAB8', surface: '#2A262D', border: '#423C46',
   accent: '#C98FC4', accentSoft: '#3D2F42', supports: '#7FD39B', refutes: '#E08A76',
   insufficient: '#D8B45F',
+  cluster: ['#C98FC4', '#7FAAE0', '#6CC3CF', '#A7AEBB', '#D0A07E'],
 }
 
 /** Follows the app theme from `useSettings()`, the same source the rest of the app reads: the
@@ -82,7 +87,7 @@ function usePalette(): { pal: Palette; dark: boolean } {
 
 /** Cluster → colour, cycled in cluster order so new clusters stay distinguishable. */
 function clusterColors(pal: Palette): string[] {
-  return [pal.accent, pal.supports, pal.insufficient, pal.inkMuted, pal.refutes]
+  return pal.cluster
 }
 
 /** A short node label for the canvas — the full title would overlap everything. Cuts on a word
@@ -110,7 +115,7 @@ function paperShort(node: { label: string; year?: string }): string {
   return `${truncate(node.label, 18)}${node.year ? ` ${node.year}` : ''}`
 }
 
-type Insight = { key: string; count: number; label: string; icon: Icon; tone: string; ids: Set<string> }
+type Insight = { key: string; count: number; label: string; hint: string; icon: Icon; tone: string; ids: Set<string> }
 type Icon = ComponentType<{ className?: string }>
 
 /** The four headline findings the graph exists to surface, all read off the returned graph so
@@ -143,10 +148,10 @@ function computeInsights(graph: KnowledgeGraph): Insight[] {
   }
 
   return [
-    { key: 'single', count: singleSource.size, label: 'claims rest on a single source', icon: AlertCircle, tone: 'text-insufficient', ids: singleSource },
-    { key: 'circular', count: pairs.size, label: 'circular citation (A cites B cites A)', icon: GitFork, tone: 'text-accent', ids: cyclic },
-    { key: 'no-primary', count: noPrimary.size, label: 'claims with no primary evidence', icon: HelpCircle, tone: 'text-insufficient', ids: noPrimary },
-    { key: 'agreed', count: agreed.size, label: 'claims every paper agrees on', icon: CheckCircle2, tone: 'text-supports', ids: agreed },
+    { key: 'single', count: singleSource.size, label: 'claims rest on a single source', hint: 'Each of these claims cites one work only, so no second work backs or checks it.', icon: AlertCircle, tone: 'text-insufficient', ids: singleSource },
+    { key: 'circular', count: pairs.size, label: 'circular citation (A cites B cites A)', hint: 'Two analysed papers cite each other.', icon: GitFork, tone: 'text-accent', ids: cyclic },
+    { key: 'no-primary', count: noPrimary.size, label: 'claims with no primary evidence', hint: 'None of the works cited for these claims backs them.', icon: HelpCircle, tone: 'text-insufficient', ids: noPrimary },
+    { key: 'agreed', count: agreed.size, label: 'claims every paper agrees on', hint: 'Every work cited for these claims backs them.', icon: CheckCircle2, tone: 'text-supports', ids: agreed },
   ]
 }
 
@@ -304,13 +309,13 @@ function InsightTile({ insight, active, onToggle }: { insight: Insight; active: 
       aria-pressed={active}
       disabled={count === 0}
       className={cn(
-        'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl border bg-surface px-3.5 py-2.5 text-left transition-colors disabled:cursor-default disabled:opacity-60',
+        'flex min-w-0 items-center gap-2 rounded-full border bg-surface py-1.5 pl-3 pr-3.5 text-left transition-colors disabled:cursor-default disabled:opacity-60 pointer-coarse:min-h-11',
         active ? 'border-accent bg-accent-soft' : 'border-border-subtle hover:border-accent/50',
       )}
     >
       <Icon className={cn('size-4 shrink-0', tone)} />
       <span className={cn('font-mono text-[15px] leading-5 tracking-[-0.01em]', tone)}>{count}</span>
-      <span className="min-w-0 flex-1 text-xs leading-4 text-ink-muted">{label}</span>
+      <span className="min-w-0 text-xs leading-4 text-ink-muted">{label}</span>
     </button>
   )
 }
@@ -335,8 +340,12 @@ function GraphCanvas({
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
+  const filterInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(filterInput)
   const observerRef = useRef<ResizeObserver | null>(null)
   const [ready, setReady] = useState(false)
+  // True while cola is still placing the nodes (a layout with no saved positions takes a moment).
+  const [arranging, setArranging] = useState(false)
 
   // Attach the ResizeObserver through a callback ref rather than an effect: an effect runs on the
   // first render, while the query is still loading and Graph returns null, when the canvas div
@@ -373,6 +382,16 @@ function GraphCanvas({
     setShown(selection)
     if (selection) setSide('details')
   }
+
+  // The address names the view and the chosen claim or link, so a refresh or a shared link comes back to it.
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search)
+    const keep = (name: string, value: string | null) => (value ? next.set(name, value) : next.delete(name))
+    keep('view', view === 'papers' ? 'papers' : null)
+    keep('claim', claimSel)
+    keep('pair', pairSel)
+    window.history.replaceState(null, '', `?${next}`)
+  }, [view, claimSel, pairSel])
 
   useEffect(() => {
     const node = view === 'claims' && claimSel ? graph?.nodes.find((n) => n.id === claimSel) : undefined
@@ -530,6 +549,10 @@ function GraphCanvas({
       ? 'Claims and the papers that back, contradict, or ignore them. Choose a claim to see its evidence.'
       : 'Choose a link to compare a pair of papers. The key in the corner says what the lines mean.'
   const names = Object.fromEntries(graph.nodes.map((n) => [n.id, n.label]))
+  // The list follows what the canvas shows: the filter text and the pressed finding both narrow it.
+  const listedClaims = claimRows
+    .filter((row) => !filter.trim() || row.label.toLowerCase().includes(filter.trim().toLowerCase()))
+    .filter((row) => !activeInsight || activeInsight.ids.has(row.id))
   const pairRows = graph.paperEdges
     .filter((e) => (pFilter === 'strong' ? e.similarity >= 0.5 : pFilter === 'citations' ? e.cites : true))
     .map((e) => ({
@@ -583,11 +606,16 @@ function GraphCanvas({
             ]}
             onChange={setPFilter}
           />
+          {pFilter === 'strong' && (
+            <p className="mt-2 text-[13px] text-ink-muted">
+              Strong links join two papers when at least half of all the works they cite are cited by both.
+            </p>
+          )}
         </div>
       )}
 
       {view === 'claims' && (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex flex-wrap gap-2">
           {insights.map((insight) => (
             <InsightTile
               key={insight.key}
@@ -596,6 +624,11 @@ function GraphCanvas({
               onToggle={() => setInsightKey(insightKey === insight.key || insight.count === 0 ? null : insight.key)}
             />
           ))}
+          {activeInsight && (
+            <p className="basis-full text-[13px] text-ink-muted">
+              {activeInsight.hint} The other claims are dimmed on the graph.
+            </p>
+          )}
         </div>
       )}
 
@@ -636,9 +669,11 @@ function GraphCanvas({
             <div className="absolute left-3 top-3 z-10 flex w-[min(220px,calc(100%-6rem))] items-center gap-2 rounded-[9px] border border-border-subtle bg-surface px-2.5 py-[7px] focus-within:ring-2 focus-within:ring-accent/40">
               <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
               <input
+                ref={filterInput}
+                aria-keyshortcuts="/"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter claims…"
+                placeholder="Filter claims (press /)"
                 aria-label="Filter claims"
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
               />
@@ -693,6 +728,7 @@ function GraphCanvas({
               cy.on('layoutstop', () => {
                 // Cola is async: this can fire after navigating away destroyed the graph.
                 if (cy.destroyed()) return
+                setArranging(false)
                 fitReadable(cy)
                 focusLatest()
                 // Save the settled positions so the next visit replays them instantly with `preset`
@@ -718,6 +754,7 @@ function GraphCanvas({
                   }),
                 )
               }
+              setArranging(!cachedPositions)
               setReady(true)
             }}
           />
@@ -725,6 +762,14 @@ function GraphCanvas({
             <GraphClaimsLegend colors={pal} notIndexed={notIndexed} />
           ) : (
             <GraphPapersLegend colors={pal} clusters={graph.clusters} clusterColors={clusterColors(pal)} notIndexed={notIndexed} />
+          )}
+          {arranging && (
+            <p
+              role="status"
+              className="absolute bottom-3 right-3 z-10 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs text-ink-muted"
+            >
+              Arranging the graph…
+            </p>
           )}
           {tip && (
             // Near the top edge the above-the-node tooltip would render past y=0 and be clipped by
@@ -769,7 +814,9 @@ function GraphCanvas({
 
       {/* The canvas can only be read and driven with a pointer; the same claims as a list are for keyboards,
           screen readers and anyone who wants the contradicted ones first. */}
-      {view === 'claims' && <GraphClaimList rows={claimRows} selectedId={claimSel} onSelect={setClaimSel} />}
+      {view === 'claims' && (
+        <GraphClaimList rows={listedClaims} total={claimRows.length} selectedId={claimSel} onSelect={setClaimSel} />
+      )}
       {view === 'papers' && <GraphPairList rows={pairRows} selectedId={pairSel} onSelect={setPairSel} />}
     </>
   )

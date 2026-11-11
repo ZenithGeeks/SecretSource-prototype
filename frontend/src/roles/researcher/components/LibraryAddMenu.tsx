@@ -1,6 +1,7 @@
 /**
  * "Add papers": the one primary action on the Library toolbar. Every way of adding a paper
- * lives in this menu. The caller passes only the items whose action exists.
+ * lives in this menu. The caller passes only the items whose action exists. With a single way to
+ * add, a menu would only hide it behind a click, so that one action is the button.
  */
 
 import { ChevronDown } from 'lucide-react'
@@ -26,6 +27,14 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
   const menu = useMenuKeys(open, () => setOpen(false), root)
 
   if (items.length === 0) return null
+  if (items.length === 1) {
+    const [only] = items
+    return (
+      <Button type="button" title={only.hint} onClick={only.onSelect} className="rounded-[9px] px-3 py-[7px] text-[13px]">
+        {only.label}
+      </Button>
+    )
+  }
   return (
     <div ref={root} className="relative" onKeyDown={menu.onKeyDown} onBlur={menu.onBlur}>
       <Button
