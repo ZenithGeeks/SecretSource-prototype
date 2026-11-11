@@ -173,7 +173,7 @@ function Failure({ failure }: { failure: Unchecked }) {
 function shortRef(citation: Citation) {
   const who = citation.authors[0]
     ? `${citation.authors[0]}${citation.authors.length > 1 ? ' et al.' : ''}`
-    : citation.title || (citation.arxiv ? `arXiv:${citation.arxiv}` : 'Untitled')
+    : citation.title || citation.venue || (citation.arxiv ? `arXiv:${citation.arxiv}` : 'Untitled')
   return citation.year ? `${who} ${citation.year}` : who
 }
 

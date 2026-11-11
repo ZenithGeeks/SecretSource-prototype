@@ -89,6 +89,13 @@ describe('the collapsed row', () => {
     expect(screen.getByRole('button')).toHaveTextContent('Only a title 2015 · arXiv:1502.03167 · Untitled · Solo')
   })
 
+  it('names a work that has no title by its venue, as the card did before (#937)', () => {
+    const journal = 'Journal of Instrumentation'
+    card({ citations: [cite({ authors: [], title: '', venue: journal, year: '2008', doi: '' })] }, { startCollapsed: true })
+    expect(screen.getByRole('button')).toHaveTextContent(`${journal} 2008`)
+    expect(screen.getByRole('button')).not.toHaveTextContent('Untitled')
+  })
+
   it('tells the owner which claim was opened', () => {
     const onSelect = vi.fn()
     card({ verdicts: [verdict()] }, { onSelect })
