@@ -7,7 +7,9 @@ a2a-sdk[http-server]>=1.0
 # litellm comes in through dspy and google-adk. 1.106.0 imports CacheableResult from mcp.types, which
 # mcp 1.x does not have, so every LLM call failed. 1.105.1 is the version that ran before.
 litellm>=1.105,<1.106
-dspy>=2.6
+# 3.5.0 no longer parses the answers the tests fake (JSONAdapter: "LM response cannot be serialized
+# to a JSON object"), so 8 tests fail on a fresh install (#918). 3.4.1 is the version that ran before.
+dspy==3.4.1
 docling>=2.0
 pymupdf>=1.24  # locates a sentence's page and boxes in the original PDF
 nltk>=3.9  # Punkt splits sentences (app/text.py); 3.9 reads the punkt_tab and stopwords data the image downloads
