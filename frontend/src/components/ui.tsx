@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { CircleAlert, Loader2 } from 'lucide-react'
-import type { ButtonHTMLAttributes, ComponentProps, ReactNode } from 'react'
+import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode, useEffect, useState } from 'react'
 
 import type { Standing } from '../lib/claims'
 import { STANDING_LABELS } from '../lib/claims'
@@ -23,7 +23,7 @@ export function Button({ className, variant = 'solid', ...props }: ButtonProps) 
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium',
+        'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium pointer-coarse:min-h-11',
         'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
         'disabled:cursor-not-allowed disabled:opacity-50',
         // Canvas, not white: the dark-mode accent is a light plum that white text fails on.
@@ -71,7 +71,7 @@ export function MenuItem({ className, type = 'button', ...props }: ComponentProp
     <button
       type={type}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink',
+        'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink pointer-coarse:min-h-11',
         'hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent',
         'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
         className,
@@ -265,18 +265,30 @@ export function ErrorState({ title, message, onRetry }: { title: string; message
   )
 }
 
+const SLOW_LOAD_MS = 10_000
+
 /** A query's pending state, in place of returning null while it fetches — a blank screen reads
  * as "broken", not "loading" (#271). Fades in on mount so a fast load doesn't flash. */
 export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
+  const [slow, setSlow] = useState(false)
+  // A load that takes this long usually means the server is struggling: say so, so the wait is not a mystery.
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), SLOW_LOAD_MS)
+    return () => clearTimeout(timer)
+  }, [])
   return (
     <motion.div
+      role="status"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.15 }}
-      className="flex min-h-[40vh] items-center justify-center gap-2 text-sm text-ink-muted"
+      className="flex min-h-[40vh] flex-col items-center justify-center gap-1 text-sm text-ink-muted"
     >
-      <Loader2 className="size-4 animate-spin" />
-      {label}
+      <span className="flex items-center gap-2">
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+        {label}
+      </span>
+      {slow && <span className="text-xs">This is taking longer than usual.</span>}
     </motion.div>
   )
 }

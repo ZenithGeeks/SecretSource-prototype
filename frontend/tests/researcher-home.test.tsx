@@ -83,6 +83,6 @@ test('a dropped file that is not a PDF says why nothing happened', async () => {
 
 test('Analyze on a queued paper puts its identifier in the analyze box', async () => {
   renderHome()
-  fireEvent.click(await screen.findByRole('button', { name: /^Put PLAID/ }))
+  fireEvent.click(await screen.findByRole('button', { name: /^Analyze PLAID/ }))
   expect(screen.getByLabelText('Paper to analyze')).toHaveValue('10.1/plaid')
 })

@@ -23,6 +23,7 @@ type CytoscapeProps = {
 const h = vi.hoisted(() => ({
   graph: undefined as unknown,
   isError: false,
+  refetch: vi.fn(),
   skipCy: false,
   cy: null as unknown,
   props: null as unknown,
@@ -67,7 +68,7 @@ vi.mock('react-cytoscapejs', async () => {
 })
 
 vi.mock('../src/lib/useResearcher', () => ({
-  useKnowledgeGraph: () => ({ data: h.graph, isError: h.isError }),
+  useKnowledgeGraph: () => ({ data: h.graph, isError: h.isError, error: new Error('502: '), refetch: h.refetch }),
   useFieldConsensus: () => ({
     data: { question: 'q', supports: 0, refutes: 0, silent: 0, span: '', note: '', unlisted: 0, rows: [] },
     isError: false,
@@ -162,11 +163,14 @@ describe('Graph · loading, errors and empty', () => {
     expect(screen.getByText('Ask panel')).toBeInTheDocument()
   })
 
-  test('shows an error message without Ask', () => {
+  test('shows an error message without Ask, and Retry asks the gateway again', () => {
     h.isError = true
     open()
     expect(screen.getByText('The graph could not load')).toBeInTheDocument()
+    expect(screen.getByText('the server did not answer (502)')).toBeInTheDocument()
     expect(screen.queryByText('Ask panel')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(h.refetch).toHaveBeenCalledTimes(1)
   })
 
   test('an error leaves Ask open', () => {
@@ -308,10 +312,67 @@ describe('Graph · claims view', () => {
     expect(onSelectNode).toHaveBeenLastCalledWith(null)
   })
 
+  test('lists the claims under the graph, contradicted first, and choosing one opens its detail', () => {
+    open()
+    const list = screen.getByText(/Claims as a list/).closest('details')!
+    const rows = within(list).getAllByRole('button')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Late interaction wins.'),
+      expect.stringContaining('Silent and backed.'),
+      expect.stringContaining('Backed only.'),
+      expect.stringContaining('A claim with no edges.'),
+      expect.stringContaining('Unchecked only.'),
+    ])
+    expect(rows[0]).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(rows[0])
+    expect(screen.getByRole('complementary', { name: 'Claim detail' })).toBeInTheDocument()
+    expect(within(list).getAllByRole('button')[0]).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('in the papers view the faded look comes after the edge look, so edges still dim', () => {
+    open()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    const selectors = (h.props as CytoscapeProps).stylesheet.map((rule) => rule.selector)
+    expect(selectors.lastIndexOf('edge.faded')).toBeGreaterThan(selectors.indexOf('edge[kind="paper"]'))
+  })
+
+  test('has no claim list in the papers view, but a list of links that follows the filter', () => {
+    open()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    expect(screen.queryByText(/Claims as a list/)).toBeNull()
+    const list = () => screen.getByText(/Links as a list/).closest('details')!
+    expect(within(list()).getAllByRole('button')).toHaveLength(3)
+    fireEvent.click(screen.getByRole('radio', { name: 'Strong links only' }))
+    expect(within(list()).getAllByRole('button')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('radio', { name: 'Citations' }))
+    const rows = within(list()).getAllByRole('button')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('One cites the other')
+    fireEvent.click(rows[0])
+    expect(screen.getByRole('complementary', { name: 'Pair detail' })).toBeInTheDocument()
+    expect(within(list()).getAllByRole('button')[0]).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('a link that is not a citation says how many works the two papers share', () => {
+    const [, , shared] = (GRAPH as KnowledgeGraph).paperEdges
+    h.graph = { ...GRAPH, paperEdges: [{ ...shared, citations: 1 }] }
+    open()
+    fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
+    expect(screen.getByText('1 cited work in common')).toBeInTheDocument()
+  })
+
+  test('an insight tile that counts nothing cannot be pressed', () => {
+    h.graph = { ...GRAPH, nodes: GRAPH.nodes.filter((n) => n.kind === 'paper'), edges: [], paperEdges: [] }
+    open()
+    const tiles = screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))
+    expect(tiles.length).toBeGreaterThan(0)
+    expect(tiles.every((b) => (b as HTMLButtonElement).disabled)).toBe(true)
+  })
+
   test('shows the claims legend', () => {
     open()
     expect(screen.getByText(/1 not in a public index/)).toBeInTheDocument()
-    expect(screen.getByText('contradict')).toBeInTheDocument()
+    expect(screen.getByText('contradicted')).toBeInTheDocument()
   })
 })
 
@@ -400,14 +461,17 @@ describe('Graph · hover', () => {
     expect(cy().elements('.faded')).toHaveLength(0)
   })
 
+  // The claim list under the graph repeats each claim's words, so the tooltip is the one over the canvas.
+  const tooltip = (text: string) => screen.queryAllByText(text).find((el) => el.className.includes('max-w-xs'))
+
   test('a node near the top edge gets its tooltip below it, any other above', () => {
     open()
     cy().$id('c:1').position({ x: 10, y: 5 })
     hover('c:1')
-    expect(screen.getByText('Late interaction wins.').className).toContain('translate-y-2')
+    expect(tooltip('Late interaction wins.')?.className).toContain('translate-y-2')
     cy().$id('c:2').position({ x: 10, y: 300 })
     hover('c:2')
-    expect(screen.getByText('A claim with no edges.').className).toContain('-translate-y-full')
+    expect(tooltip('A claim with no edges.')?.className).toContain('-translate-y-full')
   })
 
   test.each([
@@ -417,9 +481,9 @@ describe('Graph · hover', () => {
   ])('%s hides the tooltip', (_, move) => {
     open()
     hover('c:1')
-    expect(screen.getByText('Late interaction wins.')).toBeInTheDocument()
+    expect(tooltip('Late interaction wins.')).toBeDefined()
     emit(move)
-    expect(screen.queryByText('Late interaction wins.')).toBeNull()
+    expect(tooltip('Late interaction wins.')).toBeUndefined()
   })
 
   test('a hovered node that is not in the view spotlights nothing', () => {
@@ -600,17 +664,18 @@ describe('Graph · Ask panel beside the canvas', () => {
     expect(screen.queryByRole('radiogroup', { name: 'Side panel' })).toBeNull()
   })
 
-  test('a selection adds Details and Ask tabs; Ask is the one shown first', () => {
+  test('a selection adds Details and Ask tabs, and Details is the one shown', () => {
     open({ askPanel: <p>Ask panel</p> })
+    expect(screen.queryByRole('radiogroup', { name: 'Side panel' })).toBeNull()
     emit(() => cy().$id('c:1').emit('tap'))
     const tabs = screen.getByRole('radiogroup', { name: 'Side panel' })
-    expect(within(tabs).getByRole('radio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true')
+    expect(within(tabs).getByRole('radio', { name: 'Details' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('complementary', { name: 'Claim detail' })).toHaveFocus()
+    expect(screen.queryByText('Ask panel')).toBeNull()
+
+    fireEvent.click(within(tabs).getByRole('radio', { name: 'Ask' }))
     expect(screen.getByText('Ask panel')).toBeInTheDocument()
     expect(screen.queryByRole('complementary', { name: 'Claim detail' })).toBeNull()
-
-    fireEvent.click(within(tabs).getByRole('radio', { name: 'Details' }))
-    expect(screen.getByRole('complementary', { name: 'Claim detail' })).toBeInTheDocument()
-    expect(screen.queryByText('Ask panel')).toBeNull()
   })
 })
 

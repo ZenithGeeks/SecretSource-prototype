@@ -13,6 +13,7 @@
  * through screen changes; on Graph the panel is a tab of the graph's own right panel.
  */
 
+import { MotionConfig } from 'framer-motion'
 import { Home as HomeIcon, Library as LibraryIcon, ListChecks, Microscope, Waypoints } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -72,6 +73,11 @@ function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
   window.history.replaceState(null, '', `?${params}`)
 }
 
+const NOTHING_TO_GRAPH = {
+  title: 'Nothing to graph yet',
+  hint: 'Analyze a paper on Home. Its claims and the works they cite show up here.',
+}
+
 export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [screen, setScreen] = useState<ResearcherScreen>(initialScreen)
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
@@ -121,6 +127,8 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
       : [NAV_LABEL[NAV_FOR[screen]]]
 
   return (
+    // reducedMotion="user": every fade and slide on these screens stops for people who ask the OS for less motion.
+    <MotionConfig reducedMotion="user">
     <div className="redesign-app">
     <AppShell
       nav={NAV}
@@ -148,6 +156,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
         <Graph
           onOpenAnalysis={openAnalysis}
           initialTab={screen === 'field-consensus' ? 'consensus' : 'graph'}
+          emptyMessage={NOTHING_TO_GRAPH}
           askPanel={ask.panel}
           onSelectNode={setGraphNode}
         />
@@ -162,5 +171,6 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
       />
     </AppShell>
     </div>
+    </MotionConfig>
   )
 }

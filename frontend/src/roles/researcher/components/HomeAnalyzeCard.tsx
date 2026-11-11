@@ -5,14 +5,25 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileUp, Loader2, Search } from 'lucide-react'
-import { type RefObject, useRef, useState } from 'react'
+import { CircleAlert, FileUp, Loader2, Search } from 'lucide-react'
+import { type ReactNode, type RefObject, useRef, useState } from 'react'
 
 import { Toggle } from '../../../components/settings'
 import { Button } from '../../../components/ui'
 import { api } from '../../../lib/api'
+import { errorMessage } from '../../../lib/author'
 import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { cn } from '../../../lib/utils'
+
+/** A problem line under the form: an icon with the text, so red is never the only signal. */
+function Problem({ role, children }: { role: 'status' | 'alert'; children: ReactNode }) {
+  return (
+    <p role={role} className="flex items-start gap-2 text-sm text-refutes">
+      <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      {children}
+    </p>
+  )
+}
 
 export function HomeAnalyzeCard({
   reference,
@@ -98,14 +109,14 @@ export function HomeAnalyzeCard({
             type="button"
             onClick={() => fileInput.current?.click()}
             disabled={!online || start.isPending}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-muted hover:text-ink disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 pointer-coarse:min-h-11"
           >
             <FileUp aria-hidden="true" className="size-4" />
             Upload PDF
           </button>
           <Button
             type="submit"
-            className="rounded-[9px] px-3 py-[7px] text-[13px]"
+            className="rounded-[9px] px-4 py-[7px] text-sm pointer-coarse:min-h-11"
             disabled={!reference.trim() || !online || start.isPending}
           >
             {start.isPending && <Loader2 className="size-4 animate-spin" />}
@@ -124,27 +135,19 @@ export function HomeAnalyzeCard({
         />
       </form>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
-        <Toggle on={verify} onChange={setVerify} aria-labelledby="home-deep-check" />
+        <Toggle on={verify} onChange={setVerify} aria-labelledby="home-deep-check home-deep-check-time" />
         <span id="home-deep-check" className="text-ink">
           Compare each claim with the full text of the cited work
         </span>
-        <span className="text-ink-muted">· about 4 min</span>
+        <span id="home-deep-check-time" className="text-ink-muted">
+          · about 4 min
+        </span>
       </div>
-      {!online && (
-        <p role="status" className="text-sm text-refutes">
-          {OFFLINE_REASON.analyses}
-        </p>
-      )}
+      {!online && <Problem role="status">{OFFLINE_REASON.analyses}</Problem>}
       {notPdf && (
-        <p role="alert" className="text-sm text-refutes">
-          Only PDF files can be analyzed. Paste a DOI, arXiv ID or link for anything else.
-        </p>
+        <Problem role="alert">Only PDF files can be analyzed. Paste a DOI, arXiv ID or link for anything else.</Problem>
       )}
-      {start.isError && (
-        <p role="alert" className="text-sm text-refutes">
-          {(start.error as Error).message}
-        </p>
-      )}
+      {start.isError && <Problem role="alert">{errorMessage(start.error)}</Problem>}
     </section>
   )
 }

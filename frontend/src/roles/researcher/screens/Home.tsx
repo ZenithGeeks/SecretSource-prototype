@@ -9,6 +9,7 @@ import { useRef, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
 import { Card, ErrorState, FadeIn, LoadingScreen, TextButton, VerdictBadge } from '../../../components/ui'
+import { errorMessage } from '../../../lib/author'
 import { type Standing, verdictCountWord } from '../../../lib/claims'
 import type { ClaimStanding, ClaimTally } from '../../../lib/researcher'
 import { greeting, useSettings } from '../../../lib/settings'
@@ -27,13 +28,17 @@ const STANDINGS: { key: ClaimStanding; kind: Standing; color: string }[] = [
 ]
 
 function TallyBar({ tally }: { tally: ClaimTally }) {
+  const total = STANDINGS.reduce((sum, { key }) => sum + tally[key], 0)
   return (
     <>
-      <div className="flex h-2 w-full gap-[3px]" aria-hidden="true">
-        {STANDINGS.map(({ key, color }) => (
-          <span key={key} className={cn('h-full min-w-0 rounded', color)} style={{ flexGrow: tally[key] }} />
-        ))}
-      </div>
+      {/* With no claims every segment would have zero width: an empty library draws no bar. */}
+      {total > 0 && (
+        <div className="flex h-2 w-full gap-[3px]" aria-hidden="true">
+          {STANDINGS.map(({ key, color }) => (
+            <span key={key} className={cn('h-full min-w-0 rounded', color)} style={{ flexGrow: tally[key] }} />
+          ))}
+        </div>
+      )}
       <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
         {STANDINGS.map(({ key, kind, color }) => (
           <li key={key} className="flex items-center gap-1.5 text-[13px] text-ink-muted">
@@ -62,16 +67,32 @@ export function Home({
   const { session } = useAuth()
   const [reference, setReference] = useState('')
   const analyzeInput = useRef<HTMLInputElement>(null)
+  // One element for the three states of this screen, so the card (and what is typed in it) stays mounted.
+  const analyze = (
+    <HomeAnalyzeCard
+      key="analyze"
+      reference={reference}
+      onReferenceChange={setReference}
+      inputRef={analyzeInput}
+      onStarted={onOpenAnalysis}
+    />
+  )
   if (isError) {
     return (
-      <ErrorState
-        title="Your library could not load"
-        message={(error as Error | null)?.message ?? 'The gateway did not answer.'}
-        onRetry={() => refetch()}
-      />
+      <FadeIn className="flex flex-col gap-7 pt-4">
+        {analyze}
+        <ErrorState title="Your library could not load" message={errorMessage(error)} onRetry={() => refetch()} />
+      </FadeIn>
     )
   }
-  if (!home) return <LoadingScreen label="Loading your library…" />
+  if (!home) {
+    return (
+      <FadeIn className="flex flex-col gap-7 pt-4">
+        {analyze}
+        <LoadingScreen label="Loading your library…" />
+      </FadeIn>
+    )
+  }
 
   // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
   // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
@@ -91,12 +112,7 @@ export function Home({
         </div>
       </header>
 
-      <HomeAnalyzeCard
-        reference={reference}
-        onReferenceChange={setReference}
-        inputRef={analyzeInput}
-        onStarted={onOpenAnalysis}
-      />
+      {analyze}
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
         {/* Conflicts */}
@@ -122,8 +138,12 @@ export function Home({
                   onClick={() => onOpenAnalysis(c.analysis)}
                   className="flex w-full min-w-0 flex-col items-start gap-1.5 px-5 py-3 text-left hover:bg-accent-soft"
                 >
-                  {c.paper && <span className="max-w-full truncate text-xs text-ink-muted">{c.paper}</span>}
-                  <p className="line-clamp-2 text-sm leading-6 text-ink">{c.claim}</p>
+                  {c.paper && (
+                    <span title={c.paper} className="max-w-full truncate text-xs text-ink-muted">
+                      {c.paper}
+                    </span>
+                  )}
+                  <span className="line-clamp-2 text-sm leading-6 text-ink">{c.claim}</span>
                   {/* One pill per cited work, so a long list wraps instead of running out of the card. */}
                   <span className="flex max-w-full flex-wrap items-center gap-2">
                     {c.against.map((work) => (
@@ -164,12 +184,13 @@ export function Home({
                 </button>
                 <button
                   type="button"
-                  aria-label={`Put ${entry.paper} in the analyze box`}
+                  // The name starts with the visible word, so voice control ("click Analyze") finds it.
+                  aria-label={`Analyze ${entry.paper}: put it in the analyze box`}
                   onClick={() => {
                     setReference(entry.identifier)
                     analyzeInput.current?.focus()
                   }}
-                  className="shrink-0 rounded-[9px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] font-medium text-ink hover:bg-accent-soft"
+                  className="shrink-0 rounded-[9px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] font-medium text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11"
                 >
                   Analyze
                 </button>

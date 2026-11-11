@@ -1,6 +1,7 @@
 /** The Library paper table (Figma: Library, table). One row per analysed paper. */
 
 import { ChevronRight } from 'lucide-react'
+import { useState } from 'react'
 
 import { verdictCountLabel } from '../../../lib/claims'
 import type { LibraryPaper } from '../../../lib/researcher'
@@ -10,6 +11,21 @@ import { count } from './LibraryCount'
 
 const MARKER =
   'shrink-0 rounded-full border border-dashed border-insufficient px-2 py-px text-xs font-medium text-insufficient'
+
+type SortKey = 'title' | 'claims' | 'standing'
+
+/** What each header sorts by. Claims and Standing put the biggest first; "not analyzed" papers
+ * have no standing, so they go last. */
+const SORTERS: Record<SortKey, (a: LibraryPaper, b: LibraryPaper) => number> = {
+  title: (a, b) => a.title.localeCompare(b.title),
+  claims: (a, b) => b.claims - a.claims,
+  standing: (a, b) => (b.contradicted ?? -1) - (a.contradicted ?? -1),
+}
+const SORT_HINTS: Record<SortKey, string> = {
+  title: 'Sort by title',
+  claims: 'Most claims first',
+  standing: 'Most conflicts first',
+}
 
 /** The word beside the bar: the worst standing the paper has. */
 function standingLabel(backed: number, contradicted: number, rest: number) {
@@ -62,14 +78,30 @@ export function LibraryPaperTable({
   expanded: boolean
   onExpand: () => void
 }) {
-  const visible = expanded ? papers : papers.slice(0, limit)
+  const [sortBy, setSortBy] = useState<SortKey | null>(null)
+  const ordered = sortBy ? [...papers].sort(SORTERS[sortBy]) : papers
+  const visible = expanded ? ordered : ordered.slice(0, limit)
+  const header = (key: SortKey, label: string, width: string) => (
+    <span className={width}>
+      <button
+        type="button"
+        aria-pressed={sortBy === key}
+        onClick={() => setSortBy(sortBy === key ? null : key)}
+        title={sortBy === key ? 'Back to the usual order' : SORT_HINTS[key]}
+        className="type-label rounded text-ink-muted hover:text-ink pointer-coarse:min-h-11"
+      >
+        {label}
+        {sortBy === key && <span aria-hidden="true">{key === 'title' ? ' ↑' : ' ↓'}</span>}
+      </button>
+    </span>
+  )
   return (
     <div className="overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-sm">
-      <div className="type-label hidden items-center gap-5 px-5 py-3 text-ink-muted md:flex">
-        <span className="min-w-0 flex-1">Paper</span>
-        <span className="w-16 shrink-0">Claims</span>
-        <span className="w-56 shrink-0">Standing</span>
-        {hasClusters && <span className="w-36 shrink-0">Cluster</span>}
+      <div className="hidden items-center gap-5 px-5 py-3 md:flex">
+        {header('title', 'Paper', 'min-w-0 flex-1')}
+        {header('claims', 'Claims', 'w-16 shrink-0')}
+        {header('standing', 'Standing', 'w-56 shrink-0')}
+        {hasClusters && <span className="type-label w-36 shrink-0 text-ink-muted">Cluster</span>}
         <span className="w-4 shrink-0" />
       </div>
       {visible.map((paper) => (
@@ -78,12 +110,11 @@ export function LibraryPaperTable({
           type="button"
           onClick={() => onOpen(paper.id)}
           data-ask-target={askTarget({ kind: 'paper', id: paper.id })}
-          title="Open this analysis"
           className="flex w-full items-center gap-5 border-t border-border-subtle px-5 py-3 text-left hover:bg-accent-soft"
         >
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-medium text-ink">{paper.title}</p>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+            <span className="block truncate text-[13px] font-medium text-ink">{paper.title}</span>
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
               <span>{paper.cite}</span>
               {paper.indexed === 'no' && (
                 <span className={MARKER} title="This paper was not found in Semantic Scholar, arXiv, or Unpaywall.">
@@ -101,12 +132,12 @@ export function LibraryPaperTable({
               {paper.linked.length > 0 && (
                 <span className="truncate text-accent">Linked to {paper.linked.join(', ')}</span>
               )}
-            </p>
+            </span>
             {/* On a phone the columns do not fit, so they read as one line here. */}
-            <p className="mt-1 text-xs text-ink-muted md:hidden">
+            <span className="mt-1 block text-xs text-ink-muted md:hidden">
               {count(paper.claims, 'claim')}
-              {paper.backed === null ? ' · Not analyzed' : null}
-            </p>
+              {paper.backed === null ? ' · Not analyzed' : ` · ${standingLabel(paper.backed, paper.contradicted ?? 0, Math.max(0, paper.claims - paper.backed - (paper.contradicted ?? 0)))}`}
+            </span>
           </div>
           <span className="hidden w-16 shrink-0 font-mono text-[13px] text-ink md:inline">{paper.claims}</span>
           <span className="hidden w-56 shrink-0 md:inline">
@@ -115,7 +146,7 @@ export function LibraryPaperTable({
           {hasClusters && (
             <span className="hidden w-36 shrink-0 text-[13px] text-ink-muted md:inline">{paper.cluster}</span>
           )}
-          <ChevronRight className="size-4 shrink-0 text-ink-muted" />
+          <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
         </button>
       ))}
       {papers.length === 0 && (

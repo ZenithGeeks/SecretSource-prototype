@@ -6,23 +6,28 @@
  */
 
 import { Copy, ExternalLink, X } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { IconButton, VerdictBadge } from '../../../components/ui'
 import type { Standing } from '../../../lib/claims'
 import { reasonText } from '../../../lib/api'
-import type { GraphEdge, GraphNode, GraphRelation, KnowledgeGraph, PaperEdge } from '../../../lib/researcher'
+import { type GraphEdge, type GraphNode, type GraphRelation, type KnowledgeGraph, type PaperEdge, RELATION_STANDING } from '../../../lib/researcher'
 
 const RELATION_LABEL: Record<GraphRelation, string> = {
   asserts: 'asserts', backs: 'backs', contradicts: 'contradicts', silent: 'silent', unchecked: "couldn't check",
 }
 
-const RELATION_STANDING: Record<GraphRelation, Standing> = {
-  asserts: 'unchecked', backs: 'supports', contradicts: 'refutes', silent: 'insufficient', unchecked: 'unchecked',
-}
-
 const PANEL =
   'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-card lg:w-[360px] lg:shrink-0'
+
+/** Puts focus on a detail panel when it opens or shows another item, so a keyboard or screen reader
+ * user lands in what they just chose instead of staying on the canvas. */
+function useFocusOnOpen(key: string) {
+  const panel = useRef<HTMLElement>(null)
+  useEffect(() => panel.current?.focus(), [key])
+  return panel
+}
 
 /** The overall standing of a claim, from the edges that cite it: contradicted, then silent, then backed. */
 function standingOf(edges: GraphEdge[]): Standing {
@@ -60,6 +65,7 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
   const edges = graph.edges.filter((e) => e.target === claimId)
   const paper = (id: string) => graph.nodes.find((n) => n.id === id)
   const [copied, setCopied] = useState(false)
+  const panel = useFocusOnOpen(claimId)
   if (!claim || claim.kind !== 'claim') return null
   const contradicts = edges.some((e) => e.relation === 'contradicts')
   const origins = edges.filter((e) => e.relation === 'asserts')
@@ -73,20 +79,26 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
     const lines = others
       .filter((e) => e.quote)
       .map((e) => `${name(e.source)} — ${RELATION_LABEL[e.relation]}: "${e.quote}"`)
-    await navigator.clipboard.writeText([claim.label, ...lines].join('\n\n'))
+    try {
+      // navigator.clipboard is missing on a page served over plain http.
+      await navigator.clipboard.writeText([claim.label, ...lines].join('\n\n'))
+    } catch {
+      toast.error('Could not copy. Select the text and copy it by hand.')
+      return
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
 
   return (
-    <aside aria-label="Claim detail" className={PANEL}>
+    <aside ref={panel} tabIndex={-1} aria-label="Claim detail" className={PANEL}>
       <div className="flex items-center gap-2">
         <VerdictBadge verdict={standingOf(edges)} />
         <span className="flex-1" />
-        <IconButton onClick={copyEvidence} aria-label="Copy evidence" title={copied ? 'Copied' : 'Copy evidence'} className="size-8 rounded-[9px]">
+        <IconButton onClick={copyEvidence} aria-label="Copy evidence" title={copied ? 'Copied' : 'Copy evidence'} className="size-8 rounded-[9px] pointer-coarse:size-11">
           <Copy className="size-4" />
         </IconButton>
-        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px]">
+        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px] pointer-coarse:size-11">
           <X className="size-4" />
         </IconButton>
       </div>
@@ -134,6 +146,7 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
 }
 
 export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGraph; edge: PaperEdge; onClose: () => void }) {
+  const panel = useFocusOnOpen(edge.id)
   const node = (id: string) => graph.nodes.find((x) => x.id === id)
   const label = (id: string) => {
     const n = node(id)
@@ -148,12 +161,12 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
     : `${edge.citations} cited ${edge.citations === 1 ? 'work' : 'works'} in common`
 
   return (
-    <aside aria-label="Pair detail" className={PANEL}>
+    <aside ref={panel} tabIndex={-1} aria-label="Pair detail" className={PANEL}>
       <div className="flex items-center gap-2">
         <h2 className="min-w-0 flex-1 text-[15px] leading-[22px] font-semibold text-ink">
-          {label(edge.a)} <span className="font-normal text-ink-muted">↔</span> {label(edge.b)}
+          {label(edge.a)} <span aria-hidden="true" className="font-normal text-ink-muted">↔</span> {label(edge.b)}
         </h2>
-        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px]">
+        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px] pointer-coarse:size-11">
           <X className="size-4" />
         </IconButton>
       </div>
@@ -185,17 +198,20 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
       ) : (
         <p className="text-[13px] text-ink-muted">No shared passages indexed for this pair yet.</p>
       )}
-      <button
-        type="button"
-        onClick={() => {
-          for (const id of [edge.a, edge.b]) {
-            window.open(`${window.location.pathname}?screen=analyses&analysis=${id.replace(/^a:/, '')}`, '_blank')
-          }
-        }}
-        className="flex items-center gap-2 text-sm text-ink hover:text-accent"
-      >
-        <ExternalLink className="size-4" /> Open both side by side
-      </button>
+      {/* Two links, not two window.open calls: a browser lets only the first of those through. */}
+      <div className="flex flex-col gap-1.5">
+        {[edge.a, edge.b].map((id) => (
+          <a
+            key={id}
+            href={`${window.location.pathname}?role=researcher&screen=analyses&analysis=${id.replace(/^a:/, '')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-ink hover:text-accent"
+          >
+            <ExternalLink aria-hidden="true" className="size-4 shrink-0" /> Open {label(id)} in a new tab
+          </a>
+        ))}
+      </div>
     </aside>
   )
 }

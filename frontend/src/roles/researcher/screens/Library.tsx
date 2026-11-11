@@ -7,12 +7,24 @@
 
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronRight, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ToolbarActions } from '../../../components/AppShell'
-import { Button, Empty, FadeIn, IconButton, Input, LoadingScreen, MenuItem } from '../../../components/ui'
+import {
+  Button,
+  ErrorState,
+  FadeIn,
+  IconButton,
+  Input,
+  LoadingScreen,
+  MenuItem,
+  Segmented,
+  Textarea,
+} from '../../../components/ui'
 import { paperName } from '../../../lib/api'
+import { errorMessage } from '../../../lib/author'
+import { useMenuKeys } from '../../../lib/useMenuKeys'
 import type { ClaimStanding, ClaimTally, LibraryPaper, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
@@ -28,7 +40,7 @@ const STANDINGS: { key: ClaimStanding; color: string }[] = [
   { key: 'backed', color: 'bg-supports' },
   { key: 'silent', color: 'bg-insufficient' },
   { key: 'contradicted', color: 'bg-refutes' },
-  { key: 'unchecked', color: 'bg-ink-muted' },
+  { key: 'unchecked', color: 'bg-neutral' },
 ]
 
 /** The two dialogs' enter/exit: the scrim fades, the panel fades and settles in from slightly
@@ -46,6 +58,55 @@ const PANEL_MOTION = {
   transition: { duration: 0.15 },
 }
 
+const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled)'
+
+/** The shell of the three dialogs: a scrim that closes it, Escape, and a Tab key that stays inside
+ * (aria-modal alone does not stop Tab from reaching the page behind). When it closes, focus goes
+ * back to what had it before it opened. */
+function Modal({ titleId, onClose, children }: { titleId: string; onClose: () => void; children: ReactNode }) {
+  // Read while rendering: by the time an effect runs, the dialog's autoFocus field already has focus.
+  const root = useRef<HTMLDivElement>(null)
+  const [opener] = useState(() => document.activeElement as HTMLElement | null)
+  // After a tick: React's development StrictMode unmounts and remounts at once, which must not take focus away.
+  useEffect(
+    () => () => {
+      setTimeout(() => {
+        if (!root.current?.isConnected) opener?.focus()
+      })
+    },
+    [opener],
+  )
+  // A dialog opened from a menu has nothing of its own to focus: take focus so Escape and Tab work at once.
+  useEffect(() => {
+    if (!root.current?.contains(document.activeElement)) root.current?.focus()
+  }, [])
+
+  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') return onClose()
+    if (event.key !== 'Tab') return
+    const stops = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)]
+    const edge = event.shiftKey ? stops[0] : stops[stops.length - 1]
+    if (document.activeElement !== edge) return
+    event.preventDefault()
+    stops[event.shiftKey ? stops.length - 1 : 0].focus()
+  }
+
+  return (
+    <div
+      ref={root}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onKeyDown={keys}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onClose} />
+      {children}
+    </div>
+  )
+}
+
 function TallyBar({ tally }: { tally: ClaimTally }) {
   const total = STANDINGS.reduce((sum, s) => sum + tally[s.key], 0)
   if (!total) return null
@@ -60,7 +121,7 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
 
 /** The open "⋯" menu on a project card: Rename (switches the card into inline-edit) and
  * Delete project (hands off to the confirm dialog). Not shown for Unsorted — it is a synthetic
- * bucket, not a real project. Same click-outside/Escape pattern as ExportMenu. */
+ * bucket, not a real project. Click outside closes it; the keys are useMenuKeys'. */
 function ProjectMenu({
   onRename,
   onDelete,
@@ -76,25 +137,19 @@ function ProjectMenu({
     const away = (event: MouseEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false)
     }
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', escape)
-    return () => {
-      document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', escape)
-    }
+    return () => document.removeEventListener('mousedown', away)
   }, [open])
+  const menu = useMenuKeys(open, () => setOpen(false), root)
 
   return (
-    <div ref={root} className="pointer-events-auto relative">
+    <div ref={root} onKeyDown={menu.onKeyDown} onBlur={menu.onBlur} className="pointer-events-auto relative">
       <IconButton
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Project actions"
-        className="size-7 lg:size-7"
+        className="size-8 pointer-coarse:size-11"
       >
         <MoreVertical className="size-4" />
       </IconButton>
@@ -106,6 +161,7 @@ function ProjectMenu({
           <MenuItem
             role="menuitem"
             onClick={() => {
+              menu.returnFocus()
               setOpen(false)
               onRename()
             }}
@@ -117,6 +173,7 @@ function ProjectMenu({
           <MenuItem
             role="menuitem"
             onClick={() => {
+              menu.returnFocus()
               setOpen(false)
               onDelete()
             }}
@@ -147,14 +204,19 @@ function ProjectCard({
     : `${count(project.papers, 'paper')} · ${count(project.claims, 'claim')}`
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(project.name)
+  // What is in the field right now, readable by a blur that fires while the field is being removed.
+  const typed = useRef(project.name)
   const [saving, setSaving] = useState(false)
 
   const cancelRename = () => {
     setRenaming(false)
     setDraft(project.name)
+    typed.current = project.name
   }
   const submitRename = async () => {
-    const name = draft.trim()
+    // Enter and the blur it can cause both land here; the second one must not save twice.
+    if (saving) return
+    const name = typed.current.trim()
     if (!name || name === project.name) return cancelRename()
     setSaving(true)
     try {
@@ -171,14 +233,15 @@ function ProjectCard({
     <div className="relative flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent">
       {/* The whole card opens the project; it sits under the real content (next, pointer-events-
           none) so the menu and the rename field above it can still take their own clicks. */}
-      <button type="button" onClick={() => onOpen(project.id)} aria-label={`Open ${project.name}`} className="absolute inset-0 rounded-xl" />
+      <button type="button" onClick={() => onOpen(project.id)} aria-label={`Open ${project.name}, ${meta}`} className="absolute inset-0 rounded-xl" />
 
       <div className="pointer-events-none flex flex-col gap-3">
         {renaming ? (
           // The invisible "open project" button (above, position: absolute) paints over any
           // in-flow sibling here regardless of DOM order, so a click on a button in this form
           // never reached it — only Enter (a keyboard submit, no hit-testing) worked. Rather
-          // than fight the stacking, there is just the input: Enter saves, Escape cancels.
+          // than fight the stacking, there is just the input: Enter or leaving the field saves,
+          // Escape cancels. Tabbing away used to throw the edit away.
           <form
             onSubmit={(event) => {
               event.preventDefault()
@@ -188,12 +251,16 @@ function ProjectCard({
           >
             <input
               autoFocus
+              aria-label="Project name"
               value={draft}
               disabled={saving}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                typed.current = event.target.value
+              }}
               onKeyDown={(event) => event.key === 'Escape' && cancelRename()}
-              onBlur={cancelRename}
-              className="w-full min-w-0 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink outline-none disabled:opacity-60"
+              onBlur={() => void submitRename()}
+              className="w-full min-w-0 rounded-lg border border-accent bg-canvas px-2.5 py-1.5 font-serif text-base font-semibold text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60"
             />
           </form>
         ) : (
@@ -228,17 +295,18 @@ function DeleteProjectDialog({
   onConfirm: () => Promise<void>
 }) {
   const [deleting, setDeleting] = useState(false)
+  const titleId = useId()
   return (
-    <div role="dialog" aria-modal="true" onKeyDown={(e) => e.key === 'Escape' && !deleting && onCancel()} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={() => !deleting && onCancel()} />
+    <Modal titleId={titleId} onClose={() => !deleting && onCancel()}>
       <motion.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
-        <h2 className="font-serif text-lg font-semibold text-ink">Delete "{project.name}"?</h2>
+        <h2 id={titleId} className="font-serif text-lg font-semibold text-ink">Delete "{project.name}"?</h2>
         <p className="mt-2 text-sm leading-5 text-ink-muted">
-          Its {count(project.papers, 'paper')} move back to Unsorted — nothing is deleted, the project just stops
-          grouping them. This can't be undone.
+          Its {count(project.papers, 'paper')} move back to Unsorted. No paper is deleted. The project itself can't
+          be brought back.
         </p>
         <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="ghost" className="border border-border-subtle" disabled={deleting} onClick={onCancel}>
+          {/* Focus starts on the safe choice, so Enter right after opening cancels. */}
+          <Button type="button" variant="ghost" autoFocus className="border border-border-subtle" disabled={deleting} onClick={onCancel}>
             Cancel
           </Button>
           <Button
@@ -249,6 +317,8 @@ function DeleteProjectDialog({
               setDeleting(true)
               try {
                 await onConfirm()
+              } catch {
+                toast.error('Could not delete the project. Try again.')
               } finally {
                 setDeleting(false)
               }
@@ -258,7 +328,7 @@ function DeleteProjectDialog({
           </Button>
         </div>
       </motion.div>
-    </div>
+    </Modal>
   )
 }
 
@@ -337,22 +407,12 @@ function ProjectsLanding({
             aria-label="Filter projects"
             className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
           />
-          <div className="flex flex-wrap gap-0.5 rounded-[9px] bg-neutral-soft p-0.5">
-            {SORTS.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                aria-pressed={sort === s.key}
-                onClick={() => setSort(s.key)}
-                className={cn(
-                  'rounded-lg px-3 py-[5px] text-[13px] font-medium',
-                  sort === s.key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Sort projects"
+            options={SORTS.map(({ key, label }) => ({ value: key, label }))}
+            value={sort}
+            onChange={setSort}
+          />
         </div>
       )}
 
@@ -404,16 +464,16 @@ function AddPapersDialog({
   const analyses = useAnalyses().data ?? []
   const { addToProject } = useResearcherActions()
   const [adding, setAdding] = useState<string | null>(null)
+  const titleId = useId()
   const choices = analyses.filter((a) => a.status === 'done' && !inProject.has(a.id))
 
   return (
-    <div role="dialog" aria-modal="true" onKeyDown={(e) => e.key === 'Escape' && onClose()} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onClose} />
+    <Modal titleId={titleId} onClose={onClose}>
       <motion.div
         {...PANEL_MOTION}
         className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
-        <h2 className="type-title text-ink">Add papers</h2>
+        <h2 id={titleId} className="type-title text-ink">Add papers</h2>
         <p className="mt-1 text-[13px] text-ink-muted">Papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
           {choices.length === 0 && <li className="py-3 text-sm text-ink-muted">Every analysed paper is already in this project.</li>}
@@ -429,6 +489,8 @@ function AddPapersDialog({
                   setAdding(analysis.id)
                   try {
                     await addToProject(projectId, analysis.id)
+                  } catch {
+                    toast.error('Could not add the paper. Try again.')
                   } finally {
                     setAdding(null)
                   }
@@ -446,7 +508,7 @@ function AddPapersDialog({
           </Button>
         </div>
       </motion.div>
-    </div>
+    </Modal>
   )
 }
 
@@ -477,8 +539,17 @@ function ProjectDetail({
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [picking, setPicking] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const { data: library, isError } = useResearcherLibrary(projectId)
-  if (isError) return <Empty title="This project could not load" hint="Refresh the page to try again." />
+  const { data: library, isError, error, refetch } = useResearcherLibrary(projectId)
+  if (isError) {
+    return (
+      <>
+        <button type="button" onClick={onBack} className="self-start text-[13px] font-medium text-accent hover:underline">
+          ← Projects
+        </button>
+        <ErrorState title="This project could not load" message={errorMessage(error)} onRetry={() => refetch()} />
+      </>
+    )
+  }
   if (!library) return <LoadingScreen label="Loading this project…" />
   const hasClusters = library.papers.some((p) => p.cluster)
   const notAnalyzed = library.papers.filter((p) => p.backed === null).length
@@ -549,22 +620,14 @@ function ProjectDetail({
           data-ask-target={askTarget({ kind: 'field', id: 'library-filter' })}
           className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
         />
-        <div className="flex flex-wrap gap-0.5 rounded-[9px] bg-neutral-soft p-0.5">
-          {segments.map((seg) => (
-            <button
-              key={seg.key}
-              type="button"
-              aria-pressed={filter === seg.key}
-              onClick={() => setFilter(seg.key)}
-              className={cn(
-                'rounded-lg px-3 py-[5px] text-[13px] font-medium',
-                filter === seg.key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
-              )}
-            >
-              {seg.label} {seg.n}
-            </button>
-          ))}
-        </div>
+        {/* Cluster names come from the papers, so there can be many: let the group wrap. */}
+        <Segmented
+          label="Show papers"
+          options={segments.map(({ key, label, n }) => ({ value: key, label: `${label} ${n}` }))}
+          value={filter}
+          onChange={setFilter}
+          className="flex-wrap"
+        />
       </div>
 
       <LibraryPaperTable
@@ -591,14 +654,11 @@ function NewProjectDialog({
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const titleId = useId()
+  const nameId = useId()
+  const descriptionId = useId()
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onKeyDown={(e) => e.key === 'Escape' && onCancel()}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-    >
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onCancel} />
+    <Modal titleId={titleId} onClose={onCancel}>
       <motion.form
         {...PANEL_MOTION}
         onSubmit={(e) => {
@@ -608,13 +668,14 @@ function NewProjectDialog({
         }}
         className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
-        <h2 className="font-serif text-xl font-semibold text-ink">New project</h2>
+        <h2 id={titleId} className="font-serif text-xl font-semibold text-ink">New project</h2>
         <p className="mt-1 text-[13px] text-ink-muted">
           Group papers into their own library and graph. You can move papers between projects any time.
         </p>
 
-        <label className="mt-4 block text-[13px] font-medium text-ink">Project name</label>
+        <label htmlFor={nameId} className="mt-4 block text-[13px] font-medium text-ink">Project name</label>
         <Input
+          id={nameId}
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -622,13 +683,14 @@ function NewProjectDialog({
           className="mt-1.5 w-full"
         />
 
-        <label className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
-        <textarea
+        <label htmlFor={descriptionId} className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
+        <Textarea
+          id={descriptionId}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="What is this project about?"
           rows={3}
-          className="mt-1.5 w-full resize-none rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted focus-visible:border-accent"
+          className="mt-1.5 resize-none"
         />
 
         <div className="mt-5 flex justify-end gap-2">
@@ -640,7 +702,7 @@ function NewProjectDialog({
           </Button>
         </div>
       </motion.form>
-    </div>
+    </Modal>
   )
 }
 
@@ -657,9 +719,16 @@ export function Library({
   const [showNew, setShowNew] = useState(
     () => new URLSearchParams(window.location.search).get('new') === '1',
   )
-  const { data: projects, isError } = useProjects()
+  const { data: projects, isError, error, refetch } = useProjects()
   const { createProject } = useResearcherActions()
-  if (isError) return <Empty title="Your library could not load" hint="Refresh the page to try again." />
+  if (isError) {
+    return (
+      <>
+        <h1 className="type-display text-ink">Library</h1>
+        <ErrorState title="Your library could not load" message={errorMessage(error)} onRetry={() => refetch()} />
+      </>
+    )
+  }
   if (!projects) return <LoadingScreen label="Loading your projects…" />
 
   if (openId) {

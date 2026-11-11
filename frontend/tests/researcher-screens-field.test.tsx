@@ -64,7 +64,7 @@ describe('asking the field', () => {
     expect(await screen.findByText('That question could not be checked')).toBeInTheDocument()
   })
 
-  it('shows only the note when no row matched, and nothing when there is no note either', async () => {
+  it('shows only the note when no row matched, and a plain line when there is no note either', async () => {
     gateway(answer({ rows: [], note: 'No claim matches that.' }))
     const first = render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -79,6 +79,16 @@ describe('asking the field', () => {
     renderField()
     await waitFor(() => expect(screen.queryByText('Checking your library…')).not.toBeInTheDocument())
     expect(screen.queryByText('No claim matches that.')).not.toBeInTheDocument()
+    expect(screen.getByText('No claim in your papers matches that question.')).toBeInTheDocument()
+  })
+
+  it('offers Retry, which asks again', async () => {
+    gateway({ detail: 'x' }, 500)
+    renderField()
+    expect(await screen.findByText('That question could not be checked')).toBeInTheDocument()
+    gateway(answer())
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findAllByTestId('consensus-count')).toHaveLength(3)
   })
 })
 
@@ -115,7 +125,7 @@ describe('the answer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide them' }))
     expect(screen.getAllByTestId('consensus-row')).toHaveLength(2)
 
-    fireEvent.click(within(screen.getAllByTestId('consensus-row')[0]).getByRole('button', { name: 'Open the analysis' }))
+    fireEvent.click(within(screen.getAllByTestId('consensus-row')[0]).getByRole('button', { name: /^Open the analysis of /  }))
     expect(onOpenAnalysis).toHaveBeenCalledWith('an-PLAID')
   })
 

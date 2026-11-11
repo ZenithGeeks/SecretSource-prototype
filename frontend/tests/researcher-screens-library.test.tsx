@@ -3,6 +3,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -106,7 +107,7 @@ describe('project list', () => {
   it('opens a project when its card is clicked', async () => {
     gateway()
     renderLibrary()
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Retrieval survey' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Open Retrieval survey, / }))
     expect(await screen.findByRole('heading', { name: 'Retrieval survey' })).toBeInTheDocument()
     expect(await screen.findByText('Tevatron toolkit')).toBeInTheDocument()
   })
@@ -172,9 +173,9 @@ describe('project list', () => {
     renderLibrary()
     await screen.findByRole('heading', { name: 'Library' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'retrieval' } })
-    expect(screen.getByRole('button', { name: 'Open Retrieval survey' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Open Empty one' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Unsorted' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Open Retrieval survey, / })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Open Empty one, / })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Open Unsorted, / })).toBeInTheDocument()
     expect(screen.getByText('+ New project')).toBeInTheDocument()
   })
 
@@ -184,7 +185,7 @@ describe('project list', () => {
     await screen.findByRole('heading', { name: 'Library' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter projects' }), { target: { value: 'nonexistent' } })
     expect(screen.getByText('No project matches "nonexistent".')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Unsorted' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Open Unsorted, / })).toBeInTheDocument()
     expect(screen.getByText('+ New project')).toBeInTheDocument()
   })
 
@@ -196,6 +197,7 @@ describe('project list', () => {
       screen
         .getAllByRole('button', { name: /^Open / })
         .map((b) => b.getAttribute('aria-label'))
+        .map((label) => label!.split(', ')[0])
         .filter((label) => label !== 'Open the menu')
 
     fireEvent.click(screen.getByRole('button', { name: 'Name' }))
@@ -306,9 +308,9 @@ describe('renaming and deleting', () => {
     await openMenu()
     fireEvent.mouseDown(screen.getByRole('menu'))
     expect(screen.getByRole('menu')).toBeInTheDocument()
-    fireEvent.keyDown(document, { key: 'Enter' })
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
     expect(screen.getByRole('menu')).toBeInTheDocument()
-    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
@@ -623,5 +625,246 @@ describe('updatedText', () => {
     expect(updatedText({ ...base, updated: ago(5) })).toBe('Updated 5 days ago')
     expect(updatedText({ ...base, updated: '' })).toBe('')
     expect(updatedText({ ...base, updated: '', unsorted: true })).toBe('New analyses land here')
+  })
+})
+
+describe('keyboard use and recovery', () => {
+  async function openMenu() {
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    const button = within(card).getByRole('button', { name: 'Project actions' })
+    fireEvent.click(button)
+    return button
+  }
+
+  it('the project menu takes focus, moves with the arrow keys and Escape gives focus back', async () => {
+    gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    const button = within(card).getByRole('button', { name: 'Project actions' })
+    fireEvent.keyDown(button, { key: 'ArrowDown' }) // closed: nothing to move through
+    fireEvent.click(button)
+    const [rename, remove] = screen.getAllByRole('menuitem')
+    expect(rename).toHaveFocus()
+    fireEvent.keyDown(rename, { key: 'ArrowDown' })
+    expect(remove).toHaveFocus()
+    fireEvent.keyDown(remove, { key: 'ArrowDown' })
+    expect(rename).toHaveFocus()
+    fireEvent.keyDown(rename, { key: 'ArrowUp' })
+    expect(remove).toHaveFocus()
+    fireEvent.keyDown(remove, { key: 'Home' })
+    expect(rename).toHaveFocus()
+    fireEvent.keyDown(rename, { key: 'End' })
+    expect(remove).toHaveFocus()
+    fireEvent.keyDown(remove, { key: 'a' })
+    expect(remove).toHaveFocus()
+    fireEvent.keyDown(remove, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(button).toHaveFocus()
+  })
+
+  it('leaving the rename field saves a changed name', async () => {
+    const calls = gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByRole('textbox', { name: 'Project name' })
+    fireEvent.change(input, { target: { value: 'Renamed' } })
+    fireEvent.blur(input)
+    await waitFor(() =>
+      expect(calls).toContainEqual({ method: 'PATCH', path: '/researcher/projects/p1', body: { name: 'Renamed' } }),
+    )
+  })
+
+  it('Enter followed by the blur it causes saves once', async () => {
+    const calls = gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByRole('textbox', { name: 'Project name' })
+    fireEvent.change(input, { target: { value: 'Renamed' } })
+    fireEvent.submit(input.closest('form')!)
+    fireEvent.blur(input)
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1)
+  })
+
+  it('Delete project starts on Cancel, and the dialog is named by its title', async () => {
+    gateway()
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Delete "Retrieval survey"?' })
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+  })
+
+  it('the new-project fields have labels', async () => {
+    gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    expect(within(dialog).getByLabelText('Project name')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Description (optional)')).toBeInTheDocument()
+  })
+
+  it('offers Retry when the projects fail to load, and shows them once they do', async () => {
+    gateway({ fail: ['GET /researcher/projects'] })
+    renderLibrary()
+    expect(await screen.findByText('Your library could not load')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Library' })).toBeInTheDocument()
+    gateway()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Retrieval survey')).toBeInTheDocument()
+  })
+
+  it('offers Retry when a project fails to load, and shows it once it does', async () => {
+    gateway({ fail: ['GET /researcher/projects/p1/library'] })
+    renderLibrary('&project=p1')
+    expect(await screen.findByText('This project could not load')).toBeInTheDocument()
+    gateway()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Tevatron toolkit')).toBeInTheDocument()
+  })
+})
+
+describe('the paper table sort', () => {
+  const titles = () => [...document.querySelectorAll('button span.block.truncate')].map((p) => p.textContent)
+
+  it('sorts by title, by claims and by conflicts, and a second press goes back to the usual order', async () => {
+    gateway()
+    renderLibrary('&project=p1')
+    await screen.findByText('Tevatron toolkit')
+    const usual = ['ColBERTv2', 'Tevatron toolkit', 'Backed only', 'Silent only']
+    expect(titles()).toEqual(usual)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Paper' }))
+    expect(titles()).toEqual(['Backed only', 'ColBERTv2', 'Silent only', 'Tevatron toolkit'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Claims' }))
+    expect(titles()).toEqual(['ColBERTv2', 'Tevatron toolkit', 'Silent only', 'Backed only'])
+    expect(screen.getByRole('button', { name: 'Claims' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Standing' }))
+    expect(titles()).toEqual(['ColBERTv2', 'Backed only', 'Tevatron toolkit', 'Silent only'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Standing' }))
+    expect(titles()).toEqual(usual)
+  })
+})
+
+describe('dialog focus', () => {
+  it('Tab stays inside the New project dialog, in both directions, and Escape closes it', async () => {
+    gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    const name = within(dialog).getByLabelText('Project name')
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' })
+    // "Create project" is disabled until there is a name, so Cancel is the last stop.
+    cancel.focus()
+    fireEvent.keyDown(cancel, { key: 'Tab' })
+    expect(name).toHaveFocus()
+    fireEvent.keyDown(name, { key: 'Tab', shiftKey: true })
+    expect(cancel).toHaveFocus()
+    // Away from the edges Tab is left to the browser.
+    name.focus()
+    fireEvent.keyDown(name, { key: 'Tab' })
+    expect(name).toHaveFocus()
+    fireEvent.keyDown(dialog, { key: 'Enter' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('focus goes back to the button that opened the dialog', async () => {
+    gateway()
+    renderLibrary()
+    const opener = await screen.findByRole('button', { name: 'New project' })
+    opener.focus() // a real click focuses the button; fireEvent.click does not
+    fireEvent.click(opener)
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New project' })).toHaveFocus())
+  })
+
+  it('a dialog opened from a menu gives focus back to the menu button, not to the item that went away', async () => {
+    gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    const button = within(card).getByRole('button', { name: 'Project actions' })
+    fireEvent.click(button)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(button).toHaveFocus())
+  })
+
+  it('under StrictMode, the dialog that mounts twice keeps focus inside itself', async () => {
+    gateway()
+    window.history.replaceState(null, '', '?role=researcher&screen=library&new=1')
+    render(
+      <StrictMode>
+        <QueryClientProvider client={client()}>
+          <ResearcherApp />
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    await new Promise((resolve) => setTimeout(resolve, 20)) // let the deferred focus restore run
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+  })
+
+  it('the project menu closes when focus leaves it, and stays open while focus moves inside it', async () => {
+    gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Project actions' }))
+    const [rename, remove] = screen.getAllByRole('menuitem')
+    fireEvent.blur(rename, { relatedTarget: remove })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.blur(remove, { relatedTarget: document.body })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('an Escape that cancels a rename wins over a blur that arrives while the field is removed', async () => {
+    const calls = gateway()
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Project actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByRole('textbox', { name: 'Project name' })
+    fireEvent.change(input, { target: { value: 'half typed' } })
+    // Some browsers blur a focused field as they remove it, in the same turn as the Escape.
+    input.addEventListener('keydown', () => queueMicrotask(() => fireEvent.blur(input)), { once: true })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await Promise.resolve()
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    expect(screen.getByText('Retrieval survey')).toBeInTheDocument()
+  })
+})
+
+describe('failures say so', () => {
+  it('a project that cannot be deleted keeps its dialog and shows a message', async () => {
+    gateway({ fail: ['DELETE /researcher/projects/p1'] })
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary()
+    const card = (await screen.findByText('Retrieval survey')).closest('.relative')! as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Project actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete project' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not delete the project. Try again.'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('a paper that cannot be added shows a message', async () => {
+    gateway({ fail: ['POST /researcher/projects/p1/papers'] })
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary('&project=p1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Add papers' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /From your analysed papers/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click((await within(dialog).findAllByRole('button', { name: /^Add$/ }))[0])
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not add the paper. Try again.'))
   })
 })

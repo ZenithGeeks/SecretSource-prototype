@@ -51,7 +51,7 @@ function Row({ row, onOpenAnalysis }: { row: ConsensusRow; onOpenAnalysis: (id: 
           onClick={() => onOpenAnalysis(row.analysis)}
           className="self-start text-[13px] leading-[18px]"
         >
-          Open the analysis
+          Open the analysis <span className="sr-only">of {row.paper}</span>
         </TextButton>
       </div>
     </div>

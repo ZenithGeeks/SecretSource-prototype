@@ -3,12 +3,12 @@
  * verdict stamps, and the error state that sits beside Empty and LoadingScreen.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { Stamp } from '../src/components/Stamp'
 import { VerdictBar, VerdictLegend } from '../src/components/VerdictBar'
-import { ErrorState } from '../src/components/ui'
+import { ErrorState, LoadingScreen } from '../src/components/ui'
 import { STAMPS } from '../src/lib/stamps'
 
 const counts = { supports: 3, refutes: 1, insufficient: 0, unavailable: 2, unchecked: 4 }
@@ -83,5 +83,20 @@ describe('ErrorState', () => {
   test('has no button without onRetry', () => {
     render(<ErrorState title="Not found" message="This draft no longer exists." />)
     expect(screen.queryByRole('button')).toBeNull()
+  })
+})
+
+describe('LoadingScreen', () => {
+  afterEach(() => vi.useRealTimers())
+
+  test('says nothing extra at first, then admits a slow load after ten seconds', () => {
+    vi.useFakeTimers()
+    render(<LoadingScreen label="Loading the graph…" />)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading the graph…')
+    expect(screen.queryByText(/taking longer than usual/)).toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(10_000)
+    })
+    expect(screen.getByText(/taking longer than usual/)).toBeInTheDocument()
   })
 })

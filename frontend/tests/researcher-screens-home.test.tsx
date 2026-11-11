@@ -38,7 +38,7 @@ function gateway({ home = EMPTY_HOME, features, startFails }: Options = {}) {
     vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url).replace(/^\/api/, '')
       calls.push({ path, init })
-      if (path === '/researcher/home') return home === null ? Promise.reject(null) : Response.json(home)
+      if (path === '/researcher/home') return home === null ? Promise.reject(new Error('502: ')) : Response.json(home)
       if (path === '/health') return Response.json({ features })
       if (path === '/uploads') return Response.json({ url: null })
       if (init?.method === 'POST') {
@@ -92,17 +92,26 @@ describe('Home', () => {
 
   it('shows the gateway error and retries on request', async () => {
     gateway()
-    vi.mocked(fetch).mockRejectedValueOnce(new Error('gateway is down'))
+    // Only the first call for the home data fails; the Analyze card's own /health call must get through.
+    const answer = vi.mocked(fetch).getMockImplementation()!
+    let failed = false
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/researcher/home') && !failed) {
+        failed = true
+        throw new Error('gateway is down')
+      }
+      return answer(url, init)
+    })
     renderHome()
     expect(await screen.findByText('gateway is down')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /retry/i }))
     expect(await screen.findByText('Nothing new.')).toBeInTheDocument()
   })
 
-  it('falls back to a plain message when the failure carries none', async () => {
+  it('says the server did not answer when a proxy error carries no message', async () => {
     gateway({ home: null })
     renderHome()
-    expect(await screen.findByText('The gateway did not answer.')).toBeInTheDocument()
+    expect(await screen.findByText('the server did not answer (502)')).toBeInTheDocument()
   })
 
   it('opens the analysis behind a conflict, with or without a paper name', async () => {
@@ -187,7 +196,7 @@ describe('Analyze card', () => {
     await card()
     fireEvent.change(screen.getByLabelText('Paper to analyze'), { target: { value: '10.1/z' } })
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('503: queue is full')
+    expect(await screen.findByRole('alert')).toHaveTextContent('queue is full')
   })
 
   it('Upload PDF opens the file picker, and a chosen PDF is uploaded', async () => {

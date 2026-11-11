@@ -59,9 +59,9 @@ export function GraphClaimsLegend({ colors, notIndexed }: { colors: LegendColors
     <div className={BOX}>
       <div className={ROW}>
         <Name>Claim</Name>
-        <Item mark={<Dot color={colors.refutes} />}>contradict</Item>
+        <Item mark={<Dot color={colors.refutes} />}>contradicted</Item>
         <Item mark={<Dot color={colors.insufficient} />}>silent</Item>
-        <Item mark={<Dot color={colors.supports} />}>back it</Item>
+        <Item mark={<Dot color={colors.supports} />}>backed</Item>
         <Item mark={<Dot color={colors.inkMuted} />}>not checked</Item>
       </div>
       <div className={ROW}>
@@ -100,9 +100,9 @@ export function GraphPapersLegend({
       </div>
       <div className={ROW}>
         <Name>Link</Name>
-        <Item mark={<Line color={colors.border} />}>cite the same works</Item>
+        <Item mark={<Line color={colors.inkMuted} />}>cite the same works</Item>
         <Item mark={<Line color={colors.accent} thick />}>more in common</Item>
-        <Item mark={<Line color={colors.border} style="dashed" />}>one cites the other</Item>
+        <Item mark={<Line color={colors.inkMuted} style="dashed" />}>one cites the other</Item>
       </div>
     </div>
   )

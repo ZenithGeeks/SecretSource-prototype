@@ -9,24 +9,25 @@
 import { Search } from 'lucide-react'
 import { useState } from 'react'
 
-import { Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { Button, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
+import { errorMessage } from '../../../lib/author'
 import { useFieldConsensus } from '../../../lib/useResearcher'
 import { FieldCountTiles, FieldVerdictTable } from '../components/FieldResults'
 
 export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState('')
-  const { data: consensus, isError, isPending } = useFieldConsensus(question)
+  const { data: consensus, isError, isPending, error, refetch } = useFieldConsensus(question)
 
   return (
     <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pt-4 pb-12">
-      <header className="flex flex-col gap-2">
-        <p className="type-label text-accent">Across your library</p>
-        <h1 className="type-display tracking-[-0.01em] text-ink">What does your library say?</h1>
+      <header>
+        <h1 className="type-display text-ink">What does your library say?</h1>
       </header>
 
       <form
-        className="flex items-center gap-2.5 rounded-xl border-[1.5px] border-accent bg-surface py-1.5 pr-1.5 pl-3.5"
+        // The input has no outline of its own: the field shows focus as a ring.
+        className="flex items-center gap-2.5 rounded-xl border-[1.5px] border-accent bg-surface py-1.5 pr-1.5 pl-3.5 focus-within:ring-2 focus-within:ring-accent/30"
         onSubmit={(event) => {
           event.preventDefault()
           setQuestion(draft)
@@ -40,20 +41,21 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
           aria-label="Your question"
           className="min-w-0 flex-1 bg-transparent text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted"
         />
-        <button
-          type="submit"
-          className="shrink-0 rounded-[9px] bg-accent px-3 py-[7px] text-[13px] leading-[18px] font-medium text-white hover:opacity-90"
-        >
+        <Button type="submit" className="rounded-[9px] px-4 py-[7px] pointer-coarse:min-h-11">
           Ask
-        </button>
+        </Button>
       </form>
 
       {isPending && <LoadingScreen label="Checking your library…" />}
-      {isError && <Empty title="That question could not be checked" hint="Refresh the page and try again." />}
+      {isError && (
+        <ErrorState title="That question could not be checked" message={errorMessage(error)} onRetry={() => refetch()} />
+      )}
       {consensus && (
         <FadeIn className="flex flex-col gap-6">
           {consensus.rows.length === 0 ? (
-            consensus.note && <p className="text-[15px] text-ink-muted">{consensus.note}</p>
+            <p className="text-[15px] text-ink-muted">
+              {consensus.note || 'No claim in your papers matches that question.'}
+            </p>
           ) : (
             <>
               <FieldCountTiles consensus={consensus} />
