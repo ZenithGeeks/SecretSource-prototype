@@ -428,7 +428,7 @@ def _full_name(person) -> str:
 TITLE_PATHS = (
     "tei:analytic/tei:title[@level='a']",  # the article's own title
     "tei:monogr/tei:title[@level='m']",  # a book or proceedings, cited whole
-    "tei:monogr/tei:title[@level='j']",  # a journal, when nothing finer was parsed
+    "tei:monogr/tei:title[@level='j']",  # the journal: the venue, or a preprint note
 )
 NAME_TOKEN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['’-])*\.?$")  # any alphabet, so "Stéphane" counts
 OTHERS_TAIL = re.compile(r",?\s*(?:\band\s+\d+\s+others|\bet\s+al)\.?$")  # "and 244 others", "et al."
@@ -537,11 +537,28 @@ def _raw_title(reference) -> str:
     When a long author list runs into the article title, GROBID can leave the real title in a
     note, and the next title line is the venue (#908). The note is read only then: other notes
     hold a venue or a page range.
+
+    A journal's name is not the work's title: a reference list that gives authors, journal and
+    year but no title was looked up as "Future Generation Computer Systems" (#937). The journal
+    line is read as the title only when it is a preprint note ("arXiv preprint arXiv:2303.12712").
     """
-    article, *others = _title_lines(reference)
+    article, book, journal = _title_lines(reference)
     if article and _looks_like_authors(article) and (note := _plain_note(reference)):
         return note
-    return next((title for title in (article, *others) if title and not _looks_like_authors(title)), "")
+    own = (article, book, journal if _is_preprint_note(journal) else "")
+    return next((title for title in own if title and not _looks_like_authors(title)), "")
+
+
+def _is_preprint_note(journal_line: str) -> bool:
+    """Whether GROBID's journal line says where a preprint is, not which journal printed the work."""
+    return bool(_PREPRINT_WORD.search(journal_line) or _arxiv_from_title(journal_line))
+
+
+def _venue_of(reference) -> str:
+    """The journal the reference names, or "" when it names none. PDFs of a journal's papers
+    are not found by its name, so this is kept apart from the title."""
+    *_, journal = _title_lines(reference)
+    return "" if _is_preprint_note(journal) else journal
 
 
 def _plain_note(reference) -> str:
@@ -648,6 +665,7 @@ def _parse_reference(reference) -> dict:
     arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_in_reference_titles(reference)
     return {
         "title": _title_of(reference),
+        "venue": _venue_of(reference),
         "authors": [_full_name(person) for person in reference.findall(".//tei:persName", TEI_NAMESPACE)],
         "year": date.get("when", "")[:4] if date is not None else "",
         "doi": _identifier(reference, "DOI"),
@@ -739,8 +757,11 @@ def paper_title(pdf_path: str, grobid_title: str = "", given: str = "") -> str:
 
 
 def _findable(citation: dict) -> bool:
-    """A reference with no title, id, or URL is a lookup that cannot succeed. Drop it counted."""
-    return bool(citation["title"] or citation["doi"] or citation["arxiv"] or citation["url"])
+    """A reference with no title, id, URL or venue names no work. Drop it counted. One with only
+    a venue cannot be looked up yet, but it stays: the claim does cite it (#937)."""
+    return bool(
+        citation["title"] or citation["doi"] or citation["arxiv"] or citation["url"] or citation["venue"]
+    )
 
 
 def _findable_references(tei) -> tuple[list[dict], int]:
@@ -1290,7 +1311,8 @@ def _claims_with_citations(claims: list[dict]) -> str:
         lines.append(f"{number}. {sentence}")
         for position, citation in enumerate(claim["citations"], 1):
             year = f" ({citation['year']})" if citation.get("year") else ""
-            lines.append(f"   [{position}] {citation.get('title') or citation.get('url', '')}{year}")
+            name = citation.get("title") or citation.get("venue") or citation.get("url", "")
+            lines.append(f"   [{position}] {name}{year}")
     return "\n".join(lines)
 
 
