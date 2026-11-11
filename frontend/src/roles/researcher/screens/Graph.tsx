@@ -25,6 +25,7 @@ import { Empty, ErrorState, LoadingScreen } from '../../../components/ui'
 import { errorMessage } from '../../../lib/author'
 import { type GraphEdge, type GraphRelation, type KnowledgeGraph, RELATION_STANDING } from '../../../lib/researcher'
 import { useSettings } from '../../../lib/settings'
+import { useSlashFocus } from '../../../lib/useSlashFocus'
 import { FieldConsensus } from './FieldConsensus'
 import { useKnowledgeGraph } from '../../../lib/useResearcher'
 import { fitReadable } from '../../../lib/graphFit'
@@ -339,6 +340,8 @@ function GraphCanvas({
   const { pal } = usePalette()
   const cyRef = useRef<cytoscape.Core | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
+  const filterInput = useRef<HTMLInputElement>(null)
+  useSlashFocus(filterInput)
   const observerRef = useRef<ResizeObserver | null>(null)
   const [ready, setReady] = useState(false)
   // True while cola is still placing the nodes (a layout with no saved positions takes a moment).
@@ -652,6 +655,8 @@ function GraphCanvas({
             <div className="absolute left-3 top-3 z-10 flex w-[min(220px,calc(100%-6rem))] items-center gap-2 rounded-[9px] border border-border-subtle bg-surface px-2.5 py-[7px] focus-within:ring-2 focus-within:ring-accent/40">
               <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
               <input
+                ref={filterInput}
+                aria-keyshortcuts="/"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter claims…"

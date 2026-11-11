@@ -15,7 +15,7 @@
 
 import { MotionConfig } from 'framer-motion'
 import { Home as HomeIcon, Library as LibraryIcon, ListChecks, MessageSquareQuote, Microscope, Waypoints } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
@@ -56,12 +56,16 @@ function initialScreen(): ResearcherScreen {
 /** Keeps `?screen=`/`?analysis=` in sync with what's showing, so a refresh reopens the same
  * screen and, on Analyses, the same analysis (#132) instead of the params only ever being
  * read at mount. Reads the URL fresh each time so Root's own `?role=` param is untouched. */
-function syncScreenParams(screen: ResearcherScreen, selected: string | null) {
+function syncScreenParams(screen: ResearcherScreen, selected: string | null, keepHistory: boolean) {
   const params = new URLSearchParams(window.location.search)
+  // A new screen is a new history entry, so Back returns to the screen before it. Opening a
+  // different analysis on the same screen only rewrites the entry it is on.
+  const newScreen = keepHistory && params.get('screen') !== screen
   params.set('screen', screen)
   if (screen === 'analyses' && selected) params.set('analysis', selected)
   else params.delete('analysis')
-  window.history.replaceState(null, '', `?${params}`)
+  if (newScreen) window.history.pushState(null, '', `?${params}`)
+  else window.history.replaceState(null, '', `?${params}`)
 }
 
 const NOTHING_TO_GRAPH = {
@@ -78,7 +82,23 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
   // "+ New" in the sidebar brings the Analyses screen up from wherever the reader is.
   const history = useHistoryWorkspace({ onPicked: () => setScreen('analyses') })
 
-  useEffect(() => syncScreenParams(screen, history.selected), [screen, history.selected])
+  // The first sync only normalises the URL it opened with; later ones follow the reader.
+  const synced = useRef(false)
+  useEffect(() => {
+    syncScreenParams(screen, history.selected, synced.current)
+    synced.current = true
+  }, [screen, history.selected])
+  // Back and Forward: show the screen (and analysis) the address now names.
+  const openFromHistory = history.open
+  useEffect(() => {
+    const onPop = () => {
+      setScreen(initialScreen())
+      const analysis = new URLSearchParams(window.location.search).get('analysis')
+      if (analysis) openFromHistory(analysis)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [openFromHistory])
 
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
   const onGraph = screen === 'graph' || screen === 'field-consensus'

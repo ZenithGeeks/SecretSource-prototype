@@ -194,11 +194,14 @@ function ProjectMenu({
 
 function ProjectCard({
   project,
+  otherNames,
   onOpen,
   onRename,
   onRequestDelete,
 }: {
   project: Project
+  /** Names of the other projects, so a rename cannot copy one. */
+  otherNames: string[]
   onOpen: (id: string) => void
   onRename: (id: string, name: string) => Promise<unknown>
   onRequestDelete: (project: Project) => void
@@ -222,6 +225,11 @@ function ProjectCard({
     if (saving) return
     const name = typed.current.trim()
     if (!name || name === project.name) return cancelRename()
+    if (otherNames.some((other) => other.toLowerCase() === name.toLowerCase())) {
+      // Stay in the field so the name can be changed.
+      toast.error(`A project called "${name}" already exists. Choose another name.`)
+      return
+    }
     setSaving(true)
     try {
       await onRename(project.id, name)
@@ -431,7 +439,11 @@ function ProjectsLanding({
           <p className="text-sm text-ink-muted sm:col-span-2">No project matches "{query}".</p>
         )}
         {visible.map((p) => (
-          <ProjectCard key={p.id} project={p} onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
+          <ProjectCard
+            key={p.id}
+            project={p}
+            otherNames={projects.filter((other) => other.id !== p.id).map((other) => other.name)}
+            onOpen={onOpen} onRename={renameProject} onRequestDelete={setDeleting} />
         ))}
       </div>
 
@@ -653,9 +665,12 @@ function ProjectDetail({
  * Enter/Create submits when a name is present. */
 function NewProjectDialog({
   existing,
+  busy,
   onCancel,
   onCreate,
 }: {
+  /** A create is in flight: the button is off so a second click or Enter cannot make a second project. */
+  busy: boolean
   /** Names already in use, so a second project cannot be given the same one. */
   existing: string[]
   onCancel: () => void
@@ -675,7 +690,7 @@ function NewProjectDialog({
         {...PANEL_MOTION}
         onSubmit={(e) => {
           e.preventDefault()
-          if (n && !taken) onCreate(n, description.trim())
+          if (n && !taken && !busy) onCreate(n, description.trim())
         }}
         className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
@@ -715,8 +730,8 @@ function NewProjectDialog({
           <Button type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!name.trim()}>
-            Create project
+          <Button type="submit" disabled={!name.trim() || busy}>
+            {busy ? 'Creating…' : 'Create project'}
           </Button>
         </div>
       </motion.form>
@@ -739,6 +754,7 @@ export function Library({
   )
   const { data: projects, isError, error, refetch } = useProjects()
   const { createProject } = useResearcherActions()
+  const [creating, setCreating] = useState(false)
   // Opening or leaving a project adds a history entry, so the browser's Back button leaves it too.
   const openProject = (id: string | null) => {
     const params = new URLSearchParams(window.location.search)
@@ -782,8 +798,10 @@ export function Library({
         {showNew && (
           <NewProjectDialog
             existing={projects.map((p) => p.name)}
+            busy={creating}
             onCancel={() => setShowNew(false)}
             onCreate={async (name, description) => {
+              setCreating(true)
               try {
                 const id = await createProject(name, description)
                 setShowNew(false)
@@ -791,6 +809,8 @@ export function Library({
               } catch {
                 // The dialog stays open so the typed name is not lost.
                 toast.error('Could not create the project. Try again.')
+              } finally {
+                setCreating(false)
               }
             }}
           />

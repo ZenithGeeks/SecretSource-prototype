@@ -388,6 +388,14 @@ describe('Graph · claims view', () => {
     expect(screen.getByText(/at least half of all the works they cite are cited by both/)).toBeInTheDocument()
   })
 
+  test('/ puts focus in the claims filter', () => {
+    open()
+    const filter = screen.getByRole('textbox', { name: 'Filter claims' })
+    expect(filter).toHaveAttribute('aria-keyshortcuts', '/')
+    fireEvent.keyDown(document.body, { key: '/' })
+    expect(filter).toHaveFocus()
+  })
+
   test('shows the claims legend', () => {
     open()
     expect(screen.getByText(/1 not in a public index/)).toBeInTheDocument()

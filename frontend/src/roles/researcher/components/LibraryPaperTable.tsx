@@ -34,7 +34,7 @@ function standingLabel(backed: number, contradicted: number, rest: number) {
   return verdictCountLabel('insufficient', rest)
 }
 
-/** Backed / silent-or-unchecked / contradicted as one thin bar. The words sit beside it, so
+/** Contradicted / silent-or-unchecked / backed as one thin bar, worst first like every other tally. The words sit beside it, so
  * colour is never the only signal. */
 function StandingBar({ paper }: { paper: LibraryPaper }) {
   if (paper.backed === null) return <span className="text-[13px] text-ink-muted">Not analyzed</span>
@@ -42,9 +42,9 @@ function StandingBar({ paper }: { paper: LibraryPaper }) {
   const contradicted = paper.contradicted ?? 0
   const rest = Math.max(0, paper.claims - backed - contradicted)
   const parts = [
-    { key: 'backed', n: backed, color: 'bg-supports' },
-    { key: 'rest', n: rest, color: 'bg-neutral-soft' },
     { key: 'contradicted', n: contradicted, color: 'bg-refutes' },
+    { key: 'rest', n: rest, color: 'bg-neutral-soft' },
+    { key: 'backed', n: backed, color: 'bg-supports' },
   ].filter((p) => p.n > 0)
   return (
     <span className="flex items-center gap-2.5">

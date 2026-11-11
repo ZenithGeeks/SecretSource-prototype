@@ -144,6 +144,32 @@ describe('Graph and Ask the field', () => {
     expect(lastAsk().node).toBeNull()
   })
 
+  it('Back and Forward move between the screens the reader visited', async () => {
+    renderApp('?role=researcher&screen=graph')
+    fireEvent.click(mainNav().getByRole('button', { name: 'Library' }))
+    expect(param('screen')).toBe('library')
+    act(() => {
+      window.history.back()
+    })
+    await waitFor(() => expect(screen.getByTestId('graph')).toBeInTheDocument())
+    expect(param('screen')).toBe('graph')
+    act(() => {
+      window.history.forward()
+    })
+    await waitFor(() => expect(within(breadcrumb()).getByText('Library')).toBeInTheDocument())
+    expect(screen.queryByTestId('graph')).not.toBeInTheDocument()
+  })
+
+  it('Back to an analysis entry reopens that analysis', async () => {
+    renderApp('?role=researcher&screen=graph')
+    window.history.pushState(null, '', '?role=researcher&screen=analyses&analysis=a1')
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await waitFor(() => expect(lastAsk().analysis).toBe('a1'))
+    expect(param('screen')).toBe('analyses')
+  })
+
   it('opening a paper from the graph shows it on Analyses', async () => {
     renderApp('?role=researcher&screen=graph')
     fireEvent.click(screen.getByText('open from graph'))

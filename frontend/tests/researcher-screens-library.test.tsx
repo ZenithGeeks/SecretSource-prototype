@@ -274,6 +274,27 @@ describe('new project', () => {
     expect(name).toHaveAttribute('aria-invalid', 'false')
   })
 
+  it('while the project is being created the button is off, so a second submit makes no second project', async () => {
+    const calls = gateway()
+    renderLibrary('&new=1')
+    const dialog = await screen.findByRole('dialog')
+    const answer = vi.mocked(fetch).getMockImplementation()!
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (init?.method === 'POST') await held
+      return answer(url, init)
+    })
+    const name = within(dialog).getByPlaceholderText('e.g. Retrieval survey')
+    fireEvent.change(name, { target: { value: 'Graphs' } })
+    fireEvent.submit(name.closest('form')!)
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Creating…' })).toBeDisabled())
+    fireEvent.submit(name.closest('form')!)
+    release()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/researcher/projects')).toHaveLength(1)
+  })
+
   it('creates the project with a trimmed name and opens it', async () => {
     const calls = gateway()
     renderLibrary('&new=1')
@@ -366,6 +387,20 @@ describe('renaming and deleting', () => {
     fireEvent.submit(input.closest('form')!)
     await waitFor(() => expect(error).toHaveBeenCalledWith('Could not rename the project. Try again.'))
     expect(screen.getByDisplayValue('Renamed')).toBeEnabled()
+  })
+
+  it('Rename to a name another project has says so and stays in the field', async () => {
+    const calls = gateway()
+    const error = vi.spyOn(toast, 'error')
+    renderLibrary()
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const input = screen.getByDisplayValue('Retrieval survey')
+    fireEvent.change(input, { target: { value: 'empty ONE' } })
+    fireEvent.submit(input.closest('form')!)
+    expect(error).toHaveBeenCalledWith('A project called "empty ONE" already exists. Choose another name.')
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    expect(screen.getByDisplayValue('empty ONE')).toBeEnabled()
   })
 
   it('Rename with an unchanged or blank name sends nothing and leaves edit mode', async () => {
