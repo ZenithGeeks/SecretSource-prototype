@@ -23,9 +23,14 @@ export function useResearcherActions() {
       await researcherApi.renameProject(projectId, name)
       await qc.invalidateQueries({ queryKey: ['researcher'] })
     },
-    /** Delete the project itself; its papers are not touched and fall back to Unsorted. */
+    /** Delete the project itself; its papers are not touched and fall back to Unsorted. The
+     * gateway keeps it for a while, so restoreProject can bring it back. */
     deleteProject: async (projectId: string) => {
       await researcherApi.deleteProject(projectId)
+      await qc.invalidateQueries({ queryKey: ['researcher'] })
+    },
+    restoreProject: async (projectId: string) => {
+      await researcherApi.restoreProject(projectId)
       await qc.invalidateQueries({ queryKey: ['researcher'] })
     },
   }

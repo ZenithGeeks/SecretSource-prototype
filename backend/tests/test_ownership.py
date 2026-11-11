@@ -23,7 +23,11 @@ def fake_projects(monkeypatch):
     saved: dict[str, dict] = {}
     monkeypatch.setattr(main.store, "save_project", lambda project: saved.__setitem__(project["id"], project))
     monkeypatch.setattr(
-        main.store, "load_projects", lambda owner: [p for p in saved.values() if p.get("owner") == owner]
+        main.store,
+        "load_projects",
+        lambda owner, include_deleted=False: [
+            p for p in saved.values() if p.get("owner") == owner and (include_deleted or not p.get("deleted"))
+        ],
     )
     monkeypatch.setattr(main.store, "delete_project", lambda project_id: saved.pop(project_id, None))
     return saved

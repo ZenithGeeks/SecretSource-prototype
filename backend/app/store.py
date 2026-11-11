@@ -487,17 +487,29 @@ def save_project(project: dict) -> None:
         database.commit()
 
 
-def load_projects(owner: str | None) -> list[dict]:
-    """Every project of one owner. None means the projects made while login was off."""
+def load_projects(owner: str | None, include_deleted: bool = False) -> list[dict]:
+    """Every project of one owner. None means the projects made while login was off.
+
+    A deleted project stays in its row, marked with a `deleted` time, until it is restored or
+    purged (main.py's delete_project). Only the restore route asks for those."""
     if _use_supabase():
         query = _supabase().table("projects").select("data")
         query = query.is_("owner", "null") if owner is None else query.eq("owner", owner)
-        return [row["data"] for row in _execute_with_retry(query).data]
-    with _sqlite() as database:
-        rows = database.execute(
-            "SELECT data FROM projects WHERE owner IS ?", (owner,)
-        ).fetchall()
-    return [json.loads(row["data"]) for row in rows]
+        projects = [row["data"] for row in _execute_with_retry(query).data]
+    else:
+        with _sqlite() as database:
+            rows = database.execute(
+                "SELECT data FROM projects WHERE owner IS ?", (owner,)
+            ).fetchall()
+        projects = [json.loads(row["data"]) for row in rows]
+    return projects if include_deleted else [p for p in projects if not p.get("deleted")]
+
+
+def purge_deleted_projects(owner: str | None, before: str) -> None:
+    """Removes for good the projects of one owner that were deleted before the ISO time `before`."""
+    for project in load_projects(owner, include_deleted=True):
+        if project.get("deleted") and project["deleted"] < before:
+            delete_project(project["id"])
 
 
 def delete_project(project_id: str) -> None:
