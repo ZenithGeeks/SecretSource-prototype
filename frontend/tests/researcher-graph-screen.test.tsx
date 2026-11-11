@@ -380,6 +380,20 @@ describe('Graph · claims view', () => {
     expect(screen.queryByText(/The other claims are dimmed on the graph\./)).not.toBeInTheDocument()
   })
 
+  test('the findings sit in a disclosure whose summary names the pressed one', () => {
+    open()
+    const findings = screen.getByText(/^Findings · /).closest('details')!
+    expect(findings).not.toHaveAttribute('open')
+    expect(screen.getByText(/^Findings · \d+ to look at$/)).toBeInTheDocument()
+    const tile = within(findings)
+      .getAllByRole('button')
+      .find((b) => !(b as HTMLButtonElement).disabled)!
+    fireEvent.click(tile)
+    expect(screen.getByText(/^Findings · showing /)).toBeInTheDocument()
+    fireEvent.click(tile)
+    expect(screen.getByText(/^Findings · \d+ to look at$/)).toBeInTheDocument()
+  })
+
   test('"Strong links only" says what a strong link is', () => {
     open()
     fireEvent.click(screen.getByRole('radio', { name: 'Papers' }))
