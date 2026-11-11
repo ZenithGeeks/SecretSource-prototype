@@ -615,21 +615,28 @@ function GraphCanvas({
       )}
 
       {view === 'claims' && (
-        <div className="flex flex-wrap gap-2">
-          {insights.map((insight) => (
-            <InsightTile
-              key={insight.key}
-              insight={insight}
-              active={insightKey === insight.key}
-              onToggle={() => setInsightKey(insightKey === insight.key || insight.count === 0 ? null : insight.key)}
-            />
-          ))}
-          {activeInsight && (
-            <p className="basis-full text-[13px] text-ink-muted">
-              {activeInsight.hint} The other claims are dimmed on the graph.
-            </p>
-          )}
-        </div>
+        // The findings are filters on the canvas, opened on demand so the first view is the graph.
+        // The summary names the pressed one, so a closed disclosure still says why claims are dimmed.
+        <details className="rounded-xl border border-border-subtle bg-surface">
+          <summary className="cursor-pointer rounded-xl px-4 py-3 text-[13px] font-medium text-ink pointer-coarse:min-h-11">
+            {activeInsight ? `Findings · showing ${activeInsight.label}` : `Findings · ${insights.filter((i) => i.count > 0).length} to look at`}
+          </summary>
+          <div className="flex flex-wrap gap-2 border-t border-border-subtle p-3">
+            {insights.map((insight) => (
+              <InsightTile
+                key={insight.key}
+                insight={insight}
+                active={insightKey === insight.key}
+                onToggle={() => setInsightKey(insightKey === insight.key || insight.count === 0 ? null : insight.key)}
+              />
+            ))}
+            {activeInsight && (
+              <p className="basis-full text-[13px] text-ink-muted">
+                {activeInsight.hint} The other claims are dimmed on the graph.
+              </p>
+            )}
+          </div>
+        </details>
       )}
 
       <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
