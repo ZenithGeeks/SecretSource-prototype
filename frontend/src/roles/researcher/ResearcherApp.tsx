@@ -133,7 +133,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
   const breadcrumb =
     screen === 'analyses'
       ? history.selectedName
-        ? ['Analyses', history.selectedName]
+        ? [{ label: 'Analyses', onSelect: () => history.select(null) }, history.selectedName]
         : ['Analyses']
       : [NAV_LABEL[screen]]
 

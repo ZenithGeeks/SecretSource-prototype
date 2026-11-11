@@ -170,6 +170,17 @@ describe('Graph and Ask the field', () => {
     expect(param('screen')).toBe('analyses')
   })
 
+  it('the Analyses part of the trail leads back from an open analysis to the list', async () => {
+    renderApp('?role=researcher&screen=analyses&analysis=a1')
+    const crumb = await within(breadcrumb()).findByRole('button', { name: 'Analyses' })
+    expect(within(breadcrumb()).getByText('p.pdf')).toBeInTheDocument()
+    fireEvent.click(crumb)
+    await waitFor(() => expect(param('analysis')).toBeNull())
+    expect(param('screen')).toBe('analyses')
+    expect(within(breadcrumb()).queryByRole('button', { name: 'Analyses' })).toBeNull()
+    expect(within(breadcrumb()).getByText('Analyses')).toHaveAttribute('aria-current', 'page')
+  })
+
   it('opening a paper from the graph shows it on Analyses', async () => {
     renderApp('?role=researcher&screen=graph')
     fireEvent.click(screen.getByText('open from graph'))
