@@ -3,7 +3,8 @@ whatever alphabet the names are written in."""
 
 import xml.etree.ElementTree as ET
 
-from app.pipeline import claims, sources
+import pytest
+from app.pipeline import claims, sources, verify
 
 
 def bibl(article: str = "", journal: str = "", tagged: str = "") -> ET.Element:
@@ -224,3 +225,137 @@ def test_a_typed_note_is_not_taken_for_a_title():
     )
 
     assert claims._parse_reference(report)["title"] == "OpenAI blog"
+
+
+# --- A reference with no article title (#937) ---------------------------------------------------
+
+# Analysis c646a7a53a35 (EPJ Web of Conferences): the reference list gives authors, journal and
+# year, and no article title, so the journal line was the only title GROBID wrote.
+JOURNAL_ONLY = [
+    ("b2", "Journal of Instrumentation", [], "2008"),
+    ("b4", "AIP Conference Proceedings", ["H B Newman", "I C Legrand"], "2001"),
+    ("b5", "Journal of Parallel and Distributed Computing", ["H Casanova", "A Giersch", "A Legrand"], "2014"),
+    ("b7", "Future Generation Computer Systems", ["H Casanova", "R Ferreira Da Silva", "F Suter"], "2020"),
+    (
+        "b9",
+        "ACM Transactions on Modeling and Computer Simulation (TOMACS)",
+        ["P Velho", "L M Schnorr", "H Casanova", "A Legrand"],
+        "2013",
+    ),
+]
+
+
+def journal_only(journal: str, authors: list[str], year: str) -> ET.Element:
+    people = "".join(
+        f"<author><persName><forename>{name.rsplit(' ', 1)[0]}</forename>"
+        f"<surname>{name.rsplit(' ', 1)[1]}</surname></persName></author>"
+        for name in authors
+    )
+    return ET.fromstring(
+        f'<biblStruct xmlns="http://www.tei-c.org/ns/1.0"><analytic>{people}</analytic>'
+        f'<monogr><title level="j">{journal}</title><imprint><date when="{year}"/></imprint></monogr>'
+        "</biblStruct>"
+    )
+
+
+@pytest.mark.parametrize(("ref", "journal", "authors", "year"), JOURNAL_ONLY)
+def test_a_journal_line_is_the_venue_and_not_the_title(ref, journal, authors, year):
+    parsed = claims._parse_reference(journal_only(journal, authors, year))
+
+    assert parsed["title"] == ""
+    assert parsed["venue"] == journal
+    assert parsed["authors"] == authors
+    assert parsed["year"] == year
+
+
+@pytest.mark.parametrize(("ref", "journal", "authors", "year"), JOURNAL_ONLY)
+def test_a_reference_with_only_a_venue_is_kept_and_not_looked_up(ref, journal, authors, year, monkeypatch):
+    asked = []
+    monkeypatch.setattr(sources, "_lookup", lambda identifier: asked.append(identifier))
+    parsed = claims._parse_reference(journal_only(journal, authors, year))
+    claim = {"claim": "A claim.", "sentence": f"A claim [{ref}].", "citations": [{**parsed, "ref": ref}]}
+
+    assert claims._findable(parsed)
+    assert sources.lookup_key(parsed) == ""
+    for _citation, source in verify.checked_citations(claim):
+        verify.prepare_source(source)
+    assert asked == []
+
+
+def test_an_article_keeps_its_title_and_gets_its_journal_as_the_venue():
+    parsed = claims._parse_reference(
+        bibl("Kokkos 3", journal="IEEE Transactions on Parallel and Distributed Systems")
+    )
+
+    assert parsed["title"] == "Kokkos 3"
+    assert parsed["venue"] == "IEEE Transactions on Parallel and Distributed Systems"
+
+
+def test_a_book_or_proceedings_cited_whole_keeps_its_title():
+    book = ET.fromstring(
+        '<biblStruct xmlns="http://www.tei-c.org/ns/1.0"><monogr>'
+        '<title level="m">Structured Parallel Programming: Patterns for Efficient Computation</title>'
+        "</monogr></biblStruct>"
+    )
+
+    parsed = claims._parse_reference(book)
+
+    assert parsed["title"] == "Structured Parallel Programming: Patterns for Efficient Computation"
+    assert parsed["venue"] == ""
+
+
+def test_a_preprint_note_on_the_journal_line_is_not_a_venue():
+    # "arXiv preprint arXiv:2303.12712" on the journal line says where the preprint is, not
+    # which journal printed the work, so it is read as before.
+    parsed = claims._parse_reference(bibl(journal="arXiv preprint arXiv:2303.12712"))
+
+    assert parsed["title"] == "arXiv:2303.12712"
+    assert parsed["venue"] == ""
+
+
+def test_a_journal_line_beside_a_link_is_still_the_title():
+    # arXiv 2409.12191 [b28]: software, with its maker and name on the journal line and a link.
+    # The line is not a journal there, and the link is something to look the work up by.
+    software = ET.fromstring(
+        '<biblStruct xmlns="http://www.tei-c.org/ns/1.0">'
+        '<analytic><title/><ptr target="http://ffmpeg.org/"/></analytic>'
+        '<monogr><title level="j">FFmpeg-Developers. ffmpeg tool</title>'
+        '<imprint><date type="published" when="2024">2024</date></imprint></monogr>'
+        "</biblStruct>"
+    )
+
+    parsed = claims._parse_reference(software)
+
+    assert parsed["title"] == "FFmpeg-Developers. ffmpeg tool"
+    assert parsed["venue"] == ""
+    assert parsed["authors"] == []
+    assert parsed["year"] == "2024"
+    assert sources.lookup_key(parsed) == "FFmpeg-Developers. ffmpeg tool"
+
+
+def test_a_journal_line_beside_a_doi_is_still_the_title():
+    with_doi = ET.fromstring(
+        '<biblStruct xmlns="http://www.tei-c.org/ns/1.0"><analytic/>'
+        '<monogr><title level="j">Journal of Instrumentation</title>'
+        '<idno type="DOI">10.1088/1748-0221/3/08/S08004</idno></monogr></biblStruct>'
+    )
+
+    parsed = claims._parse_reference(with_doi)
+
+    assert parsed["title"] == "Journal of Instrumentation"
+    assert parsed["venue"] == ""
+    assert sources.lookup_key(parsed) == "10.1088/1748-0221/3/08/S08004"
+
+
+def test_the_citation_roles_listing_names_a_work_by_its_venue_when_it_has_no_title():
+    claim = {
+        "claim": "Flow-level models are accurate.",
+        "sentence": "Flow-level models are accurate [b9].",
+        "citations": [
+            {"title": "", "venue": "ACM Transactions on Modeling and Computer Simulation", "year": "2013"}
+        ],
+    }
+
+    assert claims._claims_with_citations([claim]).endswith(
+        "[1] ACM Transactions on Modeling and Computer Simulation (2013)"
+    )

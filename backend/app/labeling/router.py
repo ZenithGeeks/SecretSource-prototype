@@ -212,7 +212,7 @@ def _unread_references(analysis: dict, read: list[dict]) -> list[dict]:
     for claim in analysis.get("claims", []):
         for citation in claim.get("citations") or []:
             ref = citation.get("ref", "")
-            title = citation.get("title") or citation.get("label") or ref
+            title = citation.get("title") or _by_venue(citation) or citation.get("label") or ref
             if not ref or ref in read_refs or title.casefold() in read_titles:
                 continue
             unread.setdefault(
@@ -227,6 +227,18 @@ def _unread_references(analysis: dict, read: list[dict]) -> list[dict]:
                 },
             )
     return list(unread.values())
+
+
+def _by_venue(citation: dict) -> str:
+    """ "Velho et al., ACM Transactions on Modeling and Computer Simulation" for a work whose
+    reference list gave no title (#937), or "" when it names no journal either."""
+    venue = citation.get("venue") or ""
+    surnames = [name.split()[-1] for name in citation.get("authors") or [] if name.split()]
+    if len(surnames) > 2:
+        people = f"{surnames[0]} et al."
+    else:
+        people = " and ".join(surnames)
+    return ", ".join(part for part in (people, venue) if part) if venue else ""
 
 
 async def labeler_id(who: str = Depends(annotator), user: str | None = Depends(current_user)) -> str:

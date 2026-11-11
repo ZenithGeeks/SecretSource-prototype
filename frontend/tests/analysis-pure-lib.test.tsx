@@ -205,6 +205,12 @@ describe('citations', () => {
     expect(reference(cite({ title: '' }))).toBe('Khattab et al. (2020). Untitled')
   })
 
+  it('writes the venue where a work has no title (#937)', () => {
+    const venue = 'Future Generation Computer Systems'
+    expect(reference(cite({ title: '', venue }))).toBe(`Khattab et al. (2020). ${venue}`)
+    expect(reference(cite({ title: '', venue, arxiv: '2001.1' }))).toBe(`Khattab et al. (2020). ${venue}`)
+  })
+
   it('keeps only numeric labels as the citation number', () => {
     expect(citationNumber(cite({ label: '13' }))).toBe('13')
     expect(citationNumber(cite({ label: '13a' }))).toBe('13a')

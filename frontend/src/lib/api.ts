@@ -4,7 +4,8 @@ import { supabase } from './supabase'
 import { endSession } from './useAuth'
 
 export type Citation = {
-  title: string
+  title: string // empty when the reference list gave none (#937)
+  venue?: string // the journal the reference names; missing on older analyses
   authors: string[]
   year: string
   doi: string

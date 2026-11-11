@@ -3,11 +3,12 @@
 import type { Citation } from './api'
 
 /** "Khattab et al. (2020). ColBERT: ..." */
-export function reference({ authors, year, title, arxiv }: Citation) {
+export function reference({ authors, year, title, venue, arxiv }: Citation) {
   const who = authors.length ? `${authors[0]}${authors.length > 1 ? ' et al.' : ''}` : 'Unknown'
   const head = `${who}${year ? ` (${year})` : ''}`
   // "et al." already ends with a full stop; a second one reads as a typo.
-  return `${head}${head.endsWith('.') ? '' : '.'} ${title || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
+  // A work whose reference list gave no title is written by its journal (#937).
+  return `${head}${head.endsWith('.') ? '' : '.'} ${title || venue || (arxiv ? `arXiv:${arxiv}` : 'Untitled')}`
 }
 
 /** The number the paper prints for this work, like "13", or empty. Author-year labels
