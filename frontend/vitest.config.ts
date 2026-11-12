@@ -11,7 +11,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
-    include: ['tests/**/*.test.tsx'],
+    include: ['tests/**/*.test.tsx', 'tests/**/*.spec.tsx'],
     coverage: {
       provider: 'v8',
       // Researcher, Labeler and the shared code they use. Author- and

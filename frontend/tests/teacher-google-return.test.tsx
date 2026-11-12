@@ -7,6 +7,7 @@ vi.mock('../src/lib/useAuth', () => ({ useAuth: () => ({ session: null, loading:
 vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => null }))
 
 import { Root } from '../src/Root'
+import '../src/roles/teacher/TeacherApp'
 import { TEACHER_GOOGLE_RETURN_KEY } from '../src/lib/teacherGoogleReturn'
 import { teacherApi } from '../src/lib/teacher'
 

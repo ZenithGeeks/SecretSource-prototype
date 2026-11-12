@@ -1,0 +1,84 @@
+{
+  "course": {
+    "id": "class-literary-2b",
+    "name": "Literary Analysis",
+    "section": "2B",
+    "subject": "English · Undergraduate",
+    "status": "active",
+    "teacherName": "Alex S.",
+    "studentCount": 25,
+    "assignmentCount": 4,
+    "topicCount": 3,
+    "announcementCount": 1,
+    "linkedFileCount": 12,
+    "lastSyncedAt": "Today, 9:42 AM"
+  },
+  "description": "Critical reading and evidence verification in modern essays.",
+  "assignments": [
+    {
+      "id": "assignment-essay",
+      "courseId": "class-literary-2b",
+      "title": "Assignment 2: Evidence-based essay",
+      "description": "Analyze citation validity in the selected text.",
+      "dueAt": "Tomorrow, 11:59 PM",
+      "topic": "Essays",
+      "enrolledCount": 25,
+      "submittedCount": 19,
+      "missingCount": 6,
+      "returnedCount": 0,
+      "pendingReviewCount": 2,
+      "overdue": false,
+      "materials": []
+    }
+  ],
+  "submissions": [
+    {
+      "id": "sub-anan-essay",
+      "assignmentId": "assignment-essay",
+      "studentId": "student-anan",
+      "studentName": "Anan P.",
+      "studentEmail": "anan@example.edu",
+      "state": "submitted",
+      "submittedAt": "Yesterday, 3:45 PM",
+      "reviewStatus": "analysis-ready",
+      "attachments": [
+        {
+          "id": "att-1",
+          "title": "essay-2.docx",
+          "url": "https://example.com/essay.docx",
+          "kind": "driveFile"
+        }
+      ]
+    }
+  ],
+  "people": [
+    {
+      "id": "teacher-alex",
+      "name": "Alex S.",
+      "initials": "AS",
+      "role": "Teacher",
+      "isCourseOwner": true
+    },
+    {
+      "id": "student-anan",
+      "name": "Anan P.",
+      "initials": "AP",
+      "role": "Student",
+      "isCourseOwner": false
+    }
+  ],
+  "latestAnnouncement": null,
+  "materials": [],
+  "topics": [
+    {
+      "id": "topic-1",
+      "name": "Essays",
+      "assignmentCount": 1
+    }
+  ],
+  "stats": {
+    "enrolled": 25,
+    "submitted": 19,
+    "reviewed": 0
+  }
+}

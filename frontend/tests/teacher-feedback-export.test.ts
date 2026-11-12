@@ -39,7 +39,7 @@ describe('teacher feedback exports', () => {
 
     const markdown = teacherFeedbackMarkdown(report)
     expect(markdown).toContain('# Essay feedback')
-    expect(markdown).toContain('**Submission:** draft.pdf')
+    expect(markdown).toContain('**Submission:** draft\\.pdf')
     expect(markdown).toContain('**What the source says**')
     expect(teacherFeedbackCsv(report)).toContain('"Student","Course","Assignment","Submission","Teacher feedback"')
     expect(teacherFeedbackCsv(report)).toContain('Sleep study')

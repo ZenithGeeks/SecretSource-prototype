@@ -1,0 +1,30 @@
+[
+  {
+    "id": "class-literary-2b",
+    "name": "Literary Analysis",
+    "section": "2B",
+    "subject": "English · Undergraduate",
+    "status": "active",
+    "teacherName": "Alex S.",
+    "studentCount": 25,
+    "assignmentCount": 4,
+    "topicCount": 3,
+    "announcementCount": 1,
+    "linkedFileCount": 12,
+    "lastSyncedAt": "Today, 9:42 AM"
+  },
+  {
+    "id": "class-modern-writing-1a",
+    "name": "Modern Writing",
+    "section": "1A",
+    "subject": "English · Undergraduate",
+    "status": "active",
+    "teacherName": "Alex S.",
+    "studentCount": 22,
+    "assignmentCount": 3,
+    "topicCount": 2,
+    "announcementCount": 2,
+    "linkedFileCount": 8,
+    "lastSyncedAt": "Yesterday, 4:18 PM"
+  }
+]
