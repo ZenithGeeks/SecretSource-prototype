@@ -14,15 +14,22 @@ verdicts into one answer (SCRUM-171).
 
 A question about earlier work goes to load_memory, which searches the saved analyses
 through the runner's memory service, app/memory.py (SCRUM-172).
+
+A tool that reads a paper takes a local path as well as a DOI, arXiv ID or URL. A local file
+is read only if it is in PAPERS_DIR and is one of the caller's papers (rag.caller_papers), so
+cli.py and the A2A server, which have no login, cannot read other people's uploads (SCRUM-532).
 """
 
 import asyncio
 import functools
+import inspect
+from pathlib import Path
 
 from google.adk.agents import LlmAgent
-from google.adk.tools import load_memory
+from google.adk.tools import ToolContext, load_memory
 from pydantic import BaseModel, Field
 
+from app.config import PAPERS_DIR
 from app.llm import adk_model
 from app.pipeline import claims, rag, sources, verify
 
@@ -39,14 +46,44 @@ def off_the_loop(function):
     return run
 
 
-extract_citations = off_the_loop(claims.extract_citations)
-extract_claims = off_the_loop(claims.extract_claims)
-extract_claims_with_citations = off_the_loop(claims.extract_claims_with_citations)
-add_paper = off_the_loop(rag.add_paper)
+def refused_file(paper: str, tool_context: ToolContext | None) -> dict | None:
+    """A tool error when `paper` is a local file the caller may not read, else None.
+    Anything that is not a file (a DOI, an arXiv ID, a URL, a title) is looked up as before."""
+    path = Path(paper)
+    if not path.is_file():
+        return None
+    resolved = path.resolve()
+    if resolved.is_relative_to(PAPERS_DIR.resolve()) and resolved.name in rag.caller_papers(tool_context):
+        return None
+    return sources.tool_error(PermissionError(f"{paper} is not one of your papers"))
+
+
+def own_papers_only(function, argument: str):
+    """The same tool, off the loop, refusing a local file the caller may not read. ADK passes
+    tool_context to a tool whose signature has one and leaves it out of the model's schema, so
+    the model sees the same tool."""
+    signature = inspect.signature(function)
+
+    @functools.wraps(function)
+    async def run(*args, tool_context: ToolContext | None = None, **kwargs):
+        paper = signature.bind(*args, **kwargs).arguments[argument]
+        if refused := refused_file(paper, tool_context):
+            return refused
+        return await asyncio.to_thread(function, *args, **kwargs)
+
+    context = inspect.Parameter("tool_context", inspect.Parameter.KEYWORD_ONLY, default=None)
+    run.__signature__ = signature.replace(parameters=[*signature.parameters.values(), context])
+    return run
+
+
+extract_citations = own_papers_only(claims.extract_citations, "pdf_path")
+extract_claims = own_papers_only(claims.extract_claims, "pdf_path")
+extract_claims_with_citations = own_papers_only(claims.extract_claims_with_citations, "pdf_path")
+add_paper = own_papers_only(rag.add_paper, "pdf_path")
 answer_from_docs = off_the_loop(rag.answer_from_docs)
 search_passages = off_the_loop(rag.search_passages)
 fetch_source = off_the_loop(sources.fetch_source)
-verify_claim = off_the_loop(verify.verify_claim)
+verify_claim = own_papers_only(verify.verify_claim, "source_pdf_path")
 
 rag_agent = LlmAgent(
     name="rag_agent",
