@@ -231,8 +231,7 @@ services:
       - gateway
     restart: unless-stopped
 
-  # The analysis pipeline as a graph, drawn by ADK's dev UI, with the events of each run
-  # (backend/app/workflow.py). Development only:
+  # ADK's dev UI for the chat agents (backend/adk_agents). Development only:
   #   docker compose --profile dev up -d adk-web        then open http://localhost:8001
   adk-web:
     profiles: [dev]

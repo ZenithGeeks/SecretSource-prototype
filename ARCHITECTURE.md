@@ -35,14 +35,13 @@ In production everything runs on our own machines with Docker Compose. A mini PC
 RTX 5070 Ti runs GROBID, ColBERT, ColPali and `worker`, which takes jobs from the mini PC's
 Redis. `worker` is the process that calls GROBID, ColBERT, ColPali and the LLM.
 
-## Three ways to run the pipeline
+## Two ways to run the pipeline
 
-The same pipeline code (`backend/app/pipeline/`) is used in three places.
+The same pipeline code (`backend/app/pipeline/`) is used in two places.
 
 | Way | Code | Used by |
 | --- | --- | --- |
 | HTTP gateway | `backend/app/main.py` | the web app |
-| Analysis graph | `backend/app/workflow.py` | `adk web`, for development |
 | Chat agents | `backend/app/agents/team.py` | `backend/cli.py`, `adk web`, and A2A |
 
 Only the gateway serves the web app. If you fix something for users, fix it there.
@@ -169,7 +168,7 @@ fields. You read them like normal Python values, for example `prediction.verdict
 
 **ADK and DSPy do different jobs.**
 
-- Google ADK runs the agents and the order of steps (`team.py`, `workflow.py`).
+- Google ADK runs the agents (`team.py`).
 - DSPy is used inside a step, for one LLM call that must return exact data.
 - Both use the same LLM. `backend/app/llm.py` creates `adk_model()` for ADK and `dspy_lm()`
   for DSPy, both pointed at `VLLM_URL`.
@@ -272,52 +271,18 @@ flowchart TD
   analyses owned by the user id the runner passes. `cli.py` and `a2a_server.py` have no
   login, so they read only the analyses without an owner.
 
-### Analysis graph
-
-`backend/app/workflow.py`. The same steps as the gateway, written as an ADK `Workflow`
-graph, so `adk web` can draw it and show the events of a run.
-
-```mermaid
-flowchart LR
-    S(["START"]) --> RP["read_paper"]
-    RP -->|ok| PC["plan_checks"]
-    RP -->|error| RE["report_error"]
-    PC --> PS["prepare_sources<br/>up to PARALLEL_SOURCES"]
-    PS --> PJ["plan_judging"]
-    PJ --> CS["check_sources<br/>up to PARALLEL_CHECKS"]
-    CS --> AS["assemble"]
-    AS --> RF["read_figures"]
-    RF --> AU["audit_analysis"]
-```
-
-- We keep the graph and the gateway's `_run_queued` in step. Both use the same pipeline
-  functions, `fold_check` to add a result to its claim, `paper_figures` and `audit`. If
-  you change the steps in one, change the other. The graph reads the figures after the
-  checks; the gateway reads them while it checks.
-- The gateway does not run through the graph, because it sends an event to the web app
-  after every check.
-- A run ends with `status` `ok` and the same fields the gateway stores (`paper`, `file`,
-  `claims`, `figures`, `audit`), or with `status` `error` and a `message`.
-- The nodes are plain Python functions, not agents.
-- `prepare_sources` and `check_sources` are parallel workers: they run once for each item
-  in a list, several at a time.
-- Nodes share data through session state: `paper`, `file`, `claims` and `jobs`.
-- Set the session state key `verify` to `false` to stop after reading the paper.
-
 ### ADK features we use
 
 | Feature | Where |
 | --- | --- |
 | A coordinator that routes to sub-agents | `team.py` |
 | A single-turn sub-agent called as a tool, several at once | `team.py`: `check_claim` |
-| Shared session state | `workflow.py` |
 | Scoped passage search | `team.py`: `search_passages` reads `papers_of`, not ColBERT's MCP tool |
-| Parallel workers in a graph | `workflow.py`: `prepare_sources`, `check_sources` |
 | A2A server | `backend/a2a_server.py` |
 
 We do not use `AgentTool` (`mode="single_turn"` does the same job), `LoopAgent`,
 `SequentialAgent` or `ParallelAgent`. The analysis
-pipeline is a graph of plain functions. The LLM is used inside two steps, reading the paper
+pipeline is plain asyncio code in `_run_queued`, with a Phoenix span per step. The LLM is used inside two steps, reading the paper
 and judging a claim, and never to choose the next step. The next section explains why.
 
 ## Design pattern
@@ -330,7 +295,7 @@ paper, judging a claim), and plain code decides the order of the steps.
 
 ```mermaid
 flowchart TD
-    subgraph ANALYSIS ["Analysis of a paper: sequential, custom code in _run_queued / analysis_workflow"]
+    subgraph ANALYSIS ["Analysis of a paper: sequential, custom code in _run_queued"]
         P["Read the paper<br/>parallel windows, EXTRACT_WORKERS = 3<br/>LLM"]
         PL["Plan checks<br/>code"]
         subgraph PREP ["Parallel: PARALLEL_SOURCES = 3"]
@@ -363,7 +328,7 @@ flowchart TD
 
 | Part | Code | Pattern | Why |
 | --- | --- | --- | --- |
-| Analysis of a paper | `_run_queued` in `main.py`, `analysis_workflow` in `workflow.py` | Sequential | Every paper goes through the same steps in the same order. Nothing is decided while it runs. |
+| Analysis of a paper | `_run_queued` in `main.py` | Sequential | Every paper goes through the same steps in the same order. Nothing is decided while it runs. |
 | Getting cited papers ready, judging claims | `prepare_source`, `check_prepared` in `verify.py` | Parallel | Independent jobs. Running 3 at a time cut a run from 376 s to 246 s (commit `1b10b3a`). |
 | Reading the paper | `extract_claims_with_citations` in `claims.py` | Parallel | Parts of up to 12,000 characters. Up to 3 parts (`EXTRACT_WORKERS`) go to the model at once. |
 | Judging one claim | `JudgeClaim` in `verify.py` | One model call, not an agent | Code runs the searches first. The model only reads the passages and picks one of three verdicts. |
@@ -371,9 +336,12 @@ flowchart TD
 | Chat agents | `root_agent` in `team.py` | Coordinator | A chat message can ask for many things, so a model has to pick the specialist. |
 | One claim against several papers, in chat | `check_claim` in `team.py` | Parallel, gathered by the coordinator | The checks do not depend on each other. The coordinator gets every verdict back and writes one answer. |
 
-- The worker runs the steps with plain `asyncio` in `_run_queued`, not the ADK graph, because
-  it sends an event to the web app after every check. The guide calls this the custom logic
-  pattern.
+- The worker runs the steps with plain `asyncio` in `_run_queued`. The guide calls this the
+  custom logic pattern. Each check starts as soon as its cited paper is indexed, and the web
+  app gets an event after every check. An ADK `Workflow` graph with parallel workers waits
+  for every cited paper before the first check, so it would be slower. It was removed in
+  SCRUM-528.
+  Phoenix shows each step as a span instead.
 - Verdicts are not merged. `fold_check` keeps each one, and the web app shows both when two
   cited papers disagree.
 - The audit only reports findings. It never changes a verdict or asks the judge again, so it
@@ -565,7 +533,6 @@ at least one LLM turn to each question, and #504 and #506 measured the direct pa
 | how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS`, `LLM_PARALLEL_REQUESTS` in `.env`; analyses at once = worker count (`--scale worker=N`) |
 | how analyses are queued, or the Redis connection | `backend/app/queue.py` |
 | what the worker process does | `backend/worker.py` |
-| the graph in `adk web` | `backend/app/workflow.py` |
 | the chat agents and their routing | `backend/app/agents/team.py` |
 | the researcher Home, Library, Field consensus or Graph | `backend/app/researcher.py`, `frontend/src/roles/researcher` |
 | the teacher Classroom OAuth, roster sync, or essay-check review | `backend/app/teacher/`, `frontend/src/roles/teacher` |

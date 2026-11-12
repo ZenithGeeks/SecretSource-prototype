@@ -287,7 +287,6 @@ paper.pdf
 backend/            gateway API, pipeline, agents  (Python, FastAPI, ADK, DSPy)
   app/main.py         HTTP gateway the frontend talks to
   app/pipeline/       claims, sources, verify, figures, rag
-  app/workflow.py     the pipeline as an ADK Workflow graph
   app/teacher/        Google Classroom: OAuth, roster sync, essay-check review
   a2a_server.py       the agent tree over A2A (docker compose --profile a2a)
   cli.py              agent REPL

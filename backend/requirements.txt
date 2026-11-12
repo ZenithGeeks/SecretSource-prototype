@@ -1,4 +1,4 @@
-google-adk[extensions,a2a,mcp]>=2.8,<3 # the workflow graph API (app/workflow.py) was checked against 2.8.0
+google-adk[extensions,a2a,mcp]>=2.8,<3
 # The same pin as services/colbert and services/colpali: CI runs their server tests in this
 # venv, and mcp 2.x renamed the FastMCP they import.
 mcp>=1.24,<2
