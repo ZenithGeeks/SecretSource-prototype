@@ -71,7 +71,7 @@ function rowNote(c: Citation): string {
     return `${at} · ${what} ${where}: ${read ? `check the ${what}` : 'check that it exists'}`
   }
   if (c.verdict === 'unavailable') return `${at} · ${shortMessage(c.message) || 'source PDF unavailable'}`
-  if (c.verdict === 'unchecked') return `${at} · ${c.reason === 'missing-key' ? 'no bib entry' : 'not checked yet'}`
+  if (c.verdict === 'unchecked') return `${at} · ${c.reason === 'missing-key' ? 'missing bib key' : 'not checked yet'}`
   // A passage can be quoted with no page known (the verdict's own quote, no located evidence).
   // A preprint's text can differ from the published paper, so the row says which one was read (#424).
   const preprint = c.sourceVersion === 'preprint' ? ` · ${preprintNote(c.arxiv)}` : ''

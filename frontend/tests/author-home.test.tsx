@@ -88,7 +88,7 @@ describe('Author Home', () => {
     fireEvent.click(unreadToggle())
     expect(unreadToggle()).toHaveAttribute('aria-expanded', 'true')
     const all = await rowsOf()
-    expect(all.some((row) => row.textContent?.includes('no bib entry'))).toBe(true)
+    expect(all.some((row) => row.textContent?.includes('missing bib key'))).toBe(true)
     // The badge says what the legend counts: an unreadable source is not "not checked".
     expect(all.find((row) => row.textContent?.includes('nguyen2016'))).toHaveTextContent('Source unavailable')
     expect(all.find((row) => row.textContent?.includes('liu2023'))).toHaveTextContent('Not checked')
@@ -125,12 +125,15 @@ describe('Author Home', () => {
     expect(row.querySelector('[data-verdict]')).toHaveTextContent('Not found')
     expect(row).toHaveTextContent('check that it exists')
     expect(screen.getByRole('button', { name: /1 of 3 issues/ })).toBeInTheDocument()
-    // Its fix is in the draft (the DOI, or the \cite): Edit leads, and there is no verdict to override.
+    // Its fix is in the draft (the DOI, or the \cite): Edit leads, with no PDF to upload and no
+    // verdict to override, and the panel gives no author and year to a work no index knows.
     fireEvent.click(row)
-    const evidence = within(await screen.findByRole('region', { name: /^Evidence/ }))
+    const evidence = within(await screen.findByRole('region', { name: 'Evidence · \\cite{nguyen2016}' }))
     expect(evidence.getByText('Not found')).toBeInTheDocument()
     expect(evidence.getByRole('button', { name: /^Edit at L\d+$/ })).toHaveClass('bg-accent')
     expect(evidence.queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
+    expect(evidence.queryByRole('button', { name: /Upload source PDF/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/^Evidence for \\cite\{nguyen2016\}, line \d+: Not found\.$/)).toBeInTheDocument()
   })
 
   test('the Evidence panel names the verdict, and the cards are named regions', async () => {
@@ -140,6 +143,18 @@ describe('Author Home', () => {
     expect(evidence.getByText('\\cite{khattab2020}')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Citations that need work' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Your drafts' })).toBeInTheDocument()
+  })
+
+  test('picking another row while its paper is open brings the evidence back, never the old paper', async () => {
+    // The viewer reads the window's width and size, which jsdom lacks (as in analysis-page-viewer).
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    renderHome()
+    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+    fireEvent.click(screen.getByRole('button', { name: 'show in the paper' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: /^Evidence/ })).not.toBeInTheDocument())
+    fireEvent.click((await rowsOf()).find((row) => row.textContent?.includes('thakur2021'))!)
+    expect(await screen.findByRole('region', { name: /^Evidence · / })).toHaveTextContent('\\cite{thakur2021}')
   })
 
   test('a source the publisher refused says so in plain words, not the raw HTTP error', async () => {

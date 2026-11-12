@@ -18,7 +18,7 @@ import { api } from '../../../lib/api'
 import { askTarget } from '../../../lib/askCursor'
 import { shortMessage } from '../../../lib/citations'
 import { referenceNote } from '../../../lib/referenceCheck'
-import { isNotFound, isOpenIssue, isUnjudged, settledHint } from '../../../lib/verdict'
+import { NOT_FOUND, VERDICTS, isNotFound, isOpenIssue, isUnjudged, settledHint } from '../../../lib/verdict'
 import type { Citation, DraftStatus } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
@@ -98,9 +98,14 @@ export function EvidencePanel({
 
   return (
     <Card className="@container flex flex-col gap-3" aria-labelledby="evidence-title">
+      {/* A pick in the list changes this panel without moving focus: say what it shows now. */}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {citation ? `Evidence for \\cite{${citation.key}}, line ${citation.line}: ${isNotFound(citation) ? NOT_FOUND.badge : VERDICTS[citation.verdict].badge}.` : ''}
+      </p>
       <CardHead
         id="evidence-title"
-        title={citation ? `Evidence · ${sourceLabel(citation)}` : 'Evidence'}
+        // A reference no index knows has no author or year worth naming: it may not exist.
+        title={citation ? `Evidence · ${isNotFound(citation) ? `\\cite{${citation.key}}` : sourceLabel(citation)}` : 'Evidence'}
         aside={
           <button
             type="button"
@@ -127,7 +132,9 @@ export function EvidencePanel({
           {/* What the check said, so the verdict is not left behind in the list. */}
           <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
-            <span className="min-w-0 truncate font-mono text-xs text-ink-muted">{`\\cite{${citation.key}}`}</span>
+            <span className="min-w-0 truncate font-mono text-xs text-ink-muted">
+              {isNotFound(citation) ? NOT_FOUND.title : `\\cite{${citation.key}}`}
+            </span>
           </p>
           <div className="grid grid-cols-[minmax(0,1fr)] gap-3 @xl:grid-cols-2 @xl:gap-4">
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
@@ -250,7 +257,8 @@ export function EvidencePanel({
               )}
               {/* A passage read from the published paper settles it: an upload would not change the
                   verdict. One read from a preprint (#424) might, so the upload stays there. */}
-              {(!citation.evidence?.passage || citation.sourceVersion === 'preprint') && (
+              {/* Not for a reference no index knows: the fix is its DOI or the \cite, not a PDF. */}
+              {!isNotFound(citation) && (!citation.evidence?.passage || citation.sourceVersion === 'preprint') && (
                 <>
                   <Button
                     variant={editLeads ? 'ghost' : 'solid'}

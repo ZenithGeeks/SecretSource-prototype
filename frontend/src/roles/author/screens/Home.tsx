@@ -282,11 +282,15 @@ function HomeBody({
     const index = issues.findIndex((c) => c.id === selected?.id)
     setSelectedId(issues[(index + 1) % issues.length].id)
     setReveal((n) => n + 1)
+    showTarget(null)
   }
 
+  // The source PDF open in the evidence's place is that citation's: another pick brings the
+  // evidence back rather than leave one paper showing beside another citation.
   const selectRow = (id: string) => {
     setSelectedId(id)
     setReveal((n) => n + 1)
+    if (id !== selected?.id) showTarget(null)
   }
 
   if (draft.isPending) return <LoadingScreen label="Opening your draft…" />

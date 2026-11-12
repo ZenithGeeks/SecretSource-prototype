@@ -71,7 +71,8 @@ export const VERDICTS: Record<Verdict, VerdictMeta> = {
     legend: 'not checked',
     standing: 'unchecked',
     text: 'text-ink-muted',
-    fill: 'bg-ink-muted',
+    // Lighter than unavailable's, so the two neutral segments and legend dots tell apart.
+    fill: 'bg-neutral',
     soft: 'bg-canvas text-ink-muted',
     needsWork: false,
   },
