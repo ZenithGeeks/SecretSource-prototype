@@ -43,10 +43,19 @@ function rowsFor(filter: Filter, citations: Citation[]): Citation[] {
  * number as the Evidence pager and "Your drafts", and the rest are named for what they are. */
 function needsWorkLabel(citations: Citation[]): string {
   const issues = citations.filter(isOpenIssue).length
-  const unread = (verdict: Citation['verdict']) => citations.filter((c) => c.verdict === verdict && unjudged(c)).length
+  // A reference no index knows is named for that, not hidden in "unavailable" (isNotFound).
+  const unread = (verdict: Citation['verdict']) => citations.filter((c) => c.verdict === verdict && unjudged(c) && !isNotFound(c)).length
+  const notFound = citations.filter((c) => unjudged(c) && isNotFound(c)).length
   const unavailable = unread('unavailable')
   const unchecked = unread('unchecked')
-  return [`${issues} issue${issues === 1 ? '' : 's'}`, unavailable && `${unavailable} unavailable`, unchecked && `${unchecked} not checked`].filter(Boolean).join(' · ')
+  return [
+    `${issues} issue${issues === 1 ? '' : 's'}`,
+    notFound && `${notFound} not found`,
+    unavailable && `${unavailable} unavailable`,
+    unchecked && `${unchecked} not checked`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /** The mono line under a claim: where the \cite is, then where the verdict rests or why there is none. */
@@ -85,7 +94,8 @@ function CitationRow({ citation, selected, onSelect }: { citation: Citation; sel
         className={cn(
           'flex w-full min-w-0 flex-col items-start gap-1.5 px-5 py-3 text-left transition-colors hover:bg-accent-soft/40',
           FOCUS,
-          selected && 'bg-accent-soft/60',
+          // Tint plus a hairline ring, so the selected row is not just a deeper hover.
+          selected && 'bg-accent-soft/60 ring-1 ring-accent/35 ring-inset',
         )}
       >
         <span className="flex max-w-full min-w-0 items-center gap-2">
@@ -121,7 +131,8 @@ export function CitationCheckCard({
   const [filter, setFilter] = useState<Filter>('needs-work')
   const rows = rowsFor(filter, citations)
   // "Needs work": the issues, then what could not be judged. That group opens by itself when there
-  // is no issue above it, or when the selected row is in it; the author's own toggle wins.
+  // is no issue above it, when the selected row is in it, or when it holds a reference no index
+  // knows (it may be made up, so it is never folded away unasked).
   const issueRows: Citation[] = []
   const unreadRows: Citation[] = []
   for (const c of rows) (isOpenIssue(c) ? issueRows : unreadRows).push(c)
@@ -129,7 +140,8 @@ export function CitationCheckCard({
   // pager, Ask) is never selected inside a closed group.
   const [toggled, setToggled] = useState<{ open: boolean; selectedId: string | undefined } | null>(null)
   const showUnread =
-    toggled && toggled.selectedId === selectedId ? toggled.open : issueRows.length === 0 || unreadRows.some((c) => c.id === selectedId)
+    toggled && toggled.selectedId === selectedId ? toggled.open
+      : issueRows.length === 0 || unreadRows.some((c) => c.id === selectedId || isNotFound(c))
   const unreadId = useId()
 
   const emptyHint: Record<Filter, [string, string]> = {

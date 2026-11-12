@@ -117,12 +117,45 @@ describe('Author Home', () => {
     })
     renderHome()
     await screen.findByRole('heading', { name: 'Citations that need work' })
-    fireEvent.click(await waitFor(unreadToggle))
+    // It may be made up, so its group is open unasked and the count names it.
+    expect(await waitFor(unreadToggle)).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/^3 issues · 1 not found · \d+ not checked$/)).toBeInTheDocument()
     const row = (await rowsOf()).find((r) => r.textContent?.includes('nguyen2016'))!
     expect(row.querySelector('[data-verdict]')).toHaveAttribute('data-verdict', 'refutes')
     expect(row.querySelector('[data-verdict]')).toHaveTextContent('Not found')
     expect(row).toHaveTextContent('check that it exists')
     expect(screen.getByRole('button', { name: /1 of 3 issues/ })).toBeInTheDocument()
+    // Its fix is in the draft (the DOI, or the \cite): Edit leads, and there is no verdict to override.
+    fireEvent.click(row)
+    const evidence = within(await screen.findByRole('region', { name: /^Evidence/ }))
+    expect(evidence.getByText('Not found')).toBeInTheDocument()
+    expect(evidence.getByRole('button', { name: /^Edit at L\d+$/ })).toHaveClass('bg-accent')
+    expect(evidence.queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
+  })
+
+  test('the Evidence panel names the verdict, and the cards are named regions', async () => {
+    renderHome()
+    const evidence = within(await screen.findByRole('region', { name: 'Evidence · Khattab & Zaharia, 2020' }))
+    expect(evidence.getByText('Source contradicts')).toBeInTheDocument()
+    expect(evidence.getByText('\\cite{khattab2020}')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Citations that need work' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Your drafts' })).toBeInTheDocument()
+  })
+
+  test('a source the publisher refused says so in plain words, not the raw HTTP error', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: (key, claim) =>
+        key === 'nguyen2016'
+          ? { verdict: 'unavailable', reason: 'failed', message: '403 Client Error: Forbidden for url: https://lekythos.library.example/pdf/123?token=abc' }
+          : DEFAULT_VERDICTS(key, claim),
+    })
+    const { container } = renderHome()
+    await screen.findByRole('heading', { name: 'Citations that need work' })
+    fireEvent.click(await waitFor(unreadToggle))
+    const row = (await rowsOf()).find((r) => r.textContent?.includes('nguyen2016'))!
+    expect(row).toHaveTextContent('HTTP 403: lekythos.library.example refused the download')
+    expect(container.textContent).not.toContain('Client Error')
   })
 
   test('the card says what it counts: its issues are the pager’s and Your drafts’ number, the rest are named', async () => {

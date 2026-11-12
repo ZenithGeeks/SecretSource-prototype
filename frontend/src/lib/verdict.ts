@@ -14,7 +14,8 @@ export type VerdictMeta = {
   /** Badge text: "Source contradicts". Same words as the gateway's report (VERDICT_WORDS in
    * backend/app/author/logic.py) and, for the verdicts it has, StandingBadge. */
   badge: string
-  /** Legend / status-bar text: "not supported". */
+  /** Legend / status-bar text: "contradicted". The badge's words, shortened, so a count and a
+   * row never name one verdict two ways ("partial" read as half-backed for a silent source). */
   legend: string
   /** The StandingBadge kind that renders this verdict, so the existing badge is reused. */
   standing: 'supports' | 'refutes' | 'insufficient' | 'unchecked'
@@ -38,7 +39,7 @@ export const VERDICTS: Record<Verdict, VerdictMeta> = {
   },
   insufficient: {
     badge: 'Source is silent',
-    legend: 'partial',
+    legend: 'source silent',
     standing: 'insufficient',
     text: 'text-insufficient',
     fill: 'bg-insufficient',
@@ -47,7 +48,7 @@ export const VERDICTS: Record<Verdict, VerdictMeta> = {
   },
   refutes: {
     badge: 'Source contradicts',
-    legend: 'not supported',
+    legend: 'contradicted',
     standing: 'refutes',
     text: 'text-refutes',
     fill: 'bg-refutes',

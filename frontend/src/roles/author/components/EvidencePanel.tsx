@@ -1,7 +1,8 @@
 /**
  * "Evidence — issue N of M": the selected citation's sentence beside the passage the verdict
- * rests on, why, and the ways to act on it: edit the sentence at its line (first, the usual fix),
- * upload the source PDF (only when no passage was read), or keep the citation with a note. "Override · add note" and the editor's "Keep mine" are the same action, so the
+ * rests on, why, and the ways to act on it: edit the draft at the citation's line, upload the
+ * source PDF (when no passage of the published paper was read), or keep the citation with a
+ * note. "Override · add note" and the editor's "Keep mine" are the same action, so the
  * note form lives here and the popover reuses the wording.
  *
  * "show in the paper" opens the source PDF at the passage in the shared PageViewer, the way
@@ -17,7 +18,7 @@ import { api } from '../../../lib/api'
 import { askTarget } from '../../../lib/askCursor'
 import { shortMessage } from '../../../lib/citations'
 import { referenceNote } from '../../../lib/referenceCheck'
-import { isNotFound, isOpenIssue, settledHint } from '../../../lib/verdict'
+import { isNotFound, isOpenIssue, isUnjudged, settledHint } from '../../../lib/verdict'
 import type { Citation, DraftStatus } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
@@ -57,6 +58,10 @@ export function EvidencePanel({
   const [locating, setLocating] = useState(false)
   const pdfInput = useRef<HTMLInputElement>(null)
 
+  // An open issue, or a reference no index knows, is fixed in the draft (the sentence, the DOI,
+  // or the \cite itself); a source nobody could read is fixed by uploading it.
+  const editLeads = Boolean(citation && (isOpenIssue(citation) || isNotFound(citation)))
+
   const index = citation ? issues.findIndex((c) => c.id === citation.id) : -1
   const pager =
     issues.length === 0
@@ -92,7 +97,7 @@ export function EvidencePanel({
   }
 
   return (
-    <Card className="flex flex-col gap-3" aria-labelledby="evidence-title">
+    <Card className="@container flex flex-col gap-3" aria-labelledby="evidence-title">
       <CardHead
         id="evidence-title"
         title={citation ? `Evidence · ${sourceLabel(citation)}` : 'Evidence'}
@@ -119,9 +124,14 @@ export function EvidencePanel({
         )
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
+          {/* What the check said, so the verdict is not left behind in the list. */}
+          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
+            <span className="min-w-0 truncate font-mono text-xs text-ink-muted">{`\\cite{${citation.key}}`}</span>
+          </p>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 @xl:grid-cols-2 @xl:gap-4">
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
-              <p className="text-[11px] font-medium break-words text-ink-muted">
+              <p className="text-xs font-medium break-words text-ink-muted">
                 <span className="uppercase tracking-wide">Your sentence</span> · {citation.file} L{citation.line}
               </p>
               <p className="font-mono text-xs leading-relaxed break-words text-ink">{citation.sentence}</p>
@@ -129,7 +139,7 @@ export function EvidencePanel({
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
               {citation.evidence?.passage ? (
                 <>
-                  <p className="text-[11px] font-medium break-words text-ink-muted">
+                  <p className="text-xs font-medium break-words text-ink-muted">
                     <span className="uppercase tracking-wide">Source passage</span> · {citation.evidence.pdf}
                     {citation.evidence.page ? ` p.${citation.evidence.page}` : ''}
                   </p>
@@ -149,7 +159,7 @@ export function EvidencePanel({
                 </>
               ) : (
                 <>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
                   <p className="text-[13px] break-words text-ink-muted">
                     {citation.verdict === 'unavailable'
                       ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
@@ -180,7 +190,6 @@ export function EvidencePanel({
 
           {citation.resolution ? (
             <div className="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
-              <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
               <span>
                 {citation.resolution.kind === 'replaced'
                   ? `Replaced \\cite{${citation.resolution.previousKey}} with \\cite{${citation.key}}.`
@@ -228,11 +237,10 @@ export function EvidencePanel({
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              {/* An open issue is usually fixed in the sentence; a citation with no answer, in its
-                  source or the .bib, so there the upload leads and Edit steps back. */}
+              {/* editLeads: the fix is in the draft. Otherwise the upload leads and Edit steps back. */}
               {onEdit && (
                 <Button
-                  variant={isOpenIssue(citation) ? 'solid' : 'ghost'}
+                  variant={editLeads ? 'solid' : 'ghost'}
                   onClick={() => onEdit(citation)}
                   data-ask-target={askTarget({ kind: 'action', id: 'edit-at-line' })}
                 >
@@ -245,7 +253,7 @@ export function EvidencePanel({
               {(!citation.evidence?.passage || citation.sourceVersion === 'preprint') && (
                 <>
                   <Button
-                    variant={isOpenIssue(citation) ? 'ghost' : 'solid'}
+                    variant={editLeads ? 'ghost' : 'solid'}
                     onClick={() => pdfInput.current?.click()}
                     data-ask-target={askTarget({ kind: 'action', id: 'upload-pdf' })}
                   >
@@ -267,10 +275,13 @@ export function EvidencePanel({
                   />
                 </>
               )}
-              <Button variant="ghost" onClick={() => setNoteOpen(true)} data-ask-target={askTarget({ kind: 'action', id: 'override' })}>
-                <PencilLine className="size-4" aria-hidden="true" />
-                Override · add note
-              </Button>
+              {/* Nothing was judged, so there is no verdict to override. */}
+              {!isUnjudged(citation) && (
+                <Button variant="ghost" onClick={() => setNoteOpen(true)} data-ask-target={askTarget({ kind: 'action', id: 'override' })}>
+                  <PencilLine className="size-4" aria-hidden="true" />
+                  Override · add note
+                </Button>
+              )}
             </div>
           )}
         </>

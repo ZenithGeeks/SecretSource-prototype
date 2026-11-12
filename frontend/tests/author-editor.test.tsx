@@ -71,7 +71,7 @@ describe('Author LaTeX editor', () => {
 
     // 7 \cite on this file: 2 supported, 1 partial, 2 not supported, 1 unavailable, 1 missing.
     await waitFor(() => expect(screen.getByText('2 supported')).toBeInTheDocument())
-    expect(screen.getByText('2 not supported')).toBeInTheDocument()
+    expect(screen.getByText('2 contradicted')).toBeInTheDocument()
     expect(screen.getByText(/7 \\cite · 1 warning$/)).toBeInTheDocument()
 
     // jsdom has no layout, so CodeMirror only draws the first lines of the viewport.
