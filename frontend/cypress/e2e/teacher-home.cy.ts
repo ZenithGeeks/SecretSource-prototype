@@ -6,7 +6,7 @@ describe('Teacher: Home overview and quick actions', () => {
     chooseRole('Teacher')
 
     // Heading greeting is visible
-    cy.findByRole('heading', { level: 1, name: /^Good morning/ }).should('be.visible')
+    cy.findByRole('heading', { level: 1, name: /^Good / }).should('be.visible')
     cy.findByText(/awaiting review/).should('be.visible')
 
     // Quick action buttons

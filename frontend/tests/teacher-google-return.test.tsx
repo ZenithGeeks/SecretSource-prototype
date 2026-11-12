@@ -7,6 +7,7 @@ vi.mock('../src/lib/useAuth', () => ({ useAuth: () => ({ session: null, loading:
 vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => null }))
 
 import { Root } from '../src/Root'
+import '../src/roles/teacher/TeacherApp'
 import { TEACHER_GOOGLE_RETURN_KEY } from '../src/lib/teacherGoogleReturn'
 import { teacherApi } from '../src/lib/teacher'
 
@@ -27,7 +28,7 @@ describe('Google Classroom OAuth return', () => {
 
     renderRoot()
 
-    expect(await screen.findByRole('heading', { name: 'Choose a class' }, { timeout: 4000 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Choose a class' })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('role')).toBe('teacher')
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('add-class-course')
     expect(sessionStorage.getItem(TEACHER_GOOGLE_RETURN_KEY)).toBeNull()
