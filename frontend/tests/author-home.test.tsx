@@ -117,10 +117,13 @@ describe('Author Home', () => {
     })
     renderHome()
     await screen.findByRole('heading', { name: 'Citations that need work' })
-    // It may be made up, so its group is open unasked and the count names it.
-    expect(await waitFor(unreadToggle)).toHaveAttribute('aria-expanded', 'true')
+    // It may be made up, so it is never folded away: it sits right after the contradictions, above
+    // the silent sources, and the count names it, though it is still not counted as an issue.
+    expect(await waitFor(unreadToggle)).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText(/^3 issues · 1 not found · \d+ not checked$/)).toBeInTheDocument()
-    const row = (await rowsOf()).find((r) => r.textContent?.includes('nguyen2016'))!
+    const top = within(screen.getByRole('list', { name: 'Citations' })).getAllByRole('button')
+    expect(top.map((r) => r.querySelector('[data-verdict]')?.textContent)).toEqual(['Source contradicts', 'Source contradicts', 'Not found', 'Source is silent'])
+    const row = top.find((r) => r.textContent?.includes('nguyen2016'))!
     expect(row.querySelector('[data-verdict]')).toHaveAttribute('data-verdict', 'refutes')
     expect(row.querySelector('[data-verdict]')).toHaveTextContent('Not found')
     expect(row).toHaveTextContent('check that it exists')

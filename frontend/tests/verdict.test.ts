@@ -16,7 +16,7 @@ test('every verdict has words and colours, and the bar order covers every checke
   assert.equal(VERDICTS.unchecked.badge, 'Not checked')
 })
 
-test('bySeverity: contradicts, silent, not found, unavailable, not checked; line order kept within a rank', () => {
+test('bySeverity: contradicts, not found, silent, unavailable, not checked; line order kept within a rank', () => {
   const rows = [
     { id: 'a', verdict: 'unchecked' as const },
     { id: 'b', verdict: 'insufficient' as const },
@@ -25,7 +25,7 @@ test('bySeverity: contradicts, silent, not found, unavailable, not checked; line
     { id: 'e', verdict: 'unavailable' as const, exists: 'no' as const },
     { id: 'f', verdict: 'refutes' as const },
   ]
-  assert.deepEqual(bySeverity(rows).map((r) => r.id), ['d', 'f', 'b', 'e', 'c', 'a'])
+  assert.deepEqual(bySeverity(rows).map((r) => r.id), ['d', 'f', 'e', 'b', 'c', 'a'])
 })
 
 test('isNotFound: a reference no index knows, whose source was not read', () => {

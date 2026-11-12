@@ -108,11 +108,13 @@ export function isNotFound(c: Pick<Citation, 'verdict' | 'exists'>): boolean {
 export const NOT_FOUND = { badge: 'Not found', title: 'no index knows this reference' } as const
 
 /** Worst first, for "Needs work", its Evidence pager and the first issue Home opens on:
- * Source contradicts, Source is silent, Not found, Source unavailable, Not checked. Sort with a
- * stable sort so citations of one rank keep the draft's line order. */
+ * Source contradicts, Not found (it may be a made-up reference), Source is silent, Source
+ * unavailable, Not checked. Sort with a stable sort so citations of one rank keep the draft's
+ * line order. */
 export function severity(c: Pick<Citation, 'verdict' | 'exists' | 'resolution'>): number {
-  if (isOpenIssue(c)) return c.verdict === 'refutes' ? 0 : 1
-  if (isNotFound(c)) return 2
+  if (isOpenIssue(c) && c.verdict === 'refutes') return 0
+  if (isNotFound(c)) return 1
+  if (isOpenIssue(c)) return 2
   return c.verdict === 'unavailable' ? 3 : 4
 }
 

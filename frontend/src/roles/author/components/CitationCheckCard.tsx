@@ -1,8 +1,8 @@
 /** "Citations that need work" (Redesign A1): the filter chips and the rows. Clicking a row selects
  * it for the Evidence panel below. "Needs work" lists the open issues worst first (Source
- * contradicts, then Source is silent), then what could not be judged under a collapsible
- * "N couldn't be checked", so a source nobody could read is not hidden but does not bury the
- * issues either; those rows are not open issues (isOpenIssue). */
+ * contradicts, Not found, then Source is silent: bySeverity), then what could not be judged
+ * under a collapsible "N couldn't be checked", so a source nobody could read is not hidden but
+ * does not bury the issues either; those rows are not open issues (isOpenIssue). */
 
 import { ChevronDown } from 'lucide-react'
 import { Fragment, useId, useState } from 'react'
@@ -130,18 +130,18 @@ export function CitationCheckCard({
 }) {
   const [filter, setFilter] = useState<Filter>('needs-work')
   const rows = rowsFor(filter, citations)
-  // "Needs work": the issues, then what could not be judged. That group opens by itself when there
-  // is no issue above it, when the selected row is in it, or when it holds a reference no index
-  // knows (it may be made up, so it is never folded away unasked).
+  // "Needs work": the issues, with any reference no index knows among them (it may be made up, so
+  // it is never folded away; it is still not counted as an issue), then what could not be judged.
+  // That group opens by itself when there is nothing above it or when the selected row is in it.
   const issueRows: Citation[] = []
   const unreadRows: Citation[] = []
-  for (const c of rows) (isOpenIssue(c) ? issueRows : unreadRows).push(c)
+  for (const c of rows) (isOpenIssue(c) || isNotFound(c) ? issueRows : unreadRows).push(c)
   // The author's toggle holds until the selection changes, so a row picked from elsewhere (the
   // pager, Ask) is never selected inside a closed group.
   const [toggled, setToggled] = useState<{ open: boolean; selectedId: string | undefined } | null>(null)
   const showUnread =
     toggled && toggled.selectedId === selectedId ? toggled.open
-      : issueRows.length === 0 || unreadRows.some((c) => c.id === selectedId || isNotFound(c))
+      : issueRows.length === 0 || unreadRows.some((c) => c.id === selectedId)
   const unreadId = useId()
 
   const emptyHint: Record<Filter, [string, string]> = {
