@@ -3,10 +3,24 @@
 from pathlib import Path
 
 from app.pipeline import sources, verify
-from app.pipeline.verify import judged_text
+from app.pipeline.verify import cites_others, judged_text
 
 MARKED = "Engines [cited] scale."
 SENTENCE = "Optimized late interaction engines [b45][b31] enable to easily scale corpus sizes."
+
+
+def test_a_sentence_that_cites_another_work_too_cites_others():
+    claim = {"claim": "Engines scale.", "sentence": SENTENCE}
+
+    assert cites_others(claim, {"ref": "b31"})
+
+
+def test_a_sentence_with_only_this_citation_or_none_does_not_cite_others():
+    assert not cites_others({"claim": "x", "sentence": "Engines [b31] scale [b31]."}, {"ref": "b31"})
+    # Without this citation's marker the judge reads the claim, so there is no part to pick out.
+    assert not cites_others({"claim": "x", "sentence": SENTENCE}, {"ref": "b99"})
+    assert not cites_others({"claim": "x", "sentence": SENTENCE}, {"title": "PLAID"})
+    assert not cites_others({"claim": "x", "sentence": None}, {"ref": "b31"})
 
 
 def test_marks_the_checked_citation_and_drops_the_others():
@@ -37,7 +51,7 @@ def test_falls_back_to_the_claim_without_a_marker_for_the_citation():
     assert judged_text({"claim": "Engines scale.", "sentence": None}, {"ref": "b31"}) == "Engines scale."
 
 
-def _check(monkeypatch, verdicts):
+def _check(monkeypatch, verdicts, others=False):
     """check_prepared with fake retrieval and a judge that answers from `verdicts` by text.
     Returns the result, the retrieval queries and the texts the judge read."""
     queries, judged = [], []
@@ -56,7 +70,9 @@ def _check(monkeypatch, verdicts):
     monkeypatch.setattr(verify, "_visual_indexing", {})
     monkeypatch.setattr(sources, "known_index", lambda identifier: {"index": "", "ids": {}})
     monkeypatch.setattr(sources, "version_of", lambda pdf: {})
-    result = verify.check_prepared("Engines scale.", "2205.09707", Path("cited.pdf"), MARKED)
+    result = verify.check_prepared(
+        "Engines scale.", "2205.09707", Path("cited.pdf"), MARKED, other_citations=others
+    )
     return result, queries, judged
 
 
@@ -82,3 +98,38 @@ def test_other_verdicts_are_not_rechecked(monkeypatch):
 
     assert judged == ["Engines scale."]
     assert result["verdict"] == "supports"
+
+
+def test_an_insufficient_for_a_sentence_citing_others_is_asked_again_about_its_part(monkeypatch):
+    """#943: "8.3B in Megatron-LM and 17B in Turing-NLG [cited]" was insufficient against the
+    Turing-NLG page, because the page does not mention Megatron-LM."""
+    verdicts = {"Engines scale.": "insufficient", MARKED: "supports"}
+
+    result, queries, judged = _check(monkeypatch, verdicts, others=True)
+
+    assert queries == ["Engines scale."]
+    assert judged == ["Engines scale.", MARKED]
+    assert (result["verdict"], result["verdict_from"]) == ("supports", "cited")
+
+
+def test_the_second_ask_never_turns_an_insufficient_into_a_refutes(monkeypatch):
+    verdicts = {"Engines scale.": "insufficient", MARKED: "refutes"}
+
+    result, _, judged = _check(monkeypatch, verdicts, others=True)
+
+    assert judged == ["Engines scale.", MARKED]
+    assert (result["verdict"], result["verdict_from"]) == ("insufficient", "text")
+
+
+def test_an_insufficient_for_a_sentence_citing_only_this_work_is_not_asked_again(monkeypatch):
+    result, _, judged = _check(monkeypatch, {"Engines scale.": "insufficient"})
+
+    assert judged == ["Engines scale."]
+    assert result["verdict"] == "insufficient"
+
+
+def test_a_supports_for_a_sentence_citing_others_is_not_asked_again(monkeypatch):
+    result, _, judged = _check(monkeypatch, {"Engines scale.": "supports"}, others=True)
+
+    assert judged == ["Engines scale."]
+    assert (result["verdict"], result["verdict_from"]) == ("supports", "text")

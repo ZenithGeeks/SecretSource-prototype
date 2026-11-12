@@ -321,7 +321,7 @@ def pipeline(monkeypatch):
     monkeypatch.setattr(
         main,
         "check_prepared",
-        lambda claim, source, path, judged="": (
+        lambda claim, source, path, judged="", other_citations=False: (
             checked.append(source)
             or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
         ),
