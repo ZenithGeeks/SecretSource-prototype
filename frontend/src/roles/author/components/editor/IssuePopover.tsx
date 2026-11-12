@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../../../components/ui'
 import { shortMessage } from '../../../../lib/citations'
+import { isNotFound } from '../../../../lib/verdict'
 import type { Citation } from '../../../../types/draftCheck'
 import { sourceLabel } from '../../labels'
 import { AuditNote, CitationBadge } from '../Verdicts'
@@ -86,7 +87,7 @@ export function IssuePopover({
       style={{ top: anchor.top + anchor.height + 8, left, width: WIDTH }}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <CitationBadge verdict={citation.verdict} />
+        <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
         <span id="issue-popover-title" className="text-[11px] text-ink-muted">
           [{numberOf(citation.key) ?? '?'}] {sourceLabel(citation)}
         </span>

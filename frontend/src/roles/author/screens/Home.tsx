@@ -28,7 +28,7 @@ import { useAuth } from '../../../lib/useAuth'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorDrafts, useAuthorParse, useDraftChecks, useLibrary, useProjectLint, useStartCheck } from '../../../lib/useAuthor'
 import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
-import { isOpenIssue, settledHint } from '../../../lib/verdict'
+import { bySeverity, isOpenIssue, settledHint } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { BibliographyCard } from '../components/BibliographyCard'
 import { CheckProgress } from '../components/CheckProgress'
@@ -240,7 +240,8 @@ function HomeBody({
   useEffect(() => () => onTargetChange?.(false), [onTargetChange])
 
   const citations = latest.data?.citations ?? []
-  const issues = citations.filter(isOpenIssue)
+  // Worst first, in the order "Needs work" lists them, so the pager walks the list top to bottom.
+  const issues = bySeverity(citations.filter(isOpenIssue))
   // The selected row, else the first open issue — what the Evidence panel shows.
   const selected: Citation | undefined = citations.find((c) => c.id === selectedId) ?? issues[0]
   const checkId = latest.data?.id
@@ -259,7 +260,7 @@ function HomeBody({
     if (!draft.data || !checkId) return
     try {
       const check = await actions.overrideCitation(draft.data.id, checkId, citation, note)
-      const next = (check.citations ?? []).filter(isOpenIssue)
+      const next = bySeverity((check.citations ?? []).filter(isOpenIssue))
       setSelectedId(next[0]?.id ?? null)
       setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
     } catch (error) {
@@ -392,6 +393,7 @@ function HomeBody({
                   .catch((error) => setToast(`Could not upload ${file.name}: ${errorMessage(error)}`))
               }
               onShow={showTarget}
+              onEdit={(c) => onOpenEditor({ draftId: current.id, file: c.file, line: c.line })}
             />
           </div>
           <YourDraftsCard drafts={drafts} currentId={current.id} onOpen={(id) => onOpenEditor({ draftId: id })} onNew={onNewDraft} creating={creatingDraft} onHistory={onOpenHistory} onDelete={setDeleting} />

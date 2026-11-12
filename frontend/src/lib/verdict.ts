@@ -11,7 +11,8 @@
 import type { Citation, DraftStatus, Verdict } from '../types/draftCheck'
 
 export type VerdictMeta = {
-  /** Badge text: "Source contradicts". Same words as StandingBadge. */
+  /** Badge text: "Source contradicts". Same words as the gateway's report (VERDICT_WORDS in
+   * backend/app/author/logic.py) and, for the verdicts it has, StandingBadge. */
   badge: string
   /** Legend / status-bar text: "not supported". */
   legend: string
@@ -56,7 +57,7 @@ export const VERDICTS: Record<Verdict, VerdictMeta> = {
   // Not an open issue: nothing was judged, so there is nothing to replace or override. The
   // Library's "Needs attention" lists it instead, with "Upload PDF" (same rule as the gateway).
   unavailable: {
-    badge: 'Not checked',
+    badge: 'Source unavailable',
     legend: 'unavailable',
     standing: 'unchecked',
     text: 'text-ink-muted',
@@ -87,6 +88,34 @@ export function emptyCounts(): Record<Verdict, number> {
 /** A citation the author still has to deal with: needs work and not yet replaced/overridden. */
 export function isOpenIssue(citation: Pick<Citation, 'verdict' | 'resolution'>): boolean {
   return VERDICTS[citation.verdict].needsWork && !citation.resolution
+}
+
+/** No answer for this citation: its source was not read, or its key is not in the .bib. */
+export function isUnjudged(c: Pick<Citation, 'verdict'>): boolean {
+  return c.verdict === 'unavailable' || c.verdict === 'unchecked'
+}
+
+/** A reference no index knows (#421) whose source the check could not read, so nothing vouches
+ * that the paper exists. Its badge says NOT_FOUND in the refutes tone instead of a neutral
+ * "Source unavailable": it may be a made-up reference. Still not an open issue, so counts are
+ * unchanged. */
+export function isNotFound(c: Pick<Citation, 'verdict' | 'exists'>): boolean {
+  return c.exists === 'no' && isUnjudged(c)
+}
+
+export const NOT_FOUND = { badge: 'Not found', title: 'no index knows this reference' } as const
+
+/** Worst first, for "Needs work", its Evidence pager and the first issue Home opens on:
+ * Source contradicts, Source is silent, Not found, Source unavailable, Not checked. Sort with a
+ * stable sort so citations of one rank keep the draft's line order. */
+export function severity(c: Pick<Citation, 'verdict' | 'exists' | 'resolution'>): number {
+  if (isOpenIssue(c)) return c.verdict === 'refutes' ? 0 : 1
+  if (isNotFound(c)) return 2
+  return c.verdict === 'unavailable' ? 3 : 4
+}
+
+export function bySeverity<C extends Pick<Citation, 'verdict' | 'exists' | 'resolution'>>(citations: readonly C[]): C[] {
+  return [...citations].sort((a, b) => severity(a) - severity(b))
 }
 
 /** A verdict the check is not sure of: the source was silent on the sentence, the judge

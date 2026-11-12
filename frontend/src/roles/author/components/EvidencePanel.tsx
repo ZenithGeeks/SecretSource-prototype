@@ -1,14 +1,14 @@
 /**
  * "Evidence — issue N of M": the selected citation's sentence beside the passage the verdict
- * rests on, why, and the two ways to act on it: upload the source PDF, or keep the citation
- * with a note. "Override · add note" and the editor's "Keep mine" are the same action, so the
+ * rests on, why, and the ways to act on it: edit the sentence at its line (first, the usual fix),
+ * upload the source PDF (only when no passage was read), or keep the citation with a note. "Override · add note" and the editor's "Keep mine" are the same action, so the
  * note form lives here and the popover reuses the wording.
  *
  * "show in the paper" opens the source PDF at the passage in the shared PageViewer, the way
  * a researcher's claim card does: the gateway locates the text, the viewer highlights it.
  */
 
-import { ChevronRight, PencilLine, RotateCcw, Upload } from 'lucide-react'
+import { ChevronRight, PencilLine, RotateCcw, SquarePen, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import type { Target } from '../../../components/PageViewer'
@@ -17,7 +17,7 @@ import { api } from '../../../lib/api'
 import { askTarget } from '../../../lib/askCursor'
 import { shortMessage } from '../../../lib/citations'
 import { referenceNote } from '../../../lib/referenceCheck'
-import { settledHint } from '../../../lib/verdict'
+import { isNotFound, isOpenIssue, settledHint } from '../../../lib/verdict'
 import type { Citation, DraftStatus } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
@@ -34,6 +34,7 @@ export function EvidencePanel({
   onReopen,
   onAttachPdf,
   onShow,
+  onEdit,
 }: {
   citation: Citation | undefined
   /** The open issues, for the "N of M" pager. */
@@ -48,6 +49,8 @@ export function EvidencePanel({
   onAttachPdf: (citation: Citation, file: File) => void
   /** Open the source PDF at the passage. */
   onShow?: (target: Target) => void
+  /** Open the editor at the citation's line: the usual fix is to change the sentence. */
+  onEdit?: (citation: Citation) => void
 }) {
   const [noteOpen, setNoteOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -177,7 +180,7 @@ export function EvidencePanel({
 
           {citation.resolution ? (
             <div className="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
-              <CitationBadge verdict={citation.verdict} />
+              <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
               <span>
                 {citation.resolution.kind === 'replaced'
                   ? `Replaced \\cite{${citation.resolution.previousKey}} with \\cite{${citation.key}}.`
@@ -225,23 +228,45 @@ export function EvidencePanel({
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" onClick={() => pdfInput.current?.click()} data-ask-target={askTarget({ kind: 'action', id: 'upload-pdf' })}>
-                <Upload className="size-4" aria-hidden="true" />
-                Upload source PDF
-              </Button>
-              <input
-                ref={pdfInput}
-                type="file"
-                accept="application/pdf,.pdf"
-                className="sr-only"
-                tabIndex={-1}
-                aria-hidden="true"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  event.target.value = ''
-                  if (file) onAttachPdf(citation, file)
-                }}
-              />
+              {/* An open issue is usually fixed in the sentence; a citation with no answer, in its
+                  source or the .bib, so there the upload leads and Edit steps back. */}
+              {onEdit && (
+                <Button
+                  variant={isOpenIssue(citation) ? 'solid' : 'ghost'}
+                  onClick={() => onEdit(citation)}
+                  data-ask-target={askTarget({ kind: 'action', id: 'edit-at-line' })}
+                >
+                  <SquarePen className="size-4" aria-hidden="true" />
+                  Edit at L{citation.line}
+                </Button>
+              )}
+              {/* A passage read from the published paper settles it: an upload would not change the
+                  verdict. One read from a preprint (#424) might, so the upload stays there. */}
+              {(!citation.evidence?.passage || citation.sourceVersion === 'preprint') && (
+                <>
+                  <Button
+                    variant={isOpenIssue(citation) ? 'ghost' : 'solid'}
+                    onClick={() => pdfInput.current?.click()}
+                    data-ask-target={askTarget({ kind: 'action', id: 'upload-pdf' })}
+                  >
+                    <Upload className="size-4" aria-hidden="true" />
+                    Upload source PDF
+                  </Button>
+                  <input
+                    ref={pdfInput}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ''
+                      if (file) onAttachPdf(citation, file)
+                    }}
+                  />
+                </>
+              )}
               <Button variant="ghost" onClick={() => setNoteOpen(true)} data-ask-target={askTarget({ kind: 'action', id: 'override' })}>
                 <PencilLine className="size-4" aria-hidden="true" />
                 Override · add note
