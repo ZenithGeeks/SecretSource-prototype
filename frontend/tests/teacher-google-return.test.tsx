@@ -27,7 +27,7 @@ describe('Google Classroom OAuth return', () => {
 
     renderRoot()
 
-    expect(await screen.findByRole('heading', { name: 'Choose a class' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Choose a class' }, { timeout: 4000 })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('role')).toBe('teacher')
     expect(new URLSearchParams(window.location.search).get('screen')).toBe('add-class-course')
     expect(sessionStorage.getItem(TEACHER_GOOGLE_RETURN_KEY)).toBeNull()

@@ -1,0 +1,43 @@
+{
+  "courseId": "class-literary-2b",
+  "course": "Literary Analysis",
+  "assignmentId": "assignment-essay",
+  "reviewQueueCount": 2,
+  "submissions": [
+    {
+      "id": "sub-anan-essay",
+      "assignmentId": "assignment-essay",
+      "courseId": "class-literary-2b",
+      "courseName": "Literary Analysis",
+      "studentId": "student-anan",
+      "studentName": "Anan P.",
+      "initial": "A",
+      "state": "submitted",
+      "submittedAt": "Yesterday, 3:45 PM",
+      "reviewStatus": "not-checked",
+      "summary": "1 claim supported, 1 refuted, 1 unverified.",
+      "attachments": []
+    }
+  ],
+  "dueSoon": [
+    {
+      "id": "assignment-essay",
+      "courseId": "class-literary-2b",
+      "courseName": "Literary Analysis",
+      "title": "Assignment 2: Evidence-based essay",
+      "dueAt": "Tomorrow, 11:59 PM",
+      "enrolledCount": 25,
+      "submittedCount": 19,
+      "missingCount": 6,
+      "returnedCount": 0,
+      "pendingReviewCount": 2,
+      "overdue": false
+    }
+  ],
+  "mostMisusedSources": [
+    {
+      "title": "Wikipedia - Literary Analysis",
+      "count": 4
+    }
+  ]
+}

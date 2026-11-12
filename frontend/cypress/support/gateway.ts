@@ -1,7 +1,7 @@
 /** Stubs for the gateway routes the Researcher and Labeler screens call, and the role picker. */
 
 /** Opens the app on the role picker and picks a role, as a first-time visitor does. */
-export function chooseRole(role: 'Researcher' | 'Labeler') {
+export function chooseRole(role: 'Researcher' | 'Labeler' | 'Teacher') {
   cy.visit('/')
   cy.findByRole('radio', { name: new RegExp(role) }).click()
   cy.findByRole('button', { name: `Continue as ${role}` }).click()
@@ -28,3 +28,14 @@ export function stubLabeler(pool: Record<string, unknown> = {}) {
   cy.intercept('GET', '/api/labeling/sessions/nlp1', { fixture: 'labeler-session.json' })
   cy.intercept('GET', '/api/labeling/sessions/cv1', { fixture: 'labeler-session-blind.json' })
 }
+
+/** The Teacher's Home, classes, workspace, history, and Classroom connection status. */
+export function stubTeacher() {
+  cy.intercept('GET', '/api/teacher/home', { fixture: 'teacher-home.json' })
+  cy.intercept('GET', '/api/teacher/classes', { fixture: 'teacher-classes.json' })
+  cy.intercept('GET', '/api/teacher/classes/class-literary-2b/workspace', { fixture: 'teacher-workspace.json' })
+  cy.intercept('GET', '/api/teacher/classes/class-modern-writing-1a/workspace', { fixture: 'teacher-workspace.json' })
+  cy.intercept('GET', '/api/teacher/history', [])
+  cy.intercept('GET', '/api/teacher/google/status', { connected: true, email: 'teacher@example.edu', scopes: [] })
+}
+
