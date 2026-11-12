@@ -14,7 +14,7 @@ import { centreInView } from '../src/lib/centreInView'
 import { resetSettings, updateSettings } from '../src/lib/settings'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
-import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
+import { DEFAULT_VERDICTS, installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
@@ -37,7 +37,12 @@ function renderHome(draftId: string | null = 'd1') {
   return { ...view, onSelectDraft, onOpenEditor, onOpenHistory }
 }
 
-const rowsOf = async () => within(await screen.findByRole('list', { name: 'Citations' })).getAllByRole('button')
+/** Every citation row on the card: the issues' list, and the "couldn't be checked" one while open. */
+const rowsOf = async () => {
+  const lists = await screen.findAllByRole('list', { name: /^Citations/ })
+  return lists.flatMap((list) => within(list).getAllByRole('button'))
+}
+const unreadToggle = () => screen.getByRole('button', { name: /couldn’t be checked$/ })
 const bibliography = () => within(screen.getByRole('heading', { name: 'Bibliography' }).closest('.rounded-2xl') as HTMLElement)
 
 beforeEach(() => {
@@ -76,7 +81,99 @@ describe('Author Home', () => {
     expect(rows[0]).toHaveTextContent('Source contradicts')
     expect(rows[0]).toHaveTextContent('\\cite{khattab2020}')
     expect(rows[0]).toHaveTextContent(/related-work\.tex · L\d+ · khattab2020\.pdf p\.7/)
-    expect(rows.some((row) => row.textContent?.includes('no bib entry'))).toBe(true)
+    // What could not be judged waits, folded, under the issues.
+    expect(rows).toHaveLength(3)
+    expect(unreadToggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(unreadToggle()).toHaveTextContent('3 couldn’t be checked')
+    fireEvent.click(unreadToggle())
+    expect(unreadToggle()).toHaveAttribute('aria-expanded', 'true')
+    const all = await rowsOf()
+    expect(all.some((row) => row.textContent?.includes('missing bib key'))).toBe(true)
+    // The badge says what the legend counts: an unreadable source is not "not checked".
+    expect(all.find((row) => row.textContent?.includes('nguyen2016'))).toHaveTextContent('Source unavailable')
+    expect(all.find((row) => row.textContent?.includes('liu2023'))).toHaveTextContent('Not checked')
+  })
+
+  test('"Needs work" puts the worst first: Source contradicts, then Source is silent, then what was not read', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      // robertson2009 comes first in the draft, but a silent source is less bad than a contradiction.
+      verdictFor: (key, claim) => (key === 'robertson2009' ? { verdict: 'insufficient', passage: '' } : DEFAULT_VERDICTS(key, claim)),
+    })
+    renderHome()
+    await screen.findByRole('heading', { name: 'Citations that need work' })
+    fireEvent.click(await waitFor(unreadToggle))
+    // The Evidence pager walks the same order: issue 1 is the top row, not the first in the draft.
+    expect(await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /1 of 4 issues/ })).toBeInTheDocument()
+    const badges = (await rowsOf()).map((row) => row.querySelector('[data-verdict]')?.textContent)
+    expect(badges).toEqual(['Source contradicts', 'Source contradicts', 'Source is silent', 'Source is silent', 'Source unavailable', 'Not checked', 'Not checked'])
+  })
+
+  test('a reference no index knows reads "Not found" in the refutes tone, and is still not an issue', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: (key, claim) => (key === 'nguyen2016' ? { verdict: 'unavailable', reason: 'no-open-access', message: 'no free copy', exists: 'no' } : DEFAULT_VERDICTS(key, claim)),
+    })
+    renderHome()
+    await screen.findByRole('heading', { name: 'Citations that need work' })
+    // It may be made up, so it is never folded away: it sits right after the contradictions, above
+    // the silent sources, and the count names it, though it is still not counted as an issue.
+    expect(await waitFor(unreadToggle)).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText(/^3 issues · 1 not found · \d+ not checked$/)).toBeInTheDocument()
+    const top = within(screen.getByRole('list', { name: 'Citations' })).getAllByRole('button')
+    expect(top.map((r) => r.querySelector('[data-verdict]')?.textContent)).toEqual(['Source contradicts', 'Source contradicts', 'Not found', 'Source is silent'])
+    const row = top.find((r) => r.textContent?.includes('nguyen2016'))!
+    expect(row.querySelector('[data-verdict]')).toHaveAttribute('data-verdict', 'refutes')
+    expect(row.querySelector('[data-verdict]')).toHaveTextContent('Not found')
+    expect(row).toHaveTextContent('check that it exists')
+    expect(screen.getByRole('button', { name: /1 of 3 issues/ })).toBeInTheDocument()
+    // Its fix is in the draft (the DOI, or the \cite): Edit leads, with no PDF to upload and no
+    // verdict to override, and the panel gives no author and year to a work no index knows.
+    fireEvent.click(row)
+    const evidence = within(await screen.findByRole('region', { name: 'Evidence · \\cite{nguyen2016}' }))
+    expect(evidence.getByText('Not found')).toBeInTheDocument()
+    expect(evidence.getByRole('button', { name: /^Edit at L\d+$/ })).toHaveClass('bg-accent')
+    expect(evidence.queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
+    expect(evidence.queryByRole('button', { name: /Upload source PDF/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/^Evidence for \\cite\{nguyen2016\}, line \d+: Not found\.$/)).toBeInTheDocument()
+  })
+
+  test('the Evidence panel names the verdict, and the cards are named regions', async () => {
+    renderHome()
+    const evidence = within(await screen.findByRole('region', { name: 'Evidence · Khattab & Zaharia, 2020' }))
+    expect(evidence.getByText('Source contradicts')).toBeInTheDocument()
+    expect(evidence.getByText('\\cite{khattab2020}')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Citations that need work' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Your drafts' })).toBeInTheDocument()
+  })
+
+  test('picking another row while its paper is open brings the evidence back, never the old paper', async () => {
+    // The viewer reads the window's width and size, which jsdom lacks (as in analysis-page-viewer).
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    renderHome()
+    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+    fireEvent.click(screen.getByRole('button', { name: 'show in the paper' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: /^Evidence/ })).not.toBeInTheDocument())
+    fireEvent.click((await rowsOf()).find((row) => row.textContent?.includes('thakur2021'))!)
+    expect(await screen.findByRole('region', { name: /^Evidence · / })).toHaveTextContent('\\cite{thakur2021}')
+  })
+
+  test('a source the publisher refused says so in plain words, not the raw HTTP error', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: (key, claim) =>
+        key === 'nguyen2016'
+          ? { verdict: 'unavailable', reason: 'failed', message: '403 Client Error: Forbidden for url: https://lekythos.library.example/pdf/123?token=abc' }
+          : DEFAULT_VERDICTS(key, claim),
+    })
+    const { container } = renderHome()
+    await screen.findByRole('heading', { name: 'Citations that need work' })
+    fireEvent.click(await waitFor(unreadToggle))
+    const row = (await rowsOf()).find((r) => r.textContent?.includes('nguyen2016'))!
+    expect(row).toHaveTextContent('HTTP 403: lekythos.library.example refused the download')
+    expect(container.textContent).not.toContain('Client Error')
   })
 
   test('the card says what it counts: its issues are the pager’s and Your drafts’ number, the rest are named', async () => {
@@ -85,8 +182,9 @@ describe('Author Home', () => {
     const label = await card.findByText(/^\d+ issues?/)
     expect(label).toHaveTextContent(/^3 issues/)
     expect(label).toHaveTextContent(/\d+ not checked$/)
-    // Every row on the card is in the label.
+    // Every row on the card is in the label, once the folded ones are open.
     const counted = (label.textContent ?? '').split(' · ').reduce((sum, part) => sum + Number(part.split(' ')[0]), 0)
+    fireEvent.click(unreadToggle())
     expect(await rowsOf()).toHaveLength(counted)
     expect(screen.getByRole('button', { name: /1 of 3 issues/ })).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'Drafts' })).getAllByRole('button').some((row) => row.textContent?.includes('3 issues'))).toBe(true)
@@ -191,14 +289,62 @@ describe('Author Home', () => {
     expect(check.citations.some((c) => c.resolution)).toBe(false)
   })
 
-  test('Upload source PDF attaches the file to that citation’s key', async () => {
+  test('Edit at the line opens the editor on the citation’s file and line, first among the actions', async () => {
+    const { onOpenEditor } = renderHome()
+    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+    const edit = screen.getByRole('button', { name: /^Edit at L\d+$/ })
+    const line = Number(edit.textContent?.match(/L(\d+)/)?.[1])
+    fireEvent.click(edit)
+    expect(onOpenEditor).toHaveBeenCalledWith({ draftId: 'd1', file: 'related-work.tex', line })
+    expect(line).toBeGreaterThan(0)
+  })
+
+  test('the "couldn’t be checked" group stays in the page while closed, so its toggle points at a real list', async () => {
+    renderHome()
+    await screen.findByRole('heading', { name: 'Citations that need work' })
+    const toggle = await waitFor(unreadToggle)
+    const list = document.getElementById(toggle.getAttribute('aria-controls')!)
+    expect(list).toHaveAttribute('hidden')
+    fireEvent.click(toggle)
+    expect(list).not.toHaveAttribute('hidden')
+    fireEvent.click(toggle)
+    expect(list).toHaveAttribute('hidden')
+  })
+
+  test('for a citation with no answer, Upload source PDF leads and Edit steps back', async () => {
+    renderHome()
+    await screen.findByRole('heading', { name: 'Citations that need work' })
+    fireEvent.click(await waitFor(unreadToggle))
+    fireEvent.click((await rowsOf()).find((row) => row.textContent?.includes('nguyen2016'))!)
+    const upload = await screen.findByRole('button', { name: /Upload source PDF/ })
+    const edit = screen.getByRole('button', { name: /^Edit at L\d+$/ })
+    expect(upload).toHaveClass('bg-accent')
+    expect(edit).not.toHaveClass('bg-accent')
+  })
+
+  test('a passage read from a preprint keeps Upload source PDF: the published paper might differ', async () => {
+    gateway = installFakeGateway({
+      files: THESIS_FILES,
+      verdictFor: (key, claim) => (key === 'khattab2020' ? { ...DEFAULT_VERDICTS(key, claim), sourceVersion: 'preprint' } : DEFAULT_VERDICTS(key, claim)),
+    })
     renderHome()
     await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
     expect(screen.getByRole('button', { name: /Upload source PDF/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Edit at L\d+$/ })).toHaveClass('bg-accent')
+  })
+
+  test('Upload source PDF only shows where no passage was read, and attaches the file to that citation’s key', async () => {
+    renderHome()
+    await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
+    // The check quoted the paper: a PDF upload would not change the verdict.
+    expect(screen.queryByRole('button', { name: /Upload source PDF/ })).not.toBeInTheDocument()
+    fireEvent.click(unreadToggle())
+    fireEvent.click((await rowsOf()).find((row) => row.textContent?.includes('nguyen2016'))!)
+    expect(await screen.findByRole('button', { name: /Upload source PDF/ })).toBeInTheDocument()
     const input = document.querySelector('input[accept="application/pdf,.pdf"]') as HTMLInputElement
-    fireEvent.change(input, { target: { files: [new File(['%PDF-1.7'], 'colbert.pdf', { type: 'application/pdf' })] } })
-    await waitFor(() => expect(gateway.calls).toContain('POST /author/drafts/d1/citations/khattab2020/pdf'))
-    expect(await screen.findByText('colbert.pdf attached to \\cite{khattab2020}. Re-check to read it.')).toBeInTheDocument()
+    fireEvent.change(input, { target: { files: [new File(['%PDF-1.7'], 'msmarco.pdf', { type: 'application/pdf' })] } })
+    await waitFor(() => expect(gateway.calls).toContain('POST /author/drafts/d1/citations/nguyen2016/pdf'))
+    expect(await screen.findByText('msmarco.pdf attached to \\cite{nguyen2016}. Re-check to read it.')).toBeInTheDocument()
   })
 
   test('Re-check starts a run on the gateway and the new verdicts land', async () => {
@@ -518,7 +664,7 @@ describe('What the screen agent can see (data-ask-target)', () => {
     await screen.findByRole('button', { name: 'Fix in editor' })
     const targets = [...container.querySelectorAll('[data-ask-target]')].map((el) => el.getAttribute('data-ask-target'))
     expect(targets).toEqual(
-      expect.arrayContaining(['action:check', 'action:open-editor', 'action:fix-in-editor', 'action:fix-warning-1', 'action:next-issue', 'action:upload-pdf', 'action:override', 'action:new-draft', 'draft:d1', 'draft:d2']),
+      expect.arrayContaining(['action:check', 'action:open-editor', 'action:fix-in-editor', 'action:fix-warning-1', 'action:next-issue', 'action:edit-at-line', 'action:override', 'action:new-draft', 'draft:d1', 'draft:d2']),
     )
     expect(targets.some((t) => t?.startsWith('citation:'))).toBe(true)
   })

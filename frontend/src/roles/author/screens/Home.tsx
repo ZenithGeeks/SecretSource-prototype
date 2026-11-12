@@ -27,8 +27,7 @@ import { SETTINGS_DEFAULTS, greeting, useSettings } from '../../../lib/settings'
 import { useAuth } from '../../../lib/useAuth'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useAuthorDrafts, useAuthorParse, useDraftChecks, useLibrary, useProjectLint, useStartCheck } from '../../../lib/useAuthor'
 import { useInFlight } from '../../../lib/useInFlight'
-import { cn } from '../../../lib/utils'
-import { isOpenIssue, settledHint } from '../../../lib/verdict'
+import { bySeverity, isOpenIssue, settledHint } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { BibliographyCard } from '../components/BibliographyCard'
 import { CheckProgress } from '../components/CheckProgress'
@@ -240,7 +239,8 @@ function HomeBody({
   useEffect(() => () => onTargetChange?.(false), [onTargetChange])
 
   const citations = latest.data?.citations ?? []
-  const issues = citations.filter(isOpenIssue)
+  // Worst first, in the order "Needs work" lists them, so the pager walks the list top to bottom.
+  const issues = bySeverity(citations.filter(isOpenIssue))
   // The selected row, else the first open issue — what the Evidence panel shows.
   const selected: Citation | undefined = citations.find((c) => c.id === selectedId) ?? issues[0]
   const checkId = latest.data?.id
@@ -259,7 +259,7 @@ function HomeBody({
     if (!draft.data || !checkId) return
     try {
       const check = await actions.overrideCitation(draft.data.id, checkId, citation, note)
-      const next = (check.citations ?? []).filter(isOpenIssue)
+      const next = bySeverity((check.citations ?? []).filter(isOpenIssue))
       setSelectedId(next[0]?.id ?? null)
       setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
     } catch (error) {
@@ -267,11 +267,14 @@ function HomeBody({
     }
   }
 
-  // A row or the pager picks a citation; the Evidence panel is under the cards, so it is brought
-  // to the middle of the screen once it shows that citation (its height changes with it).
+  // A row or the pager picks a citation. From lg up the Evidence panel sits beside the list and
+  // stays in view (sticky), so nothing moves; below it, the panel is under the list and is
+  // brought to the middle of the screen once it shows that citation (its height changes with it).
   const [reveal, setReveal] = useState(0)
   useEffect(() => {
-    if (reveal) centreInView(evidence.current)
+    if (!reveal) return
+    const beside = typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 64rem)').matches
+    if (!beside) centreInView(evidence.current)
   }, [reveal])
 
   const nextIssue = () => {
@@ -279,11 +282,15 @@ function HomeBody({
     const index = issues.findIndex((c) => c.id === selected?.id)
     setSelectedId(issues[(index + 1) % issues.length].id)
     setReveal((n) => n + 1)
+    showTarget(null)
   }
 
+  // The source PDF open in the evidence's place is that citation's: another pick brings the
+  // evidence back rather than leave one paper showing beside another citation.
   const selectRow = (id: string) => {
     setSelectedId(id)
     setReveal((n) => n + 1)
+    if (id !== selected?.id) showTarget(null)
   }
 
   if (draft.isPending) return <LoadingScreen label="Opening your draft…" />
@@ -315,7 +322,7 @@ function HomeBody({
   const about = [current.files.map((f) => f.name).join(' · ') || 'no files yet', editedLabel(current.edited ?? current.updated), checkedLabel(current.lastCheckedAt)].join('  ·  ')
 
   return (
-    <FadeIn className={cn('mx-auto flex w-full min-w-0 flex-col gap-7 pt-4', !target && 'max-w-[960px]')}>
+    <FadeIn className="mx-auto flex w-full max-w-[1120px] min-w-0 flex-col gap-7 pt-4">
       <Greeting summary={summaryOf(current, isChecking)} />
 
       <Card className="flex min-w-0 flex-col gap-4 rounded-2xl">
@@ -360,21 +367,18 @@ function HomeBody({
       {failed && <ErrorState title="The check failed" message={shortMessage(failed.message) || 'It stopped before it finished.'} onRetry={recheck} />}
       {latest.isError && <ErrorState title="Could not load the last check" message={errorMessage(latest.error)} onRetry={() => void latest.refetch()} />}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 lg:grid-cols-[minmax(0,580fr)_minmax(0,360fr)]">
+      {/* The work: the list, and beside it (lg up, sticky) the evidence for the row picked in it,
+          so a row and its evidence are on screen together. "show in the paper" puts the source
+          PDF in that place; closing it brings the evidence back. */}
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 lg:grid-cols-2">
         <CitationCheckCard draft={current} citations={citations} selectedId={selected?.id} onSelect={selectRow} checking={isChecking} notJudged={notJudged} />
-        <BibliographyCard
-          draftId={current.id}
-          parse={bibliography.data}
-          error={bibliography.error}
-          onRetry={() => void bibliography.refetch()}
-          draftTitle={(id) => drafts.find((d) => d.id === id)?.title}
-          onOpenEditor={onOpenEditor}
-        />
-      </div>
-
-      <div className={cn('grid grid-cols-[minmax(0,1fr)] items-start gap-5', target && 'xl:grid-cols-2')}>
-        <div className="flex min-w-0 flex-col gap-5">
-          <div ref={evidence} className="min-w-0 scroll-mt-16">
+        <div
+          ref={evidence}
+          className="min-w-0 scroll-mt-16 lg:sticky lg:top-16 lg:z-10 lg:max-h-[calc(100dvh-5rem)] lg:self-start lg:overflow-y-auto lg:overscroll-contain"
+        >
+          {target ? (
+            <PageViewer key={target.paper} target={target} onClose={() => showTarget(null)} />
+          ) : (
             <EvidencePanel
               citation={selected}
               issues={issues}
@@ -392,15 +396,22 @@ function HomeBody({
                   .catch((error) => setToast(`Could not upload ${file.name}: ${errorMessage(error)}`))
               }
               onShow={showTarget}
+              onEdit={(c) => onOpenEditor({ draftId: current.id, file: c.file, line: c.line })}
             />
-          </div>
-          <YourDraftsCard drafts={drafts} currentId={current.id} onOpen={(id) => onOpenEditor({ draftId: id })} onNew={onNewDraft} creating={creatingDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
+          )}
         </div>
-        {target && (
-          <div className="min-w-0 xl:sticky xl:top-6 xl:z-20 xl:self-start">
-            <PageViewer key={target.paper} target={target} onClose={() => showTarget(null)} />
-          </div>
-        )}
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 lg:grid-cols-2">
+        <BibliographyCard
+          draftId={current.id}
+          parse={bibliography.data}
+          error={bibliography.error}
+          onRetry={() => void bibliography.refetch()}
+          draftTitle={(id) => drafts.find((d) => d.id === id)?.title}
+          onOpenEditor={onOpenEditor}
+        />
+        <YourDraftsCard drafts={drafts} currentId={current.id} onOpen={(id) => onOpenEditor({ draftId: id })} onNew={onNewDraft} creating={creatingDraft} onHistory={onOpenHistory} onDelete={setDeleting} />
       </div>
 
       <AnimatePresence>

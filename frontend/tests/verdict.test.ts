@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ALL_VERDICTS, VERDICTS, VERDICT_ORDER, isLowConfidence, isOpenIssue, labelAfterCounts, projectStatus, settledHint, statusLabel, statusTone, summarize } from '../src/lib/verdict.ts'
+import { ALL_VERDICTS, VERDICTS, VERDICT_ORDER, bySeverity, isLowConfidence, isNotFound, isOpenIssue, labelAfterCounts, projectStatus, settledHint, statusLabel, statusTone, summarize } from '../src/lib/verdict.ts'
 import type { Verdict } from '../src/types/draftCheck.ts'
 
 test('every verdict has words and colours, and the bar order covers every checked verdict', () => {
@@ -10,7 +10,31 @@ test('every verdict has words and colours, and the bar order covers every checke
     assert.ok(meta.badge && meta.legend && meta.text && meta.fill && meta.soft, verdict)
   }
   assert.deepEqual([...VERDICT_ORDER, 'unchecked'].sort(), [...ALL_VERDICTS].sort())
-  assert.equal(VERDICTS.unavailable.badge, VERDICTS.unchecked.badge)
+  // Both are "no answer" and share the neutral tone, but each badge says what its legend counts.
+  assert.equal(VERDICTS.unavailable.soft, VERDICTS.unchecked.soft)
+  assert.equal(VERDICTS.unavailable.badge, 'Source unavailable')
+  assert.equal(VERDICTS.unchecked.badge, 'Not checked')
+})
+
+test('bySeverity: contradicts, not found, silent, unavailable, not checked; line order kept within a rank', () => {
+  const rows = [
+    { id: 'a', verdict: 'unchecked' as const },
+    { id: 'b', verdict: 'insufficient' as const },
+    { id: 'c', verdict: 'unavailable' as const },
+    { id: 'd', verdict: 'refutes' as const },
+    { id: 'e', verdict: 'unavailable' as const, exists: 'no' as const },
+    { id: 'f', verdict: 'refutes' as const },
+  ]
+  assert.deepEqual(bySeverity(rows).map((r) => r.id), ['d', 'f', 'e', 'b', 'c', 'a'])
+})
+
+test('isNotFound: a reference no index knows, whose source was not read', () => {
+  assert.equal(isNotFound({ verdict: 'unavailable', exists: 'no' }), true)
+  assert.equal(isNotFound({ verdict: 'unchecked', exists: 'no' }), true)
+  // A source that was read exists: the row's note says to check the DOI instead.
+  assert.equal(isNotFound({ verdict: 'refutes', exists: 'no' }), false)
+  assert.equal(isNotFound({ verdict: 'unavailable', exists: 'unknown' }), false)
+  assert.equal(isNotFound({ verdict: 'unavailable' }), false)
 })
 
 test('isOpenIssue: refutes and insufficient are open until resolved; the rest never are', () => {

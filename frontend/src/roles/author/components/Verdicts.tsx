@@ -6,13 +6,18 @@
 
 import { AlertTriangle } from 'lucide-react'
 
-import { StandingBadge } from '../../../components/ui'
+import { VerdictBadge } from '../../../components/ui'
 import { cn } from '../../../lib/utils'
-import { VERDICTS } from '../../../lib/verdict'
+import { NOT_FOUND, VERDICTS } from '../../../lib/verdict'
 import type { AuditFinding, Verdict } from '../../../types/draftCheck'
 
-export function CitationBadge({ verdict }: { verdict: Verdict }) {
-  return <StandingBadge standing={VERDICTS[verdict].standing} title={VERDICTS[verdict].legend} />
+/** The verdict's own badge words, so a row says what the legend above it counts ("Source
+ * unavailable" and "Not checked" are both neutral but not the same). `notFound` (isNotFound)
+ * overrides it. */
+export function CitationBadge({ verdict, notFound }: { verdict: Verdict; notFound?: boolean }) {
+  if (notFound) return <VerdictBadge verdict="refutes" text={NOT_FOUND.badge} title={NOT_FOUND.title} />
+  const meta = VERDICTS[verdict]
+  return <VerdictBadge verdict={meta.standing} text={meta.badge} title={meta.legend} />
 }
 
 const AUDIT_WORDS: Record<string, string> = {

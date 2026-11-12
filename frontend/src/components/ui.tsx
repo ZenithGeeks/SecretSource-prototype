@@ -9,9 +9,12 @@ import { STANDING_LABELS } from '../lib/claims'
 import { useSettings } from '../lib/settings'
 import { cn } from '../lib/utils'
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+/** A surface. Given `aria-labelledby` (its heading's id), it is a named region, so a screen
+ * reader can list the screen's cards and jump between them. */
+export function Card({ className, children, ...rest }: ComponentProps<'div'> & { children: ReactNode }) {
+  const region = rest['aria-labelledby'] ? { role: 'region' as const } : {}
   return (
-    <div className={cn('rounded-xl border border-border-subtle bg-surface p-5', className)}>
+    <div {...region} {...rest} className={cn('rounded-xl border border-border-subtle bg-surface p-5', className)}>
       {children}
     </div>
   )
