@@ -133,3 +133,33 @@ def test_a_supports_for_a_sentence_citing_others_is_not_asked_again(monkeypatch)
 
     assert judged == ["Engines scale."]
     assert (result["verdict"], result["verdict_from"]) == ("supports", "text")
+
+
+def test_a_refutes_for_a_sentence_citing_others_is_only_rechecked_once(monkeypatch):
+    verdicts = {"Engines scale.": "refutes", MARKED: "insufficient"}
+
+    result, _, judged = _check(monkeypatch, verdicts, others=True)
+
+    assert judged == ["Engines scale.", MARKED]
+    assert (result["verdict"], result["verdict_from"]) == ("insufficient", "cited")
+
+
+def test_no_second_ask_when_the_marked_sentence_is_the_claim(monkeypatch):
+    def judge(text, passages, figure=None):
+        judged.append(text)
+        return {"verdict": "insufficient", "quote": "", "reasoning": ""}
+
+    judged = []
+    monkeypatch.setattr(verify.retrieval, "colbert_search", lambda query, k, source=None: [
+        {"text": "Engines scale.", "page": 1, "start": 0, "end": 14, "score": 1.0, "source": "cited.pdf"}
+    ])
+    monkeypatch.setattr(verify, "_judge", judge)
+    monkeypatch.setattr(verify, "_visual_indexing", {})
+    monkeypatch.setattr(sources, "known_index", lambda identifier: {"index": "", "ids": {}})
+    monkeypatch.setattr(sources, "version_of", lambda pdf: {})
+
+    verify.check_prepared(
+        "Engines scale.", "2205.09707", Path("cited.pdf"), "Engines scale.", other_citations=True
+    )
+
+    assert judged == ["Engines scale."]

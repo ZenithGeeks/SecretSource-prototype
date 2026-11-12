@@ -798,3 +798,38 @@ def test_verify_checks_one_claim_against_one_source(client_as, monkeypatch):
     response = client_as(None).post("/verify", json={"claim": "c", "source": "s"})
 
     assert response.json() == {**verdict, "claim": "c"}
+
+
+def test_each_citation_of_a_sentence_citing_several_works_is_checked_as_one_of_several(monkeypatch, pipeline):
+    """#943: the gateway tells check_prepared when the sentence cites other works too."""
+    flags = {}
+    monkeypatch.setattr(
+        main,
+        "extract_claims_with_citations",
+        lambda paper: {
+            "status": "ok",
+            "file": f"{paper}.pdf",
+            "title": "T",
+            "claims": [
+                {"claim": "c1", "sentence": "A [b1] and B [b2].",
+                 "citations": [{"key": "s1", "ref": "b1"}, {"key": "s2", "ref": "b2"}]},
+                {"claim": "c2", "sentence": "Only C [b3].", "citations": [{"key": "s3", "ref": "b3"}]},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "check_prepared",
+        lambda claim, source, path, judged="", other_citations=False: (
+            flags.__setitem__(source, (judged, other_citations))
+            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+        ),
+    )
+
+    run_analysis_job("g-several", "paper", True, None)
+
+    assert flags == {
+        "s1": ("A [cited] and B.", True),
+        "s2": ("A and B [cited].", True),
+        "s3": ("Only C [cited].", False),
+    }
