@@ -6,7 +6,7 @@
  * claims, passages and references; the other roles' Ask points at each statement as it is checked.
  */
 
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m } from 'framer-motion'
 import { useEffect, useState } from 'react'
 
 import { askTarget, scrollingAncestors, TONES, visibleBox, type AskTarget, type Box, type Pointing } from '../lib/askCursor'
@@ -22,7 +22,7 @@ export function AiCursor({ pointing, scroll = true }: { pointing: Pointing | nul
   return (
     <AnimatePresence>
       {reaction && box && (
-        <motion.div
+        <m.div
           key="ai-cursor"
           aria-hidden="true"
           className="pointer-events-none fixed top-0 left-0 z-30"
@@ -30,14 +30,14 @@ export function AiCursor({ pointing, scroll = true }: { pointing: Pointing | nul
           animate={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.15 } }}
         >
-          <motion.div
+          <m.div
             className={cn('absolute rounded-xl border-2', reaction.ring)}
             initial={false}
             animate={{ x: box.left - 4, y: box.top - 4, width: box.width + 8, height: box.height + 8 }}
             transition={SPRING}
           />
           {/* The tip sits just inside the target's top right corner, where it does not cover text. */}
-          <motion.div
+          <m.div
             className="absolute flex items-start gap-1"
             initial={false}
             animate={{ x: box.left + Math.min(box.width - 28, 260), y: box.top + 6 }}
@@ -46,7 +46,7 @@ export function AiCursor({ pointing, scroll = true }: { pointing: Pointing | nul
             <svg width="22" height="24" viewBox="0 0 22 24" style={{ filter: 'drop-shadow(0 2px 3px rgb(0 0 0 / 0.3))' }}>
               <path d="M2 2 L2 20 L7 15.5 L10.5 22.5 L13.5 21 L10 14 L17 14 Z" className="fill-accent stroke-canvas" strokeWidth="1.5" strokeLinejoin="round" />
             </svg>
-            <motion.span
+            <m.span
               key={pointing.tone}
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -55,9 +55,9 @@ export function AiCursor({ pointing, scroll = true }: { pointing: Pointing | nul
             >
               <reaction.icon className={cn('size-3.5', pointing.tone === 'reading' && 'animate-spin motion-reduce:animate-none')} />
               {pointing.label || reaction.label}
-            </motion.span>
-          </motion.div>
-        </motion.div>
+            </m.span>
+          </m.div>
+        </m.div>
       )}
     </AnimatePresence>
   )

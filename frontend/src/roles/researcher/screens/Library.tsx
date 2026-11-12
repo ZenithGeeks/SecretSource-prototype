@@ -5,7 +5,7 @@
  * analysed papers; in Unsorted it hands off to History, where a paper is analysed.
  */
 
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m } from 'framer-motion'
 import { ChevronRight, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -108,7 +108,7 @@ function Modal({ titleId, onClose, children }: { titleId: string; onClose: () =>
       onKeyDown={keys}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onClose} />
+      <m.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onClose} />
       {children}
     </div>
   )
@@ -313,7 +313,7 @@ function DeleteProjectDialog({
   const titleId = useId()
   return (
     <Modal titleId={titleId} onClose={() => !deleting && onCancel()}>
-      <motion.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
+      <m.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
         <h2 id={titleId} className="font-serif text-lg font-semibold text-ink">Delete "{project.name}"?</h2>
         <p className="mt-2 text-sm leading-5 text-ink-muted">
           Its {count(project.papers, 'paper')} move back to Unsorted. No paper is deleted. The project itself can't
@@ -342,7 +342,7 @@ function DeleteProjectDialog({
             {deleting ? 'Deleting…' : 'Delete project'}
           </Button>
         </div>
-      </motion.div>
+      </m.div>
     </Modal>
   )
 }
@@ -520,7 +520,7 @@ function AddPapersDialog({
 
   return (
     <Modal titleId={titleId} onClose={onClose}>
-      <motion.div
+      <m.div
         {...PANEL_MOTION}
         className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
       >
@@ -568,7 +568,7 @@ function AddPapersDialog({
             {adding ? 'Adding…' : chosen.size ? `Add ${count(chosen.size, 'paper')}` : 'Add'}
           </Button>
         </div>
-      </motion.div>
+      </m.div>
     </Modal>
   )
 }
@@ -735,7 +735,7 @@ function NewProjectDialog({
   const descriptionId = useId()
   return (
     <Modal titleId={titleId} onClose={onCancel}>
-      <motion.form
+      <m.form
         {...PANEL_MOTION}
         onSubmit={(e) => {
           e.preventDefault()
@@ -783,7 +783,7 @@ function NewProjectDialog({
             {busy ? 'Creating…' : 'Create project'}
           </Button>
         </div>
-      </motion.form>
+      </m.form>
     </Modal>
   )
 }

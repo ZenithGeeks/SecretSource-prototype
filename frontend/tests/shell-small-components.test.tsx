@@ -13,6 +13,7 @@ import { SplitPane } from '../src/components/SplitPane'
 import { Progress, VerdictBadge } from '../src/components/ui'
 import type { Role } from '../src/lib/roles'
 import { resetSettings, updateSettings } from '../src/lib/settings'
+import { renderWithMotion } from './motion'
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 
@@ -137,7 +138,7 @@ describe('Mascot', () => {
   })
 
   it('wiggles its prop while hovered and settles when the pointer leaves', async () => {
-    const { container } = render(<Mascot role="writer" />)
+    const { container } = renderWithMotion(<Mascot role="writer" />)
     const svg = container.querySelector('svg') as SVGSVGElement
     // framer-motion reports a hover on the next animation frame.
     const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)))

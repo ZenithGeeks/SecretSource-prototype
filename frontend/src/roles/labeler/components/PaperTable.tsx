@@ -4,7 +4,7 @@
  * on its title.
  */
 
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
@@ -94,7 +94,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   return (
     // A row the list gains (a paper just added, one a filter brings back) fades in instead of
     // popping in. No exit fade: a removed row would stay readable until it ended.
-    <motion.tr
+    <m.tr
       data-ask-target={askTarget({ kind: 'paper', id: paper.analysis_id })}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -200,7 +200,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
           </Button>
         )}
       </td>
-    </motion.tr>
+    </m.tr>
   )
 }
 

@@ -7,7 +7,7 @@
  * Both stop when the visitor asks the OS for reduced motion.
  */
 
-import { motion, useReducedMotion } from 'framer-motion'
+import { m, useReducedMotion } from 'framer-motion'
 import { useState } from 'react'
 
 import type { Role } from '../lib/roles'
@@ -41,7 +41,7 @@ export function Mascot({
   const [isHovered, setIsHovered] = useState(false)
 
   return (
-    <motion.svg
+    <m.svg
       viewBox="0 0 96 96"
       width={size}
       height={size}
@@ -51,32 +51,32 @@ export function Mascot({
       onHoverEnd={() => setIsHovered(false)}
     >
       <ellipse cx="46" cy="90" rx="20" ry="3" fill={C.ink} opacity="0.12" />
-      <motion.g
+      <m.g
         animate={loop ? { y: [0, -3, 0] } : undefined}
         transition={loop ? { duration: 3.2, ease: EASE_IN_OUT, repeat: Infinity } : undefined}
       >
         <path d="M24 54C20 39 26 28 39 21" stroke={C.body} strokeWidth="11" strokeLinecap="round" fill="none" />
         <circle cx="44" cy="60" r="24" fill={C.body} />
-        <motion.g
+        <m.g
           style={{ transformOrigin: '44px 57px' }}
           animate={loop ? { scaleY: [1, 1, 0.1, 1] } : undefined}
           transition={loop ? { duration: 4, times: [0, 0.92, 0.96, 1], repeat: Infinity } : undefined}
         >
           <circle cx="37" cy="57" r="3.2" fill={C.face} />
           <circle cx="51" cy="57" r="3.2" fill={C.face} />
-        </motion.g>
+        </m.g>
         <circle cx="31" cy="64" r="3" fill={C.soft} opacity="0.7" />
         <circle cx="57" cy="64" r="3" fill={C.soft} opacity="0.7" />
         <path d="M39 65Q44 69.5 49 65" stroke={C.face} strokeWidth="2.2" strokeLinecap="round" fill="none" />
-        <motion.g
+        <m.g
           style={{ transformOrigin: PROP_PIVOT[role] }}
           animate={isHovered && !reduceMotion ? { rotate: [0, -10, 7, 0] } : { rotate: 0 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
         >
           <Prop role={role} />
-        </motion.g>
-      </motion.g>
-    </motion.svg>
+        </m.g>
+      </m.g>
+    </m.svg>
   )
 }
 

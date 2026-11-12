@@ -1,6 +1,6 @@
 /** The handful of primitives the app reuses. Styling lives here so screens stay about content. */
 
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import { CircleAlert, Loader2 } from 'lucide-react'
 import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode, useEffect, useState } from 'react'
 
@@ -277,7 +277,7 @@ export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
     return () => clearTimeout(timer)
   }, [])
   return (
-    <motion.div
+    <m.div
       role="status"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -289,7 +289,7 @@ export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
         {label}
       </span>
       {slow && <span className="text-xs">This is taking longer than usual.</span>}
-    </motion.div>
+    </m.div>
   )
 }
 
@@ -300,13 +300,13 @@ export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
  * them. */
 export function FadeIn({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       className={className}
     >
       {children}
-    </motion.div>
+    </m.div>
   )
 }
