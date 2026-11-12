@@ -4,7 +4,8 @@ import { afterEach, beforeEach, vi } from 'vitest'
 
 import { clearDoItConversation } from '../src/lib/doItConversation'
 
-// Drop persisted Ask session keys before each test.
+// Ask remembers the open chat, panel and mode per user (src/lib/askSession.ts). Drop those
+// keys before each test so one file's Ask does not reopen inside the next test.
 const ASK_STORAGE_PREFIX = 'secretsource.ask.'
 
 beforeEach(() => {
@@ -16,31 +17,19 @@ beforeEach(() => {
   for (const key of keys) localStorage.removeItem(key)
 })
 
-// Mock URL helpers used for file blobs.
 Object.defineProperty(URL, 'createObjectURL', {
+  configurable: true,
   writable: true,
   value: vi.fn(() => 'blob:vitest'),
 })
 Object.defineProperty(URL, 'revokeObjectURL', {
+  configurable: true,
   writable: true,
   value: vi.fn(),
 })
 
-// Mock window.location navigation methods to avoid JSDOM navigation errors.
-Object.defineProperty(window, 'location', {
-  writable: true,
-  value: {
-    ...window.location,
-    assign: vi.fn(),
-    replace: vi.fn(),
-    // href getter/setter for assignments.
-    get href() { return (this as any)._href || '' },
-    set href(val) { (this as any)._href = val },
-  },
-})
-
-// Mock clipboard API.
 Object.defineProperty(navigator, 'clipboard', {
+  configurable: true,
   writable: true,
   value: { writeText: vi.fn().mockResolvedValue(undefined) },
 })
