@@ -40,10 +40,11 @@ if (import.meta.env.PROD) watchForNewVersion()
 
 // Animations render as `m.*` and load only domAnimation (animate, exit, variants, hover, tap,
 // focus), not drag or layout, which nothing uses: about a third of framer-motion (SCRUM-527).
-// `strict` makes a stray `motion.*` throw instead of pulling the whole library back in.
+// A stray `motion.*` is a lint error (.oxlintrc.json), not a runtime throw: `strict` would
+// blank the screen for every user over a few kilobytes.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <LazyMotion features={domAnimation} strict>
+    <LazyMotion features={domAnimation}>
       <QueryClientProvider client={queryClient}>
         <Root />
         <Toaster />

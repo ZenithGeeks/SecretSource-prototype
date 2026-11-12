@@ -19,28 +19,40 @@ const CRC_TABLE = (() => {
 
 function crc32(bytes: Uint8Array): number {
   let c = 0xffffffff
-  for (const byte of bytes) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8)
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8)
   return (c ^ 0xffffffff) >>> 0
 }
 
-/** MS-DOS time and date, the only timestamp a zip header has (two-second steps, from 1980). */
+/** MS-DOS time and date, the only timestamp a zip header has: two-second steps, years 1980 to
+ * 2107. A clock outside that range is held at its nearest end rather than wrapped. */
 function dosStamp(at: Date): { time: number; date: number } {
+  const year = Math.min(Math.max(at.getFullYear(), 1980), 2107)
   return {
     time: (at.getHours() << 11) | (at.getMinutes() << 5) | (at.getSeconds() >> 1),
-    date: ((at.getFullYear() - 1980) << 9) | ((at.getMonth() + 1) << 5) | at.getDate(),
+    date: ((year - 1980) << 9) | ((at.getMonth() + 1) << 5) | at.getDate(),
   }
 }
 
-/** The archive's bytes, one entry per file, in the order given. */
-export function zipStored(files: { name: string; content: string }[], at = new Date()): Uint8Array {
+/** Without ZIP64, a zip counts entries in 16 bits. Its 32-bit offsets (4 GiB) are out of reach:
+ * a browser cannot hold a string that long, so files read as text never get there. */
+const MAX_ENTRIES = 0xffff
+
+/** The archive's bytes, one entry per name in the order names first appear. A name given twice
+ * keeps its last content, as the export did with fflate (one object key per name). Throws past
+ * what a zip without ZIP64 can hold, rather than write an archive readers would cut short. */
+export function zipStored(files: { name: string; content: string }[], at = new Date()): Uint8Array<ArrayBuffer> {
+  const byName = new Map<string, string>()
+  for (const file of files) byName.set(file.name, file.content)
+  if (byName.size > MAX_ENTRIES) throw new Error(`A zip holds at most ${MAX_ENTRIES} files; this one has ${byName.size}.`)
+
   const { time, date } = dosStamp(at)
   const local: Uint8Array[] = []
   const central: Uint8Array[] = []
   let offset = 0
 
-  for (const file of files) {
-    const name = encoder.encode(file.name)
-    const data = encoder.encode(file.content)
+  for (const [fileName, content] of byName) {
+    const name = encoder.encode(fileName)
+    const data = encoder.encode(content)
     const crc = crc32(data)
 
     const head = new DataView(new ArrayBuffer(30))
@@ -77,8 +89,8 @@ export function zipStored(files: { name: string; content: string }[], at = new D
   const centralSize = central.reduce((sum, part) => sum + part.length, 0)
   const end = new DataView(new ArrayBuffer(22))
   end.setUint32(0, 0x06054b50, true) // end of central directory
-  end.setUint16(8, files.length, true)
-  end.setUint16(10, files.length, true)
+  end.setUint16(8, byName.size, true)
+  end.setUint16(10, byName.size, true)
   end.setUint32(12, centralSize, true)
   end.setUint32(16, offset, true)
 

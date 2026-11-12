@@ -38,6 +38,29 @@ describe('zipStored', () => {
     expect(end.getUint32(16, true)).toBe(30 + 'a.txt'.length + 9)
   })
 
+  it('writes a name given twice once, with its last content, where it first appeared', () => {
+    const read = unzipSync(
+      zipStored([
+        { name: 'a.tex', content: 'old' },
+        { name: 'b.bib', content: 'bib' },
+        { name: 'a.tex', content: 'new' },
+      ]),
+    )
+    expect(Object.keys(read)).toEqual(['a.tex', 'b.bib'])
+    expect(strFromU8(read['a.tex'])).toBe('new')
+  })
+
+  it('holds a clock outside 1980-2107 at the nearest year a zip can say', () => {
+    const year = (at: Date) => (view(zipStored([{ name: 'a', content: '' }], at)).getUint16(12, true) >> 9) + 1980
+    expect(year(new Date(1970, 0, 1))).toBe(1980)
+    expect(year(new Date(2200, 0, 1))).toBe(2107)
+  })
+
+  it('refuses more files than a zip without ZIP64 can count', () => {
+    const files = Array.from({ length: 0x10000 }, (_, i) => ({ name: `f${i}.tex`, content: '' }))
+    expect(() => zipStored(files)).toThrow('A zip holds at most 65535 files; this one has 65536.')
+  })
+
   it('makes a valid empty archive from no files', () => {
     const bytes = zipStored([])
     expect(bytes).toHaveLength(22)

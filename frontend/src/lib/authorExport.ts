@@ -80,10 +80,7 @@ export function buildAnnotatedTex(file: ProjectFile, citations: Citation[]): str
 /** Every file of the project as a .zip, with the current file contents. Figures would go
  * in here too once uploads carry them; the prototype has none. */
 export function buildProjectZip(draft: Draft): Blob {
-  const bytes = zipStored(draft.files)
-  return new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], {
-    type: 'application/zip',
-  })
+  return new Blob([zipStored(draft.files)], { type: 'application/zip' })
 }
 
 /** "related-work-thesis-ch-2" from a draft title, for file names. */
