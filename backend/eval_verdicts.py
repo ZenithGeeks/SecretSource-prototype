@@ -14,6 +14,12 @@ judge's scores, the report has each verdict against each 1-4 level (`levels`), h
 labeled passage was among the ones retrieved (`retrieval`), and how often the judge's quote is in
 the passages it was given (`quote_grounding`).
 
+With `--claims claims.csv` (the Labeler's claims tab export) each pair is judged the way an analysis
+judges it: the judge also gets the claim's sentence with this citation marked, and whether the
+sentence cites other works, so check_prepared rechecks as it does in _run_queued (#672, #953).
+Without it the judge sees only the claim, which scored recall 0.47 against 0.56 with sentences on
+the 13 Nov val split (#962).
+
 With PHOENIX_COLLECTOR_ENDPOINT set, the run is also an experiment in Phoenix: every labeled pair is a
 dataset example (its split as a Phoenix split, its topic in the metadata), each verdict is a run,
 and each run gets a `correct` evaluation. Runs on the same labels share one dataset, so their
@@ -24,6 +30,7 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,8 +38,9 @@ from pathlib import Path
 import requests
 from app.config import PAPERS_DIR, PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
 from app.evaluation import Pair, human_agreement, judge_scores, level_confusion, pairs_from_labels
-from app.pipeline import verify
+from app.pipeline import claims, verify
 from app.pipeline.audit import _grounded  # the analysis audit's test of "is this text in the evidence"
+from app.pipeline.sources import lookup_key
 
 
 def main() -> None:
@@ -45,6 +53,9 @@ def main() -> None:
         choices=["retrieved", "labeled"],
         default="retrieved",
         help="judge on the passages retrieval finds, or on the ones the labelers marked relevant",
+    )
+    parser.add_argument(
+        "--claims", type=Path, help="the claims tab export, to judge with each claim's sentence"
     )
     args = parser.parse_args()
 
@@ -61,10 +72,12 @@ def main() -> None:
     )
 
     retrieving = args.passages == "retrieved"
+    sentences = judged_sentences(args.claims, scored) if args.claims and retrieving else {}
     results = []
     for number, pair in enumerate(scored, 1):
         started = datetime.now(UTC).isoformat()
-        result = check(pair, args.passages)
+        sentence = sentences.get((pair.claim_id, pair.reference_id))
+        result = check(pair, args.passages, sentence)
         verdict = result.get("verdict") if result.get("status") == "ok" else "error"
         verdict_from = result.get("verdict_from", "none") if verdict != "error" else "none"
         results.append(
@@ -76,6 +89,7 @@ def main() -> None:
                 "verdict_from": verdict_from,
                 "topic": topics[pair.claim_id, pair.reference_id],
                 "levels": pair.levels,
+                "marked": bool(sentence) and sentence[0] != pair.claim,
                 "labeled_retrieved": labeled_retrieved(pair, result) if retrieving else None,
                 "quote_grounded": quote_grounded(result) if verdict != "error" else None,
                 "started": started,
@@ -94,6 +108,7 @@ def main() -> None:
                 "gold",
                 "verdict",
                 "verdict_from",
+                "marked",
                 "labeled_retrieved",
                 "quote_grounded",
             ],
@@ -105,6 +120,8 @@ def main() -> None:
     judged = [r for r in results if r["verdict"] != "error"]
     report = {
         "settings": settings(args.passages),
+        # How many pairs got their sentence with the citation marked; the rest kept the claim.
+        "marked": sum(r["marked"] for r in results),
         "errors": len(results) - len(judged),
         "judge": judge_scores([r["gold"] for r in judged], [r["verdict"] == "supports" for r in judged]),
         # The text judge and the figure judge are scored apart (SCRUM-80).
@@ -132,10 +149,18 @@ def main() -> None:
         record_experiment(every_pair, topics, results, args.split, report)
 
 
-def check(pair: Pair, passages: str) -> dict:
-    """The judge's result on one pair, with the passages it read under `evidence`."""
+def check(pair: Pair, passages: str, sentence: tuple[str, bool] | None = None) -> dict:
+    """The judge's result on one pair, with the passages it read under `evidence`. `sentence` is
+    (judged_text, cites_others) from judged_sentences; without it the judge sees the claim only."""
     if passages == "retrieved":
-        return verify.verify_claim(pair.claim, (PAPERS_DIR / f"{pair.reference_id}.pdf").as_posix())
+        source = (PAPERS_DIR / f"{pair.reference_id}.pdf").as_posix()
+        if sentence is None:
+            return verify.verify_claim(pair.claim, source)
+        # verify_claim's two steps, with the sentence passed on as _run_queued passes it.
+        prepared = verify.prepare_source(source, wait_for_figures=True)
+        if prepared["status"] == "error":
+            return {**prepared, "claim": pair.claim, "source": source}
+        return verify.check_prepared(pair.claim, source, Path(prepared["path"]), *sentence)
     if not pair.spans:
         return {"status": "error", "message": "no passage was marked relevant"}
     try:
@@ -144,6 +169,55 @@ def check(pair: Pair, passages: str) -> dict:
         print(f"{pair.claim_id}: {error!r}", file=sys.stderr)
         return {"status": "error", "message": str(error)}
     return {"status": "ok", **verdict, "evidence": [{"text": span} for span in pair.spans]}
+
+
+def judged_sentences(claims_csv: Path, pairs: list[Pair]) -> dict[tuple[str, str], tuple[str, bool]]:
+    """What _run_queued gives the judge besides the claim, for each pair: the claim's sentence
+    with this citation marked (judged_text), and whether it cites other works (cites_others).
+
+    The labels export has neither. The sentence comes from the claims tab, and the citation's
+    "[b12]" from GROBID on the citing paper, matched to the reference by the file name its PDF was
+    saved under. A pair that cannot be matched gets the claim back, as without --claims.
+    """
+    with claims_csv.open(newline="", encoding="utf-8") as file:
+        sentences = {row["claim_id"]: row["sentence"] for row in csv.DictReader(file)}
+    ids_by_paper: dict[str, dict[str, str]] = {}
+    judged = {}
+    for pair in pairs:
+        paper_id = pair.claim_id.split("#")[0]
+        if paper_id not in ids_by_paper:
+            ids_by_paper[paper_id] = reference_ids(paper_id)
+        claim = {"claim": pair.claim, "sentence": sentences.get(pair.claim_id, "")}
+        citation = {"ref": ids_by_paper[paper_id].get(_squash(pair.reference_id), "")}
+        judged[pair.claim_id, pair.reference_id] = (
+            verify.judged_text(claim, citation),
+            verify.cites_others(claim, citation),
+        )
+    return judged
+
+
+def reference_ids(paper_id: str) -> dict[str, str]:
+    """{saved file name, squashed: GROBID id} for each reference of the citing paper."""
+    try:
+        references = claims.references_of((PAPERS_DIR / f"{paper_id}.pdf").as_posix())
+    except Exception as error:  # one unreadable paper leaves its pairs on the claim alone
+        print(f"{paper_id}: could not read its references: {error!r}", file=sys.stderr)
+        return {}
+    ids = {}
+    for ref, citation in references.items():
+        for identifier in (lookup_key(citation), citation.get("doi"), citation.get("arxiv")):
+            if identifier:
+                ids.setdefault(_squash(_saved_name(identifier)), ref)
+    return ids
+
+
+def _saved_name(identifier: str) -> str:
+    """The file name prepare_source saves a cited work under (sources._fetch)."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", identifier.strip()).strip("-")[:80]
+
+
+def _squash(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
 def labeled_retrieved(pair: Pair, result: dict) -> bool | None:
