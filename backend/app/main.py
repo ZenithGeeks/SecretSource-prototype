@@ -922,9 +922,17 @@ async def upload_reference_pdf(
         raise HTTPException(422, "the file is not a PDF")
     path = await asyncio.to_thread(save_upload, content, file.filename)
     analysis.setdefault("pdfs", {})[ref] = path.name
-    _save_soon(analysis_id)
+    _record_stage(analysis_id, "rechecking", ref=ref)
     _detach(_recheck_reference(analysis_id, ref, path))
     return {"ref": ref, "pdf": path.name}
+
+
+def _record_stage(analysis_id: str, stage: str, **fields) -> None:
+    """Add a stage to a finished analysis and save it. A finished analysis has no open event
+    stream, and a new stage is what _rows_state watches, so papers_of sees the change."""
+    event = {"stage": stage, **fields, "at": round(time.time(), 1)}
+    analyses[analysis_id]["stages"].append(event)
+    _save_soon(analysis_id)
 
 
 async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
@@ -955,7 +963,7 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
         # Detached from the request, so nothing else would report it.
         logger.exception("checking analysis %s again against an uploaded %s failed", analysis_id, ref)
     finally:
-        _save_soon(analysis_id)
+        _record_stage(analysis_id, "rechecked", ref=ref)
 
 
 class UploadRequest(BaseModel):
@@ -1178,8 +1186,8 @@ FINISHED = ("done", "error")
 
 def papers_of(user: str | None) -> frozenset[str]:
     """The file names of the papers this user may open: the analysed paper of each analysis they
-    may read (visible_to), each cited paper a check read for one of them, their Author
-    PDFs, and the papers shared with the labeling team. The Author PDFs live outside `analyses`, so
+    may read (visible_to), each cited paper a check read or they uploaded for one of them, their
+    Author PDFs, and the papers shared with the labeling team. The Author PDFs live outside `analyses`, so
     they are read each call, not cached."""
     shared = labeling_pool.pdf_names(lookup, _paper_names)
     return _per_owner("papers", user, _paper_names) | author_pdfs(user) | shared
@@ -1190,6 +1198,8 @@ def _paper_names(rows: list[dict]) -> frozenset[str]:
     for analysis in rows:
         if analysis.get("file"):
             names.add(Path(analysis["file"]).name)
+        # A cited paper the owner uploaded, even when no check could read it.
+        names.update((analysis.get("pdfs") or {}).values())
         for claim in analysis.get("claims", []):
             names.update(Path(v["source"]).name for v in claim.get("verdicts", []) if v.get("source"))
     return frozenset(names)
