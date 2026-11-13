@@ -2,7 +2,7 @@
 
 The backend reads a research paper, finds its claims, and checks each claim against the
 paper it cites. It is a FastAPI gateway that the web app talks to. The same code also runs
-as a chat agent (`cli.py`), an A2A server (`a2a_server.py`) and an ADK graph (`adk web`).
+as a chat agent (`cli.py`, `adk web`) and an A2A server (`a2a_server.py`).
 
 For how the pipeline works inside, read [ARCHITECTURE.md](../ARCHITECTURE.md). This page
 covers how to run the backend, how it is organised, and the HTTP API.
@@ -205,7 +205,6 @@ backend/
 │   ├── sessions.py      where the chat agents keep sessions (Postgres or memory)
 │   ├── backfill_titles.py  gives stored analyses the title a new run would give them
 │   ├── llm.py           the LLM for ADK (adk_model) and for DSPy (dspy_lm)
-│   ├── workflow.py      the same pipeline as an ADK Workflow graph
 │   ├── agents/team.py   chat agents: coordinator, rag_agent, paper_agent, verify_agent
 │   ├── clients/         HTTP clients for ColBERT, ColPali and GROBID, and identity tokens
 │   ├── author/          the Author role: drafts, projects, sources, draft checks, search (see Author below)

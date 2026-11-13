@@ -537,7 +537,7 @@ tracer = trace.get_tracer(__name__)
 
 
 def _step_span(name: str, value: str, attributes: dict | None = None):
-    """A Phoenix AGENT span for one step of a run, named as the step in app/workflow.py, so a
+    """A Phoenix AGENT span for one step of a run, named after the step, so a
     trace shows which step made each search and LLM call."""
     return tracer.start_as_current_span(
         name,
@@ -592,7 +592,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         indexed = asyncio.create_task(_in_step("add_paper", file, add_paper, file))
 
         if verify:
-            # One job per claim and cited work, the way app/workflow.py plans them.
+            # One job per claim and cited work.
             jobs = [
                 (index, claim, citation, source)
                 for index, claim in enumerate(claims)

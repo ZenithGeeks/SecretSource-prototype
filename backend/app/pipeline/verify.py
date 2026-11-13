@@ -370,7 +370,7 @@ def cites_others(claim: dict, citation: dict) -> bool:
 
 
 def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
-    """Add the result of one check to its claim. The gateway and the graph both use this.
+    """Add the result of one check to its claim. _run_queued calls it after each check.
 
     A verdict goes under `verdicts`, keyed by the name the source was looked up by, so the
     card can show it next to its citation. A failure goes under `unchecked` with a reason,
