@@ -23,7 +23,7 @@ from pydantic import Field
 from app import store
 from app.config import CLAIM_LIMIT, GROBID_URL, VLLM_MODEL
 from app.metrics import record_llm_usage
-from app.pipeline.sources import arxiv_titles, local_pdf, lookup_key, tool_error
+from app.pipeline.sources import ARXIV_PATTERN, arxiv_titles, local_pdf, lookup_key, tool_error
 from app.text import english_stopwords, split_sentences
 
 TEI_NAMESPACE = {"tei": "http://www.tei-c.org/ns/1.0"}
@@ -668,9 +668,14 @@ def _parse_reference(reference) -> dict:
     in_url = ARXIV_IN_URL.search(url)
     # GROBID tags an arXiv id only sometimes. Where it did not, the link often says so, and
     # failing that a title line still may ("arXiv preprint arXiv:2303.12712"), including the
-    # journal line when the article title is separate. Read that before cleaning.
-    tagged = _identifier(reference, "arXiv").replace("arXiv:", "").strip()
-    arxiv = tagged or (in_url.group(1) if in_url else "") or _arxiv_in_reference_titles(reference)
+    # journal line when the article title is separate. Read that before cleaning. A tagged id
+    # can carry its category ("2412.19322[cs.CE"), which no index finds, so keep the id only.
+    tagged = ARXIV_PATTERN.search(_identifier(reference, "arXiv"))
+    arxiv = (
+        (tagged.group(0) if tagged else "")
+        or (in_url.group(1) if in_url else "")
+        or _arxiv_in_reference_titles(reference)
+    )
     return {
         "title": _title_of(reference),
         "venue": _venue_of(reference),
