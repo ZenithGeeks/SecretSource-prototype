@@ -8,7 +8,7 @@
  * for good (`ask.introSeen`).
  */
 
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { AnimatePresence, m, MotionConfig } from 'framer-motion'
 import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -67,7 +67,7 @@ export function AskButton({
       <MotionConfig reducedMotion="user">
         <AnimatePresence>
           {showIntro && (
-            <motion.div
+            <m.div
               key="ask-intro"
               role="note"
               aria-label="About Ask AI"
@@ -119,7 +119,7 @@ export function AskButton({
                   <X className="size-3.5" aria-hidden="true" />
                 </button>
               </span>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </MotionConfig>

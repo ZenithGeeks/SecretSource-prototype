@@ -3,7 +3,7 @@
  * that says how Ask answers and offers a few questions to start from.
  */
 
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 
 import type { Role } from '../lib/roles'
 import type { AskAbout } from './AssistantPanel'
@@ -25,7 +25,7 @@ export function AskWelcome({
 }) {
   return (
     <div className="m-auto flex w-full max-w-sm flex-col items-center gap-5 py-6">
-      <motion.div
+      <m.div
         initial={{ y: -16, opacity: 0, scale: 0.9 }}
         animate={{ y: 0, opacity: 1, scale: 1 }}
         transition={SPRING}
@@ -33,9 +33,9 @@ export function AskWelcome({
       >
         <span aria-hidden="true" className="absolute top-1/2 size-28 -translate-y-1/3 rounded-full bg-accent-soft blur-2xl" />
         <Mascot role={role} size={96} animated className="relative drop-shadow-lg" />
-      </motion.div>
+      </m.div>
 
-      <motion.div
+      <m.div
         initial={{ y: 12, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.25, ease: 'easeOut', delay: 0.08 }}
@@ -60,7 +60,7 @@ export function AskWelcome({
             </button>
           ))}
         </div>
-      </motion.div>
+      </m.div>
     </div>
   )
 }

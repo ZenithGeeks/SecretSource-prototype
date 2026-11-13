@@ -5,7 +5,7 @@
  * Settings, Agents (components/AgentsSection); docs/agent-tools.md covers the agent's side.
  */
 
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { AnimatePresence, m, MotionConfig } from 'framer-motion'
 import { Link2, Loader2, SquareTerminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -83,30 +83,30 @@ function AppPair() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="flex items-center justify-center gap-3" aria-hidden="true">
-        <motion.span
+        <m.span
           initial={{ x: 16, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ type: 'spring', stiffness: 260, damping: 22 }}
           className={cn(tile, 'bg-accent font-serif text-2xl font-semibold text-canvas')}
         >
           S
-        </motion.span>
-        <motion.span
+        </m.span>
+        <m.span
           initial={{ scale: 0.6, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.2, ease: 'easeOut' }}
           className="flex size-7 items-center justify-center rounded-full border border-border-subtle bg-canvas text-ink-muted"
         >
           <Link2 className="size-3.5" />
-        </motion.span>
-        <motion.span
+        </m.span>
+        <m.span
           initial={{ x: -16, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ type: 'spring', stiffness: 260, damping: 22 }}
           className={cn(tile, 'bg-ink text-canvas')}
         >
           <SquareTerminal className="size-6" />
-        </motion.span>
+        </m.span>
       </div>
     </MotionConfig>
   )
@@ -136,7 +136,7 @@ export function AgentStatus({ bridge }: { bridge: AgentBridge }) {
       <MotionConfig reducedMotion="user">
         <AnimatePresence>
           {shown && (
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, transition: { duration: 0.12 } }}
@@ -170,7 +170,7 @@ export function AgentStatus({ bridge }: { bridge: AgentBridge }) {
               >
                 Disconnect
               </button>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </MotionConfig>

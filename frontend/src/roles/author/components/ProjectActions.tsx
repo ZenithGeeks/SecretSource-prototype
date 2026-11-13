@@ -3,7 +3,7 @@
  * dialog (an empty project by name, or Import a .bib or an Overleaf .zip). A project name has
  * the rules of a draft title: one trimmed line, not empty, at most MAX_TITLE characters. */
 
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import { Check, MoreVertical, Pencil, Trash2, Upload, X } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
@@ -178,8 +178,8 @@ export function NewProjectDialog({
   const cancel = () => !busy && onCancel()
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="new-project-title" onKeyDown={(e) => e.key === 'Escape' && cancel()} className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={cancel} />
-      <motion.form
+      <m.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={cancel} />
+      <m.form
         {...PANEL_MOTION}
         onSubmit={async (event) => {
           event.preventDefault()
@@ -237,7 +237,7 @@ export function NewProjectDialog({
             </Button>
           </span>
         </div>
-      </motion.form>
+      </m.form>
     </div>
   )
 }

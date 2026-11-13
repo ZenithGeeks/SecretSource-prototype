@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { domAnimation, LazyMotion } from 'framer-motion'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
@@ -37,11 +38,17 @@ supabase?.auth.onAuthStateChange((event) => {
 // The dev server reloads on its own; built tabs need telling about a new deploy.
 if (import.meta.env.PROD) watchForNewVersion()
 
+// Animations render as `m.*` and load only domAnimation (animate, exit, variants, hover, tap,
+// focus), not drag or layout, which nothing uses: about a third of framer-motion (SCRUM-527).
+// A stray `motion.*` is a lint error (.oxlintrc.json), not a runtime throw: `strict` would
+// blank the screen for every user over a few kilobytes.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <Root />
-      <Toaster />
-    </QueryClientProvider>
+    <LazyMotion features={domAnimation}>
+      <QueryClientProvider client={queryClient}>
+        <Root />
+        <Toaster />
+      </QueryClientProvider>
+    </LazyMotion>
   </StrictMode>,
 )

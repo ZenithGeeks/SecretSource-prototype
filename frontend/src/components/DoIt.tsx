@@ -4,7 +4,7 @@
  * offers to connect a coding agent instead (components/ConnectAgent).
  */
 
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { AnimatePresence, m, MotionConfig } from 'framer-motion'
 import { ArrowUp, Ban, Check, ChevronLeft, CircleAlert, Loader2, MousePointerClick, Square, SquareTerminal, Users } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -247,7 +247,7 @@ function Delegation({ line }: { line: Extract<AgentLine, { kind: 'delegation' }>
   const state = DELEGATION[line.state]
   const name = SPECIALISTS[line.name] ?? line.name
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, ease: 'easeOut' }}
@@ -260,7 +260,7 @@ function Delegation({ line }: { line: Extract<AgentLine, { kind: 'delegation' }>
         </span>
         {/* The badge swaps in place when the state changes; keyed on the state so it animates once per change. */}
         <AnimatePresence mode="wait" initial={false}>
-          <motion.span
+          <m.span
             key={line.state}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -271,11 +271,11 @@ function Delegation({ line }: { line: Extract<AgentLine, { kind: 'delegation' }>
               <state.icon className={cn(line.state === 'working' && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
               {state.label}
             </Badge>
-          </motion.span>
+          </m.span>
         </AnimatePresence>
       </div>
       {line.task && <p className="text-[13px] leading-5 text-ink-muted [overflow-wrap:anywhere]">{line.task}</p>}
-    </motion.div>
+    </m.div>
   )
 }
 

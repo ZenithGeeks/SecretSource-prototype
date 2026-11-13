@@ -10,7 +10,6 @@ import { useEffect } from 'react'
 
 import { followEvents } from './api'
 import { authorApi, errorMessage } from './author'
-import { parseBib } from './bibtex'
 import { dropBackup } from './draftSave'
 import type { CheckRun, CheckStage, Citation, Draft, LibraryView, ProjectDetail } from '../types/draftCheck'
 
@@ -172,11 +171,6 @@ export function useStartCheck() {
 /** The verification report PDF; rejects with the gateway's reason before any check ran. */
 export function useExportReport() {
   return useMutation({ mutationFn: authorApi.report })
-}
-
-/** The bib keys a draft can cite: its own .bib files plus the project's shared one. */
-export function bibKeysOf(draft: Draft): Set<string> {
-  return new Set(draft.files.filter((f) => f.kind === 'bib').flatMap((f) => parseBib(f.content).map((e) => e.key)))
 }
 
 /** Every write. Each calls the gateway, then invalidates what it changed. */

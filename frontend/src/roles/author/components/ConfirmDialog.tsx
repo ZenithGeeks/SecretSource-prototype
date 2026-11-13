@@ -3,7 +3,7 @@
  * a refused delete stays open with the gateway's reason under the text. Its call site sits
  * inside AnimatePresence, or the exit would never play. */
 
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import { type ReactNode, useState } from 'react'
 
 import { Button } from '../../../components/ui'
@@ -45,8 +45,8 @@ export function ConfirmDialog({
       onKeyDown={(e) => e.key === 'Escape' && cancel()}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={cancel} />
-      <motion.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
+      <m.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={cancel} />
+      <m.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
         <h2 id="confirm-dialog-title" className="font-serif text-lg font-semibold break-words text-ink">
           {title}
         </h2>
@@ -79,7 +79,7 @@ export function ConfirmDialog({
             {busy ? busyLabel : confirmLabel}
           </Button>
         </div>
-      </motion.div>
+      </m.div>
     </div>
   )
 }
