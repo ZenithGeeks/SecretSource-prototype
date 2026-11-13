@@ -105,8 +105,16 @@ describe('Author Library', () => {
     expect(cited.line).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /Find a source/ })).not.toBeInTheDocument()
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // Cancel keeps the entry; Remove in the dialog deletes it.
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(gateway.calls).not.toContain('DELETE /author/projects/proj1/bib/karpukhin2020')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Remove karpukhin2020 from the .bib?')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(gateway.calls).toContain('DELETE /author/projects/proj1/bib/karpukhin2020'))
     await waitFor(() => expect(screen.queryByText('karpukhin2020 · in main.bib')).not.toBeInTheDocument())
     expect(await screen.findByText('karpukhin2020 removed')).toBeInTheDocument()
@@ -133,13 +141,31 @@ describe('Author Library', () => {
       venue: 'CIKM', doi: '', arxiv: '', url: '', identifier: '', openAccess: true, citedBy: null, bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID},\n}',
       inBib: false, bibName: 'main.bib', savedAt: '', verdict: 'supports',
     })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderLibrary()
     fireEvent.click(await screen.findByRole('button', { name: 'Delete PLAID' }))
-    expect(confirm).toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete “PLAID”?' })).getByRole('button', { name: 'Delete source' }))
     await waitFor(() => expect(gateway.calls).toContain('DELETE /author/sources/src9'))
     await waitFor(() => expect(screen.queryByText(/Santhanam et al\. \(2022\) · PLAID/)).not.toBeInTheDocument())
     expect(gateway.projects.get('proj1')!.bib!.content).toBe(MAIN_BIB)
+  })
+
+  test('a saved source in no project picks its project from a menu when there are several', async () => {
+    const t = new Date().toISOString()
+    gateway.projects.set('proj2', { id: 'proj2', name: 'Grant aims', bib: { name: 'aims.bib', content: '' }, pdfs: {}, created: t, updated: t })
+    gateway.sources.set('src9', {
+      id: 'src9', projectId: null, key: 'santhanam2022plaid', title: 'PLAID', authors: 'Santhanam et al.', authorsList: ['Keshav Santhanam'], year: 2022,
+      venue: 'CIKM', doi: '', arxiv: '', url: '', identifier: '', openAccess: true, citedBy: null, bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID},\n}',
+      inBib: false, bibName: null, savedAt: '', verdict: 'supports',
+    })
+    renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to .bib' }))
+    const menu = screen.getByRole('menu', { name: 'Projects' })
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(
+      expect.arrayContaining(['Related work — thesis ch.2', 'Grant aims']),
+    )
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Grant aims' }))
+    await waitFor(() => expect(gateway.calls).toContain('POST /author/sources/src9/add-to-bib'))
+    expect(await screen.findByText('santhanam2022plaid added to Grant aims')).toBeInTheDocument()
   })
 
   test('Import .bib creates a project on the gateway and opens it', async () => {
