@@ -304,6 +304,29 @@ describe('the labeler queue', () => {
     expect(titlesIn(table)).toHaveLength(4)
   })
 
+  it('summarizes the chosen people\'s papers by the whole team\'s progress, for one or several', async () => {
+    renderQueue()
+    await screen.findByRole('table')
+    fireEvent.click(screen.getByRole('button', { name: 'Added by' }))
+    const people = screen.getByRole('group', { name: 'Added by' })
+
+    // Nuttadon's one paper (HPC paper) has no claims judged yet by anyone.
+    fireEvent.click(within(people).getByRole('checkbox', { name: /Nuttadon/ }))
+    expect(screen.getByText(/Nuttadon: 0 done · 0 in progress · 1 not started/)).toBeInTheDocument()
+
+    // Several chosen, same as Topic: the summary covers everyone picked, combined.
+    fireEvent.click(within(people).getByRole('checkbox', { name: /You/ }))
+    expect(screen.getByText(/Nuttadon, You: 0 done · 1 in progress · 3 not started/)).toBeInTheDocument()
+
+    // Back to one: your papers. NLP paper is started (4 of 5 judged by the team), the other two untouched.
+    fireEvent.click(within(people).getByRole('checkbox', { name: /Nuttadon/ }))
+    expect(screen.getByText(/You: 0 done · 1 in progress · 2 not started/)).toBeInTheDocument()
+
+    // Nobody chosen: no summary.
+    fireEvent.click(within(people).getByRole('checkbox', { name: /You/ }))
+    expect(screen.queryByText(/in progress/)).not.toBeInTheDocument()
+  })
+
   it('filters by my progress and by words in the title', async () => {
     renderQueue()
     const table = await screen.findByRole('table')
