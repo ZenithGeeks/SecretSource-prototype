@@ -134,6 +134,20 @@ def test_the_runner_scores_the_split_and_writes_one_row_per_pair(monkeypatch, tm
     assert [r["verdict_from"] for r in rows] == ["text", "figure"]
 
 
+def test_the_same_labels_in_another_split_make_another_dataset():
+    import eval_verdicts
+
+    topics = {("c1", "refB"): "", ("c2", "refB"): ""}
+    first = evaluation.pairs_from_labels([label("c1", "ada", 4), label("c2", "ada", 1)])
+    moved = evaluation.pairs_from_labels([label("c1", "ada", 4), label("c2", "ada", 1, split="val")])
+
+    def name(pairs):
+        return eval_verdicts.labels_dataset(pairs, topics).name
+
+    assert name(first) == name(evaluation.pairs_from_labels([label("c1", "ada", 4), label("c2", "ada", 1)]))
+    assert name(first) != name(moved)
+
+
 def test_an_errored_pair_keeps_its_message_in_the_csv_and_in_phoenix(monkeypatch, tmp_path):
     import eval_verdicts
 

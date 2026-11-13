@@ -20,14 +20,18 @@ import json
 import statistics
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
 import dspy
 from app import store
+from app.config import PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
 from app.evaluation import judge_scores
+from app.experiments import Dataset, Run, Score, dataset_name, log_experiment
 from app.pipeline import verify
 from app.tracing import setup_tracing
+from eval_verdicts import settings
 
 PAPERS = Path("data/papers")
 VERDICTS = ("supports", "refutes", "insufficient", "error")
@@ -39,6 +43,7 @@ class Judged(NamedTuple):
     verdict: str
     verdict_from: str  # text | figure | none
     judged_figure: str  # the figure's file name when verdict_from is "figure"
+    error: str | None = None  # why there is no verdict, when verdict is "error"
 
 
 def load_claims(paths: list[Path]) -> list[dict]:
@@ -46,18 +51,27 @@ def load_claims(paths: list[Path]) -> list[dict]:
     claims = []
     for path in paths:
         with path.open(encoding="utf-8") as file:
-            claims += [{**json.loads(line), "claim_file": path.stem} for line in file]
+            for line in file:
+                claim = json.loads(line)
+                # Ids repeat across files (claims.jsonl and caption-claims.jsonl share four), so
+                # results are keyed by file and id together.
+                claims.append({**claim, "claim_file": path.stem, "key": f"{path.stem}:{claim['id']}"})
     return claims
 
 
 def judge(claim: dict, prepared: dict) -> Judged:
     """The pipeline's verdict for one claim, or "error"."""
     if prepared["status"] != "ok":
-        return Judged("error", "none", "")
+        return Judged("error", "none", "", failure(prepared))
     result = verify.check_prepared(claim["text"], claim["paper"], Path(prepared["path"]))
     if result["status"] != "ok":
-        return Judged("error", "none", "")
+        return Judged("error", "none", "", failure(result))
     return Judged(result["verdict"], result["verdict_from"], result["judged_figure"])
+
+
+def failure(result: dict) -> str:
+    """The reason and message of a failed step, as one line of text."""
+    return " ".join(filter(None, [result.get("reason"), result.get("message")])) or "no message"
 
 
 def report(claims: list[dict], runs: list[dict[str, Judged]]) -> None:
@@ -65,7 +79,7 @@ def report(claims: list[dict], runs: list[dict[str, Judged]]) -> None:
     precision, recall and F1 per run, split by the judge call that gave the verdict."""
     for kind in ("supports", "refutes", "all"):
         chosen = [c for c in claims if kind in ("all", c["kind"])]
-        scores = [sum(run[c["id"]].verdict == c["kind"] for c in chosen) / len(chosen) for run in runs]
+        scores = [sum(run[c["key"]].verdict == c["kind"] for c in chosen) / len(chosen) for run in runs]
         spread = f" (spread {max(scores) - min(scores):.3f})" if len(scores) > 1 else ""
         print(
             f"{kind:<9} n={len(chosen):<4} accuracy per run "
@@ -73,9 +87,9 @@ def report(claims: list[dict], runs: list[dict[str, Judged]]) -> None:
             + f"; mean {statistics.mean(scores):.3f}{spread}"
         )
     for kind in ("supports", "refutes"):
-        counts = Counter(run[c["id"]].verdict for run in runs for c in claims if c["kind"] == kind)
+        counts = Counter(run[c["key"]].verdict for run in runs for c in claims if c["kind"] == kind)
         print(f"expected {kind:<8} -> " + ", ".join(f"{v} {counts[v]}" for v in VERDICTS if counts[v]))
-    flipped = [c["id"] for c in claims if len({run[c["id"]].verdict for run in runs}) > 1]
+    flipped = [c["key"] for c in claims if len({run[c["key"]].verdict for run in runs}) > 1]
     print(f"{len(flipped)} claims changed verdict between runs")
     for number, run in enumerate(runs, 1):
         for source, scores in scores_by_source(claims, run).items():
@@ -93,7 +107,7 @@ def scores_by_source(claims: list[dict], run: dict[str, Judged]) -> dict[str, di
     """
     pairs: dict[str, list[tuple[bool, bool]]] = {"all": []}
     for claim in claims:
-        judged = run[claim["id"]]
+        judged = run[claim["key"]]
         if judged.verdict == "error":
             continue
         pair = (claim["kind"] == "supports", judged.verdict == "supports")
@@ -134,11 +148,14 @@ def main() -> None:
     print(f"{len(claims)} claims on {len(papers)} papers; {len(failed)} papers failed to index {failed}")
 
     runs = []
+    windows = []  # each pass's start and end, for its Phoenix runs
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for run in range(1, args.runs + 1):
+            started = datetime.now(UTC).isoformat()
             judged = list(pool.map(lambda c: judge(c, prepared[c["paper"]]), claims))
-            runs.append({c["id"]: j for c, j in zip(claims, judged, strict=True)})
-            accuracy = sum(runs[-1][c["id"]].verdict == c["kind"] for c in claims) / len(claims)
+            windows.append((started, datetime.now(UTC).isoformat()))
+            runs.append({c["key"]: j for c, j in zip(claims, judged, strict=True)})
+            accuracy = sum(runs[-1][c["key"]].verdict == c["kind"] for c in claims) / len(claims)
             print(f"run {run}: {accuracy:.3f}", flush=True)
 
     for name in sorted({c["claim_file"] for c in claims}):
@@ -147,7 +164,7 @@ def main() -> None:
     if args.out:
         with args.out.open("w", encoding="utf-8") as file:
             for claim in claims:
-                judged = [run[claim["id"]] for run in runs]
+                judged = [run[claim["key"]] for run in runs]
                 record = {
                     **claim,
                     "verdicts": [j.verdict for j in judged],
@@ -155,6 +172,53 @@ def main() -> None:
                     "judged_figure": [j.judged_figure for j in judged],
                 }
                 file.write(json.dumps(record) + "\n")
+    if PHOENIX_COLLECTOR_ENDPOINT:
+        experiment_id = log_experiment(
+            claims_dataset(claims),
+            experiment_runs(claims, runs, windows),
+            name=f"{VLLM_MODEL} generated {settings('retrieved')['verify_py_sha256']}",
+            description=f"eval_generated.py {' '.join(p.name for p in args.claims)}, {args.runs} runs",
+            metadata={**settings("retrieved"), "fresh": args.fresh},
+        )
+        print(f"Phoenix experiment {experiment_id}")
+
+
+def claim_input(claim: dict) -> dict:
+    """A claim's dataset input."""
+    return {"id": claim["id"], "paper": claim["paper"], "text": claim["text"]}
+
+
+def claims_dataset(claims: list[dict]) -> Dataset:
+    """The generated claims as a Phoenix dataset, with the verdict each was written to get."""
+    inputs = [claim_input(c) for c in claims]
+    outputs = [{"kind": c["kind"]} for c in claims]
+    return Dataset(
+        name=dataset_name("generated-claims", inputs + outputs),
+        description="Claims written from one passage each; kind is the expected verdict.",
+        inputs=inputs,
+        outputs=outputs,
+        metadata=[{"claim_file": c["claim_file"]} for c in claims],
+        splits=[None] * len(claims),
+    )
+
+
+def experiment_runs(
+    claims: list[dict], runs: list[dict[str, Judged]], windows: list[tuple[str, str]]
+) -> list[Run]:
+    """One Phoenix run per claim and pass, scored `correct` when the verdict is the claim's kind."""
+    # shortcut: every claim of a pass gets the pass's start and end, since claims run in a pool
+    found = []
+    for repetition, (run, (started, ended)) in enumerate(zip(runs, windows, strict=True), 1):
+        for claim in claims:
+            judged = run[claim["key"]]
+            output = {"verdict": judged.verdict, "verdict_from": judged.verdict_from}
+            scores = []
+            if judged.verdict != "error":
+                is_correct = judged.verdict == claim["kind"]
+                label = "correct" if is_correct else "wrong"
+                scores = [Score(name="correct", score=float(is_correct), label=label)]
+            found.append(Run(claim_input(claim), output, started, ended, judged.error, scores, repetition))
+    return found
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ Phoenix's REST API (/v1/datasets, /v1/experiments, /v1/experiment_evaluations), 
 need no Phoenix client.
 """
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 
@@ -38,7 +39,10 @@ class Score:
 
 @dataclass
 class Run:
-    """The result for one example. `input` must equal that example's input in the Dataset."""
+    """The result for one example. `input` must equal that example's input in the Dataset.
+
+    An eval that runs every example several times gives each pass its own repetition, from 1.
+    """
 
     input: dict
     output: dict
@@ -46,6 +50,13 @@ class Run:
     ended: str
     error: str | None = None
     scores: list[Score] = field(default_factory=list)
+    repetition: int = 1
+
+
+def dataset_name(prefix: str, rows: list[dict]) -> str:
+    """`prefix` and a hash of `rows`, so changed rows make a new dataset and the same rows reuse one."""
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:10]
+    return f"{prefix}-{digest}"
 
 
 def log_experiment(
@@ -88,7 +99,7 @@ def log_experiment(
             json={
                 "dataset_example_id": example_id,
                 "output": run.output,
-                "repetition_number": 1,
+                "repetition_number": run.repetition,
                 "start_time": run.started,
                 "end_time": run.ended,
                 "error": run.error,

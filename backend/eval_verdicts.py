@@ -294,10 +294,11 @@ def record_experiment(
 def labels_dataset(pairs: list[Pair], topics: dict[tuple[str, str], str]) -> Dataset:
     """The labeled pairs as a Phoenix dataset.
 
-    The name carries a hash of the pairs and their levels, so new labels make a new dataset and
-    runs on the same labels reuse one.
+    The name carries a hash of the pairs, their levels and their splits, so new labels or a new
+    split make a new dataset and runs on the same labels reuse one. Without the split, the first
+    upload's split tags stayed on the dataset for every later run.
     """
-    keys = sorted((p.claim_id, p.reference_id, sorted(p.levels.items())) for p in pairs)
+    keys = sorted((p.claim_id, p.reference_id, sorted(p.levels.items()), p.split) for p in pairs)
     return Dataset(
         name="labeler-pairs-" + hashlib.sha256(json.dumps(keys).encode()).hexdigest()[:10],
         description="Labeled claim/reference pairs from the Labeler export; gold is the majority.",

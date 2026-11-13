@@ -106,3 +106,19 @@ def test_a_run_for_an_unknown_input_fails_before_the_experiment_is_created(phoen
         experiments.log_experiment(DATASET, [run("a"), run("z")], name="x", description="", metadata={})
 
     assert fake.posts == []
+
+
+def test_each_repetition_is_posted_with_its_number(phoenix):
+    fake = phoenix(has_dataset=True)
+    again = Run({"q": "a"}, {"answer": 1}, "t2", "t3", repetition=2)
+
+    experiments.log_experiment(DATASET, [run("a"), again], name="x", description="", metadata={})
+
+    assert [body["repetition_number"] for url, body in fake.posts if url.endswith("/runs")] == [1, 2]
+
+
+def test_a_dataset_name_changes_only_when_its_rows_do():
+    name = experiments.dataset_name("toy", [{"q": "a"}, {"answer": 1}])
+
+    assert name == experiments.dataset_name("toy", [{"q": "a"}, {"answer": 1}])
+    assert name != experiments.dataset_name("toy", [{"q": "b"}, {"answer": 1}])
