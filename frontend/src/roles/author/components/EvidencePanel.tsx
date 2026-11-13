@@ -173,7 +173,7 @@ export function EvidencePanel({
                       : citation.verdict === 'unchecked'
                         ? citation.reason === 'missing-key'
                           ? `\\cite{${citation.key}} has no entry in the bibliography.`
-                          : 'Not checked yet.'
+                          : citation.message ? `${citation.message}.` : 'Not checked yet.'
                         : 'The check answered without quoting a passage.'}
                   </p>
                 </>

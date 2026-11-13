@@ -131,7 +131,7 @@ async def draft_issues(draft_id: str, tool_context: ToolContext) -> dict:
     citations = check["citations"] if check else []
     open_issues = [
         citation for citation in citations
-        if logic.is_open_issue(citation) or citation.get("reason") == "missing-key"
+        if logic.is_open_issue(citation) or citation.get("reason") in ("missing-key", "no-locator")
     ]  # fmt: skip
     return {
         "checked": check is not None,

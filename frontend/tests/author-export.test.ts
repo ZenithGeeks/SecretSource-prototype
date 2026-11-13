@@ -85,6 +85,11 @@ test('annotationFor explains an unavailable source and a missing key', () => {
     annotationFor({ ...contradicted, verdict: 'unchecked', evidence: undefined, explanation: undefined, reason: 'missing-key' }),
     '% SecretSource: Not checked — \\cite{khattab2020}: No entry in the bibliography.',
   )
+  const nothingToLookUp = { reason: 'no-locator', message: 'Add a DOI, URL or title to check this source' }
+  assert.equal(
+    annotationFor({ ...contradicted, verdict: 'unchecked', evidence: undefined, explanation: undefined, ...nothingToLookUp }),
+    '% SecretSource: Not checked — \\cite{khattab2020}: Add a DOI, URL or title to check this source.',
+  )
 })
 
 test('annotationFor says when no index knows the cited DOI, or the bib entry disagrees with it', () => {

@@ -47,7 +47,9 @@ export function annotationFor(citation: Citation): string {
       ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
       : citation.reason === 'missing-key'
         ? 'No entry in the bibliography.'
-        : 'Not checked yet.')
+        : citation.message
+          ? `${citation.message}.`
+          : 'Not checked yet.')
   const where = citation.evidence?.page ? ` (${citation.evidence.pdf} p.${citation.evidence.page})` : ''
   const note = referenceNote(citation)
   const text = note ? `${detail} ${note}` : detail
