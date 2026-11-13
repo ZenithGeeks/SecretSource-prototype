@@ -8,6 +8,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { backupKey } from '../src/lib/draftSave'
@@ -17,6 +18,11 @@ import { Library } from '../src/roles/author/screens/Library'
 import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX, THESIS_FILES } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -58,12 +64,12 @@ describe('Library: projects', () => {
 
   test('"+ New project" with no name makes "Untitled project" and opens it; Cancel makes nothing', async () => {
     const { onOpenProject } = renderLibrary()
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(calls('POST /author/projects')).toEqual([])
 
-    fireEvent.click(screen.getByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     expect(dialog().getByLabelText('Project name')).toHaveAttribute('placeholder', 'Untitled project')
     fireEvent.click(dialog().getByRole('button', { name: 'Create project' }))
     await waitFor(() => expect(onOpenProject).toHaveBeenCalled())
@@ -74,7 +80,7 @@ describe('Library: projects', () => {
 
   test('"+ New project" by name trims it, and still offers the .bib / .zip import', async () => {
     const { onOpenProject } = renderLibrary()
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     expect(dialog().getByRole('button', { name: /Import a \.bib or an Overleaf \.zip/ })).toBeInTheDocument()
     fireEvent.change(dialog().getByLabelText('Project name'), { target: { value: '  Thesis   ch.3 ' } })
     fireEvent.click(dialog().getByRole('button', { name: 'Create project' }))
@@ -82,7 +88,7 @@ describe('Library: projects', () => {
     expect(gateway.projects.get(onOpenProject.mock.calls[0][0])?.name).toBe('Thesis ch.3')
 
     // Import closes the dialog and hands over to the file input the "Import .bib" button uses.
-    fireEvent.click(screen.getByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     fireEvent.click(dialog().getByRole('button', { name: /Import a \.bib or an Overleaf \.zip/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByLabelText('Import a .bib or an Overleaf .zip')).toBeInTheDocument()
@@ -138,7 +144,7 @@ describe('Library: projects', () => {
     fireEvent.click(dialog().getByRole('button', { name: 'Delete project' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Open Related work — thesis ch.2' })).not.toBeInTheDocument())
     expect(calls('DELETE /author/projects')).toEqual(['DELETE /author/projects/proj1'])
-    expect(await screen.findByRole('button', { name: /Unsorted sources/ })).toHaveTextContent('2 drafts in no project')
+    expect(await screen.findByRole('button', { name: /Unsorted sources/ })).toHaveAccessibleName(/2 drafts in no project/)
     expect(gateway.sources.get('s1')?.projectId).toBeNull()
   })
 

@@ -7,6 +7,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { checkedAtLabel } from '../src/lib/author'
@@ -14,6 +15,11 @@ import { Library } from '../src/roles/author/screens/Library'
 import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, markSaved, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -65,7 +71,7 @@ describe('Author Library', () => {
     const card = (await screen.findByRole('button', { name: 'Open Related work — thesis ch.2' })).parentElement!
     expect(card).toHaveTextContent('main.bib · 7 entries · 0 cited · 3 need work')
     expect(card).toHaveTextContent(/Checked/)
-    expect(screen.getByRole('button', { name: /Unsorted sources/ })).toHaveTextContent('1 draft in no project')
+    expect(screen.getByRole('button', { name: /Unsorted sources/ })).toHaveAccessibleName(/1 draft in no project/)
 
     const attention = within(screen.getByRole('heading', { name: 'Needs attention' }).closest('div')!.parentElement!)
     expect(attention.getByText('\\cite{khattab2020} contradicts a claim in Related work — thesis ch.2')).toBeInTheDocument()
@@ -156,7 +162,7 @@ describe('Author Library', () => {
     expect(await screen.findByRole('heading', { name: 'Related work — thesis ch.2' })).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Drafts in this project' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Check history · Related work/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '← Library' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^← Library/ })).toBeInTheDocument()
   })
 
   test('the project detail lists its drafts and the check history with a compare', async () => {
@@ -189,7 +195,7 @@ describe('Author Library', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open in editor' }))
     expect(onOpenEditor).toHaveBeenCalledWith('d1')
-    fireEvent.click(screen.getByRole('button', { name: '← Library' }))
+    fireEvent.click(screen.getByRole('button', { name: /^← Library/ }))
   })
 
   test('a re-check without edits says so instead of offering a compare of the same version', async () => {
@@ -260,6 +266,8 @@ describe('Author Library', () => {
   test('a gateway error shows the message and a retry', async () => {
     gateway.fetch.mockRejectedValue(new Error('the gateway is down'))
     renderLibrary()
-    expect(await screen.findByText(/Could not load your library: the gateway is down/)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your library could not load')
+    expect(screen.getByRole('alert')).toHaveTextContent('the gateway is down')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })

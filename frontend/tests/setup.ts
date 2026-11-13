@@ -1,6 +1,5 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { toast } from 'sonner'
 import { afterEach, beforeEach, vi } from 'vitest'
 
 import { clearDoItConversation } from '../src/lib/doItConversation'
@@ -43,7 +42,4 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   clearDoItConversation()
-  // Sonner keeps its toasts in a module-level store, and a Toaster mounted by the next test
-  // would show the ones still up: dismiss them so each test starts with none.
-  toast.dismiss()
 })
