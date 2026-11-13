@@ -104,7 +104,7 @@ describe('a double click creates one item', () => {
     gateway = installFakeGateway({ files: THESIS_FILES })
     const onOpenProject = vi.fn()
     renderWithQuery(<Library projectId={null} onOpenProject={onOpenProject} onOpenEditor={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = within(screen.getByRole('dialog'))
     const form = dialog.getByRole('button', { name: 'Create project' }).closest('form')!
     const { release } = holdPosts('/author/projects')
