@@ -8,13 +8,20 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { Home } from '../src/roles/author/screens/Home'
 import { Library } from '../src/roles/author/screens/Library'
 import { ProjectDetail } from '../src/roles/author/screens/ProjectDetail'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
@@ -24,7 +31,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 /** Holds every `POST <path>` until `release` is called; the rest of the gateway answers as usual. */

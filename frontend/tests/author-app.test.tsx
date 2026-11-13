@@ -7,13 +7,20 @@
 import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { runTool } from '../src/lib/agentTools'
 import { clearDoItConversation } from '../src/lib/doItConversation'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 // Ask's Do it streams: each POST gets the next list of agent events.
 const agent = vi.hoisted(() => ({
@@ -54,6 +61,7 @@ function renderApp(search = '') {
   const onSwitchRole = vi.fn()
   render(
     <QueryClientProvider client={queryClient}>
+      <Toaster />
       <AuthorApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     </QueryClientProvider>,
   )

@@ -8,14 +8,21 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { type ReactNode, useState } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { keysLostByMove } from '../src/lib/latexProject'
 import { NewProjectWithDrafts } from '../src/roles/author/components/MoveDraft'
 import { Library } from '../src/roles/author/screens/Library'
 import type { Draft, ProjectFile } from '../src/types/draftCheck'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 
@@ -36,7 +43,7 @@ function renderLibrary(projectId: string | null) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const onOpenProject = vi.fn()
   const ui: ReactNode = <Library projectId={projectId} onOpenProject={onOpenProject} onOpenEditor={vi.fn()} />
-  render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
   return { onOpenProject }
 }
 
@@ -159,6 +166,7 @@ describe('Moving drafts (#721)', () => {
     }
     render(
       <QueryClientProvider client={queryClient}>
+        <Toaster />
         <App />
       </QueryClientProvider>,
     )
@@ -291,6 +299,7 @@ describe('Moving drafts (#721)', () => {
     const onCreated = vi.fn()
     render(
       <QueryClientProvider client={queryClient}>
+        <Toaster />
         <NewProjectWithDrafts initial={[handed]} onCancel={vi.fn()} onCreated={onCreated} />
       </QueryClientProvider>,
     )
@@ -304,7 +313,8 @@ describe('Moving drafts (#721)', () => {
     await waitFor(() => expect(dialog.queryByRole('checkbox', { name: THESIS })).toBeNull())
     expect(dialog.queryByRole('status')).toBeNull()
     fireEvent.click(dialog.getByRole('button', { name: 'Create project' }))
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.any(String), 'Untitled project created with 1 draft'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.any(String)))
+    expect(await screen.findByText('Untitled project created with 1 draft')).toBeInTheDocument()
     expect(patches()).toEqual(['PATCH /author/drafts/d2'])
   })
 
@@ -316,7 +326,9 @@ describe('Moving drafts (#721)', () => {
     const move = within(screen.getByRole('dialog', { name: `Move ${SEMINAR}` })).getByRole('button', { name: 'Move' })
     await waitFor(() => expect(move).toBeEnabled())
     fireEvent.click(move)
-    expect(await screen.findByText(/^Could not move Seminar paper \(CPE\) \(.*the gateway is down.*\)$/)).toBeInTheDocument()
+    const failure = await screen.findByText(/^Could not move Seminar paper \(CPE\) \(.*the gateway is down.*\)$/)
+    // SCRUM-533: a failure is an error toast (its red icon), never a success one.
+    expect(failure.closest('[data-sonner-toast]')).toHaveAttribute('data-type', 'error')
     expect(gateway.drafts.get('d2')!.projectId).toBeNull()
     expect(screen.getByRole('button', { name: `Move ${SEMINAR} to…` })).toBeInTheDocument()
   })

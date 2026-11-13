@@ -37,6 +37,7 @@
 
 import { Loader2 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Button, Card } from '../../../components/ui'
 import type { DraftReader } from '../../../lib/agentTools'
@@ -57,7 +58,6 @@ import { FileTabs } from '../components/editor/FileTabs'
 import { PreviewPane } from '../components/editor/PreviewPane'
 import { SplitPane } from '../../../components/SplitPane'
 import { StatusBar } from '../components/editor/StatusBar'
-import { Toast } from '../components/Toast'
 import type { EditorTarget } from '../editorTarget'
 
 type Texts = Record<string, string>
@@ -336,8 +336,6 @@ export function Editor({
     if (draft.data && !offering && status === 'saved') dropBackup(draftId)
   }, [draft.data, offering, status, draftId])
 
-  const [toast, setToast] = useState<string | null>(null)
-  const closeToast = useCallback(() => setToast(null), [])
 
   const [savingVersion, setSavingVersion] = useState(false)
   const save = async () => {
@@ -345,15 +343,15 @@ export function Editor({
     setSavingVersion(true)
     try {
       if (!(await flush())) {
-        setToast(conflictsRef.current.size ? 'Not saved: choose which version of the file to keep first.' : 'Not saved: the gateway refused the last edit. Retry, then save again.')
+        toast.error(conflictsRef.current.size ? 'Not saved: choose which version of the file to keep first.' : 'Not saved: the gateway refused the last edit. Retry, then save again.')
         return
       }
       const saved = await actions.saveDraft(draftId)
       // A version moves the draft's `updated`; the next write carries the new value.
       lastUpdated.current = saved.updated
-      setToast(`Saved as v${saved.version}`)
+      toast.success(`Saved as v${saved.version}`)
     } catch (error) {
-      setToast(`Could not save: ${errorMessage(error)}`)
+      toast.error(`Could not save: ${errorMessage(error)}`)
     } finally {
       setSavingVersion(false)
     }
@@ -422,10 +420,10 @@ export function Editor({
 
   const recheck = async () => {
     if (!(await flush())) {
-      setToast('Not checked: the gateway refused the last edit. Retry, then check again.')
+      toast.error('Not checked: the gateway refused the last edit. Retry, then check again.')
       return
     }
-    start.mutate(draftId, { onError: (error) => setToast(`Could not start the check: ${errorMessage(error)}`) })
+    start.mutate(draftId, { onError: (error) => toast.error(`Could not start the check: ${errorMessage(error)}`) })
   }
 
   const [cursor, setCursor] = useState<CursorPosition>({ line: target.line ?? 1, column: 1 })
@@ -450,9 +448,9 @@ export function Editor({
     if (!checkId) return
     try {
       await actions.overrideCitation(draftId, checkId, citation, note)
-      setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+      toast.success(note ? 'Kept your citation, note saved' : 'Kept your citation')
     } catch (error) {
-      setToast(`Could not save the note: ${errorMessage(error)}`)
+      toast.error(`Could not save the note: ${errorMessage(error)}`)
     }
   }
 
@@ -466,17 +464,17 @@ export function Editor({
     switch (kind) {
       case 'bib':
         downloadText(`${name}.bib`, buildUpdatedBib(current), 'application/x-bibtex')
-        setToast(`Downloaded ${name}.bib`)
+        toast.success(`Downloaded ${name}.bib`)
         return
       case 'tex': {
         const file = current.files.find((f) => f.name === active.name)!
         downloadText(file.name.split('/').pop()!, buildAnnotatedTex(file, check.data?.citations ?? []), 'application/x-tex')
-        setToast(`Downloaded ${file.name} with SecretSource comments`)
+        toast.success(`Downloaded ${file.name} with SecretSource comments`)
         return
       }
       case 'zip':
         downloadBlob(`${name}.zip`, buildProjectZip(current))
-        setToast(`Downloaded ${name}.zip`)
+        toast.success(`Downloaded ${name}.zip`)
         return
       case 'report':
         setExporting('report')
@@ -484,9 +482,9 @@ export function Editor({
           await flush()
           const pdf = await exportReport.mutateAsync(draftId)
           downloadBlob(`${name}-report.pdf`, pdf)
-          setToast('Downloaded the verification report')
+          toast.success('Downloaded the verification report')
         } catch (error) {
-          setToast(`Could not build the report: ${errorMessage(error)}`)
+          toast.error(`Could not build the report: ${errorMessage(error)}`)
           return false
         } finally {
           setExporting(null)
@@ -702,7 +700,7 @@ export function Editor({
           </span>
           <button
             type="button"
-            onClick={() => void rename(offeredTitle).then((refused) => (refused ? setToast(refused) : setTitleOfferDismissed(true)))}
+            onClick={() => void rename(offeredTitle).then((refused) => (refused ? toast.error(refused) : setTitleOfferDismissed(true)))}
             className="shrink-0 rounded font-medium text-accent underline"
           >
             Use this title
@@ -730,7 +728,7 @@ export function Editor({
                     lastUpdated.current = added.updated
                     selectFile(name)
                   })
-                  .catch((error) => setToast(`Could not add ${name}: ${errorMessage(error)}`))
+                  .catch((error) => toast.error(`Could not add ${name}: ${errorMessage(error)}`))
               }}
             />
             <CodeEditor
@@ -760,7 +758,6 @@ export function Editor({
           />
         }
       />
-      <Toast message={toast} onClose={closeToast} />
     </div>
   )
 }

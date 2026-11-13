@@ -8,14 +8,21 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { backupKey } from '../src/lib/draftSave'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
 import { Library } from '../src/roles/author/screens/Library'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX, THESIS_FILES } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -26,7 +33,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderLibrary(projectId: string | null = null) {

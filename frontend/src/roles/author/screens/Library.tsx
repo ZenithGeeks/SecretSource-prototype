@@ -7,7 +7,8 @@
 
 import { AnimatePresence } from 'framer-motion'
 import { AlertCircle, Bookmark, FileText, Plus, Trash2, Upload } from 'lucide-react'
-import { useCallback, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { LibraryCard, LibraryHeader, LibraryTitle, ProjectMenu, ProjectName } from '../../../components/library'
 import { Button, Card, Empty, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
@@ -20,8 +21,7 @@ import type { AttentionRow, Project, SavedSource } from '../../../types/draftChe
 import { CardHead, TextLink } from '../components/CardHead'
 import { NewProjectWithDrafts } from '../components/MoveDraft'
 import { ProjectNameField } from '../components/ProjectActions'
-import { copiedMessage, copyText } from '../clipboard'
-import { Toast } from '../components/Toast'
+import { copyText, toastCopied } from '../clipboard'
 import { issues } from '../labels'
 import { DeleteProjectDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
 import { HIGHLIGHT } from '../hover'
@@ -98,8 +98,6 @@ export function Library({
 }) {
   const library = useLibrary()
   const actions = useAuthorActions()
-  const [toast, setToast] = useState<string | null>(null)
-  const closeToast = useCallback(() => setToast(null), [])
   const importInput = useRef<HTMLInputElement>(null)
   const pdfInput = useRef<HTMLInputElement>(null)
   const [pdfFor, setPdfFor] = useState<AttentionRow | null>(null)
@@ -108,18 +106,16 @@ export function Library({
   const [deleting, setDeleting] = useState<Project | null>(null)
 
   if (projectId) {
-    // The toast stays: a project just created or imported here says so on its own page.
+    // A toast from here (a project just created or imported) stays up on the project's page:
+    // the app's toaster sits above every screen.
     return (
-      <>
-        <ProjectDetail
-          projectId={projectId}
-          initialDraft={draftId ?? null}
-          onBack={() => onOpenProject(null)}
-          onOpenEditor={onOpenEditor}
-          onDraftDeleted={onDraftDeleted}
-        />
-        <Toast message={toast} onClose={closeToast} />
-      </>
+      <ProjectDetail
+        projectId={projectId}
+        initialDraft={draftId ?? null}
+        onBack={() => onOpenProject(null)}
+        onOpenEditor={onOpenEditor}
+        onDraftDeleted={onDraftDeleted}
+      />
     )
   }
 
@@ -127,9 +123,9 @@ export function Library({
   const run = async (key: string, failed: string, work: () => Promise<string>) => {
     setBusy(key)
     try {
-      setToast(await work())
+      toast.success(await work())
     } catch (error) {
-      setToast(`${failed}: ${errorMessage(error)}`)
+      toast.error(`${failed}: ${errorMessage(error)}`)
     } finally {
       setBusy(null)
     }
@@ -186,7 +182,7 @@ export function Library({
   const pickProject = (): { id: string; name: string } | undefined => {
     const projects = library.data?.projects ?? []
     if (projects.length === 0) {
-      setToast('Create a project first, then add the entry to its .bib')
+      toast.warning('Create a project first, then add the entry to its .bib')
       return undefined
     }
     if (projects.length === 1) return projects[0]
@@ -197,7 +193,7 @@ export function Library({
   const savedAction = async (source: SavedSource) => {
     if (source.inBib) {
       const ok = await copyText(`\\cite{${source.key}}`)
-      setToast(copiedMessage(ok, `\\cite{${source.key}}`))
+      toastCopied(ok, `\\cite{${source.key}}`)
       return
     }
     const target = source.projectId ? { id: source.projectId, name: source.bibName ?? 'the .bib' } : pickProject()
@@ -363,7 +359,7 @@ export function Library({
                     {busy === source.id ? '…' : source.inBib ? 'Insert \\cite' : 'Add to .bib'}
                   </TextLink>
                   <TextLink
-                    onClick={() => void copyText(source.bibtex).then((ok) => setToast(copiedMessage(ok, `BibTeX for ${source.key}`)))}
+                    onClick={() => void copyText(source.bibtex).then((ok) => toastCopied(ok, `BibTeX for ${source.key}`))}
                     className="shrink-0"
                   >
                     Copy BibTeX
@@ -373,7 +369,7 @@ export function Library({
                     aria-label={`Delete ${source.title}`}
                     onClick={() => {
                       if (!window.confirm(`Delete ${source.title} from your saved sources? This cannot be undone.`)) return
-                      void actions.deleteSource(source.id).catch((error) => setToast(`Could not delete: ${errorMessage(error)}`))
+                      void actions.deleteSource(source.id).catch((error) => toast.error(`Could not delete: ${errorMessage(error)}`))
                     }}
                     className={`shrink-0 rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
                   >
@@ -390,9 +386,8 @@ export function Library({
         {creating && (
           <NewProjectWithDrafts
             onCancel={() => setCreating(false)}
-            onCreated={(projectId, notice) => {
+            onCreated={(projectId) => {
               setCreating(false)
-              setToast(notice)
               onOpenProject(projectId)
             }}
             onImport={() => {
@@ -411,13 +406,12 @@ export function Library({
             onCancel={() => setDeleting(null)}
             onConfirm={async () => {
               await actions.deleteProject(deleting.id)
-              setToast(`${deleting.name} deleted`)
+              toast.success(`${deleting.name} deleted`)
               setDeleting(null)
             }}
           />
         )}
       </AnimatePresence>
-      <Toast message={toast} onClose={closeToast} />
     </FadeIn>
   )
 }

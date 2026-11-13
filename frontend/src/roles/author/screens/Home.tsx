@@ -12,7 +12,8 @@
 
 import { AnimatePresence } from 'framer-motion'
 import { Loader2, Pen, Search } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { ToolbarActions } from '../../../components/AppShell'
 import type { Target } from '../../../components/PageViewer'
@@ -35,7 +36,6 @@ import { CitationCheckCard } from '../components/CitationCheckCard'
 import { DeleteDraftDialog } from '../components/DeleteDraftButton'
 import { DraftFileInputs, NewProjectMenu, NoDraftsCard } from '../components/DraftActions'
 import { EvidencePanel } from '../components/EvidencePanel'
-import { Toast } from '../components/Toast'
 import { YourDraftsCard } from '../components/YourDraftsCard'
 import type { EditorTarget } from '../editorTarget'
 
@@ -86,8 +86,6 @@ export function Home({
 }) {
   const drafts = useAuthorDrafts()
   const actions = useAuthorActions()
-  const [toast, setToast] = useState<string | null>(null)
-  const closeToast = useCallback(() => setToast(null), [])
 
   // No draft in the URL: open the most recently changed one.
   useEffect(() => {
@@ -100,7 +98,7 @@ export function Home({
       onSelectDraft(draft.id)
       return draft
     } catch (error) {
-      setToast(`Could not create the draft: ${errorMessage(error)}`)
+      toast.error(`Could not create the draft: ${errorMessage(error)}`)
       return null
     }
   }
@@ -109,9 +107,9 @@ export function Home({
     try {
       const draft = await actions.uploadDraft(file)
       onSelectDraft(draft.id)
-      setToast(`${file.name} uploaded${file.name.toLowerCase().endsWith('.zip') ? ' — its .tex and .bib files are in the draft' : ''}. Re-check when you are ready.`)
+      toast.success(`${file.name} uploaded${file.name.toLowerCase().endsWith('.zip') ? ' — its .tex and .bib files are in the draft' : ''}. Re-check when you are ready.`)
     } catch (error) {
-      setToast(`Could not upload ${file.name}: ${errorMessage(error)}`)
+      toast.error(`Could not upload ${file.name}: ${errorMessage(error)}`)
     }
   }
 
@@ -131,13 +129,13 @@ export function Home({
     try {
       if (open) {
         await actions.putFile(open, name, text)
-        setToast(`${name} added to ${drafts.data?.find((d) => d.id === open)?.title ?? 'this draft'}`)
+        toast.success(`${name} added to ${drafts.data?.find((d) => d.id === open)?.title ?? 'this draft'}`)
       } else {
         const created = await newDraft(name.replace(/\.bib$/, ''), [{ name: 'main.tex', content: '' }, { name, content: text }])
-        if (created) setToast(`${name} added to a new draft`)
+        if (created) toast.success(`${name} added to a new draft`)
       }
     } catch (error) {
-      setToast(`Could not add ${name}: ${errorMessage(error)}`)
+      toast.error(`Could not add ${name}: ${errorMessage(error)}`)
     }
   }
 
@@ -167,7 +165,6 @@ export function Home({
           key={draftId}
           draftId={draftId}
           drafts={drafts.data}
-          setToast={setToast}
           onSelectDraft={onSelectDraft}
           onOpenEditor={onOpenEditor}
           onOpenHistory={onOpenHistory}
@@ -176,7 +173,6 @@ export function Home({
           creatingDraft={creating.busy}
         />
       )}
-      <Toast message={toast} onClose={closeToast} />
     </>
   )
 }
@@ -184,7 +180,6 @@ export function Home({
 function HomeBody({
   draftId,
   drafts,
-  setToast,
   onSelectDraft,
   onOpenEditor,
   onOpenHistory,
@@ -194,7 +189,6 @@ function HomeBody({
 }: {
   draftId: string
   drafts: Draft[]
-  setToast: (message: string | null) => void
   onSelectDraft: (id: string | null) => void
   onOpenEditor: (target: EditorTarget) => void
   onOpenHistory: (draft: Draft) => void
@@ -228,7 +222,7 @@ function HomeBody({
     const neighbour = drafts[at + 1] ?? drafts[at - 1]
     const alreadyGone = await actions.deleteDraft(gone.id)
     setDeleting(null)
-    setToast(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
+    toast.success(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
     if (gone.id === draftId) onSelectDraft(neighbour?.id ?? null)
   }
 
@@ -251,7 +245,7 @@ function HomeBody({
   const recheck = () => {
     if (!draft.data || isChecking) return
     start.mutate(draft.data.id, {
-      onError: (error) => setToast(`Could not start the check: ${errorMessage(error)}`),
+      onError: (error) => toast.error(`Could not start the check: ${errorMessage(error)}`),
     })
   }
 
@@ -261,9 +255,9 @@ function HomeBody({
       const check = await actions.overrideCitation(draft.data.id, checkId, citation, note)
       const next = bySeverity((check.citations ?? []).filter(isOpenIssue))
       setSelectedId(next[0]?.id ?? null)
-      setToast(note ? 'Kept your citation, note saved' : 'Kept your citation')
+      toast.success(note ? 'Kept your citation, note saved' : 'Kept your citation')
     } catch (error) {
-      setToast(`Could not save the note: ${errorMessage(error)}`)
+      toast.error(`Could not save the note: ${errorMessage(error)}`)
     }
   }
 
@@ -387,13 +381,13 @@ function HomeBody({
               onNext={nextIssue}
               onOverride={(c, note) => void override(c, note)}
               onReopen={(c) => {
-                if (checkId) void actions.reopenCitation(current.id, checkId, c).catch((error) => setToast(`Could not reopen: ${errorMessage(error)}`))
+                if (checkId) void actions.reopenCitation(current.id, checkId, c).catch((error) => toast.error(`Could not reopen: ${errorMessage(error)}`))
               }}
               onAttachPdf={(c, file) =>
                 void actions
                   .attachPdf(current.id, c.key, file)
-                  .then(() => setToast(`${file.name} attached to \\cite{${c.key}}. Re-check to read it.`))
-                  .catch((error) => setToast(`Could not upload ${file.name}: ${errorMessage(error)}`))
+                  .then(() => toast.success(`${file.name} attached to \\cite{${c.key}}. Re-check to read it.`))
+                  .catch((error) => toast.error(`Could not upload ${file.name}: ${errorMessage(error)}`))
               }
               onShow={showTarget}
               onEdit={(c) => onOpenEditor({ draftId: current.id, file: c.file, line: c.line })}

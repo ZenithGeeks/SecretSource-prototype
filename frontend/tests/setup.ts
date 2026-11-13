@@ -8,6 +8,15 @@ import { clearDoItConversation } from '../src/lib/doItConversation'
 // keys before each test so one file's Ask does not reopen inside the next test.
 const ASK_STORAGE_PREFIX = 'secretsource.ask.'
 
+// Sonner adds its stylesheet to document.head when any module imports it (the app's Author and
+// Researcher screens do). jsdom lays nothing out, so in tests the sheet only makes every
+// getComputedStyle, and so every role query, slower. Drop it; no test reads a toast's CSS.
+beforeEach(() => {
+  for (const style of document.head.querySelectorAll('style')) {
+    if (style.textContent?.includes('[data-sonner-toaster]')) style.remove()
+  }
+})
+
 beforeEach(() => {
   const keys: string[] = []
   for (let i = 0; i < localStorage.length; i++) {
