@@ -14,6 +14,7 @@ import { centreInView } from '../src/lib/centreInView'
 import { resetSettings, updateSettings } from '../src/lib/settings'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
+import { Toaster } from '../src/components/Toaster'
 import { DEFAULT_VERDICTS, installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
@@ -26,7 +27,7 @@ let gateway: FakeGateway
 let queryClient: QueryClient
 
 function renderWithQuery(ui: ReactNode) {
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderHome(draftId: string | null = 'd1') {

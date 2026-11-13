@@ -9,6 +9,7 @@ import { checkedLabel } from '../src/lib/timeAgo'
 import { CodeEditor } from '../src/roles/author/components/editor/CodeEditor'
 import { Editor } from '../src/roles/author/screens/Editor'
 import { SplitPane } from '../src/components/SplitPane'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { PAPER_TEX } from './fixtures/paper'
 import { THESIS_FILES } from './fixtures/thesis'
@@ -28,7 +29,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderEditor(target = { draftId: 'd1', file: 'related-work.tex', line: 10 }) {
@@ -143,12 +144,12 @@ describe('Author LaTeX editor', () => {
     await screen.findByRole('tab', { name: /related-work\.tex/ })
     fireEvent.click(screen.getByRole('button', { name: /Export/ }))
     fireEvent.click(screen.getAllByRole('menuitem')[1])
-    expect(await screen.findByRole('status')).toHaveTextContent('Downloaded related-work-thesis-ch-2.bib')
+    expect(await screen.findByText('Downloaded related-work-thesis-ch-2.bib')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Export/ }))
     fireEvent.click(screen.getAllByRole('menuitem')[0])
     await waitFor(() => expect(gateway.calls).toContain('POST /author/drafts/d1/report'))
-    expect(await screen.findByRole('status')).toHaveTextContent('Downloaded the verification report')
+    expect(await screen.findByText('Downloaded the verification report')).toBeInTheDocument()
   })
 })
 

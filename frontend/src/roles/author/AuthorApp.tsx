@@ -17,6 +17,7 @@
 
 import { Home as HomeIcon, Library as LibraryIcon, Pen } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import type { NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
@@ -27,7 +28,6 @@ import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { NewProject } from './components/NewProject'
 import { RecentProjects } from './components/RecentProjects'
-import { Toast } from './components/Toast'
 import type { EditorTarget } from './editorTarget'
 import { Editor } from './screens/Editor'
 import { Home } from './screens/Home'
@@ -131,10 +131,11 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
   const [creatingProject, setCreatingProject] = useState(false)
   // A bookmarked ?screen=settings (the old Settings screen) opens the modal over Home.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
-  // What outlives a screen: the editor's last write being refused after the author left it, or
-  // a bookmark of a screen this role no longer has.
-  const [notice, setNotice] = useState<string | null>(initial.moved ? MOVED_NOTICE : null)
-  const closeNotice = useCallback(() => setNotice(null), [])
+  // A bookmark of a screen this role no longer has says where it went. The id keeps a remount
+  // (StrictMode, a role switch back) from stacking a second copy.
+  useEffect(() => {
+    if (initial.moved) toast.info(MOVED_NOTICE, { id: 'author-moved', duration: 10_000 })
+  }, [initial.moved])
   // The open editor's reader for read_draft; set while the editor is mounted.
   const draftReader = useRef<DraftReader | null>(null)
   const onAgentApi = useCallback((api: DraftReader | null) => {
@@ -234,7 +235,8 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
           target={editorTarget ?? { draftId }}
           onFileChange={(file) => setEditorTarget({ draftId, file })}
           onNavigate={(next) => navigate(next)}
-          onWriteFailed={setNotice}
+          // Outlives the editor: its last write can be refused after the author left it.
+          onWriteFailed={(message) => toast.error(message, { duration: 10_000 })}
           onAgentApi={onAgentApi}
           askSlot={ask.button}
           back={back}
@@ -265,8 +267,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
         />
       )}
       {ask.viewer}
-      <NewProject open={creatingProject} onClose={() => setCreatingProject(false)} onCreated={openProject} onNotice={setNotice} />
-      <Toast message={notice} onClose={closeNotice} ms={10_000} />
+      <NewProject open={creatingProject} onClose={() => setCreatingProject(false)} onCreated={openProject} />
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

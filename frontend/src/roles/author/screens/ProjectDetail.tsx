@@ -7,7 +7,8 @@
 
 import { AnimatePresence } from 'framer-motion'
 import { Clock, FileText, Plus, Trash2 } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
+import { toast } from 'sonner'
 
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
@@ -22,8 +23,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { DeleteDraftButton, DeleteDraftDialog } from '../components/DeleteDraftButton'
 import { MoveDraftMenu } from '../components/MoveDraft'
 import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
-import { copiedMessage, copyText } from '../clipboard'
-import { Toast } from '../components/Toast'
+import { copyText, toastCopied } from '../clipboard'
 import { CitationBadge } from '../components/Verdicts'
 import { FOCUS, HIGHLIGHT, LINK } from '../hover'
 
@@ -148,7 +148,7 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
   )
 }
 
-function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast: (message: string) => void }) {
+function UnsortedSources({ sources }: { sources: SavedSource[] }) {
   const actions = useAuthorActions()
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="unsorted-sources-title">
@@ -168,13 +168,13 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
                   {[source.pdf ? `PDF attached · ${source.pdf}` : null, source.inBib ? 'in the project .bib' : 'not in a .bib yet'].filter(Boolean).join(' · ')}
                 </p>
               </div>
-              <TextLink onClick={() => void copyText(source.bibtex).then((ok) => onToast(copiedMessage(ok, `BibTeX for ${source.key}`)))}>
+              <TextLink onClick={() => void copyText(source.bibtex).then((ok) => toastCopied(ok, `BibTeX for ${source.key}`))}>
                 Copy BibTeX
               </TextLink>
               <button
                 type="button"
                 aria-label={`Delete ${source.title}`}
-                onClick={() => void actions.deleteSource(source.id).catch((error) => onToast(`Could not delete: ${errorMessage(error)}`))}
+                onClick={() => void actions.deleteSource(source.id).catch((error) => toast.error(`Could not delete: ${errorMessage(error)}`))}
                 className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
@@ -209,11 +209,9 @@ export function ProjectDetail({
   const sources = useSavedSources(unsorted ? '' : projectId)
   const actions = useAuthorActions()
   const [selectedDraft, setSelectedDraft] = useState<string | null>(initialDraft)
-  const [toast, setToast] = useState<string | null>(null)
   const [deletingDraft, setDeletingDraft] = useState<Draft | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
-  const closeToast = useCallback(() => setToast(null), [])
   // Unsorted drafts belong to no project, so their check history comes from the draft itself.
   const unfiled = unsorted ? (drafts.data ?? []).filter((d) => !d.projectId) : []
   const unfiledCurrent = unfiled.find((d) => d.id === selectedDraft) ?? unfiled[0]
@@ -238,7 +236,7 @@ export function ProjectDetail({
         const draft = await actions.createDraft({ title: 'Untitled draft', projectId: unsorted ? null : projectId })
         onOpenEditor(draft.id, 'main.tex', 1)
       } catch (error) {
-        setToast(`Could not create the draft: ${errorMessage(error)}`)
+        toast.error(`Could not create the draft: ${errorMessage(error)}`)
       }
     })
 
@@ -248,7 +246,7 @@ export function ProjectDetail({
     setDeletingDraft(null)
     if (selectedDraft === gone.id) setSelectedDraft(null)
     onDraftDeleted?.(gone.id)
-    setToast(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
+    toast.success(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
   }
   const draftDialog = (
     <AnimatePresence>
@@ -279,7 +277,6 @@ export function ProjectDetail({
             onSelect={setSelectedDraft}
             onOpenEditor={onOpenEditor}
             onDelete={setDeletingDraft}
-            onNotice={setToast}
             title="Drafts in no project"
           />
           {unfiledCurrent ? (
@@ -290,9 +287,8 @@ export function ProjectDetail({
             </Card>
           )}
         </div>
-        <UnsortedSources sources={sources.data ?? []} onToast={setToast} />
+        <UnsortedSources sources={sources.data ?? []} />
         {draftDialog}
-        <Toast message={toast} onClose={closeToast} />
       </FadeIn>
     )
   }
@@ -365,7 +361,6 @@ export function ProjectDetail({
           onSelect={setSelectedDraft}
           onOpenEditor={onOpenEditor}
           onDelete={setDeletingDraft}
-          onNotice={setToast}
           title="Drafts in this project"
         />
         {current ? (
@@ -394,7 +389,6 @@ export function ProjectDetail({
           />
         )}
       </AnimatePresence>
-      <Toast message={toast} onClose={closeToast} />
     </FadeIn>
   )
 }
@@ -438,7 +432,6 @@ function DraftList({
   onSelect,
   onOpenEditor,
   onDelete,
-  onNotice,
   title,
 }: {
   drafts: Draft[]
@@ -447,8 +440,6 @@ function DraftList({
   onOpenEditor: (id: string) => void
   /** The bin on each row: asks first. */
   onDelete: (draft: Draft) => void
-  /** How a "Move to…" went. */
-  onNotice: (message: string) => void
   title: string
 }) {
   return (
@@ -479,7 +470,7 @@ function DraftList({
                   {statusLabel(draft.status)}
                 </span>
               </button>
-              <MoveDraftMenu draft={draft} onNotice={onNotice} />
+              <MoveDraftMenu draft={draft} />
               <DeleteDraftButton draft={draft} onDelete={onDelete} />
             </li>
           ))}

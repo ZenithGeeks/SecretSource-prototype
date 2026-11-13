@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 import { runTool } from '../src/lib/agentTools'
 import { clearDoItConversation } from '../src/lib/doItConversation'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
@@ -54,6 +55,7 @@ function renderApp(search = '') {
   const onSwitchRole = vi.fn()
   render(
     <QueryClientProvider client={queryClient}>
+      <Toaster />
       <AuthorApp onChangeRole={onChangeRole} onSwitchRole={onSwitchRole} />
     </QueryClientProvider>,
   )

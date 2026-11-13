@@ -14,6 +14,7 @@ import { backupKey } from '../src/lib/draftSave'
 import { AuthorApp } from '../src/roles/author/AuthorApp'
 import { Home } from '../src/roles/author/screens/Home'
 import { Library } from '../src/roles/author/screens/Library'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX, THESIS_FILES } from './fixtures/thesis'
 
@@ -26,7 +27,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderLibrary(projectId: string | null = null) {

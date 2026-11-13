@@ -17,6 +17,7 @@ import { YourDraftsCard } from '../src/roles/author/components/YourDraftsCard'
 import { AUTOSAVE_DELAY_MS, texTitle } from '../src/lib/draftSave'
 import { Editor } from '../src/roles/author/screens/Editor'
 import type { Draft } from '../src/types/draftCheck'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
@@ -44,6 +45,7 @@ function open(draftId: string, ui: (editor: ReactNode) => ReactNode = (e) => e) 
   const onWriteFailed = vi.fn()
   const view = render(
     <QueryClientProvider client={queryClient}>
+      <Toaster />
       {ui(<Editor target={{ draftId, file: 'main.tex', line: 1 }} onFileChange={() => undefined} onNavigate={() => undefined} onWriteFailed={onWriteFailed} />)}
     </QueryClientProvider>,
   )

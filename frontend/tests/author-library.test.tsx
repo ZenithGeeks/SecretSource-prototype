@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { checkedAtLabel } from '../src/lib/author'
 import { Library } from '../src/roles/author/screens/Library'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, markSaved, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
 
@@ -21,7 +22,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderLibrary(projectId: string | null = null) {
@@ -102,7 +103,7 @@ describe('Author Library', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(gateway.calls).toContain('DELETE /author/projects/proj1/bib/karpukhin2020'))
     await waitFor(() => expect(screen.queryByText('karpukhin2020 · in main.bib')).not.toBeInTheDocument())
-    expect(await screen.findByRole('status')).toHaveTextContent('karpukhin2020 removed')
+    expect(await screen.findByText('karpukhin2020 removed')).toBeInTheDocument()
   })
 
   test('a saved source can be added to the project .bib, after which it offers Insert \\cite', async () => {

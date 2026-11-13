@@ -13,6 +13,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { Home } from '../src/roles/author/screens/Home'
 import { Library } from '../src/roles/author/screens/Library'
 import { ProjectDetail } from '../src/roles/author/screens/ProjectDetail'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
 
@@ -24,7 +25,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 /** Holds every `POST <path>` until `release` is called; the rest of the gateway answers as usual. */
