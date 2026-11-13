@@ -32,15 +32,22 @@ vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
 let gateway: FakeGateway
 let queryClient: QueryClient
 
-function renderWithQuery(ui: ReactNode) {
-  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
+/** `toasts` mounts the app Toaster, for the tests that read a toast. The rest leave it out:
+ * its toasts add to the page every role query walks, and one test here is already slow on CI. */
+function renderWithQuery(ui: ReactNode, { toasts = false } = {}) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {toasts && <Toaster />}
+      {ui}
+    </QueryClientProvider>,
+  )
 }
 
-function renderHome(draftId: string | null = 'd1') {
+function renderHome(draftId: string | null = 'd1', options: { toasts?: boolean } = {}) {
   const onSelectDraft = vi.fn()
   const onOpenEditor = vi.fn()
   const onOpenHistory = vi.fn()
-  const view = renderWithQuery(<Home draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={onOpenEditor} onOpenHistory={onOpenHistory} />)
+  const view = renderWithQuery(<Home draftId={draftId} onSelectDraft={onSelectDraft} onOpenEditor={onOpenEditor} onOpenHistory={onOpenHistory} />, options)
   return { ...view, onSelectDraft, onOpenEditor, onOpenHistory }
 }
 
@@ -341,7 +348,7 @@ describe('Author Home', () => {
   })
 
   test('Upload source PDF only shows where no passage was read, and attaches the file to that citation’s key', async () => {
-    renderHome()
+    renderHome('d1', { toasts: true })
     await screen.findByRole('heading', { name: 'Evidence · Khattab & Zaharia, 2020' })
     // The check quoted the paper: a PDF upload would not change the verdict.
     expect(screen.queryByRole('button', { name: /Upload source PDF/ })).not.toBeInTheDocument()
@@ -414,7 +421,7 @@ describe('Author Home', () => {
   })
 
   test('a draft that does not exist shows an honest message, and a toast still shows there', async () => {
-    renderHome('gone')
+    renderHome('gone', { toasts: true })
     expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Upload a .tex or .zip file'), { target: { files: [new File(['\\section{A}'], 'chapter.tex')] } })
     expect(await screen.findByText(/chapter\.tex uploaded/)).toBeInTheDocument()
