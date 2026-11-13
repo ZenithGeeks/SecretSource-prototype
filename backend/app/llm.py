@@ -171,7 +171,13 @@ class CappedLiteLlm(LiteLlm):
 # may not be. Then the model spends its whole max_tokens budget on reasoning_content
 # and returns content=None ("The LM returned an empty or null response." from DSPy).
 # Asking per request works against both.
-NO_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
+def no_thinking(model: str) -> dict:
+    """The request fields that turn thinking off for `model`: only Qwen's chat template reads
+    them, and gpt-oss behind the gateway rejects the field with HTTP 400 (#978)."""
+    return {"chat_template_kwargs": {"enable_thinking": False}} if model.startswith("qwen") else {}
+
+
+NO_THINKING = no_thinking(VLLM_MODEL)
 
 
 # A dspy callback, not a LiteLLM one: dspy 3.4 sends some requests through LiteLLM and some

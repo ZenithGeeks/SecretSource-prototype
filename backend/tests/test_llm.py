@@ -373,3 +373,11 @@ def test_a_wait_gives_the_slot_back(busy_gateway, monkeypatch):
 
     assert lm("hi") == ["ok"]
     assert llm._slots.acquire(blocking=False)
+
+
+def test_only_qwen_models_get_the_no_thinking_field():
+    from app.llm import no_thinking
+
+    assert no_thinking("qwen3.8-27b-fp8") == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert no_thinking("gpt-oss-120b") == {}
+    assert no_thinking("gemma-4-31b-it") == {}
