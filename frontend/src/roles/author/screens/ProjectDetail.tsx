@@ -10,7 +10,7 @@ import { Clock, FileText, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
-import { BackLink, ConfirmDialog, LibraryHeader, LibraryTitle, ProjectMenu } from '../../../components/library'
+import { BackLink, LibraryHeader, LibraryTitle, ProjectMenu } from '../../../components/library'
 import { Badge, Button, Card, Empty, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedAtLabel, checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
@@ -24,6 +24,8 @@ import { DeleteDraftButton, DeleteDraftDialog } from '../components/DeleteDraftB
 import { MoveDraftMenu } from '../components/MoveDraft'
 import { ProjectNameField } from '../components/ProjectActions'
 import { copyText, toastCopied } from '../clipboard'
+import { DeleteProjectDialog, DeleteSourceDialog } from '../components/DeleteDialogs'
+import { plural } from '../labels'
 import { CitationBadge } from '../components/Verdicts'
 import { FOCUS, HIGHLIGHT, LINK } from '../hover'
 
@@ -35,7 +37,6 @@ function statusBadgeTone(status: DraftStatus) {
   return tone === 'text-refutes' ? 'refutes' : tone === 'text-supports' ? 'supports' : 'neutral'
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 function countsLine(run: CheckRun): string {
   const c = run.summary.counts
@@ -157,7 +158,7 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
 }
 
 function UnsortedSources({ sources }: { sources: SavedSource[] }) {
-  const actions = useAuthorActions()
+  const [deleting, setDeleting] = useState<SavedSource | null>(null)
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="unsorted-sources-title">
       <CardHead id="unsorted-sources-title" title="Unsorted sources" aside={<span className="text-ink-muted">{sources.length} saved</span>} />
@@ -182,7 +183,7 @@ function UnsortedSources({ sources }: { sources: SavedSource[] }) {
               <button
                 type="button"
                 aria-label={`Delete ${source.title}`}
-                onClick={() => void actions.deleteSource(source.id).catch((error) => toast.error(`Could not delete: ${errorMessage(error)}`))}
+                onClick={() => setDeleting(source)}
                 className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
@@ -191,6 +192,7 @@ function UnsortedSources({ sources }: { sources: SavedSource[] }) {
           ))}
         </ul>
       )}
+      {deleting && <DeleteSourceDialog source={deleting} onClose={() => setDeleting(null)} />}
     </Card>
   )
 }
@@ -386,37 +388,6 @@ export function ProjectDetail({
   )
 }
 
-/** "Delete project?": says what the gateway does. The drafts and saved sources stay and move
- * to Unsorted; the .bib and the PDFs attached to its entries go with the project. */
-export function DeleteProjectDialog({
-  name,
-  drafts,
-  sources,
-  entries,
-  bibName,
-  onCancel,
-  onConfirm,
-}: {
-  name: string
-  drafts: number
-  sources: number
-  entries: number
-  bibName: string | null | undefined
-  onCancel: () => void
-  onConfirm: () => Promise<void>
-}) {
-  return (
-    <ConfirmDialog title={`Delete “${name}”?`} confirmLabel="Delete project" onCancel={onCancel} onConfirm={onConfirm}>
-      <p>
-        Its {plural(drafts, 'draft', 'drafts')} and {plural(sources, 'saved source', 'saved sources')} move to Unsorted.
-      </p>
-      <p className="mt-2">
-        {bibName ?? 'Its .bib'} ({plural(entries, 'entry', 'entries')}) and the PDFs attached to it are deleted, so drafts that cite
-        those keys will show them as missing. This can't be undone.
-      </p>
-    </ConfirmDialog>
-  )
-}
 
 function DraftList({
   drafts,

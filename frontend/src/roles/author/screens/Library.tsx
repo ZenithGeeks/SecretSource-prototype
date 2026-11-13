@@ -19,11 +19,12 @@ import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
+import { DeleteProjectDialog, DeleteSourceDialog } from '../components/DeleteDialogs'
 import { NewProjectWithDrafts } from '../components/MoveDraft'
 import { ProjectNameField } from '../components/ProjectActions'
 import { copyText, toastCopied } from '../clipboard'
 import { issues } from '../labels'
-import { DeleteProjectDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
+import { ProjectDetail, UNSORTED } from './ProjectDetail'
 import { HIGHLIGHT } from '../hover'
 
 function count(n: number, noun: string): string {
@@ -104,7 +105,8 @@ export function Library({
   const [busy, setBusy] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<Project | null>(null)
-  const [confirming, setConfirming] = useState<Confirmation | null>(null)
+  const [removing, setRemoving] = useState<{ projectId: string; key: string } | null>(null)
+  const [deletingSource, setDeletingSource] = useState<SavedSource | null>(null)
 
   if (projectId) {
     // A toast from here (a project just created or imported) stays up on the project's page:
@@ -161,15 +163,7 @@ export function Library({
     }
     const { projectId } = row
     if (row.kind !== 'remove' || !projectId) return
-    setConfirming({
-      title: `Remove ${row.key} from the .bib?`,
-      body: "The entry leaves the project's .bib. This cannot be undone.",
-      label: 'Remove',
-      work: async () => {
-        await actions.removeBibEntry(projectId, row.key)
-        return `${row.key} removed`
-      },
-    })
+    setRemoving({ projectId, key: row.key })
   }
 
   const uploadPdf = async (file: File) => {
@@ -382,17 +376,7 @@ export function Library({
                   <button
                     type="button"
                     aria-label={`Delete ${source.title}`}
-                    onClick={() =>
-                      setConfirming({
-                        title: `Delete “${source.title}”?`,
-                        body: 'It leaves your saved sources. A .bib entry made from it stays. This cannot be undone.',
-                        label: 'Delete source',
-                        work: async () => {
-                          await actions.deleteSource(source.id)
-                          return `${source.title} deleted`
-                        },
-                      })
-                    }
+                    onClick={() => setDeletingSource(source)}
                     className={`shrink-0 rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />
@@ -433,25 +417,23 @@ export function Library({
             }}
           />
         )}
-        {confirming && (
+        {deletingSource && <DeleteSourceDialog source={deletingSource} onClose={() => setDeletingSource(null)} />}
+        {removing && (
           <ConfirmDialog
-            title={confirming.title}
-            confirmLabel={confirming.label}
-            onCancel={() => setConfirming(null)}
+            title={`Remove ${removing.key} from the .bib?`}
+            confirmLabel="Remove"
+            onCancel={() => setRemoving(null)}
             onConfirm={async () => {
-              toast.success(await confirming.work())
-              setConfirming(null)
+              await actions.removeBibEntry(removing.projectId, removing.key)
+              toast.success(`${removing.key} removed`)
+              setRemoving(null)
             }}
           >
-            {confirming.body}
+            The entry leaves the project's .bib. This cannot be undone.
           </ConfirmDialog>
         )}
       </AnimatePresence>
     </FadeIn>
   )
 }
-
-/** A destructive action waiting on ConfirmDialog. `work` resolves to the toast's text; a throw
- * keeps the dialog open with the gateway's message. */
-type Confirmation = { title: string; body: string; label: string; work: () => Promise<string> }
 
