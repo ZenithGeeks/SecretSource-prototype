@@ -143,6 +143,11 @@ def test_a_tagged_arxiv_id_wins_over_one_written_in_the_title():
     assert parsed["arxiv"] == "1111.22222"
 
 
+def test_a_tagged_arxiv_id_loses_the_category_grobid_read_with_it():
+    # From the HPG-MxP paper's reference list: "arXiv: 2412.19322 [cs.CE]".
+    assert claims._parse_reference(bibl("A survey", tagged="2412.19322[cs.CE"))["arxiv"] == "2412.19322"
+
+
 def test_an_arxiv_id_on_the_journal_line_is_kept_beside_an_article_title():
     # GROBID 0.8.2: the article title is the work, and the monogr line is the preprint note.
     parsed = claims._parse_reference(bibl("Sparks of AGI", journal="arXiv preprint arXiv:2303.12712"))

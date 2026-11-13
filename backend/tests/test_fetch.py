@@ -90,6 +90,15 @@ def test_a_working_link_is_used_and_arxiv_is_not_asked(lookup):
     assert tried == [pdf]
 
 
+def test_an_osti_record_page_is_fetched_as_its_pdf(lookup):
+    # Semantic Scholar's link for 10.2172/2318788, a DOE report cited by an HPC paper.
+    found = sources.Resolution("https://www.osti.gov/biblio/2318788", ids={"DOI": "10.2172/2318788"})
+    tried = lookup(found, {})
+
+    assert sources._fetch("10.2172/2318788")[1].url == "https://www.osti.gov/servlets/purl/2318788"
+    assert tried == ["https://www.osti.gov/servlets/purl/2318788"]
+
+
 # Unpaywall's answer for 10.1162/tacl.a.782 on 2026-10-16, cut to the fields used: the best
 # location is the publisher's PDF link, which answers a script with 403, and the work is also on
 # arXiv. Semantic Scholar does not know this DOI, so Unpaywall is the only lookup that answers.

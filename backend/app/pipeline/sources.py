@@ -167,6 +167,9 @@ ARXIV_LOCATION = re.compile(
 # arXiv's abstract page says this for a withdrawn paper. Its API does not say it anywhere: the
 # entry of 2305.13664 has the comment "requires revision".
 ARXIV_WITHDRAWN = re.compile(r"This paper has been withdrawn by ([^<]+)<")
+# OSTI's record page for a DOE report or paper. Semantic Scholar sometimes links it, and the PDF
+# of the same record is at osti.gov/servlets/purl/<id>.
+OSTI_RECORD_PAGE = re.compile(r"^https?://(?:www\.)?osti\.gov/biblio/(\d+)\b.*")
 
 
 def _headers() -> dict:
@@ -542,7 +545,7 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     except requests.RequestException as error:
         raise NotDownloadable(str(error)) from error
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", identifier.strip()).strip("-")[:80]
-    urls = [found.url]
+    urls = [OSTI_RECORD_PAGE.sub(r"https://www.osti.gov/servlets/purl/\1", found.url)]
     if (arxiv := found.ids.get("ArXiv")) and "arxiv.org" not in found.url:
         urls.append(f"https://arxiv.org/pdf/{arxiv}")
     failure: Exception | None = None
