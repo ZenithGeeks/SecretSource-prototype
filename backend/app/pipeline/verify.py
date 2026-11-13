@@ -283,13 +283,12 @@ def _build_judge():
 
     def ask(name: str, inputs: dict) -> dspy.Prediction:
         with dspy.context(lm=language_model, adapter=dspy.JSONAdapter()):
-            if name != "judge-figure":
-                return judges[name](**inputs)
             try:
                 return judges[name](**inputs)
             except AdapterParseError:
-                # About 1 reply in 10 with a figure is not JSON. Ask once more, past dspy's
-                # cache: at temperature 0 it would hand back the same reply.
+                # Some replies are not JSON: about 1 in 10 with a figure, and 26 of 819 calls
+                # in the 13 Nov benchmark. Ask once more, past dspy's cache: at temperature 0
+                # it would hand back the same reply.
                 with dspy.context(lm=language_model.copy(cache=False)):
                     return judges[name](**inputs)
 
