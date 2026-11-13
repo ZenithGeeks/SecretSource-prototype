@@ -289,6 +289,21 @@ describe('Author Library', () => {
     expect(gateway.calls).toContain(`GET /author/drafts/${unfiled.id}/checks`)
   })
 
+  test('deleting an unsorted source asks first, and Cancel keeps it (#959)', async () => {
+    gateway.sources.set('loose', { id: 'loose', projectId: null, key: 'formal2021', title: 'SPLADE v2', authors: 'Formal et al.', authorsList: ['Thibault Formal'], year: 2021, venue: '', doi: '', arxiv: '', url: '', identifier: 'arxiv:2109.10086', openAccess: true, citedBy: 1, bibtex: '', inBib: false, bibName: null, savedAt: '2026-09-27T00:00:00Z' })
+    renderLibrary('unsorted')
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete SPLADE v2' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete “SPLADE v2”?' })).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(gateway.calls).not.toContain('DELETE /author/sources/loose')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete SPLADE v2' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete source' }))
+    await waitFor(() => expect(gateway.calls).toContain('DELETE /author/sources/loose'))
+    expect(await screen.findByText('SPLADE v2 deleted')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/Formal et al\. \(2021\) · SPLADE v2/)).not.toBeInTheDocument())
+  })
+
   test('a gateway error shows the message and a retry', async () => {
     gateway.fetch.mockRejectedValue(new Error('the gateway is down'))
     renderLibrary()

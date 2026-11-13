@@ -156,8 +156,27 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
   )
 }
 
-function UnsortedSources({ sources }: { sources: SavedSource[] }) {
+/** "Delete “title”?" for a saved source, in the Library and on Unsorted. Only the source goes. */
+export function DeleteSourceDialog({ source, onClose }: { source: SavedSource; onClose: () => void }) {
   const actions = useAuthorActions()
+  return (
+    <ConfirmDialog
+      title={`Delete “${source.title}”?`}
+      confirmLabel="Delete source"
+      onCancel={onClose}
+      onConfirm={async () => {
+        await actions.deleteSource(source.id)
+        toast.success(`${source.title} deleted`)
+        onClose()
+      }}
+    >
+      It leaves your saved sources. A .bib entry made from it stays. This cannot be undone.
+    </ConfirmDialog>
+  )
+}
+
+function UnsortedSources({ sources }: { sources: SavedSource[] }) {
+  const [deleting, setDeleting] = useState<SavedSource | null>(null)
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="unsorted-sources-title">
       <CardHead id="unsorted-sources-title" title="Unsorted sources" aside={<span className="text-ink-muted">{sources.length} saved</span>} />
@@ -182,7 +201,7 @@ function UnsortedSources({ sources }: { sources: SavedSource[] }) {
               <button
                 type="button"
                 aria-label={`Delete ${source.title}`}
-                onClick={() => void actions.deleteSource(source.id).catch((error) => toast.error(`Could not delete: ${errorMessage(error)}`))}
+                onClick={() => setDeleting(source)}
                 className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
@@ -191,6 +210,7 @@ function UnsortedSources({ sources }: { sources: SavedSource[] }) {
           ))}
         </ul>
       )}
+      {deleting && <DeleteSourceDialog source={deleting} onClose={() => setDeleting(null)} />}
     </Card>
   )
 }
