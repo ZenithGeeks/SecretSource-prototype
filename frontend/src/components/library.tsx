@@ -264,9 +264,23 @@ export function NewProjectDialog({
   )
 }
 
-/** "⋯" on a project card or page: Rename and Delete project. Click outside closes it; the keys
- * are useMenuKeys'. */
-export function ProjectMenu({ label, onRename, onDelete }: { label: string; onRename: () => void; onDelete: () => void }) {
+export type MenuButtonItem = { key: string; content: ReactNode; onSelect: () => void; className?: string }
+
+/** A button that opens a menu of `items`. Click outside closes it; the keys are useMenuKeys'.
+ * `trigger` draws the button from the props that open the menu and say so. */
+export function MenuButton({
+  trigger,
+  items,
+  label,
+  className,
+  menuClassName,
+}: {
+  trigger: (props: { onClick: () => void; 'aria-haspopup': 'menu'; 'aria-expanded': boolean }) => ReactNode
+  items: MenuButtonItem[]
+  label?: string
+  className?: string
+  menuClassName?: string
+}) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
 
@@ -279,36 +293,53 @@ export function ProjectMenu({ label, onRename, onDelete }: { label: string; onRe
     return () => document.removeEventListener('mousedown', away)
   }, [open])
   const menu = useMenuKeys(open, () => setOpen(false), root)
-  const pick = (action: () => void) => () => {
-    menu.returnFocus()
-    setOpen(false)
-    action()
-  }
 
   return (
-    <div ref={root} onKeyDown={menu.onKeyDown} onBlur={menu.onBlur} className="pointer-events-auto relative">
-      <IconButton
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={label}
-        className="size-8 pointer-coarse:size-11"
-      >
-        <MoreVertical className="size-4" />
-      </IconButton>
+    <div ref={root} onKeyDown={menu.onKeyDown} onBlur={menu.onBlur} className={cn('relative', className)}>
+      {trigger({ onClick: () => setOpen((v) => !v), 'aria-haspopup': 'menu', 'aria-expanded': open })}
       {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-card">
-          <MenuItem role="menuitem" onClick={pick(onRename)} className="px-3 font-normal">
-            <Pencil className="size-4" />
-            Rename
-          </MenuItem>
-          <MenuItem role="menuitem" onClick={pick(onDelete)} className="px-3 font-normal text-refutes hover:bg-refutes-soft">
-            <Trash2 className="size-4" />
-            Delete project
-          </MenuItem>
+        <div role="menu" aria-label={label} className={cn('absolute right-0 z-20 mt-1 rounded-xl border border-border-subtle bg-surface p-1 shadow-card', menuClassName)}>
+          {items.map((item) => (
+            <MenuItem
+              key={item.key}
+              role="menuitem"
+              onClick={() => {
+                menu.returnFocus()
+                setOpen(false)
+                item.onSelect()
+              }}
+              className={cn('px-3 font-normal', item.className)}
+            >
+              {item.content}
+            </MenuItem>
+          ))}
         </div>
       )}
     </div>
+  )
+}
+
+/** "⋯" on a project card or page: Rename and Delete project. */
+export function ProjectMenu({ label, onRename, onDelete }: { label: string; onRename: () => void; onDelete: () => void }) {
+  return (
+    <MenuButton
+      className="pointer-events-auto"
+      menuClassName="w-44"
+      trigger={(open) => (
+        <IconButton {...open} aria-label={label} className="size-8 pointer-coarse:size-11">
+          <MoreVertical className="size-4" />
+        </IconButton>
+      )}
+      items={[
+        { key: 'rename', content: <><Pencil className="size-4" />Rename</>, onSelect: onRename },
+        {
+          key: 'delete',
+          content: <><Trash2 className="size-4" />Delete project</>,
+          onSelect: onDelete,
+          className: 'text-refutes hover:bg-refutes-soft',
+        },
+      ]}
+    />
   )
 }
 

@@ -159,7 +159,7 @@ describe('Author Library', () => {
     })
     renderLibrary()
     fireEvent.click(await screen.findByRole('button', { name: 'Add to .bib' }))
-    const menu = screen.getByRole('menu', { name: "Add to which project's .bib" })
+    const menu = screen.getByRole('menu', { name: 'Projects' })
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(
       expect.arrayContaining(['Related work — thesis ch.2', 'Grant aims']),
     )
