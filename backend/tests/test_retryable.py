@@ -121,7 +121,7 @@ def test_answer_from_docs_carries_retryable(monkeypatch):
     def unanswered(question, papers):
         raise requests.ReadTimeout("ColBERT timed out")
 
-    monkeypatch.setattr(rag, "_caller_papers", lambda tool_context: frozenset({"paper.pdf"}))
+    monkeypatch.setattr(rag, "caller_papers", lambda tool_context: frozenset({"paper.pdf"}))
     monkeypatch.setattr(rag, "_rag", unanswered)
 
     assert rag.answer_from_docs("How does ColBERTv2 compress its index?")["retryable"] is True

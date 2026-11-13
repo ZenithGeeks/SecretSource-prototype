@@ -57,7 +57,7 @@ def _build_rag():
     return RAG()
 
 
-def _caller_papers(tool_context) -> frozenset[str]:
+def caller_papers(tool_context) -> frozenset[str]:
     """The file names this caller may read. No user counts as signed out, whose papers are the
     unowned ones, never every paper in the index."""
     from app.main import papers_of
@@ -85,7 +85,7 @@ def answer_from_docs(question: str, tool_context=None) -> dict:
     """
     global _rag
     try:
-        papers = _caller_papers(tool_context)
+        papers = caller_papers(tool_context)
         if not papers:
             return {"status": "ok", "answer": "", "sources": []}
         if _rag is None:
@@ -147,7 +147,7 @@ def search_passages(
     if snippet_chars is not None and snippet_chars < 1:
         return {"status": "error", "message": "snippet_chars must be at least 1", "retryable": False}
     try:
-        papers = _caller_papers(tool_context)
+        papers = caller_papers(tool_context)
         if source is not None:
             papers = papers & {source}
         if not papers:
