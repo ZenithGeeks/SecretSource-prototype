@@ -54,7 +54,6 @@ PERFECT = {
         "Claim 2, about SPLADEv2",
     ),
     "How many claims in my PointNet++": ([], [("get_analysis", {"analysis_id": "a2"})], ""),
-    "Is the analysis of my Lost": ([], [("get_analysis", {"analysis_id": "a3"})], ""),
     "What evidence backs claim 1": ([], [("get_claim", {"analysis_id": "a1", "claim_number": 1})], ""),
     "Why is claim 2": ([], [("get_claim", {"analysis_id": "a1", "claim_number": 2})], "SPLADEv2 wins on 3"),
     "Find the claims about index size": ([], [("search_claims", {"query": "index size"})], ""),
@@ -85,6 +84,16 @@ def test_a_perfect_agent_passes_each_data_task_and_doing_nothing_fails_it(prefix
 
     assert task.check(Run(calls=calls, data_calls=data_calls, reply=reply))
     assert not task.check(Run(calls=[("read_screen", {})], data_calls=[], reply=reply))
+
+
+def test_asking_whether_an_analysis_finished_passes_from_list_papers_and_fails_if_it_starts_one():
+    task = data_task("Is the analysis of my Lost")
+
+    assert task.check(Run(reply="Yes, Lost in the Middle (a3) is done."))
+    assert task.check(Run(data_calls=[("get_analysis", {"analysis_id": "a3"})], reply="It finished."))
+    assert not task.check(Run(data_calls=[("submit_analysis", {"paper": "2307.03172"})], reply="Done."))
+    assert not task.check(Run(reply="I could not find that paper."))
+    assert not task.check(Run(reply="It is not finished yet; it is still running."))
 
 
 def test_a_navigation_task_fails_when_it_also_asks_data_agent():
