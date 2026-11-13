@@ -134,6 +134,44 @@ def test_the_runner_scores_the_split_and_writes_one_row_per_pair(monkeypatch, tm
     assert [r["verdict_from"] for r in rows] == ["text", "figure"]
 
 
+def test_an_errored_pair_keeps_its_message_in_the_csv_and_in_phoenix(monkeypatch, tmp_path):
+    import eval_verdicts
+
+    labels = tmp_path / "labels.csv"
+    write_labels(labels, [label("c1", "ada", 4), label("c2", "ada", 1), label("c3", "ada", 1)])
+    messages = {"claim c2": "no PDF for refB", "claim c3": ""}  # verify.py can give an empty one
+
+    def verify_claim(claim, source):
+        if claim in messages:
+            return {"status": "error", "message": messages[claim]}
+        return {"status": "ok", "verdict": "supports", "verdict_from": "text"}
+
+    logged = {}
+
+    def log_experiment(dataset, runs, **options):
+        logged.update(dataset=dataset, runs=runs, options=options)
+        return "exp1"
+
+    monkeypatch.setattr(eval_verdicts.verify, "verify_claim", verify_claim)
+    monkeypatch.setattr(eval_verdicts, "PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006")
+    monkeypatch.setattr(eval_verdicts, "log_experiment", log_experiment)
+    out = tmp_path / "verdicts.csv"
+    monkeypatch.setattr(sys, "argv", ["eval_verdicts.py", str(labels), "--out", str(out)])
+
+    eval_verdicts.main()
+
+    with out.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    assert [r["error"] for r in rows] == ["", "no PDF for refB", "no verdict and no message"]
+    supported, errored, unexplained = logged["runs"]
+    assert supported.error is None and supported.scores[0].label == "correct"
+    assert errored.error == "no PDF for refB" and errored.scores == []
+    assert unexplained.error == "no verdict and no message" and unexplained.scores == []
+    # Each run's input matches an example the dataset uploads, which is how Phoenix links them.
+    assert [r.input for r in logged["runs"]] == logged["dataset"].inputs
+    assert logged["options"]["split"] == "test"
+
+
 def test_pairs_keep_each_labeled_passage_once():
     rows = [
         {**label("c1", "ada", 4), "spans": json.dumps(["first passage", ""])},

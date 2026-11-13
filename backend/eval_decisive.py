@@ -21,6 +21,7 @@ import requests
 from app import store
 from app.config import VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.pipeline import verify
+from app.tracing import setup_tracing
 
 
 def main() -> None:
@@ -35,6 +36,7 @@ def main() -> None:
     )
     parser.add_argument("--min-kept", type=int, default=0, help="fail when a run keeps fewer rows")
     args = parser.parse_args()
+    setup_tracing()
 
     print("gateway model:", gateway_model())
     with args.cases.open(newline="", encoding="utf-8") as file:

@@ -27,6 +27,7 @@ import dspy
 from app import store
 from app.evaluation import judge_scores
 from app.pipeline import verify
+from app.tracing import setup_tracing
 
 PAPERS = Path("data/papers")
 VERDICTS = ("supports", "refutes", "insufficient", "error")
@@ -115,6 +116,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="each claim's verdicts and which call gave them, here")
     parser.add_argument("--evidence-count", type=int, help="override verify.EVIDENCE_COUNT for this run")
     args = parser.parse_args()
+    setup_tracing()
 
     if args.evidence_count:
         verify.EVIDENCE_COUNT = args.evidence_count

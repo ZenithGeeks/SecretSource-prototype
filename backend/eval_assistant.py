@@ -29,6 +29,7 @@ from app import assistant, store
 from app.assistant import Cited
 from app.config import PARALLEL_CHECKS
 from app.pipeline import verify
+from app.tracing import setup_tracing
 
 
 def prepare_papers(cited: list[Cited]) -> list[Cited]:
@@ -73,6 +74,7 @@ def main() -> None:
     parser.add_argument("--no-memory", action="store_true", help="ignore the remembered column")
     parser.add_argument("--no-rewrite", action="store_true", help="answer follow-ups as typed")
     args = parser.parse_args()
+    setup_tracing()
 
     with args.questions.open(newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))

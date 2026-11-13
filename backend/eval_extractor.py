@@ -26,6 +26,7 @@ from app import store
 from app.config import CLAIM_LIMIT
 from app.metrics import current_analysis_tokens
 from app.pipeline import claims
+from app.tracing import setup_tracing
 from dspy.utils.exceptions import AdapterParseError
 
 
@@ -128,6 +129,7 @@ def main() -> None:
         help="skip the extraction cache, so each run asks the LLM again (needed to see run-to-run spread)",
     )
     args = parser.parse_args()
+    setup_tracing()
 
     if args.fresh:
         # Neither read nor write: a variant's answer must not replace the one the pipeline uses.

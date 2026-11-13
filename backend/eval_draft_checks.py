@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path
 
 import requests
+from app.tracing import setup_tracing
 
 POLL_SECONDS = 20
 
@@ -28,6 +29,7 @@ def main() -> None:
     parser.add_argument("results", type=Path, help="where to write <paper>.json")
     parser.add_argument("gateway", nargs="?", default="http://127.0.0.1:8082")
     args = parser.parse_args()
+    setup_tracing()
     args.results.mkdir(parents=True, exist_ok=True)
 
     for paper in sorted(p for p in args.projects.iterdir() if (p / "latex").is_dir()):

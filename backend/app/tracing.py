@@ -2,7 +2,8 @@
 
 Each DSPy call (the analysis pipeline) and each ADK agent run (the chat agents) becomes a span
 with its prompt, answer, token counts and time. Open the Phoenix UI at the endpoint to read
-them. The gateway and the worker call setup_tracing() once at start. See backend/README.md#tracing.
+them. The gateway, the worker, the A2A server, cli.py and the eval scripts call setup_tracing()
+once at start. See backend/README.md#tracing.
 """
 
 import logging
