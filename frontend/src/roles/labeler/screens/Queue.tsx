@@ -11,7 +11,7 @@ import { NoMatch, PaperFilters } from '../components/PaperFilters'
 import { PaperTable } from '../components/PaperTable'
 import { ScopusAdd } from '../components/ScopusAdd'
 import { TeamTopics } from '../components/TeamTopics'
-import { isFinished, matches, NO_FILTERS, readFilters, writeFilters, type Filters } from '../paperFilters'
+import { isFinished, matches, NO_FILTERS, readFilters, teamStatusOf, valueLabel, writeFilters, type Filters } from '../paperFilters'
 
 type Export = Parameters<typeof labelingApi.exportFile>[0]
 type Scope = NonNullable<Parameters<typeof labelingApi.exportFile>[1]>
@@ -87,6 +87,16 @@ export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; o
   const me = pool.data?.me ?? ''
   const shown = papers.filter((paper) => matches(paper, filters, me))
   const reading = papers.filter((paper) => paper.status === 'running').length
+  // Any "Added by" choice, same as Topic: one or more selected just broadens which papers
+  // show (OR'd, already how `shown` works). How much of what they brought in is done, by the
+  // whole team, not just the viewer — so anyone can see what is left.
+  const personSummary =
+    filters.addedBy.length > 0
+      ? shown.reduce(
+          (totals, paper) => ({ ...totals, [teamStatusOf(paper)]: totals[teamStatusOf(paper)] + 1 }),
+          { done: 0, started: 0, none: 0 },
+        )
+      : null
   return (
     <FadeIn className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -195,6 +205,12 @@ export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; o
             {/* v8 ignore start -- @preserve */}
             <PaperFilters papers={papers} topics={pool.data?.topics ?? []} me={me} filters={filters} onChange={setFilters} shown={shown.length} />
             {/* v8 ignore stop -- @preserve */}
+            {personSummary && (
+              <Card role="status" className="py-3 text-sm text-ink">
+                {filters.addedBy.map((who) => valueLabel('addedBy', who, me)).join(', ')}: {personSummary.done} done ·{' '}
+                {personSummary.started} in progress · {personSummary.none} not started
+              </Card>
+            )}
             {shown.length === 0 ? (
               <NoMatch filters={filters} me={me} onClear={() => setFilters(NO_FILTERS)} />
             ) : (
