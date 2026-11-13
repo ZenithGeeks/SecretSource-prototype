@@ -503,8 +503,15 @@ def check_prepared(
         # insufficient text verdict came from a table that left a model out (#734).
         figure = _figure_crop(pages, source)
         if verdict["verdict"] in ("insufficient", "refutes") and figure and CITED_MARK not in claim:
+            from dspy.utils.exceptions import AdapterParseError
+
             caption = _captions([hit for hit in pages if hit.get("image")][:1])
-            seen = _judge(claim, caption, figure)
+            try:
+                seen = _judge(claim, caption, figure)
+            except AdapterParseError:
+                # The figure judge already had its retry (ask in _build_judge). Its verdict counts
+                # only when it is supports, so a reply that is still not JSON leaves the text verdict.
+                seen = {"verdict": "unparsed"}
             if seen["verdict"] == "supports":
                 verdict, verdict_from, judged_figure = seen, "figure", figure.name
         return {"status": "ok", "claim": claim, "source": source.name,

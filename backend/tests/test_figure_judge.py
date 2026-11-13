@@ -97,6 +97,25 @@ def test_an_insufficient_stays_when_the_figure_does_not_support_the_claim(judge,
     assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
 
 
+@pytest.mark.parametrize("text_verdict", ["insufficient", "refutes"])
+def test_a_figure_reply_that_is_not_json_leaves_the_text_verdict(judge, monkeypatch, text_verdict):
+    import dspy
+    from dspy.utils.exceptions import AdapterParseError
+
+    def fake_judge(claim, passages, figure=None):
+        if figure is not None:
+            signature = dspy.Signature("claim -> verdict")
+            raise AdapterParseError(adapter_name="JSONAdapter", signature=signature, lm_response="[...]")
+        return {"verdict": text_verdict, "quote": "", "reasoning": ""}
+
+    monkeypatch.setattr(verify, "_judge", fake_judge)
+
+    result = verify.check_prepared("The model scores 71.0.", "2112.01488", PAPER)
+
+    assert result["status"] == "ok" and result["verdict"] == text_verdict
+    assert (result["verdict_from"], result["judged_figure"]) == ("text", "")
+
+
 def test_a_claim_with_the_cited_mark_never_gets_the_figure(judge):
     result = verify.check_prepared("We use AdamW [cited].", "2112.01488", PAPER)
 
