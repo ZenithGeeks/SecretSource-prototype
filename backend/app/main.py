@@ -903,6 +903,61 @@ async def upload_analysis(
     return _start(path.as_posix(), verify, user)
 
 
+@app.post("/analyses/{analysis_id}/references/{ref}/pdf", status_code=202)
+async def upload_reference_pdf(
+    analysis_id: str, ref: str, file: UploadFile = PDF_UPLOAD, user: str | None = Depends(current_user)
+):
+    """Attach the PDF of one cited work that has no open-access copy, and check again the claims
+    that cite it (#983). Only the owner may, and only the owner can open the PDF afterwards:
+    it is often a paywalled copy from the owner's library."""
+    analysis = await asyncio.to_thread(_owned, analysis_id, user)
+    if analysis.get("status") != "done":
+        raise HTTPException(409, "wait for the analysis to finish")
+    if ref not in (analysis.get("references") or {}):
+        raise HTTPException(404, f"the paper has no reference {ref}")
+    content = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
+    if len(content) > uploads.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "the PDF must be 100 MB or smaller")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(422, "the file is not a PDF")
+    path = await asyncio.to_thread(save_upload, content, file.filename)
+    analysis.setdefault("pdfs", {})[ref] = path.name
+    _save_soon(analysis_id)
+    _detach(_recheck_reference(analysis_id, ref, path))
+    return {"ref": ref, "pdf": path.name}
+
+
+async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
+    """Check each claim that cites `ref` against `pdf`, replacing that citation's earlier result.
+
+    The result keeps the citation's lookup key as `cited`, so the claim card and the labeler
+    still match it to the citation. Claims are checked one at a time: a reference is cited by
+    a few claims, and the gateway serves everyone else meanwhile.
+    """
+    analysis = analyses[analysis_id]
+    try:
+        ready = await asyncio.to_thread(prepare_source, pdf.as_posix())
+        for claim in analysis["claims"]:
+            for citation, source in checked_citations(claim):
+                if citation.get("ref") != ref:
+                    continue
+                if ready["status"] == "error":
+                    verdict = {**ready, "claim": claim["claim"], "source": source}
+                else:
+                    verdict = await asyncio.to_thread(
+                        check_prepared, claim["claim"], pdf.as_posix(), Path(ready["path"]),
+                        judged_text(claim, citation), cites_others(claim, citation),
+                    )
+                claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") != source]
+                claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") != source]
+                fold_check(claim, source, citation, verdict)
+    except Exception:
+        # Detached from the request, so nothing else would report it.
+        logger.exception("checking analysis %s again against an uploaded %s failed", analysis_id, ref)
+    finally:
+        _save_soon(analysis_id)
+
+
 class UploadRequest(BaseModel):
     filename: str
     size: int = Field(gt=0, le=uploads.MAX_UPLOAD_BYTES)
