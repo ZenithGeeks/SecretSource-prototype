@@ -9,6 +9,8 @@ need no Phoenix client.
 import hashlib
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
+from types import ModuleType
 
 import requests
 
@@ -57,6 +59,11 @@ def dataset_name(prefix: str, rows: list[dict]) -> str:
     """`prefix` and a hash of `rows`, so changed rows make a new dataset and the same rows reuse one."""
     digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:10]
     return f"{prefix}-{digest}"
+
+
+def source_sha(module: ModuleType) -> str:
+    """The first 12 hex digits of a module's source hash, so a run records the prompt it used."""
+    return hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()[:12]
 
 
 def log_experiment(

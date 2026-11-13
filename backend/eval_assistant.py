@@ -15,6 +15,7 @@ user's matching facts; --no-memory leaves it out, so the same rows show what the
 A row with `earlier` is a follow-up to that question: it is rewritten to stand alone first, as
 Ask does, unless --no-rewrite. `expected` lists the papers (separated by |) a good answer cites.
 The answer and the checks are app/assistant.py's; this script only times them.
+With PHOENIX_COLLECTOR_ENDPOINT set, the runs are saved as one Phoenix experiment.
 """
 
 import argparse
@@ -22,12 +23,14 @@ import csv
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 import dspy
 from app import assistant, store
 from app.assistant import Cited
-from app.config import PARALLEL_CHECKS
+from app.config import PARALLEL_CHECKS, PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
+from app.experiments import Dataset, Run, Score, dataset_name, log_experiment, source_sha
 from app.pipeline import verify
 from app.tracing import setup_tracing
 
@@ -85,9 +88,11 @@ def main() -> None:
         dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
 
     papers = {row["paper"]: verify.prepare_source(row["paper"]) for row in rows if row.get("paper")}
+    results = []
     for run in range(1, args.runs + 1):
         seconds, verdicts, declined, outside, on_paper, expected = [], [], 0, 0, 0, 0
         for number, row in enumerate(rows, 1):
+            started_at = datetime.now(UTC).isoformat()
             remembered = [row["remembered"]] if row.get("remembered") and not args.no_memory else None
             started = time.perf_counter()
             question = row["question"]
@@ -97,6 +102,9 @@ def main() -> None:
                 paper = papers[row["paper"]]
                 if paper["status"] == "error":
                     print(f"run {run} {number}/{len(rows)} skipped: {row['paper']} {paper.get('reason')}")
+                    error = f"{row['paper']} not prepared: {paper.get('reason')}"
+                    ended = datetime.now(UTC).isoformat()
+                    results.append(Run(row_input(number, row), {}, started_at, ended, error, repetition=run))
                     continue
                 cited = assistant.answer_about_paper(question, row["paper"], Path(paper["path"]), remembered)
             else:
@@ -127,6 +135,15 @@ def main() -> None:
                 print(f"    rewritten: {question}")
             for item, verdict in zip(cited, row_verdicts, strict=True):
                 print(f"    {verdict:<12} {item.text}  [{item.source}]")
+            output = {
+                "question": question,
+                "statements": [
+                    {"text": item.text, "source": item.source, "verdict": verdict}
+                    for item, verdict in zip(cited, row_verdicts, strict=True)
+                ],
+                "seconds": round(finished - started, 1),
+            }
+            results.append(question_run(number, row, output, started_at, run))
         not_backed = sum(verdict != "supports" for verdict in verdicts)
         summary = (
             f"run {run}: median {statistics.median(seconds):.1f}s, slowest {max(seconds):.1f}s,"
@@ -137,6 +154,66 @@ def main() -> None:
         if expected:
             summary += f", answers citing the expected paper {on_paper}/{expected}"
         print(summary)
+
+    if PHOENIX_COLLECTOR_ENDPOINT:
+        sha = source_sha(assistant)
+        experiment_id = log_experiment(
+            questions_dataset(args.questions.stem, rows),
+            results,
+            name=f"{VLLM_MODEL} assistant {args.questions.stem} {sha}",
+            description=f"eval_assistant.py {args.questions.name}, {args.runs} runs",
+            metadata={
+                "model": VLLM_MODEL,
+                "assistant_py_sha256": sha,
+                "verify_py_sha256": source_sha(verify),
+                "memory": not args.no_memory,
+                "rewrite": not args.no_rewrite,
+                "fresh": args.fresh,
+            },
+        )
+        print(f"Phoenix experiment {experiment_id}")
+
+
+def row_input(number: int, row: dict) -> dict:
+    """A question's dataset input: its CSV row and the row number, since columns differ by file."""
+    return {"row": str(number), **row}
+
+
+def questions_dataset(name: str, rows: list[dict]) -> Dataset:
+    """The questions as a Phoenix dataset, with whether each is answerable and the papers to cite."""
+    inputs = [row_input(number, row) for number, row in enumerate(rows, 1)]
+    outputs = [
+        {"answerable": row.get("answerable", "yes"), "expected": row.get("expected", "")} for row in rows
+    ]
+    return Dataset(
+        name=dataset_name(name, inputs + outputs),
+        description="Questions for the checked assistant answer (#504, #506).",
+        inputs=inputs,
+        outputs=outputs,
+        metadata=[{} for _ in rows],
+        splits=[None] * len(rows),
+    )
+
+
+def question_run(number: int, row: dict, output: dict, started: str, repetition: int) -> Run:
+    """One answer in one run.
+
+    An answerable question is scored on the share of its statements the judge `backed`, an
+    out-of-library one on whether it `declined` with no statements, and a row with expected
+    papers on whether the answer `cites_expected` one of them.
+    """
+    verdicts = [statement["verdict"] for statement in output["statements"]]
+    scores = []
+    if row.get("answerable", "yes") == "no":
+        scores.append(Score(name="declined", score=float(not verdicts)))
+    elif verdicts:
+        scores.append(Score(name="backed", score=verdicts.count("supports") / len(verdicts)))
+    if row.get("expected"):
+        sources = {statement["source"] for statement in output["statements"]}
+        cites = bool(sources & set(row["expected"].split("|")))
+        scores.append(Score(name="cites_expected", score=float(cites)))
+    ended = datetime.now(UTC).isoformat()
+    return Run(row_input(number, row), output, started, ended, scores=scores, repetition=repetition)
 
 
 if __name__ == "__main__":

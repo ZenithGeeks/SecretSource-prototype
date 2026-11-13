@@ -6,19 +6,26 @@ Each claim is judged twice per run with the same instructions (JudgeClaim's, fro
 the same 4 ColBERT passages (verify.evidence_from): once with the passages only, once with the
 claim's figure crop added. The image is the only difference, so the gap is what the figure adds.
 Run it in the worker container with COLBERT_URL pointing at a ColBERT that has the papers.
+With PHOENIX_COLLECTOR_ENDPOINT set, each mode is saved as its own Phoenix experiment, on the
+same dataset eval_generated.py uses for that claims file.
 """
 
 import argparse
 import json
+import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 import dspy
+from app.config import PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
+from app.experiments import log_experiment, source_sha
 from app.llm import dspy_lm
 from app.pipeline import verify
 from app.tracing import setup_tracing
 from dspy.utils.exceptions import AdapterParseError
+from eval_generated import Judged, claims_dataset, experiment_runs, load_claims
 from make_eval_claims import write_with_retry
 
 FIGURES = Path("data/papers/figures")
@@ -89,8 +96,7 @@ def main() -> None:
     args = parser.parse_args()
     setup_tracing()
 
-    with args.claims.open(encoding="utf-8") as file:
-        claims = [json.loads(line) for line in file]
+    claims = load_claims([args.claims])
     for paper in sorted({c["paper"] for c in claims}):
         verify.prepare_source((PAPERS / paper).as_posix())  # index the text once
 
@@ -103,10 +109,13 @@ def main() -> None:
         "figure": dspy.ChainOfThought(JudgeTextAndFigure.with_instructions(INSTRUCTIONS)),
     }
     runs = []
+    windows = []  # each pass's start and end, for its Phoenix runs
     judge_both(claims[0], judges)  # the first call imports litellm before threads start
     with ThreadPoolExecutor(max_workers=2) as pool:  # the judge gateway allows 3 requests at once
         for run in range(1, args.runs + 1):
+            started = datetime.now(UTC).isoformat()
             runs.append(list(pool.map(lambda c: judge_both(c, judges), claims)))
+            windows.append((started, datetime.now(UTC).isoformat()))
             for mode in ("text", "figure"):
                 right = sum(v[mode] == c["kind"] for c, v in zip(claims, runs[-1], strict=True))
                 print(f"run {run} {mode:<6} {right}/{len(claims)}", flush=True)
@@ -121,6 +130,28 @@ def main() -> None:
         with args.out.open("w", encoding="utf-8") as file:
             for i, claim in enumerate(claims):
                 file.write(json.dumps({**claim, "verdicts": [r[i] for r in runs]}, ensure_ascii=False) + "\n")
+    if PHOENIX_COLLECTOR_ENDPOINT:
+        sha = source_sha(sys.modules[__name__])  # this file holds the judge's instructions
+        for mode in ("text", "figure"):
+            experiment_id = log_experiment(
+                claims_dataset(claims),
+                experiment_runs(claims, [judged_by(mode, claims, run) for run in runs], windows),
+                name=f"{VLLM_MODEL} figures {mode} {sha}",
+                description=f"eval_figures.py {args.claims.name}, {args.runs} runs, {mode} mode",
+                metadata={"model": VLLM_MODEL, "eval_figures_py_sha256": sha, "mode": mode},
+            )
+            print(f"Phoenix experiment ({mode}) {experiment_id}")
+
+
+def judged_by(mode: str, claims: list[dict], run: list[dict[str, str]]) -> dict[str, Judged]:
+    """One pass's verdicts in one mode, by the claim key eval_generated.load_claims sets."""
+    found = {}
+    for claim, verdicts in zip(claims, run, strict=True):
+        verdict = verdicts[mode]
+        figure = claim["figure"] if mode == "figure" else ""
+        error = "reply was not JSON twice" if verdict == "error" else None
+        found[claim["key"]] = Judged(verdict, mode, figure, error)
+    return found
 
 
 if __name__ == "__main__":
