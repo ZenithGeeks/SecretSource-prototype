@@ -354,6 +354,59 @@ def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution
     raise Unresolvable(f"no paper found matching the title: {title}")
 
 
+def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
+    """A work by its title in OpenAlex, with the first PDF link among its locations.
+
+    Asked after Semantic Scholar: OpenAlex lists repository copies too, and keeps a short title
+    that Semantic Scholar joins to its subtitle ("Frontier: Exploring Exascale", SC23).
+    """
+    from app.pipeline.indexes import _IndexError, openalex_works
+
+    # "," and "|" separate values in a filter, and OpenAlex refuses "?" and "*" in a title search.
+    words = re.sub(r"[,|?*]", " ", title)
+    params = {
+        "filter": f"title.search:{words}",
+        "select": "doi,title,publication_year,authorships,locations",
+        "per-page": 5,
+    }
+    try:
+        works = openalex_works(params)
+    except _IndexError as error:
+        raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
+    others = []
+    for work in works:
+        found = work.get("title") or ""
+        if not titles_match(title, found):
+            continue
+        year = work.get("publication_year")
+        first_author = ((work.get("authorships") or [{}])[0].get("author") or {}).get("display_name") or ""
+        if not fits(year, first_author):
+            others.append(_described(found, year, first_author))
+            continue
+        pdf = next((loc["pdf_url"] for loc in work.get("locations") or [] if loc.get("pdf_url")), "")
+        if not pdf:
+            raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'")
+        ids = {"DOI": work["doi"].removeprefix("https://doi.org/")} if work.get("doi") else {}
+        return Resolution(pdf, found, "openalex", ids, year, first_author)
+    if others:
+        raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
+    raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")
+
+
+def _openalex_pdfs(doi: str) -> list[str]:
+    """Every PDF link OpenAlex lists for a DOI, publisher and repository copies alike; [] when
+    OpenAlex does not answer or the DOI cannot go in a filter."""
+    from app.pipeline.indexes import _IndexError, openalex_works
+
+    if re.search(r"[,|]", doi):  # value separators in an OpenAlex filter
+        return []
+    try:
+        works = openalex_works({"filter": f"doi:{doi}", "select": "locations"})
+    except _IndexError:
+        return []
+    return [loc["pdf_url"] for work in works for loc in work.get("locations") or [] if loc.get("pdf_url")]
+
+
 def _described(title: str, year: int | None, first_author: str) -> str:
     """ "Deep Learning (2018, Nicholas G. Polson)", for a message about a work that was skipped."""
     return f"{title} ({', '.join(str(part) for part in (year, first_author) if part)})"
@@ -387,17 +440,21 @@ def _unpaywall_pdf(doi: str) -> Resolution:
 
 def _first_answer(resolvers, argument: str) -> Resolution:
     """Ask each resolver in turn. An unavailable service is not an answer about the paper."""
-    failure: Exception = LookupUnavailable("no resolver was asked")
+    failures: list[Exception] = []
     for resolver in resolvers:
         try:
             return resolver(argument)
         except (ValueError, OSError) as error:
-            failure = error
-    raise failure
+            failures.append(error)
+    raise _reported(failures) if failures else LookupUnavailable("no resolver was asked")
+
+
+# The indexes asked for a work by its title, in this order.
+TITLE_RESOLVERS = (_arxiv_by_title, _semantic_scholar_by_title, _openalex_by_title)
 
 
 def _by_title(title: str) -> Resolution:
-    return _first_answer((_arxiv_by_title, _semantic_scholar_by_title), title)
+    return _first_answer(TITLE_RESOLVERS, title)
 
 
 def find_by_title(title: str, fits: Fits) -> Resolution:
@@ -422,7 +479,7 @@ def find_by_title(title: str, fits: Fits) -> Resolution:
             return work
 
     failures: list[Exception] = []
-    for resolver in (_arxiv_by_title, _semantic_scholar_by_title):
+    for resolver in TITLE_RESOLVERS:
         try:
             found = resolver(title, fits)
             break
@@ -437,12 +494,14 @@ def find_by_title(title: str, fits: Fits) -> Resolution:
 
 
 def _reported(failures: list[Exception]) -> Exception:
-    """The failure to report when no index had the work: the last one, except that a work arXiv
-    skipped wins over Semantic Scholar's plain "no paper found". The skipped work is what the
-    author needs to see. A rate limit or a paywall still wins, since it says more."""
-    skipped = next((error for error in failures if isinstance(error, OnlyOtherWorks)), None)
-    if skipped and type(failures[-1]) is Unresolvable:
-        return skipped
+    """The failure to report when no index had the work: the last one, except when that is a
+    plain "no paper found". Then an earlier index that knew the work wins: a work it skipped
+    (OnlyOtherWorks) is what the author needs to see, and a paywall says more than a later index
+    not knowing the title. A rate limit still wins when it comes last."""
+    if type(failures[-1]) is Unresolvable:
+        known = [error for error in failures if isinstance(error, OnlyOtherWorks | NoOpenAccessCopy)]
+        if known:
+            return known[-1]
     return failures[-1]
 
 
@@ -529,7 +588,8 @@ def _link_file(pdf: Path) -> Path:
 
 
 def _fetch(identifier: str) -> tuple[Path, Resolution]:
-    """Download the work's PDF from where the lookup found it, or else from its arXiv copy.
+    """Download the work's PDF from where the lookup found it, or else from its arXiv copy, or
+    else from another PDF link OpenAlex lists for its DOI.
 
     Semantic Scholar's open-access link is often the publisher's landing page (doi.org), and
     ACM, MIT Press and IEEE refuse a script there with a 403 or an HTML page, even when the same
@@ -548,8 +608,16 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     urls = [OSTI_RECORD_PAGE.sub(r"https://www.osti.gov/servlets/purl/\1", found.url)]
     if (arxiv := found.ids.get("ArXiv")) and "arxiv.org" not in found.url:
         urls.append(f"https://arxiv.org/pdf/{arxiv}")
+
+    def links():
+        yield from urls
+        # A refused publisher link often has a repository copy OpenAlex knows, such as OSTI's
+        # for ACM's SC papers. Asked only after the links above failed.
+        if doi := found.ids.get("DOI"):
+            yield from (url for url in _openalex_pdfs(doi) if url not in urls)
+
     failure: Exception | None = None
-    for url in urls:
+    for url in links():
         try:
             return _download(url, name), found._replace(url=url)
         except (requests.RequestException, WebSource, NotDownloadable) as error:
