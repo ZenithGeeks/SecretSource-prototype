@@ -23,7 +23,7 @@ import { TeamTopics } from '../src/roles/labeler/components/TeamTopics'
 import { TopicSelect } from '../src/roles/labeler/components/TopicSelect'
 import { UploadPdfButton } from '../src/roles/labeler/components/UploadPdfButton'
 import { VenueRankBadge } from '../src/roles/labeler/components/VenueRankBadge'
-import { NO_FILTERS, readFilters, valueLabel, writeFilters, type Paper } from '../src/roles/labeler/paperFilters'
+import { NO_FILTERS, readFilters, teamStatusOf, valueLabel, writeFilters, type Paper } from '../src/roles/labeler/paperFilters'
 
 const withQuery = (ui: ReactElement) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
@@ -68,6 +68,18 @@ const paper = (id: string, over: Partial<Paper> = {}): Paper => ({
   venue_rank: '',
   venue_rank_source: '',
   ...over,
+})
+
+describe('teamStatusOf', () => {
+  it('is done only once every claim is judged by someone on the team, and the paper itself is ready', () => {
+    expect(teamStatusOf(paper('a', { claims: 2, team_judged: 2 }))).toBe('done')
+    expect(teamStatusOf(paper('b', { claims: 2, team_judged: 1 }))).toBe('started')
+    expect(teamStatusOf(paper('c', { claims: 2, team_judged: 0 }))).toBe('none')
+    // A paper with no claims at all is never "done", even though 0 judged meets 0 needed.
+    expect(teamStatusOf(paper('d', { claims: 0, team_judged: 0 }))).toBe('none')
+    // Still being read: not done no matter how many of its (not yet final) claims are judged.
+    expect(teamStatusOf(paper('e', { status: 'running', claims: 2, team_judged: 2 }))).toBe('started')
+  })
 })
 
 describe('PaperFilters', () => {
