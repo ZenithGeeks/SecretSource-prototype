@@ -12,18 +12,23 @@ the windows themselves:
 - located: the share of claims whose sentence was found in the PDF
 - repeats: claims _deduplicated drops, and kept: what is left after CLAIM_LIMIT
 - failed: windows whose answer could not be parsed (often cut off by max_tokens)
+
+With PHOENIX_COLLECTOR_ENDPOINT set, each variant is saved as its own Phoenix experiment on the
+same papers, so the variants sit side by side.
 """
 
 import argparse
 import statistics
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
 import dspy
 from app import store
-from app.config import CLAIM_LIMIT
+from app.config import CLAIM_LIMIT, PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
+from app.experiments import Dataset, Run, Score, dataset_name, log_experiment, source_sha
 from app.metrics import current_analysis_tokens
 from app.pipeline import claims
 from app.tracing import setup_tracing
@@ -141,14 +146,17 @@ def main() -> None:
         windows = {size: len(paper.windows(size)) for size in (claims.MAX_CHARS, claims.CITING_CHARS)}
         print(f"{Path(paper.path).name}: {len(paper.cited)} citing sentences, windows by size {windows}")
 
+    results: dict[str, list[Run]] = {variant.name: [] for variant in VARIANTS}
     for run in range(1, args.runs + 1):
         for variant in VARIANTS:
             tokens: dict[str, int] = {}
             current_analysis_tokens.set(tokens)
             total, per_window = {}, []
             for paper in papers:
+                started = datetime.now(UTC).isoformat()
                 result = score_paper(paper, variant)
                 per_window += result.pop("per_window")
+                results[variant.name].append(paper_run(paper, result, started, run))
                 for key, value in result.items():
                     total[key] = total.get(key, 0) + value
                 print(f"run {run} {variant.name:<22} {Path(paper.path).name}: {result}")
@@ -161,6 +169,55 @@ def main() -> None:
                 f" {total['seconds']:.0f}s; tokens in {tokens.get('extract_prompt', 0)}"
                 f" out {tokens.get('extract_completion', 0)}"
             )
+
+    if PHOENIX_COLLECTOR_ENDPOINT:
+        sha = source_sha(claims)
+        for variant in VARIANTS:
+            experiment_id = log_experiment(
+                papers_dataset(papers),
+                results[variant.name],
+                name=f"{VLLM_MODEL} extractor {variant.name} {sha}",
+                description=f"eval_extractor.py, {len(papers)} papers, {args.runs} runs, fresh={args.fresh}",
+                metadata={"model": VLLM_MODEL, "claims_py_sha256": sha, **asdict(variant)},
+            )
+            print(f"Phoenix experiment ({variant.name}) {experiment_id}")
+
+
+def paper_input(paper: Paper) -> dict:
+    """A paper's dataset input."""
+    return {"paper": Path(paper.path).name}
+
+
+def papers_dataset(papers: list[Paper]) -> Dataset:
+    """The papers as a Phoenix dataset, with how many citing sentences each has."""
+    inputs = [paper_input(paper) for paper in papers]
+    outputs = [{"citing_sentences": len(paper.cited)} for paper in papers]
+    return Dataset(
+        name=dataset_name("extractor-papers", inputs + outputs),
+        description="Papers the claim extractor runs on; scored against their own citing sentences.",
+        inputs=inputs,
+        outputs=outputs,
+        metadata=[{} for _ in papers],
+        splits=[None] * len(papers),
+    )
+
+
+def paper_run(paper: Paper, counts: dict, started: str, repetition: int) -> Run:
+    """One paper's counts for one variant in one run, with the shares as scores."""
+    shares = {
+        "covered": ("covered", "sentences"),
+        "citing": ("citing", "claims"),
+        "located": ("located", "claims"),
+        "failed": ("failed", "windows"),
+    }
+    scores = [
+        Score(name=name, score=counts[part] / counts[whole])
+        for name, (part, whole) in shares.items()
+        if counts[whole]
+    ]
+    output = {**counts, "seconds": round(counts["seconds"], 1)}
+    ended = datetime.now(UTC).isoformat()
+    return Run(paper_input(paper), output, started, ended, scores=scores, repetition=repetition)
 
 
 if __name__ == "__main__":
