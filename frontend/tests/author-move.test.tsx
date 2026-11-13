@@ -77,7 +77,7 @@ describe('keysLostByMove', () => {
 describe('Moving drafts (#721)', () => {
   test('"+ New project" takes existing drafts along, grouped Unsorted then by project, and warns about keys left behind', async () => {
     const { onOpenProject } = renderLibrary(null)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'New project' }))
     const picker = within(await dialog.findByRole('group', { name: 'Add existing drafts (optional)' }))
     expect(picker.getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['Unsorted', THESIS])
@@ -162,7 +162,7 @@ describe('Moving drafts (#721)', () => {
         <App />
       </QueryClientProvider>,
     )
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'New project' }))
     fireEvent.click(await dialog.findByRole('checkbox', { name: SEMINAR }))
     fireEvent.change(dialog.getByLabelText('Project name'), { target: { value: 'Seminar' } })
@@ -218,7 +218,7 @@ describe('Moving drafts (#721)', () => {
   test('"+ New project" with a draft whose .bib cannot be read makes no project until Retry reads it', async () => {
     const source = projectDown('proj1')
     const { onOpenProject } = renderLibrary(null)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'New project' }))
     fireEvent.click(await dialog.findByRole('checkbox', { name: THESIS }))
     expect(await dialog.findByRole('alert')).toHaveTextContent('Couldn’t check which \\cite keys the move leaves behind.')
@@ -247,7 +247,7 @@ describe('Moving drafts (#721)', () => {
     source.wait = new Promise<void>((resolve) => (release = resolve))
     const create = refuse((method, url) => method === 'POST' && url.endsWith('/author/projects'))
     const { onOpenProject } = renderLibrary(null)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'New project' }))
     fireEvent.click(await dialog.findByRole('checkbox', { name: THESIS }))
     fireEvent.change(dialog.getByLabelText('Project name'), { target: { value: 'Empty' } })
@@ -275,7 +275,7 @@ describe('Moving drafts (#721)', () => {
   test('"+ New project": a draft that could not be moved is named, and the project is still made', async () => {
     moveDown('d2')
     const { onOpenProject } = renderLibrary(null)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'New project' }))
     fireEvent.click(await dialog.findByRole('checkbox', { name: SEMINAR }))
     fireEvent.change(dialog.getByLabelText('Project name'), { target: { value: 'Chapter 3' } })

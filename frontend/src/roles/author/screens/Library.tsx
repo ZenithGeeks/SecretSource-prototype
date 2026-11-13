@@ -6,11 +6,11 @@
  */
 
 import { AnimatePresence } from 'framer-motion'
-import { AlertCircle, ArrowRight, Bookmark, FileText, Trash2, Upload } from 'lucide-react'
+import { AlertCircle, Bookmark, FileText, Plus, Trash2, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 
-import { Mascot } from '../../../components/Mascot'
-import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { LibraryCard, LibraryHeader, LibraryTitle, ProjectMenu, ProjectName } from '../../../components/library'
+import { Button, Card, Empty, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
 import { VerdictBar } from '../../../components/VerdictBar'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedSentence, errorMessage } from '../../../lib/author'
@@ -19,20 +19,19 @@ import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
 import { NewProjectWithDrafts } from '../components/MoveDraft'
-import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
+import { ProjectNameField } from '../components/ProjectActions'
 import { copiedMessage, copyText } from '../clipboard'
 import { Toast } from '../components/Toast'
 import { issues } from '../labels'
 import { DeleteProjectDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
-import { FOCUS, HIGHLIGHT } from '../hover'
+import { HIGHLIGHT } from '../hover'
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
-/** A project card. The whole card opens the project; its "⋯" menu renames it in place or asks
- * to delete it (the Researcher's card pattern: the open button lies under the content, which
- * lets clicks through except on the menu and the name field). */
+/** A project card on the shared Library frame: the whole card opens the project; its "⋯" menu
+ * renames it in place or asks to delete it. */
 function ProjectCard({
   project,
   onOpen,
@@ -58,33 +57,22 @@ function ProjectCard({
         : `${count(project.drafts, 'draft')}`,
   ]
   return (
-    <div className="relative flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent">
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`Open ${project.name}`}
-        data-ask-target={askTarget({ kind: 'project', id: project.id })}
-        className={`absolute inset-0 rounded-xl ${FOCUS}`}
-      />
-      <div className="pointer-events-none flex flex-col gap-3">
-        {renaming ? (
+    <LibraryCard
+      openLabel={`Open ${project.name}`}
+      onOpen={onOpen}
+      askTarget={askTarget({ kind: 'project', id: project.id })}
+      title={
+        renaming ? (
           <ProjectNameField name={project.name} onSave={onRename} onDone={() => setRenaming(false)} />
         ) : (
-          <p className="pr-8 font-serif text-base font-semibold break-words text-ink">{project.name}</p>
-        )}
-        <p className="text-[13px] text-ink-muted">{meta.join(' · ')}</p>
-        <VerdictBar counts={project.tally} />
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-xs text-ink-muted">{checkedSentence(project.checkedAt)}</span>
-          <ArrowRight className="size-4 text-accent" aria-hidden="true" />
-        </div>
-      </div>
-      {!renaming && (
-        <div className="absolute top-3 right-3">
-          <ProjectMenu name={project.name} onRename={() => setRenaming(true)} onDelete={onDelete} />
-        </div>
-      )}
-    </div>
+          <ProjectName>{project.name}</ProjectName>
+        )
+      }
+      meta={meta.join(' · ')}
+      bar={<VerdictBar counts={project.tally} />}
+      footer={checkedSentence(project.checkedAt)}
+      menu={!renaming && <ProjectMenu label={`Actions for ${project.name}`} onRename={() => setRenaming(true)} onDelete={onDelete} />}
+    />
   )
 }
 
@@ -135,20 +123,26 @@ export function Library({
     )
   }
 
-  const importFile = async (file: File) => {
-    setBusy('import')
+  /** One action on a row at a time: `key` shows that row busy, and the toast says how it went. */
+  const run = async (key: string, failed: string, work: () => Promise<string>) => {
+    setBusy(key)
     try {
-      const project = await actions.importProject(file)
-      setToast(`${project.name} created from ${file.name}`)
-      onOpenProject(project.id)
+      setToast(await work())
     } catch (error) {
-      setToast(`Could not import ${file.name}: ${errorMessage(error)}`)
+      setToast(`${failed}: ${errorMessage(error)}`)
     } finally {
       setBusy(null)
     }
   }
 
-  /** "+ New project" by name: an empty project, opened right away. */
+  const importFile = (file: File) =>
+    run('import', `Could not import ${file.name}`, async () => {
+      const project = await actions.importProject(file)
+      onOpenProject(project.id)
+      return `${project.name} created from ${file.name}`
+    })
+
+  /** Rename on a card: resolves to the gateway's refusal, or null when it took the name. */
   const renameProject = async (projectId: string, name: string): Promise<string | null> => {
     try {
       await actions.updateProject(projectId, { name })
@@ -168,132 +162,129 @@ export function Library({
       pdfInput.current?.click()
       return
     }
-    if (row.kind === 'remove' && row.projectId) {
-      if (!window.confirm(`Remove ${row.key} from the project's .bib? This cannot be undone.`)) return
-      setBusy(row.key)
-      try {
-        await actions.removeBibEntry(row.projectId, row.key)
-        setToast(`${row.key} removed`)
-      } catch (error) {
-        setToast(`Could not remove ${row.key}: ${errorMessage(error)}`)
-      } finally {
-        setBusy(null)
-      }
-    }
+    const { projectId } = row
+    if (row.kind !== 'remove' || !projectId) return
+    if (!window.confirm(`Remove ${row.key} from the project's .bib? This cannot be undone.`)) return
+    await run(row.key, `Could not remove ${row.key}`, async () => {
+      await actions.removeBibEntry(projectId, row.key)
+      return `${row.key} removed`
+    })
   }
 
   const uploadPdf = async (file: File) => {
     const row = pdfFor
     setPdfFor(null)
     if (!row) return
-    setBusy(row.key)
-    try {
+    await run(row.key, `Could not upload ${file.name}`, async () => {
       if (row.projectId) await actions.attachProjectPdf(row.projectId, row.key, file)
       else if (row.draftId) await actions.attachPdf(row.draftId, row.key, file)
-      setToast(`${file.name} attached to ${row.key}. Re-check the draft to read it.`)
-    } catch (error) {
-      setToast(`Could not upload ${file.name}: ${errorMessage(error)}`)
-    } finally {
-      setBusy(null)
+      return `${file.name} attached to ${row.key}. Re-check the draft to read it.`
+    })
+  }
+
+  /** The project a saved source in no project goes to: the only one, or the one named. */
+  const pickProject = (): { id: string; name: string } | undefined => {
+    const projects = library.data?.projects ?? []
+    if (projects.length === 0) {
+      setToast('Create a project first, then add the entry to its .bib')
+      return undefined
     }
+    if (projects.length === 1) return projects[0]
+    const name = window.prompt(`Add to which project?\n${projects.map((p) => p.name).join('\n')}`, projects[0].name)
+    return projects.find((p) => p.name === name)
   }
 
   const savedAction = async (source: SavedSource) => {
-    if (!source.inBib && source.projectId) {
-      setBusy(source.id)
-      try {
-        await actions.addSourceToBib(source.id, source.projectId)
-        setToast(`${source.key} added to ${source.bibName ?? 'the .bib'}`)
-      } catch (error) {
-        setToast(`Could not add ${source.key}: ${errorMessage(error)}`)
-      } finally {
-        setBusy(null)
-      }
+    if (source.inBib) {
+      const ok = await copyText(`\\cite{${source.key}}`)
+      setToast(copiedMessage(ok, `\\cite{${source.key}}`))
       return
     }
-    if (!source.inBib && !source.projectId) {
-      const projects = library.data?.projects ?? []
-      if (projects.length === 0) {
-        setToast('Create a project first, then add the entry to its .bib')
-        return
-      }
-      const choice = projects.length === 1 ? projects[0] : projects.find((p) => p.name === window.prompt(`Add to which project?\n${projects.map((p) => p.name).join('\n')}`, projects[0].name))
-      if (!choice) return
-      setBusy(source.id)
-      try {
-        await actions.addSourceToBib(source.id, choice.id)
-        setToast(`${source.key} added to ${choice.name}`)
-      } catch (error) {
-        setToast(`Could not add ${source.key}: ${errorMessage(error)}`)
-      } finally {
-        setBusy(null)
-      }
-      return
-    }
-    const ok = await copyText(`\\cite{${source.key}}`)
-    setToast(copiedMessage(ok, `\\cite{${source.key}}`))
+    const target = source.projectId ? { id: source.projectId, name: source.bibName ?? 'the .bib' } : pickProject()
+    if (!target) return
+    await run(source.id, `Could not add ${source.key}`, async () => {
+      await actions.addSourceToBib(source.id, target.id)
+      return `${source.key} added to ${target.name}`
+    })
   }
 
   if (library.isPending) return <LoadingScreen label="Loading your library…" />
   if (library.isError) {
     return (
-      <Card className="flex flex-col items-start gap-3 border-refutes text-refutes">
-        <p>Could not load your library: {errorMessage(library.error)}</p>
-        <Button variant="ghost" onClick={() => void library.refetch()}>
-          Try again
-        </Button>
-      </Card>
+      <>
+        <LibraryTitle>Library</LibraryTitle>
+        <ErrorState title="Your library could not load" message={errorMessage(library.error)} onRetry={() => void library.refetch()} />
+      </>
     )
   }
 
   const { projects, unsorted, attention: rows, saved } = library.data
+  const drafts = projects.reduce((sum, p) => sum + p.drafts, 0)
+  const cited = projects.reduce((sum, p) => sum + p.cited, 0)
+  const unsortedMeta =
+    [
+      unsorted.sources ? `${count(unsorted.sources, 'source')}${unsorted.pdfs ? ` · ${count(unsorted.pdfs, 'PDF')}` : ''}` : null,
+      unsorted.drafts ? `${count(unsorted.drafts, 'draft')} in no project` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ') || 'Nothing unsorted'
 
   return (
-    <FadeIn className="flex flex-col gap-5">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <Mascot role="writer" size={52} className="hidden shrink-0 sm:block" />
-          <div>
-            <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Library</h1>
-            <p className="text-sm text-ink-muted">The sources behind your drafts. Each project keeps its own .bib, PDFs and check results.</p>
-          </div>
-        </div>
-        <Button
-          onClick={() => importInput.current?.click()}
-          disabled={busy === 'import'}
-          className="self-start sm:self-auto"
-          data-ask-target={askTarget({ kind: 'action', id: 'import-bib' })}
-        >
-          <Upload className="size-4" aria-hidden="true" />
-          {busy === 'import' ? 'Importing…' : 'Import .bib'}
-        </Button>
-        <input
-          ref={importInput}
-          type="file"
-          accept=".bib,.zip"
-          className="sr-only"
-          tabIndex={-1}
-          aria-label="Import a .bib or an Overleaf .zip"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            event.target.value = ''
-            if (file) void importFile(file)
-          }}
-        />
-        <input
-          ref={pdfInput}
-          type="file"
-          accept="application/pdf,.pdf"
-          className="sr-only"
-          tabIndex={-1}
-          aria-label="Upload the source PDF"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            event.target.value = ''
-            if (file) void uploadPdf(file)
-          }}
-        />
-      </header>
+    <FadeIn className="flex flex-col gap-6">
+      <LibraryHeader
+        eyebrow={`${count(projects.length, 'project')} · ${count(drafts, 'draft')} · ${cited} cited`}
+        title={<LibraryTitle>Library</LibraryTitle>}
+        description="The sources behind your drafts. Each project keeps its own .bib, PDFs and check results."
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => importInput.current?.click()}
+              disabled={busy === 'import'}
+              className="border border-border-subtle"
+              data-ask-target={askTarget({ kind: 'action', id: 'import-bib' })}
+            >
+              <Upload className="size-4" aria-hidden="true" />
+              {busy === 'import' ? 'Importing…' : 'Import .bib'}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setCreating(true)}
+              className="border border-border-subtle"
+              data-ask-target={askTarget({ kind: 'action', id: 'new-project' })}
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              New project
+            </Button>
+          </>
+        }
+      />
+      <input
+        ref={importInput}
+        type="file"
+        accept=".bib,.zip"
+        className="sr-only"
+        tabIndex={-1}
+        aria-label="Import a .bib or an Overleaf .zip"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (file) void importFile(file)
+        }}
+      />
+      <input
+        ref={pdfInput}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="sr-only"
+        tabIndex={-1}
+        aria-label="Upload the source PDF"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (file) void uploadPdf(file)
+        }}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((project) => (
@@ -305,37 +296,14 @@ export function Library({
             onDelete={() => setDeleting(project)}
           />
         ))}
-        <button
-          type="button"
-          onClick={() => onOpenProject(UNSORTED)}
-          data-ask-target={askTarget({ kind: 'project', id: UNSORTED })}
-          className={`flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent ${FOCUS}`}
-        >
-          <p className="font-serif text-base font-semibold text-ink">Unsorted sources</p>
-          <p className="text-[13px] text-ink-muted">
-            {unsorted.sources === 0 && unsorted.drafts === 0
-              ? 'Nothing unsorted'
-              : [
-                  unsorted.sources ? `${count(unsorted.sources, 'source')}${unsorted.pdfs ? ` · ${count(unsorted.pdfs, 'PDF')}` : ''}` : null,
-                  unsorted.drafts ? `${count(unsorted.drafts, 'draft')} in no project` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-          </p>
-          <div className="mt-1 flex items-center justify-between">
-            <span className="text-xs text-ink-muted">Sources kept outside a project land here</span>
-            <ArrowRight className="size-4 text-accent" aria-hidden="true" />
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          data-ask-target={askTarget({ kind: 'action', id: 'new-project' })}
-          className={`flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-accent p-9 text-center transition-colors hover:bg-accent-soft ${FOCUS}`}
-        >
-          <span className="font-serif text-base font-semibold text-accent">+ New project</span>
-          <span className="text-xs text-ink-muted">An empty project, or import a .bib or an Overleaf .zip</span>
-        </button>
+        <LibraryCard
+          openLabel={`Open Unsorted sources, ${unsortedMeta}`}
+          onOpen={() => onOpenProject(UNSORTED)}
+          askTarget={askTarget({ kind: 'project', id: UNSORTED })}
+          title={<ProjectName>Unsorted sources</ProjectName>}
+          meta={unsortedMeta}
+          footer="Sources kept outside a project land here"
+        />
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-2">
