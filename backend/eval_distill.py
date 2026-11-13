@@ -20,6 +20,7 @@ from pathlib import Path
 import dspy
 from app import distill
 from app.chats import distill_lines
+from app.tracing import setup_tracing
 from dspy.clients.base_lm import GLOBAL_HISTORY
 
 
@@ -70,6 +71,7 @@ def main() -> None:
     parser.add_argument("chats", type=Path, help="JSON lines with id, messages, expected, forbidden")
     parser.add_argument("--runs", type=int, default=3)
     args = parser.parse_args()
+    setup_tracing()
 
     dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
     chats = load_chats(args.chats)

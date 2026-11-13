@@ -28,6 +28,7 @@ from app.config import VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.evaluation import Pair, judge_scores, pairs_from_labels
 from app.llm import NO_THINKING
 from app.pipeline import verify
+from app.tracing import setup_tracing
 
 NLI_MODEL = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"
 PLAIN_PROMPT = """Claim: {claim}
@@ -47,6 +48,7 @@ def main() -> None:
     parser.add_argument("--split", default="test", help='which split to score ("" for all rows)')
     parser.add_argument("--out", type=Path, help="per-pair verdicts as CSV")
     args = parser.parse_args()
+    setup_tracing()
 
     with args.labels.open(newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))

@@ -35,12 +35,13 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-import requests
 from app.config import PAPERS_DIR, PHOENIX_COLLECTOR_ENDPOINT, VLLM_MODEL
 from app.evaluation import Pair, human_agreement, judge_scores, level_confusion, pairs_from_labels
+from app.experiments import Dataset, Run, Score, log_experiment
 from app.pipeline import claims, verify
 from app.pipeline.audit import _grounded  # the analysis audit's test of "is this text in the evidence"
 from app.pipeline.sources import lookup_key
+from app.tracing import setup_tracing
 
 
 def main() -> None:
@@ -58,6 +59,7 @@ def main() -> None:
         "--claims", type=Path, help="the claims tab export, to judge with each claim's sentence"
     )
     args = parser.parse_args()
+    setup_tracing()
 
     with args.labels.open(newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
@@ -80,8 +82,11 @@ def main() -> None:
         result = check(pair, args.passages, sentence)
         verdict = result.get("verdict") if result.get("status") == "ok" else "error"
         verdict_from = result.get("verdict_from", "none") if verdict != "error" else "none"
+        # verify.py can give an empty message, and an errored pair must still read as one.
+        error = (result.get("message") or "no verdict and no message") if verdict == "error" else None
         results.append(
             {
+                "claim": pair.claim,
                 "claim_id": pair.claim_id,
                 "reference_id": pair.reference_id,
                 "gold": pair.gold(),
@@ -92,11 +97,13 @@ def main() -> None:
                 "marked": bool(sentence) and sentence[0] != pair.claim,
                 "labeled_retrieved": labeled_retrieved(pair, result) if retrieving else None,
                 "quote_grounded": quote_grounded(result) if verdict != "error" else None,
+                "error": error,
                 "started": started,
                 "ended": datetime.now(UTC).isoformat(),
             }
         )
-        print(f"{number}/{len(scored)} {pair.claim_id} {verdict}", file=sys.stderr)
+        note = f" ({error.splitlines()[0]})" if error else ""  # the CSV keeps the whole message
+        print(f"{number}/{len(scored)} {pair.claim_id} {verdict}{note}", file=sys.stderr)
 
     with args.out.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
@@ -111,6 +118,7 @@ def main() -> None:
                 "marked",
                 "labeled_retrieved",
                 "quote_grounded",
+                "error",
             ],
             extrasaction="ignore",
         )
@@ -252,85 +260,68 @@ def settings(passages: str) -> dict:
     }
 
 
+# What each Phoenix run shows of a result.
+RUN_OUTPUT = ("verdict", "verdict_from", "labeled_retrieved", "quote_grounded")
+
+
 def record_experiment(
     pairs: list[Pair], topics: dict[tuple[str, str], str], results: list[dict], split: str, report: dict
 ) -> None:
     """Save this run in Phoenix as an experiment on the labeled pairs, with `correct` per pair."""
-    phoenix = PHOENIX_COLLECTOR_ENDPOINT.rstrip("/")
-    dataset_id = labels_dataset(phoenix, pairs, topics)
-    examples = requests.get(f"{phoenix}/v1/datasets/{dataset_id}/examples", timeout=30)
-    examples.raise_for_status()
-    example_ids = {
-        (e["input"]["claim_id"], e["input"]["reference_id"]): e["id"]
-        for e in examples.json()["data"]["examples"]
-    }
     settings = report["settings"]
-    body = {
-        "name": f"{settings['model']} verify {settings['verify_py_sha256']} {settings['passages']}",
-        "description": f"eval_verdicts.py on split {split or 'all'}",
-        "metadata": {**settings, "split": split, "judge": report["judge"]},
-        "splits": [split] if split else None,
-    }
-    created = requests.post(f"{phoenix}/v1/datasets/{dataset_id}/experiments", json=body, timeout=30)
-    created.raise_for_status()
-    experiment_id = created.json()["data"]["id"]
-    for result in results:
-        error = result["verdict"] == "error"
-        run = {
-            "dataset_example_id": example_ids[result["claim_id"], result["reference_id"]],
-            "output": {
-                "verdict": result["verdict"],
-                "verdict_from": result["verdict_from"],
-                "labeled_retrieved": result["labeled_retrieved"],
-                "quote_grounded": result["quote_grounded"],
-            },
-            "repetition_number": 1,
-            "start_time": result["started"],
-            "end_time": result["ended"],
-            "error": "verify_claim did not return a verdict" if error else None,
-        }
-        posted = requests.post(f"{phoenix}/v1/experiments/{experiment_id}/runs", json=run, timeout=30)
-        posted.raise_for_status()
-        if error:
-            continue
-        correct = (result["verdict"] == "supports") == result["gold"]
-        evaluation = {
-            "experiment_run_id": posted.json()["data"]["id"],
-            "name": "correct",
-            "annotator_kind": "CODE",
-            "start_time": result["ended"],
-            "end_time": result["ended"],
-            "result": {"label": "correct" if correct else "wrong", "score": float(correct)},
-            "metadata": {"topic": result["topic"]},
-        }
-        requests.post(f"{phoenix}/v1/experiment_evaluations", json=evaluation, timeout=30).raise_for_status()
-    print(f"Phoenix experiment {experiment_id} on dataset {dataset_id}", file=sys.stderr)
+    runs = [
+        Run(
+            input=pair_input(result),
+            output={key: result[key] for key in RUN_OUTPUT},
+            started=result["started"],
+            ended=result["ended"],
+            error=result["error"],
+            scores=[] if result["verdict"] == "error" else [correct(result)],
+        )
+        for result in results
+    ]
+    experiment_id = log_experiment(
+        labels_dataset(pairs, topics),
+        runs,
+        name=f"{settings['model']} verify {settings['verify_py_sha256']} {settings['passages']}",
+        description=f"eval_verdicts.py on split {split or 'all'}",
+        metadata={**settings, "split": split, "judge": report["judge"]},
+        split=split,
+    )
+    print(f"Phoenix experiment {experiment_id}", file=sys.stderr)
 
 
-def labels_dataset(phoenix: str, pairs: list[Pair], topics: dict[tuple[str, str], str]) -> str:
-    """The id of the Phoenix dataset holding these labeled pairs, uploaded on first use.
+def labels_dataset(pairs: list[Pair], topics: dict[tuple[str, str], str]) -> Dataset:
+    """The labeled pairs as a Phoenix dataset.
 
     The name carries a hash of the pairs and their levels, so new labels make a new dataset and
     runs on the same labels reuse one.
     """
     keys = sorted((p.claim_id, p.reference_id, sorted(p.levels.items())) for p in pairs)
-    name = "labeler-pairs-" + hashlib.sha256(json.dumps(keys).encode()).hexdigest()[:10]
-    found = requests.get(f"{phoenix}/v1/datasets", params={"name": name}, timeout=30)
-    found.raise_for_status()
-    if found.json()["data"]:
-        return found.json()["data"][0]["id"]
-    body = {
-        "action": "create",
-        "name": name,
-        "description": "Labeled claim/reference pairs from the Labeler export; gold is the majority.",
-        "inputs": [{"claim": p.claim, "claim_id": p.claim_id, "reference_id": p.reference_id} for p in pairs],
-        "outputs": [{"supported": p.gold(), "levels": p.levels} for p in pairs],
-        "metadata": [{"paper_id": p.paper_id, "topic": topics[p.claim_id, p.reference_id]} for p in pairs],
-        "splits": [p.split or None for p in pairs],
-    }
-    uploaded = requests.post(f"{phoenix}/v1/datasets/upload", params={"sync": "true"}, json=body, timeout=60)
-    uploaded.raise_for_status()
-    return uploaded.json()["data"]["dataset_id"]
+    return Dataset(
+        name="labeler-pairs-" + hashlib.sha256(json.dumps(keys).encode()).hexdigest()[:10],
+        description="Labeled claim/reference pairs from the Labeler export; gold is the majority.",
+        inputs=[{"claim": p.claim, "claim_id": p.claim_id, "reference_id": p.reference_id} for p in pairs],
+        outputs=[{"supported": p.gold(), "levels": p.levels} for p in pairs],
+        metadata=[{"paper_id": p.paper_id, "topic": topics[p.claim_id, p.reference_id]} for p in pairs],
+        splits=[p.split or None for p in pairs],
+    )
+
+
+def pair_input(result: dict) -> dict:
+    """The dataset input of the pair this result is for, as labels_dataset wrote it."""
+    return {"claim": result["claim"], "claim_id": result["claim_id"], "reference_id": result["reference_id"]}
+
+
+def correct(result: dict) -> Score:
+    """Did the judge's supports / not-supports match the labelers' majority?"""
+    is_correct = (result["verdict"] == "supports") == result["gold"]
+    return Score(
+        name="correct",
+        score=float(is_correct),
+        label="correct" if is_correct else "wrong",
+        metadata={"topic": result["topic"]},
+    )
 
 
 if __name__ == "__main__":

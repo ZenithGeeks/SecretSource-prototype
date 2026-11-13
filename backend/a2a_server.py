@@ -17,10 +17,12 @@ conversation survives a restart.
 """
 
 import os
+from contextlib import asynccontextmanager
 
 from app.agents.team import root_agent
 from app.memory import SIGNED_OUT, AnalysisMemory
 from app.sessions import session_service
+from app.tracing import setup_tracing
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.auth.credential_service.in_memory_credential_service import InMemoryCredentialService
@@ -40,4 +42,13 @@ runner = Runner(
     memory_service=AnalysisMemory(as_user=SIGNED_OUT),
     credential_service=InMemoryCredentialService(),
 )
-app = to_a2a(root_agent, host=HOST, port=PORT, runner=runner)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # At server start, not at import: the tests import this module before tracing is switched off.
+    setup_tracing()
+    yield
+
+
+app = to_a2a(root_agent, host=HOST, port=PORT, runner=runner, lifespan=lifespan)
