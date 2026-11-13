@@ -374,6 +374,7 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     except _IndexError as error:
         raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
     others = []
+    paywalled = False
     for work in works:
         found = work.get("title") or ""
         if not titles_match(title, found):
@@ -385,9 +386,13 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
             continue
         pdf = next((loc["pdf_url"] for loc in work.get("locations") or [] if loc.get("pdf_url")), "")
         if not pdf:
-            raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'")
+            # The publisher's record and the preprint can be two works with one title: keep looking.
+            paywalled = True
+            continue
         ids = {"DOI": work["doi"].removeprefix("https://doi.org/")} if work.get("doi") else {}
         return Resolution(pdf, found, "openalex", ids, year, first_author)
+    if paywalled:
+        raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'")
     if others:
         raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")
@@ -494,15 +499,21 @@ def find_by_title(title: str, fits: Fits) -> Resolution:
 
 
 def _reported(failures: list[Exception]) -> Exception:
-    """The failure to report when no index had the work: the last one, except when that is a
-    plain "no paper found". Then an earlier index that knew the work wins: a work it skipped
-    (OnlyOtherWorks) is what the author needs to see, and a paywall says more than a later index
-    not knowing the title. A rate limit still wins when it comes last."""
-    if type(failures[-1]) is Unresolvable:
-        known = [error for error in failures if isinstance(error, OnlyOtherWorks | NoOpenAccessCopy)]
-        if known:
-            return known[-1]
-    return failures[-1]
+    """The failure to report when no index had the work, the one that says the most, the
+    latest of equals. A paywall means an index knew the work. A rate limit or network error
+    means we could not tell, which must not read as "does not exist". A work an index skipped
+    (OnlyOtherWorks) is what the author needs to see over a plain "no paper found"."""
+    return max(reversed(failures), key=_says_most)
+
+
+def _says_most(error: Exception) -> int:
+    if isinstance(error, NoOpenAccessCopy):
+        return 3
+    if isinstance(error, OnlyOtherWorks):
+        return 1
+    if isinstance(error, Unresolvable):
+        return 0
+    return 2  # LookupUnavailable, a rate limit, a network error
 
 
 def _by_doi(doi: str) -> Resolution:
@@ -587,6 +598,11 @@ def _link_file(pdf: Path) -> Path:
     return pdf.with_name(f"{pdf.name}.url")
 
 
+def _pdf_link(url: str) -> str:
+    """The PDF behind a link: OSTI's record page becomes its purl, anything else stays."""
+    return OSTI_RECORD_PAGE.sub(r"https://www.osti.gov/servlets/purl/\1", url)
+
+
 def _fetch(identifier: str) -> tuple[Path, Resolution]:
     """Download the work's PDF from where the lookup found it, or else from its arXiv copy, or
     else from another PDF link OpenAlex lists for its DOI.
@@ -605,7 +621,7 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
     except requests.RequestException as error:
         raise NotDownloadable(str(error)) from error
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", identifier.strip()).strip("-")[:80]
-    urls = [OSTI_RECORD_PAGE.sub(r"https://www.osti.gov/servlets/purl/\1", found.url)]
+    urls = [_pdf_link(found.url)]
     if (arxiv := found.ids.get("ArXiv")) and "arxiv.org" not in found.url:
         urls.append(f"https://arxiv.org/pdf/{arxiv}")
 
@@ -614,7 +630,7 @@ def _fetch(identifier: str) -> tuple[Path, Resolution]:
         # A refused publisher link often has a repository copy OpenAlex knows, such as OSTI's
         # for ACM's SC papers. Asked only after the links above failed.
         if doi := found.ids.get("DOI"):
-            yield from (url for url in _openalex_pdfs(doi) if url not in urls)
+            yield from (url for url in map(_pdf_link, _openalex_pdfs(doi)) if url not in urls)
 
     failure: Exception | None = None
     for url in links():

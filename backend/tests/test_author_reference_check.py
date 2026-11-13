@@ -121,6 +121,16 @@ def test_an_arxiv_only_paper_the_indexes_miss_is_found_on_arxiv(monkeypatch):
     assert verify.reference_check(LORA) == {"exists": "yes", "index": "arXiv", "lookedUpBy": "title"}
 
 
+def test_a_paper_only_openalex_finds_by_title_exists(monkeypatch):
+    monkeypatch.setattr(verify, "find_title", lambda title, author, fits: None)
+    frontier = sources.Resolution(
+        "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089", "Frontier: Exploring Exascale", "openalex"
+    )
+    monkeypatch.setattr(verify, "find_by_title", lambda title, fits: frontier)
+
+    assert verify.reference_check(LORA) == {"exists": "yes", "index": "OpenAlex", "lookedUpBy": "title"}
+
+
 def test_a_work_semantic_scholar_knows_without_a_free_pdf_exists(monkeypatch):
     def paywalled(title, fits):
         raise sources.NoOpenAccessCopy(f"no open-access PDF known for '{title}'")

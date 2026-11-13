@@ -70,6 +70,12 @@ def test_a_same_titled_work_that_does_not_fit_is_named(monkeypatch):
         sources._openalex_by_title("Frontier: Exploring Exascale", lambda year, author: year == 2023)
 
 
+def test_a_paywalled_record_does_not_hide_an_open_one_with_the_same_title(monkeypatch):
+    preprint = "https://arxiv.org/pdf/2312.00001"
+    answer(monkeypatch, work(pdfs=(None,)), work(pdfs=(preprint,)))
+    assert sources._openalex_by_title("Frontier: Exploring Exascale").url == preprint
+
+
 def test_openalex_not_answering_is_unavailable_not_unknown(monkeypatch):
     refuse(monkeypatch)
     with pytest.raises(sources.LookupUnavailable):
@@ -94,6 +100,17 @@ def test_openalex_not_answering_last_is_what_a_title_lookup_reports():
     skipped = sources.OnlyOtherWorks("arXiv has only other works titled 'X'")
     down = sources.LookupUnavailable("OpenAlex did not answer")
     assert sources._reported([skipped, sources.Unresolvable("no paper"), down]) is down
+
+
+def test_a_rate_limit_in_the_middle_is_not_reported_as_not_found():
+    limited = sources.LookupUnavailable("Semantic Scholar is rate limiting us")
+    nowhere = sources.Unresolvable("no paper")
+    assert sources._reported([nowhere, limited, sources.Unresolvable("OpenAlex: no paper")]) is limited
+
+
+def test_a_paywall_wins_over_openalex_not_answering():
+    paywall = sources.NoOpenAccessCopy("no open-access PDF known")
+    assert sources._reported([paywall, sources.LookupUnavailable("OpenAlex did not answer")]) is paywall
 
 
 def test_no_resolver_at_all_is_unavailable():

@@ -22,7 +22,7 @@ from app.pipeline.sources import Fits, NoOpenAccessCopy, Unresolvable, find_by_t
 from app.pipeline.verify import unchecked_reason
 
 INDEX_NAMES = {"crossref": "Crossref", "openalex": "OpenAlex"}
-SOURCE_NAMES = {"arxiv": "arXiv", "semantic-scholar": "Semantic Scholar"}
+SOURCE_NAMES = {"arxiv": "arXiv", "semantic-scholar": "Semantic Scholar", "openalex": "OpenAlex"}
 log = logging.getLogger(__name__)
 
 
@@ -236,7 +236,7 @@ def _title_check(fields: dict) -> dict:
         work = find_by_title(title, fits)
     except NoOpenAccessCopy:  # Semantic Scholar knows the work, but has no free PDF of it
         return {**found, "index": "Semantic Scholar"}
-    except Unresolvable as error:  # neither arXiv nor Semantic Scholar has the title
+    except Unresolvable as error:  # no title lookup has the title
         if unavailable:
             raise unavailable from error
         return {"exists": "no", "lookedUpBy": "title"}

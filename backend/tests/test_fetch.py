@@ -110,6 +110,15 @@ def test_a_refused_publisher_link_falls_back_to_a_copy_openalex_lists(lookup):
     assert tried == [acm, osti]  # the refused link is not asked twice
 
 
+def test_an_osti_record_page_openalex_lists_is_fetched_as_its_pdf(lookup):
+    acm = "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089"
+    found = sources.Resolution(acm, ids={"DOI": "10.1145/3581784.3607089"})
+    tried = lookup(found, {acm: refused(acm)}, openalex=["https://www.osti.gov/biblio/2224161"])
+
+    assert sources._fetch("10.1145/3581784.3607089")[1].url == "https://www.osti.gov/servlets/purl/2224161"
+    assert tried == [acm, "https://www.osti.gov/servlets/purl/2224161"]
+
+
 # Unpaywall's answer for 10.1162/tacl.a.782 on 2026-10-16, cut to the fields used: the best
 # location is the publisher's PDF link, which answers a script with 403, and the work is also on
 # arXiv. Semantic Scholar does not know this DOI, so Unpaywall is the only lookup that answers.
