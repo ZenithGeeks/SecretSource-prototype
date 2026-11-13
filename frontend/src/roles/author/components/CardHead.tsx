@@ -29,6 +29,8 @@ export function TextLink({
   disabled?: boolean
   'aria-label'?: string
   'aria-disabled'?: boolean
+  'aria-haspopup'?: 'menu'
+  'aria-expanded'?: boolean
   'data-ask-target'?: string
 }) {
   return (

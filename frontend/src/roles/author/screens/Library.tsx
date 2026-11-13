@@ -10,12 +10,13 @@ import { AlertCircle, Bookmark, FileText, Plus, Trash2, Upload } from 'lucide-re
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
-import { LibraryCard, LibraryHeader, LibraryTitle, ProjectMenu, ProjectName } from '../../../components/library'
-import { Button, Card, Empty, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
+import { ConfirmDialog, LibraryCard, LibraryHeader, LibraryTitle, ProjectMenu, ProjectName } from '../../../components/library'
+import { Button, Card, Empty, ErrorState, FadeIn, LoadingScreen, MenuItem } from '../../../components/ui'
 import { VerdictBar } from '../../../components/VerdictBar'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedSentence, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
+import { useMenuKeys } from '../../../lib/useMenuKeys'
 import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
@@ -104,6 +105,7 @@ export function Library({
   const [busy, setBusy] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<Project | null>(null)
+  const [confirming, setConfirming] = useState<Confirmation | null>(null)
 
   if (projectId) {
     // A toast from here (a project just created or imported) stays up on the project's page:
@@ -160,10 +162,15 @@ export function Library({
     }
     const { projectId } = row
     if (row.kind !== 'remove' || !projectId) return
-    if (!window.confirm(`Remove ${row.key} from the project's .bib? This cannot be undone.`)) return
-    await run(row.key, `Could not remove ${row.key}`, async () => {
-      await actions.removeBibEntry(projectId, row.key)
-      return `${row.key} removed`
+    setConfirming({
+      title: `Remove ${row.key} from the .bib?`,
+      body: "The entry leaves the project's .bib. This cannot be undone.",
+      label: 'Remove',
+      busyLabel: 'Removing…',
+      work: async () => {
+        await actions.removeBibEntry(projectId, row.key)
+        return `${row.key} removed`
+      },
     })
   }
 
@@ -178,30 +185,26 @@ export function Library({
     })
   }
 
-  /** The project a saved source in no project goes to: the only one, or the one named. */
-  const pickProject = (): { id: string; name: string } | undefined => {
-    const projects = library.data?.projects ?? []
-    if (projects.length === 0) {
-      toast.warning('Create a project first, then add the entry to its .bib')
-      return undefined
-    }
-    if (projects.length === 1) return projects[0]
-    const name = window.prompt(`Add to which project?\n${projects.map((p) => p.name).join('\n')}`, projects[0].name)
-    return projects.find((p) => p.name === name)
-  }
+  const addToBib = (source: SavedSource, target: { id: string; name: string }) =>
+    run(source.id, `Could not add ${source.key}`, async () => {
+      await actions.addSourceToBib(source.id, target.id)
+      return `${source.key} added to ${target.name}`
+    })
 
+  /** Insert \cite, or add to the source's own project, or to the only one. With several
+   * projects, a source in none picks one from AddToProjectMenu instead. */
   const savedAction = async (source: SavedSource) => {
     if (source.inBib) {
       const ok = await copyText(`\\cite{${source.key}}`)
       toastCopied(ok, `\\cite{${source.key}}`)
       return
     }
-    const target = source.projectId ? { id: source.projectId, name: source.bibName ?? 'the .bib' } : pickProject()
-    if (!target) return
-    await run(source.id, `Could not add ${source.key}`, async () => {
-      await actions.addSourceToBib(source.id, target.id)
-      return `${source.key} added to ${target.name}`
-    })
+    const target = source.projectId ? { id: source.projectId, name: source.bibName ?? 'the .bib' } : library.data?.projects[0]
+    if (!target) {
+      toast.warning('Create a project first, then add the entry to its .bib')
+      return
+    }
+    await addToBib(source, target)
   }
 
   if (library.isPending) return <LoadingScreen label="Loading your library…" />
@@ -355,9 +358,13 @@ export function Library({
                         .join(' · ')}
                     </p>
                   </div>
-                  <TextLink onClick={() => void savedAction(source)} aria-disabled={busy === source.id} className="shrink-0">
-                    {busy === source.id ? '…' : source.inBib ? 'Insert \\cite' : 'Add to .bib'}
-                  </TextLink>
+                  {!source.inBib && !source.projectId && projects.length > 1 ? (
+                    <AddToProjectMenu projects={projects} busy={busy === source.id} onPick={(project) => void addToBib(source, project)} />
+                  ) : (
+                    <TextLink onClick={() => void savedAction(source)} aria-disabled={busy === source.id} className="shrink-0">
+                      {busy === source.id ? '…' : source.inBib ? 'Insert \\cite' : 'Add to .bib'}
+                    </TextLink>
+                  )}
                   <TextLink
                     onClick={() => void copyText(source.bibtex).then((ok) => toastCopied(ok, `BibTeX for ${source.key}`))}
                     className="shrink-0"
@@ -367,10 +374,18 @@ export function Library({
                   <button
                     type="button"
                     aria-label={`Delete ${source.title}`}
-                    onClick={() => {
-                      if (!window.confirm(`Delete ${source.title} from your saved sources? This cannot be undone.`)) return
-                      void actions.deleteSource(source.id).catch((error) => toast.error(`Could not delete: ${errorMessage(error)}`))
-                    }}
+                    onClick={() =>
+                      setConfirming({
+                        title: `Delete “${source.title}”?`,
+                        body: 'It leaves your saved sources. A .bib entry made from it stays. This cannot be undone.',
+                        label: 'Delete source',
+                        busyLabel: 'Deleting…',
+                        work: async () => {
+                          await actions.deleteSource(source.id)
+                          return `${source.title} deleted`
+                        },
+                      })
+                    }
                     className={`shrink-0 rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />
@@ -411,7 +426,58 @@ export function Library({
             }}
           />
         )}
+        {confirming && (
+          <ConfirmDialog
+            title={confirming.title}
+            confirmLabel={confirming.label}
+            busyLabel={confirming.busyLabel}
+            onCancel={() => setConfirming(null)}
+            onConfirm={async () => {
+              toast.success(await confirming.work())
+              setConfirming(null)
+            }}
+          >
+            {confirming.body}
+          </ConfirmDialog>
+        )}
       </AnimatePresence>
     </FadeIn>
+  )
+}
+
+/** A destructive action waiting on ConfirmDialog. `work` resolves to the toast's text; a throw
+ * keeps the dialog open with the gateway's message. */
+type Confirmation = { title: string; body: string; label: string; busyLabel: string; work: () => Promise<string> }
+
+/** "Add to .bib" for a saved source in no project when there are several projects: a menu of
+ * them, as MoveDraftMenu does, in place of typing a project's name. */
+function AddToProjectMenu({ projects, busy, onPick }: { projects: Project[]; busy: boolean; onPick: (project: Project) => void }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const menu = useMenuKeys(open, () => setOpen(false), root)
+  return (
+    <div ref={root} onKeyDown={menu.onKeyDown} onBlur={menu.onBlur} className="relative shrink-0">
+      <TextLink onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-disabled={busy}>
+        {busy ? '…' : 'Add to .bib'}
+      </TextLink>
+      {open && (
+        <div role="menu" aria-label="Add to which project's .bib" className="absolute right-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-xl border border-border-subtle bg-surface p-1 shadow-card">
+          {projects.map((project) => (
+            <MenuItem
+              key={project.id}
+              role="menuitem"
+              className="px-3 font-normal"
+              onClick={() => {
+                menu.returnFocus()
+                setOpen(false)
+                onPick(project)
+              }}
+            >
+              <span className="truncate">{project.name}</span>
+            </MenuItem>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
