@@ -61,7 +61,7 @@ export function RecentProjects({
   return (
     <section aria-labelledby="author-recent-projects" className="mt-5">
       <div className="mb-1 flex items-center justify-between px-2.5">
-        <h2 id="author-recent-projects" className="text-[10px] font-semibold tracking-[0.1em] text-ink-muted uppercase">
+        <h2 id="author-recent-projects" className="text-[11px] font-semibold tracking-[0.1em] text-ink-muted uppercase">
           Recent projects
         </h2>
         <button

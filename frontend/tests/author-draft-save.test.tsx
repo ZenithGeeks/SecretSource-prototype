@@ -10,6 +10,7 @@ import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { authorApi, editedLabel } from '../src/lib/author'
@@ -17,8 +18,14 @@ import { YourDraftsCard } from '../src/roles/author/components/YourDraftsCard'
 import { AUTOSAVE_DELAY_MS, texTitle } from '../src/lib/draftSave'
 import { Editor } from '../src/roles/author/screens/Editor'
 import type { Draft } from '../src/types/draftCheck'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { THESIS_FILES } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
 
@@ -44,6 +51,7 @@ function open(draftId: string, ui: (editor: ReactNode) => ReactNode = (e) => e) 
   const onWriteFailed = vi.fn()
   const view = render(
     <QueryClientProvider client={queryClient}>
+      <Toaster />
       {ui(<Editor target={{ draftId, file: 'main.tex', line: 1 }} onFileChange={() => undefined} onNavigate={() => undefined} onWriteFailed={onWriteFailed} />)}
     </QueryClientProvider>,
   )

@@ -22,6 +22,7 @@ logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
 from app.agents.team import root_agent  # noqa: E402
 from app.memory import SIGNED_OUT, AnalysisMemory  # noqa: E402
 from app.sessions import session_service  # noqa: E402
+from app.tracing import setup_tracing  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.genai import types  # noqa: E402
 
@@ -78,4 +79,5 @@ if __name__ == "__main__":
     parser.add_argument("--session", help="continue this session id")
     parser.add_argument("prompts", nargs="*", help="one turn each; none starts a REPL")
     args = parser.parse_args()
+    setup_tracing()
     asyncio.run(main(args.prompts or repl(), args.session))

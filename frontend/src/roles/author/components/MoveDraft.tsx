@@ -17,6 +17,7 @@ import { useQueries } from '@tanstack/react-query'
 import { AnimatePresence } from 'framer-motion'
 import { FolderInput } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Button, IconButton, MenuItem, TextButton } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
@@ -146,8 +147,8 @@ export function NewProjectWithDrafts({
   /** The draft "New project…" was chosen on, which may not be in the drafts list yet. */
   initial?: Draft[]
   onCancel: () => void
-  /** The project exists; `notice` says how the moves went. */
-  onCreated: (projectId: string, notice: string) => void
+  /** The project exists; a toast has said how the moves went. */
+  onCreated: (projectId: string) => void
   onImport?: () => void
 }) {
   const actions = useAuthorActions()
@@ -169,14 +170,9 @@ export function NewProjectWithDrafts({
           const project = await actions.createProject(name ? { name } : {})
           const failed = await moveDrafts(actions, chosen, project.id)
           const moved = chosen.length - failed.length
-          onCreated(
-            project.id,
-            failed.length
-              ? `${project.name} created; could not move ${failed.join(', ')}`
-              : moved
-                ? `${project.name} created with ${moved} draft${moved === 1 ? '' : 's'}`
-                : `${project.name} created`,
-          )
+          if (failed.length) toast.warning(`${project.name} created; could not move ${failed.join(', ')}`)
+          else toast.success(moved ? `${project.name} created with ${moved} draft${moved === 1 ? '' : 's'}` : `${project.name} created`)
+          onCreated(project.id)
           return null
         } catch (error) {
           return errorMessage(error)
@@ -192,7 +188,7 @@ export function NewProjectWithDrafts({
 
 /** "Move to…" on a draft's row: the other projects, Unsorted when it is in one, and "New
  * project…". Picking one asks to confirm, with what the move costs. */
-export function MoveDraftMenu({ draft, onNotice, onCreated }: { draft: Draft; onNotice: (message: string) => void; onCreated?: (projectId: string) => void }) {
+export function MoveDraftMenu({ draft, onCreated }: { draft: Draft; onCreated?: (projectId: string) => void }) {
   const actions = useAuthorActions()
   const projects = (useAuthorProjects().data ?? []).filter((p) => p.id !== draft.projectId)
   const [open, setOpen] = useState(false)
@@ -237,7 +233,8 @@ export function MoveDraftMenu({ draft, onNotice, onCreated }: { draft: Draft; on
     inFlight.current = false
     setMoving(false)
     setTarget(null)
-    onNotice(failed.length ? `Could not move ${failed[0]}` : `${draft.title} moved to ${target.name}`)
+    if (failed.length) toast.error(`Could not move ${failed[0]}`)
+    else toast.success(`${draft.title} moved to ${target.name}`)
   }
 
   let panel: ReactNode = null
@@ -305,9 +302,8 @@ export function MoveDraftMenu({ draft, onNotice, onCreated }: { draft: Draft; on
           <NewProjectWithDrafts
             initial={[draft]}
             onCancel={() => setCreating(false)}
-            onCreated={(projectId, notice) => {
+            onCreated={(projectId) => {
               setCreating(false)
-              onNotice(notice)
               onCreated?.(projectId)
             }}
           />

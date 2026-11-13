@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { runTool, type DraftReader } from '../src/lib/agentTools'
@@ -9,9 +10,15 @@ import { checkedLabel } from '../src/lib/timeAgo'
 import { CodeEditor } from '../src/roles/author/components/editor/CodeEditor'
 import { Editor } from '../src/roles/author/screens/Editor'
 import { SplitPane } from '../src/components/SplitPane'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
 import { PAPER_TEX } from './fixtures/paper'
 import { THESIS_FILES } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -28,7 +35,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderEditor(target = { draftId: 'd1', file: 'related-work.tex', line: 10 }) {
@@ -71,7 +78,7 @@ describe('Author LaTeX editor', () => {
 
     // 7 \cite on this file: 2 supported, 1 partial, 2 not supported, 1 unavailable, 1 missing.
     await waitFor(() => expect(screen.getByText('2 supported')).toBeInTheDocument())
-    expect(screen.getByText('2 not supported')).toBeInTheDocument()
+    expect(screen.getByText('2 contradicted')).toBeInTheDocument()
     expect(screen.getByText(/7 \\cite · 1 warning$/)).toBeInTheDocument()
 
     // jsdom has no layout, so CodeMirror only draws the first lines of the viewport.
@@ -143,12 +150,12 @@ describe('Author LaTeX editor', () => {
     await screen.findByRole('tab', { name: /related-work\.tex/ })
     fireEvent.click(screen.getByRole('button', { name: /Export/ }))
     fireEvent.click(screen.getAllByRole('menuitem')[1])
-    expect(await screen.findByRole('status')).toHaveTextContent('Downloaded related-work-thesis-ch-2.bib')
+    expect(await screen.findByText('Downloaded related-work-thesis-ch-2.bib')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Export/ }))
     fireEvent.click(screen.getAllByRole('menuitem')[0])
     await waitFor(() => expect(gateway.calls).toContain('POST /author/drafts/d1/report'))
-    expect(await screen.findByRole('status')).toHaveTextContent('Downloaded the verification report')
+    expect(await screen.findByText('Downloaded the verification report')).toBeInTheDocument()
   })
 })
 

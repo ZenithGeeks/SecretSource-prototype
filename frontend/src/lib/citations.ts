@@ -46,5 +46,13 @@ export function shortMessage(message: string | undefined): string {
     const title = /<title[^>]*>([^<]*)/i.exec(message)?.[1].replace(/\s+/g, ' ').trim()
     return title ? `the server sent an error page (${clip(title, 60)})` : 'the server sent an error page'
   }
+  // A Python `requests` error ("403 Client Error: Forbidden for url: https://…") names the
+  // status and the host in the author's words; the full URL is noise in a one-line note.
+  const http = /\b([45]\d\d) (?:Client|Server) Error\b[^]*?\bfor url: (\S+)/i.exec(message)
+  if (http) {
+    const host = /^https?:\/\/([^/?#]+)/i.exec(http[2])?.[1] ?? 'the site'
+    // The status first: a long host is what a one-line note cuts, not the reason.
+    return http[1].startsWith('4') ? `HTTP ${http[1]}: ${host} refused the download` : `HTTP ${http[1]}: ${host} failed to send it`
+  }
   return clip(message.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(), MESSAGE_LIMIT)
 }

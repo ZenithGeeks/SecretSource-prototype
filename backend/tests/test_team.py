@@ -62,3 +62,39 @@ def test_wrapped_tools_run_off_the_event_loop_so_calls_overlap():
     assert [result["source"] for result in results] == ["a", "b", "c"]
     assert took < 2
     assert loop_thread not in threads
+
+
+def test_a_paper_tool_reads_only_the_callers_own_local_files(tmp_path, monkeypatch):
+    """SCRUM-532: cli.py and the A2A server have no login, so a path must not reach another
+    person's upload or a file outside the papers folder."""
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    for name in ("mine.pdf", "theirs.pdf"):
+        (papers / name).write_bytes(b"%PDF-1.4")
+    outside = tmp_path / "secret.json"
+    outside.write_text("{}")
+    monkeypatch.setattr(team, "PAPERS_DIR", papers)
+    monkeypatch.setattr(team.rag, "caller_papers", lambda tool_context: frozenset({"mine.pdf"}))
+    read = []
+
+    def check(claim: str, source_pdf_path: str) -> dict:
+        read.append(source_pdf_path)
+        return {"status": "ok"}
+
+    tool = team.own_papers_only(check, "source_pdf_path")
+
+    def run(source: str) -> dict:
+        return asyncio.run(tool("a claim", source, tool_context=None))
+
+    assert run(str(papers / "mine.pdf")) == {"status": "ok"}
+    assert run("10.18653/v1/N18-1202")["status"] == "ok"  # not a file: looked up as before
+    for refused in (papers / "theirs.pdf", outside, papers / ".." / "secret.json"):
+        assert run(str(refused))["status"] == "error"
+    assert read == [str(papers / "mine.pdf"), "10.18653/v1/N18-1202"]
+
+
+def test_a_scoped_tool_gets_the_tool_context_and_the_same_schema():
+    for tool in (team.verify_claim, team.extract_claims, team.add_paper):
+        assert "tool_context" in inspect.signature(tool).parameters
+    scoped, plain = FunctionTool(team.add_paper), FunctionTool(team.rag.add_paper)
+    assert scoped._get_declaration() == plain._get_declaration()

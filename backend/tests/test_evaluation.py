@@ -134,6 +134,58 @@ def test_the_runner_scores_the_split_and_writes_one_row_per_pair(monkeypatch, tm
     assert [r["verdict_from"] for r in rows] == ["text", "figure"]
 
 
+def test_the_same_labels_in_another_split_make_another_dataset():
+    import eval_verdicts
+
+    topics = {("c1", "refB"): "", ("c2", "refB"): ""}
+    first = evaluation.pairs_from_labels([label("c1", "ada", 4), label("c2", "ada", 1)])
+    moved = evaluation.pairs_from_labels([label("c1", "ada", 4), label("c2", "ada", 1, split="val")])
+
+    def name(pairs):
+        return eval_verdicts.labels_dataset(pairs, topics).name
+
+    assert name(first) == name(evaluation.pairs_from_labels([label("c1", "ada", 4), label("c2", "ada", 1)]))
+    assert name(first) != name(moved)
+
+
+def test_an_errored_pair_keeps_its_message_in_the_csv_and_in_phoenix(monkeypatch, tmp_path):
+    import eval_verdicts
+
+    labels = tmp_path / "labels.csv"
+    write_labels(labels, [label("c1", "ada", 4), label("c2", "ada", 1), label("c3", "ada", 1)])
+    messages = {"claim c2": "no PDF for refB", "claim c3": ""}  # verify.py can give an empty one
+
+    def verify_claim(claim, source):
+        if claim in messages:
+            return {"status": "error", "message": messages[claim]}
+        return {"status": "ok", "verdict": "supports", "verdict_from": "text"}
+
+    logged = {}
+
+    def log_experiment(dataset, runs, **options):
+        logged.update(dataset=dataset, runs=runs, options=options)
+        return "exp1"
+
+    monkeypatch.setattr(eval_verdicts.verify, "verify_claim", verify_claim)
+    monkeypatch.setattr(eval_verdicts, "PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006")
+    monkeypatch.setattr(eval_verdicts, "log_experiment", log_experiment)
+    out = tmp_path / "verdicts.csv"
+    monkeypatch.setattr(sys, "argv", ["eval_verdicts.py", str(labels), "--out", str(out)])
+
+    eval_verdicts.main()
+
+    with out.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    assert [r["error"] for r in rows] == ["", "no PDF for refB", "no verdict and no message"]
+    supported, errored, unexplained = logged["runs"]
+    assert supported.error is None and supported.scores[0].label == "correct"
+    assert errored.error == "no PDF for refB" and errored.scores == []
+    assert unexplained.error == "no verdict and no message" and unexplained.scores == []
+    # Each run's input matches an example the dataset uploads, which is how Phoenix links them.
+    assert [r.input for r in logged["runs"]] == logged["dataset"].inputs
+    assert logged["options"]["split"] == "test"
+
+
 def test_pairs_keep_each_labeled_passage_once():
     rows = [
         {**label("c1", "ada", 4), "spans": json.dumps(["first passage", ""])},
@@ -220,3 +272,44 @@ def test_the_runner_can_judge_the_labeled_passages_instead(monkeypatch, tmp_path
     assert report["settings"]["passages"] == "labeled"
     assert report["quote_grounding"] == {"pairs": 1, "share": 1.0}
     assert report[f"retrieval_recall_at_{eval_verdicts.verify.EVIDENCE_COUNT}"]["pairs"] == 0
+
+
+def test_with_claims_each_pair_is_judged_with_its_sentence_as_an_analysis_does(monkeypatch, tmp_path, capsys):
+    """#962: the judge gets the sentence with this citation marked, and whether it cites others."""
+    import eval_verdicts
+
+    labels = tmp_path / "labels.csv"
+    rows = [label("c1", "ada", 4)]
+    with labels.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    claims_csv = tmp_path / "claims.csv"
+    with claims_csv.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=["claim_id", "sentence"])
+        writer.writeheader()
+        writer.writerow({"claim_id": "c1", "sentence": "Tables [b3] and databases [b7] are covered."})
+    # The citing paper's references: refB is b3, saved under its title.
+    monkeypatch.setattr(eval_verdicts.claims, "references_of", lambda path: {"b3": {"title": "refB"}})
+    monkeypatch.setattr(
+        eval_verdicts.verify,
+        "prepare_source",
+        lambda source, wait_for_figures: {"status": "ok", "path": source},
+    )
+    judged = []
+
+    def check_prepared(claim, source, path, sentence, others):
+        judged.append((claim, sentence, others))
+        return {"status": "ok", "verdict": "supports", "verdict_from": "cited"}
+
+    monkeypatch.setattr(eval_verdicts.verify, "check_prepared", check_prepared)
+    out = tmp_path / "verdicts.csv"
+    monkeypatch.setattr(
+        sys, "argv", ["eval_verdicts.py", str(labels), "--out", str(out), "--claims", str(claims_csv)]
+    )
+
+    eval_verdicts.main()
+
+    assert judged == [("claim c1", "Tables [cited] and databases are covered.", True)]
+    report = json.loads(capsys.readouterr().out)
+    assert report["marked"] == 1

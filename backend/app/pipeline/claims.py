@@ -804,6 +804,13 @@ def extract_citations(pdf_path: str) -> dict:
         return tool_error(error)
 
 
+def references_of(pdf_path: str) -> dict[str, dict]:
+    """The paper's references keyed by GROBID id ("b12"), from the same GROBID call
+    extract_claims_with_citations makes, so the ids match the "[b12]" in a claim's sentence."""
+    tei = _grobid_pdf("processFulltextDocument", local_pdf(pdf_path), coordinates=("ref", "head"))
+    return _references_by_id(tei)[0]
+
+
 # --- Claims linked to the references they cite ----------------------------------
 
 

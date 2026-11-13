@@ -21,13 +21,17 @@ import csv
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
-from app.config import VLLM_API_KEY, VLLM_MODEL, VLLM_URL
+from app.config import PHOENIX_COLLECTOR_ENDPOINT, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
 from app.evaluation import Pair, judge_scores, pairs_from_labels
+from app.experiments import Run, log_experiment
 from app.llm import NO_THINKING
 from app.pipeline import verify
+from app.tracing import setup_tracing
+from eval_verdicts import correct, labels_dataset, pair_input
 
 NLI_MODEL = "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli"
 PLAIN_PROMPT = """Claim: {claim}
@@ -47,20 +51,21 @@ def main() -> None:
     parser.add_argument("--split", default="test", help='which split to score ("" for all rows)')
     parser.add_argument("--out", type=Path, help="per-pair verdicts as CSV")
     args = parser.parse_args()
+    setup_tracing()
 
     with args.labels.open(newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
     topics = {(row["claim_id"], row["reference_id"]): row.get("topic", "") for row in rows}
-    pairs = [
-        p
-        for p in pairs_from_labels(rows)
-        if (not args.split or p.split == args.split) and p.gold() is not None
-    ]
+    every_pair = pairs_from_labels(rows)
+    pairs = [p for p in every_pair if (not args.split or p.split == args.split) and p.gold() is not None]
     print(f"{len(pairs)} pairs, baseline {args.baseline}", file=sys.stderr)
 
+    started = datetime.now(UTC).isoformat()
     verdicts = judge(args.baseline, pairs)
+    ended = datetime.now(UTC).isoformat()
     results = [
         {
+            "claim": p.claim,
             "claim_id": p.claim_id,
             "reference_id": p.reference_id,
             "topic": topics[p.claim_id, p.reference_id],
@@ -75,6 +80,40 @@ def main() -> None:
             writer.writeheader()
             writer.writerows(results)
     print(json.dumps(report(args.baseline, results), indent=2))
+    if PHOENIX_COLLECTOR_ENDPOINT:
+        record_experiment(args.baseline, every_pair, topics, results, args.split, (started, ended))
+
+
+def record_experiment(
+    baseline: str,
+    pairs: list[Pair],
+    topics: dict[tuple[str, str], str],
+    results: list[dict],
+    split: str,
+    window: tuple[str, str],
+) -> None:
+    """Save this run in Phoenix on the dataset eval_verdicts.py uses, so it sits next to the judge's runs."""
+    started, ended = window  # shortcut: one window for the whole batch, since judge() runs pairs together
+    runs = [
+        Run(
+            input=pair_input(result),
+            output={"verdict": result["verdict"]},
+            started=started,
+            ended=ended,
+            error="the baseline gave no answer" if result["verdict"] == "error" else None,
+            scores=[] if result["verdict"] == "error" else [correct(result)],
+        )
+        for result in results
+    ]
+    experiment_id = log_experiment(
+        labels_dataset(pairs, topics),
+        runs,
+        name=f"baseline {baseline}",
+        description=f"eval_baselines.py --baseline {baseline} on split {split or 'all'}",
+        metadata={"baseline": baseline, "model": MODELS[baseline], "evidence_count": verify.EVIDENCE_COUNT},
+        split=split,
+    )
+    print(f"Phoenix experiment {experiment_id}", file=sys.stderr)
 
 
 def judge(baseline: str, pairs: list[Pair]) -> list[str]:

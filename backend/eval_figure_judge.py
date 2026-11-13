@@ -16,6 +16,7 @@ from pathlib import Path
 
 import dspy
 from app.pipeline import verify
+from app.tracing import setup_tracing
 from dspy.utils.exceptions import AdapterParseError
 from eval_decisive import gateway_model
 
@@ -36,6 +37,7 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=2)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
+    setup_tracing()
 
     with args.claims.open(encoding="utf-8") as file:
         claims = [json.loads(line) for line in file]

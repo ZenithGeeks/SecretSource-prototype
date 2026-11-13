@@ -1,14 +1,17 @@
 /** "Citations that need work" (Redesign A1): the filter chips and the rows. Clicking a row selects
- * it for the Evidence panel below. "Needs work" also lists what could not be judged, as the design
- * does, so a source nobody could read is not hidden; those rows are not open issues (isOpenIssue). */
+ * it for the Evidence panel below. "Needs work" lists the open issues worst first (Source
+ * contradicts, Not found, then Source is silent: bySeverity), then what could not be judged
+ * under a collapsible "N couldn't be checked", so a source nobody could read is not hidden but
+ * does not bury the issues either; those rows are not open issues (isOpenIssue). */
 
-import { Fragment, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { Fragment, useId, useState } from 'react'
 
 import { Card, Empty } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { preprintNote, shortMessage } from '../../../lib/citations'
 import { cn } from '../../../lib/utils'
-import { VERDICTS, isLowConfidence, isOpenIssue, settledHint } from '../../../lib/verdict'
+import { VERDICTS, bySeverity, isLowConfidence, isNotFound, isOpenIssue, isUnjudged, settledHint } from '../../../lib/verdict'
 import type { Citation, Draft } from '../../../types/draftCheck'
 import { CardHead } from './CardHead'
 import { CitationBadge } from './Verdicts'
@@ -23,12 +26,12 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'low-confidence', label: 'Low confidence' },
 ]
 
-const unjudged = (c: Citation) => (c.verdict === 'unavailable' || c.verdict === 'unchecked') && !c.resolution
+const unjudged = (c: Citation) => isUnjudged(c) && !c.resolution
 
 function rowsFor(filter: Filter, citations: Citation[]): Citation[] {
   switch (filter) {
     case 'needs-work':
-      return citations.filter((c) => isOpenIssue(c) || unjudged(c))
+      return bySeverity(citations.filter((c) => isOpenIssue(c) || unjudged(c)))
     case 'low-confidence':
       return citations.filter(isLowConfidence)
     default:
@@ -40,10 +43,19 @@ function rowsFor(filter: Filter, citations: Citation[]): Citation[] {
  * number as the Evidence pager and "Your drafts", and the rest are named for what they are. */
 function needsWorkLabel(citations: Citation[]): string {
   const issues = citations.filter(isOpenIssue).length
-  const unread = (verdict: Citation['verdict']) => citations.filter((c) => c.verdict === verdict && unjudged(c)).length
+  // A reference no index knows is named for that, not hidden in "unavailable" (isNotFound).
+  const unread = (verdict: Citation['verdict']) => citations.filter((c) => c.verdict === verdict && unjudged(c) && !isNotFound(c)).length
+  const notFound = citations.filter((c) => unjudged(c) && isNotFound(c)).length
   const unavailable = unread('unavailable')
   const unchecked = unread('unchecked')
-  return [`${issues} issue${issues === 1 ? '' : 's'}`, unavailable && `${unavailable} unavailable`, unchecked && `${unchecked} not checked`].filter(Boolean).join(' · ')
+  return [
+    `${issues} issue${issues === 1 ? '' : 's'}`,
+    notFound && `${notFound} not found`,
+    unavailable && `${unavailable} unavailable`,
+    unchecked && `${unchecked} not checked`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /** The mono line under a claim: where the \cite is, then where the verdict rests or why there is none. */
@@ -59,7 +71,7 @@ function rowNote(c: Citation): string {
     return `${at} · ${what} ${where}: ${read ? `check the ${what}` : 'check that it exists'}`
   }
   if (c.verdict === 'unavailable') return `${at} · ${shortMessage(c.message) || 'source PDF unavailable'}`
-  if (c.verdict === 'unchecked') return `${at} · ${c.reason === 'missing-key' ? 'no bib entry' : 'not checked yet'}`
+  if (c.verdict === 'unchecked') return `${at} · ${c.reason === 'missing-key' ? 'missing bib key' : c.message || 'not checked yet'}`
   // A passage can be quoted with no page known (the verdict's own quote, no located evidence).
   // A preprint's text can differ from the published paper, so the row says which one was read (#424).
   const preprint = c.sourceVersion === 'preprint' ? ` · ${preprintNote(c.arxiv)}` : ''
@@ -82,11 +94,12 @@ function CitationRow({ citation, selected, onSelect }: { citation: Citation; sel
         className={cn(
           'flex w-full min-w-0 flex-col items-start gap-1.5 px-5 py-3 text-left transition-colors hover:bg-accent-soft/40',
           FOCUS,
-          selected && 'bg-accent-soft/60',
+          // Tint plus a hairline ring, so the selected row is not just a deeper hover.
+          selected && 'bg-accent-soft/60 ring-1 ring-accent/35 ring-inset',
         )}
       >
         <span className="flex max-w-full min-w-0 items-center gap-2">
-          <CitationBadge verdict={citation.verdict} />
+          <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
           <span className={cn('min-w-0 truncate font-mono text-xs', VERDICTS[citation.verdict].text)}>{`\\cite{${citation.key}}`}</span>
         </span>
         <span className="max-w-full text-[15px] leading-6 break-words text-ink">{citation.claim}</span>
@@ -117,6 +130,19 @@ export function CitationCheckCard({
 }) {
   const [filter, setFilter] = useState<Filter>('needs-work')
   const rows = rowsFor(filter, citations)
+  // "Needs work": the issues, with any reference no index knows among them (it may be made up, so
+  // it is never folded away; it is still not counted as an issue), then what could not be judged.
+  // That group opens by itself when there is nothing above it or when the selected row is in it.
+  const issueRows: Citation[] = []
+  const unreadRows: Citation[] = []
+  for (const c of rows) (isOpenIssue(c) || isNotFound(c) ? issueRows : unreadRows).push(c)
+  // The author's toggle holds until the selection changes, so a row picked from elsewhere (the
+  // pager, Ask) is never selected inside a closed group.
+  const [toggled, setToggled] = useState<{ open: boolean; selectedId: string | undefined } | null>(null)
+  const showUnread =
+    toggled && toggled.selectedId === selectedId ? toggled.open
+      : issueRows.length === 0 || unreadRows.some((c) => c.id === selectedId)
+  const unreadId = useId()
 
   const emptyHint: Record<Filter, [string, string]> = {
     'needs-work': ['Nothing needs work', settledHint(draft.status)],
@@ -175,6 +201,38 @@ export function CitationCheckCard({
             </Fragment>
           ))}
         </ul>
+      ) : filter === 'needs-work' ? (
+        <div className="pb-1.5">
+          {issueRows.length > 0 && (
+            <ul aria-label="Citations">
+              {issueRows.map((c) => (
+                <CitationRow key={c.id} citation={c} selected={c.id === selectedId} onSelect={() => onSelect(c.id)} />
+              ))}
+            </ul>
+          )}
+          {unreadRows.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setToggled({ open: !showUnread, selectedId })}
+                aria-expanded={showUnread}
+                aria-controls={unreadId}
+                className={cn(
+                  'flex w-full items-center gap-1.5 border-t border-border-subtle px-5 py-2.5 text-left text-xs font-medium text-ink-muted transition-colors hover:bg-accent-soft/40 hover:text-ink',
+                  FOCUS,
+                )}
+              >
+                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform motion-reduce:transition-none', !showUnread && '-rotate-90')} aria-hidden="true" />
+                {unreadRows.length} couldn’t be checked
+              </button>
+              <ul id={unreadId} hidden={!showUnread} aria-label="Citations that couldn’t be checked">
+                {unreadRows.map((c) => (
+                  <CitationRow key={c.id} citation={c} selected={c.id === selectedId} onSelect={() => onSelect(c.id)} />
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       ) : (
         <ul aria-label="Citations" className="pb-1.5">
           {rows.map((c) => (

@@ -7,12 +7,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { checkedAtLabel } from '../src/lib/author'
 import { Library } from '../src/roles/author/screens/Library'
+import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, markSaved, runCheck, type FakeGateway } from './fakeAuthorGateway'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis'
+
+// Sonner keeps its toasts in a module-level store, and the next test's Toaster would show the
+// ones still up: dismiss them so each test starts with none. Only the files that mount a
+// Toaster do this, since importing sonner adds its stylesheet to the page and slows queries.
+afterEach(() => toast.dismiss())
 
 // Login off, as on a gateway without Supabase: the client sends no token and asks for no session.
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -21,7 +28,7 @@ let gateway: FakeGateway
 
 function renderWithQuery(ui: ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Toaster />{ui}</QueryClientProvider>)
 }
 
 function renderLibrary(projectId: string | null = null) {
@@ -64,7 +71,7 @@ describe('Author Library', () => {
     const card = (await screen.findByRole('button', { name: 'Open Related work — thesis ch.2' })).parentElement!
     expect(card).toHaveTextContent('main.bib · 7 entries · 0 cited · 3 need work')
     expect(card).toHaveTextContent(/Checked/)
-    expect(screen.getByRole('button', { name: /Unsorted sources/ })).toHaveTextContent('1 draft in no project')
+    expect(screen.getByRole('button', { name: /Unsorted sources/ })).toHaveAccessibleName(/1 draft in no project/)
 
     const attention = within(screen.getByRole('heading', { name: 'Needs attention' }).closest('div')!.parentElement!)
     expect(attention.getByText('\\cite{khattab2020} contradicts a claim in Related work — thesis ch.2')).toBeInTheDocument()
@@ -98,11 +105,19 @@ describe('Author Library', () => {
     expect(cited.line).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /Find a source/ })).not.toBeInTheDocument()
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // Cancel keeps the entry; Remove in the dialog deletes it.
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(gateway.calls).not.toContain('DELETE /author/projects/proj1/bib/karpukhin2020')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Remove karpukhin2020 from the .bib?')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(gateway.calls).toContain('DELETE /author/projects/proj1/bib/karpukhin2020'))
     await waitFor(() => expect(screen.queryByText('karpukhin2020 · in main.bib')).not.toBeInTheDocument())
-    expect(await screen.findByRole('status')).toHaveTextContent('karpukhin2020 removed')
+    expect(await screen.findByText('karpukhin2020 removed')).toBeInTheDocument()
   })
 
   test('a saved source can be added to the project .bib, after which it offers Insert \\cite', async () => {
@@ -126,13 +141,31 @@ describe('Author Library', () => {
       venue: 'CIKM', doi: '', arxiv: '', url: '', identifier: '', openAccess: true, citedBy: null, bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID},\n}',
       inBib: false, bibName: 'main.bib', savedAt: '', verdict: 'supports',
     })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderLibrary()
     fireEvent.click(await screen.findByRole('button', { name: 'Delete PLAID' }))
-    expect(confirm).toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete “PLAID”?' })).getByRole('button', { name: 'Delete source' }))
     await waitFor(() => expect(gateway.calls).toContain('DELETE /author/sources/src9'))
     await waitFor(() => expect(screen.queryByText(/Santhanam et al\. \(2022\) · PLAID/)).not.toBeInTheDocument())
     expect(gateway.projects.get('proj1')!.bib!.content).toBe(MAIN_BIB)
+  })
+
+  test('a saved source in no project picks its project from a menu when there are several', async () => {
+    const t = new Date().toISOString()
+    gateway.projects.set('proj2', { id: 'proj2', name: 'Grant aims', bib: { name: 'aims.bib', content: '' }, pdfs: {}, created: t, updated: t })
+    gateway.sources.set('src9', {
+      id: 'src9', projectId: null, key: 'santhanam2022plaid', title: 'PLAID', authors: 'Santhanam et al.', authorsList: ['Keshav Santhanam'], year: 2022,
+      venue: 'CIKM', doi: '', arxiv: '', url: '', identifier: '', openAccess: true, citedBy: null, bibtex: '@inproceedings{santhanam2022plaid,\n  title = {PLAID},\n}',
+      inBib: false, bibName: null, savedAt: '', verdict: 'supports',
+    })
+    renderLibrary()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to .bib' }))
+    const menu = screen.getByRole('menu', { name: 'Projects' })
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(
+      expect.arrayContaining(['Related work — thesis ch.2', 'Grant aims']),
+    )
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Grant aims' }))
+    await waitFor(() => expect(gateway.calls).toContain('POST /author/sources/src9/add-to-bib'))
+    expect(await screen.findByText('santhanam2022plaid added to Grant aims')).toBeInTheDocument()
   })
 
   test('Import .bib creates a project on the gateway and opens it', async () => {
@@ -155,7 +188,7 @@ describe('Author Library', () => {
     expect(await screen.findByRole('heading', { name: 'Related work — thesis ch.2' })).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Drafts in this project' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Check history · Related work/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '← Library' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^← Library/ })).toBeInTheDocument()
   })
 
   test('the project detail lists its drafts and the check history with a compare', async () => {
@@ -188,7 +221,7 @@ describe('Author Library', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open in editor' }))
     expect(onOpenEditor).toHaveBeenCalledWith('d1')
-    fireEvent.click(screen.getByRole('button', { name: '← Library' }))
+    fireEvent.click(screen.getByRole('button', { name: /^← Library/ }))
   })
 
   test('a re-check without edits says so instead of offering a compare of the same version', async () => {
@@ -256,9 +289,26 @@ describe('Author Library', () => {
     expect(gateway.calls).toContain(`GET /author/drafts/${unfiled.id}/checks`)
   })
 
+  test('deleting an unsorted source asks first, and Cancel keeps it (#959)', async () => {
+    gateway.sources.set('loose', { id: 'loose', projectId: null, key: 'formal2021', title: 'SPLADE v2', authors: 'Formal et al.', authorsList: ['Thibault Formal'], year: 2021, venue: '', doi: '', arxiv: '', url: '', identifier: 'arxiv:2109.10086', openAccess: true, citedBy: 1, bibtex: '', inBib: false, bibName: null, savedAt: '2026-09-27T00:00:00Z' })
+    renderLibrary('unsorted')
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete SPLADE v2' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete “SPLADE v2”?' })).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(gateway.calls).not.toContain('DELETE /author/sources/loose')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete SPLADE v2' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete source' }))
+    await waitFor(() => expect(gateway.calls).toContain('DELETE /author/sources/loose'))
+    expect(await screen.findByText('SPLADE v2 deleted')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/Formal et al\. \(2021\) · SPLADE v2/)).not.toBeInTheDocument())
+  })
+
   test('a gateway error shows the message and a retry', async () => {
     gateway.fetch.mockRejectedValue(new Error('the gateway is down'))
     renderLibrary()
-    expect(await screen.findByText(/Could not load your library: the gateway is down/)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your library could not load')
+    expect(screen.getByRole('alert')).toHaveTextContent('the gateway is down')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })

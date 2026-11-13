@@ -242,6 +242,17 @@ describe('citations', () => {
     expect(shortMessage('x'.repeat(200))).toHaveLength(140)
     expect(shortMessage(undefined)).toBe('')
   })
+
+  it('names the status and the host of a requests error, not the whole URL', () => {
+    expect(shortMessage('403 Client Error: Forbidden for url: https://lekythos.example/pdf/1?token=abc')).toBe(
+      'HTTP 403: lekythos.example refused the download',
+    )
+    expect(shortMessage('503 Server Error: Service Unavailable for url: http://mirror.example/a.pdf')).toBe(
+      'HTTP 503: mirror.example failed to send it',
+    )
+    // A URL with no scheme still says what happened, without a host.
+    expect(shortMessage('404 Client Error: Not Found for url: ftp-mirror/a.pdf')).toBe('HTTP 404: the site refused the download')
+  })
 })
 
 describe('progress', () => {

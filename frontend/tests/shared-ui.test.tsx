@@ -31,7 +31,7 @@ describe('VerdictBar and VerdictLegend', () => {
   test('the legend lists each verdict with its count', () => {
     render(<VerdictLegend counts={counts} />)
     expect(screen.getByText(/3 supported/)).toBeInTheDocument()
-    expect(screen.getByText(/1 not supported/)).toBeInTheDocument()
+    expect(screen.getByText(/1 contradicted/)).toBeInTheDocument()
   })
 })
 

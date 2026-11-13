@@ -17,6 +17,7 @@ from pathlib import Path
 import dspy
 from app.llm import dspy_lm
 from app.pipeline import verify
+from app.tracing import setup_tracing
 from dspy.utils.exceptions import AdapterParseError
 from make_eval_claims import write_with_retry
 
@@ -86,6 +87,7 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
+    setup_tracing()
 
     with args.claims.open(encoding="utf-8") as file:
         claims = [json.loads(line) for line in file]

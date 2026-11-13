@@ -1,6 +1,6 @@
 /** The handful of primitives the app reuses. Styling lives here so screens stay about content. */
 
-import { motion } from 'framer-motion'
+import { m } from 'framer-motion'
 import { CircleAlert, Loader2 } from 'lucide-react'
 import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode, useEffect, useState } from 'react'
 
@@ -9,9 +9,12 @@ import { STANDING_LABELS } from '../lib/claims'
 import { useSettings } from '../lib/settings'
 import { cn } from '../lib/utils'
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+/** A surface. Given `aria-labelledby` (its heading's id), it is a named region, so a screen
+ * reader can list the screen's cards and jump between them. */
+export function Card({ className, children, ...rest }: ComponentProps<'div'> & { children: ReactNode }) {
+  const region = rest['aria-labelledby'] ? { role: 'region' as const } : {}
   return (
-    <div className={cn('rounded-xl border border-border-subtle bg-surface p-5', className)}>
+    <div {...region} {...rest} className={cn('rounded-xl border border-border-subtle bg-surface p-5', className)}>
       {children}
     </div>
   )
@@ -277,7 +280,7 @@ export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
     return () => clearTimeout(timer)
   }, [])
   return (
-    <motion.div
+    <m.div
       role="status"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -289,7 +292,7 @@ export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
         {label}
       </span>
       {slow && <span className="text-xs">This is taking longer than usual.</span>}
-    </motion.div>
+    </m.div>
   )
 }
 
@@ -300,13 +303,13 @@ export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
  * them. */
 export function FadeIn({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       className={className}
     >
       {children}
-    </motion.div>
+    </m.div>
   )
 }

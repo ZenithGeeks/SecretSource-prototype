@@ -7,27 +7,36 @@
 
 import { AnimatePresence } from 'framer-motion'
 import { Clock, FileText, Plus, Trash2 } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
+import { toast } from 'sonner'
 
-import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
+import { BackLink, LibraryHeader, LibraryTitle, ProjectMenu } from '../../../components/library'
+import { Badge, Button, Card, Empty, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { checkedAtLabel, checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { useInFlight } from '../../../lib/useInFlight'
 import { cn } from '../../../lib/utils'
 import { labelAfterCounts, projectStatus, statusLabel, statusTone, VERDICTS } from '../../../lib/verdict'
-import type { CheckDelta, CheckRun, Draft, SavedSource } from '../../../types/draftCheck'
+import type { CheckDelta, CheckRun, Draft, DraftStatus, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
-import { ConfirmDialog } from '../components/ConfirmDialog'
 import { DeleteDraftButton, DeleteDraftDialog } from '../components/DeleteDraftButton'
 import { MoveDraftMenu } from '../components/MoveDraft'
-import { ProjectMenu, ProjectNameField } from '../components/ProjectActions'
-import { copiedMessage, copyText } from '../clipboard'
-import { Toast } from '../components/Toast'
+import { ProjectNameField } from '../components/ProjectActions'
+import { copyText, toastCopied } from '../clipboard'
+import { DeleteProjectDialog, DeleteSourceDialog } from '../components/DeleteDialogs'
+import { plural } from '../labels'
 import { CitationBadge } from '../components/Verdicts'
 import { FOCUS, HIGHLIGHT, LINK } from '../hover'
 
 export const UNSORTED = 'unsorted'
+
+/** A draft's status pill: red with open issues, green when every citation is backed. */
+function statusBadgeTone(status: DraftStatus) {
+  const tone = statusTone(status)
+  return tone === 'text-refutes' ? 'refutes' : tone === 'text-supports' ? 'supports' : 'neutral'
+}
+
 
 function countsLine(run: CheckRun): string {
   const c = run.summary.counts
@@ -148,8 +157,8 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
   )
 }
 
-function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast: (message: string) => void }) {
-  const actions = useAuthorActions()
+function UnsortedSources({ sources }: { sources: SavedSource[] }) {
+  const [deleting, setDeleting] = useState<SavedSource | null>(null)
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="unsorted-sources-title">
       <CardHead id="unsorted-sources-title" title="Unsorted sources" aside={<span className="text-ink-muted">{sources.length} saved</span>} />
@@ -168,13 +177,13 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
                   {[source.pdf ? `PDF attached · ${source.pdf}` : null, source.inBib ? 'in the project .bib' : 'not in a .bib yet'].filter(Boolean).join(' · ')}
                 </p>
               </div>
-              <TextLink onClick={() => void copyText(source.bibtex).then((ok) => onToast(copiedMessage(ok, `BibTeX for ${source.key}`)))}>
+              <TextLink onClick={() => void copyText(source.bibtex).then((ok) => toastCopied(ok, `BibTeX for ${source.key}`))}>
                 Copy BibTeX
               </TextLink>
               <button
                 type="button"
                 aria-label={`Delete ${source.title}`}
-                onClick={() => void actions.deleteSource(source.id).catch((error) => onToast(`Could not delete: ${errorMessage(error)}`))}
+                onClick={() => setDeleting(source)}
                 className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
@@ -183,6 +192,7 @@ function UnsortedSources({ sources, onToast }: { sources: SavedSource[]; onToast
           ))}
         </ul>
       )}
+      {deleting && <DeleteSourceDialog source={deleting} onClose={() => setDeleting(null)} />}
     </Card>
   )
 }
@@ -209,25 +219,17 @@ export function ProjectDetail({
   const sources = useSavedSources(unsorted ? '' : projectId)
   const actions = useAuthorActions()
   const [selectedDraft, setSelectedDraft] = useState<string | null>(initialDraft)
-  const [toast, setToast] = useState<string | null>(null)
   const [deletingDraft, setDeletingDraft] = useState<Draft | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
-  const closeToast = useCallback(() => setToast(null), [])
   // Unsorted drafts belong to no project, so their check history comes from the draft itself.
   const unfiled = unsorted ? (drafts.data ?? []).filter((d) => !d.projectId) : []
   const unfiledCurrent = unfiled.find((d) => d.id === selectedDraft) ?? unfiled[0]
   const unfiledChecks = useDraftChecks(unfiledCurrent?.id ?? null)
 
-  const back = (
-    <button
-      type="button"
-      onClick={onBack}
-      data-ask-target={askTarget({ kind: 'action', id: 'back-to-library' })}
-      className={`flex items-center gap-1.5 self-start text-[13px] font-medium text-accent ${LINK}`}
-    >
-      ← Library
-    </button>
+  /** "← Library · name", the Researcher's "← Projects · name". */
+  const back = (trail?: string) => (
+    <BackLink label="Library" trail={trail} hover={LINK} onClick={onBack} askTarget={askTarget({ kind: 'action', id: 'back-to-library' })} />
   )
 
   // One at a time, so a double click on New draft makes one draft.
@@ -238,7 +240,7 @@ export function ProjectDetail({
         const draft = await actions.createDraft({ title: 'Untitled draft', projectId: unsorted ? null : projectId })
         onOpenEditor(draft.id, 'main.tex', 1)
       } catch (error) {
-        setToast(`Could not create the draft: ${errorMessage(error)}`)
+        toast.error(`Could not create the draft: ${errorMessage(error)}`)
       }
     })
 
@@ -248,7 +250,7 @@ export function ProjectDetail({
     setDeletingDraft(null)
     if (selectedDraft === gone.id) setSelectedDraft(null)
     onDraftDeleted?.(gone.id)
-    setToast(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
+    toast.success(alreadyGone ? `${gone.title} was already deleted` : `${gone.title} deleted`)
   }
   const draftDialog = (
     <AnimatePresence>
@@ -256,43 +258,51 @@ export function ProjectDetail({
     </AnimatePresence>
   )
 
+  const newDraftButton = (
+    <Button onClick={() => void newDraft()} disabled={creating.busy} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
+      <Plus className="size-4" aria-hidden="true" />
+      New draft
+    </Button>
+  )
+  /** The drafts, then the selected one's check history at full width (#721): side by side the
+   * history was squeezed. */
+  const draftsAndHistory = (list: Draft[], current: Draft | undefined, runs: CheckRun[], title: string, empty: { title: string; hint: string }) => (
+    <div className="flex flex-col gap-4">
+      <DraftList
+        drafts={list}
+        selected={current?.id ?? null}
+        onSelect={setSelectedDraft}
+        onOpenEditor={onOpenEditor}
+        onDelete={setDeletingDraft}
+        title={title}
+      />
+      {current ? (
+        <CheckHistory draft={current} runs={runs} onOpenEditor={() => onOpenEditor(current.id)} />
+      ) : (
+        <Card>
+          <Empty {...empty} />
+        </Card>
+      )}
+    </div>
+  )
+
   if (unsorted) {
     if (drafts.isPending || sources.isPending) return <LoadingScreen label="Loading unsorted sources…" />
     return (
-      <FadeIn className="flex flex-col gap-5">
-        {back}
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="font-serif text-[22px] font-semibold tracking-tight text-ink">Unsorted sources</h1>
-            <p className="text-sm text-ink-muted">Drafts that are in no project yet, and sources saved to no project.</p>
-          </div>
-          <Button onClick={() => void newDraft()} disabled={creating.busy} className="self-start sm:self-auto" data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
-            <Plus className="size-4" aria-hidden="true" />
-            New draft
-          </Button>
-        </header>
-        {/* Drafts, then their check history at full width (#721): side by side the history was squeezed. */}
-        <div className="flex flex-col gap-4">
-          <DraftList
-            drafts={unfiled}
-            selected={unfiledCurrent?.id ?? null}
-            onSelect={setSelectedDraft}
-            onOpenEditor={onOpenEditor}
-            onDelete={setDeletingDraft}
-            onNotice={setToast}
-            title="Drafts in no project"
-          />
-          {unfiledCurrent ? (
-            <CheckHistory draft={unfiledCurrent} runs={unfiledChecks.data ?? []} onOpenEditor={() => onOpenEditor(unfiledCurrent.id)} />
-          ) : (
-            <Card>
-              <Empty title="No drafts outside a project" hint="Every draft is in a project. Upload a .tex on Home to start one here." />
-            </Card>
-          )}
-        </div>
-        <UnsortedSources sources={sources.data ?? []} onToast={setToast} />
+      <FadeIn className="flex flex-col gap-6">
+        {back('Unsorted sources')}
+        <LibraryHeader
+          eyebrow={`${plural(unfiled.length, 'draft')} · ${plural((sources.data ?? []).length, 'source')}`}
+          title={<LibraryTitle>Unsorted sources</LibraryTitle>}
+          description="Drafts that are in no project yet, and sources saved to no project."
+          actions={newDraftButton}
+        />
+        {draftsAndHistory(unfiled, unfiledCurrent, unfiledChecks.data ?? [], 'Drafts in no project', {
+          title: 'No drafts outside a project',
+          hint: 'Every draft is in a project. Upload a .tex on Home to start one here.',
+        })}
+        <UnsortedSources sources={sources.data ?? []} />
         {draftDialog}
-        <Toast message={toast} onClose={closeToast} />
       </FadeIn>
     )
   }
@@ -301,13 +311,8 @@ export function ProjectDetail({
   if (project.isError) {
     return (
       <FadeIn className="flex flex-col gap-4">
-        {back}
-        <Card className="flex flex-col items-start gap-3 border-refutes text-refutes">
-          <p>Could not load this project: {errorMessage(project.error)}</p>
-          <Button variant="ghost" onClick={() => void project.refetch()}>
-            Try again
-          </Button>
-        </Card>
+        {back()}
+        <ErrorState title="This project could not load" message={errorMessage(project.error)} onRetry={() => void project.refetch()} />
       </FadeIn>
     )
   }
@@ -325,7 +330,7 @@ export function ProjectDetail({
   const status = projectStatus(detail)
   const meta = [
     detail.bibName ?? 'no .bib yet',
-    `${detail.entries} entr${detail.entries === 1 ? 'y' : 'ies'}`,
+    plural(detail.entries, 'entry', 'entries'),
     `${detail.cited} cited`,
     detail.needWork
       ? `${detail.needWork} need work`
@@ -337,45 +342,30 @@ export function ProjectDetail({
   ].join(' · ')
 
   return (
-    <FadeIn className="flex flex-col gap-5">
-      {back}
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1">
-          {renaming ? (
+    <FadeIn className="flex flex-col gap-6">
+      {back(detail.name)}
+      <LibraryHeader
+        eyebrow={plural(detail.draftList.length, 'draft')}
+        title={
+          renaming ? (
             <ProjectNameField name={detail.name} onSave={renameProject} onDone={() => setRenaming(false)} className="max-w-md" />
           ) : (
-            <h1 className="font-serif text-[22px] font-semibold tracking-tight break-words text-ink">{detail.name}</h1>
-          )}
-          <p className="text-sm text-ink-muted">{meta}</p>
-        </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <Button onClick={() => void newDraft()} disabled={creating.busy} data-ask-target={askTarget({ kind: 'action', id: 'new-draft' })}>
-            <Plus className="size-4" aria-hidden="true" />
-            New draft
-          </Button>
-          <ProjectMenu name={detail.name} onRename={() => setRenaming(true)} onDelete={() => setDeletingProject(true)} />
-        </div>
-      </header>
+            <LibraryTitle>{detail.name}</LibraryTitle>
+          )
+        }
+        description={meta}
+        actions={
+          <>
+            {newDraftButton}
+            <ProjectMenu label={`Actions for ${detail.name}`} onRename={() => setRenaming(true)} onDelete={() => setDeletingProject(true)} />
+          </>
+        }
+      />
 
-      {/* Drafts, then their check history at full width (#721): side by side the history was squeezed. */}
-      <div className="flex flex-col gap-4">
-        <DraftList
-          drafts={detail.draftList}
-          selected={current?.id ?? null}
-          onSelect={setSelectedDraft}
-          onOpenEditor={onOpenEditor}
-          onDelete={setDeletingDraft}
-          onNotice={setToast}
-          title="Drafts in this project"
-        />
-        {current ? (
-          <CheckHistory draft={current} runs={detail.history[current.id] ?? []} onOpenEditor={() => onOpenEditor(current.id)} />
-        ) : (
-          <Card>
-            <Empty title="No drafts in this project" hint="Start one with + New draft, or upload a .tex on Home." />
-          </Card>
-        )}
-      </div>
+      {draftsAndHistory(detail.draftList, current, current ? (detail.history[current.id] ?? []) : [], 'Drafts in this project', {
+        title: 'No drafts in this project',
+        hint: 'Start one with + New draft, or upload a .tex on Home.',
+      })}
       {draftDialog}
       <AnimatePresence>
         {deletingProject && (
@@ -394,43 +384,10 @@ export function ProjectDetail({
           />
         )}
       </AnimatePresence>
-      <Toast message={toast} onClose={closeToast} />
     </FadeIn>
   )
 }
 
-/** "Delete project?": says what the gateway does. The drafts and saved sources stay and move
- * to Unsorted; the .bib and the PDFs attached to its entries go with the project. */
-export function DeleteProjectDialog({
-  name,
-  drafts,
-  sources,
-  entries,
-  bibName,
-  onCancel,
-  onConfirm,
-}: {
-  name: string
-  drafts: number
-  sources: number
-  entries: number
-  bibName: string | null | undefined
-  onCancel: () => void
-  onConfirm: () => Promise<void>
-}) {
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
-  return (
-    <ConfirmDialog title={`Delete “${name}”?`} confirmLabel="Delete project" onCancel={onCancel} onConfirm={onConfirm}>
-      <p>
-        Its {plural(drafts, 'draft', 'drafts')} and {plural(sources, 'saved source', 'saved sources')} move to Unsorted.
-      </p>
-      <p className="mt-2">
-        {bibName ?? 'Its .bib'} ({plural(entries, 'entry', 'entries')}) and the PDFs attached to it are deleted, so drafts that cite
-        those keys will show them as missing. This can't be undone.
-      </p>
-    </ConfirmDialog>
-  )
-}
 
 function DraftList({
   drafts,
@@ -438,7 +395,6 @@ function DraftList({
   onSelect,
   onOpenEditor,
   onDelete,
-  onNotice,
   title,
 }: {
   drafts: Draft[]
@@ -447,8 +403,6 @@ function DraftList({
   onOpenEditor: (id: string) => void
   /** The bin on each row: asks first. */
   onDelete: (draft: Draft) => void
-  /** How a "Move to…" went. */
-  onNotice: (message: string) => void
   title: string
 }) {
   return (
@@ -475,11 +429,9 @@ function DraftList({
                     v{draft.version} · {editedLabel(draft.edited ?? draft.updated)} · {checkedLabel(draft.lastCheckedAt)}
                   </span>
                 </span>
-                <span className={cn('shrink-0 whitespace-nowrap text-xs', statusTone(draft.status))}>
-                  {statusLabel(draft.status)}
-                </span>
+                <Badge tone={statusBadgeTone(draft.status)}>{statusLabel(draft.status)}</Badge>
               </button>
-              <MoveDraftMenu draft={draft} onNotice={onNotice} />
+              <MoveDraftMenu draft={draft} />
               <DeleteDraftButton draft={draft} onDelete={onDelete} />
             </li>
           ))}

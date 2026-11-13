@@ -1,10 +1,11 @@
 /** Mascot with the OS asking for reduced motion. framer-motion reads that setting once, the
  * first time any component asks, so this file answers matchMedia before anything renders. */
 
-import { act, render } from '@testing-library/react'
+import { act } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 
 import { Mascot } from '../src/components/Mascot'
+import { renderWithMotion } from './motion'
 
 window.matchMedia = vi.fn().mockImplementation((query: string) => ({
   matches: query.includes('prefers-reduced-motion'),
@@ -16,7 +17,7 @@ window.matchMedia = vi.fn().mockImplementation((query: string) => ({
 }))
 
 it('still draws, and takes a hover without error, when reduced motion is asked for', async () => {
-  const { container } = render(<Mascot role="teacher" animated />)
+  const { container } = renderWithMotion(<Mascot role="teacher" animated />)
   const svg = container.querySelector('svg') as SVGSVGElement
 
   // framer-motion reports a hover on the next animation frame.

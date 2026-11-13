@@ -97,6 +97,7 @@ from app.pipeline.sources import index_paper
 from app.pipeline.verify import (
     check_prepared,
     checked_citations,
+    cites_others,
     fold_check,
     judged_text,
     prepare_source,
@@ -633,7 +634,7 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                         else:
                             verdict = await asyncio.to_thread(
                                 check_prepared, claim["claim"], source, Path(ready["path"]),
-                                judged_text(claim, citation),
+                                judged_text(claim, citation), cites_others(claim, citation),
                             )
                         outcome = verdict.get("verdict") or verdict.get("message", "")
                         span.set_attribute(SpanAttributes.OUTPUT_VALUE, outcome)

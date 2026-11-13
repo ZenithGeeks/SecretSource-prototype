@@ -1,10 +1,12 @@
 /** The one way a project starts outside the Library: NewProjectDialog, opened from Home's "New
  * project ▾" and from "+ New" in Recent projects, and the file input behind its Import. Either way
- * the new project opens; an import says how it is going, since the dialog has closed by then.
+ * the new project opens; an import says how it is going in a toast, since the dialog has closed
+ * by then.
  * The dialog can take existing drafts into the new project (MoveDraft). */
 
 import { AnimatePresence } from 'framer-motion'
 import { useRef } from 'react'
+import { toast } from 'sonner'
 
 import { errorMessage } from '../../../lib/author'
 import { useAuthorActions } from '../../../lib/useAuthor'
@@ -14,12 +16,10 @@ export function NewProject({
   open,
   onClose,
   onCreated,
-  onNotice,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (projectId: string) => void
-  onNotice: (message: string) => void
 }) {
   const actions = useAuthorActions()
   const importInput = useRef<HTMLInputElement>(null)
@@ -37,23 +37,23 @@ export function NewProject({
           const file = event.target.files?.[0]
           event.target.value = ''
           if (!file) return
-          onNotice(`Importing ${file.name}…`)
+          // One toast that turns from "Importing…" into how it went.
+          const id = toast.loading(`Importing ${file.name}…`)
           actions
             .importProject(file)
             .then((project) => {
-              onNotice(`${project.name} created from ${file.name}`)
+              toast.success(`${project.name} created from ${file.name}`, { id })
               onCreated(project.id)
             })
-            .catch((error) => onNotice(`Could not import ${file.name}: ${errorMessage(error)}`))
+            .catch((error) => toast.error(`Could not import ${file.name}: ${errorMessage(error)}`, { id }))
         }}
       />
       <AnimatePresence>
         {open && (
           <NewProjectWithDrafts
             onCancel={onClose}
-            onCreated={(projectId, notice) => {
+            onCreated={(projectId) => {
               onClose()
-              onNotice(notice)
               onCreated(projectId)
             }}
             onImport={() => {

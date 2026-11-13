@@ -296,7 +296,42 @@ def test_a_figure_judge_reply_that_does_not_parse_is_asked_again_without_the_cac
     assert copies == [{"cache": False}]
 
 
-def test_the_text_only_judge_does_not_ask_again_when_the_reply_does_not_parse(monkeypatch):
+def test_a_text_judge_reply_that_does_not_parse_is_asked_again_without_the_cache(monkeypatch):
+    """SCRUM-531: the text judges failed the check on the first reply that was not JSON."""
+    import app.llm
+
+    copies = []
+
+    class FakeLM:
+        def copy(self, **kwargs):
+            copies.append(kwargs)
+            return FakeLM()
+
+    monkeypatch.setattr(app.llm, "dspy_lm", lambda **kwargs: FakeLM())
+    calls = []
+
+    def answer(claim, evidence):
+        if len(calls) == 1:
+            raise _parse_error()
+        return _FakePrediction(verdict="supports", quote="q", reasoning="r")
+
+    _stub_dspy(monkeypatch, calls, answer)
+
+    result = verify._build_judge()("text claim four", ["evidence"])
+
+    assert result["verdict"] == "supports"
+    assert len(calls) == 2
+    assert copies == [{"cache": False}]
+
+
+def test_a_judge_gives_up_after_the_second_reply_does_not_parse(monkeypatch):
+    import app.llm
+
+    class FakeLM:
+        def copy(self, **kwargs):
+            return FakeLM()
+
+    monkeypatch.setattr(app.llm, "dspy_lm", lambda **kwargs: FakeLM())
     calls = []
 
     def answer(claim, evidence):
@@ -305,5 +340,5 @@ def test_the_text_only_judge_does_not_ask_again_when_the_reply_does_not_parse(mo
     _stub_dspy(monkeypatch, calls, answer)
 
     with pytest.raises(AdapterParseError):
-        verify._build_judge()("text claim four", ["evidence"])
-    assert len(calls) == 1
+        verify._build_judge()("text claim five", ["evidence"])
+    assert len(calls) == 2

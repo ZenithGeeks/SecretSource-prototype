@@ -1,14 +1,15 @@
 /**
  * "Evidence — issue N of M": the selected citation's sentence beside the passage the verdict
- * rests on, why, and the two ways to act on it: upload the source PDF, or keep the citation
- * with a note. "Override · add note" and the editor's "Keep mine" are the same action, so the
+ * rests on, why, and the ways to act on it: edit the draft at the citation's line, upload the
+ * source PDF (when no passage of the published paper was read), or keep the citation with a
+ * note. "Override · add note" and the editor's "Keep mine" are the same action, so the
  * note form lives here and the popover reuses the wording.
  *
  * "show in the paper" opens the source PDF at the passage in the shared PageViewer, the way
  * a researcher's claim card does: the gateway locates the text, the viewer highlights it.
  */
 
-import { ChevronRight, PencilLine, RotateCcw, Upload } from 'lucide-react'
+import { ChevronRight, PencilLine, RotateCcw, SquarePen, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import type { Target } from '../../../components/PageViewer'
@@ -17,7 +18,7 @@ import { api } from '../../../lib/api'
 import { askTarget } from '../../../lib/askCursor'
 import { shortMessage } from '../../../lib/citations'
 import { referenceNote } from '../../../lib/referenceCheck'
-import { settledHint } from '../../../lib/verdict'
+import { NOT_FOUND, VERDICTS, isNotFound, isOpenIssue, isUnjudged, settledHint } from '../../../lib/verdict'
 import type { Citation, DraftStatus } from '../../../types/draftCheck'
 import { sourceLabel } from '../labels'
 import { CardHead, TextLink } from './CardHead'
@@ -34,6 +35,7 @@ export function EvidencePanel({
   onReopen,
   onAttachPdf,
   onShow,
+  onEdit,
 }: {
   citation: Citation | undefined
   /** The open issues, for the "N of M" pager. */
@@ -48,11 +50,17 @@ export function EvidencePanel({
   onAttachPdf: (citation: Citation, file: File) => void
   /** Open the source PDF at the passage. */
   onShow?: (target: Target) => void
+  /** Open the editor at the citation's line: the usual fix is to change the sentence. */
+  onEdit?: (citation: Citation) => void
 }) {
   const [noteOpen, setNoteOpen] = useState(false)
   const [note, setNote] = useState('')
   const [locating, setLocating] = useState(false)
   const pdfInput = useRef<HTMLInputElement>(null)
+
+  // An open issue, or a reference no index knows, is fixed in the draft (the sentence, the DOI,
+  // or the \cite itself); a source nobody could read is fixed by uploading it.
+  const editLeads = Boolean(citation && (isOpenIssue(citation) || isNotFound(citation)))
 
   const index = citation ? issues.findIndex((c) => c.id === citation.id) : -1
   const pager =
@@ -89,10 +97,15 @@ export function EvidencePanel({
   }
 
   return (
-    <Card className="flex flex-col gap-3" aria-labelledby="evidence-title">
+    <Card className="@container flex flex-col gap-3" aria-labelledby="evidence-title">
+      {/* A pick in the list changes this panel without moving focus: say what it shows now. */}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {citation ? `Evidence for \\cite{${citation.key}}, line ${citation.line}: ${isNotFound(citation) ? NOT_FOUND.badge : VERDICTS[citation.verdict].badge}.` : ''}
+      </p>
       <CardHead
         id="evidence-title"
-        title={citation ? `Evidence · ${sourceLabel(citation)}` : 'Evidence'}
+        // A reference no index knows has no author or year worth naming: it may not exist.
+        title={citation ? `Evidence · ${isNotFound(citation) ? `\\cite{${citation.key}}` : sourceLabel(citation)}` : 'Evidence'}
         aside={
           <button
             type="button"
@@ -116,9 +129,16 @@ export function EvidencePanel({
         )
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
+          {/* What the check said, so the verdict is not left behind in the list. */}
+          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
+            <span className="min-w-0 truncate font-mono text-xs text-ink-muted">
+              {isNotFound(citation) ? NOT_FOUND.title : `\\cite{${citation.key}}`}
+            </span>
+          </p>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 @xl:grid-cols-2 @xl:gap-4">
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
-              <p className="text-[11px] font-medium break-words text-ink-muted">
+              <p className="text-xs font-medium break-words text-ink-muted">
                 <span className="uppercase tracking-wide">Your sentence</span> · {citation.file} L{citation.line}
               </p>
               <p className="font-mono text-xs leading-relaxed break-words text-ink">{citation.sentence}</p>
@@ -126,7 +146,7 @@ export function EvidencePanel({
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
               {citation.evidence?.passage ? (
                 <>
-                  <p className="text-[11px] font-medium break-words text-ink-muted">
+                  <p className="text-xs font-medium break-words text-ink-muted">
                     <span className="uppercase tracking-wide">Source passage</span> · {citation.evidence.pdf}
                     {citation.evidence.page ? ` p.${citation.evidence.page}` : ''}
                   </p>
@@ -146,14 +166,14 @@ export function EvidencePanel({
                 </>
               ) : (
                 <>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
                   <p className="text-[13px] break-words text-ink-muted">
                     {citation.verdict === 'unavailable'
                       ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
                       : citation.verdict === 'unchecked'
                         ? citation.reason === 'missing-key'
                           ? `\\cite{${citation.key}} has no entry in the bibliography.`
-                          : 'Not checked yet.'
+                          : citation.message ? `${citation.message}.` : 'Not checked yet.'
                         : 'The check answered without quoting a passage.'}
                   </p>
                 </>
@@ -177,7 +197,6 @@ export function EvidencePanel({
 
           {citation.resolution ? (
             <div className="flex flex-wrap items-center gap-3 text-xs text-ink-muted">
-              <CitationBadge verdict={citation.verdict} />
               <span>
                 {citation.resolution.kind === 'replaced'
                   ? `Replaced \\cite{${citation.resolution.previousKey}} with \\cite{${citation.key}}.`
@@ -225,27 +244,52 @@ export function EvidencePanel({
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" onClick={() => pdfInput.current?.click()} data-ask-target={askTarget({ kind: 'action', id: 'upload-pdf' })}>
-                <Upload className="size-4" aria-hidden="true" />
-                Upload source PDF
-              </Button>
-              <input
-                ref={pdfInput}
-                type="file"
-                accept="application/pdf,.pdf"
-                className="sr-only"
-                tabIndex={-1}
-                aria-hidden="true"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  event.target.value = ''
-                  if (file) onAttachPdf(citation, file)
-                }}
-              />
-              <Button variant="ghost" onClick={() => setNoteOpen(true)} data-ask-target={askTarget({ kind: 'action', id: 'override' })}>
-                <PencilLine className="size-4" aria-hidden="true" />
-                Override · add note
-              </Button>
+              {/* editLeads: the fix is in the draft. Otherwise the upload leads and Edit steps back. */}
+              {onEdit && (
+                <Button
+                  variant={editLeads ? 'solid' : 'ghost'}
+                  onClick={() => onEdit(citation)}
+                  data-ask-target={askTarget({ kind: 'action', id: 'edit-at-line' })}
+                >
+                  <SquarePen className="size-4" aria-hidden="true" />
+                  Edit at L{citation.line}
+                </Button>
+              )}
+              {/* A passage read from the published paper settles it: an upload would not change the
+                  verdict. One read from a preprint (#424) might, so the upload stays there. */}
+              {/* Not for a reference no index knows: the fix is its DOI or the \cite, not a PDF. */}
+              {!isNotFound(citation) && (!citation.evidence?.passage || citation.sourceVersion === 'preprint') && (
+                <>
+                  <Button
+                    variant={editLeads ? 'ghost' : 'solid'}
+                    onClick={() => pdfInput.current?.click()}
+                    data-ask-target={askTarget({ kind: 'action', id: 'upload-pdf' })}
+                  >
+                    <Upload className="size-4" aria-hidden="true" />
+                    Upload source PDF
+                  </Button>
+                  <input
+                    ref={pdfInput}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ''
+                      if (file) onAttachPdf(citation, file)
+                    }}
+                  />
+                </>
+              )}
+              {/* Nothing was judged, so there is no verdict to override. */}
+              {!isUnjudged(citation) && (
+                <Button variant="ghost" onClick={() => setNoteOpen(true)} data-ask-target={askTarget({ kind: 'action', id: 'override' })}>
+                  <PencilLine className="size-4" aria-hidden="true" />
+                  Override · add note
+                </Button>
+              )}
             </div>
           )}
         </>

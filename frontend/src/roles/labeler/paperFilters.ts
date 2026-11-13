@@ -21,6 +21,13 @@ export function progressOf(paper: Paper): keyof typeof PROGRESS_LABELS {
 /** Who shared the paper. Older papers of your own may have no name, so `mine` fills it in. */
 export const addedByOf = (paper: Paper, me: string) => paper.added_by || (paper.mine ? me : '')
 
+/** Whether the whole team, not just the viewer, has judged every claim — for the summary card
+ * shown once "Added by" is narrowed to one person (not a filter of its own). */
+export function teamStatusOf(paper: Paper): keyof typeof PROGRESS_LABELS {
+  if (paper.status === 'done' && paper.claims > 0 && paper.team_judged >= paper.claims) return 'done'
+  return paper.team_judged > 0 ? 'started' : 'none'
+}
+
 export type Facet = 'addedBy' | 'topic' | 'status' | 'progress'
 export type Filters = { search: string } & Record<Facet, string[]>
 

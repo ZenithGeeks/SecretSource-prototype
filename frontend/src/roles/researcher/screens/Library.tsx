@@ -5,26 +5,35 @@
  * analysed papers; in Unsorted it hands off to History, where a paper is analysed.
  */
 
-import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
+import { Plus } from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ToolbarActions } from '../../../components/AppShell'
 import {
+  BackLink,
+  ConfirmDialog,
+  DialogPanel,
+  LibraryHeader,
+  LibraryTitle,
+  NewProjectDialog as SharedNewProjectDialog,
+  Modal,
+  LibraryCard,
+  ProjectMenu,
+  ProjectName,
+} from '../../../components/library'
+import {
   Button,
   ErrorState,
   FadeIn,
-  IconButton,
   Input,
   LoadingScreen,
-  MenuItem,
   Segmented,
   Textarea,
 } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import { errorMessage } from '../../../lib/author'
-import { useMenuKeys } from '../../../lib/useMenuKeys'
 import type { ClaimStanding, ClaimTally, LibraryPaper, Project } from '../../../lib/researcher'
 import { updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
@@ -45,74 +54,9 @@ const STANDINGS: { key: ClaimStanding; color: string }[] = [
   { key: 'unchecked', color: 'bg-neutral' },
 ]
 
-/** The two dialogs' enter/exit: the scrim fades, the panel fades and settles in from slightly
- * smaller. Their call sites sit inside AnimatePresence, or the exit would never play. */
-const BACKDROP_MOTION = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1 },
-  exit: { opacity: 0 },
-  transition: { duration: 0.15 },
-}
-const PANEL_MOTION = {
-  initial: { opacity: 0, scale: 0.96 },
-  animate: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0.96 },
-  transition: { duration: 0.15 },
-}
-
 /** How long the Undo toast after deleting a project stays up. */
 const UNDO_MS = 10_000
 
-const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled)'
-
-/** The shell of the three dialogs: a scrim that closes it, Escape, and a Tab key that stays inside
- * (aria-modal alone does not stop Tab from reaching the page behind). When it closes, focus goes
- * back to what had it before it opened. */
-function Modal({ titleId, onClose, children }: { titleId: string; onClose: () => void; children: ReactNode }) {
-  // Read while rendering: by the time an effect runs, the dialog's autoFocus field already has focus.
-  const root = useRef<HTMLDivElement>(null)
-  const [opener] = useState(() => document.activeElement as HTMLElement | null)
-  // After a tick: React's development StrictMode unmounts and remounts at once, which must not take focus away.
-  useEffect(
-    () => () => {
-      setTimeout(() => {
-        if (!root.current?.isConnected) opener?.focus()
-      })
-    },
-    [opener],
-  )
-  // A dialog opened from a menu has nothing of its own to focus: take focus so Escape and Tab work at once.
-  useEffect(() => {
-    if (!root.current?.contains(document.activeElement)) root.current?.focus()
-  }, [])
-
-  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') return onClose()
-    if (event.key !== 'Tab') return
-    const stops = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)]
-    // Shift+Tab from the dialog itself (a dialog opened from a menu starts there) would leave it too.
-    const atStart = document.activeElement === stops[0] || document.activeElement === event.currentTarget
-    const atEnd = document.activeElement === stops[stops.length - 1]
-    if (!(event.shiftKey ? atStart : atEnd)) return
-    event.preventDefault()
-    stops[event.shiftKey ? stops.length - 1 : 0].focus()
-  }
-
-  return (
-    <div
-      ref={root}
-      tabIndex={-1}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onKeyDown={keys}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-    >
-      <motion.div {...BACKDROP_MOTION} className="absolute inset-0 bg-ink/45" onClick={onClose} />
-      {children}
-    </div>
-  )
-}
 
 function TallyBar({ tally }: { tally: ClaimTally }) {
   const total = STANDINGS.reduce((sum, s) => sum + tally[s.key], 0)
@@ -126,74 +70,6 @@ function TallyBar({ tally }: { tally: ClaimTally }) {
   )
 }
 
-/** The open "⋯" menu on a project card: Rename (switches the card into inline-edit) and
- * Delete project (hands off to the confirm dialog). Not shown for Unsorted — it is a synthetic
- * bucket, not a real project. Click outside closes it; the keys are useMenuKeys'. */
-function ProjectMenu({
-  onRename,
-  onDelete,
-}: {
-  onRename: () => void
-  onDelete: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const away = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', away)
-    return () => document.removeEventListener('mousedown', away)
-  }, [open])
-  const menu = useMenuKeys(open, () => setOpen(false), root)
-
-  return (
-    <div ref={root} onKeyDown={menu.onKeyDown} onBlur={menu.onBlur} className="pointer-events-auto relative">
-      <IconButton
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Project actions"
-        className="size-8 pointer-coarse:size-11"
-      >
-        <MoreVertical className="size-4" />
-      </IconButton>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-border-subtle bg-surface p-1 shadow-card"
-        >
-          <MenuItem
-            role="menuitem"
-            onClick={() => {
-              menu.returnFocus()
-              setOpen(false)
-              onRename()
-            }}
-            className="px-3 font-normal"
-          >
-            <Pencil className="size-4" />
-            Rename
-          </MenuItem>
-          <MenuItem
-            role="menuitem"
-            onClick={() => {
-              menu.returnFocus()
-              setOpen(false)
-              onDelete()
-            }}
-            className="px-3 font-normal text-refutes hover:bg-refutes-soft"
-          >
-            <Trash2 className="size-4" />
-            Delete project
-          </MenuItem>
-        </div>
-      )}
-    </div>
-  )
-}
 
 function ProjectCard({
   project,
@@ -245,18 +121,13 @@ function ProjectCard({
   }
 
   return (
-    <div className="relative flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent">
-      {/* The whole card opens the project; it sits under the real content (next, pointer-events-
-          none) so the menu and the rename field above it can still take their own clicks. */}
-      <button type="button" onClick={() => onOpen(project.id)} aria-label={`Open ${project.name}, ${meta}`} className="absolute inset-0 rounded-xl" />
-
-      <div className="pointer-events-none flex flex-col gap-3">
-        {renaming ? (
-          // The invisible "open project" button (above, position: absolute) paints over any
-          // in-flow sibling here regardless of DOM order, so a click on a button in this form
-          // never reached it — only Enter (a keyboard submit, no hit-testing) worked. Rather
-          // than fight the stacking, there is just the input: Enter or leaving the field saves,
-          // Escape cancels. Tabbing away used to throw the edit away.
+    <LibraryCard
+      openLabel={`Open ${project.name}, ${meta}`}
+      onOpen={() => onOpen(project.id)}
+      title={
+        renaming ? (
+          // Just the input: Enter or leaving the field saves, Escape cancels. Tabbing away used to
+          // throw the edit away.
           <form
             onSubmit={(event) => {
               event.preventDefault()
@@ -279,71 +150,33 @@ function ProjectCard({
             />
           </form>
         ) : (
-          <p className="font-serif text-base font-semibold text-ink">{project.name}</p>
-        )}
-        <p className="text-[13px] text-ink-muted">{meta}</p>
-        <TallyBar tally={project.tally} />
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-xs text-ink-muted">{updatedText(project)}</span>
-          <ChevronRight className="size-4 text-accent" />
-        </div>
-      </div>
-
-      {!project.unsorted && !renaming && (
-        <div className="absolute right-3 top-3">
-          <ProjectMenu onRename={() => setRenaming(true)} onDelete={() => onRequestDelete(project)} />
-        </div>
-      )}
-    </div>
+          <ProjectName>{project.name}</ProjectName>
+        )
+      }
+      meta={meta}
+      bar={<TallyBar tally={project.tally} />}
+      footer={updatedText(project)}
+      menu={
+        !project.unsorted &&
+        !renaming && <ProjectMenu label="Project actions" onRename={() => setRenaming(true)} onDelete={() => onRequestDelete(project)} />
+      }
+    />
   )
 }
 
 /** "Delete project?" (Figma: Library — Delete project (confirm)). Only the project is removed;
  * its papers fall back to Unsorted, the same way an unfiled paper always has. */
-function DeleteProjectDialog({
-  project,
-  onCancel,
-  onConfirm,
-}: {
-  project: Project
-  onCancel: () => void
-  onConfirm: () => Promise<void>
-}) {
-  const [deleting, setDeleting] = useState(false)
-  const titleId = useId()
+function DeleteProjectDialog({ project, onCancel, onConfirm }: { project: Project; onCancel: () => void; onConfirm: () => Promise<void> }) {
   return (
-    <Modal titleId={titleId} onClose={() => !deleting && onCancel()}>
-      <motion.div {...PANEL_MOTION} className="relative w-[420px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl">
-        <h2 id={titleId} className="font-serif text-lg font-semibold text-ink">Delete "{project.name}"?</h2>
-        <p className="mt-2 text-sm leading-5 text-ink-muted">
-          Its {count(project.papers, 'paper')} move back to Unsorted. No paper is deleted. The project itself can't
-          be brought back.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          {/* Focus starts on the safe choice, so Enter right after opening cancels. */}
-          <Button type="button" variant="ghost" autoFocus className="border border-border-subtle" disabled={deleting} onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            className="bg-refutes hover:opacity-90"
-            disabled={deleting}
-            onClick={async () => {
-              setDeleting(true)
-              try {
-                await onConfirm()
-              } catch {
-                toast.error('Could not delete the project. Try again.')
-              } finally {
-                setDeleting(false)
-              }
-            }}
-          >
-            {deleting ? 'Deleting…' : 'Delete project'}
-          </Button>
-        </div>
-      </motion.div>
-    </Modal>
+    <ConfirmDialog
+      title={`Delete "${project.name}"?`}
+      confirmLabel="Delete project"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      onError={() => toast.error('Could not delete the project. Try again.')}
+    >
+      Its {count(project.papers, 'paper')} move back to Unsorted. No paper is deleted. The project itself can't be brought back.
+    </ConfirmDialog>
   )
 }
 
@@ -401,19 +234,17 @@ function ProjectsLanding({
       <ToolbarActions>
         <LibraryAddMenu items={analyseItems(onAddPaper)} />
       </ToolbarActions>
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-2">
-          <p className="type-label text-accent">
-            {count(papers, 'paper')} · {count(claims, 'claim')}
-          </p>
-          <h1 className="type-display text-ink">Library</h1>
-          <p className="text-sm text-ink-muted">Group the papers you analysed into projects.</p>
-        </div>
-        <Button variant="ghost" onClick={onNew} className="self-start border border-border-subtle sm:self-auto">
-          <Plus className="size-4" />
-          New project
-        </Button>
-      </header>
+      <LibraryHeader
+        eyebrow={`${count(papers, 'paper')} · ${count(claims, 'claim')}`}
+        title={<LibraryTitle>Library</LibraryTitle>}
+        description="Group the papers you analysed into projects."
+        actions={
+          <Button variant="ghost" onClick={onNew} className="border border-border-subtle">
+            <Plus className="size-4" />
+            New project
+          </Button>
+        }
+      />
 
       {projects.filter((p) => !p.unsorted).length >= 2 && (
         <div className="flex flex-wrap items-center gap-3">
@@ -520,10 +351,7 @@ function AddPapersDialog({
 
   return (
     <Modal titleId={titleId} onClose={onClose}>
-      <motion.div
-        {...PANEL_MOTION}
-        className="relative flex max-h-[80vh] w-[520px] max-w-full flex-col rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
-      >
+      <DialogPanel className="flex max-h-[80vh] w-[520px] flex-col">
         <h2 id={titleId} className="type-title text-ink">Add papers</h2>
         <p className="mt-1 text-[13px] text-ink-muted">Choose the papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
@@ -568,7 +396,7 @@ function AddPapersDialog({
             {adding ? 'Adding…' : chosen.size ? `Add ${count(chosen.size, 'paper')}` : 'Add'}
           </Button>
         </div>
-      </motion.div>
+      </DialogPanel>
     </Modal>
   )
 }
@@ -606,9 +434,7 @@ function ProjectDetail({
   if (isError) {
     return (
       <>
-        <button type="button" onClick={onBack} className="self-start text-[13px] font-medium text-accent hover:underline">
-          ← Projects
-        </button>
+        <BackLink label="Projects" onClick={onBack} />
         <ErrorState title="This project could not load" message={errorMessage(error)} onRetry={() => refetch()} />
       </>
     )
@@ -651,18 +477,12 @@ function ProjectDetail({
       <ToolbarActions>
         <LibraryAddMenu items={items} />
       </ToolbarActions>
-      <button type="button" onClick={onBack} className="flex items-center gap-1.5 self-start text-[13px]">
-        <span className="font-medium text-accent hover:underline">← Projects</span>
-        <span className="text-ink-muted">· {projectName}</span>
-      </button>
-
-      <header className="flex flex-col gap-2">
-        <p className="type-label text-accent">
-          {count(library.papers.length, 'paper')} · {count(claimTotal, 'claim')} · {checked} checked
-        </p>
-        <h1 className="type-display text-ink">{projectName}</h1>
-        <p className="text-sm text-ink-muted">{library.summary}</p>
-      </header>
+      <BackLink label="Projects" trail={projectName} onClick={onBack} />
+      <LibraryHeader
+        eyebrow={`${count(library.papers.length, 'paper')} · ${count(claimTotal, 'claim')} · ${checked} checked`}
+        title={<LibraryTitle>{projectName}</LibraryTitle>}
+        description={library.summary}
+      />
       <AnimatePresence>
         {picking && (
           <AddPapersDialog
@@ -710,81 +530,46 @@ function ProjectDetail({
   )
 }
 
-/** The "New project" modal (Figma: New project modal). Scrim + card; Esc or backdrop cancels,
- * Enter/Create submits when a name is present. */
+/** The "New project" modal (Figma: New project modal): a name, which no other project may
+ * have, and an optional description. */
 function NewProjectDialog({
   existing,
-  busy,
   onCancel,
   onCreate,
 }: {
-  /** A create is in flight: the button is off so a second click or Enter cannot make a second project. */
-  busy: boolean
-  /** Names already in use, so a second project cannot be given the same one. */
   existing: string[]
   onCancel: () => void
-  onCreate: (name: string, description: string) => void
+  /** Resolves once the project exists; a throw keeps the dialog open with the typed name. */
+  onCreate: (name: string, description: string) => Promise<void>
 }) {
-  const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const n = name.trim()
-  const taken = existing.some((other) => other.toLowerCase() === n.toLowerCase())
-  const titleId = useId()
-  const nameId = useId()
-  const takenId = useId()
   const descriptionId = useId()
   return (
-    <Modal titleId={titleId} onClose={onCancel}>
-      <motion.form
-        {...PANEL_MOTION}
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (n && !taken && !busy) onCreate(n, description.trim())
-        }}
-        className="relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl"
-      >
-        <h2 id={titleId} className="font-serif text-xl font-semibold text-ink">New project</h2>
-        <p className="mt-1 text-[13px] text-ink-muted">
-          Group papers into their own library and graph. You can move papers between projects any time.
-        </p>
-
-        <label htmlFor={nameId} className="mt-4 block text-[13px] font-medium text-ink">Project name</label>
-        <Input
-          id={nameId}
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Retrieval survey"
-          aria-invalid={taken}
-          aria-describedby={taken ? takenId : undefined}
-          className="mt-1.5 w-full"
-        />
-        {taken && (
-          <p id={takenId} role="alert" className="mt-1.5 text-[13px] text-refutes">
-            A project called "{n}" already exists. Choose another name.
-          </p>
-        )}
-
-        <label htmlFor={descriptionId} className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
-        <Textarea
-          id={descriptionId}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What is this project about?"
-          rows={3}
-          className="mt-1.5 resize-none"
-        />
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!name.trim() || busy}>
-            {busy ? 'Creating…' : 'Create project'}
-          </Button>
-        </div>
-      </motion.form>
-    </Modal>
+    <SharedNewProjectDialog
+      hint="Group papers into their own library and graph. You can move papers between projects any time."
+      placeholder="e.g. Retrieval survey"
+      existing={existing}
+      required
+      onCancel={onCancel}
+      onCreate={async (name) => {
+        try {
+          await onCreate(name, description.trim())
+        } catch {
+          toast.error('Could not create the project. Try again.')
+        }
+        return null
+      }}
+    >
+      <label htmlFor={descriptionId} className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
+      <Textarea
+        id={descriptionId}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="What is this project about?"
+        rows={3}
+        className="mt-1.5 resize-none"
+      />
+    </SharedNewProjectDialog>
   )
 }
 
@@ -803,7 +588,6 @@ export function Library({
   )
   const { data: projects, isError, error, refetch } = useProjects()
   const { createProject } = useResearcherActions()
-  const [creating, setCreating] = useState(false)
   // Opening or leaving a project adds a history entry, so the browser's Back button leaves it too.
   const openProject = (id: string | null) => {
     const params = new URLSearchParams(window.location.search)
@@ -820,7 +604,7 @@ export function Library({
   if (isError) {
     return (
       <>
-        <h1 className="type-display text-ink">Library</h1>
+        <LibraryTitle>Library</LibraryTitle>
         <ErrorState title="Your library could not load" message={errorMessage(error)} onRetry={() => refetch()} />
       </>
     )
@@ -847,20 +631,11 @@ export function Library({
         {showNew && (
           <NewProjectDialog
             existing={projects.map((p) => p.name)}
-            busy={creating}
             onCancel={() => setShowNew(false)}
             onCreate={async (name, description) => {
-              setCreating(true)
-              try {
-                const id = await createProject(name, description)
-                setShowNew(false)
-                openProject(id)
-              } catch {
-                // The dialog stays open so the typed name is not lost.
-                toast.error('Could not create the project. Try again.')
-              } finally {
-                setCreating(false)
-              }
+              const id = await createProject(name, description)
+              setShowNew(false)
+              openProject(id)
             }}
           />
         )}

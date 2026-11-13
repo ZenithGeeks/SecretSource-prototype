@@ -22,6 +22,7 @@ import dspy
 from app import assistant, store
 from app.assistant import Cited
 from app.config import PAPERS_DIR
+from app.tracing import setup_tracing
 from eval_assistant import prepare_papers
 
 STEPS = ("first statement", "first checked", "all checked")
@@ -61,6 +62,7 @@ def main() -> None:
         help="skip the answer cache, so each run asks the LLM again (needed to see run-to-run spread)",
     )
     args = parser.parse_args()
+    setup_tracing()
 
     with args.questions.open(newline="", encoding="utf-8") as file:
         rows = [row for row in csv.DictReader(file) if not row.get("paper")]

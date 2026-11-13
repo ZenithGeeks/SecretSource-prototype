@@ -4,7 +4,7 @@
  * time, most cited first unless the labeler picks another order, and each opens to its abstract.
  */
 
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { AnimatePresence, m, MotionConfig } from 'framer-motion'
 import { ChevronDown, ExternalLink, Loader2, Plus, RotateCcw, SearchX } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 
@@ -348,7 +348,7 @@ function ResultRow({
   // null: it could not be checked, so adding stays allowed.
   const unreachable = paper.downloadable === false && !done
   return (
-    <motion.li
+    <m.li
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut', delay }}
@@ -404,7 +404,7 @@ function ResultRow({
       </div>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.12 } }}
@@ -426,10 +426,10 @@ function ResultRow({
               Open the paper's page
               <ExternalLink className="size-3.5" aria-hidden="true" />
             </a>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
-    </motion.li>
+    </m.li>
   )
 }
 

@@ -4,7 +4,7 @@
  * right panel plays a short loop of how SecretSource works for that role.
  */
 
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, m, useReducedMotion } from 'framer-motion'
 import { ArrowRight, FileText } from 'lucide-react'
 import type { KeyboardEvent, Ref } from 'react'
 import { useEffect, useRef, useState } from 'react'
@@ -133,7 +133,7 @@ export function Onboarding({
               these one-off offsets out of the CSS bundle, which is at its size budget. */}
           <div style={{ position: 'relative' }}>
             <AnimatePresence initial={false}>
-              <motion.div
+              <m.div
                 key={story.id}
                 style={{ position: 'absolute', top: -62, right: 20, zIndex: 1 }}
                 initial={{ opacity: 0, y: 8, scale: 0.9 }}
@@ -142,7 +142,7 @@ export function Onboarding({
                 transition={{ duration: 0.25, ease: EASE_OUT }}
               >
                 <Mascot role={story.id} size={96} animated />
-              </motion.div>
+              </m.div>
             </AnimatePresence>
             <HowItWorks key={story.id} story={story} />
           </div>
@@ -240,20 +240,20 @@ function HowItWorks({ story }: { story: RoleStory }) {
             <FileText className="size-3.5" /> Your paper
           </span>
           <Line width="90%" />
-          <motion.span
+          <m.span
             className="rounded bg-accent-soft px-1 py-0.5 text-[11px] leading-snug text-ink"
             initial={false}
             animate={{ boxShadow: linked ? 'inset 0 0 0 1px var(--color-accent)' : 'inset 0 0 0 1px rgba(0,0,0,0)' }}
             transition={{ duration: 0.3 }}
           >
             {story.claim}
-          </motion.span>
+          </m.span>
           <Line width="75%" />
           <Line width="60%" />
         </div>
 
         <svg viewBox="0 0 40 12" className="w-10 overflow-visible" aria-hidden="true">
-          <motion.path
+          <m.path
             d="M2 6H36M31 1.5L36 6L31 10.5"
             fill="none"
             strokeWidth="1.5"
@@ -266,7 +266,7 @@ function HowItWorks({ story }: { story: RoleStory }) {
           />
         </svg>
 
-        <motion.div
+        <m.div
           className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-canvas p-3"
           initial={false}
           animate={{ opacity: linked ? 1 : 0.45, y: linked ? 0 : 4 }}
@@ -278,7 +278,7 @@ function HowItWorks({ story }: { story: RoleStory }) {
           <div className="h-6">
             <AnimatePresence>
               {judged && (
-                <motion.span
+                <m.span
                   key={story.id}
                   className="inline-flex"
                   initial={{ opacity: 0, scale: 0.85, filter: 'blur(4px)' }}
@@ -287,11 +287,11 @@ function HowItWorks({ story }: { story: RoleStory }) {
                   transition={{ duration: 0.35, ease: EASE_OUT }}
                 >
                   <VerdictBadge verdict={story.verdict} />
-                </motion.span>
+                </m.span>
               )}
             </AnimatePresence>
           </div>
-        </motion.div>
+        </m.div>
       </div>
 
       <ol className="flex flex-col gap-1 border-t border-border-subtle px-5 py-4 sm:px-6">

@@ -6,13 +6,12 @@
  * authorApi.exportReport until that endpoint exists.
  */
 
-import { strToU8, zipSync } from 'fflate'
-
 import { parseBib, serializeBib, type BibEntry } from './bibtex'
 import { shortMessage } from './citations'
 import { findCites } from './latexProject'
 import { referenceNote } from './referenceCheck'
 import { VERDICTS, isOpenIssue } from './verdict'
+import { zipStored } from './zip'
 import type { Citation, Draft, ProjectFile } from '../types/draftCheck'
 
 /** Two entries with the same key become one that has every field of both; the first
@@ -48,7 +47,9 @@ export function annotationFor(citation: Citation): string {
       ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
       : citation.reason === 'missing-key'
         ? 'No entry in the bibliography.'
-        : 'Not checked yet.')
+        : citation.message
+          ? `${citation.message}.`
+          : 'Not checked yet.')
   const where = citation.evidence?.page ? ` (${citation.evidence.pdf} p.${citation.evidence.page})` : ''
   const note = referenceNote(citation)
   const text = note ? `${detail} ${note}` : detail
@@ -81,12 +82,7 @@ export function buildAnnotatedTex(file: ProjectFile, citations: Citation[]): str
 /** Every file of the project as a .zip, with the current file contents. Figures would go
  * in here too once uploads carry them; the prototype has none. */
 export function buildProjectZip(draft: Draft): Blob {
-  const files: Record<string, Uint8Array> = {}
-  for (const file of draft.files) files[file.name] = strToU8(file.content)
-  const bytes = zipSync(files, { level: 6 })
-  return new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], {
-    type: 'application/zip',
-  })
+  return new Blob([zipStored(draft.files)], { type: 'application/zip' })
 }
 
 /** "related-work-thesis-ch-2" from a draft title, for file names. */

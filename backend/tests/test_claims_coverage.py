@@ -710,3 +710,20 @@ def test_a_reference_with_an_arxiv_id_and_no_title_gets_the_title_from_arxiv(mon
     assert asked == [["2112.11446", "2203.15556"]]
     titles = [reference["title"] for reference in references.values()]
     assert titles == ["Scaling Language Models", "ColBERT", ""]
+
+
+def test_references_of_keys_the_references_by_their_grobid_id(monkeypatch):
+    asked = []
+    monkeypatch.setattr(claims, "local_pdf", lambda path: path)
+
+    def grobid(endpoint, path, coordinates=()):
+        asked.append((endpoint, coordinates))
+        return BIBLIOGRAPHY
+
+    monkeypatch.setattr(claims, "_grobid_pdf", grobid)
+
+    references = claims.references_of("paper.pdf")
+
+    assert list(references) == ["b0"]
+    # The full-text call extract_claims_with_citations makes, so the ids match its sentences.
+    assert asked == [("processFulltextDocument", ("ref", "head"))]

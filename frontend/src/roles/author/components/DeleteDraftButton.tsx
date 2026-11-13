@@ -6,7 +6,7 @@ import { Trash2 } from 'lucide-react'
 
 import { IconButton } from '../../../components/ui'
 import type { Draft } from '../../../types/draftCheck'
-import { ConfirmDialog } from './ConfirmDialog'
+import { ConfirmDialog } from '../../../components/library'
 
 export function DeleteDraftButton({ draft, onDelete }: { draft: Draft; onDelete: (draft: Draft) => void }) {
   return (
