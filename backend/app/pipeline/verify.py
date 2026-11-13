@@ -359,6 +359,17 @@ def judged_text(claim: dict, citation: dict) -> str:
     return re.sub(r"\s+", " ", marked).strip()
 
 
+def cites_others(claim: dict, citation: dict) -> bool:
+    """Whether the sentence that carries this citation's marker cites other works too.
+
+    Then each work is cited for only part of the sentence, as in "8.3B in Megatron-LM and 17B
+    in Turing-NLG" (#943), and check_prepared asks again about this citation's part.
+    """
+    ref = citation.get("ref")
+    markers = set(re.findall(r"\[(b\d+)\]", claim.get("sentence") or ""))
+    return bool(ref) and ref in markers and len(markers) > 1
+
+
 def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
     """Add the result of one check to its claim. The gateway and the graph both use this.
 
@@ -427,12 +438,15 @@ def judge_passages(claim: str, passages: list[str]) -> dict:
     return _judge(claim, passages)
 
 
-def check_prepared(claim: str, source_pdf_path: str, source: Path, judged: str = "") -> dict:
+def check_prepared(
+    claim: str, source_pdf_path: str, source: Path, judged: str = "", other_citations: bool = False
+) -> dict:
     """Judge a claim against a paper that prepare_source already made ready.
 
     `judged` is the claim's sentence with the citation marked (judged_text). It is read
-    only to recheck a "refutes", the costly verdict; retrieval and the first judge keep the
-    claim.
+    only to recheck a "refutes", the costly verdict, or an "insufficient" when the sentence
+    cites other works too (`other_citations`, from cites_others). Retrieval and the first
+    judge keep the claim.
     """
     global _judge
     try:
@@ -469,6 +483,15 @@ def check_prepared(claim: str, source_pdf_path: str, source: Path, judged: str =
         if verdict["verdict"] == "refutes" and judged and judged != claim:
             recheck = _judge(judged, passages)
             if recheck["verdict"] != "refutes":
+                verdict, verdict_from = recheck, "cited"
+        # A sentence citing several works credits each with only its part, but the first judge
+        # wants the whole claim from every one: "8.3B in Megatron-LM and 17B in Turing-NLG" was
+        # insufficient against the Turing-NLG page, which says 17B (#943). Ask again about this
+        # citation's part, and take only a supports: on 40 such checks the second judge gave
+        # 11 supports and 1 refutes, and that refutes was wrong.
+        elif verdict["verdict"] == "insufficient" and other_citations and judged and judged != claim:
+            recheck = _judge(judged, passages)
+            if recheck["verdict"] == "supports":
                 verdict, verdict_from = recheck, "cited"
         # Numbers read off a chart are often in no passage, so a claim the text cannot settle
         # is asked again about the top figure, with only its caption. With the passages next

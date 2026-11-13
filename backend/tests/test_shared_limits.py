@@ -34,7 +34,7 @@ def two_runs(monkeypatch):
         ]
         return {"status": "ok", "file": f"{paper}.pdf", "claims": claims}
 
-    def check(claim, source, path, judged=""):
+    def check(claim, source, path, judged="", other_citations=False):
         with lock:
             started.append(claim.split()[0])
         return counted("check", {"status": "ok", "claim": claim, "source": source, "verdict": "supports"})

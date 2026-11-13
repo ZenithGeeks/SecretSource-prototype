@@ -287,7 +287,7 @@ def test_each_step_of_a_queued_analysis_is_an_agent_span(phoenix, monkeypatch):
     monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     monkeypatch.setattr(main, "audit", lambda analysis: [])
 
-    def check_prepared(claim, source, path, judged=""):
+    def check_prepared(claim, source, path, judged="", other_citations=False):
         with retrieval.tracer.start_as_current_span("colbert_search"):
             return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
 

@@ -39,6 +39,7 @@ from app.pipeline.figures import paper_figures
 from app.pipeline.verify import (
     check_prepared,
     checked_citations,
+    cites_others,
     fold_check,
     judged_text,
     prepare_source,
@@ -88,7 +89,7 @@ def plan_checks(ctx: Context, claims: list[dict], verify: bool = True) -> list[s
                 url = citation.get("url", "")
                 jobs.append({
                     "claim": index, "text": claim["claim"], "judged": judged_text(claim, citation),
-                    "source": source, "url": url,
+                    "others": cites_others(claim, citation), "source": source, "url": url,
                 })
     ctx.state["jobs"] = jobs
     return list(dict.fromkeys(job["source"] for job in jobs))
@@ -131,7 +132,8 @@ async def check_source(node_input: dict) -> dict:
         verdict = {**prepared, "claim": job["text"], "source": job["source"]}
     else:
         verdict = await asyncio.to_thread(
-            check_prepared, job["text"], job["source"], Path(prepared["path"]), job["judged"]
+            check_prepared, job["text"], job["source"], Path(prepared["path"]), job["judged"],
+            job.get("others", False),
         )
     return {**job, "verdict": verdict}
 

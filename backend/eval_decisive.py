@@ -57,8 +57,12 @@ def main() -> None:
             else:
                 # The judge reads what an analysis would send it: the sentence with the citation
                 # marked, when the row carries them.
-                judged = verify.judged_text(case, {"ref": case.get("ref")})
-                result = verify.check_prepared(case["claim"], case["source"], Path(prepared["path"]), judged)
+                citation = {"ref": case.get("ref")}
+                judged = verify.judged_text(case, citation)
+                result = verify.check_prepared(
+                    case["claim"], case["source"], Path(prepared["path"]), judged,
+                    verify.cites_others(case, citation),
+                )
                 if result["status"] == "ok":
                     verdict = result.get("verdict", "error")
                 else:
