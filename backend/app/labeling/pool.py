@@ -134,6 +134,10 @@ def pdf_names(
     get: Callable[[str], dict | None], names_of: Callable[[list[dict]], frozenset[str]]
 ) -> frozenset[str]:
     """The PDFs of every shared analysis (the paper and the papers its claims cite), so the page
-    viewer can open them for any signed-in person."""
+    viewer can open them for any signed-in person. A cited paper its owner uploaded is left out:
+    it is often a paywalled copy, for the owner only (#983)."""
     found = [row for row in (get(i) for i in pooled()) if row]
-    return names_of(found) if found else frozenset()
+    if not found:
+        return frozenset()
+    uploaded = {name for row in found for name in (row.get("pdfs") or {}).values()}
+    return names_of(found) - uploaded
