@@ -19,11 +19,12 @@ import { useAuthorActions, useLibrary } from '../../../lib/useAuthor'
 import { projectStatus, statusLabel } from '../../../lib/verdict'
 import type { AttentionRow, Project, SavedSource } from '../../../types/draftCheck'
 import { CardHead, TextLink } from '../components/CardHead'
+import { DeleteProjectDialog, DeleteSourceDialog } from '../components/DeleteDialogs'
 import { NewProjectWithDrafts } from '../components/MoveDraft'
 import { ProjectNameField } from '../components/ProjectActions'
 import { copyText, toastCopied } from '../clipboard'
 import { issues } from '../labels'
-import { DeleteProjectDialog, DeleteSourceDialog, ProjectDetail, UNSORTED } from './ProjectDetail'
+import { ProjectDetail, UNSORTED } from './ProjectDetail'
 import { HIGHLIGHT } from '../hover'
 
 function count(n: number, noun: string): string {
