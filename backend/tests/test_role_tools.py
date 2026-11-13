@@ -86,6 +86,7 @@ def test_draft_issues_lists_only_open_citations_and_missing_keys(monkeypatch):
         {"key": "b", "verdict": "refutes", "message": "the source says the opposite"},
         {"key": "c", "verdict": "insufficient", "resolution": "kept as is"},
         {"key": "d", "verdict": "unchecked", "reason": "missing-key", "message": "no entry d"},
+        {"key": "e", "verdict": "unchecked", "reason": "no-locator", "message": "add a DOI"},
     ]
     fake_author(monkeypatch, "k1", citations)
     got = asyncio.run(role_tools.draft_issues("d1", CONTEXT))
@@ -93,6 +94,7 @@ def test_draft_issues_lists_only_open_citations_and_missing_keys(monkeypatch):
     assert [(c["key"], c["why"]) for c in got["citations"]] == [
         ("b", "the source says the opposite"),
         ("d", "no entry d"),
+        ("e", "add a DOI"),
     ]
     assert got["warnings"][0]["type"] == "unused-entry"
 

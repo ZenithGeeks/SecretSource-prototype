@@ -342,6 +342,22 @@ def test_a_draft_check_verifies_every_cite_and_persists_per_version(client, monk
     assert client.get(f"/author/checks/{check_id}/events", headers=ADA).status_code == 200
 
 
+def test_an_entry_with_nothing_to_look_up_is_not_checked_and_says_what_to_add(client, monkeypatch):
+    calls = stub_verify(monkeypatch)
+    files = [
+        {"name": "related-work.tex", "content": r"Alpha did it first~\cite{alpha2020}."},
+        {"name": "main.bib", "content": "@misc{alpha2020, author = {Ada Alpha}, year = {2020}}"},
+    ]
+    draft = client.post("/author/drafts", headers=ADA, json={"title": "Bare", "files": files}).json()
+    check = client.get(f"/author/checks/{run_check(client, draft['id'])}", headers=ADA).json()
+
+    (citation,) = check["citations"]
+    assert citation["verdict"] == "unchecked"
+    assert citation["reason"] == "no-locator"
+    assert citation["message"] == "Add a DOI, URL or title to check this source"
+    assert calls == []  # nothing was looked up
+
+
 def test_a_check_saves_unsaved_edits_first_and_the_version_names_what_was_checked(client, monkeypatch):
     stub_verify(monkeypatch)
     draft = make_draft(client)

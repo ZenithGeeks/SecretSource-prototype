@@ -765,26 +765,23 @@ async def _run_draft_check(check_id: str, user: str | None):
 
         limit = asyncio.Semaphore(PARALLEL_CHECKS)
 
+        async def not_checked(index: int, citation: dict, reason: str, message: str) -> None:
+            citation.update(verdict="unchecked", reason=reason, message=message)
+            await gateway._publish(
+                check_id, "checked", claim=index, key=citation["key"], verdict="unchecked", reason=reason
+            )
+
         async def check_one(index: int, citation: dict) -> None:
             entry = by_key.get(citation["key"])
             if entry is None:
-                citation.update(
-                    verdict="unchecked",
-                    reason="missing-key",
-                    message=f"{citation['key']} is not in the bibliography",
-                )
-                await gateway._publish(
-                    check_id,
-                    "checked",
-                    claim=index,
-                    key=citation["key"],
-                    verdict="unchecked",
-                    reason="missing-key",
-                )
-                return
+                message = f"{citation['key']} is not in the bibliography"
+                return await not_checked(index, citation, "missing-key", message)
             citation["sourceRef"] = logic.source_ref(entry, pdfs)
             identifier = logic.lookup_identifier(entry, pdfs)
-            if identifier and pdfs.get(entry["key"]):
+            if not identifier:  # no PDF, DOI, arXiv id, URL or title to look the work up by
+                message = "Add a DOI, URL or title to check this source"
+                return await not_checked(index, citation, "no-locator", message)
+            if pdfs.get(entry["key"]):
                 identifier = (gateway.PAPERS_DIR / identifier).as_posix()
             async with limit:
                 await gateway._publish(
