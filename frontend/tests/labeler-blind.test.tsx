@@ -112,6 +112,7 @@ describe('blind checks', () => {
       ],
       blind_checks: [
         { name: 'Somchai', analysis_id: 'nlp1' },
+        { name: 'Chanya', analysis_id: 'hpc1' },
         { name: 'Chanya', analysis_id: 'cv1' },
       ],
     }
@@ -127,7 +128,8 @@ describe('blind checks', () => {
     expect(open).toBeEnabled()
     expect(open.parentElement).toHaveAttribute('label', 'Other') // HPC is not in this pool's topics
 
-    const rows = within(screen.getByRole('table', { name: 'Assigned (2)' })).getAllByRole('row').slice(1)
-    expect(rows.map((row) => row.textContent)).toEqual(['ChanyaCVA CV paper', 'SomchaiNLPAn NLP paper'])
+    // Sorted by person, then by title within a person.
+    const rows = within(screen.getByRole('table', { name: 'Assigned (3)' })).getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual(['ChanyaCVA CV paper', 'ChanyaHPCAn HPC paper', 'SomchaiNLPAn NLP paper'])
   })
 })
