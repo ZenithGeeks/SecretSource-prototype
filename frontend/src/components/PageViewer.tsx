@@ -314,7 +314,10 @@ export function PageViewer({
     if (ready) scrollToPage(pageInView.current)
   }, [zoom, ready, scrollToPage])
 
-  // The page counter follows the scroll.
+  // The page counter follows the scroll. `rootMargin` counts a page "in view" half a panel
+  // early, so the pages around it are drawn before the reader scrolls onto them, not after:
+  // without it the blank placeholder of an undrawn page (see `drawn` below) flashed into view
+  // first and only then filled in.
   useEffect(() => {
     const container = scroller.current
     if (!container || !pageCount) return
@@ -329,7 +332,7 @@ export function PageViewer({
           setPage(number)
         }
       },
-      { root: container, threshold: [0.25, 0.5, 0.75] },
+      { root: container, rootMargin: '50% 0px', threshold: [0.25, 0.5, 0.75] },
     )
     pageNodes.current.forEach((node) => observer.observe(node))
     return () => observer.disconnect()
