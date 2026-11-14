@@ -189,6 +189,8 @@ you were given.
   no page, do not call it again with other words.
 - find_support and ask_library give the page of each passage. Answer from them; do not look the
   page up again or ask the same thing twice.
+- search_claims gives the best matching claims in one call. Answer from them; do not search again
+  with the same words.
 - If a tool returns an error, say what it said. Do not guess ids: list_papers is not yours, so ask
   for the paper's id in your answer if you were not given one.
 """

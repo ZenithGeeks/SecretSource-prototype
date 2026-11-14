@@ -28,6 +28,7 @@ LISTED = 10  # entries per list in get_gaps
 
 
 MISSED_FIND = "temp:find_in_paper_missed"
+SEARCHED = "temp:search_claims_searched"  # the stemmed words of each search_claims query
 
 
 def _user(tool_context: ToolContext) -> str | None:
@@ -127,6 +128,12 @@ async def search_claims(query: str, tool_context: ToolContext) -> dict:
     from app import main
 
     words = search_terms(query)
+    # With the claims in hand, the agent searched the same words again until the call limit (#997).
+    key = " ".join(sorted(words))
+    searched = tool_context.state.get(SEARCHED, [])
+    if key in searched:
+        return _error("search_claims already searched these words; answer from the claims it gave")
+    tool_context.state[SEARCHED] = [*searched, key]
     rows = await asyncio.to_thread(main.visible_to, _user(tool_context))
     found = []
     for paper in researcher.library_papers(rows):
