@@ -13,6 +13,8 @@ const stub = vi.hoisted(() => ({
   narrow: false,
   mediaChange: undefined as (() => void) | undefined,
   intersect: undefined as ((entries: unknown[]) => void) | undefined,
+  intersectLead: undefined as ((entries: unknown[]) => void) | undefined,
+  intersectOptions: [] as IntersectionObserverInit[],
   documentOptions: undefined as unknown,
   authorizedFor: '' as string,
 }))
@@ -101,8 +103,12 @@ function stubBrowser() {
   vi.stubGlobal(
     'IntersectionObserver',
     class {
-      constructor(callback: (entries: unknown[]) => void) {
-        stub.intersect = callback
+      constructor(callback: (entries: unknown[]) => void, options: IntersectionObserverInit) {
+        stub.intersectOptions.push(options)
+        // The page counter's own observer has no rootMargin; the one that only decides what to
+        // draw ahead of the reader does (see PageViewer's two observers).
+        if (options.rootMargin) stub.intersectLead = callback
+        else stub.intersect = callback
       }
       observe() {}
       disconnect() {}
@@ -126,6 +132,8 @@ beforeEach(() => {
   stub.narrow = false
   stub.mediaChange = undefined
   stub.intersect = undefined
+  stub.intersectLead = undefined
+  stub.intersectOptions = []
   window.localStorage.clear()
   stubBrowser()
   Element.prototype.scrollTo = scrollTo as never
@@ -299,6 +307,26 @@ describe('paging', () => {
       stub.intersect!([{ isIntersecting: false, intersectionRatio: 0, target: pageNode(1) }])
     })
     expect(screen.getByText('Page 3 of 3')).toBeInTheDocument()
+  })
+
+  it('draws a page the reader is about to scroll onto, without moving the page count', async () => {
+    stub.numPages = 6
+    await render(<PageViewer target={{ ...target, page: 1 }} />)
+    expect(stub.intersectOptions.some((o) => !o.rootMargin)).toBe(true)
+    expect(stub.intersectOptions.some((o) => o.rootMargin === '50% 0px')).toBe(true)
+    expect(screen.queryByTestId('drawn-5')).not.toBeInTheDocument()
+    act(() => {
+      stub.intersectLead!([
+        { isIntersecting: true, intersectionRatio: 0.3, target: pageNode(4) },
+        { isIntersecting: true, intersectionRatio: 0.8, target: pageNode(5) },
+      ])
+    })
+    expect(screen.getByTestId('drawn-5')).toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 6')).toBeInTheDocument()
+    act(() => {
+      stub.intersectLead!([{ isIntersecting: false, intersectionRatio: 0, target: pageNode(4) }])
+    })
+    expect(screen.getByTestId('drawn-5')).toBeInTheDocument()
   })
 
   it('scrolls to a highlighted box within its page', async () => {

@@ -233,6 +233,10 @@ export function PageViewer({
   const [pageRatio, setPageRatio] = useState(1.294) // height / width; US Letter until page 1 says
   const [failed, setFailed] = useState(false)
   const [page, setPage] = useState(targetPage(target))
+  // Which pages to draw leads `page` by `rootMargin` (see the observer below), so a page is
+  // never blank when the reader actually scrolls onto it — only `page` itself (the toolbar's
+  // count, and where the arrow keys and zoom return to) must stay exact.
+  const [leadPage, setLeadPage] = useState(targetPage(target))
   const [zoom, setZoomState] = useState(() => storedZoom(zoomKey))
   const setZoom = (next: number) => {
     setZoomState(next)
@@ -314,10 +318,9 @@ export function PageViewer({
     if (ready) scrollToPage(pageInView.current)
   }, [zoom, ready, scrollToPage])
 
-  // The page counter follows the scroll. `rootMargin` counts a page "in view" half a panel
-  // early, so the pages around it are drawn before the reader scrolls onto them, not after:
-  // without it the blank placeholder of an undrawn page (see `drawn` below) flashed into view
-  // first and only then filled in.
+  // The page counter follows the scroll, exactly: widening this observer's own root would
+  // count a page not yet on screen as "in view" and move the counter (and the arrow keys,
+  // and where zooming returns to) ahead of what the reader is actually looking at.
   useEffect(() => {
     const container = scroller.current
     if (!container || !pageCount) return
@@ -331,6 +334,27 @@ export function PageViewer({
           pageInView.current = number
           setPage(number)
         }
+      },
+      { root: container, threshold: [0.25, 0.5, 0.75] },
+    )
+    pageNodes.current.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [pageCount])
+
+  // A separate observer, its root widened by `rootMargin`, only decides which pages to draw
+  // (see `drawn` below) — never the page count. It counts a page "in view" half a panel early,
+  // so the pages around it are drawn before the reader scrolls onto them, not after: without
+  // this the blank placeholder of an undrawn page flashed into view first and only then filled in.
+  useEffect(() => {
+    const container = scroller.current
+    if (!container || !pageCount) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        const number = Number(visible?.target.getAttribute('data-page'))
+        if (number) setLeadPage(number)
       },
       { root: container, rootMargin: '50% 0px', threshold: [0.25, 0.5, 0.75] },
     )
@@ -546,7 +570,8 @@ export function PageViewer({
                 // Drawing every page of a long paper at high resolution costs a lot of memory,
                 // so only the pages near the one in view are drawn.
                 const around = zoom > 1 ? 1 : RENDERED_AROUND
-                const drawn = Math.abs(number - page) <= around || number === targetPage(target)
+                const drawn =
+                  Math.abs(number - page) <= around || Math.abs(number - leadPage) <= around || number === targetPage(target)
                 const pageMarkers = markers.filter((marker) => marker.page === number && references[marker.ref])
                 return (
                   <div key={number} style={{ padding: `${PAGE_GAP}px ${PAGE_GAP}px 0` }}>
