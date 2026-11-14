@@ -23,6 +23,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -216,7 +217,9 @@ def draft_view(draft: dict, runs: list[dict] | None = None) -> dict:
 
 
 def _draft_files(draft: dict, project: dict | None) -> list[dict]:
-    """The draft's files plus its project's .bib, which every draft of the project cites."""
+    """The draft's files plus its project's .bib, which every draft of the project cites. The
+    shared entry carries the .bib's own `updated`, which a write to it is checked against: the
+    project's `updated` also moves on a rename or a PDF, which leave the .bib as it was."""
     files = list(draft.get("files", []))
     if project and project.get("bib") and not any(f["name"] == project["bib"]["name"] for f in files):
         files.append(
@@ -225,9 +228,34 @@ def _draft_files(draft: dict, project: dict | None) -> list[dict]:
                 "kind": "bib",
                 "content": project["bib"].get("content", ""),
                 "shared": True,
+                "updated": _bib_token(project["bib"]),
             }
         )
     return files
+
+
+def _set_bib(project: dict, name: str, content: str) -> None:
+    """Every write to a project's .bib goes through here, so its `updated` always moves."""
+    project["bib"] = {"name": name, "content": content, "updated": logic.now_iso()}
+
+
+def _bib_token(bib: dict) -> str:
+    """The .bib's version, which a write to it must send back. A .bib last written before it had
+    an `updated` gets one from its content, so every .bib has a version without a migration."""
+    return bib.get("updated") or "content:" + logic.content_hash([bib])
+
+
+def _shared_bib_name(project: dict | None) -> str | None:
+    return ((project or {}).get("bib") or {}).get("name")
+
+
+def _bib_fork(draft: dict, project: dict | None) -> str | None:
+    """The name of a draft-local file that hides its project's .bib (#733: an edit in the shared
+    tab used to make one), unless the author chose to keep it. The editor offers the choice."""
+    name = _shared_bib_name(project)
+    if not name or draft.get("keptBib") == name:
+        return None
+    return name if any(f["name"] == name for f in draft.get("files", [])) else None
 
 
 def _project_of(draft: dict, user: str | None) -> dict | None:
@@ -249,6 +277,7 @@ async def _draft_answer(draft: dict, user: str | None) -> dict:
     view = draft_view(draft, await asyncio.to_thread(_checks_of, draft["id"], user))
     view["files"] = _draft_files(draft, project)
     view["pdfs"] = _pdfs_for(draft, project)
+    view["bibFork"] = _bib_fork(draft, project)
     return view
 
 
@@ -264,7 +293,13 @@ class FileIn(BaseModel):
     # own last write. A write that carries one is refused (409) unless it is the row's current
     # value, compared as the stored string and never as a time, so a second tab that saved in
     # between is noticed instead of silently overwritten. Left out, the write is not checked.
+    # For the project's shared .bib it is that file's `updated` instead (see _draft_files).
     updated: str | None = None
+
+
+class BibForkIn(BaseModel):
+    # "project": drop the draft's copy and cite the project's .bib; "draft": keep the copy.
+    keep: Literal["project", "draft"]
 
 
 UNTITLED = "Untitled draft"
@@ -333,6 +368,8 @@ _RANK = {PROJECTS: 0, DRAFTS: 1, SOURCES: 2}
 LOCK_TIMEOUT_S = 10.0
 BUSY = "This is busy with another change. Try again in a moment."
 DRAFT_BUSY = "The draft is busy with another change. Try again in a moment."
+# After a file name: a write to the project's .bib carried a token another write has moved on.
+STALE_BIB = "changed elsewhere since this editor last saved it. Reload it."
 
 
 def _busy() -> HTTPException:
@@ -360,10 +397,10 @@ def _locked(table: str, *row_ids: str | None, busy=_busy):
     return _hold(*(_row_key(table, row_id) for row_id in row_ids if row_id), busy=busy)
 
 
-def _locked_rows(projects: tuple = (), drafts: tuple = (), sources: tuple = ()):
+def _locked_rows(projects: tuple = (), drafts: tuple = (), sources: tuple = (), busy=_busy):
     """The locks of rows of several tables at once, in the fixed order (see _RANK)."""
     wanted = ((PROJECTS, projects), (DRAFTS, drafts), (SOURCES, sources))
-    return _hold(*(_row_key(table, i) for table, ids in wanted for i in ids if i))
+    return _hold(*(_row_key(table, i) for table, ids in wanted for i in ids if i), busy=busy)
 
 
 def _title_key(table: str, user: str | None) -> tuple:
@@ -574,13 +611,31 @@ async def put_file(draft_id: str, name: str, request: FileIn, user: str | None =
         raise HTTPException(413, "a draft file must be under 2MB")
 
     def write() -> dict:
-        # The check against `updated` and the write are one step under the draft's lock, so a
-        # rename or another write cannot land between them. A lock not free in time is a 409.
-        with _locked(DRAFTS, draft_id, busy=_draft_busy):
+        # The check against `updated` and the write are one step under the draft's lock (and its
+        # project's, for the shared .bib), so a rename or another write cannot land between them.
+        # A lock not free in time is a 409.
+        project_id = _row(DRAFTS, draft_id, user, "draft").get("projectId")
+        with _locked_rows(projects=(project_id,), drafts=(draft_id,), busy=_draft_busy):
             draft = _row(DRAFTS, draft_id, user, "draft")
+            if draft.get("projectId") != project_id:
+                raise HTTPException(409, DRAFT_BUSY)  # moved meanwhile: the editor reads it again
+            existing = next((f for f in draft["files"] if f["name"] == name), None)
+            project = _project_of(draft, user)
+            if not existing and name == _shared_bib_name(project):
+                # The project's .bib, shown in every draft of the project: the edit is the
+                # project's, not a draft-local copy that would hide it from now on (#733). It
+                # replaces the whole file other drafts also write, so it is always checked: a
+                # write with no version (an upload, a new tab added from a stale list) is a 409,
+                # never a silent replace.
+                if request.updated is None:
+                    raise HTTPException(409, f"{name} is the project's .bib: reload the draft and try again")
+                if request.updated != _bib_token(project["bib"]):
+                    raise HTTPException(409, f"{name} {STALE_BIB}")
+                _set_bib(project, name, request.content)
+                _save(PROJECTS, project)
+                return draft
             if request.updated is not None and request.updated != draft.get("updated"):
                 raise HTTPException(409, "the draft was changed elsewhere since this editor last saved it")
-            existing = next((f for f in draft["files"] if f["name"] == name), None)
             if existing:
                 existing["content"] = request.content
             else:
@@ -598,13 +653,44 @@ async def delete_file(draft_id: str, name: str, user: str | None = Depends(curre
             draft = _row(DRAFTS, draft_id, user, "draft")
             before = len(draft["files"])
             draft["files"] = [f for f in draft["files"] if f["name"] != name]
+            if draft.get("keptBib") == name:
+                draft.pop("keptBib")  # a copy made later is asked about again
             if len(draft["files"]) == before:
+                if name == _shared_bib_name(_project_of(draft, user)):
+                    shared = f"{name} is the project's .bib, shared by every draft of the project"
+                    raise HTTPException(400, f"{shared}: it is not deleted from one draft")
                 raise HTTPException(404, "no such file")
             if not draft["files"]:
                 raise HTTPException(400, "a draft keeps at least one file")
             return _save(DRAFTS, draft)
 
     return await _draft_answer(await asyncio.to_thread(remove), user)
+
+
+@router.post("/drafts/{draft_id}/bib-fork")
+async def settle_bib_fork(draft_id: str, request: BibForkIn, user: str | None = Depends(current_user)):
+    """The editor's one-time choice for a draft whose own copy hides its project's .bib (see
+    _bib_fork): cite the project's .bib again (the copy is dropped), or keep the copy. Nothing
+    is merged; a 404 when there is no copy to choose about."""
+
+    def settle() -> dict:
+        project_id = _row(DRAFTS, draft_id, user, "draft").get("projectId")
+        with _locked_rows(projects=(project_id,), drafts=(draft_id,)):
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            name = _bib_fork(draft, _project_of(draft, user))
+            if not name:
+                raise HTTPException(404, "this draft holds no copy of its project's .bib")
+            if request.keep == "draft":
+                draft["keptBib"] = name
+            else:
+                remaining = [f for f in draft["files"] if f["name"] != name]
+                if not remaining:
+                    raise HTTPException(400, "a draft keeps at least one file")
+                draft["files"] = remaining
+                draft["edited"] = logic.now_iso()
+            return _save(DRAFTS, draft)
+
+    return await _draft_answer(await asyncio.to_thread(settle), user)
 
 
 @router.post("/drafts/{draft_id}/save")
@@ -1086,6 +1172,10 @@ class ProjectIn(BaseModel):
     name: str | None = None
     bib: str | None = None
     bibName: str | None = None
+    # The .bib's `updated` as the Project page last read it: a `bib` write that carries one is
+    # refused (409) unless it is still current, as a draft's shared-tab write is. Left out, the
+    # write is not checked.
+    bibUpdated: str | None = None
 
 
 def _project_view(project: dict, drafts: list[dict], runs_by_draft: dict[str, list[dict]]) -> dict:
@@ -1146,11 +1236,11 @@ def _insert_project(user: str | None, name: str, bib_name: str | None, bib: str 
         "id": _new_id(),
         "owner": user,
         "name": name,
-        "bib": {"name": bib_name or "main.bib", "content": bib or ""},
         "pdfs": {},
         "created": now,
         "updated": now,
     }
+    _set_bib(project, bib_name or "main.bib", bib or "")
     store.save_author_row(PROJECTS, project)
     return project
 
@@ -1206,7 +1296,7 @@ async def get_project(project_id: str, user: str | None = Depends(current_user))
                 done_before = run
         history[draft["id"]] = list(reversed(views))
     view = _project_view(project, drafts, runs)
-    view["bib"] = project.get("bib")
+    view["bib"] = {**project["bib"], "updated": _bib_token(project["bib"])} if project.get("bib") else None
     view["draftList"] = sorted(
         (draft_view(d, runs.get(d["id"])) for d in drafts), key=lambda d: d.get("updated", ""), reverse=True
     )
@@ -1224,10 +1314,10 @@ async def update_project(project_id: str, request: ProjectIn, user: str | None =
             if name is not None:
                 project["name"] = name
             if request.bib is not None:
-                project["bib"] = {
-                    "name": request.bibName or project.get("bib", {}).get("name") or "main.bib",
-                    "content": request.bib,
-                }
+                current = project.get("bib") or {}
+                if request.bibUpdated is not None and request.bibUpdated != _bib_token(current):
+                    raise HTTPException(409, f"{current.get('name')} {STALE_BIB}")
+                _set_bib(project, request.bibName or current.get("name") or "main.bib", request.bib)
             return _save(PROJECTS, project)
 
     project = await asyncio.to_thread(update)
@@ -1291,8 +1381,7 @@ async def remove_bib_entry(project_id: str, key: str, user: str | None = Depends
             content, removed = logic.without_bib_entry(bib.get("content", ""), key)
             if not removed:
                 raise HTTPException(404, f"{key} is not in {bib.get('name')}")
-            bib["content"] = content
-            project["bib"] = bib
+            _set_bib(project, bib.get("name") or "main.bib", content)
             _save(PROJECTS, project)
             return len(logic.parse_bib(content))
 
@@ -1542,8 +1631,8 @@ async def add_source_to_bib(source_id: str, request: MoveIn, user: str | None = 
             keys = {e["key"] for e in logic.parse_bib(bib.get("content", ""))}
             if source.get("key") in keys:
                 raise HTTPException(409, f"{source['key']} is already in {bib['name']}")
-            bib["content"] = (bib.get("content", "").rstrip() + "\n\n" + source["bibtex"] + "\n").lstrip()
-            project["bib"] = bib
+            content = (bib.get("content", "").rstrip() + "\n\n" + source["bibtex"] + "\n").lstrip()
+            _set_bib(project, bib.get("name") or "main.bib", content)
             _save(PROJECTS, project)
             if source.get("projectId") != project_id:
                 source["projectId"] = project_id

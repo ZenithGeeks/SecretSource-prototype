@@ -15,7 +15,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 
 import { authorApi, editedLabel } from '../src/lib/author'
 import { YourDraftsCard } from '../src/roles/author/components/YourDraftsCard'
-import { AUTOSAVE_DELAY_MS, texTitle } from '../src/lib/draftSave'
+import { AUTOSAVE_DELAY_MS, readBackup, texTitle, writeBackup } from '../src/lib/draftSave'
 import { Editor } from '../src/roles/author/screens/Editor'
 import type { Draft } from '../src/types/draftCheck'
 import { Toaster } from '../src/components/Toaster'
@@ -46,13 +46,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 /** The editor as the app mounts it, with a cache of its own: a second call is a reload. */
-function open(draftId: string, ui: (editor: ReactNode) => ReactNode = (e) => e) {
+function open(draftId: string, ui: (editor: ReactNode) => ReactNode = (e) => e, file = 'main.tex') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const onWriteFailed = vi.fn()
   const view = render(
     <QueryClientProvider client={queryClient}>
       <Toaster />
-      {ui(<Editor target={{ draftId, file: 'main.tex', line: 1 }} onFileChange={() => undefined} onNavigate={() => undefined} onWriteFailed={onWriteFailed} />)}
+      {ui(<Editor target={{ draftId, file, line: 1 }} onFileChange={() => undefined} onNavigate={() => undefined} onWriteFailed={onWriteFailed} />)}
     </QueryClientProvider>,
   )
   return { ...view, onWriteFailed }
@@ -273,6 +273,105 @@ describe('a save that fails', () => {
     await waitFor(() => expect(docText()).toBe('saved text\n'))
     await waitFor(() => expect(window.localStorage.getItem(`ss.author.unsaved.${id}`)).toBeNull())
     expect(screen.queryByText(/were kept on this device/)).toBeNull()
+  })
+})
+
+describe("the project's shared .bib (#733)", () => {
+  const PROJECT_BIB = '@misc{shared2024, title={Shared}, year={2024}, url={https://s.x}}\n'
+  const projectBib = () => gateway.projects.get('proj1')!.bib!
+  const shareBib = (name: string) => {
+    gateway.projects.get('proj1')!.bib = { name, content: PROJECT_BIB, updated: 'v1' } as never
+  }
+  /** The `updated` each PUT of this file carried. */
+  const tokensSent = (name: string) =>
+    gateway.fetch.mock.calls
+      .filter(([url, init]) => String(url).endsWith(`/files/${name}`) && (init as RequestInit | undefined)?.method === 'PUT')
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)).updated as string | undefined)
+
+  test("an edit in its tab is written to the project's .bib, carrying that file's own version", async () => {
+    shareBib('shared.bib')
+    open('d1', undefined, 'shared.bib')
+    await waitFor(() => expect(docText()).toBe(PROJECT_BIB))
+
+    type('% one\n')
+    await waitFor(() => expect(projectBib().content).toBe(`% one\n${PROJECT_BIB}`), { timeout: 4000 })
+    expect(gateway.drafts.get('d1')!.files.some((f) => f.name === 'shared.bib')).toBe(false)
+    type('% two\n')
+    await waitFor(() => expect(projectBib().content).toBe(`% two\n% one\n${PROJECT_BIB}`), { timeout: 4000 })
+    const [first, second] = tokensSent('shared.bib')
+    expect(first).toBe('v1')
+    // the second carries the version the first write's answer gave, not the stale one
+    expect(second).toMatch(/#\d+$/)
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('Saved'))
+    expect(screen.queryByText(/Which version do you want to keep/)).toBeNull()
+  }, 20000)
+
+  test('another draft writing it first is asked about, never overwritten', async () => {
+    shareBib('shared.bib')
+    open('d1', undefined, 'shared.bib')
+    await waitFor(() => expect(docText()).toBe(PROJECT_BIB))
+
+    // d2's editor writes the project's .bib while this one still holds version v1
+    await authorApi.putFile('d2', 'shared.bib', '% theirs\n', 'v1')
+    expect(projectBib().content).toBe('% theirs\n')
+    type('% mine\n')
+    expect(await screen.findByText(/another draft or tab\?/, undefined, { timeout: 4000 })).toBeInTheDocument()
+    expect(projectBib().content).toBe('% theirs\n')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep my version' }))
+    await waitFor(() => expect(projectBib().content).toBe(`% mine\n${PROJECT_BIB}`))
+  }, 20000)
+
+  test("a write of another file does not hand unsaved .bib edits the other draft's version", async () => {
+    shareBib('shared.bib')
+    open('d1')
+    await waitFor(() => expect(docText()).toContain('\\section{Related work}'))
+    type('% chapter\n') // written first: its answer carries the .bib's newest version
+    fireEvent.click(screen.getByRole('tab', { name: /shared\.bib/ }))
+    await waitFor(() => expect(docText()).toBe(PROJECT_BIB))
+    await authorApi.putFile('d2', 'shared.bib', '% theirs\n', 'v1')
+    type('% mine\n')
+
+    expect(await screen.findByText(/another draft or tab\?/, undefined, { timeout: 6000 })).toBeInTheDocument()
+    expect(projectBib().content).toBe('% theirs\n')
+    expect(gateway.drafts.get('d1')!.files.find((f) => f.name === 'related-work.tex')!.content.startsWith('% chapter\n')).toBe(true)
+  }, 20000)
+
+  test('an upload from Home with no version read is refused, never a silent replace', async () => {
+    shareBib('shared.bib')
+    await expect(authorApi.putFile('d1', 'shared.bib', '@misc{old, title={From disk}}')).rejects.toThrow(/^409: /)
+    expect(projectBib().content).toBe(PROJECT_BIB)
+  })
+
+  test("a draft holding its own copy is offered the project's .bib; using it drops the copy", async () => {
+    shareBib('main.bib')
+    // an earlier visit kept unsaved edits to the copy on this device
+    writeBackup('d1', { 'main.bib': '% unsaved copy edits\n' })
+    open('d1', undefined, 'main.bib')
+    expect(await screen.findByText(/This draft has its own copy of main\.bib/)).toBeInTheDocument()
+    expect(screen.getByText(/were kept on this device/)).toBeInTheDocument()
+    expect(docText()).not.toBe(PROJECT_BIB)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use the project’s .bib' }))
+    await waitFor(() => expect(screen.queryByText(/This draft has its own copy/)).toBeNull())
+    await waitFor(() => expect(docText()).toBe(PROJECT_BIB))
+    expect(gateway.drafts.get('d1')!.files.some((f) => f.name === 'main.bib')).toBe(false)
+    expect(projectBib().content).toBe(PROJECT_BIB)
+    // the copy's kept text is not offered back, where Restore would write it over the project's
+    expect(screen.queryByText(/were kept on this device/)).toBeNull()
+    expect(readBackup('d1')).toBeNull()
+  })
+
+  test('keeping the copy stops the question and leaves the copy as it is', async () => {
+    shareBib('main.bib')
+    open('d1', undefined, 'main.bib')
+    await screen.findByText(/This draft has its own copy of main\.bib/)
+    const copy = docText()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep this draft’s copy' }))
+    await waitFor(() => expect(screen.queryByText(/This draft has its own copy/)).toBeNull())
+    expect(docText()).toBe(copy)
+    expect(gateway.drafts.get('d1')!.keptBib).toBe('main.bib')
   })
 })
 

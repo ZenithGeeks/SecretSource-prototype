@@ -55,12 +55,16 @@ export const authorApi = {
   updateDraft: (id: string, body: { title?: string; projectId?: string | null }) =>
     request<Draft>(`/author/drafts/${enc(id)}`, json('PATCH', body)),
   deleteDraft: (id: string) => request<{ deleted: string }>(`/author/drafts/${enc(id)}`, { method: 'DELETE' }),
-  /** `updated` is the draft's `updated` the caller last saw; with it, the gateway refuses the
-   * write (409) if the draft changed since, so another tab's save is noticed, not overwritten. */
+  /** `updated` is the draft's `updated` the caller last saw (for the project's shared .bib,
+   * that file's own `updated`); with it, the gateway refuses the write (409) if it changed
+   * since, so another tab's or draft's save is noticed, not overwritten. */
   putFile: (id: string, name: string, content: string, updated?: string) =>
     request<Draft>(`/author/drafts/${enc(id)}/files/${name.split('/').map(enc).join('/')}`, json('PUT', { content, updated })),
   deleteFile: (id: string, name: string) =>
     request<Draft>(`/author/drafts/${enc(id)}/files/${name.split('/').map(enc).join('/')}`, { method: 'DELETE' }),
+  /** A draft whose own copy hides its project's .bib: cite the project's again, or keep the copy. */
+  settleBibFork: (id: string, keep: 'project' | 'draft') =>
+    request<Draft>(`/author/drafts/${enc(id)}/bib-fork`, json('POST', { keep })),
   saveDraft: (id: string) => request<Draft>(`/author/drafts/${enc(id)}/save`, { method: 'POST' }),
   parseDraft: (id: string) => request<ParseResult>(`/author/drafts/${enc(id)}/parse`),
   attachPdf: (draftId: string, key: string, file: File) =>

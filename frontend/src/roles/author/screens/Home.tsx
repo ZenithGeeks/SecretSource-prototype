@@ -128,8 +128,10 @@ export function Home({
     const open = draftId && (!drafts.data || drafts.data.some((d) => d.id === draftId)) ? draftId : null
     try {
       if (open) {
-        await actions.putFile(open, name, text)
-        toast.success(`${name} added to ${drafts.data?.find((d) => d.id === open)?.title ?? 'this draft'}`)
+        const written = await actions.putFile(open, name, text)
+        // A name the project's .bib has replaces that .bib, which every draft of the project cites.
+        if (written.files.some((f) => f.shared && f.name === name)) toast.success(`${name} now replaces the project’s ${name}, in every draft of the project`)
+        else toast.success(`${name} added to ${drafts.data?.find((d) => d.id === open)?.title ?? 'this draft'}`)
       } else {
         const created = await newDraft(name.replace(/\.bib$/, ''), [{ name: 'main.tex', content: '' }, { name, content: text }])
         if (created) toast.success(`${name} added to a new draft`)
