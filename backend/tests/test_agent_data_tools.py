@@ -140,6 +140,18 @@ def test_search_claims_ranks_by_shared_words(library):
     assert [(c["analysis_id"], c["number"]) for c in found] == [("a1", 1), ("a1", 3)]  # 3 shares "index"
 
 
+def test_search_claims_refuses_the_same_words_twice_in_one_request(library):
+    request = SimpleNamespace(state={"user": "user-1"})
+
+    first = asyncio.run(data_tools.search_claims("index size", tool_context=request))
+    again = asyncio.run(data_tools.search_claims("the indexes sizes", tool_context=request))  # same stems
+    other = asyncio.run(data_tools.search_claims("late interaction", tool_context=request))
+
+    assert [c["number"] for c in first["claims"]] == [1, 3]
+    assert again["status"] == "error" and "answer from the claims" in again["message"]
+    assert [c["number"] for c in other["claims"]] == [2]
+
+
 def test_search_claims_of_another_person_finds_nothing(library):
     stranger = SimpleNamespace(state={"user": "user-2"})
 
