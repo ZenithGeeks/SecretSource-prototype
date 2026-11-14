@@ -87,10 +87,12 @@ def audit(analysis: dict) -> list[dict]:
     findings = []
     claims = analysis.get("claims", [])
 
-    if CLAIM_LIMIT and len(claims) > CLAIM_LIMIT:
+    # An analysis started for the labeler keeps every claim (claim_limit 0).
+    limit = analysis.get("claim_limit", CLAIM_LIMIT)
+    if limit and len(claims) > limit:
         findings.append(
             {"check": "claim-limit", "claim": None, "source": None,
-             "detail": f"{len(claims)} claims kept, over the limit of {CLAIM_LIMIT}"}
+             "detail": f"{len(claims)} claims kept, over the limit of {limit}"}
         )
 
     for index, claim in enumerate(claims):

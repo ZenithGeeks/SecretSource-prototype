@@ -104,7 +104,7 @@ default".
 | `A2A_HOST`, `A2A_PORT` | `localhost`, `8002` | the address the A2A agent card tells callers to use (`a2a_server.py`), not the address the server binds |
 | `S2_API_KEY` | empty | Semantic Scholar key; without it most lookups are rate limited |
 | `UNPAYWALL_EMAIL` | empty | contact email that lets Unpaywall answer lookups |
-| `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all |
+| `CLAIM_LIMIT` | `20` | most claims kept per paper; `0` keeps all. Papers the labeler adds (Scopus add, retry) keep all |
 | `PARALLEL_SOURCES` | `3` | cited papers downloaded and indexed at the same time |
 | `PARALLEL_CHECKS` | `3` | claims, or draft-check citations, judged at the same time inside one worker. A worker runs one job at a time, so this is that worker's limit |
 | `PARALLEL_SOURCES_TOTAL` | `PARALLEL_SOURCES` | cited papers prepared at the same time inside one worker; a worker runs one analysis at a time, so this only limits that run |

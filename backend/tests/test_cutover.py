@@ -35,7 +35,9 @@ def test_start_records_one_queued_stage_enqueues_it_and_stores_it(monkeypatch):
     saved = []
     monkeypatch.setattr(
         main, "enqueue_analysis",
-        lambda analysis_id, paper, verify, owner, stages, started=None: calls.append((analysis_id, stages)),
+        lambda analysis_id, paper, verify, owner, stages, started=None, claim_limit=None: calls.append(
+            (analysis_id, stages)
+        ),
     )
     monkeypatch.setattr(main.store, "save", lambda analysis: saved.append(copy.deepcopy(analysis)))
 

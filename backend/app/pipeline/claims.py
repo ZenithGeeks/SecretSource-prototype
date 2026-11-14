@@ -1506,6 +1506,15 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
         {"status": "ok", "file", "title", "claims", "outline", ...}, or {"status": "error",
         "message", "reason", "retryable"}. Retry only when `retryable` is true.
     """
+    return extract_cited_claims(pdf_path, CLAIM_LIMIT)
+
+
+def extract_cited_claims(pdf_path: str, claim_limit: int) -> dict:
+    """extract_claims_with_citations with its own cap on the claims kept; 0 keeps every one.
+
+    Separate so the agent tool keeps one argument: an analysis started for the labeler keeps
+    every claim, others keep CLAIM_LIMIT.
+    """
     global _cited_claim_extractor
     given = pdf_path
     try:
@@ -1531,7 +1540,7 @@ def extract_claims_with_citations(pdf_path: str) -> dict:
             for extracted in window_claims
         ]
         claims = _most_checkable(
-            _deduplicated([claim for claim in found if not _asserts_nothing(claim["claim"])]), CLAIM_LIMIT
+            _deduplicated([claim for claim in found if not _asserts_nothing(claim["claim"])]), claim_limit
         )
         header = _paper_header(tei)
         header["title"] = paper_title(pdf_path, header["title"], given)

@@ -1191,8 +1191,8 @@ def test_scopus_add_lists_the_paper_under_a_topic_once(api, monkeypatch):
     started = []
 
     # The real _start runs, so a call it cannot make from this route fails the test (#397).
-    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None):
-        started.append((analysis_id, paper, verify, owner))
+    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None, claim_limit=None):
+        started.append((analysis_id, paper, verify, owner, claim_limit))
 
     monkeypatch.setattr(main, "enqueue_analysis", fake_enqueue)
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
@@ -1202,7 +1202,8 @@ def test_scopus_add_lists_the_paper_under_a_topic_once(api, monkeypatch):
     assert first.status_code == 200
     analysis_id = first.json()["id"]
     assert first.json() == {"id": analysis_id, "existing": False}
-    assert started == [(analysis_id, doi, True, None)]
+    # A paper analysed for the team keeps every claim.
+    assert started == [(analysis_id, doi, True, None, 0)]
     assert pool.pooled() == {analysis_id: "NLP"}
     again = client.post("/labeling/scopus/add", json={"doi": doi.upper(), "topic": "CV"})
     assert again.json() == {"id": analysis_id, "existing": True} and len(started) == 1
@@ -1350,8 +1351,8 @@ FAILED = {
 def _fake_start(monkeypatch, started):
     from app import main
 
-    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None):
-        started.append((analysis_id, paper, owner))
+    def fake_enqueue(analysis_id, paper, verify, owner, stages, started_at=None, claim_limit=None):
+        started.append((analysis_id, paper, owner, claim_limit))
 
     monkeypatch.setattr(main, "enqueue_analysis", fake_enqueue)
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
@@ -1370,7 +1371,8 @@ def test_retry_puts_a_new_analysis_of_the_same_doi_in_place_of_the_failed_one(ap
 
     assert reply.status_code == 200
     new_id = reply.json()["id"]
-    assert started == [(new_id, "10.1145/3712285.3771787", "nuttadon-id")]
+    # The retried paper keeps every claim too.
+    assert started == [(new_id, "10.1145/3712285.3771787", "nuttadon-id", 0)]
     assert pool.pooled() == {new_id: "HPC"}
 
 

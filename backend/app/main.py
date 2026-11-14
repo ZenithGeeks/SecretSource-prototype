@@ -90,7 +90,7 @@ from app.metrics import (
 )
 from app.ownership import require_owner
 from app.pipeline.audit import audit
-from app.pipeline.claims import extract_claims_with_citations, locate
+from app.pipeline.claims import extract_cited_claims, extract_claims_with_citations, locate
 from app.pipeline.figures import figures_dir, paper_figures
 from app.pipeline.rag import add_paper
 from app.pipeline.sources import index_paper
@@ -563,7 +563,11 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
     current_analysis_tokens.set(analysis["llm_tokens"])
     try:
         await _publish(analysis_id, "extracting", message=f"reading {paper}")
-        extracted = await _in_step("read_paper", paper, extract_claims_with_citations, paper)
+        limit = analysis.get("claim_limit")
+        if limit is None:
+            extracted = await _in_step("read_paper", paper, extract_claims_with_citations, paper)
+        else:
+            extracted = await _in_step("read_paper", paper, extract_cited_claims, paper, limit)
         if extracted["status"] == "error":
             raise RuntimeError(extracted["message"])
 
@@ -694,12 +698,14 @@ def _new_analysis(analysis_id: str, paper: str, owner: str | None) -> dict:
             "owner": owner, "stages": [], "claims": []}
 
 
-def _start(paper: str, verify: bool, owner: str | None) -> dict:
+def _start(paper: str, verify: bool, owner: str | None, claim_limit: int | None = None) -> dict:
     """Records a "queued" stage locally (so the caller sees it immediately) and hands the run to
-    an RQ worker."""
+    an RQ worker. `claim_limit` overrides CLAIM_LIMIT for this run; the labeler passes 0."""
     analysis_id = uuid.uuid4().hex[:12]
     analysis = _new_analysis(analysis_id, paper, owner)
     analysis["started"] = datetime.now(UTC).isoformat()
+    if claim_limit is not None:
+        analysis["claim_limit"] = claim_limit
     queued = {"stage": "queued", "message": "waiting for a free worker", "at": round(time.time(), 1)}
     analysis["stages"].append(queued)
     with _load_lock:
@@ -710,7 +716,7 @@ def _start(paper: str, verify: bool, owner: str | None) -> dict:
         streams[analysis_id] = queue
         queue.put_nowait(queued)
     try:
-        enqueue_analysis(analysis_id, paper, verify, owner, [queued], analysis["started"])
+        enqueue_analysis(analysis_id, paper, verify, owner, [queued], analysis["started"], claim_limit)
     except Exception:
         with _load_lock:
             analyses.pop(analysis_id, None)

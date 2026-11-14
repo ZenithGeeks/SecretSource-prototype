@@ -74,6 +74,7 @@ def run_analysis_job(
     owner: str | None,
     stages: list[dict] | None = None,
     started: str | None = None,
+    claim_limit: int | None = None,
 ) -> dict:
     """What a worker process actually runs for one analysis (RQ jobs are sync, so this
     wraps the async pipeline in its own event loop via asyncio.run)."""
@@ -95,6 +96,8 @@ def run_analysis_job(
             analysis["stages"] = list(stages or [])
             if started:
                 analysis["started"] = started
+            if claim_limit is not None:
+                analysis["claim_limit"] = claim_limit
             main.analyses[analysis_id] = analysis
             main.streams[analysis_id] = asyncio.Queue()
 
@@ -200,6 +203,7 @@ def enqueue_analysis(
     owner: str | None,
     stages: list[dict],
     started: str | None = None,
+    claim_limit: int | None = None,
 ):
     return analysis_queue().enqueue(
         run_analysis_job,
@@ -209,6 +213,7 @@ def enqueue_analysis(
         owner,
         stages,
         started,
+        claim_limit,
         job_id=analysis_id,
         job_timeout=JOB_TIMEOUT,
         on_failure=Callback(_on_analysis_job_failure),

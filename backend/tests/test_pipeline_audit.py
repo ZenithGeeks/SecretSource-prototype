@@ -96,6 +96,11 @@ def test_a_limit_of_zero_keeps_every_claim(monkeypatch):
     assert audit.audit({"claims": [{}] * 50}) == []
 
 
+def test_an_analysis_with_its_own_limit_of_zero_is_not_flagged(monkeypatch):
+    monkeypatch.setattr(audit, "CLAIM_LIMIT", 2)
+    assert audit.audit({"claims": [{}] * 50, "claim_limit": 0}) == []
+
+
 def test_an_unchecked_entry_without_a_reason_is_flagged_on_its_claim():
     analysis = {"claims": [{}, {"unchecked": [{"source": "paper-a", "reason": ""}]}]}
     [finding] = audit.audit(analysis)

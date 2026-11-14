@@ -56,6 +56,10 @@ router = APIRouter(prefix="/labeling", tags=["labeling"], dependencies=[Depends(
 
 ExportScope = Literal["mine", "team"]
 NEXT_PASSAGES = 8  # passages listed for the next unsaved claim
+# Papers analysed for the team keep every claim, not CLAIM_LIMIT's 20: 93 of 118 finished
+# analyses stopped at 20 (14 Nov). Only new or failed papers start here, so the claim ids of
+# labeled papers (paper_id#index) never shift.
+LABELING_CLAIM_LIMIT = 0
 
 
 async def mine_analysis(analysis_id: str, user: str | None = Depends(current_user)) -> dict:
@@ -504,7 +508,7 @@ async def retry_paper(
         raise HTTPException(404, "this paper is not on the team's list")
     _store()
     # On the event loop, as scopus_add does: _start schedules its save with create_task (#397).
-    started = main._start(analysis["paper"], True, user)
+    started = main._start(analysis["paper"], True, user, LABELING_CLAIM_LIMIT)
     # An uploaded paper's analysis only knows its file, so its DOI moves to the new one.
     doi = (await asyncio.to_thread(pool.uploaded_dois)).get(analysis["id"], "")
     venue_rank, source = (await asyncio.to_thread(pool.venue_ranks)).get(analysis["id"], ("", ""))
@@ -665,7 +669,7 @@ async def scopus_add(
         return {"id": existing, "existing": True}
     rank = await asyncio.to_thread(_venue_rank, body.doi)
     # On the event loop, as POST /analyses does: _start schedules its save with create_task (#397).
-    started = main._start(body.doi, True, user)
+    started = main._start(body.doi, True, user, LABELING_CLAIM_LIMIT)
     await asyncio.to_thread(pool.assign, who, "paper", started["id"], body.topic, user or "", "", rank)
     return {"id": started["id"], "existing": False}
 

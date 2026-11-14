@@ -83,6 +83,19 @@ def test_run_analysis_job_returns_a_small_result_and_cleans_up(stubbed_pipeline,
     assert "job1" not in main.streams
 
 
+def test_a_job_with_a_claim_limit_extracts_with_that_limit(stubbed_pipeline, monkeypatch):
+    limits = []
+
+    def extract_cited(paper, limit):
+        limits.append(limit)
+        return {"status": "ok", "file": f"{paper}.pdf", "title": "A Paper", "claims": []}
+
+    monkeypatch.setattr(main, "extract_cited_claims", extract_cited)
+    run_analysis_job("job1", "paper.pdf", True, "owner-1", None, None, 0)
+    assert limits == [0]
+    assert stubbed_pipeline[-1]["claim_limit"] == 0
+
+
 def test_run_analysis_job_runs_twice_in_one_process(stubbed_pipeline, monkeypatch):
     """The event-loop trap: main.all_sources/all_checks are module-level asyncio.Semaphores
     that bind to the loop of whichever coroutine first has to actually wait on them (only the
