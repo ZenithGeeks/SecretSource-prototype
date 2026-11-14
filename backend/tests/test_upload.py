@@ -14,7 +14,9 @@ def uploads(monkeypatch, tmp_path):
     enqueued = []
     monkeypatch.setattr(
         main, "enqueue_analysis",
-        lambda analysis_id, paper, verify, owner, stages, started=None: enqueued.append(paper),
+        lambda analysis_id, paper, verify, owner, stages, started=None, claim_limit=None: enqueued.append(
+            paper
+        ),
     )
     main.analyses.clear()
     main.streams.clear()
