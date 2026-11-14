@@ -56,11 +56,37 @@ search with that instead of `judged`. This keeps the useful part of Search-R1 (t
 what to search for) without training a policy. It costs one more LLM call per eligible check, and
 its query must go in the judge cache key so a reworded prompt does not reuse old queries.
 
+## Result of the offline check (14 Nov)
+
+Labels v1.2 val, 220 pairs, 218 searched (one reference PDF did not load). Every pair had a marked
+sentence. The 65 missed supports are pairs where qwen's first pass said "insufficient" (runs
+pr-val-1 and v12-valfill-1, which include the #953 recheck) and the gold label is supported.
+
+| Pairs | Labeled passage in the claim's top 4 | Marked sentence finds it, claim did not | Marked sentence loses it | New passage that is labeled relevant |
+|---|---|---|---|---|
+| All 218 | 216 | 1 | 6 | 26 |
+| 65 missed supports | 64 | 1 | 1 | 9 |
+
+For 64 of the 65 missed supports the judge already read a passage a labeler marked relevant, and
+still said "insufficient". Searching again with the marked sentence would add relevant passages
+to at most 9 checks, inside the run-to-run noise. The labeled passages come from the claim's own
+search, which favours this column, but the judge did read them.
+
+Reading 37 of the 64 by hand (claim, marked sentence, labeled passages): in 29 the labeled passage
+supports the citation's part of the sentence, so the judge is too strict. Most are sentences that
+cite several works, where each work backs only its part (GSM8K introduced by the GSM8K paper; a
+claim-only BERT at 61.7% on FEVER). In 8 the passage does not say what the claim says, so the
+label is generous; 5 of those 8 are CV pairs.
+
+So Step 1 is not built. The miss is in judging the citation's part, which points to the judge
+prompt (how it reads `[cited]`) and the cutoff, tuned on v1.3 when it lands, not to retrieval.
+Script and rows: `query_overlap.py` and `overlap-val.csv` in the judge eval folder.
+
 ## Key Assumptions to Validate
 
-- [ ] The marked sentence finds passages the claim did not. Test: on the val split, how often the
+- [x] The marked sentence finds passages the claim did not. Test: on the val split, how often the
       top 4 for `judged` differ from the top 4 for the claim, and whether the labeled passage is
-      among them. Offline, ColBERT only, no LLM.
+      among them. Offline, ColBERT only, no LLM. **Failed, 14 Nov**; see Result below.
 - [ ] Extra supports are real. Test: production-faithful val eval, 2 runs, branch and main the
       same day; supports gained against false supports added, compared with the 22/184 noise.
 - [ ] No decisive row is lost. Test: `eval_decisive.py --runs 3 --fresh` on the branch and on
