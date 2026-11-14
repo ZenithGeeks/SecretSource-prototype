@@ -89,7 +89,7 @@ citation); figure-judge changes; new retriever models.
   the authors.
 - A reranker on the second search: it lowered within-paper recall from 0.965 to 0.904.
 - Self-RAG (Asai et al. 2024) as published: it fine-tunes the generator to emit reflection tokens
-  (retrieve?, relevant?, supported?). We cannot fine-tune the hosted 9arm judge, the verdict is
+  (retrieve?, relevant?, supported?). We cannot fine-tune the hosted judge on tokenme, the verdict is
   already the "supported?" grade, and every check must retrieve, so "retrieve?" has no use.
 - CRAG (Yan et al. 2024) as published: its trained evaluator is replaced here by the judge's own
   verdict, and its web-search fallback cannot apply, since a citation is checked against the
