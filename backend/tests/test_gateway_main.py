@@ -829,7 +829,7 @@ def test_each_citation_of_a_sentence_citing_several_works_is_checked_as_one_of_s
     run_analysis_job("g-several", "paper", True, None)
 
     assert flags == {
-        "s1": ("A [cited] and B.", True),
-        "s2": ("A and B [cited].", True),
+        "s1": ("A [cited] and B [other].", True),
+        "s2": ("A [other] and B [cited].", True),
         "s3": ("Only C [cited].", False),
     }
