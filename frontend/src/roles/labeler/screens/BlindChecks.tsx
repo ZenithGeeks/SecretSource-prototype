@@ -76,9 +76,27 @@ function AssignBlindChecks({ pool }: { pool: Pool }) {
   const blind = useBlindCheck()
   const [name, setName] = useState('')
   const [paperId, setPaperId] = useState('')
-  const checks = pool.blind_checks ?? []
-  const titleOf = new Map(pool.papers.map((p) => [p.analysis_id, p.title]))
-  const chosen = pool.papers.find((p) => p.analysis_id === paperId)
+  const paperOf = new Map(pool.papers.map((p) => [p.analysis_id, p]))
+  const titleOf = (id: string) => paperOf.get(id)?.title ?? id
+  const checks = [...(pool.blind_checks ?? [])].sort(
+    (a, b) => a.name.localeCompare(b.name) || titleOf(a.analysis_id).localeCompare(titleOf(b.analysis_id)),
+  )
+  const countOf = (person: string) => checks.filter((c) => c.name === person).length
+  // Grouped by topic and sorted, so a lead handing out a round finds each paper without scrolling 50 titles.
+  const labeled = pool.papers.filter((p) => p.team_judged > 0).sort((a, b) => a.title.localeCompare(b.title))
+  const groups = [
+    ...pool.topics.map((topic) => ({ topic, papers: labeled.filter((p) => p.topic === topic) })),
+    { topic: 'Other', papers: labeled.filter((p) => !pool.topics.includes(p.topic)) },
+  ].filter((group) => group.papers.length > 0)
+  const unavailable = (paper: Paper) =>
+    !name
+      ? ''
+      : paper.labelers.includes(name)
+        ? ' (already labeled)'
+        : checks.some((c) => c.name === name && c.analysis_id === paper.analysis_id)
+          ? ' (already assigned)'
+          : ''
+  const chosen = paperOf.get(paperId)
   // Their own labels on the paper would make a blind check of it meaningless.
   const alreadyLabeled = Boolean(chosen && name && chosen.labelers.includes(name))
   const duplicate = checks.some((c) => c.name === name && c.analysis_id === paperId)
@@ -106,29 +124,39 @@ function AssignBlindChecks({ pool }: { pool: Pool }) {
           if (canAssign) blind.mutate({ name, analysis_id: paperId, on: true }, { onSuccess: () => setPaperId('') })
         }}
       >
-        <label className="flex min-w-48 flex-col gap-1 text-sm text-ink">
+        <label className="flex w-full flex-col gap-1 text-sm text-ink sm:w-auto sm:min-w-48">
           Person
           <select value={name} onChange={(e) => setName(e.target.value)} className="min-h-10 rounded-lg border border-border-subtle bg-surface px-3 text-sm">
             <option value="">Choose a person</option>
-            {pool.people.map((person) => (
-              <option key={person.name} value={person.name}>
-                {person.name}
-                {person.topic ? ` (${person.topic})` : ''}
-              </option>
-            ))}
+            {pool.people.map((person) => {
+              const count = countOf(person.name)
+              return (
+                <option key={person.name} value={person.name}>
+                  {person.name}
+                  {person.topic ? ` (${person.topic})` : ''}
+                  {count ? ` · ${count} assigned` : ''}
+                </option>
+              )
+            })}
           </select>
         </label>
         <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm text-ink">
           Paper
           <select value={paperId} onChange={(e) => setPaperId(e.target.value)} className="min-h-10 rounded-lg border border-border-subtle bg-surface px-3 text-sm">
             <option value="">Choose a labeled paper</option>
-            {pool.papers
-              .filter((p) => p.team_judged > 0)
-              .map((paper) => (
-                <option key={paper.analysis_id} value={paper.analysis_id}>
-                  {paper.topic} · {paper.title}
-                </option>
-              ))}
+            {groups.map((group) => (
+              <optgroup key={group.topic} label={group.topic}>
+                {group.papers.map((paper) => {
+                  const reason = unavailable(paper)
+                  return (
+                    <option key={paper.analysis_id} value={paper.analysis_id} disabled={Boolean(reason)}>
+                      {paper.title}
+                      {reason}
+                    </option>
+                  )
+                })}
+              </optgroup>
+            ))}
           </select>
         </label>
         <Button type="submit" disabled={!canAssign} className="min-h-10">
@@ -147,10 +175,13 @@ function AssignBlindChecks({ pool }: { pool: Pool }) {
 
       {checks.length > 0 && (
         <table className="w-full text-left text-sm">
-          <caption className="sr-only">Blind checks on the team</caption>
+          <caption className="pb-2 text-left text-sm font-semibold text-ink">
+            Assigned <span className="font-normal text-ink-muted tabular-nums">({checks.length})</span>
+          </caption>
           <thead className="text-xs text-ink-muted">
             <tr>
               <th scope="col" className="py-1.5 font-medium">Person</th>
+              <th scope="col" className="py-1.5 font-medium">Topic</th>
               <th scope="col" className="py-1.5 font-medium">Paper</th>
               <th scope="col" className="w-12 py-1.5">
                 <span className="sr-only">Remove</span>
@@ -161,8 +192,9 @@ function AssignBlindChecks({ pool }: { pool: Pool }) {
             {checks.map((check) => (
               <tr key={`${check.name}|${check.analysis_id}`}>
                 <td className="py-2 pr-4 align-top whitespace-nowrap text-ink">{check.name}</td>
-                <td className="py-2 pr-4 align-top text-ink-muted">{titleOf.get(check.analysis_id) ?? check.analysis_id}</td>
-                <td className="py-1 text-right">
+                <td className="py-2 pr-4 align-top text-ink-muted">{paperOf.get(check.analysis_id)?.topic}</td>
+                <td className="py-2 pr-4 align-top text-ink-muted">{titleOf(check.analysis_id)}</td>
+                <td className="py-1 text-right align-top">
                   <IconButton
                     aria-label={`Take back ${check.name}'s blind check of this paper`}
                     disabled={blind.isPending}

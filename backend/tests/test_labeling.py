@@ -652,6 +652,13 @@ def test_sharing_a_paper_makes_it_listed_and_its_pdfs_openable_for_the_team(api,
     assert pool.pdf_names(lambda i: ANALYSIS, lambda rows: frozenset({"x"})) == frozenset()
 
 
+def test_a_cited_pdf_its_owner_uploaded_is_not_openable_by_the_team(monkeypatch):
+    monkeypatch.setattr(pool, "pooled", lambda: {"a1": "HPC"})
+    row = {"file": "paper.pdf", "pdfs": {"b13": "gmres-0123456789ab.pdf"}}
+    every_pdf = frozenset({"paper.pdf", "gmres-0123456789ab.pdf", "2412.19322.pdf"})
+    assert pool.pdf_names(lambda i: row, lambda rows: every_pdf) == {"paper.pdf", "2412.19322.pdf"}
+
+
 def test_a_paper_that_could_not_be_read_can_be_taken_back(api):
     client, _, app = api
     failed = {"id": "e1", "status": "error", "file": None, "owner": None}
