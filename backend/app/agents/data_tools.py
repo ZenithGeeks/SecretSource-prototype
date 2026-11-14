@@ -131,10 +131,10 @@ async def search_claims(query: str, tool_context: ToolContext) -> dict:
     # With the claims in hand, the agent searched the same words again until the call limit (#997).
     key = " ".join(sorted(words))
     searched = tool_context.state.get(SEARCHED, [])
-    if key in searched:
+    if key and key in searched:
         return _error("search_claims already searched these words; answer from the claims it gave")
-    tool_context.state[SEARCHED] = [*searched, key]
     rows = await asyncio.to_thread(main.visible_to, _user(tool_context))
+    tool_context.state[SEARCHED] = [*searched, key]  # only once it ran: a failed search may be retried
     found = []
     for paper in researcher.library_papers(rows):
         for number, claim in enumerate(paper.get("claims", []), 1):
