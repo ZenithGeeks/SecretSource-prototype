@@ -234,8 +234,9 @@ def _title_check(fields: dict) -> dict:
     # entry the draft check just read it answers from its cache.
     try:
         work = find_by_title(title, fits)
-    except NoOpenAccessCopy:  # Semantic Scholar knows the work, but has no free PDF of it
-        return {**found, "index": "Semantic Scholar"}
+    except NoOpenAccessCopy as error:  # a lookup knows the work, but has no free PDF of it
+        name = SOURCE_NAMES.get(error.index)
+        return {**found, "index": name} if name else found
     except Unresolvable as error:  # no title lookup has the title
         if unavailable:
             raise unavailable from error

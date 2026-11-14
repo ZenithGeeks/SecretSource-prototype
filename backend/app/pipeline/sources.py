@@ -48,7 +48,12 @@ class OnlyOtherWorks(Unresolvable):
 
 
 class NoOpenAccessCopy(ValueError):
-    """The work is known, but no free PDF is published for it."""
+    """The work is known, but no free PDF is published for it. `index` is the lookup that knows
+    it ("semantic-scholar", "openalex"), or "" when no one lookup does."""
+
+    def __init__(self, message: str, index: str = ""):
+        super().__init__(message)
+        self.index = index
 
 
 class NotDownloadable(ValueError):
@@ -249,7 +254,7 @@ def _pdf_of(paper: dict, described_as: str) -> Resolution:
     if arxiv:
         url = f"https://arxiv.org/pdf/{arxiv}"
         return Resolution(url, title, "semantic-scholar", ids, year, first_author)
-    raise NoOpenAccessCopy(f"no open-access PDF known for {described_as}")
+    raise NoOpenAccessCopy(f"no open-access PDF known for {described_as}", "semantic-scholar")
 
 
 def _s2_first_author(paper: dict) -> str:
@@ -392,7 +397,7 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
         ids = {"DOI": work["doi"].removeprefix("https://doi.org/")} if work.get("doi") else {}
         return Resolution(pdf, found, "openalex", ids, year, first_author)
     if paywalled:
-        raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'")
+        raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
     if others:
         raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")

@@ -3,6 +3,7 @@
 find_doi is replaced, so nothing leaves the machine.
 """
 
+import pytest
 from app.author import verify
 from app.pipeline import sources
 from app.pipeline.indexes import IndexRecord, IndexUnavailable
@@ -131,18 +132,18 @@ def test_a_paper_only_openalex_finds_by_title_exists(monkeypatch):
     assert verify.reference_check(LORA) == {"exists": "yes", "index": "OpenAlex", "lookedUpBy": "title"}
 
 
-def test_a_work_semantic_scholar_knows_without_a_free_pdf_exists(monkeypatch):
+@pytest.mark.parametrize(
+    ("index", "named"), [("semantic-scholar", "Semantic Scholar"), ("openalex", "OpenAlex"), ("", None)]
+)
+def test_a_work_a_lookup_knows_without_a_free_pdf_exists_and_names_that_lookup(monkeypatch, index, named):
     def paywalled(title, fits):
-        raise sources.NoOpenAccessCopy(f"no open-access PDF known for '{title}'")
+        raise sources.NoOpenAccessCopy(f"no open-access PDF known for '{title}'", index)
 
     monkeypatch.setattr(verify, "find_title", lambda title, author, fits: None)
     monkeypatch.setattr(verify, "find_by_title", paywalled)
 
-    assert verify.reference_check(LORA) == {
-        "exists": "yes",
-        "index": "Semantic Scholar",
-        "lookedUpBy": "title",
-    }
+    expected = {"exists": "yes", "lookedUpBy": "title"} | ({"index": named} if named else {})
+    assert verify.reference_check(LORA) == expected
 
 
 def test_a_rate_limit_after_the_indexes_missed_is_unknown(monkeypatch):
