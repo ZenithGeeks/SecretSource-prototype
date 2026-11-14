@@ -23,12 +23,18 @@ def test_a_sentence_with_only_this_citation_or_none_does_not_cite_others():
     assert not cites_others({"claim": "x", "sentence": None}, {"ref": "b31"})
 
 
-def test_marks_the_checked_citation_and_drops_the_others():
+def test_marks_the_checked_citation_and_the_others():
     claim = {"claim": "Optimized engines scale corpus sizes.", "sentence": SENTENCE}
 
     assert judged_text(claim, {"ref": "b31"}) == (
-        "Optimized late interaction engines [cited] enable to easily scale corpus sizes."
+        "Optimized late interaction engines [other] [cited] enable to easily scale corpus sizes."
     )
+
+
+def test_a_run_of_other_citations_becomes_one_mark():
+    claim = {"claim": "x", "sentence": "8.3B in Megatron-LM [b1][b2], and 17B in Turing-NLG [b3]."}
+
+    assert judged_text(claim, {"ref": "b3"}) == "8.3B in Megatron-LM [other], and 17B in Turing-NLG [cited]."
 
 
 def test_keeps_punctuation_after_the_mark():

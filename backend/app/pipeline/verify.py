@@ -24,6 +24,7 @@ EVIDENCE_COUNT = 4
 PAGE_COUNT = 2
 LABELS = ("supports", "refutes", "insufficient")
 CITED_MARK = "[cited]"  # app.author.logic.cited_text puts it where the citation stands
+OTHER_MARK = "[other]"  # judged_text puts it where other works are cited
 
 _judge = None  # built on first use: needs dspy and a running LM
 
@@ -236,7 +237,9 @@ def _build_judge():
         own work (their setup, values, data or results) and cites a method, tool, model or
         dataset they used, the citation is only for that method, tool, model or dataset. The
         authors' own settings are not claims about the cited paper, and settings that differ
-        from the cited paper's do not count against it.
+        from the cited paper's do not count against it. "[other]" marks citations of other
+        works: the words they cover are for those works to support and never count against
+        this paper.
         Then answer "supports" if the passages state everything the citation is for,
         "refutes" if a passage contradicts it, and "insufficient" if any part of it is not
         in the passages."""
@@ -354,7 +357,8 @@ def judged_text(claim: dict, citation: dict) -> str:
     sentence = claim.get("sentence") or ""
     if not ref or f"[{ref}]" not in sentence:
         return claim["claim"]
-    marked = re.sub(r"\s*\[b\d+\]", "", sentence.replace(f"[{ref}]", f" {CITED_MARK}"))
+    # Other works' markers stay as "[other]" so the judge does not credit their part to this one.
+    marked = re.sub(r"(?:\s*\[b\d+\])+", f" {OTHER_MARK}", sentence.replace(f"[{ref}]", f" {CITED_MARK}"))
     return re.sub(r"\s+", " ", marked).strip()
 
 

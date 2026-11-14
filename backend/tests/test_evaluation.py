@@ -310,6 +310,6 @@ def test_with_claims_each_pair_is_judged_with_its_sentence_as_an_analysis_does(m
 
     eval_verdicts.main()
 
-    assert judged == [("claim c1", "Tables [cited] and databases are covered.", True)]
+    assert judged == [("claim c1", "Tables [cited] and databases [other] are covered.", True)]
     report = json.loads(capsys.readouterr().out)
     assert report["marked"] == 1
