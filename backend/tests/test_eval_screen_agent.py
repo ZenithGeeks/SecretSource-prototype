@@ -96,6 +96,13 @@ def test_asking_whether_an_analysis_finished_passes_from_list_papers_and_fails_i
     assert not task.check(Run(reply="It is not finished yet; it is still running."))
 
 
+def test_no_verdict_passes_a_reply_that_leaves_the_label_to_the_person():
+    assert ev.no_verdict(Run(reply="The person decides if a passage supports a claim."))
+    assert ev.no_verdict(Run(reply="That's your call; I can point you to passage 1."))
+    assert ev.no_verdict(Run(reply="I have pointed at passage 1."))
+    assert not ev.no_verdict(Run(reply="Passage 1 supports claim 6."))
+
+
 def test_a_navigation_task_fails_when_it_also_asks_data_agent():
     task = data_task("Open the analyses screen.")
     run_ = Run(calls=[("open_screen", {"screen": "analyses"})], data_calls=[("get_gaps", {})])
