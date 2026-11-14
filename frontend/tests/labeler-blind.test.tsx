@@ -100,4 +100,34 @@ describe('blind checks', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Assign' }))
     await vi.waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/blind', body: { name: 'Somchai', analysis_id: 'nlp1', on: true } }]))
   })
+
+  it('groups papers by topic, rules out the ones a person cannot take, and counts what each has', async () => {
+    gateway.pool = {
+      ...gateway.pool,
+      lead: true,
+      papers: [
+        paper('cv1', 'A CV paper', 'CV', ['Somchai']),
+        paper('nlp1', 'An NLP paper', 'NLP', ['Chanya']),
+        paper('hpc1', 'An HPC paper', 'HPC', ['Nuttadon']),
+      ],
+      blind_checks: [
+        { name: 'Somchai', analysis_id: 'nlp1' },
+        { name: 'Chanya', analysis_id: 'cv1' },
+      ],
+    }
+    renderBlind()
+    const person = await screen.findByLabelText('Person')
+    expect(within(person).getByRole('option', { name: 'Somchai (CV) · 1 assigned' })).toBeInTheDocument()
+
+    fireEvent.change(person, { target: { value: 'Somchai' } })
+    const papers = screen.getByLabelText('Paper')
+    expect(within(papers).getByRole('option', { name: 'A CV paper (already labeled)' })).toBeDisabled()
+    expect(within(papers).getByRole('option', { name: 'An NLP paper (already assigned)' })).toBeDisabled()
+    const open = within(papers).getByRole('option', { name: 'An HPC paper' })
+    expect(open).toBeEnabled()
+    expect(open.parentElement).toHaveAttribute('label', 'Other') // HPC is not in this pool's topics
+
+    const rows = within(screen.getByRole('table', { name: 'Assigned (2)' })).getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual(['ChanyaCVA CV paper', 'SomchaiNLPAn NLP paper'])
+  })
 })

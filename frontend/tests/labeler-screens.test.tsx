@@ -195,7 +195,7 @@ describe('Blind checks', () => {
       renderBlind()
       expect(await screen.findByRole('option', { name: 'Ann' })).toBeInTheDocument()
       expect(screen.getByRole('option', { name: 'Somchai (CV)' })).toBeInTheDocument()
-      expect(screen.getByRole('option', { name: 'CV · Labeled paper' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: 'Labeled paper' }).parentElement).toHaveAttribute('label', 'CV')
       expect(screen.queryByRole('option', { name: /Unlabeled/ })).not.toBeInTheDocument()
     })
 
@@ -260,7 +260,7 @@ describe('Blind checks', () => {
         ],
       })
       renderBlind()
-      const table = await screen.findByRole('table', { name: 'Blind checks on the team' })
+      const table = await screen.findByRole('table', { name: 'Assigned (2)' })
       expect(within(table).getByText('Labeled paper')).toBeInTheDocument()
       expect(within(table).getByText('gone')).toBeInTheDocument()
 
