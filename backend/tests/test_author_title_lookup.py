@@ -10,7 +10,7 @@ import time
 import pytest
 from app import store
 from app.author import verify
-from app.pipeline import sources
+from app.pipeline import indexes, sources
 
 GOODFELLOW = {"title": "Deep learning", "author": "Goodfellow, Ian and Bengio, Yoshua", "year": "2016"}
 
@@ -47,7 +47,9 @@ class Response:
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
-    """A fresh SQLite store, and no waiting between Semantic Scholar calls."""
+    """A fresh SQLite store, no waiting between Semantic Scholar calls, and an OpenAlex that
+    knows no title."""
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: [])
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "analyses.db"))
     monkeypatch.setattr(sources, "S2_MIN_INTERVAL", 0.0)

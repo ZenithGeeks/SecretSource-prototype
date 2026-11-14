@@ -478,7 +478,12 @@ def _year(year: str) -> str:
     return f"'{year[-2:]}" if year and year[-2:].isdigit() else ""
 
 
-INDEX_NAMES = {"semantic-scholar": "Semantic Scholar", "arxiv": "arXiv", "unpaywall": "Unpaywall"}
+INDEX_NAMES = {
+    "semantic-scholar": "Semantic Scholar",
+    "arxiv": "arXiv",
+    "unpaywall": "Unpaywall",
+    "openalex": "OpenAlex",
+}
 FOUND_WITHOUT_COPY = {"no-open-access", "withdrawn"}  # an index knew the work; it has no free PDF
 NOT_FOUND = {"unresolvable", "web-source"}  # no index knew the work
 

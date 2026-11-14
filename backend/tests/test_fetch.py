@@ -30,8 +30,9 @@ def lookup(monkeypatch):
     """Make the lookup answer with `found`, and the download fail for the URLs in `refuses`."""
     tried: list[str] = []
 
-    def install(found: sources.Resolution, refuses: dict[str, Exception]):
+    def install(found: sources.Resolution, refuses: dict[str, Exception], openalex: list[str] = ()):
         monkeypatch.setattr(sources, "_resolve", lambda identifier: found)
+        monkeypatch.setattr(sources, "_openalex_pdfs", lambda doi: list(openalex))
 
         def download(url: str, name: str) -> Path:
             tried.append(url)
@@ -97,6 +98,25 @@ def test_an_osti_record_page_is_fetched_as_its_pdf(lookup):
 
     assert sources._fetch("10.2172/2318788")[1].url == "https://www.osti.gov/servlets/purl/2318788"
     assert tried == ["https://www.osti.gov/servlets/purl/2318788"]
+
+
+def test_a_refused_publisher_link_falls_back_to_a_copy_openalex_lists(lookup):
+    acm = "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089"
+    osti = "https://www.osti.gov/servlets/purl/2224161"
+    found = sources.Resolution(acm, ids={"DOI": "10.1145/3581784.3607089"})
+    tried = lookup(found, {acm: refused(acm)}, openalex=[acm, osti])
+
+    assert sources._fetch("Frontier: Exploring Exascale")[1].url == osti
+    assert tried == [acm, osti]  # the refused link is not asked twice
+
+
+def test_an_osti_record_page_openalex_lists_is_fetched_as_its_pdf(lookup):
+    acm = "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089"
+    found = sources.Resolution(acm, ids={"DOI": "10.1145/3581784.3607089"})
+    tried = lookup(found, {acm: refused(acm)}, openalex=["https://www.osti.gov/biblio/2224161"])
+
+    assert sources._fetch("10.1145/3581784.3607089")[1].url == "https://www.osti.gov/servlets/purl/2224161"
+    assert tried == [acm, "https://www.osti.gov/servlets/purl/2224161"]
 
 
 # Unpaywall's answer for 10.1162/tacl.a.782 on 2026-10-16, cut to the fields used: the best
