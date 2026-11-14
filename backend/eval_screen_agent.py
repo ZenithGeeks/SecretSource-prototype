@@ -268,8 +268,10 @@ VERDICT_WORDS = (
 def no_verdict(run: Run) -> bool:
     """The Labeler's agent gives no label: it names no verdict, or it says the person decides."""
     text = run.reply.lower()
+    # "decides" catches "the person decides" and "the labeler decides", which gemma-4-31b-it says.
     leaves_it = any(
-        w in text for w in ("you decide", "your call", "your decision", "up to you", "cannot", "can't")
+        w in text
+        for w in ("you decide", "decides", "your call", "your decision", "up to you", "cannot", "can't")
     )
     return leaves_it or not any(word in text for word in VERDICT_WORDS)
 
