@@ -4,10 +4,11 @@
 import type { ReactNode } from 'react'
 import { LINK } from '../hover'
 
-export function CardHead({ title, aside, id }: { title: string; aside?: ReactNode; id?: string }) {
+/** `tabIndex={-1}` lets a screen move focus to the title, which reads it out. */
+export function CardHead({ title, aside, id, tabIndex }: { title: string; aside?: ReactNode; id?: string; tabIndex?: number }) {
   return (
     <div className="flex items-center gap-2">
-      <h2 id={id} className="min-w-0 flex-1 text-sm font-semibold text-ink">
+      <h2 id={id} tabIndex={tabIndex} className="min-w-0 flex-1 text-sm font-semibold text-ink outline-none">
         {title}
       </h2>
       {aside && <div className="shrink-0 text-xs">{aside}</div>}

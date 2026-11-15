@@ -7,12 +7,13 @@
 
 import { AnimatePresence } from 'framer-motion'
 import { Clock, FileText, Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { BackLink, LibraryHeader, LibraryTitle, ProjectMenu } from '../../../components/library'
 import { Badge, Button, Card, Empty, ErrorState, FadeIn, LoadingScreen } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
+import { centreInView } from '../../../lib/centreInView'
 import { checkedAtLabel, checkedLabel, editedLabel, errorMessage } from '../../../lib/author'
 import { useAuthorActions, useAuthorDrafts, useAuthorProject, useCompare, useDraftChecks, useSavedSources } from '../../../lib/useAuthor'
 import { useInFlight } from '../../../lib/useInFlight'
@@ -30,6 +31,8 @@ import { CitationBadge } from '../components/Verdicts'
 import { FOCUS, HIGHLIGHT, LINK } from '../hover'
 
 export const UNSORTED = 'unsorted'
+/** Drafts listed before "Show all" (#960). */
+const DRAFTS_SHOWN = 5
 
 /** A draft's status pill: red with open issues, green when every citation is backed. */
 function statusBadgeTone(status: DraftStatus) {
@@ -101,9 +104,10 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
   const [comparing, setComparing] = useState<string | null>(null)
   const done = runs.filter((r) => r.status === 'done')
   return (
-    <Card className="flex flex-col gap-2.5" aria-labelledby="check-history-title">
+    <Card className="flex scroll-mt-16 flex-col gap-2.5" aria-labelledby="check-history-title">
       <CardHead
         id="check-history-title"
+        tabIndex={-1}
         title={`Check history · ${draft.title}`}
         aside={
           <TextLink onClick={onOpenEditor} data-ask-target={askTarget({ kind: 'action', id: 'open-editor' })}>
@@ -219,6 +223,18 @@ export function ProjectDetail({
   const sources = useSavedSources(unsorted ? '' : projectId)
   const actions = useAuthorActions()
   const [selectedDraft, setSelectedDraft] = useState<string | null>(initialDraft)
+  // The history sits below the drafts, off-screen with many, so each pick (the same draft
+  // again too) brings it into view and reads its title out (#960). Not on load.
+  const [picks, setPicks] = useState(0)
+  const pick = (id: string) => {
+    setSelectedDraft(id)
+    setPicks((n) => n + 1)
+  }
+  useEffect(() => {
+    if (!picks) return
+    document.getElementById('check-history-title')?.focus({ preventScroll: true })
+    centreInView(document.querySelector<HTMLElement>('[aria-labelledby="check-history-title"]'))
+  }, [picks])
   const [deletingDraft, setDeletingDraft] = useState<Draft | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
@@ -271,7 +287,7 @@ export function ProjectDetail({
       <DraftList
         drafts={list}
         selected={current?.id ?? null}
-        onSelect={setSelectedDraft}
+        onSelect={pick}
         onOpenEditor={onOpenEditor}
         onDelete={setDeletingDraft}
         title={title}
@@ -405,6 +421,9 @@ function DraftList({
   onDelete: (draft: Draft) => void
   title: string
 }) {
+  // Past the first few the history below would be off-screen; the picked draft always shows.
+  const [all, setAll] = useState(false)
+  const shown = all ? drafts : drafts.filter((d, i) => i < DRAFTS_SHOWN || d.id === selected)
   return (
     <Card className="flex flex-col gap-2.5" aria-labelledby="project-drafts-title">
       <CardHead id="project-drafts-title" title={title} aside={<span className="text-ink-muted">{drafts.length} draft{drafts.length === 1 ? '' : 's'}</span>} />
@@ -412,7 +431,7 @@ function DraftList({
         <Empty title="No drafts yet" hint="+ New draft opens an empty one in the editor." />
       ) : (
         <ul aria-label={title}>
-          {drafts.map((draft) => (
+          {shown.map((draft) => (
             <li key={draft.id} className="flex items-center gap-1 border-b border-border-subtle">
               <button
                 type="button"
@@ -436,6 +455,11 @@ function DraftList({
             </li>
           ))}
         </ul>
+      )}
+      {drafts.length > DRAFTS_SHOWN && (
+        <TextLink onClick={() => setAll(!all)} aria-expanded={all} className="self-start">
+          {all ? 'Show fewer' : `Show all ${drafts.length} drafts`}
+        </TextLink>
       )}
       {selected && (
         <TextLink onClick={() => onOpenEditor(selected)} className="self-start" data-ask-target={askTarget({ kind: 'action', id: 'open-draft' })}>

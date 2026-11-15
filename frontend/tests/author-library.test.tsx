@@ -262,6 +262,55 @@ describe('Author Library', () => {
     expect(checkedAtLabel('', now).text).not.toMatch(/NaN|undefined/)
   })
 
+  test('a project lists 5 drafts behind "Show all", keeps the picked one, and each pick brings its history into view (#960)', async () => {
+    const d1 = gateway.drafts.get('d1')!
+    for (let i = 2; i <= 7; i++) gateway.drafts.set(`n${i}`, { ...d1, id: `n${i}`, title: `Draft ${i}` })
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    try {
+      renderLibrary('proj1')
+      const rows = async () => within(await screen.findByRole('list', { name: 'Drafts in this project' })).getAllByRole('listitem')
+      expect(await rows()).toHaveLength(5)
+      // Opening the page moves neither focus nor the page.
+      expect(document.activeElement).toBe(document.body)
+      expect(scroll).not.toHaveBeenCalled()
+
+      const more = screen.getByRole('button', { name: 'Show all 7 drafts' })
+      expect(more).toHaveAttribute('aria-expanded', 'false')
+      fireEvent.click(more)
+      expect(await rows()).toHaveLength(7)
+      expect(screen.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true')
+
+      // Picking the last draft focuses the history heading, already naming it, and scrolls to it.
+      fireEvent.click(screen.getByRole('button', { name: /^Draft 7/ }))
+      const heading = await screen.findByRole('heading', { name: 'Check history · Draft 7' })
+      await waitFor(() => expect(document.activeElement).toBe(heading))
+      expect(scroll).toHaveBeenCalledTimes(1)
+      expect(scroll.mock.instances[0]).toBe(heading.closest('[aria-labelledby="check-history-title"]'))
+
+      // Folded again, the picked draft stays listed after the first 5.
+      fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }))
+      const folded = await rows()
+      expect(folded).toHaveLength(6)
+      expect(folded[5]).toHaveTextContent('Draft 7')
+
+      // Picking the same draft again still brings its history back.
+      const row = screen.getByRole('button', { name: /^Draft 7/ })
+      row.focus()
+      fireEvent.click(row)
+      await waitFor(() => expect(document.activeElement).toBe(heading))
+      expect(scroll).toHaveBeenCalledTimes(2)
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
+  })
+
+  test('a project with 5 drafts or fewer has no "Show all"', async () => {
+    renderLibrary('proj1')
+    await screen.findByRole('list', { name: 'Drafts in this project' })
+    expect(screen.queryByRole('button', { name: /^Show all/ })).not.toBeInTheDocument()
+  })
+
   test('the check history sits below the drafts at full width, not in a column beside them (#721)', async () => {
     renderLibrary('proj1')
     // the heading's CardHead, then its Card
