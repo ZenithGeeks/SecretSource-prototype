@@ -282,7 +282,9 @@ def test_each_step_of_a_queued_analysis_is_an_agent_span(phoenix, monkeypatch):
         "claims": [{"claim": "Hard negatives help.", "citations": [{"key": "ance.pdf"}]}],
     }
     monkeypatch.setattr(main, "extract_claims_with_citations", lambda paper: extracted)
-    monkeypatch.setattr(main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source})
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
+    )
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     monkeypatch.setattr(main, "audit", lambda analysis: [])

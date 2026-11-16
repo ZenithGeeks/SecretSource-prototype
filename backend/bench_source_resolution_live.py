@@ -21,7 +21,6 @@ from typing import Callable
 from unittest.mock import patch
 
 import requests
-
 from app import store
 from app.pipeline import sources
 

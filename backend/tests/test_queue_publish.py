@@ -40,7 +40,9 @@ def stubbed_pipeline(monkeypatch):
     # _background drain loop under pytest's capture and can hang it (unrelated to this change).
     monkeypatch.setattr(main, "index_paper", lambda title: f"indexed:{title}")
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source})
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
+    )
     monkeypatch.setattr(
         main, "check_prepared",
         lambda claim, source, path, judged="", other_citations=False, source_outcome=None: {

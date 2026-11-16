@@ -317,7 +317,9 @@ def pipeline(monkeypatch):
         },
     )
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source})
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
+    )
     monkeypatch.setattr(
         main,
         "check_prepared",

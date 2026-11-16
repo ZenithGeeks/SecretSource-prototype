@@ -42,7 +42,10 @@ def two_runs(monkeypatch):
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
     monkeypatch.setattr(main, "extract_claims_with_citations", extract)
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda s, expected=None: counted("prepare", {"status": "ok", "path": s}))
+    monkeypatch.setattr(
+        main, "prepare_source",
+        lambda s, expected=None: counted("prepare", {"status": "ok", "path": s}),
+    )
     monkeypatch.setattr(main, "check_prepared", check)
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})

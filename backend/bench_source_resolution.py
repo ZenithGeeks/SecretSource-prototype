@@ -17,7 +17,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import requests
-
 from app import store
 from app.pipeline import sources
 
