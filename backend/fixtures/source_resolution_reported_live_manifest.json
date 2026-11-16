@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "description": "Ten unresolved works previously reported by the user; OpenAlex is measured on DOI, arXiv, or title lookup. This is a transparent replacement evaluation corpus, not the unavailable original ten-paper run.",
+  "providers": [
+    "openalex"
+  ],
+  "cases": [
+    {
+      "id": "llm-multi-agent-systems-2024",
+      "arxiv": "2402.03578",
+      "title": "LLM Multi-Agent Systems: Challenges and Open Problems",
+      "year": 2024,
+      "prior_report_reason": "arXiv abstract page was classified as a web page"
+    },
+    {
+      "id": "confusing-claims-for-data-2014",
+      "doi": "10.1080/10508406.2013.802652",
+      "title": "Confusing claims for data: A critique of common practices for presenting qualitative research on learning",
+      "year": 2014,
+      "venue": "The Journal of the Learning Sciences",
+      "prior_report_reason": "named in the paper but not checked"
+    },
+    {
+      "id": "coding-manual-qualitative-researchers-2009",
+      "title": "The Coding Manual for Qualitative Researchers",
+      "year": 2009,
+      "prior_report_reason": "book reported as having no free copy"
+    },
+    {
+      "id": "collective-self-esteem-1992",
+      "doi": "10.1177/0146167292183006",
+      "title": "A collective self-esteem scale: Self-evaluation of one's social identity",
+      "year": 1992,
+      "venue": "Personality and Social Psychology Bulletin",
+      "prior_report_reason": "reported as having no free copy"
+    },
+    {
+      "id": "social-identity-leadership-2003",
+      "doi": "10.1016/S0065-2601(03)01001-3",
+      "title": "Social identity and leadership processes in groups",
+      "year": 2003,
+      "venue": "Advances in Experimental Social Psychology",
+      "prior_report_reason": "PDF reported as not downloading"
+    },
+    {
+      "id": "intergroup-bias-2002",
+      "doi": "10.1146/annurev.psych.53.100901.135109",
+      "title": "Intergroup bias",
+      "year": 2002,
+      "venue": "Annual Review of Psychology",
+      "prior_report_reason": "reported without a DOI or arXiv ID"
+    },
+    {
+      "id": "transformation-open-source-software-2006",
+      "doi": "10.2307/25148740",
+      "title": "The transformation of open source software",
+      "year": 2006,
+      "venue": "MIS Quarterly",
+      "prior_report_reason": "publisher page was classified as a web page"
+    },
+    {
+      "id": "business-firms-community-projects-2007",
+      "doi": "10.1109/FLOSS.2007.3",
+      "title": "Business firms' engagement in community projects: Empirical evidence and further developments of the research",
+      "year": 2007,
+      "venue": "First International Workshop on Emerging Trends in FLOSS Research and Development",
+      "prior_report_reason": "reported as having no free copy"
+    },
+    {
+      "id": "single-vendor-commercial-open-course-2012",
+      "doi": "10.1007/s10257-010-0149-x",
+      "title": "The single-vendor commercial open course business model",
+      "year": 2012,
+      "venue": "Information Systems and E-Business Management",
+      "prior_report_reason": "reported as having no free copy"
+    },
+    {
+      "id": "challenges-open-innovation-2006",
+      "doi": "10.1111/j.1467-9310.2006.00436.x",
+      "title": "Challenges of open innovation: The paradox of firm investment in open-source software",
+      "year": 2006,
+      "venue": "R&D Management",
+      "prior_report_reason": "reported as having no free copy"
+    }
+  ]
+}

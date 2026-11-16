@@ -245,3 +245,21 @@ def test_openalex_works_returns_the_results_of_the_filter(answers):
     table["openalex"] = Answer(200, {"results": [OPENALEX_WORK]})
 
     assert indexes.openalex_works({"filter": "doi:" + DOI}) == [OPENALEX_WORK]
+
+
+def test_openalex_work_by_doi_returns_locations_for_source_fallback(answers):
+    table, asked = answers
+    payload = {**OPENALEX_WORK, "doi": f"https://doi.org/{DOI}", "locations": []}
+    table["openalex"] = Answer(200, payload)
+
+    assert indexes.openalex_work_by_doi(DOI) == payload
+    assert asked == ["openalex"]
+
+
+def test_openalex_search_works_returns_full_search_records(answers):
+    table, asked = answers
+    payload = {**OPENALEX_WORK, "doi": f"https://doi.org/{DOI}", "locations": []}
+    table["openalex"] = Answer(200, {"results": [payload]})
+
+    assert indexes.openalex_search_works("KisMATH") == [payload]
+    assert asked == ["openalex"]

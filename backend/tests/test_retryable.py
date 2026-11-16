@@ -32,17 +32,19 @@ def local_store(monkeypatch, tmp_path):
     ],
 )
 def test_each_reason_says_whether_a_retry_can_help(error, reason, retryable):
-    assert sources.tool_error(error) == {
+    result = sources.tool_error(error)
+    assert {key: result[key] for key in ("status", "message", "reason", "retryable")} == {
         "status": "error",
         "message": str(error),
         "reason": reason,
         "retryable": retryable,
     }
+    assert result["source_outcome"]["outcome"]
 
 
 def test_a_download_that_timed_out_is_reported_as_retryable(monkeypatch):
     found = sources.Resolution("https://example.org/paper.pdf")
-    monkeypatch.setattr(sources, "_resolve", lambda identifier: found)
+    monkeypatch.setattr(sources, "_resolve", lambda identifier, expected=None: found)
 
     def download(url, name):
         raise requests.ConnectTimeout("connect timed out")
@@ -55,7 +57,7 @@ def test_a_download_that_timed_out_is_reported_as_retryable(monkeypatch):
     assert result["retryable"] is True
 
 
-def lookup_unavailable(identifier):
+def lookup_unavailable(identifier, expected=None):
     raise sources.LookupUnavailable("Semantic Scholar is rate limiting us")
 
 
@@ -95,10 +97,28 @@ def test_a_failed_check_carries_retryable(monkeypatch, tmp_path):
     monkeypatch.setattr(verify, "evidence_from", evidence_from)
     monkeypatch.setattr(verify, "_figures_ready", lambda source: False)
 
-    result = verify.check_prepared("a claim", "2112.01488", tmp_path / "paper.pdf")
+    result = verify.check_prepared(
+        "a claim", "2112.01488", tmp_path / "paper.pdf",
+        source_outcome={"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []},
+    )
 
     assert result["status"] == "error"
     assert result["retryable"] is True
+    assert result["source_outcome"]["outcome"] == "retrieval-failed"
+
+
+def test_a_failed_check_without_prior_source_outcome_uses_error_outcome(monkeypatch, tmp_path):
+    def evidence_from(claim, name):
+        raise requests.ReadTimeout("ColBERT timed out")
+
+    monkeypatch.setattr(verify, "evidence_from", evidence_from)
+    monkeypatch.setattr(verify, "_figures_ready", lambda source: False)
+
+    result = verify.check_prepared("a claim", "2112.01488", tmp_path / "paper.pdf")
+
+    assert result["status"] == "error"
+    assert result["reason"] == "failed"
+    assert result["source_outcome"]["outcome"] == "temporary-failure"
 
 
 def test_add_paper_carries_retryable(monkeypatch):
@@ -109,7 +129,7 @@ def test_add_paper_carries_retryable(monkeypatch):
 
     result = rag.add_paper("data/papers/missing.pdf")
 
-    assert result == {
+    assert {key: result[key] for key in ("status", "message", "reason", "retryable")} == {
         "status": "error",
         "message": "connection refused",
         "reason": "indexing-failed",

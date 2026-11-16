@@ -23,3 +23,12 @@ supabase/.temp/
 
 # pytest-cov data from a local run of the backend tests
 .coverage
+
+# Personal Codex workflow instructions (kept local; do not publish)
+/agent-instruct/
+/AGENTS.md
+SKILL.md
+skills-lock.json
+openai.yaml
+# Planning drafts are tracked in Jira and GitHub issues, not in the prototype.
+/docs/superpowers/plans/

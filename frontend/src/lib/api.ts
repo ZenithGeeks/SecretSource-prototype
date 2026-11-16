@@ -42,6 +42,7 @@ export type Verdict = {
   /** Set when the PDF read was the arXiv copy, not the publisher's (#424). */
   source_version?: 'preprint'
   arxiv?: string // that copy's arXiv id, e.g. "2507.11408"
+  source_outcome?: SourceOutcome
 }
 
 /** Where a sentence sits in the PDF. Boxes are top-left origin, in PDF points. */
@@ -98,16 +99,20 @@ export type Reason =
   | 'not-downloadable'
   | 'lookup-unavailable'
   | 'web-source'
+  | 'ambiguous-match'
+  | 'identity-mismatch'
   | 'withdrawn'
   | 'indexing-failed'
   | 'failed'
 
 export const REASONS: Record<Reason, string> = {
-  unresolvable: 'no DOI or arXiv ID to look it up by',
+  unresolvable: 'no matching work was found in the indexes checked',
   'no-open-access': 'no free copy published',
   'not-downloadable': 'the PDF would not download',
   'lookup-unavailable': 'the lookup service would not answer, so we could not tell',
   'web-source': 'a web page, not a paper we can check a claim against',
+  'ambiguous-match': 'more than one matching work was found',
+  'identity-mismatch': 'the candidate did not match the citation identity',
   withdrawn: 'withdrawn by its authors on arXiv',
   'indexing-failed': 'the retrieval service could not read this paper',
   failed: 'checking it failed',
@@ -125,7 +130,23 @@ export function reasonText(reason?: string) {
 }
 
 /** A cited work we tried to check and could not. */
-export type Unchecked = { source: string; reason: Reason; message: string }
+export type SourceAttempt = {
+  provider: string
+  result: string
+  host?: string
+  locator?: string
+  status_code?: number
+  retryable?: boolean
+}
+
+export type SourceOutcome = {
+  source_kind: 'paper' | 'web-page' | 'unknown'
+  outcome: string
+  retryable: boolean
+  attempts: SourceAttempt[]
+}
+
+export type Unchecked = { source: string; reason: Reason; message: string; source_outcome?: SourceOutcome }
 
 /** Where the analysed paper cites a reference, e.g. "[13]": one box in PDF points. */
 export type CitationMarker = {

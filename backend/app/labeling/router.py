@@ -181,21 +181,39 @@ def _unchecked(claim: dict) -> list[dict]:
     and `year` are the citation's own, "" when the reference list had none, so the labeler can
     still open a work that has no PDF here."""
     named = set(claim.get("named") or [])
-    failed = {row["source"]: row["reason"] for row in claim.get("unchecked") or []}
+    failed = {row["source"]: row for row in claim.get("unchecked") or []}
     rows = []
     for citation in claim.get("citations") or []:
         source = lookup_key(citation)
-        if reason := "named" if source in named else failed.get(source):
-            rows.append(
-                {
-                    "ref": citation.get("ref", ""),
-                    "label": citation.get("title") or source,
-                    "reason": reason,
-                    "url": citation.get("url") or "",
-                    "doi": citation.get("doi") or "",
-                    "year": str(citation.get("year") or ""),
-                }
-            )
+        failed_row = failed.get(source)
+        if not source:
+            reason = "unresolvable"
+            source_outcome = {
+                "source_kind": "unknown", "outcome": "not-attempted",
+                "retryable": False, "attempts": [],
+            }
+        elif source in named:
+            reason = "named"
+            source_outcome = {
+                "source_kind": "unknown", "outcome": "named-only",
+                "retryable": False, "attempts": [],
+            }
+        elif failed_row:
+            reason = failed_row["reason"]
+            source_outcome = failed_row.get("source_outcome")
+        else:
+            continue
+        row = {
+            "ref": citation.get("ref", ""),
+            "label": citation.get("title") or source or f"Reference [{citation.get('ref') or ''}]",
+            "reason": reason,
+            "url": citation.get("url") or "",
+            "doi": citation.get("doi") or "",
+            "year": str(citation.get("year") or ""),
+        }
+        if source_outcome is not None:
+            row["source_outcome"] = source_outcome
+        rows.append(row)
     return rows
 
 

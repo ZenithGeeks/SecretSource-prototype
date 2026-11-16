@@ -39,7 +39,7 @@ def client(monkeypatch, tmp_path, asked):
     monkeypatch.setattr(main.store, "_use_supabase", lambda: False)
     monkeypatch.setattr(auth, "_user_id_for", {"token-ada": "user-ada", "token-bo": "user-bo"}.get)
     monkeypatch.setattr(chats, "_service", InMemorySessionService())
-    monkeypatch.setattr(main, "prepare_source", lambda paper: {"status": "ok", "path": paper})
+    monkeypatch.setattr(main, "prepare_source", lambda paper, expected=None: {"status": "ok", "path": paper})
     main.analyses.clear()
     for analysis_id, owner in (("a1", "user-ada"), ("b1", "user-bo"), ("shared", None)):
         main.analyses[analysis_id] = {

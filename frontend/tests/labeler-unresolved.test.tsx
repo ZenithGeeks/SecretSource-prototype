@@ -86,6 +86,41 @@ describe('unresolvedCitations', () => {
     expect(row).toEqual({ ref: 'b23', label: 'Top500', year: '', reason: 'a web page, not a paper we can check a claim against', links: [] })
   })
 
+  it('keeps the legacy wording for old unresolved citations without a lookup identifier', () => {
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A talk', reason: 'unresolvable' }],
+    }), session)
+    expect(row.reason).toBe('no DOI or arXiv ID to look it up by')
+  })
+
+  it('keeps the legacy web-page wording for older unresolved citations with a URL', () => {
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A site', reason: 'unresolvable', url: 'https://example.org' }],
+    }), session)
+    expect(row.reason).toBe('a web page, not a paper we can check a claim against')
+  })
+
+  it('keeps the legacy index wording when an older unresolved citation has a DOI', () => {
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A paper', reason: 'unresolvable', doi: '10.1000/example' }],
+    }), session)
+    expect(row.reason).toBe('no matching work was found in the indexes checked')
+  })
+
+  it('preserves retrieval outcomes from a checked citation row', () => {
+    const sourceOutcome = {
+      source_kind: 'paper' as const,
+      outcome: 'blocked',
+      retryable: false,
+      attempts: [{ provider: 'openalex', result: 'blocked' }],
+    }
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A paper', reason: 'failed', source_outcome: sourceOutcome }],
+    }), session)
+
+    expect(row.sourceOutcome).toBe(sourceOutcome)
+  })
+
   it('leaves out a work that has a PDF from another claim: that one opens', () => {
     const named = { ref: 'b4', label: 'Ref B', reason: 'named' }
     expect(unresolvedCitations(claim({ cited: ['b4', 'b23'], unchecked: [named, TOP500] }), session).map((c) => c.ref)).toEqual(['b23'])
@@ -101,8 +136,11 @@ describe('unresolvedCitations', () => {
     const rows = unresolvedCitations(claim({ cited: ['b23', 'b30'], unchecked: [TOP500] }), { references, unread })
     expect(rows.map((c) => [c.ref, c.label, c.year, c.reason])).toEqual([
       ['b23', 'Top500', '2021', 'the PDF would not download'],
-      ['b30', 'A talk', '', 'no DOI or arXiv ID to look it up by'],
+      ['b30', 'A talk', '', 'this reference was not checked in the analysis'],
     ])
+    expect(rows[1].sourceOutcome).toEqual({
+      source_kind: 'unknown', outcome: 'not-attempted', retryable: false, attempts: [],
+    })
   })
 
   it('is empty for a claim that cites nothing, and for a gateway with neither field', () => {
@@ -116,6 +154,9 @@ describe('uncheckedReason', () => {
     expect(uncheckedReason('named')).toBe('the paper only names it, so it was not checked')
     expect(uncheckedReason('no-open-access')).toBe('no free copy published')
     expect(uncheckedReason('a-new-code')).toBe('checking it failed')
+    expect(uncheckedReason('failed', {
+      source_kind: 'paper', outcome: 'no-accessible-copy', retryable: false, attempts: [],
+    })).toBe('the work was identified, but no free copy was found')
   })
 })
 
@@ -148,6 +189,42 @@ describe('UnresolvedReferences', () => {
     const doi = { text: 'doi:10.1016/j.jpdc.2014.07.003', href: 'https://doi.org/10.1016/j.jpdc.2014.07.003' }
     render(<UnresolvedReferences citations={[card({ links: [doi, card().links[0]] })]} />)
     expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([doi.href, 'https://www.top500.org/'])
+  })
+
+  it('shows a sanitized retrieval attempt and distinguishes a retryable outage', () => {
+    render(<UnresolvedReferences citations={[
+      card({
+        reason: 'the source location blocked the download',
+        links: [],
+        sourceOutcome: {
+          source_kind: 'paper', outcome: 'blocked', retryable: false,
+          attempts: [{
+            provider: 'unpaywall', result: 'blocked', host: 'publisher.example',
+            locator: 'https://publisher.example/paper.pdf', status_code: 403,
+          }],
+        },
+      }),
+      card({
+        ref: 'b24',
+        reason: 'a lookup or download failed temporarily',
+        links: [],
+        sourceOutcome: {
+          source_kind: 'unknown', outcome: 'temporary-failure', retryable: true,
+          attempts: [{
+            provider: 'semantic_scholar', result: 'temporary-failure',
+            host: 'api.semanticscholar.org', locator: 'javascript:ignored', status_code: 503,
+          }, { provider: 'resolver', result: 'no-match' }],
+        },
+      }),
+    ]} />)
+
+    expect(screen.getByText('This may be a temporary failure; retrying later may help.')).toBeInTheDocument()
+    const attempts = screen.getAllByText(/unpaywall: blocked|semantic_scholar: temporary-failure/)
+    expect(attempts).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'https://publisher.example/paper.pdf' }))
+      .toHaveAttribute('href', 'https://publisher.example/paper.pdf')
+    expect(screen.getByText(/HTTP 403/)).toBeInTheDocument()
+    expect(screen.getByText(/HTTP 503/)).toBeInTheDocument()
   })
 
   it('shows one card for each work, and one with no marker, year or link as just its title and reason', () => {

@@ -37,7 +37,7 @@ def _histogram_count(histogram):
 def stub_pipeline(monkeypatch):
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda s: {"status": "ok", "path": s})
+    monkeypatch.setattr(main, "prepare_source", lambda s, expected=None: {"status": "ok", "path": s})
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})
     findings = [{"kind": "claim-limit"}, {"kind": "ungrounded-quote"}]
@@ -75,7 +75,7 @@ def test_a_successful_run_records_lifecycle_verdict_and_audit_metrics(stub_pipel
     )
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: {
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: {
             "status": "ok", "claim": claim, "source": source, "verdict": "supports"
         },
     )
@@ -110,7 +110,7 @@ def test_an_analysis_records_the_tokens_of_its_own_llm_calls(stub_pipeline, monk
         return {"status": "ok", "file": f"{paper}.pdf", "title": "T",
                 "claims": [{"claim": "c1", "citations": [{"key": "s1"}, {"key": "s2"}]}]}
 
-    def check(claim, source, path, judged="", other_citations=False):
+    def check(claim, source, path, judged="", other_citations=False, source_outcome=None):
         record_llm_usage("judge", _Tracker(1000, 100))
         return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
 
@@ -148,7 +148,7 @@ def test_a_failed_check_is_counted_by_reason_not_as_a_verdict(stub_pipeline, mon
     )
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: {
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: {
             "status": "error", "message": "not found", "reason": "unresolvable",
             "claim": claim, "source": source,
         },

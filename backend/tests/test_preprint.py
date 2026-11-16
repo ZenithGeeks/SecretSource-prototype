@@ -38,7 +38,7 @@ def publisher(monkeypatch, tmp_path):
 
     def install(refuses: bool):
         found = sources.Resolution(LANDING, "KisMATH", "semantic-scholar", {"ArXiv": "2507.11408"})
-        monkeypatch.setattr(sources, "_lookup", lambda identifier: found)
+        monkeypatch.setattr(sources, "_lookup", lambda identifier, expected=None: found)
 
         def get(url, **kwargs):
             if refuses and url == LANDING:

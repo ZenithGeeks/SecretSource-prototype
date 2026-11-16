@@ -8,7 +8,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api, API_BASE, fetchFile, postEvents, reasonText, request, type CitationMarker, type Source } from './api'
+import { api, API_BASE, fetchFile, postEvents, reasonText, request, type CitationMarker, type Source, type SourceOutcome } from './api'
 import type { AnswerEvent } from './assistant'
 
 export type Level = 1 | 2 | 3 | 4
@@ -37,7 +37,15 @@ export type Candidate = {
 /** A citation the analysis did not check, with why: "named" (the paper only names the work) or
  * one of api.ts's Reason codes. `url`, `doi` and `year` are the reference list's own, '' when it
  * had none; they are missing from a gateway older than these fields. */
-export type UncheckedCitation = { ref: string; label: string; reason: string; url?: string; doi?: string; year?: string }
+export type UncheckedCitation = {
+  ref: string
+  label: string
+  reason: string
+  url?: string
+  doi?: string
+  year?: string
+  source_outcome?: SourceOutcome
+}
 
 export type SessionClaim = {
   claim_id: string
@@ -661,11 +669,38 @@ export function citedReferences(claim: SessionClaim, references: Reference[]): R
 }
 
 /** A cited work with no PDF to open, as the reference pane lists it. */
-export type Unresolved = { ref: string; label: string; year: string; reason: string; links: { text: string; href: string }[] }
+export type Unresolved = {
+  ref: string
+  label: string
+  year: string
+  reason: string
+  links: { text: string; href: string }[]
+  sourceOutcome?: SourceOutcome
+}
 
 /** Why a citation was not read, in plain words: api.ts's wording, plus the labeler's own "named". */
-export const uncheckedReason = (reason: string): string =>
-  reason === 'named' ? 'the paper only names it, so it was not checked' : reasonText(reason)
+const OUTCOME_TEXT: Record<string, string> = {
+  'named-only': 'the paper only names it, so it was not checked',
+  'not-attempted': 'this reference was not checked in the analysis',
+  'no-match': 'no matching work was found in the indexes checked',
+  'ambiguous-match': 'more than one matching work was found',
+  'identity-mismatch': 'the matching title belonged to a different work',
+  'no-accessible-copy': 'the work was identified, but no free copy was found',
+  blocked: 'the source location blocked the download',
+  'not-found': 'the source location returned not found',
+  'download-failed': 'the source location did not provide a readable PDF',
+  'invalid-content': 'the source returned content that was not a readable PDF',
+  'temporary-failure': 'a lookup or download failed temporarily',
+  'lookup-failed': 'the lookup service did not answer',
+  'web-page': 'a fetched web page was found instead of a paper PDF',
+  'retrieval-failed': 'the retrieval service could not finish checking this paper',
+  withdrawn: 'the paper was withdrawn by its authors on arXiv',
+  'indexing-failed': 'the paper was downloaded but could not be indexed for retrieval',
+}
+
+export const uncheckedReason = (reason: string, sourceOutcome?: SourceOutcome): string =>
+  OUTCOME_TEXT[sourceOutcome?.outcome ?? ''] ??
+  (reason === 'named' ? 'the paper only names it, so it was not checked' : reasonText(reason))
 
 // Only http(s): the link comes from a PDF's reference list, so any other scheme is not followed.
 const webLink = (url: string | undefined) => (url && /^https?:\/\//i.test(url) ? [{ text: url, href: url }] : [])
@@ -689,10 +724,22 @@ export function unresolvedCitations(claim: SessionClaim, session: Pick<Session, 
       ref: row.ref,
       label: row.label,
       year: row.year ?? '',
-      reason: uncheckedReason(row.reason),
+      reason: row.reason === 'unresolvable' && !row.source_outcome
+        ? row.url
+          ? 'a web page, not a paper we can check a claim against'
+          : !row.doi ? 'no DOI or arXiv ID to look it up by' : uncheckedReason(row.reason)
+        : uncheckedReason(row.reason, row.source_outcome),
       links: [...doiLink(row.doi), ...webLink(row.url)],
+      ...(row.source_outcome ? { sourceOutcome: row.source_outcome } : {}),
     })),
-    ...unread.map((r) => ({ ref: r.ref!, label: r.label, year: r.year ?? '', reason: uncheckedReason('unresolvable'), links: [] })),
+    ...unread.map((r) => ({
+      ref: r.ref!, label: r.label, year: r.year ?? '',
+      reason: uncheckedReason('unresolvable', {
+        source_kind: 'unknown', outcome: 'not-attempted', retryable: false, attempts: [],
+      }),
+      links: [],
+      sourceOutcome: { source_kind: 'unknown' as const, outcome: 'not-attempted', retryable: false, attempts: [] },
+    })),
   ]
 }
 

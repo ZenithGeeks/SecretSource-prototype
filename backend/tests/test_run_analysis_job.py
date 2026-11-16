@@ -36,10 +36,12 @@ def stubbed_pipeline(monkeypatch):
     monkeypatch.setattr(main.store, "save", save)
     monkeypatch.setattr(main, "extract_claims_with_citations", extract)
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
+    )
     monkeypatch.setattr(
         main, "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: {
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: {
             "status": "ok", "claim": claim, "source": source, "verdict": "supports"
         },
     )
@@ -118,11 +120,11 @@ def test_run_analysis_job_runs_twice_in_one_process(stubbed_pipeline, monkeypatc
         ]
         return {"status": "ok", "file": f"{paper}.pdf", "title": "A Paper", "claims": claims}
 
-    def prepare(source):
+    def prepare(source, expected=None):
         time.sleep(0.02)
         return {"status": "ok", "path": source}
 
-    def check(claim, source, path, judged="", other_citations=False):
+    def check(claim, source, path, judged="", other_citations=False, source_outcome=None):
         time.sleep(0.02)
         return {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
 

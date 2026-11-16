@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -317,11 +318,13 @@ def pipeline(monkeypatch):
         },
     )
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
+    )
     monkeypatch.setattr(
         main,
         "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: (
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
             checked.append(source)
             or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
         ),
@@ -362,7 +365,9 @@ def test_a_cited_paper_that_could_not_be_prepared_is_a_failed_check_not_a_verdic
     monkeypatch.setattr(
         main,
         "prepare_source",
-        lambda source: {"status": "error", "message": "no pdf found", "reason": "unavailable"},
+        lambda source, expected=None: {
+            "status": "error", "message": "no pdf found", "reason": "unavailable"
+        },
     )
 
     result = run_analysis_job("g-unready", "paper", True, None)
@@ -371,6 +376,68 @@ def test_a_cited_paper_that_could_not_be_prepared_is_a_failed_check_not_a_verdic
     assert result["status"] == "done"
     assert [stage["message"] for stage in failed] == ["no pdf found"]
     assert checked == []
+
+
+def test_a_readable_source_outcome_is_passed_to_each_check(monkeypatch, pipeline):
+    saved, checked = pipeline
+    outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {
+            "status": "ok", "path": source, "source_outcome": outcome,
+        },
+    )
+    received = []
+    monkeypatch.setattr(
+        main, "check_prepared",
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
+            received.append(source_outcome)
+            or {
+                "status": "ok", "claim": claim, "source": source,
+                "verdict": "supports", "source_outcome": source_outcome,
+            }
+        ),
+    )
+
+    result = run_analysis_job("g-outcome", "paper", True, None)
+
+    assert result["status"] == "done"
+    assert checked == []
+    assert received == [outcome]
+    assert saved[-1]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
+
+
+def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
+    outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
+    main.analyses["g-recheck-outcome"] = {
+        "claims": [{
+            "claim": "c1", "sentence": "A claim [b1].",
+            "citations": [{"ref": "b1", "key": "s1"}],
+            "verdicts": [{"cited": "s1", "verdict": "refutes"}],
+        }],
+        "stages": [],
+    }
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {
+            "status": "ok", "path": source, "source_outcome": outcome,
+        },
+    )
+    received = []
+    monkeypatch.setattr(
+        main, "check_prepared",
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
+            received.append(source_outcome)
+            or {
+                "status": "ok", "claim": claim, "source": source,
+                "verdict": "supports", "source_outcome": source_outcome,
+            }
+        ),
+    )
+    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
+
+    asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf")))
+
+    assert received == [outcome]
+    assert main.analyses["g-recheck-outcome"]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
 
 
 # --- starting a run ---
@@ -730,7 +797,7 @@ def test_a_question_about_a_paper_that_cannot_be_read_gets_an_error_event_and_no
     chat_client, monkeypatch
 ):
     main.analyses["a1"] = _row("a1", "user-ada", file="data/papers/a1.pdf")
-    monkeypatch.setattr(main, "prepare_source", lambda paper: {"status": "error"})
+    monkeypatch.setattr(main, "prepare_source", lambda paper, expected=None: {"status": "error"})
     client = chat_client("user-ada")
     chat = client.post("/assistant/chats").json()
 
@@ -820,7 +887,7 @@ def test_each_citation_of_a_sentence_citing_several_works_is_checked_as_one_of_s
     monkeypatch.setattr(
         main,
         "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: (
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
             flags.__setitem__(source, (judged, other_citations))
             or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
         ),

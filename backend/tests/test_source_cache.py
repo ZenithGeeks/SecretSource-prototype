@@ -21,9 +21,10 @@ def lookups(monkeypatch, tmp_path):
     """A fresh SQLite store, and a lookup that answers PUBLISHER and counts its calls."""
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "analyses.db"))
+    monkeypatch.setattr(sources, "_fallback_resolutions", lambda *args: ([], [], []))
     calls: list[str] = []
 
-    def lookup(identifier: str) -> sources.Resolution:
+    def lookup(identifier: str, expected: dict | None = None) -> sources.Resolution:
         calls.append(identifier)
         return sources.Resolution(PUBLISHER, "A TACL paper", "unpaywall", {"DOI": DOI})
 

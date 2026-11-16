@@ -14,7 +14,10 @@ ARXIV = "https://arxiv.org/pdf/2507.11408"
 
 
 def refused(url: str) -> requests.HTTPError:
-    return requests.HTTPError(f"403 Client Error: Forbidden for url: {url}")
+    response = requests.Response()
+    response.status_code = 403
+    response.url = url
+    return requests.HTTPError(f"403 Client Error: Forbidden for url: {url}", response=response)
 
 
 @pytest.fixture(autouse=True)
@@ -30,9 +33,21 @@ def lookup(monkeypatch):
     """Make the lookup answer with `found`, and the download fail for the URLs in `refuses`."""
     tried: list[str] = []
 
-    def install(found: sources.Resolution, refuses: dict[str, Exception], openalex: list[str] = ()):
-        monkeypatch.setattr(sources, "_resolve", lambda identifier: found)
-        monkeypatch.setattr(sources, "_openalex_pdfs", lambda doi: list(openalex))
+    def install(
+        found: sources.Resolution,
+        refuses: dict[str, Exception],
+        alternatives: list[sources.Resolution] | None = None,
+    ):
+        monkeypatch.setattr(sources, "_resolve", lambda identifier, expected=None: found)
+        monkeypatch.setattr(
+            sources,
+            "_fallback_resolutions",
+            lambda identifier, expected, primary: (
+                list(alternatives or []),
+                [sources._attempt("openalex", "matched", locator=item.url) for item in alternatives or []],
+                [],
+            ),
+        )
 
         def download(url: str, name: str) -> Path:
             tried.append(url)
@@ -100,23 +115,31 @@ def test_an_osti_record_page_is_fetched_as_its_pdf(lookup):
     assert tried == ["https://www.osti.gov/servlets/purl/2318788"]
 
 
-def test_a_refused_publisher_link_falls_back_to_a_copy_openalex_lists(lookup):
-    acm = "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089"
-    osti = "https://www.osti.gov/servlets/purl/2224161"
-    found = sources.Resolution(acm, ids={"DOI": "10.1145/3581784.3607089"})
-    tried = lookup(found, {acm: refused(acm)}, openalex=[acm, osti])
+def test_a_blocked_publisher_tries_an_openalex_repository_copy(lookup):
+    doi = "10.1162/tacl_a_00594"
+    publisher = "https://direct.mit.edu/tacl/article-pdf/doi/10.1162/tacl_a_00594/2159104/tacl_a_00594.pdf"
+    arxiv_copy = sources.Resolution(
+        "https://arxiv.org/pdf/2205.15231",
+        "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and "
+        "Supporting Tasks",
+        "openalex",
+        {"DOI": doi, "ArXiv": "2205.15231"},
+        2023,
+        "Jordan Meadows",
+    )
+    tried = lookup(
+        sources.Resolution(publisher, arxiv_copy.title, "semantic-scholar", {"DOI": doi}, 2023),
+        {publisher: refused(publisher)},
+        [arxiv_copy],
+    )
 
-    assert sources._fetch("Frontier: Exploring Exascale")[1].url == osti
-    assert tried == [acm, osti]  # the refused link is not asked twice
+    path, used = sources._fetch(doi)
 
-
-def test_an_osti_record_page_openalex_lists_is_fetched_as_its_pdf(lookup):
-    acm = "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089"
-    found = sources.Resolution(acm, ids={"DOI": "10.1145/3581784.3607089"})
-    tried = lookup(found, {acm: refused(acm)}, openalex=["https://www.osti.gov/biblio/2224161"])
-
-    assert sources._fetch("10.1145/3581784.3607089")[1].url == "https://www.osti.gov/servlets/purl/2224161"
-    assert tried == [acm, "https://www.osti.gov/servlets/purl/2224161"]
+    assert tried == [publisher, arxiv_copy.url]
+    assert path == Path(f"/papers/{doi.replace('/', '-')}.pdf")
+    assert used.url == arxiv_copy.url
+    assert used.index == "openalex"
+    assert [attempt["result"] for attempt in used.attempts[-3:]] == ["blocked", "matched", "readable_pdf"]
 
 
 # Unpaywall's answer for 10.1162/tacl.a.782 on 2026-10-16, cut to the fields used: the best

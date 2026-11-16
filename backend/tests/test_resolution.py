@@ -9,6 +9,7 @@ has to be deliberate. No network: requests is faked, as in test_sources.py.
 import sys
 
 import pytest
+import requests
 from app.pipeline import indexes, sources
 
 ARXIV_ATOM = """<feed xmlns="http://www.w3.org/2005/Atom">
@@ -41,7 +42,7 @@ class Response:
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    """No waiting, no network, and no cache between tests. OpenAlex knows no title."""
+    """No waiting, no network, and no cache between tests."""
     monkeypatch.setattr(indexes, "openalex_works", lambda params: [])
     monkeypatch.setattr(sources, "S2_MIN_INTERVAL", 0.0)
     monkeypatch.setattr(sources, "RETRY_WAITS", (0.01,))
@@ -59,7 +60,12 @@ def route(monkeypatch, **by_host):
                 return response
         raise AssertionError(f"unexpected request to {url}")
 
-    monkeypatch.setitem(sys.modules, "requests", type("requests", (), {"get": staticmethod(get)}))
+    monkeypatch.setitem(sys.modules, "requests", type("requests", (), {
+        "get": staticmethod(get),
+        "Timeout": requests.Timeout,
+        "ConnectionError": requests.ConnectionError,
+        "RequestException": requests.RequestException,
+    }))
     return calls
 
 
@@ -113,8 +119,6 @@ def test_a_wrong_title_is_not_answered_with_the_wrong_paper(monkeypatch):
         sources._lookup("An entirely different paper about pastry")
 
 
-# OpenAlex's record of the SC23 Frontier paper on 2026-11-14, cut to the fields asked for.
-# Semantic Scholar joins the title to its subtitle, so only OpenAlex matches the cited title.
 FRONTIER = {
     "doi": "https://doi.org/10.1145/3581784.3607089",
     "title": "Frontier: Exploring Exascale",
@@ -128,25 +132,35 @@ FRONTIER = {
 }
 
 
-def test_a_title_only_openalex_matches_resolves_through_openalex(monkeypatch):
-    s2_title = "Frontier: Exploring Exascale The System Architecture of the First Exascale Supercomputer"
+def test_a_title_only_citation_falls_back_to_openalex(monkeypatch):
+    s2_title = (
+        "Frontier: Exploring Exascale The System Architecture of the First Exascale Supercomputer"
+    )
     route(
         monkeypatch,
         arxiv=Response(text='<feed xmlns="http://www.w3.org/2005/Atom"></feed>'),
         semanticscholar=Response(payload={"data": [{**S2_PAPER, "title": s2_title}]}),
     )
     monkeypatch.setattr(indexes, "openalex_works", lambda params: [FRONTIER])
+
     found = sources._lookup("Frontier: Exploring Exascale")
-    assert (found.url, found.index) == ("https://dl.acm.org/doi/pdf/10.1145/3581784.3607089", "openalex")
+
+    assert (found.url, found.index) == (
+        "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089",
+        "openalex",
+    )
     assert found.ids == {"DOI": "10.1145/3581784.3607089"}
 
 
-def test_a_paywall_semantic_scholar_found_is_reported_over_openalex_not_knowing_the_title(monkeypatch):
+def test_paywall_from_semantic_scholar_remains_reported_over_openalex_no_match(monkeypatch):
     route(
         monkeypatch,
         arxiv=Response(text='<feed xmlns="http://www.w3.org/2005/Atom"></feed>'),
-        semanticscholar=Response(payload={"data": [{**S2_PAPER, "openAccessPdf": None, "externalIds": {}}]}),
+        semanticscholar=Response(
+            payload={"data": [{**S2_PAPER, "openAccessPdf": None, "externalIds": {}}]}
+        ),
     )
+
     with pytest.raises(sources.NoOpenAccessCopy):
         sources._lookup(S2_PAPER["title"])
 

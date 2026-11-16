@@ -7,6 +7,7 @@ import threading
 import time
 
 import pytest
+import requests
 from app.pipeline import sources
 
 
@@ -26,7 +27,12 @@ class Response:
 
 def fake_requests(monkeypatch, get):
     """Install `get` as the module-level `requests.get` the next `import requests` will see."""
-    monkeypatch.setitem(sys.modules, "requests", type("requests", (), {"get": staticmethod(get)}))
+    monkeypatch.setitem(sys.modules, "requests", type("requests", (), {
+        "get": staticmethod(get),
+        "Timeout": requests.Timeout,
+        "ConnectionError": requests.ConnectionError,
+        "RequestException": requests.RequestException,
+    }))
 
 
 @pytest.fixture(autouse=True)

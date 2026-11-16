@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "description": "Deterministic offline source-resolution cases; synthetic locations never make network requests.",
+  "cases": [
+    {
+      "id": "arxiv-abstract-url",
+      "label": "LLM Multi-Agent Systems: Challenges and Open Problems",
+      "identifier": "https://arxiv.org/abs/2402.03578",
+      "expected_identity": "arxiv:2402.03578",
+      "expected_source_kind": "paper",
+      "expected_outcome": "readable",
+      "known_accessible_copy": true,
+      "mock": {"provider": "arxiv", "locator": "https://arxiv.org/pdf/2402.03578", "result": "readable", "identity": "arxiv:2402.03578"}
+    },
+    {
+      "id": "named-only-book",
+      "label": "The Coding Manual for Qualitative Researchers",
+      "identifier": "",
+      "expected_identity": "",
+      "expected_source_kind": "unknown",
+      "expected_outcome": "named-only",
+      "known_accessible_copy": false,
+      "mock": {"provider": "none", "locator": "", "result": "named-only", "identity": ""}
+    },
+    {
+      "id": "empty-citation",
+      "label": "Reference with no usable metadata",
+      "identifier": "",
+      "expected_identity": "",
+      "expected_source_kind": "unknown",
+      "expected_outcome": "not-attempted",
+      "known_accessible_copy": false,
+      "mock": {"provider": "none", "locator": "", "result": "not-attempted", "identity": ""}
+    },
+    {
+      "id": "no-title-match",
+      "label": "Intergroup bias. Annual Review of Psychology",
+      "identifier": "Intergroup bias. Annual Review of Psychology",
+      "expected_identity": "title:intergroup-bias-2002",
+      "expected_source_kind": "unknown",
+      "expected_outcome": "no-match",
+      "known_accessible_copy": false,
+      "mock": {"provider": "semantic_scholar", "locator": "https://api.semanticscholar.org/graph/v1/paper/search", "result": "no-match", "identity": ""}
+    },
+    {
+      "id": "ambiguous-title",
+      "label": "Two same-author, same-year title candidates",
+      "identifier": "A Shared Title: A Method Study",
+      "expected_identity": "title:shared-title-2020",
+      "expected_source_kind": "paper",
+      "expected_outcome": "ambiguous-match",
+      "known_accessible_copy": false,
+      "mock": {"provider": "semantic_scholar", "locator": "https://api.semanticscholar.org/graph/v1/paper/search", "result": "ambiguous-match", "identity": ""}
+    },
+    {
+      "id": "identified-no-free-copy",
+      "label": "A collective self-esteem scale",
+      "identifier": "A collective self-esteem scale",
+      "expected_identity": "title:collective-self-esteem-1992",
+      "expected_source_kind": "paper",
+      "expected_outcome": "no-accessible-copy",
+      "known_accessible_copy": false,
+      "mock": {"provider": "unpaywall", "locator": "https://api.unpaywall.org/v2/10.0000/example", "result": "no-accessible-copy", "identity": "title:collective-self-esteem-1992"}
+    },
+    {
+      "id": "blocked-location",
+      "label": "Publisher PDF returns HTTP 403",
+      "identifier": "10.0000/blocked-example",
+      "expected_identity": "doi:10.0000/blocked-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "blocked",
+      "known_accessible_copy": true,
+      "mock": {"provider": "unpaywall", "locator": "https://publisher.example/paper.pdf?token=fixture-secret", "result": "blocked", "identity": "doi:10.0000/blocked-example", "status_code": 403}
+    },
+    {
+      "id": "dead-location",
+      "label": "Repository PDF returns HTTP 404",
+      "identifier": "10.0000/dead-example",
+      "expected_identity": "doi:10.0000/dead-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "not-found",
+      "known_accessible_copy": false,
+      "mock": {"provider": "repository", "locator": "https://repository.example/missing.pdf", "result": "not-found", "identity": "doi:10.0000/dead-example", "status_code": 404}
+    },
+    {
+      "id": "invalid-pdf-content",
+      "label": "PDF location returns a non-PDF body",
+      "identifier": "10.0000/invalid-content-example",
+      "expected_identity": "doi:10.0000/invalid-content-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "invalid-content",
+      "known_accessible_copy": false,
+      "mock": {"provider": "semantic_scholar", "locator": "https://publisher.example/invalid.pdf", "result": "invalid-content", "identity": "doi:10.0000/invalid-content-example"}
+    },
+    {
+      "id": "confirmed-web-page",
+      "label": "The transformation of open source software",
+      "identifier": "https://website.example/open-source-transformation",
+      "expected_identity": "url:website.example/open-source-transformation",
+      "expected_source_kind": "web-page",
+      "expected_outcome": "web-page",
+      "known_accessible_copy": false,
+      "mock": {"provider": "direct_url", "locator": "https://website.example/open-source-transformation", "result": "web-page", "identity": "url:website.example/open-source-transformation"}
+    },
+    {
+      "id": "wrong-doi-same-title-author-year",
+      "label": "Similar title candidate conflicts with cited DOI",
+      "identifier": "10.0000/expected-work",
+      "expected_identity": "doi:10.0000/expected-work",
+      "expected_source_kind": "paper",
+      "expected_outcome": "identity-mismatch",
+      "known_accessible_copy": false,
+      "mock": {"provider": "semantic_scholar", "locator": "https://wrong-work.example/paper.pdf", "result": "identity-mismatch", "identity": "doi:10.0000/wrong-work", "status_code": null}
+    },
+    {
+      "id": "temporary-then-readable",
+      "label": "Transient provider failure succeeds on retry",
+      "identifier": "10.0000/retry-example",
+      "expected_identity": "doi:10.0000/retry-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "readable",
+      "known_accessible_copy": true,
+      "mock": {"provider": "arxiv", "locator": "https://arxiv.org/pdf/2402.03578", "result": "temporary-failure", "identity": "doi:10.0000/retry-example"},
+      "retry": {"provider": "arxiv", "locator": "https://arxiv.org/pdf/2402.03578", "result": "readable", "identity": "doi:10.0000/retry-example"}
+    },
+    {
+      "id": "blocked-primary-openalex-readable",
+      "label": "Publisher is blocked but OpenAlex lists a repository copy",
+      "identifier": "10.0000/alternate-example",
+      "expected_identity": "doi:10.0000/alternate-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "readable",
+      "known_accessible_copy": true,
+      "mock": {"provider": "semantic_scholar", "locator": "https://publisher.example/blocked.pdf", "result": "blocked", "identity": "doi:10.0000/alternate-example", "status_code": 403},
+      "fallback": {"provider": "openalex", "locator": "https://repository.example/alternate.pdf", "result": "readable", "identity": "doi:10.0000/alternate-example"}
+    },
+    {
+      "id": "no-primary-copy-acl-readable",
+      "label": "Primary indexes list no copy but ACL Anthology has one",
+      "identifier": "10.0000/acl-legacy-example",
+      "expected_identity": "doi:10.0000/acl-legacy-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "readable",
+      "known_accessible_copy": true,
+      "mock": {"provider": "semantic_scholar", "locator": "https://fixture.invalid/primary-no-copy", "result": "no-accessible-copy", "identity": "doi:10.0000/acl-legacy-example"},
+      "fallback": {"provider": "acl_anthology", "locator": "https://aclanthology.org/P02-1040.pdf", "result": "readable", "identity": "doi:10.0000/acl-legacy-example"}
+    },
+    {
+      "id": "blocked-primary-unpaywall-readable",
+      "label": "Publisher is blocked but Unpaywall lists a repository copy",
+      "identifier": "10.0000/unpaywall-alternate-example",
+      "expected_identity": "doi:10.0000/unpaywall-alternate-example",
+      "expected_source_kind": "paper",
+      "expected_outcome": "readable",
+      "known_accessible_copy": true,
+      "mock": {"provider": "semantic_scholar", "locator": "https://publisher.example/paywall.pdf", "result": "blocked", "identity": "doi:10.0000/unpaywall-alternate-example", "status_code": 403},
+      "fallback": {"provider": "unpaywall", "locator": "https://repository.example/unpaywall-copy.pdf", "result": "readable", "identity": "doi:10.0000/unpaywall-alternate-example"}
+    }
+  ]
+}

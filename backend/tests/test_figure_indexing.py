@@ -56,7 +56,10 @@ def services(monkeypatch):
         return {"topk": [FIGURE], "model": "colqwen"}
 
     monkeypatch.setitem(sys.modules, "app.pipeline.rag", types.SimpleNamespace(add_paper=add_paper))
-    monkeypatch.setattr(sources, "local_pdf", lambda identifier: PAPER.as_posix())
+    outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
+    monkeypatch.setattr(
+        sources, "local_pdf_with_resolution", lambda identifier, expected=None: (PAPER.as_posix(), outcome)
+    )
     monkeypatch.setattr(sources, "known_index", lambda identifier: {"index": "", "ids": {}})
     monkeypatch.setattr(sources, "version_of", lambda pdf: {})
     monkeypatch.setattr(verify.retrieval, "colbert_search", lambda claim, k, source=None: [PASSAGE])
@@ -78,7 +81,12 @@ def services(monkeypatch):
 def test_the_check_runs_before_the_figures_are_indexed(services):
     start = time.monotonic()
     prepared = verify.prepare_source("2112.01488")
-    assert prepared == {"status": "ok", "path": PAPER.as_posix()}
+    assert prepared == {
+        "status": "ok", "path": PAPER.as_posix(),
+        "source_outcome": {
+            "source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": [],
+        },
+    }
 
     verdict = verify.check_prepared("ColBERT reduces the index 10x", "2112.01488", PAPER)
     assert time.monotonic() - start < 1  # not the 5 s the figure indexing would hold it
