@@ -856,6 +856,9 @@ def test_a_string_author_can_filter_title_results_and_arxiv_ids_are_validated():
     fits = sources._expected_fits({"year": "2020", "authors": "Alex Smith"})
     assert fits(2020, "Alex Smith")
     assert not fits(2019, "Alex Smith")
+    bibtex_fits = sources._expected_fits({"year": "2020", "authors": "Smith, Alex"})
+    assert bibtex_fits(2020, "Alex Smith")
+    assert not bibtex_fits(2020, "Alex Smythe")
     found = sources.Resolution("", "Paper", ids={"ArXiv": "2101.00001v2"})
     with pytest.raises(sources.IdentityMismatch, match="arXiv ID"):
         sources._validate_resolution(found, {"arxiv": "2101.00002v1"})

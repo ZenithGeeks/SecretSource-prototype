@@ -647,10 +647,13 @@ def _as_year(value) -> int | None:
 
 
 def _surname(name: str) -> str:
-    cleaned = re.sub(r"[^a-zA-Z -]", " ", name).strip().lower()
+    # Citation metadata commonly uses "Surname, Given" while indexes use "Given Surname".
+    # In the former, only the text before the comma is the family name.
+    family_name = name.split(",", 1)[0]
+    cleaned = re.sub(r"[^a-zA-Z -]", " ", family_name).strip().lower()
     if not cleaned:
         return ""
-    return cleaned.split(",", 1)[0].split()[-1]
+    return cleaned.split()[-1]
 
 
 def _expected_fits(expected: dict | None) -> Fits:

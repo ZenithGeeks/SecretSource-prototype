@@ -107,7 +107,7 @@ def test_a_failed_check_carries_retryable(monkeypatch, tmp_path):
     assert result["source_outcome"]["outcome"] == "retrieval-failed"
 
 
-def test_a_failed_check_without_prior_source_outcome_keeps_the_original_failure(monkeypatch, tmp_path):
+def test_a_failed_check_without_prior_source_outcome_uses_error_outcome(monkeypatch, tmp_path):
     def evidence_from(claim, name):
         raise requests.ReadTimeout("ColBERT timed out")
 
