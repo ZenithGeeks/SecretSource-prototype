@@ -100,6 +100,13 @@ describe('unresolvedCitations', () => {
     expect(row.reason).toBe('a web page, not a paper we can check a claim against')
   })
 
+  it('keeps the legacy index wording when an older unresolved citation has a DOI', () => {
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A paper', reason: 'unresolvable', doi: '10.1000/example' }],
+    }), session)
+    expect(row.reason).toBe('no matching work was found in the indexes checked')
+  })
+
   it('leaves out a work that has a PDF from another claim: that one opens', () => {
     const named = { ref: 'b4', label: 'Ref B', reason: 'named' }
     expect(unresolvedCitations(claim({ cited: ['b4', 'b23'], unchecked: [named, TOP500] }), session).map((c) => c.ref)).toEqual(['b23'])
@@ -189,7 +196,10 @@ describe('UnresolvedReferences', () => {
         links: [],
         sourceOutcome: {
           source_kind: 'unknown', outcome: 'temporary-failure', retryable: true,
-          attempts: [{ provider: 'semantic_scholar', result: 'temporary-failure', status_code: 503 }],
+          attempts: [{
+            provider: 'semantic_scholar', result: 'temporary-failure',
+            host: 'api.semanticscholar.org', locator: 'javascript:ignored', status_code: 503,
+          }],
         },
       }),
     ]} />)

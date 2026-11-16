@@ -391,7 +391,10 @@ def test_a_readable_source_outcome_is_passed_to_each_check(monkeypatch, pipeline
         main, "check_prepared",
         lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
             received.append(source_outcome)
-            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+            or {
+                "status": "ok", "claim": claim, "source": source,
+                "verdict": "supports", "source_outcome": source_outcome,
+            }
         ),
     )
 
@@ -423,9 +426,13 @@ def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
         main, "check_prepared",
         lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
             received.append(source_outcome)
-            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+            or {
+                "status": "ok", "claim": claim, "source": source,
+                "verdict": "supports", "source_outcome": source_outcome,
+            }
         ),
     )
+    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
 
     asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf")))
 
