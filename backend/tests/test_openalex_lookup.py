@@ -108,9 +108,10 @@ def test_a_rate_limit_in_the_middle_is_not_reported_as_not_found():
     assert sources._reported([nowhere, limited, sources.Unresolvable("OpenAlex: no paper")]) is limited
 
 
-def test_a_paywall_wins_over_openalex_not_answering():
+def test_openalex_outage_wins_over_a_paywall_from_another_index():
     paywall = sources.NoOpenAccessCopy("no open-access PDF known")
-    assert sources._reported([paywall, sources.LookupUnavailable("OpenAlex did not answer")]) is paywall
+    outage = sources.LookupUnavailable("OpenAlex did not answer")
+    assert sources._reported([paywall, outage]) is outage
 
 
 def test_no_resolver_at_all_is_unavailable():

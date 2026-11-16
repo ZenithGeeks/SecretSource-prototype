@@ -107,6 +107,20 @@ def test_a_failed_check_carries_retryable(monkeypatch, tmp_path):
     assert result["source_outcome"]["outcome"] == "retrieval-failed"
 
 
+def test_a_failed_check_without_prior_source_outcome_keeps_the_original_failure(monkeypatch, tmp_path):
+    def evidence_from(claim, name):
+        raise requests.ReadTimeout("ColBERT timed out")
+
+    monkeypatch.setattr(verify, "evidence_from", evidence_from)
+    monkeypatch.setattr(verify, "_figures_ready", lambda source: False)
+
+    result = verify.check_prepared("a claim", "2112.01488", tmp_path / "paper.pdf")
+
+    assert result["status"] == "error"
+    assert result["reason"] == "not-downloadable"
+    assert "source_outcome" not in result
+
+
 def test_add_paper_carries_retryable(monkeypatch):
     def colbert_add(path):
         raise requests.ConnectionError("connection refused")

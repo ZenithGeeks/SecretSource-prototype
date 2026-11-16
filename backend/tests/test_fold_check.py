@@ -28,6 +28,17 @@ def test_a_failed_check_is_kept_with_its_reason():
     ]
 
 
+def test_a_failed_check_keeps_its_source_retrieval_outcome():
+    claim = {"citations": []}
+    outcome = {"source_kind": "paper", "outcome": "temporary-failure", "attempts": []}
+
+    fold_check(claim, "paper.pdf", {}, {
+        "status": "error", "reason": "lookup-unavailable", "source_outcome": outcome,
+    })
+
+    assert claim["unchecked"][0]["source_outcome"] == outcome
+
+
 def test_a_second_check_appends_rather_than_replacing():
     claim = {"claim": "A claim with two cited works.", "citations": []}
     fold_check(claim, "a.pdf", {"url": ""}, {"status": "ok", "verdict": "supports"})
