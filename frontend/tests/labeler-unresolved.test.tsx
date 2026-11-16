@@ -107,6 +107,20 @@ describe('unresolvedCitations', () => {
     expect(row.reason).toBe('no matching work was found in the indexes checked')
   })
 
+  it('preserves retrieval outcomes from a checked citation row', () => {
+    const sourceOutcome = {
+      source_kind: 'paper' as const,
+      outcome: 'blocked',
+      retryable: false,
+      attempts: [{ provider: 'openalex', result: 'blocked' }],
+    }
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A paper', reason: 'failed', source_outcome: sourceOutcome }],
+    }), session)
+
+    expect(row.sourceOutcome).toBe(sourceOutcome)
+  })
+
   it('leaves out a work that has a PDF from another claim: that one opens', () => {
     const named = { ref: 'b4', label: 'Ref B', reason: 'named' }
     expect(unresolvedCitations(claim({ cited: ['b4', 'b23'], unchecked: [named, TOP500] }), session).map((c) => c.ref)).toEqual(['b23'])

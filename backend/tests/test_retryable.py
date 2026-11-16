@@ -118,7 +118,7 @@ def test_a_failed_check_without_prior_source_outcome_keeps_the_original_failure(
 
     assert result["status"] == "error"
     assert result["reason"] == "failed"
-    assert "source_outcome" not in result
+    assert result["source_outcome"]["outcome"] == "temporary-failure"
 
 
 def test_add_paper_carries_retryable(monkeypatch):
