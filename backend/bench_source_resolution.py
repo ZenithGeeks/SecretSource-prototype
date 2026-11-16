@@ -20,7 +20,6 @@ import requests
 from app import store
 from app.pipeline import sources
 
-
 DEFAULT_MANIFEST = Path(__file__).parent / "fixtures" / "source_resolution_manifest.json"
 NON_ATTEMPT_OUTCOMES = {"named-only", "not-attempted"}
 NON_MATCH_OUTCOMES = {

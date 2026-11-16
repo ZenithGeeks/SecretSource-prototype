@@ -24,7 +24,6 @@ import requests
 from app import store
 from app.pipeline import sources
 
-
 DEFAULT_MANIFEST = Path(__file__).parent / "fixtures" / "source_resolution_live_manifest.json"
 PROVIDERS: dict[str, Callable[[str, dict], list[sources.Resolution]]] = {
     "acl_anthology": sources._acl_anthology_candidates,
