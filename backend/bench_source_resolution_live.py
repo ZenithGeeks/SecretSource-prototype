@@ -1,8 +1,9 @@
-"""Opt-in live comparison of ACL Anthology and OpenAlex on a fixed reference corpus.
+"""Opt-in live source-resolution benchmarks on a fixed reference corpus.
 
 Run from ``backend`` with ``python bench_source_resolution_live.py``. This makes
 public metadata and PDF requests, writes downloaded PDFs only to a temporary
-directory, and emits safe attempt outcomes rather than URLs or response bodies.
+directory, and emits safe attempt outcomes rather than URLs or response bodies. Pass
+``--pipeline`` to compare primary-only retrieval against the full fallback pipeline.
 """
 
 from __future__ import annotations
@@ -234,12 +235,178 @@ def run_live_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     }
 
 
+def _safe_pipeline_attempts(attempts: list[dict] | tuple[dict, ...]) -> list[dict]:
+    """Keep only provider and outcome fields; never persist citation or source URLs."""
+    safe = []
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        row = {
+            "provider": str(attempt.get("provider") or "unknown"),
+            "result": str(attempt.get("result") or attempt.get("outcome") or "unknown"),
+        }
+        status = attempt.get("status_code")
+        if isinstance(status, int):
+            row["status_code"] = status
+        if isinstance(attempt.get("retryable"), bool):
+            row["retryable"] = attempt["retryable"]
+        safe.append(row)
+    return safe
+
+
+def _run_pipeline_case(case: dict, papers_dir: Path, *, fallback_enabled: bool) -> dict:
+    identifier = case.get("doi") or case.get("arxiv") or case.get("title") or ""
+    expected = {
+        key: case[key]
+        for key in ("doi", "arxiv", "title", "year", "venue", "authors", "author")
+        if key in case
+    }
+
+    def fetch():
+        with patch.object(sources, "PAPERS_DIR", papers_dir):
+            return sources._fetch(identifier, expected=expected)
+
+    try:
+        if fallback_enabled:
+            _path, resolution = fetch()
+        else:
+            with patch.object(sources, "_fallback_resolutions", return_value=([], [], [])):
+                _path, resolution = fetch()
+        outcome = "readable"
+        source_kind = "paper"
+        retryable = False
+        resolved_by = resolution.index or "unknown"
+        attempts = _safe_pipeline_attempts(resolution.attempts)
+    except (requests.RequestException, OSError, ValueError) as error:
+        failed = sources._source_outcome(error)
+        outcome = failed["outcome"]
+        source_kind = failed["source_kind"]
+        retryable = failed["retryable"]
+        attempts = _safe_pipeline_attempts(failed.get("attempts") or [])
+        resolved_by = ""
+
+    readable_index = next(
+        (index for index, attempt in enumerate(attempts)
+         if attempt["result"] == "readable_pdf"),
+        None,
+    )
+    recovered_after_failed_download = bool(
+        outcome == "readable"
+        and readable_index is not None
+        and any(
+            attempt["result"] in {
+                "blocked", "not-found", "invalid-content", "download-failed", "web-page",
+            }
+            for attempt in attempts[:readable_index]
+        )
+    )
+    return {
+        "outcome": outcome,
+        "source_kind": source_kind,
+        "retryable": retryable,
+        "readable": outcome == "readable",
+        "resolved_by": resolved_by,
+        "recovered_after_failed_download": recovered_after_failed_download,
+        "attempts": attempts,
+    }
+
+
+def run_pipeline_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
+    """Compare primary-only retrieval with the complete resolver and fallback chain."""
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("cases"), list):
+        raise ValueError("unsupported or malformed live source-resolution manifest")
+    cases = manifest["cases"]
+    case_ids = [case.get("id") for case in cases]
+    if not case_ids or not all(isinstance(case_id, str) and case_id for case_id in case_ids):
+        raise ValueError("live benchmark cases need nonempty IDs")
+    if len(set(case_ids)) != len(case_ids):
+        raise ValueError("live benchmark case IDs must be unique")
+    if any(not (case.get("doi") or case.get("arxiv") or case.get("title")) for case in cases):
+        raise ValueError("live benchmark cases need a DOI, arXiv ID, or title")
+
+    from app import store
+
+    results = []
+    with tempfile.TemporaryDirectory(
+        prefix=".source-resolution-pipeline-live-", dir=Path(__file__).parent,
+    ) as scratch:
+        root = Path(scratch)
+        # Keep cache entries and PDFs isolated from the running application.
+        with (
+            patch.object(store, "recall_cache", return_value=None),
+            patch.object(store, "remember_cache", return_value=None),
+            patch.object(store, "recall_source", return_value=None),
+            patch.object(store, "remember_source", return_value=None),
+            patch.object(store, "forget_source", return_value=None),
+        ):
+            for case in cases:
+                primary = _run_pipeline_case(
+                    case, root / "primary-only" / case["id"], fallback_enabled=False,
+                )
+                full = _run_pipeline_case(
+                    case, root / "fallback-enabled" / case["id"], fallback_enabled=True,
+                )
+                results.append({
+                    "id": case["id"],
+                    "primary_only": primary,
+                    "fallback_enabled": full,
+                    "improved_by_fallback": not primary["readable"] and full["readable"],
+                    "regressed_with_fallback": primary["readable"] and not full["readable"],
+                })
+
+    by_outcome: dict[str, int] = {}
+    by_provider: dict[str, dict[str, int]] = {}
+    for result in results:
+        full = result["fallback_enabled"]
+        by_outcome[full["outcome"]] = by_outcome.get(full["outcome"], 0) + 1
+        for attempt in full["attempts"]:
+            provider = attempt["provider"]
+            provider_outcomes = by_provider.setdefault(provider, {})
+            provider_outcomes[attempt["result"]] = provider_outcomes.get(attempt["result"], 0) + 1
+
+    total = len(results)
+    primary_readable = sum(result["primary_only"]["readable"] for result in results)
+    fallback_readable = sum(result["fallback_enabled"]["readable"] for result in results)
+    recovered = sum(result["improved_by_fallback"] for result in results)
+    regressed = sum(result["regressed_with_fallback"] for result in results)
+    return {
+        "schema_version": 1,
+        "mode": "live-pipeline",
+        "run_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "git_revision": _revision(),
+        "manifest": manifest_path.name,
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "source_code_sha256": hashlib.sha256(Path(sources.__file__).read_bytes()).hexdigest(),
+        "metrics": {
+            "references": total,
+            "primary_only_readable_references": primary_readable,
+            "primary_only_readable_copy_rate": primary_readable / total if total else None,
+            "fallback_enabled_readable_references": fallback_readable,
+            "fallback_enabled_readable_copy_rate": fallback_readable / total if total else None,
+            "recovered_by_fallback": recovered,
+            "regressed_with_fallback": regressed,
+            "absolute_gain_percentage_points": (fallback_readable - primary_readable) / total * 100
+            if total else None,
+            "outcome_counts": by_outcome,
+            "attempt_outcomes_by_provider": by_provider,
+        },
+        "cases": results,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--output", type=Path, help="write JSON here instead of stdout")
+    parser.add_argument(
+        "--pipeline", action="store_true",
+        help="run each reference through the full resolver, fallback chain, and PDF validator",
+    )
     args = parser.parse_args()
-    rendered = json.dumps(run_live_benchmark(args.manifest), indent=2, sort_keys=True) + "\n"
+    runner = run_pipeline_benchmark if args.pipeline else run_live_benchmark
+    rendered = json.dumps(runner(args.manifest), indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.write_text(rendered, encoding="utf-8")
     else:

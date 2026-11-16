@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from bench_source_resolution_live import run_live_benchmark
+from bench_source_resolution_live import run_live_benchmark, run_pipeline_benchmark
 from app.pipeline import sources
 
 
@@ -92,3 +92,64 @@ def test_live_benchmark_rejects_unknown_provider(tmp_path):
         assert "providers" in str(error)
     else:
         raise AssertionError("unsupported providers should be rejected")
+
+
+def test_pipeline_benchmark_reports_end_to_end_download_recovery_without_identifiers_or_urls(
+    monkeypatch, tmp_path,
+):
+    doi = "10.1000/private-example"
+    title = "Example paper"
+    manifest = tmp_path / "pipeline-manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "cases": [
+            {"id": "recovered", "doi": doi, "title": title, "year": 2024},
+            {"id": "unreadable", "doi": "10.1000/unreadable", "title": "Other paper", "year": 2020},
+        ],
+    }), encoding="utf-8")
+
+    def fetch(identifier, expected=None):
+        if identifier == doi:
+            primary_attempt = sources._attempt(
+                "semantic_scholar", "blocked", locator="https://publisher.example/paper.pdf",
+            )
+            if hasattr(sources._fallback_resolutions, "return_value"):
+                error = sources.NotDownloadable("primary download blocked")
+                error.source_kind = "paper"
+                error.status_code = 403
+                error.source_attempts = [primary_attempt]
+                raise error
+            attempts = (
+                primary_attempt,
+                sources._attempt("openalex", "matched", locator="https://repository.example/paper.pdf"),
+                sources._attempt("openalex", "readable_pdf", locator="https://repository.example/paper.pdf"),
+            )
+            return Path("mock.pdf"), sources.Resolution(
+                "https://repository.example/paper.pdf", title, "openalex", {"DOI": doi}, 2024,
+                attempts=attempts,
+            )
+        error = sources.NoOpenAccessCopy("no public copy")
+        error.source_attempts = [sources._attempt("openalex", "no-accessible-copy")]
+        raise error
+
+    monkeypatch.setattr(sources, "_fetch", fetch)
+
+    report = run_pipeline_benchmark(manifest)
+
+    assert report["mode"] == "live-pipeline"
+    assert report["metrics"]["references"] == 2
+    assert report["metrics"]["primary_only_readable_references"] == 0
+    assert report["metrics"]["fallback_enabled_readable_references"] == 1
+    assert report["metrics"]["recovered_by_fallback"] == 1
+    assert report["metrics"]["absolute_gain_percentage_points"] == 50
+    assert report["metrics"]["outcome_counts"] == {
+        "no-accessible-copy": 1,
+        "readable": 1,
+    }
+    assert report["cases"][0]["primary_only"]["outcome"] == "blocked"
+    assert report["cases"][0]["fallback_enabled"]["resolved_by"] == "openalex"
+    assert report["cases"][0]["improved_by_fallback"] is True
+    rendered = str(report)
+    assert doi not in rendered
+    assert "publisher.example" not in rendered
+    assert "repository.example" not in rendered
