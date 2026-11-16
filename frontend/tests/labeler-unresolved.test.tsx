@@ -199,7 +199,7 @@ describe('UnresolvedReferences', () => {
           attempts: [{
             provider: 'semantic_scholar', result: 'temporary-failure',
             host: 'api.semanticscholar.org', locator: 'javascript:ignored', status_code: 503,
-          }],
+          }, { provider: 'resolver', result: 'no-match' }],
         },
       }),
     ]} />)

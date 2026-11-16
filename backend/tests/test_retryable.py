@@ -53,7 +53,7 @@ def test_a_download_that_timed_out_is_reported_as_retryable(monkeypatch):
 
     result = sources.fetch_source("10.1000/example")
 
-    assert result["reason"] == "failed"
+    assert result["reason"] == "not-downloadable"
     assert result["retryable"] is True
 
 
@@ -117,7 +117,7 @@ def test_a_failed_check_without_prior_source_outcome_keeps_the_original_failure(
     result = verify.check_prepared("a claim", "2112.01488", tmp_path / "paper.pdf")
 
     assert result["status"] == "error"
-    assert result["reason"] == "not-downloadable"
+    assert result["reason"] == "failed"
     assert "source_outcome" not in result
 
 

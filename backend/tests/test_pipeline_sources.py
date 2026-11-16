@@ -859,6 +859,7 @@ def test_a_string_author_can_filter_title_results_and_arxiv_ids_are_validated():
     found = sources.Resolution("", "Paper", ids={"ArXiv": "2101.00001v2"})
     with pytest.raises(sources.IdentityMismatch, match="arXiv ID"):
         sources._validate_resolution(found, {"arxiv": "2101.00002v1"})
+    sources._validate_resolution(found, {"arxiv": "2101.00001v1"})
 
 
 def test_arxiv_title_search_rejects_multiple_exact_matches(monkeypatch, web):
@@ -976,6 +977,13 @@ def test_acl_venue_partial_acronym_and_modern_paper_id(monkeypatch):
 
     root = ET.fromstring('<collection id="2022.acl"><volume id="1"><paper id="2"/></volume></collection>')
     assert sources._acl_paper_id(root, root.find("volume"), root.find("./volume/paper")) == "2022.acl-1.2"
+
+
+def test_old_acl_venue_without_legacy_id_keeps_its_current_key(monkeypatch):
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args, **kwargs: {
+        "acl": {"name": "Annual Meeting", "acronym": "ACL"},
+    })
+    assert sources._acl_venue("ACL", 2019)[0] == "acl"
 
 
 def test_acl_paper_id_accepts_legacy_ids_and_rejects_malformed_ids():
@@ -1161,6 +1169,20 @@ def test_lookup_outage_keeps_identifier_metadata_in_the_failure(monkeypatch, sto
     with pytest.raises(sources.LookupUnavailable) as failure:
         sources._fetch("https://arxiv.org/abs/2112.01488", {"doi": DOI, "arxiv": "2112.01488"})
     assert failure.value.source_kind == "unknown"
+    assert failure.value.source_attempts[0]["provider"] == "source_lookup"
+
+
+def test_failed_title_lookup_keeps_expected_arxiv_metadata(monkeypatch, store_in_tmp):
+    monkeypatch.setattr(
+        sources, "_resolve", lambda *args: (_ for _ in ()).throw(sources.Unresolvable("missing"))
+    )
+    monkeypatch.setattr(sources, "_fallback_resolutions", lambda *args: ([], [], []))
+    monkeypatch.setattr(
+        sources, "_download", lambda *args: (_ for _ in ()).throw(sources.NotDownloadable("no pdf"))
+    )
+    monkeypatch.setattr(sources, "_withdrawn_by", lambda arxiv_id: "")
+    with pytest.raises(sources.Unresolvable) as failure:
+        sources._fetch("A cited title", {"arxiv": "2112.01488"})
     assert failure.value.source_attempts[0]["provider"] == "source_lookup"
 
 
