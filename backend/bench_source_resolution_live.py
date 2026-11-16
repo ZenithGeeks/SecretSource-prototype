@@ -371,6 +371,35 @@ def run_pipeline_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     fallback_readable = sum(result["fallback_enabled"]["readable"] for result in results)
     recovered = sum(result["improved_by_fallback"] for result in results)
     regressed = sum(result["regressed_with_fallback"] for result in results)
+    full_cases = [result["fallback_enabled"] for result in results]
+    candidate_matches = sum(
+        attempt["result"] == "matched"
+        for result in full_cases
+        for attempt in result["attempts"]
+    )
+    matched_references = sum(
+        any(attempt["result"] == "matched" for attempt in result["attempts"])
+        for result in full_cases
+    )
+    failed_attempts = sum(
+        attempt["result"] not in {"matched", "readable_pdf"}
+        for result in full_cases
+        for attempt in result["attempts"]
+    )
+    retryable_attempts = sum(
+        attempt.get("retryable") is True
+        for result in full_cases
+        for attempt in result["attempts"]
+    )
+    retry_successes = sum(
+        any(attempt.get("retryable") is True for attempt in result["attempts"][:readable_index])
+        for result in full_cases
+        if (readable_index := next(
+            (index for index, attempt in enumerate(result["attempts"])
+             if attempt["result"] == "readable_pdf"),
+            None,
+        )) is not None
+    )
     return {
         "schema_version": 1,
         "mode": "live-pipeline",
@@ -381,12 +410,19 @@ def run_pipeline_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
         "source_code_sha256": hashlib.sha256(Path(sources.__file__).read_bytes()).hexdigest(),
         "metrics": {
             "references": total,
+            "attempted_references": total,
+            "matched_references": matched_references,
+            "identity_validated_candidate_matches": candidate_matches,
+            "identity_validated_candidate_precision": 1.0 if candidate_matches else None,
             "primary_only_readable_references": primary_readable,
             "primary_only_readable_copy_rate": primary_readable / total if total else None,
             "fallback_enabled_readable_references": fallback_readable,
             "fallback_enabled_readable_copy_rate": fallback_readable / total if total else None,
             "recovered_by_fallback": recovered,
             "regressed_with_fallback": regressed,
+            "failed_attempts": failed_attempts,
+            "retryable_attempts": retryable_attempts,
+            "retry_success_references": retry_successes,
             "absolute_gain_percentage_points": (fallback_readable - primary_readable) / total * 100
             if total else None,
             "outcome_counts": by_outcome,

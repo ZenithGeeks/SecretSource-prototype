@@ -138,10 +138,16 @@ def test_pipeline_benchmark_reports_end_to_end_download_recovery_without_identif
 
     assert report["mode"] == "live-pipeline"
     assert report["metrics"]["references"] == 2
+    assert report["metrics"]["matched_references"] == 1
+    assert report["metrics"]["identity_validated_candidate_matches"] == 1
+    assert report["metrics"]["identity_validated_candidate_precision"] == 1.0
     assert report["metrics"]["primary_only_readable_references"] == 0
     assert report["metrics"]["fallback_enabled_readable_references"] == 1
     assert report["metrics"]["recovered_by_fallback"] == 1
     assert report["metrics"]["absolute_gain_percentage_points"] == 50
+    assert report["metrics"]["failed_attempts"] == 2
+    assert report["metrics"]["retryable_attempts"] == 0
+    assert report["metrics"]["retry_success_references"] == 0
     assert report["metrics"]["outcome_counts"] == {
         "no-accessible-copy": 1,
         "readable": 1,
