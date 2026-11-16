@@ -395,7 +395,7 @@ def test_a_cited_work_with_no_title_is_listed_by_its_authors_and_venue():
     session = labeling.build_session(_citing(VENUE_ONLY))
 
     assert session["claims"][1]["cited"] == ["b9"]
-    assert session["claims"][1]["unchecked"] == []
+    assert session["claims"][1]["unchecked"][0]["source_outcome"]["outcome"] == "not-attempted"
     assert session["unread"] == [
         {
             "reference_id": "unread-b9",
@@ -1792,10 +1792,18 @@ def test_a_claim_says_why_its_citations_were_not_checked(api):
     assert checked["unchecked"] == []
     links = {"url": "", "doi": "", "year": "2020"}
     assert named["unchecked"] == [
-        {"ref": "b39", "label": "T5 paper", "reason": "named", **links,
-         "source_outcome": {"source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": []}},
-        {"ref": "b49", "label": "SuperGLUE", "reason": "named", **links,
-         "source_outcome": {"source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": []}},
+        {
+            "ref": "b39", "label": "T5 paper", "reason": "named", **links,
+            "source_outcome": {
+                "source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": [],
+            },
+        },
+        {
+            "ref": "b49", "label": "SuperGLUE", "reason": "named", **links,
+            "source_outcome": {
+                "source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": [],
+            },
+        },
         {"ref": "b4", "label": "NeurIPS", "reason": "no-open-access", **links},
     ]
 

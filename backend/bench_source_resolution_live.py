@@ -161,7 +161,10 @@ def run_live_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     if manifest.get("schema_version") != 1 or not isinstance(manifest.get("cases"), list):
         raise ValueError("unsupported or malformed live source-resolution manifest")
     providers = manifest.get("providers", list(PROVIDERS))
-    if not isinstance(providers, list) or not providers or any(provider not in PROVIDERS for provider in providers):
+    if (
+        not isinstance(providers, list) or not providers
+        or any(provider not in PROVIDERS for provider in providers)
+    ):
         raise ValueError("live benchmark providers must be a nonempty list of supported providers")
     case_ids = [case.get("id") for case in manifest["cases"]]
     if not case_ids or not all(isinstance(case_id, str) and case_id for case_id in case_ids):

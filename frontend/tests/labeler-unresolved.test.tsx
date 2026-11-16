@@ -93,6 +93,13 @@ describe('unresolvedCitations', () => {
     expect(row.reason).toBe('no DOI or arXiv ID to look it up by')
   })
 
+  it('keeps the legacy web-page wording for older unresolved citations with a URL', () => {
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A site', reason: 'unresolvable', url: 'https://example.org' }],
+    }), session)
+    expect(row.reason).toBe('a web page, not a paper we can check a claim against')
+  })
+
   it('leaves out a work that has a PDF from another claim: that one opens', () => {
     const named = { ref: 'b4', label: 'Ref B', reason: 'named' }
     expect(unresolvedCitations(claim({ cited: ['b4', 'b23'], unchecked: [named, TOP500] }), session).map((c) => c.ref)).toEqual(['b23'])

@@ -149,7 +149,10 @@ def test_unpaywall_keeps_each_open_location_for_fetch_fallback(monkeypatch, web)
 
 def test_openalex_doi_lookup_returns_validated_open_pdf_locations(monkeypatch):
     doi = "10.1162/tacl_a_00594"
-    title = "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and Supporting Tasks"
+    title = (
+        "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and "
+        "Supporting Tasks"
+    )
     work = {
         "doi": f"https://doi.org/{doi}",
         "title": title,
@@ -369,7 +372,9 @@ def test_fetch_uses_acl_metadata_when_other_pdf_host_is_blocked(monkeypatch, sto
     publisher = "https://publisher.example/blocked.pdf"
     monkeypatch.setattr(
         sources, "_resolve",
-        lambda identifier, metadata=None: sources.Resolution(publisher, title, "semantic-scholar", {"DOI": doi}),
+        lambda identifier, metadata=None: sources.Resolution(
+            publisher, title, "semantic-scholar", {"DOI": doi}
+        ),
     )
     response = requests.Response()
     response.status_code = 403
@@ -561,7 +566,8 @@ def test_index_paper_gives_the_index_the_lookup_found(monkeypatch, store_in_tmp)
 
 def test_known_title_reads_the_title_back_from_the_cache(monkeypatch, store_in_tmp):
     monkeypatch.setattr(
-        sources, "_lookup", lambda identifier, expected=None: sources.Resolution("https://x/p.pdf", "ColBERTv2")
+        sources, "_lookup",
+        lambda identifier, expected=None: sources.Resolution("https://x/p.pdf", "ColBERTv2"),
     )
     sources._resolve(DOI)
 
@@ -721,7 +727,10 @@ def test_errors_have_distinct_structured_outcomes(error, outcome, retryable, sou
 
 @pytest.mark.parametrize(
     ("status", "outcome", "retryable"),
-    [(403, "blocked", False), (404, "not-found", False), (429, "temporary-failure", True), (503, "temporary-failure", True)],
+    [
+        (403, "blocked", False), (404, "not-found", False),
+        (429, "temporary-failure", True), (503, "temporary-failure", True),
+    ],
 )
 def test_http_failures_keep_the_status_and_retryability(status, outcome, retryable):
     response = requests.Response()
@@ -787,7 +796,9 @@ def test_same_author_and_year_title_candidates_are_ambiguous_not_selected(monkey
     monkeypatch.setattr(sources, "_pdf_of", lambda *args: pytest.fail("an ambiguous candidate was selected"))
 
     with pytest.raises(sources.AmbiguousMatch):
-        sources._semantic_scholar_by_title("A Shared Title: A Method Study", lambda year, author: year == 2020)
+        sources._semantic_scholar_by_title(
+            "A Shared Title: A Method Study", lambda year, author: year == 2020
+        )
 
 
 def test_conflicting_doi_candidate_is_rejected_before_download(monkeypatch, store_in_tmp):

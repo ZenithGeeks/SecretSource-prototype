@@ -120,7 +120,8 @@ def test_a_blocked_publisher_tries_an_openalex_repository_copy(lookup):
     publisher = "https://direct.mit.edu/tacl/article-pdf/doi/10.1162/tacl_a_00594/2159104/tacl_a_00594.pdf"
     arxiv_copy = sources.Resolution(
         "https://arxiv.org/pdf/2205.15231",
-        "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and Supporting Tasks",
+        "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and "
+        "Supporting Tasks",
         "openalex",
         {"DOI": doi, "ArXiv": "2205.15231"},
         2023,

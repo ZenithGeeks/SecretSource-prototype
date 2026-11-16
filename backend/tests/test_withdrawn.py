@@ -23,7 +23,7 @@ def dead_link(monkeypatch, tmp_path):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.setenv("ANALYSES_DB", str(tmp_path / "analyses.db"))
     found = sources.Resolution(f"https://arxiv.org/pdf/{ARXIV_ID}", "", "arxiv", {"ArXiv": ARXIV_ID})
-    monkeypatch.setattr(sources, "_lookup", lambda identifier: found)
+    monkeypatch.setattr(sources, "_lookup", lambda identifier, expected=None: found)
 
     def not_found(url: str, name: str):
         raise requests.HTTPError(f"404 Client Error: Not Found for url: {url}")

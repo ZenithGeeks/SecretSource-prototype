@@ -34,7 +34,7 @@ def two_runs(monkeypatch):
         ]
         return {"status": "ok", "file": f"{paper}.pdf", "claims": claims}
 
-    def check(claim, source, path, judged="", other_citations=False):
+    def check(claim, source, path, judged="", other_citations=False, source_outcome=None):
         with lock:
             started.append(claim.split()[0])
         return counted("check", {"status": "ok", "claim": claim, "source": source, "verdict": "supports"})
@@ -42,7 +42,7 @@ def two_runs(monkeypatch):
     monkeypatch.setattr(main.store, "save", lambda analysis: None)
     monkeypatch.setattr(main, "extract_claims_with_citations", extract)
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda s: counted("prepare", {"status": "ok", "path": s}))
+    monkeypatch.setattr(main, "prepare_source", lambda s, expected=None: counted("prepare", {"status": "ok", "path": s}))
     monkeypatch.setattr(main, "check_prepared", check)
     monkeypatch.setattr(main, "paper_figures", lambda file: [])
     monkeypatch.setattr(main, "add_paper", lambda file: {"status": "ok"})

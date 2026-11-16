@@ -317,11 +317,11 @@ def pipeline(monkeypatch):
         },
     )
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
-    monkeypatch.setattr(main, "prepare_source", lambda source: {"status": "ok", "path": source})
+    monkeypatch.setattr(main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source})
     monkeypatch.setattr(
         main,
         "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: (
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
             checked.append(source)
             or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
         ),
@@ -730,7 +730,7 @@ def test_a_question_about_a_paper_that_cannot_be_read_gets_an_error_event_and_no
     chat_client, monkeypatch
 ):
     main.analyses["a1"] = _row("a1", "user-ada", file="data/papers/a1.pdf")
-    monkeypatch.setattr(main, "prepare_source", lambda paper: {"status": "error"})
+    monkeypatch.setattr(main, "prepare_source", lambda paper, expected=None: {"status": "error"})
     client = chat_client("user-ada")
     chat = client.post("/assistant/chats").json()
 
@@ -820,7 +820,7 @@ def test_each_citation_of_a_sentence_citing_several_works_is_checked_as_one_of_s
     monkeypatch.setattr(
         main,
         "check_prepared",
-        lambda claim, source, path, judged="", other_citations=False: (
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
             flags.__setitem__(source, (judged, other_citations))
             or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
         ),

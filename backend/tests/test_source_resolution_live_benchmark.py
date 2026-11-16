@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from bench_source_resolution_live import run_live_benchmark, run_pipeline_benchmark
 from app.pipeline import sources
+from bench_source_resolution_live import run_live_benchmark, run_pipeline_benchmark
 
 
 def test_live_benchmark_compares_providers_on_the_same_manifest(monkeypatch, tmp_path):
@@ -22,8 +22,12 @@ def test_live_benchmark_compares_providers_on_the_same_manifest(monkeypatch, tmp
     monkeypatch.setattr(
         "bench_source_resolution_live.PROVIDERS",
         {
-            "acl_anthology": lambda identifier, expected: [candidate("https://acl.example/p.pdf", "acl")],
-            "openalex": lambda identifier, expected: [candidate("https://openalex.example/p.pdf", "openalex")],
+            "acl_anthology": lambda identifier, expected: [
+                candidate("https://acl.example/p.pdf", "acl")
+            ],
+            "openalex": lambda identifier, expected: [
+                candidate("https://openalex.example/p.pdf", "openalex")
+            ],
         },
     )
     monkeypatch.setattr(sources, "_download", lambda url, name: Path(name))

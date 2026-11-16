@@ -149,7 +149,15 @@ def is_retryable(error: BaseException) -> bool:
     override = getattr(error, "retryable", None)
     if override is not None:
         return bool(override)
-    network = (requests.Timeout, requests.ConnectionError, TimeoutError, ConnectionError)
+    network = tuple(
+        kind for kind in (
+            getattr(requests, "Timeout", None),
+            getattr(requests, "ConnectionError", None),
+            TimeoutError,
+            ConnectionError,
+        )
+        if isinstance(kind, type)
+    )
     cause = error.__cause__
     timed_out = any(isinstance(each, network) for each in (error, cause))
     response = getattr(error, "response", None)
@@ -528,7 +536,10 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
             continue
         year = work.get("publication_year")
         authorships = work.get("authorships") or []
-        first_author = ((authorships[0].get("author") or {}).get("display_name") or "") if authorships else ""
+        first_author = (
+            ((authorships[0].get("author") or {}).get("display_name") or "")
+            if authorships else ""
+        )
         if not fits(year, first_author):
             others.append(_described(found_title, year, first_author))
             continue
@@ -544,6 +555,31 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     if others:
         raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")
+
+
+def _openalex_pdfs(doi: str) -> list[str]:
+    """Return every OpenAlex PDF copy listed for a DOI; lookup failures are best effort."""
+    from app.pipeline.indexes import _IndexError, openalex_works
+
+    if "," in doi or "|" in doi:
+        return []
+    normalized = doi_in(doi)
+    if not normalized:
+        return []
+    try:
+        works = openalex_works({
+            "filter": f"doi:{normalized}",
+            "select": "locations",
+            "per-page": 5,
+        })
+    except _IndexError:
+        return []
+    return list(dict.fromkeys(
+        location["pdf_url"]
+        for work in works
+        for location in work.get("locations") or []
+        if location.get("pdf_url")
+    ))
 
 
 def _described(title: str, year: int | None, first_author: str) -> str:
@@ -622,7 +658,10 @@ def _expected_fits(expected: dict | None) -> Fits:
     expected = expected or {}
     year = _as_year(expected.get("year"))
     authors = expected.get("authors") or expected.get("author") or []
-    author = authors[0] if isinstance(authors, list) and authors else authors if isinstance(authors, str) else ""
+    if isinstance(authors, list):
+        author = authors[0] if authors else ""
+    else:
+        author = authors if isinstance(authors, str) else ""
     wanted_surname = _surname(str(author)) if author else ""
 
     def fits(found_year: int | None, found_author: str) -> bool:
@@ -1073,15 +1112,17 @@ def _reported(
     """Choose the most informative failure without hiding an outage behind a no-match."""
     if not failures:
         return LookupUnavailable("no resolver was asked")
+    mismatch = next((error for error in failures if isinstance(error, IdentityMismatch)), None)
+    ambiguous = next((error for error in failures if isinstance(error, AmbiguousMatch)), None)
+    no_copy = next((error for error in failures if isinstance(error, NoOpenAccessCopy)), None)
     retryable = next((error for error in failures if is_retryable(error)), None)
-    if retryable:
+    if mismatch or ambiguous or no_copy:
+        chosen = mismatch or ambiguous or no_copy
+    elif retryable:
         chosen = retryable
     else:
-        mismatch = next((error for error in failures if isinstance(error, IdentityMismatch)), None)
-        ambiguous = next((error for error in failures if isinstance(error, AmbiguousMatch)), None)
-        no_copy = next((error for error in failures if isinstance(error, NoOpenAccessCopy)), None)
         skipped = next((error for error in failures if isinstance(error, OnlyOtherWorks)), None)
-        chosen = mismatch or ambiguous or no_copy or (
+        chosen = (
             skipped if skipped and any(type(error) is Unresolvable for error in failures)
             else failures[0] if prefer_first else failures[-1]
         )
@@ -1146,9 +1187,15 @@ def _resolve(identifier: str, expected: dict | None = None) -> Resolution:
             if expected:
                 _validate_resolution(found, expected)
                 arxiv = ARXIV_PATTERN.search(identifier)
-                if not doi_in(identifier) and not arxiv and not identifier.startswith("http") and not identifier.isdigit():
+                title_lookup = (
+                    not doi_in(identifier) and not arxiv
+                    and not identifier.startswith("http") and not identifier.isdigit()
+                )
+                if title_lookup:
                     if not _expected_fits(expected)(found.year, found.first_author):
-                        raise IdentityMismatch("the cached work conflicts with the cited year or first author")
+                        raise IdentityMismatch(
+                            "the cached work conflicts with the cited year or first author"
+                        )
         except IdentityMismatch:
             store.forget_source(key)
         else:
@@ -1185,7 +1232,12 @@ def _download(pdf_url: str, name: str) -> Path:
     if not response.content.startswith(b"%PDF"):
         content_type = response.headers.get("Content-Type", "").lower()
         prefix = response.content[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
-        if "html" in content_type or prefix.startswith((b"<!doctype html", b"<html")) or b"<html" in prefix[:512]:
+        is_html = (
+            "html" in content_type
+            or prefix.startswith((b"<!doctype html", b"<html"))
+            or b"<html" in prefix[:512]
+        )
+        if is_html:
             raise WebSource(f"a web page, not a paper: {pdf_url}")
         raise NotDownloadable(f"not a PDF: {pdf_url}")
     # Written aside, then renamed, as save_upload does: another worker that finds this name
@@ -1434,7 +1486,9 @@ def local_pdf_with_resolution(paper: str, expected: dict | None = None) -> tuple
     path, found = _fetch(paper, expected)
     return path.as_posix(), {
         "source_kind": "paper", "outcome": "readable", "retryable": False,
-        "attempts": list(found.attempts) or [{"provider": found.index or "direct_url", "result": "readable_pdf"}],
+        "attempts": list(found.attempts) or [
+            {"provider": found.index or "direct_url", "result": "readable_pdf"}
+        ],
     }
 
 

@@ -545,7 +545,10 @@ def check_prepared(
                 "retryable": failure.get("retryable", False),
                 "attempts": [
                     *(source_outcome.get("attempts") or []),
-                    {"provider": "retrieval", "result": "failed", "retryable": failure.get("retryable", False)},
+                    {
+                        "provider": "retrieval", "result": "failed",
+                        "retryable": failure.get("retryable", False),
+                    },
                 ],
             }
         return {**failure, "claim": claim, "source": source_pdf_path}

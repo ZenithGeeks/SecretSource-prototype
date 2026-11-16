@@ -188,10 +188,16 @@ def _unchecked(claim: dict) -> list[dict]:
         failed_row = failed.get(source)
         if not source:
             reason = "unresolvable"
-            source_outcome = {"source_kind": "unknown", "outcome": "not-attempted", "retryable": False, "attempts": []}
+            source_outcome = {
+                "source_kind": "unknown", "outcome": "not-attempted",
+                "retryable": False, "attempts": [],
+            }
         elif source in named:
             reason = "named"
-            source_outcome = {"source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": []}
+            source_outcome = {
+                "source_kind": "unknown", "outcome": "named-only",
+                "retryable": False, "attempts": [],
+            }
         elif failed_row:
             reason = failed_row["reason"]
             source_outcome = failed_row.get("source_outcome")

@@ -56,7 +56,10 @@ def services(monkeypatch):
         return {"topk": [FIGURE], "model": "colqwen"}
 
     monkeypatch.setitem(sys.modules, "app.pipeline.rag", types.SimpleNamespace(add_paper=add_paper))
-    monkeypatch.setattr(sources, "local_pdf", lambda identifier: PAPER.as_posix())
+    outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
+    monkeypatch.setattr(
+        sources, "local_pdf_with_resolution", lambda identifier, expected=None: (PAPER.as_posix(), outcome)
+    )
     monkeypatch.setattr(sources, "known_index", lambda identifier: {"index": "", "ids": {}})
     monkeypatch.setattr(sources, "version_of", lambda pdf: {})
     monkeypatch.setattr(verify.retrieval, "colbert_search", lambda claim, k, source=None: [PASSAGE])

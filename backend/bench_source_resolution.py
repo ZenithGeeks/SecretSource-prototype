@@ -145,7 +145,6 @@ def _run_case(case: dict, papers_dir: Path) -> dict:
     ):
         runs = 2 if "retry" in case else 1
         for run_index in range(runs):
-            result = http_events[run_index]["result"]
             attempts += 1
             try:
                 _path, found = sources._fetch(case.get("identifier", ""))
@@ -257,12 +256,19 @@ def run_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "pipeline_sha256": hashlib.sha256(Path(sources.__file__).read_bytes()).hexdigest(),
         "metric_definitions": {
-            "matched": "cases with a fixture identity equal to expected identity and no mismatch/no-match/ambiguity",
+            "matched": (
+                "cases with a fixture identity equal to expected identity and no "
+                "mismatch/no-match/ambiguity"
+            ),
             "read": "cases where the pipeline downloaded and validated a PDF",
             "correct": "read cases whose fixture identity equals expected identity",
             "provider_attempts": "safe lookup and download attempt records from the pipeline",
-            "primary_outcome": "result from the first provider/location before alternate-copy fallback",
-            "improved_by_fallback": "primary path did not read the paper but fallback read the expected identity",
+            "primary_outcome": (
+                "result from the first provider/location before alternate-copy fallback"
+            ),
+            "improved_by_fallback": (
+                "primary path did not read the paper but fallback read the expected identity"
+            ),
         },
         "metrics": {
             "cases": len(results),
