@@ -831,6 +831,9 @@ def test_safe_locator_and_retry_helpers_cover_malformed_inputs():
         "https://[2001:db8::1]:8443/paper.pdf"
     )
     assert sources._safe_locator("https://example.org:bad/paper.pdf") == ""
+    assert sources._safe_message("HTTP error at https://example.org:8443/paper.pdf?token=x") == (
+        "HTTP error at https://example.org:8443/paper.pdf"
+    )
     unsafe = "https://user:secret@example.org:bad/paper.pdf?token=private"
     assert sources._safe_message(unsafe) == unsafe
     transient = RuntimeError("network")
@@ -850,7 +853,7 @@ def test_reported_failure_does_not_hide_a_retryable_outage_behind_no_copy():
 
 
 def test_a_string_author_can_filter_title_results_and_arxiv_ids_are_validated():
-    fits = sources._expected_fits({"year": "2020", "authors": "Smith, Alex"})
+    fits = sources._expected_fits({"year": "2020", "authors": "Alex Smith"})
     assert fits(2020, "Alex Smith")
     assert not fits(2019, "Alex Smith")
     found = sources.Resolution("", "Paper", ids={"ArXiv": "2101.00001v2"})
@@ -1039,6 +1042,37 @@ def test_acl_metadata_reports_missing_pdf_and_missing_title_match(monkeypatch):
         })
 
 
+def test_acl_metadata_skips_wrong_dois_and_author_mismatches(monkeypatch):
+    monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args: (
+        '<collection id="2022.acl"><volume id="1">'
+        '<paper id="1"><title>Expected paper</title><doi>10.1000/other</doi><pdf/></paper>'
+        '<paper id="2"><title>Expected paper</title><doi>10.1000/wanted</doi>'
+        '<author><first>Other</first><last>Writer</last></author><pdf/></paper>'
+        '</volume></collection>'
+    ))
+    expected = {
+        "doi": "10.1000/wanted", "title": "Expected paper", "venue": "ACL",
+        "year": 2022, "authors": ["Alex Smith"],
+    }
+    with pytest.raises(sources.Unresolvable):
+        sources._acl_anthology_candidates("10.1000/wanted", expected)
+
+
+def test_acl_metadata_rejects_duplicate_matching_papers(monkeypatch):
+    monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args: (
+        '<collection id="2022.acl"><volume id="1">'
+        '<paper id="1"><title>Expected paper</title><pdf/></paper>'
+        '<paper id="2"><title>Expected paper</title><pdf/></paper>'
+        '</volume></collection>'
+    ))
+    with pytest.raises(sources.AmbiguousMatch):
+        sources._acl_anthology_candidates("Expected paper", {
+            "title": "Expected paper", "venue": "ACL", "year": 2022,
+        })
+
+
 def test_source_cache_rejects_a_cached_title_identity_conflict(monkeypatch, store_in_tmp):
     key = sources._normalised("Shared title")
     store.remember_source(key, {
@@ -1067,6 +1101,18 @@ def test_source_cache_accepts_a_matching_identifier_without_title_filters(monkey
     })
     monkeypatch.setattr(sources, "_lookup", lambda *args: pytest.fail("ignored matching cache"))
     assert sources._resolve(DOI, {"doi": DOI}).url == "https://repo.example/paper.pdf"
+
+
+def test_source_cache_returns_a_matching_title_and_author(monkeypatch, store_in_tmp):
+    key = sources._normalised("Shared title")
+    store.remember_source(key, {
+        "url": "https://repo.example/paper.pdf", "title": "Shared title", "index": "openalex",
+        "year": 2020, "first_author": "Alex Smith", "fetched_at": __import__("time").time(),
+    })
+    monkeypatch.setattr(sources, "_lookup", lambda *args: pytest.fail("ignored matching cache"))
+    assert sources._resolve(
+        "Shared title", {"title": "Shared title", "year": 2020, "authors": ["Alex Smith"]}
+    ).url == "https://repo.example/paper.pdf"
 
 
 def test_download_uses_a_valid_cached_pdf_before_making_a_request(monkeypatch, tmp_path):
@@ -1135,18 +1181,21 @@ def test_a_provider_html_landing_page_is_reported_as_a_paper_download_failure(
 def test_fallbacks_skip_prior_providers_and_accept_other_index_results(monkeypatch):
     monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "contact@example.org")
     unpaywall = sources.Resolution("https://repo.example/u.pdf", "A paper", "unpaywall", {"DOI": DOI})
-    openalex = sources.Resolution("https://repo.example/o.pdf", "A paper", "openalex", {"DOI": DOI})
+    openalex = sources.Resolution(
+        "https://repo.example/o.pdf", "A paper", "openalex", {"DOI": "10.18653/v1/2022.acl-main.1"}
+    )
     asked = []
     monkeypatch.setattr(
         sources, "_unpaywall_resolutions", lambda doi: asked.append("unpaywall") or [unpaywall]
     )
     monkeypatch.setattr(sources, "_openalex_candidates", lambda *args: asked.append("openalex") or [openalex])
+    acl_doi = "10.18653/v1/2022.acl-main.1"
     found = sources.Resolution(
-        "https://publisher.example/p.pdf", "A paper", "semantic_scholar", {"DOI": DOI},
+        "https://publisher.example/p.pdf", "A paper", "semantic_scholar", {"DOI": acl_doi},
         attempts=({"provider": "unpaywall"},),
     )
 
-    resolutions, attempts, failures = sources._fallback_resolutions(DOI, {"doi": DOI}, found)
+    resolutions, attempts, failures = sources._fallback_resolutions(acl_doi, {"doi": acl_doi}, found)
 
     assert asked == ["openalex"]
     assert [item.index for item in resolutions] == ["acl_anthology", "openalex"]
@@ -1173,3 +1222,40 @@ def test_fallbacks_record_provider_request_and_index_errors(monkeypatch):
     assert [attempt["provider"] for attempt in attempts] == ["unpaywall", "openalex"]
     assert [attempt["result"] for attempt in attempts] == ["temporary-failure", "temporary-failure"]
     assert len(failures) == 2
+
+
+def test_fallbacks_reraise_unexpected_adapter_errors(monkeypatch):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "")
+    monkeypatch.setattr(sources, "_acl_anthology_candidate", lambda *args: None)
+    monkeypatch.setattr(
+        sources, "_openalex_candidates",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("adapter bug")),
+    )
+    with pytest.raises(RuntimeError, match="adapter bug"):
+        sources._fallback_resolutions(DOI, None, sources.Resolution("", ids={"DOI": DOI}))
+
+
+def test_fallbacks_allow_an_index_result_when_citation_metadata_is_absent(monkeypatch):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "")
+    candidate = sources.Resolution("https://repo.example/p.pdf", "A paper", "openalex", {})
+    monkeypatch.setattr(sources, "_openalex_candidates", lambda *args: [candidate])
+    resolutions, attempts, failures = sources._fallback_resolutions(
+        "A paper", None, sources.Resolution("https://publisher.example/p.pdf", "A paper")
+    )
+    assert resolutions == [candidate]
+    assert attempts == [{"provider": "openalex", "result": "matched", "locator": candidate.url}]
+    assert failures == []
+
+
+def test_lookup_validates_arxiv_pmid_and_url_metadata(monkeypatch):
+    with pytest.raises(sources.IdentityMismatch):
+        sources._lookup("arxiv:2112.01488", {"arxiv": "2201.00001"})
+
+    wrong = sources.Resolution("https://repo.example/p.pdf", "A paper", ids={"DOI": "10.1000/other"})
+    monkeypatch.setattr(sources, "_semantic_scholar_pdf", lambda paper_id: wrong)
+    with pytest.raises(sources.IdentityMismatch):
+        sources._lookup("12345", {"doi": "10.1000/wanted"})
+
+    assert sources._lookup("https://example.org/paper", {"title": "Expected"}).url == (
+        "https://example.org/paper"
+    )

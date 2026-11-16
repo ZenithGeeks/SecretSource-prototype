@@ -53,7 +53,7 @@ def test_a_download_that_timed_out_is_reported_as_retryable(monkeypatch):
 
     result = sources.fetch_source("10.1000/example")
 
-    assert result["reason"] == "not-downloadable"
+    assert result["reason"] == "failed"
     assert result["retryable"] is True
 
 

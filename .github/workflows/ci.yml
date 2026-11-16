@@ -195,4 +195,8 @@ jobs:
       # The Vitest run fails below 100% coverage on the Researcher, Labeler and shared files
       # (vitest.config.ts). No frontend/.env exists here, so login stays off as the tests expect.
       - name: Test
-        run: npm run test:legacy && npm run test:coverage
+        run: |
+          # /tmp is a small tmpfs on this runner; Vitest's worker and coverage reports fill it.
+          export TMPDIR="$HOME/ci-tmp"
+          mkdir -p "$TMPDIR"
+          npm run test:legacy && npm run test:coverage
