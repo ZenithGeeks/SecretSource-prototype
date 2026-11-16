@@ -81,7 +81,12 @@ def services(monkeypatch):
 def test_the_check_runs_before_the_figures_are_indexed(services):
     start = time.monotonic()
     prepared = verify.prepare_source("2112.01488")
-    assert prepared == {"status": "ok", "path": PAPER.as_posix()}
+    assert prepared == {
+        "status": "ok", "path": PAPER.as_posix(),
+        "source_outcome": {
+            "source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": [],
+        },
+    }
 
     verdict = verify.check_prepared("ColBERT reduces the index 10x", "2112.01488", PAPER)
     assert time.monotonic() - start < 1  # not the 5 s the figure indexing would hold it

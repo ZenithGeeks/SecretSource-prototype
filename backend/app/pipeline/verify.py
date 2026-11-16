@@ -325,6 +325,8 @@ def _build_judge():
 
 def unchecked_reason(verdict: dict, citation: dict) -> str:
     """Why a claim went unchecked, based on the retrieval result rather than citation shape."""
+    if not verdict.get("source_outcome") and verdict.get("reason") == "unresolvable" and citation.get("url"):
+        return "web-source"
     return verdict.get("reason", "failed")
 
 

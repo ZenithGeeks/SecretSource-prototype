@@ -97,10 +97,14 @@ def test_a_failed_check_carries_retryable(monkeypatch, tmp_path):
     monkeypatch.setattr(verify, "evidence_from", evidence_from)
     monkeypatch.setattr(verify, "_figures_ready", lambda source: False)
 
-    result = verify.check_prepared("a claim", "2112.01488", tmp_path / "paper.pdf")
+    result = verify.check_prepared(
+        "a claim", "2112.01488", tmp_path / "paper.pdf",
+        source_outcome={"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []},
+    )
 
     assert result["status"] == "error"
     assert result["retryable"] is True
+    assert result["source_outcome"]["outcome"] == "retrieval-failed"
 
 
 def test_add_paper_carries_retryable(monkeypatch):

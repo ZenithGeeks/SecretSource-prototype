@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -364,7 +365,9 @@ def test_a_cited_paper_that_could_not_be_prepared_is_a_failed_check_not_a_verdic
     monkeypatch.setattr(
         main,
         "prepare_source",
-        lambda source: {"status": "error", "message": "no pdf found", "reason": "unavailable"},
+        lambda source, expected=None: {
+            "status": "error", "message": "no pdf found", "reason": "unavailable"
+        },
     )
 
     result = run_analysis_job("g-unready", "paper", True, None)
@@ -373,6 +376,61 @@ def test_a_cited_paper_that_could_not_be_prepared_is_a_failed_check_not_a_verdic
     assert result["status"] == "done"
     assert [stage["message"] for stage in failed] == ["no pdf found"]
     assert checked == []
+
+
+def test_a_readable_source_outcome_is_passed_to_each_check(monkeypatch, pipeline):
+    saved, checked = pipeline
+    outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {
+            "status": "ok", "path": source, "source_outcome": outcome,
+        },
+    )
+    received = []
+    monkeypatch.setattr(
+        main, "check_prepared",
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
+            received.append(source_outcome)
+            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+        ),
+    )
+
+    result = run_analysis_job("g-outcome", "paper", True, None)
+
+    assert result["status"] == "done"
+    assert checked == []
+    assert received == [outcome]
+    assert saved[-1]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
+
+
+def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
+    outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
+    main.analyses["g-recheck-outcome"] = {
+        "claims": [{
+            "claim": "c1", "sentence": "A claim [b1].",
+            "citations": [{"ref": "b1", "key": "s1"}],
+            "verdicts": [{"cited": "s1", "verdict": "refutes"}],
+        }],
+        "stages": [],
+    }
+    monkeypatch.setattr(
+        main, "prepare_source", lambda source, expected=None: {
+            "status": "ok", "path": source, "source_outcome": outcome,
+        },
+    )
+    received = []
+    monkeypatch.setattr(
+        main, "check_prepared",
+        lambda claim, source, path, judged="", other_citations=False, source_outcome=None: (
+            received.append(source_outcome)
+            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+        ),
+    )
+
+    asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf")))
+
+    assert received == [outcome]
+    assert main.analyses["g-recheck-outcome"]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
 
 
 # --- starting a run ---

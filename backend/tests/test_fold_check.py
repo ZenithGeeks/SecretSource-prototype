@@ -35,7 +35,7 @@ def test_a_second_check_appends_rather_than_replacing():
     assert [v["cited"] for v in claim["verdicts"]] == ["a.pdf", "b.pdf"]
 
 
-def test_a_link_we_could_not_resolve_keeps_its_retrieval_reason():
+def test_a_link_we_could_not_resolve_is_a_web_source_for_legacy_results():
     claim = {"claim": "A spec says so.", "citations": []}
     fold_check(
         claim,
@@ -43,4 +43,4 @@ def test_a_link_we_could_not_resolve_keeps_its_retrieval_reason():
         {"url": "https://example.org/spec"},
         {"status": "error", "reason": "unresolvable", "message": "not a paper"},
     )
-    assert claim["unchecked"][0]["reason"] == "unresolvable"
+    assert claim["unchecked"][0]["reason"] == "web-source"
