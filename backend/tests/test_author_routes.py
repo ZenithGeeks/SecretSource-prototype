@@ -231,6 +231,203 @@ def test_every_draft_answer_carries_the_project_bib_like_a_read_does(client):
     assert answers["rename"]["files"] == read["files"]
 
 
+def _project_with_two_drafts(client, drafts=("ch2", "ch3")):
+    project = client.post(
+        "/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB, "bibName": "refs.bib"}
+    ).json()
+
+    def draft(title: str) -> dict:
+        files = [{"name": f"{title}.tex", "content": TEX}]
+        body = {"title": title, "projectId": project["id"], "files": files}
+        return client.post("/author/drafts", headers=ADA, json=body).json()
+
+    made = [draft(title) for title in drafts]
+    return project, *made
+
+
+def _shared(answer: dict, name: str = "refs.bib") -> dict:
+    (shared,) = [f for f in answer["files"] if f["name"] == name]
+    return shared
+
+
+def test_editing_the_shared_bib_in_a_draft_edits_the_projects_bib(client):
+    """#733: the write lands on the project's .bib, not a draft-local copy, so every draft and
+    the project page see it."""
+    project, ch2, ch3 = _project_with_two_drafts(client)
+    edited = BIB + "@misc{added2024, title={New}, year={2024}, url={https://n.ew}}\n"
+    body = {"content": edited, "updated": _shared(ch2)["updated"]}
+
+    answer = client.put(f"/author/drafts/{ch2['id']}/files/refs.bib", headers=ADA, json=body)
+
+    assert answer.status_code == 200, answer.text
+    shared = _shared(answer.json())
+    assert shared["shared"] is True and shared["content"] == edited
+    assert answer.json()["bibFork"] is None
+    for draft in (ch2, ch3):
+        read = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
+        assert _shared(read)["shared"] is True and _shared(read)["content"] == edited
+    assert client.get(f"/author/projects/{project['id']}", headers=ADA).json()["bib"]["content"] == edited
+    # The draft's own row is not touched: its `updated` stays what the editor holds.
+    assert answer.json()["updated"] == ch2["updated"]
+
+
+def test_the_shared_bib_cannot_be_deleted_from_a_draft(client):
+    project, ch2, _ = _project_with_two_drafts(client)
+    response = client.delete(f"/author/drafts/{ch2['id']}/files/refs.bib", headers=ADA)
+    assert response.status_code == 400
+    assert "shared by every draft" in response.json()["detail"]
+    assert client.get(f"/author/projects/{project['id']}", headers=ADA).json()["bib"]["content"] == BIB
+
+
+def test_a_stale_shared_bib_write_is_refused_not_overwritten(client):
+    """Two drafts' editors hold the same .bib token; the second write is a 409 that names the
+    file, and the first one's text stays."""
+    project, ch2, ch3 = _project_with_two_drafts(client)
+    token = _shared(client.get(f"/author/drafts/{ch2['id']}", headers=ADA).json())["updated"]
+    assert token
+
+    def write(draft: dict, content: str, token: str):
+        body = {"content": content, "updated": token}
+        return client.put(f"/author/drafts/{draft['id']}/files/refs.bib", headers=ADA, json=body)
+
+    first = write(ch2, "A", token)
+    assert first.status_code == 200, first.text
+    assert _shared(first.json())["updated"] != token
+
+    stale = write(ch3, "B", token)
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "refs.bib changed elsewhere since this editor last saved it. Reload it."
+    assert client.get(f"/author/projects/{project['id']}", headers=ADA).json()["bib"]["content"] == "A"
+
+    fresh = _shared(first.json())["updated"]
+    again = write(ch3, "B", fresh)
+    assert again.status_code == 200, again.text
+
+
+def test_the_shared_bib_token_moves_only_when_the_bib_does(client):
+    """A project write that leaves the .bib alone (a rename, a PDF) does not make a shared-tab
+    write stale; every route that changes the .bib does."""
+    project, ch2, _ = _project_with_two_drafts(client)
+    url = f"/author/projects/{project['id']}"
+
+    def token() -> str:
+        return _shared(client.get(f"/author/drafts/{ch2['id']}", headers=ADA).json())["updated"]
+
+    before = token()
+    client.patch(url, headers=ADA, json={"name": "Thesis 2"})
+    pdf = {"file": ("c.pdf", b"%PDF-1.4 x", "application/pdf")}
+    client.post(f"{url}/bib/khattab2020/pdf", headers=ADA, files=pdf)
+    assert token() == before
+
+    client.patch(url, headers=ADA, json={"bib": BIB + "%"})
+    after_patch = token()
+    assert after_patch != before
+    client.delete(f"{url}/bib/unused2019", headers=ADA)
+    assert token() != after_patch
+
+
+def test_the_project_page_bib_write_is_checked_too(client):
+    """The Project page's .bib editor sends the token it read; a draft's shared-tab write in
+    between makes it a 409, not a silent overwrite."""
+    project, ch2, _ = _project_with_two_drafts(client)
+    url = f"/author/projects/{project['id']}"
+    token = client.get(url, headers=ADA).json()["bib"]["updated"]
+    body = {"content": "from the draft", "updated": token}
+    client.put(f"/author/drafts/{ch2['id']}/files/refs.bib", headers=ADA, json=body)
+
+    stale = client.patch(url, headers=ADA, json={"bib": "from the page", "bibUpdated": token})
+    assert stale.status_code == 409
+    assert client.get(url, headers=ADA).json()["bib"]["content"] == "from the draft"
+    # Left out, the write is not checked, as before.
+    assert client.patch(url, headers=ADA, json={"bib": "unchecked"}).status_code == 200
+
+
+def test_a_shared_bib_write_without_a_version_is_refused(client):
+    """An upload from Home or a tab added from a stale file list sends no version: it would
+    replace the whole project .bib other drafts write, so it is a 409, not a silent replace."""
+    project, ch2, _ = _project_with_two_drafts(client)
+    url = f"/author/drafts/{ch2['id']}/files/refs.bib"
+    for content in ("", "@misc{older, title={From disk}}"):
+        assert client.put(url, headers=ADA, json={"content": content}).status_code == 409
+    assert client.get(f"/author/projects/{project['id']}", headers=ADA).json()["bib"]["content"] == BIB
+
+
+def test_a_bib_written_before_versions_gets_one_from_its_content(client):
+    project, ch2, ch3 = _project_with_two_drafts(client)
+    row = author.store.load_author_row(author.PROJECTS, project["id"])
+    del row["bib"]["updated"]
+    author.store.save_author_row(author.PROJECTS, row)
+
+    token = _shared(client.get(f"/author/drafts/{ch2['id']}", headers=ADA).json())["updated"]
+    assert token.startswith("content:")
+    assert client.get(f"/author/projects/{project['id']}", headers=ADA).json()["bib"]["updated"] == token
+    def write(draft: dict, content: str):
+        body = {"content": content, "updated": token}
+        return client.put(f"/author/drafts/{draft['id']}/files/refs.bib", headers=ADA, json=body)
+
+    assert write(ch2, "A").status_code == 200
+    # ch3's editor read the same old version: its write is now stale
+    assert write(ch3, "B").status_code == 409
+
+
+def _forked(client):
+    """A draft that already holds its own copy of the project's .bib (the bug's leftover)."""
+    project = client.post(
+        "/author/projects", headers=ADA, json={"name": "Thesis", "bib": BIB, "bibName": "refs.bib"}
+    ).json()
+    files = [{"name": "ch2.tex", "content": TEX}, {"name": "refs.bib", "content": "@misc{old, title={Fork}}"}]
+    draft = client.post(
+        "/author/drafts", headers=ADA, json={"title": "ch2", "projectId": project["id"], "files": files}
+    ).json()
+    return project, draft
+
+
+def test_a_draft_holding_its_own_copy_of_the_project_bib_is_flagged(client):
+    _, draft = _forked(client)
+    read = client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()
+    assert read["bibFork"] == "refs.bib"
+    assert _shared(read).get("shared") is None and "Fork" in _shared(read)["content"]
+    # Writing the draft's own copy still writes the copy: nothing is moved without asking.
+    answer = client.put(f"/author/drafts/{draft['id']}/files/refs.bib", headers=ADA, json={"content": "own"})
+    assert _shared(answer.json())["content"] == "own" and answer.json()["bibFork"] == "refs.bib"
+    # A draft outside any project has nothing to fork.
+    loose = make_draft(client)
+    assert client.get(f"/author/drafts/{loose['id']}", headers=ADA).json()["bibFork"] is None
+
+
+def test_use_the_project_bib_drops_the_drafts_copy(client):
+    project, draft = _forked(client)
+    url = f"/author/drafts/{draft['id']}/bib-fork"
+    answer = client.post(url, headers=ADA, json={"keep": "project"})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["bibFork"] is None
+    shared = _shared(answer.json())
+    assert shared["shared"] is True and shared["content"] == BIB
+    # Nothing left to choose.
+    assert client.post(url, headers=ADA, json={"keep": "project"}).status_code == 404
+
+
+def test_keep_this_drafts_copy_stops_asking(client):
+    _, draft = _forked(client)
+    url = f"/author/drafts/{draft['id']}"
+    answer = client.post(f"{url}/bib-fork", headers=ADA, json={"keep": "draft"})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["bibFork"] is None
+    read = client.get(url, headers=ADA).json()
+    assert read["bibFork"] is None and "Fork" in _shared(read)["content"]
+    assert client.post(f"{url}/bib-fork", headers=ADA, json={"keep": "nonsense"}).status_code == 422
+    # Someone else's draft is a 404, like a missing one.
+    assert client.post(f"{url}/bib-fork", headers=BO, json={"keep": "project"}).status_code == 404
+
+    # Deleting the kept copy forgets the choice: a copy made later is asked about again.
+    assert client.delete(f"{url}/files/refs.bib", headers=ADA).status_code == 200
+    row = author.store.load_author_row(author.DRAFTS, draft["id"])
+    assert "keptBib" not in row
+    row["files"].append({"name": "refs.bib", "kind": "bib", "content": "a later copy"})
+    author.store.save_author_row(author.DRAFTS, row)
+    assert client.get(url, headers=ADA).json()["bibFork"] == "refs.bib"
+
+
 def test_uploading_a_zip_makes_a_draft_from_its_tex_and_bib_files(client):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:

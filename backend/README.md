@@ -642,8 +642,9 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 | `GET /author/drafts/{id}` | the draft with its files and uploaded PDFs |
 | `PATCH /author/drafts/{id}` | `title`, `projectId` (empty to unfile) |
 | `DELETE /author/drafts/{id}` | the draft and its finished checks |
-| `PUT /author/drafts/{id}/files/{name}` | body `{"content"}`; a new name adds the file. Does not bump the version |
-| `DELETE /author/drafts/{id}/files/{name}` | keeps at least one file |
+| `PUT /author/drafts/{id}/files/{name}` | body `{"content", "updated"?}`; a new name adds the file. Does not bump the version. The project's shared .bib (when the draft has no file of that name) is written to the project, and `updated` is then that file's own `updated` (one made from its content for a .bib older than it). It is required there: a missing or stale one is a 409 |
+| `DELETE /author/drafts/{id}/files/{name}` | keeps at least one file; the project's shared .bib is a 400 |
+| `POST /author/drafts/{id}/bib-fork` | body `{"keep": "project" \| "draft"}`: for a draft whose own copy hides its project's .bib (`bibFork` in every draft answer), drop the copy or keep it and stop asking; 404 when there is no copy |
 | `POST /author/drafts/{id}/save` | Ctrl/Cmd+S: `version + 1`. A check on a draft with unsaved edits saves first, the same way, so every check's `version` names the content it checked |
 | `GET /author/drafts/{id}/parse` | `{texFiles, citeCommands, bibEntries, warnings}`; a warning is `{type, detail, file, line}` with `type` one of `missing-key`, `duplicate-key`, `unused-entry`, `no-doi-url` |
 | `POST /author/drafts/{id}/citations/{key}/pdf` | multipart PDF for a bib key no check can read; used instead of a lookup by the next check |
@@ -692,7 +693,7 @@ already has the store, `PAPERS_DIR` and `PARALLEL_CHECKS`.
 | `POST /author/projects` | body `{"name", "bib", "bibName"}` |
 | `POST /author/projects/import` | multipart `.bib` (the bibliography) or `.zip` (its `.bib` plus one draft from its `.tex` files) |
 | `GET /author/projects/{id}` | the card plus `bib`, `draftList` and `history` (check rows per draft id) |
-| `PATCH /author/projects/{id}` | `name`, `bib`, `bibName` |
+| `PATCH /author/projects/{id}` | `name`, `bib`, `bibName`, `bibUpdated`? (the .bib's `updated` last read: a stale one is a 409) |
 | `DELETE /author/projects/{id}` | the drafts stay and become unfiled |
 | `DELETE /author/projects/{id}/bib/{key}` | drops every entry with that key |
 | `POST /author/projects/{id}/bib/{key}/pdf` | like the draft route, for the project's `.bib` |

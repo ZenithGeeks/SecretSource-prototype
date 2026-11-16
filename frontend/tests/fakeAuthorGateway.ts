@@ -13,8 +13,9 @@ import { findCites, parseProject } from '../src/lib/latexProject'
 import { summarize } from '../src/lib/verdict'
 import type { CheckRun, Citation, Draft, ParseWarning, ProjectFile, SavedSource, Verdict } from '../src/types/draftCheck'
 
-type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks'> & { savedHash?: string }
-type StoredProject = { id: string; name: string; bib: { name: string; content: string } | null; pdfs: Record<string, string>; created: string; updated: string }
+type StoredDraft = Omit<Draft, 'status' | 'lastCheckedAt' | 'lastCheckId' | 'runningCheckId' | 'sinceLastCheck' | 'checks' | 'bibFork'> & { savedHash?: string; keptBib?: string }
+type StoredBib = { name: string; content: string; updated?: string }
+type StoredProject = { id: string; name: string; bib: StoredBib | null; pdfs: Record<string, string>; created: string; updated: string }
 type StoredCheck = Omit<CheckRun, 'summary' | 'sinceLastCheck' | 'previousVersion' | 'previousId' | 'unchanged'> & { citations: Citation[]; contentHash: string }
 
 export type VerdictRule = (key: string, claim: string) => { verdict: Verdict; passage?: string; page?: number; explanation?: string; message?: string; reason?: string; audit?: Citation['audit']; exists?: Citation['exists']; sourceVersion?: Citation['sourceVersion'] }
@@ -38,6 +39,9 @@ export type FakeGateway = {
 let seq = 0
 const id = (prefix: string) => `${prefix}${++seq}`
 const now = () => new Date().toISOString()
+/** A project .bib's version, as the real route's `updated` on it: unique even within one ms. */
+let bibRevision = 0
+const bibOf = (name: string, content: string): StoredBib => ({ name, content, updated: `${now()}#${++bibRevision}` })
 
 function kindOf(name: string): 'tex' | 'bib' {
   return name.toLowerCase().endsWith('.bib') ? 'bib' : 'tex'
@@ -123,8 +127,18 @@ export function installFakeGateway(options: { files?: { name: string; content: s
 function filesOf(gateway: FakeGateway, draft: StoredDraft): ProjectFile[] {
   const files = [...draft.files]
   const project = draft.projectId ? gateway.projects.get(draft.projectId) : undefined
-  if (project?.bib && !files.some((f) => f.name === project.bib!.name)) files.push({ ...project.bib, kind: 'bib', shared: true })
+  if (project?.bib && !files.some((f) => f.name === project.bib!.name)) files.push({ ...project.bib, updated: bibToken(project.bib), kind: 'bib', shared: true })
   return files
+}
+
+/** As the real _bib_token: a .bib with no `updated` gets a version from its content. */
+const bibToken = (bib: StoredBib) => bib.updated ?? `content:${contentHash([bib])}`
+
+/** As the real _bib_fork: the draft's own copy hiding its project's .bib, until settled. */
+function bibForkOf(gateway: FakeGateway, draft: StoredDraft): string | null {
+  const name = draft.projectId ? gateway.projects.get(draft.projectId)?.bib?.name : undefined
+  if (!name || draft.keptBib === name) return null
+  return draft.files.some((f) => f.name === name) ? name : null
 }
 
 /** The gateway's content hash: the same files hash the same, whatever their order. */
@@ -185,6 +199,7 @@ function draftView(gateway: FakeGateway, draft: StoredDraft): Draft {
     runningCheckId: runs.find((r) => r.status === 'running')?.id ?? null,
     sinceLastCheck: latest ? delta(latest.citations, previous?.citations) : null,
     checks: done.length,
+    bibFork: bibForkOf(gateway, draft),
   }
 }
 
@@ -312,8 +327,18 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         // As the real route: a write carrying the `updated` the editor last saw is refused
         // when the draft has changed since (another tab saved); one carrying none is not checked.
         const updated = body?.updated as string | undefined
-        if (updated !== undefined && updated !== draft.updated) return fail(409, 'the draft was changed elsewhere since this editor last saved it')
         const existing = draft.files.find((f) => f.name === name)
+        const project = draft.projectId ? gateway.projects.get(draft.projectId) : undefined
+        if (!existing && project?.bib?.name === name) {
+          // The project's shared .bib: written to the project, always checked against its own
+          // version; a write with none is refused, never a silent replace.
+          if (updated === undefined) return fail(409, `${name} is the project's .bib: reload the draft and try again`)
+          if (updated !== bibToken(project.bib)) return fail(409, `${name} changed elsewhere since this editor last saved it. Reload it.`)
+          project.bib = bibOf(name, content)
+          project.updated = now()
+          return json(draftView(gateway, draft))
+        }
+        if (updated !== undefined && updated !== draft.updated) return fail(409, 'the draft was changed elsewhere since this editor last saved it')
         if (existing) existing.content = content
         else draft.files.push({ name, kind: kindOf(name), content })
         draft.updated = now()
@@ -321,9 +346,23 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         return json(draftView(gateway, draft))
       }
       if (method === 'DELETE') {
+        if (!draft.files.some((f) => f.name === name)) {
+          const shared = draft.projectId ? gateway.projects.get(draft.projectId)?.bib?.name : undefined
+          return shared === name ? fail(400, `${name} is the project's .bib, shared by every draft of the project: it is not deleted from one draft`) : fail(404, 'no such file')
+        }
         draft.files = draft.files.filter((f) => f.name !== name)
+        if (draft.keptBib === name) delete draft.keptBib
         return json(draftView(gateway, draft))
       }
+    }
+    if (parts[3] === 'bib-fork' && method === 'POST') {
+      const name = bibForkOf(gateway, draft)
+      if (!name) return fail(404, "this draft holds no copy of its project's .bib")
+      if (body?.keep === 'draft') draft.keptBib = name
+      else if (draft.files.length === 1) return fail(400, 'a draft keeps at least one file')
+      else draft.files = draft.files.filter((f) => f.name !== name)
+      draft.updated = now()
+      return json(draftView(gateway, draft))
     }
     if (parts[3] === 'save') {
       draft.version += 1
@@ -417,13 +456,13 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       const taken = new Set([...gateway.projects.values()].map((p) => p.name))
       let name = asked || 'Untitled project'
       for (let n = 2; !asked && taken.has(name); n++) name = `Untitled project ${n}`
-      const project: StoredProject = { id: id('proj'), name, bib: { name: String(body?.bibName ?? 'main.bib'), content: String(body?.bib ?? '') }, pdfs: {}, created: now(), updated: now() }
+      const project: StoredProject = { id: id('proj'), name, bib: bibOf(String(body?.bibName ?? 'main.bib'), String(body?.bib ?? '')), pdfs: {}, created: now(), updated: now() }
       gateway.projects.set(project.id, project)
       return json(cards().find((c) => c.id === project.id))
     }
     if (parts[2] === 'import' && method === 'POST') {
       const file = form?.get('file') as File
-      const project: StoredProject = { id: id('proj'), name: file.name.replace(/\.(bib|zip)$/i, ''), bib: { name: file.name, content: await file.text() }, pdfs: {}, created: now(), updated: now() }
+      const project: StoredProject = { id: id('proj'), name: file.name.replace(/\.(bib|zip)$/i, ''), bib: bibOf(file.name, await file.text()), pdfs: {}, created: now(), updated: now() }
       gateway.projects.set(project.id, project)
       return json(cards().find((c) => c.id === project.id))
     }
@@ -442,7 +481,10 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         if (name.length > 120) return fail(400, 'a project name is at most 120 characters')
         project.name = name
       }
-      if (typeof body?.bib === 'string') project.bib = { name: String(body.bibName ?? project.bib?.name ?? 'main.bib'), content: body.bib }
+      if (typeof body?.bib === 'string' && typeof body.bibUpdated === 'string' && project.bib && body.bibUpdated !== bibToken(project.bib)) {
+        return fail(409, `${project.bib.name} changed elsewhere since this editor last saved it. Reload it.`)
+      }
+      if (typeof body?.bib === 'string') project.bib = bibOf(String(body.bibName ?? project.bib?.name ?? 'main.bib'), body.bib)
       project.updated = now()
       return json(cards().find((c) => c.id === project.id))
     }
@@ -492,7 +534,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       const key = decodeURIComponent(parts[4])
       if (!entries.some((e) => e.key === key)) return fail(404, `${key} is not in the bib`)
       const kept = entries.filter((e) => e.key !== key)
-      project.bib = { name: project.bib!.name, content: kept.map((e) => `@${e.type}{${e.key},\n${Object.entries(e.fields).map(([k, v]) => `  ${k} = {${v}},`).join('\n')}\n}`).join('\n\n') }
+      project.bib = bibOf(project.bib!.name, kept.map((e) => `@${e.type}{${e.key},\n${Object.entries(e.fields).map(([k, v]) => `  ${k} = {${v}},`).join('\n')}\n}`).join('\n\n'))
       return json({ removed: key, entries: kept.length })
     }
     if (parts[3] === 'bib' && parts[5] === 'pdf') {
@@ -563,7 +605,7 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
       if (!project) return fail(404, 'no such project')
       const bib = project.bib ?? { name: 'main.bib', content: '' }
       if (parseBib(bib.content).some((e) => e.key === source.key)) return fail(409, `${source.key} is already in ${bib.name}`)
-      project.bib = { name: bib.name, content: `${bib.content.trimEnd()}\n\n${source.bibtex}\n` }
+      project.bib = bibOf(bib.name, `${bib.content.trimEnd()}\n\n${source.bibtex}\n`)
       source.projectId = project.id
       return json(view(source))
     }

@@ -236,9 +236,12 @@ export function useAuthorActions() {
       libraryChanged()
       return alreadyGone
     },
-    /** Writes one file and refetches what shows it. */
+    /** Writes one file and refetches what shows it. The project's shared .bib is always checked:
+     * it goes with the version this device last read, and with none (nothing read yet) the
+     * gateway refuses it rather than replace a .bib every draft of the project writes. */
     putFile: async (draftId: string, name: string, content: string): Promise<Draft> => {
-      const draft = await authorApi.putFile(draftId, name, content)
+      const shared = qc.getQueryData<Draft>(AUTHOR_KEYS.draft(draftId))?.files.find((f) => f.shared && f.name === name)
+      const draft = await authorApi.putFile(draftId, name, content, shared?.updated ?? undefined)
       touched(draftId)
       return draft
     },
@@ -249,10 +252,25 @@ export function useAuthorActions() {
     writeFile: (draftId: string, name: string, content: string, updated?: string): Promise<Draft> => authorApi.putFile(draftId, name, content, updated),
     /** Puts a write's answer in the cache without the refetch storm; only the files and
      * the timestamp move, and the parse (warnings, citation lines) is refetched. */
-    acceptWrite: (draftId: string, draft: Draft): void => {
+    acceptWrite: (draftId: string, draft: Draft, shared = false): void => {
       qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), (current) => (current ? { ...current, files: draft.files, updated: draft.updated } : current))
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.parse(draftId) })
       void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.lint })
+      // The project's .bib changed: every draft of the project and the project page read it.
+      if (shared) {
+        // Not this draft's own: the editor holds it, and a refetch would race its next write.
+        void qc.invalidateQueries({ queryKey: ['author', 'draft'], predicate: (q) => q.queryKey[2] !== draftId })
+        void qc.invalidateQueries({ queryKey: ['author', 'parse'] })
+        void qc.invalidateQueries({ queryKey: ['author', 'project'] })
+        void qc.invalidateQueries({ queryKey: AUTHOR_KEYS.library })
+      }
+    },
+    /** The one-time choice for a draft whose own copy hides its project's .bib (#733). */
+    settleBibFork: async (draftId: string, keep: 'project' | 'draft'): Promise<Draft> => {
+      const draft = await authorApi.settleBibFork(draftId, keep)
+      qc.setQueryData<Draft>(AUTHOR_KEYS.draft(draftId), draft)
+      touched(draftId)
+      return draft
     },
     deleteFile: async (draftId: string, name: string): Promise<Draft> => {
       const draft = await authorApi.deleteFile(draftId, name)

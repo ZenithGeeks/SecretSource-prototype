@@ -17,7 +17,9 @@
  *    so a superseded reply never puts earlier text back on screen.
  *  - Every write carries the draft's `updated` this editor last saw (from the draft it read,
  *    then from each write's answer). The gateway refuses a write whose value is stale (409):
- *    another tab saved in between. The file stays dirty with the author's text, the draft is
+ *    another tab saved in between. The project's shared .bib is written to the project, so its
+ *    tab sends that file's own `updated` instead: another draft may have written it. The file
+ *    stays dirty with the author's text, the draft is
  *    refetched, and the author is asked: Keep my version overwrites the newer copy, Use the
  *    saved copy puts it on screen. Until they choose, nothing writes that file.
  *  - Text the gateway has not taken (a refused write, a tab closed with edits pending) is kept
@@ -116,7 +118,8 @@ export function Editor({
   const refetchDraftRef = useRef(draft.refetch)
   /** The draft's `updated` as this editor last saw it, sent with every write (see the header). */
   const lastUpdated = useRef<string | undefined>(undefined)
-
+  /** The same for the project's shared .bib, by name: it is the project's file, with its own. */
+  const sharedTokens = useRef<Record<string, string | undefined>>({})
   const files: ProjectFile[] = useMemo(() => draft.data?.files ?? [], [draft.data])
   const [activeName, setActiveName] = useState<string | null>(target.file ?? null)
   const active = files.find((f) => f.name === activeName) ?? files.find((f) => f.kind === 'tex') ?? files[0]
@@ -135,6 +138,27 @@ export function Editor({
     onWriteFailedRef.current = onWriteFailed
     refetchDraftRef.current = draft.refetch
   })
+  /** Takes both kinds of token from a draft the gateway answered with. A shared .bib with unsaved
+   * edits here that another draft changed underneath keeps the version those edits were based
+   * on, so their write is refused (409) and the author chooses: any answer carries the .bib's
+   * newest version, even one to a write of another file. `taken` names files whose newest
+   * version this editor does take: the file it just wrote, or ones the author chose about. */
+  const adoptTokens = useCallback((data: Draft, taken: readonly string[] = []) => {
+    lastUpdated.current = data.updated
+    const before = sharedTokens.current
+    sharedTokens.current = Object.fromEntries(
+      data.files
+        .filter((f) => f.shared)
+        .map((f) => {
+          const text = textsRef.current[f.name]
+          const based = confirmedRef.current[f.name]
+          const keep = f.name in before && !taken.includes(f.name) && text !== undefined && text !== based && f.content !== based
+          return [f.name, keep ? before[f.name] : (f.updated ?? undefined)]
+        }),
+    )
+  }, [])
+  const tokenFor = useCallback((name: string) => (name in sharedTokens.current ? sharedTokens.current[name] : lastUpdated.current), [])
+
   const timers = useRef<Record<string, number>>({})
   const sequence = useRef<Record<string, number>>({})
   const inFlight = useRef<Record<string, Promise<boolean>>>({})
@@ -167,7 +191,8 @@ export function Editor({
   // replacement made on Home, a refetch); a dirty file keeps the author's text.
   useEffect(() => {
     if (!draft.data) return
-    lastUpdated.current = draft.data.updated
+    const sharedBefore = new Set(Object.keys(sharedTokens.current))
+    adoptTokens(draft.data)
     const nextTexts = { ...textsRef.current }
     const nextConfirmed = { ...confirmedRef.current }
     let changed = false
@@ -175,6 +200,12 @@ export function Editor({
       const known = nextConfirmed[file.name]
       if (known === file.content) continue
       const clean = nextTexts[file.name] === undefined || nextTexts[file.name] === known
+      if (!clean && file.shared && sharedBefore.has(file.name)) {
+        // Another draft wrote the project's .bib under this tab's unsaved edits: keep what they
+        // were based on (adoptTokens keeps its version too), so their write is refused and the
+        // author chooses, never overwrites.
+        continue
+      }
       nextConfirmed[file.name] = file.content
       if (clean) nextTexts[file.name] = file.content
       changed = true
@@ -183,7 +214,7 @@ export function Editor({
       setTexts(nextTexts)
       setConfirmed(nextConfirmed)
     }
-  }, [draft.data])
+  }, [draft.data, adoptTokens])
 
   /** Writes one file's current text. Resolves true when the gateway took it. The write goes
    * out once the file's previous write has answered (one in flight per file), so the gateway
@@ -205,15 +236,16 @@ export function Editor({
         .then(() => {
           if (sequence.current[name] !== seq) return true // superseded before it went out; the newer write answers
           const accept = (updated: Draft) => {
-            lastUpdated.current = updated.updated
+            const shared = name in sharedTokens.current
+            adoptTokens(updated, [name])
             if (sequence.current[name] !== seq) return true // superseded; the newer write answers
             setConfirmed((c) => ({ ...c, [name]: content }))
-            actionsRef.current.acceptWrite(draftId, updated)
+            actionsRef.current.acceptWrite(draftId, updated, shared)
             setWriteError(null)
             return true
           }
           return actionsRef.current
-            .writeFile(draftId, name, content, lastUpdated.current)
+            .writeFile(draftId, name, content, tokenFor(name))
             .then(accept)
             .catch(async (error: unknown) => {
               if (isConflict(error)) {
@@ -224,9 +256,9 @@ export function Editor({
                 const { data } = await refetchDraftRef.current()
                 const held = data?.files.find((f) => f.name === name)?.content
                 if (data && held === confirmedRef.current[name]) {
-                  lastUpdated.current = data.updated
+                  adoptTokens(data)
                   try {
-                    return accept(await actionsRef.current.writeFile(draftId, name, content, data.updated))
+                    return accept(await actionsRef.current.writeFile(draftId, name, content, tokenFor(name)))
                   } catch (again) {
                     error = again
                   }
@@ -238,7 +270,7 @@ export function Editor({
                 // they choose (see `conflicts`).
                 if (sequence.current[name] === seq) {
                   setConflicts((names) => new Set([...names, name]))
-                  setWriteError(`${name} was changed elsewhere (another tab?) since this editor last saved it.`)
+                  setWriteError(`${name} was changed elsewhere (${name in sharedTokens.current ? 'another draft or tab?' : 'another tab?'}) since this editor last saved it.`)
                 }
               } else if (sequence.current[name] === seq) {
                 setWriteError(`Could not save ${name}: ${errorMessage(error)}`)
@@ -255,7 +287,7 @@ export function Editor({
       setWriting((names) => (names.has(name) ? names : new Set([...names, name])))
       return write
     },
-    [draftId, backupNow],
+    [draftId, backupNow, adoptTokens, tokenFor],
   )
 
   const onChange = (name: string, content: string) => {
@@ -292,9 +324,9 @@ export function Editor({
         const previous = inFlight.current[name] ?? Promise.resolve(true)
         void previous.then(() =>
           actionsRef.current
-            .writeFile(draftId, name, content, lastUpdated.current)
+            .writeFile(draftId, name, content, tokenFor(name))
             .then((updated) => {
-              actionsRef.current.acceptWrite(draftId, updated)
+              actionsRef.current.acceptWrite(draftId, updated, name in sharedTokens.current)
               // Written after all: what was kept for it would only be offered back stale.
               forgetBackup(draftId, name, content)
             })
@@ -302,7 +334,7 @@ export function Editor({
         )
       }
     },
-    [draftId, isUnsettled, backupNow],
+    [draftId, isUnsettled, backupNow, tokenFor],
   )
 
   const dirtyNames = useMemo(
@@ -378,7 +410,7 @@ export function Editor({
     const names = [...conflictsRef.current]
     if (names.length === 0) return
     const { data } = await refetchDraftRef.current()
-    if (data) lastUpdated.current = data.updated
+    if (data) adoptTokens(data, names)
     setConflicts(new Set())
     conflictsRef.current = new Set()
     setWriteError(null)
@@ -395,6 +427,43 @@ export function Editor({
     }
   }
   const keepMineButton = useRef<HTMLButtonElement>(null)
+
+  /** A draft whose own copy hides its project's .bib (`bibFork`, #733): the author either cites
+   * the project's again, which drops the copy and any edits to it, or keeps the copy. */
+  const [settlingFork, setSettlingFork] = useState(false)
+  const settleFork = async (keep: 'project' | 'draft') => {
+    const name = draft.data?.bibFork
+    if (!name) return
+    setSettlingFork(true)
+    try {
+      if (keep === 'project') {
+        // Nothing more goes to the copy, and a write already out lands on it before it is
+        // dropped: once it is gone, a write of this name would be the project's .bib.
+        window.clearTimeout(timers.current[name])
+        delete timers.current[name]
+        sequence.current[name] = (sequence.current[name] ?? 0) + 1
+        await inFlight.current[name]
+      }
+      const settled = await actions.settleBibFork(draftId, keep)
+      if (keep === 'project') {
+        const projectBib = settled.files.find((f) => f.name === name)?.content ?? ''
+        setTexts((t) => ({ ...t, [name]: projectBib }))
+        setConfirmed((c) => ({ ...c, [name]: projectBib }))
+        // The copy's text is gone for good: never offered back, where Restore would write it
+        // over the project's .bib, and no longer a conflict to settle.
+        const kept = readBackup(draftId)?.files[name]
+        if (kept !== undefined) forgetBackup(draftId, name, kept)
+        setRecovery((r) => (r && name in r.files ? { ...r, files: Object.fromEntries(Object.entries(r.files).filter(([n]) => n !== name)) } : r))
+        setConflicts((names) => new Set([...names].filter((n) => n !== name)))
+      }
+    } catch (error) {
+      toast.error(`Not changed: ${errorMessage(error)}`)
+      // The copy is still the draft's: what was typed into it and held back goes to it now.
+      if (keep === 'project') void commit(name)
+    } finally {
+      setSettlingFork(false)
+    }
+  }
 
   const rename = async (title: string): Promise<string | null> => {
     try {
@@ -641,7 +710,8 @@ export function Editor({
       {conflicts.size > 0 ? (
         <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-refutes bg-refutes-soft px-4 py-1.5 text-xs text-refutes">
           <span className="min-w-0 flex-1">
-            {[...conflicts].join(' and ')} {conflicts.size === 1 ? 'was' : 'were'} changed elsewhere (another tab?) since this editor last saved{' '}
+            {[...conflicts].join(' and ')} {conflicts.size === 1 ? 'was' : 'were'} changed elsewhere (
+            {files.some((f) => f.shared && conflicts.has(f.name)) ? 'another draft or tab?' : 'another tab?'}) since this editor last saved{' '}
             {conflicts.size === 1 ? 'it. Which version do you want to keep?' : 'them. Which versions do you want to keep?'}
           </span>
           <button ref={keepMineButton} type="button" onClick={() => void settleConflicts('mine')} className="shrink-0 rounded font-medium underline">
@@ -690,6 +760,19 @@ export function Editor({
             className="shrink-0 rounded font-medium underline"
           >
             Discard
+          </button>
+        </div>
+      )}
+      {draft.data.bibFork && (
+        <div role="status" className="flex flex-wrap items-center gap-3 border-b border-insufficient bg-insufficient-soft px-4 py-1.5 text-xs text-insufficient">
+          <span className="min-w-0 flex-1">
+            This draft has its own copy of {draft.data.bibFork}, so changes to the project’s {draft.data.bibFork} do not reach it.
+          </span>
+          <button type="button" disabled={settlingFork} onClick={() => void settleFork('project')} className="shrink-0 rounded font-medium underline disabled:opacity-60">
+            Use the project’s .bib
+          </button>
+          <button type="button" disabled={settlingFork} onClick={() => void settleFork('draft')} className="shrink-0 rounded font-medium underline disabled:opacity-60">
+            Keep this draft’s copy
           </button>
         </div>
       )}

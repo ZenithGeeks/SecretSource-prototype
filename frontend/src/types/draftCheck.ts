@@ -20,12 +20,16 @@
 export type Verdict = 'supports' | 'refutes' | 'insufficient' | 'unavailable' | 'unchecked'
 
 /** One file of a draft's LaTeX project. `shared` marks the project's .bib, which every draft
- * of the project reads; `dirty` is the editor's own flag for unsaved typing. */
+ * of the project reads and writes; `dirty` is the editor's own flag for unsaved typing. */
 export type ProjectFile = {
   name: string // "related-work.tex", "main.bib", "chapters/intro.tex"
   kind: 'tex' | 'bib'
   content: string
   shared?: boolean
+  /** On the shared .bib only: its own version, which a write to it sends back so a write
+   * another draft got in first is refused (409), not overwritten. Null on a .bib never
+   * written since the token existed. */
+  updated?: string | null
   dirty?: boolean
 }
 
@@ -157,6 +161,9 @@ export type Draft = {
    * drafts made before it existed. */
   edited?: string
   savedAt: string
+  /** The name of the draft's own copy of its project's .bib, which hides the project's one,
+   * until the author chooses to use the project's or keep the copy (#733). */
+  bibFork?: string | null
 }
 
 /** A stage of a running check, streamed over SSE like an analysis's stages. */
