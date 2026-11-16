@@ -611,12 +611,18 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
             # Step 1: get each cited paper ready once (download and index), several at a time.
             # Many claims can cite the same paper, so this avoids repeating that slow work.
             source_limit = asyncio.Semaphore(PARALLEL_SOURCES)
+            source_expectations = {}
+            for _, _, citation, source in jobs:
+                source_expectations.setdefault(source, citation)
 
             async def prepare(source: str) -> dict:
                 # This run's limit first: a run then has at most PARALLEL_SOURCES jobs waiting
                 # on the shared limit, so a second run's first paper goes before this run's tenth.
                 async with source_limit, all_sources:
-                    return await _in_step("prepare_source", source, prepare_source, source)
+                    expected = source_expectations.get(source)
+                    return await _in_step(
+                        "prepare_source", source, lambda: prepare_source(source, expected=expected)
+                    )
 
             ready_sources = {}
             for _, _, _, source in jobs:
@@ -636,9 +642,14 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                         if ready["status"] == "error":
                             verdict = {**ready, "claim": claim["claim"], "source": source}
                         else:
-                            verdict = await asyncio.to_thread(
-                                check_prepared, claim["claim"], source, Path(ready["path"]),
+                            check_args = [
+                                claim["claim"], source, Path(ready["path"]),
                                 judged_text(claim, citation), cites_others(claim, citation),
+                            ]
+                            if ready.get("source_outcome") is not None:
+                                check_args.append(ready["source_outcome"])
+                            verdict = await asyncio.to_thread(
+                                check_prepared, *check_args,
                             )
                         outcome = verdict.get("verdict") or verdict.get("message", "")
                         span.set_attribute(SpanAttributes.OUTPUT_VALUE, outcome)
@@ -958,9 +969,14 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
                 if ready["status"] == "error":
                     verdict = {**ready, "claim": claim["claim"], "source": source}
                 else:
-                    verdict = await asyncio.to_thread(
-                        check_prepared, claim["claim"], pdf.as_posix(), Path(ready["path"]),
+                    check_args = [
+                        claim["claim"], pdf.as_posix(), Path(ready["path"]),
                         judged_text(claim, citation), cites_others(claim, citation),
+                    ]
+                    if ready.get("source_outcome") is not None:
+                        check_args.append(ready["source_outcome"])
+                    verdict = await asyncio.to_thread(
+                        check_prepared, *check_args,
                     )
                 claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") != source]
                 claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") != source]

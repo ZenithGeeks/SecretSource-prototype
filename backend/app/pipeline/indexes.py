@@ -18,6 +18,7 @@ from app.pipeline.sources import USER_AGENT, Fits, titles_match
 
 CROSSREF_URL = "https://api.crossref.org/works"
 OPENALEX_URL = "https://api.openalex.org/works"
+OPENALEX_SOURCE_FIELDS = "doi,title,publication_year,authorships,locations"
 # Short: the lookups run one after another at the end of a draft check, and a slow index
 # only makes the answer "unknown".
 TIMEOUT = 5
@@ -168,6 +169,27 @@ def openalex_works(params: dict) -> list[dict]:
         _IndexError: OpenAlex did not answer, or not with JSON.
     """
     return (_get(OPENALEX_URL, params) or {}).get("results") or []
+
+
+def openalex_work_by_doi(doi: str) -> dict | None:
+    """OpenAlex's full record for a DOI, including its legal-access locations.
+
+    Source retrieval uses this only after its primary PDF URL failed, so the extra metadata
+    request does not slow down papers that were already readable.
+    """
+    return _get(
+        f"{OPENALEX_URL}/doi:{quote(doi, safe='/')}",
+        {"select": OPENALEX_SOURCE_FIELDS},
+    )
+
+
+def openalex_search_works(title: str) -> list[dict]:
+    """A small set of OpenAlex title matches with source locations included."""
+    found = _get(
+        OPENALEX_URL,
+        {"search": title, "per-page": SEARCH_HITS, "select": OPENALEX_SOURCE_FIELDS},
+    ) or {}
+    return found.get("results") or []
 
 
 def _openalex(doi: str) -> IndexRecord | None:

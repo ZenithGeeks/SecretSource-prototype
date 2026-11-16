@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "Small public DOI sample for a live ACL Anthology versus OpenAlex source comparison.",
+  "cases": [
+    {
+      "id": "tacl-00594",
+      "doi": "10.1162/tacl_a_00594",
+      "title": "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and Supporting Tasks",
+      "year": 2023,
+      "venue": "Transactions of the Association for Computational Linguistics, Volume 11"
+    },
+    {
+      "id": "tacl-00276",
+      "doi": "10.1162/tacl_a_00276",
+      "title": "Natural Questions: A Benchmark for Question Answering Research",
+      "year": 2019,
+      "venue": "Transactions of the Association for Computational Linguistics, Volume 7"
+    },
+    {
+      "id": "bleu-2002",
+      "doi": "10.3115/1073083.1073135",
+      "title": "BLEU: a method for automatic evaluation of machine translation",
+      "year": 2002,
+      "venue": "Proceedings of the 40th Annual Meeting on Association for Computational Linguistics"
+    }
+  ]
+}

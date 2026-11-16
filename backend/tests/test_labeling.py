@@ -1792,9 +1792,36 @@ def test_a_claim_says_why_its_citations_were_not_checked(api):
     assert checked["unchecked"] == []
     links = {"url": "", "doi": "", "year": "2020"}
     assert named["unchecked"] == [
-        {"ref": "b39", "label": "T5 paper", "reason": "named", **links},
-        {"ref": "b49", "label": "SuperGLUE", "reason": "named", **links},
+        {"ref": "b39", "label": "T5 paper", "reason": "named", **links,
+         "source_outcome": {"source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": []}},
+        {"ref": "b49", "label": "SuperGLUE", "reason": "named", **links,
+         "source_outcome": {"source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": []}},
         {"ref": "b4", "label": "NeurIPS", "reason": "no-open-access", **links},
+    ]
+
+
+def test_an_empty_citation_is_marked_not_attempted(api):
+    client, _, app = api
+    empty = {
+        **ANALYSIS,
+        "claims": [{"claim": "A claim.", "citations": [{"ref": "b10"}]}],
+    }
+    app.dependency_overrides[labeling.owned_analysis] = lambda: empty
+
+    [claim] = client.get("/labeling/sessions/a1").json()["claims"]
+
+    assert claim["unchecked"] == [
+        {
+            "ref": "b10",
+            "label": "Reference [b10]",
+            "reason": "unresolvable",
+            "url": "",
+            "doi": "",
+            "year": "",
+            "source_outcome": {
+                "source_kind": "unknown", "outcome": "not-attempted", "retryable": False, "attempts": [],
+            },
+        }
     ]
 
 

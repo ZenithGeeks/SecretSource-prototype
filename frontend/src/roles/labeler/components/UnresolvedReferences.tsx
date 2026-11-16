@@ -30,6 +30,25 @@ export function UnresolvedReferences({ citations }: { citations: Unresolved[] })
               {citation.year && ` (${citation.year})`}
             </p>
             <p className="mt-1 text-ink-muted">Not read: {citation.reason}</p>
+            {citation.sourceOutcome?.retryable && (
+              <p className="mt-1 text-ink-muted">This may be a temporary failure; retrying later may help.</p>
+            )}
+            {!!citation.sourceOutcome?.attempts.length && (
+              <details className="mt-2 text-ink-muted">
+                <summary className="w-fit cursor-pointer font-medium">Retrieval attempts</summary>
+                <ul className="mt-1 list-inside list-disc">
+                  {citation.sourceOutcome.attempts.map((attempt, attemptIndex) => (
+                    <li key={`${attempt.provider}:${attemptIndex}`}>
+                      {attempt.provider}: {attempt.result}
+                      {attempt.locator && /^https?:\/\//i.test(attempt.locator) ? (
+                        <> (<a className="break-all underline" href={attempt.locator} target="_blank" rel="noreferrer">{attempt.locator}</a>)</>
+                      ) : attempt.host ? ` (${attempt.host})` : null}
+                      {attempt.status_code && `, HTTP ${attempt.status_code}`}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {citation.links.map((link) => (
               <a
                 key={link.href}

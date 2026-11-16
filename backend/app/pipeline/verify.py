@@ -324,13 +324,8 @@ def _build_judge():
 
 
 def unchecked_reason(verdict: dict, citation: dict) -> str:
-    """Why a claim went unchecked.
-
-    A citation we could not find that has a link is usually a blog post or a spec. That is
-    a fact about the source list, not a lookup that failed on our side.
-    """
-    reason = verdict.get("reason", "failed")
-    return "web-source" if reason == "unresolvable" and citation.get("url") else reason
+    """Why a claim went unchecked, based on the retrieval result rather than citation shape."""
+    return verdict.get("reason", "failed")
 
 
 def checked_citations(claim: dict) -> list[tuple[dict, str]]:
@@ -383,10 +378,11 @@ def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
     if verdict["status"] == "ok":
         claim.setdefault("verdicts", []).append({**verdict, "cited": source})
     else:
-        claim.setdefault("unchecked", []).append(
-            {"source": source, "reason": unchecked_reason(verdict, citation),
-             "message": verdict.get("message", "")}
-        )
+        row = {"source": source, "reason": unchecked_reason(verdict, citation),
+               "message": verdict.get("message", "")}
+        if verdict.get("source_outcome"):
+            row["source_outcome"] = verdict["source_outcome"]
+        claim.setdefault("unchecked", []).append(row)
 
 
 def verify_claim(claim: str, source_pdf_path: str) -> dict:
@@ -406,10 +402,14 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
     prepared = prepare_source(source_pdf_path, wait_for_figures=True)
     if prepared["status"] == "error":
         return {**prepared, "claim": claim, "source": source_pdf_path}
-    return check_prepared(claim, source_pdf_path, Path(prepared["path"]))
+    return check_prepared(
+        claim, source_pdf_path, Path(prepared["path"]), source_outcome=prepared.get("source_outcome")
+    )
 
 
-def prepare_source(source_pdf_path: str, wait_for_figures: bool = False) -> dict:
+def prepare_source(
+    source_pdf_path: str, wait_for_figures: bool = False, expected: dict | None = None,
+) -> dict:
     """Get a cited paper ready: download it if needed and index it once.
 
     Returns {"status": "ok", "path": ...} or an error with a reason and `retryable`. Safe to
@@ -417,12 +417,20 @@ def prepare_source(source_pdf_path: str, wait_for_figures: bool = False) -> dict
     the figures follow in the background unless `wait_for_figures` is set.
     """
     try:
-        from app.pipeline.sources import local_pdf
+        from app.pipeline.sources import local_pdf_with_resolution
 
-        source = Path(local_pdf(source_pdf_path))
+        path, source_outcome = local_pdf_with_resolution(source_pdf_path, expected)
+        source = Path(path)
         if failure := _index_once(source, wait_for_figures):
-            return failure
-        return {"status": "ok", "path": source.as_posix()}
+            return {
+                **failure,
+                "source_outcome": failure.get("source_outcome") or {
+                    "source_kind": "paper", "outcome": "indexing-failed",
+                    "retryable": bool(failure.get("retryable")),
+                    "attempts": source_outcome.get("attempts", []),
+                },
+            }
+        return {"status": "ok", "path": source.as_posix(), "source_outcome": source_outcome}
     except Exception as error:
         from app.pipeline.sources import tool_error
 
@@ -442,7 +450,8 @@ def judge_passages(claim: str, passages: list[str]) -> dict:
 
 
 def check_prepared(
-    claim: str, source_pdf_path: str, source: Path, judged: str = "", other_citations: bool = False
+    claim: str, source_pdf_path: str, source: Path, judged: str = "",
+    other_citations: bool = False, source_outcome: dict | None = None,
 ) -> dict:
     """Judge a claim against a paper that prepare_source already made ready.
 
@@ -454,6 +463,8 @@ def check_prepared(
     global _judge
     try:
         from app.pipeline.sources import known_index, version_of
+
+        source_details = {"source_outcome": source_outcome} if source_outcome else {}
 
         # Text search (ColBERT) and visual search (ColPali) are independent, so run both at once.
         # Figures still being indexed are left out rather than waited for (#163).
@@ -470,7 +481,7 @@ def check_prepared(
             return {"status": "ok", "claim": claim, "source": source.name,
                     "verdict": "insufficient", "quote": "", "reasoning": "no passages retrieved",
                     "verdict_from": "none", "judged_figure": "",
-                    "evidence": [], "pages": pages, "page_model": page_model,
+                    "evidence": [], "pages": pages, "page_model": page_model, **source_details,
                     "indexed_in": indexed_in, **version}
 
         if _judge is None:
@@ -519,11 +530,22 @@ def check_prepared(
                 verdict, verdict_from, judged_figure = seen, "figure", figure.name
         return {"status": "ok", "claim": claim, "source": source.name,
                 **verdict, "verdict_from": verdict_from, "judged_figure": judged_figure,
-                "evidence": evidence, "pages": pages,
+                "evidence": evidence, "pages": pages, **source_details,
                 "page_model": page_model, "indexed_in": indexed_in, **version}
     except Exception as error:
         from app.pipeline.sources import tool_error
 
         # Why it failed, not only that it did: the reader must tell "the source does not
         # support this" from "we could not read the source".
-        return {**tool_error(error), "claim": claim, "source": source_pdf_path}
+        failure = tool_error(error)
+        if source_outcome:
+            failure["source_outcome"] = {
+                "source_kind": source_outcome.get("source_kind", "paper"),
+                "outcome": "retrieval-failed",
+                "retryable": failure.get("retryable", False),
+                "attempts": [
+                    *(source_outcome.get("attempts") or []),
+                    {"provider": "retrieval", "result": "failed", "retryable": failure.get("retryable", False)},
+                ],
+            }
+        return {**failure, "claim": claim, "source": source_pdf_path}

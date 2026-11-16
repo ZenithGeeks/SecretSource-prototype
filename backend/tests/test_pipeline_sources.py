@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 import requests
-from app.pipeline import sources
+from app import store
+from app.pipeline import indexes, sources
 
 DOI = "10.1162/tacl.a.782"
 PDF = b"%PDF-1.7 a paper"
@@ -128,17 +129,341 @@ def test_unpaywall_gives_the_best_pdf_and_an_arxiv_copy_among_the_other_location
     )
 
 
+def test_unpaywall_keeps_each_open_location_for_fetch_fallback(monkeypatch, web):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "me@example.org")
+    web[0].append(Reply(payload={
+        "title": "A paper",
+        "best_oa_location": {"url_for_pdf": "https://publisher.example/p.pdf"},
+        "oa_locations": [
+            {"url_for_pdf": "https://publisher.example/p.pdf"},
+            {"url_for_pdf": "https://repository.example/p.pdf"},
+        ],
+    }))
+
+    candidates = sources._unpaywall_resolutions(DOI)
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://publisher.example/p.pdf", "https://repository.example/p.pdf",
+    ]
+
+
+def test_openalex_doi_lookup_returns_validated_open_pdf_locations(monkeypatch):
+    doi = "10.1162/tacl_a_00594"
+    title = "Introduction to Mathematical Language Processing: Informal Proofs, Word Problems, and Supporting Tasks"
+    work = {
+        "doi": f"https://doi.org/{doi}",
+        "title": title,
+        "publication_year": 2023,
+        "authorships": [{"author": {"display_name": "Jordan Meadows"}}],
+        "locations": [
+            {"is_oa": True, "pdf_url": "https://direct.mit.edu/tacl/paper.pdf"},
+            {"is_oa": True, "pdf_url": "https://arxiv.org/pdf/2205.15231"},
+            {"is_oa": False, "pdf_url": "https://closed.example/paper.pdf"},
+        ],
+    }
+    monkeypatch.setattr(indexes, "openalex_work_by_doi", lambda requested: work)
+
+    candidates = sources._openalex_candidates(doi, {"doi": doi, "title": title, "year": 2023})
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://arxiv.org/pdf/2205.15231", "https://direct.mit.edu/tacl/paper.pdf",
+    ]
+    assert all(candidate.index == "openalex" for candidate in candidates)
+    assert candidates[0].ids == {"DOI": doi, "ArXiv": "2205.15231"}
+
+
+def test_openalex_rejects_a_title_that_conflicts_with_the_citation(monkeypatch):
+    doi = "10.1162/tacl_a_00594"
+    monkeypatch.setattr(indexes, "openalex_work_by_doi", lambda requested: {
+        "doi": f"https://doi.org/{doi}",
+        "title": "An unrelated paper",
+        "locations": [{"is_oa": True, "pdf_url": "https://example.org/paper.pdf"}],
+    })
+
+    with pytest.raises(sources.IdentityMismatch):
+        sources._openalex_candidates(doi, {"doi": doi, "title": "Expected paper"})
+
+
+def test_openalex_title_search_respects_cited_year_and_author(monkeypatch):
+    title = "A Shared Title: A Method Study"
+    wrong = {
+        "doi": "https://doi.org/10.1000/wrong",
+        "title": title,
+        "publication_year": 2019,
+        "authorships": [{"author": {"display_name": "Someone Else"}}],
+        "locations": [{"is_oa": True, "pdf_url": "https://wrong.example/paper.pdf"}],
+    }
+    correct = {
+        **wrong,
+        "doi": "https://doi.org/10.1000/correct",
+        "publication_year": 2020,
+        "authorships": [{"author": {"display_name": "Alex Smith"}}],
+        "locations": [{"is_oa": True, "pdf_url": "https://right.example/paper.pdf"}],
+    }
+    monkeypatch.setattr(indexes, "openalex_search_works", lambda requested: [wrong, correct])
+
+    candidates = sources._openalex_candidates(
+        title, {"title": title, "year": 2020, "authors": ["Alex Smith"]},
+    )
+
+    assert [candidate.url for candidate in candidates] == ["https://right.example/paper.pdf"]
+    assert candidates[0].ids["DOI"] == "10.1000/correct"
+
+
+@pytest.mark.parametrize(
+    ("doi", "anthology_id"),
+    [
+        ("10.18653/v1/2022.naacl-main.272", "2022.naacl-main.272"),
+        ("10.18653/2026.acl-main.1", "2026.acl-main.1"),
+        ("10.3115/C15-1234", "C15-1234"),
+        ("10.3115/1073083.1073135", ""),
+    ],
+)
+def test_acl_doi_fallback_only_derives_canonical_anthology_ids(doi, anthology_id):
+    candidate = sources._acl_anthology_candidate(doi)
+
+    if anthology_id:
+        assert candidate is not None
+        assert candidate.url == f"https://aclanthology.org/{anthology_id}.pdf"
+        assert candidate.index == "acl_anthology"
+    else:
+        assert candidate is None
+
+
+def test_acl_anthology_url_is_derived_from_a_canonical_acl_doi():
+    doi = "10.18653/v1/2022.naacl-main.272"
+
+    candidate = sources._acl_anthology_candidate(doi)
+
+    assert candidate is not None
+    assert candidate.url == "https://aclanthology.org/2022.naacl-main.272.pdf"
+
+
+def test_acl_anthology_doi_mapping_rejects_conflicting_citation_doi():
+    with pytest.raises(sources.IdentityMismatch):
+        sources._acl_anthology_candidate(
+            "10.18653/v1/2022.naacl-main.272",
+            {"doi": "10.18653/v1/2022.acl-long.1"},
+        )
+
+
+ACL_TACL_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<collection id="Q19">
+  <volume id="1">
+    <paper id="26">
+      <title>Natural Questions: A Benchmark for Question Answering Research</title>
+      <author><first>Tom</first><last>Kwiatkowski</last></author>
+      <doi>10.1162/tacl_a_00276</doi>
+      <pdf hash="b99b51da" />
+    </paper>
+  </volume>
+</collection>"""
+
+
+def acl_metadata_fixture(monkeypatch, web):
+    monkeypatch.setattr(store, "recall_cache", lambda key: None)
+    monkeypatch.setattr(store, "remember_cache", lambda *args: None)
+    web[0].extend([
+        Reply(payload={
+            "tacl": {
+                "name": "Transactions of the Association for Computational Linguistics",
+                "acronym": "TACL",
+                "oldstyle_letter": "Q",
+            },
+        }),
+        Reply(text=ACL_TACL_XML),
+    ])
+
+
+def test_acl_metadata_finds_paper_by_doi_title_and_venue(monkeypatch, web):
+    acl_metadata_fixture(monkeypatch, web)
+    doi = "10.1162/tacl_a_00276"
+    expected = {
+        "doi": doi,
+        "title": "Natural Questions: A Benchmark for Question Answering Research",
+        "year": "2019",
+        "venue": "Transactions of the Association for Computational Linguistics, Volume 7",
+        "authors": ["Tom Kwiatkowski"],
+    }
+
+    candidates = sources._acl_anthology_candidates(doi, expected)
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://aclanthology.org/Q19-1026.pdf",
+    ]
+    assert candidates[0].ids == {"ACL": "Q19-1026", "DOI": doi}
+    assert [url.rsplit("/", 1)[-1] for url in web[1]] == [
+        "venues.json", "Q19.xml",
+    ]
+
+
+def test_acl_metadata_does_not_accept_a_doi_with_a_conflicting_title(monkeypatch, web):
+    acl_metadata_fixture(monkeypatch, web)
+    doi = "10.1162/tacl_a_00276"
+    expected = {
+        "doi": doi,
+        "title": "A different cited paper",
+        "year": "2019",
+        "venue": "TACL",
+    }
+
+    with pytest.raises(sources.IdentityMismatch):
+        sources._acl_anthology_candidates(doi, expected)
+
+
+def test_acl_metadata_resolves_an_older_acm_prefixed_acl_doi(monkeypatch, web):
+    monkeypatch.setattr(store, "recall_cache", lambda key: None)
+    monkeypatch.setattr(store, "remember_cache", lambda *args: None)
+    web[0].extend([
+        Reply(payload={
+            "acl": {
+                "name": "Annual Meeting of the Association for Computational Linguistics",
+                "acronym": "ACL",
+                "oldstyle_letter": "P",
+            },
+            "acl-long": {
+                "name": "Annual Meeting of the Association for Computational Linguistics",
+                "acronym": "ACL Long Papers",
+            },
+            "cl": {
+                "name": "Computational Linguistics",
+                "acronym": "CL",
+                "oldstyle_letter": "J",
+            },
+        }),
+        Reply(text="""<collection id="P02"><volume id="1"><paper id="40">
+          <title>BLEU: a method for automatic evaluation of machine translation</title>
+          <author><first>Kishore</first><last>Papineni</last></author>
+          <doi>10.3115/1073083.1073135</doi><pdf hash="fixture" />
+        </paper></volume></collection>"""),
+    ])
+    doi = "10.3115/1073083.1073135"
+    expected = {
+        "doi": doi,
+        "title": "BLEU: a method for automatic evaluation of machine translation",
+        "year": "2002",
+        "venue": "Proceedings of the 40th Annual Meeting on Association for Computational Linguistics",
+        "authors": ["Kishore Papineni"],
+    }
+
+    candidates = sources._acl_anthology_candidates(doi, expected)
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://aclanthology.org/P02-1040.pdf",
+    ]
+
+
+def test_fetch_uses_acl_metadata_when_other_pdf_host_is_blocked(monkeypatch, store_in_tmp, web, papers):
+    acl_metadata_fixture(monkeypatch, web)
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "")
+    monkeypatch.setattr(sources, "_openalex_candidates", lambda *args: [])
+    doi = "10.1162/tacl_a_00276"
+    title = "Natural Questions: A Benchmark for Question Answering Research"
+    expected = {
+        "doi": doi,
+        "title": title,
+        "year": "2019",
+        "venue": "Transactions of the Association for Computational Linguistics, Volume 7",
+        "authors": ["Tom Kwiatkowski"],
+    }
+    publisher = "https://publisher.example/blocked.pdf"
+    monkeypatch.setattr(
+        sources, "_resolve",
+        lambda identifier, metadata=None: sources.Resolution(publisher, title, "semantic-scholar", {"DOI": doi}),
+    )
+    response = requests.Response()
+    response.status_code = 403
+    response.url = publisher
+
+    def download(url, name):
+        if url == publisher:
+            raise requests.HTTPError("publisher denied download", response=response)
+        assert url == "https://aclanthology.org/Q19-1026.pdf"
+        return papers / f"{name}.pdf"
+
+    monkeypatch.setattr(sources, "_download", download)
+
+    path, found = sources._fetch(doi, expected)
+
+    assert path.name == "10.1162-tacl_a_00276.pdf"
+    assert found.index == "acl_anthology"
+    assert found.url == "https://aclanthology.org/Q19-1026.pdf"
+    assert any(
+        attempt["provider"] == "acl_anthology" and attempt["result"] == "readable_pdf"
+        for attempt in found.attempts
+    )
+
+
+def test_fetch_uses_acl_when_scholarly_indexes_report_no_copy(monkeypatch, store_in_tmp, web, papers):
+    acl_metadata_fixture(monkeypatch, web)
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "")
+    monkeypatch.setattr(sources, "_openalex_candidates", lambda *args: [])
+    doi = "10.1162/tacl_a_00276"
+    title = "Natural Questions: A Benchmark for Question Answering Research"
+    expected = {
+        "doi": doi,
+        "title": title,
+        "year": "2019",
+        "venue": "Transactions of the Association for Computational Linguistics, Volume 7",
+        "authors": ["Tom Kwiatkowski"],
+    }
+
+    def no_index_copy(identifier, metadata=None):
+        error = sources.NoOpenAccessCopy("the first indexes have no downloadable copy")
+        error.source_attempts = [
+            sources._attempt("semantic_scholar", "no-accessible-copy", error),
+            sources._attempt("unpaywall", "no-accessible-copy", error),
+        ]
+        raise error
+
+    monkeypatch.setattr(sources, "_resolve", no_index_copy)
+    monkeypatch.setattr(
+        sources, "_download",
+        lambda url, name: papers / f"{name}.pdf"
+        if url == "https://aclanthology.org/Q19-1026.pdf"
+        else pytest.fail(f"unexpected download URL: {url}"),
+    )
+
+    _path, found = sources._fetch(doi, expected)
+
+    assert found.index == "acl_anthology"
+    assert found.url == "https://aclanthology.org/Q19-1026.pdf"
+
+
 @pytest.fixture
 def papers(monkeypatch, tmp_path):
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path / "papers")
     return tmp_path / "papers"
 
 
-def test_an_html_answer_is_a_web_source(papers, web):
-    web[0].append(Reply(content=b"<html>", content_type="text/html; charset=utf-8"))
+@pytest.mark.parametrize(
+    ("content", "content_type"),
+    [
+        (b"<html><body>page</body></html>", "text/html; charset=utf-8"),
+        (b"  <!doctype html><html><body>page</body></html>", ""),
+    ],
+)
+def test_an_html_answer_is_a_web_source_only_after_fetch(papers, web, content, content_type):
+    web[0].append(Reply(content=content, content_type=content_type))
 
     with pytest.raises(sources.WebSource, match="a web page"):
         sources._download("https://blog.example/post", "post")
+
+
+def test_direct_url_is_classified_as_a_web_page_only_after_html_is_read(
+    monkeypatch, store_in_tmp, papers, web,
+):
+    url = "https://blog.example/post"
+    monkeypatch.setattr(sources, "_resolve", lambda identifier, expected=None: sources.Resolution(url))
+    web[0].append(Reply(content=b"<html><body>article</body></html>", content_type="text/html"))
+
+    with pytest.raises(sources.WebSource) as failure:
+        sources._fetch(url)
+
+    outcome = sources.tool_error(failure.value)["source_outcome"]
+    assert outcome["source_kind"] == "web-page"
+    assert outcome["outcome"] == "web-page"
+    assert outcome["attempts"][-1]["result"] == "web-page"
 
 
 def test_an_answer_that_is_not_a_pdf_is_not_downloadable(papers, web):
@@ -151,19 +476,19 @@ def test_an_answer_that_is_not_a_pdf_is_not_downloadable(papers, web):
 def test_a_pdf_is_saved_with_the_link_beside_it(papers, web):
     web[0].append(Reply(content=PDF))
 
-    path = sources._download("https://example.org/p.pdf", "p")
+    path = sources._download("https://example.org/p.pdf?token=private#page", "p")
 
     assert path.read_bytes() == PDF
     assert sources._link_file(path).read_text() == "https://example.org/p.pdf"
 
 
-def test_a_lookup_that_fails_on_the_network_is_not_downloadable(monkeypatch):
-    def refuse(identifier):
+def test_a_lookup_that_fails_on_the_network_is_temporary_unavailable(monkeypatch, store_in_tmp):
+    def refuse(identifier, expected=None):
         raise requests.ConnectionError("no route")
 
     monkeypatch.setattr(sources, "_resolve", refuse)
 
-    with pytest.raises(sources.NotDownloadable, match="no route") as raised:
+    with pytest.raises(sources.LookupUnavailable, match="did not respond") as raised:
         sources._fetch("10.1/x")
 
     assert sources.is_retryable(raised.value)
@@ -171,7 +496,9 @@ def test_a_lookup_that_fails_on_the_network_is_not_downloadable(monkeypatch):
 
 @pytest.mark.parametrize("error", [sources.WebSource("a web page"), sources.NotDownloadable("not a PDF")])
 def test_a_link_that_is_not_a_paper_reports_its_own_error(monkeypatch, store_in_tmp, error):
-    monkeypatch.setattr(sources, "_resolve", lambda identifier: sources.Resolution("https://example.org/p"))
+    monkeypatch.setattr(
+        sources, "_resolve", lambda identifier, expected=None: sources.Resolution("https://example.org/p")
+    )
 
     def refuse(url, name):
         raise error
@@ -203,7 +530,7 @@ def test_withdrawn_by_is_empty_for_a_page_arxiv_refused(web):
 
 
 def test_index_paper_without_a_title_or_doi_asks_nothing(monkeypatch):
-    def unexpected(identifier):
+    def unexpected(identifier, expected=None):
         raise AssertionError("nothing to look up")
 
     monkeypatch.setattr(sources, "_resolve", unexpected)
@@ -212,7 +539,7 @@ def test_index_paper_without_a_title_or_doi_asks_nothing(monkeypatch):
 
 
 def test_index_paper_that_no_resolver_can_place_is_empty_not_an_error(monkeypatch):
-    def unplaced(identifier):
+    def unplaced(identifier, expected=None):
         raise sources.Unresolvable("no such paper")
 
     monkeypatch.setattr(sources, "_resolve", unplaced)
@@ -224,7 +551,7 @@ def test_index_paper_gives_the_index_the_lookup_found(monkeypatch, store_in_tmp)
     found = sources.Resolution(
         "https://arxiv.org/pdf/2112.01488", "ColBERTv2", "arxiv", {"ArXiv": "2112.01488"}
     )
-    monkeypatch.setattr(sources, "_lookup", lambda identifier: found)
+    monkeypatch.setattr(sources, "_lookup", lambda identifier, expected=None: found)
 
     assert sources.index_paper("ColBERTv2", doi="2112.01488") == {
         "index": "arxiv",
@@ -234,7 +561,7 @@ def test_index_paper_gives_the_index_the_lookup_found(monkeypatch, store_in_tmp)
 
 def test_known_title_reads_the_title_back_from_the_cache(monkeypatch, store_in_tmp):
     monkeypatch.setattr(
-        sources, "_lookup", lambda identifier: sources.Resolution("https://x/p.pdf", "ColBERTv2")
+        sources, "_lookup", lambda identifier, expected=None: sources.Resolution("https://x/p.pdf", "ColBERTv2")
     )
     sources._resolve(DOI)
 
@@ -254,14 +581,21 @@ def test_a_local_file_is_its_own_path(tmp_path):
 
 
 def test_anything_else_is_downloaded_first(monkeypatch):
-    monkeypatch.setattr(sources, "_fetch", lambda paper: (Path("data/papers/2112.01488.pdf"), None))
+    monkeypatch.setattr(
+        sources,
+        "_fetch",
+        lambda paper, expected=None: (
+            Path("data/papers/2112.01488.pdf"), sources.Resolution("https://arxiv.org/pdf/2112.01488")
+        ),
+    )
 
     assert sources.local_pdf("2112.01488") == "data/papers/2112.01488.pdf"
 
 
 def test_fetch_source_describes_the_download(monkeypatch):
     found = sources.Resolution(
-        "https://arxiv.org/pdf/2112.01488", "ColBERTv2", "arxiv", {"ArXiv": "2112.01488"}
+        "https://arxiv.org/pdf/2112.01488", "ColBERTv2", "arxiv", {"ArXiv": "2112.01488"},
+        attempts=({"provider": "arxiv", "result": "readable_pdf"},),
     )
     monkeypatch.setattr(sources, "_fetch", lambda identifier: (Path("data/papers/2112.01488.pdf"), found))
 
@@ -272,6 +606,10 @@ def test_fetch_source_describes_the_download(monkeypatch):
         "title": "ColBERTv2",
         "index": "arxiv",
         "ids": {"ArXiv": "2112.01488"},
+        "source_outcome": {
+            "source_kind": "paper", "outcome": "readable", "retryable": False,
+            "attempts": [{"provider": "arxiv", "result": "readable_pdf"}],
+        },
     }
 
 
@@ -286,6 +624,9 @@ def test_fetch_source_reports_a_failure_with_its_reason(monkeypatch):
         "message": "paywalled",
         "reason": "no-open-access",
         "retryable": False,
+        "source_outcome": {
+            "source_kind": "paper", "outcome": "no-accessible-copy", "retryable": False, "attempts": [],
+        },
     }
 
 
@@ -346,3 +687,126 @@ def test_arxiv_titles_is_empty_when_arxiv_does_not_answer(web):
     assert sources.arxiv_titles(["2112.11446"]) == {}
     assert sources.arxiv_titles([]) == {}
     assert len(asked) == 1
+
+
+def test_safe_locator_keeps_the_candidate_path_but_removes_credentials_and_secrets():
+    locator = sources._safe_locator("https://user:password@example.org/paper.pdf?token=private#page=2")
+
+    assert locator == "https://example.org/paper.pdf"
+    assert "password" not in locator and "private" not in locator
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome", "retryable", "source_kind"),
+    [
+        (sources.Unresolvable("no work"), "no-match", False, "unknown"),
+        (sources.AmbiguousMatch("two works"), "ambiguous-match", False, "paper"),
+        (sources.IdentityMismatch("wrong DOI"), "identity-mismatch", False, "paper"),
+        (sources.NoOpenAccessCopy("paywalled"), "no-accessible-copy", False, "paper"),
+        (sources.WebSource("HTML page"), "web-page", False, "web-page"),
+        (sources.NotDownloadable("not a PDF"), "invalid-content", False, "unknown"),
+        (sources.LookupUnavailable("provider timed out"), "temporary-failure", True, "unknown"),
+    ],
+)
+def test_errors_have_distinct_structured_outcomes(error, outcome, retryable, source_kind):
+    result = sources.tool_error(error)
+
+    assert result["source_outcome"] == {
+        "source_kind": source_kind,
+        "outcome": outcome,
+        "retryable": retryable,
+        "attempts": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome", "retryable"),
+    [(403, "blocked", False), (404, "not-found", False), (429, "temporary-failure", True), (503, "temporary-failure", True)],
+)
+def test_http_failures_keep_the_status_and_retryability(status, outcome, retryable):
+    response = requests.Response()
+    response.status_code = status
+    error = sources.NotDownloadable(f"HTTP {status}")
+    error.response = response
+    error.source_kind = "paper"
+
+    result = sources.tool_error(error)
+
+    assert result["source_outcome"]["outcome"] == outcome
+    assert result["source_outcome"]["retryable"] is retryable
+
+
+def test_download_attempts_record_safe_locator_provider_status_and_retryability(monkeypatch, store_in_tmp):
+    expected_url = "https://user:password@publisher.example/paper.pdf?token=private"
+    found = sources.Resolution(expected_url, "A paper", "unpaywall", {"DOI": DOI})
+    monkeypatch.setattr(sources, "_resolve", lambda identifier, expected=None: found)
+    monkeypatch.setattr(sources, "_fallback_resolutions", lambda *args: ([], [], []))
+    response = requests.Response()
+    response.status_code = 403
+
+    def blocked(url, name):
+        raise requests.HTTPError("blocked", response=response)
+
+    monkeypatch.setattr(sources, "_download", blocked)
+    with pytest.raises(sources.NotDownloadable) as failure:
+        sources._fetch(DOI)
+
+    outcome = sources.tool_error(failure.value)["source_outcome"]
+    assert outcome["outcome"] == "blocked"
+    assert outcome["retryable"] is False
+    assert outcome["attempts"][-1] == {
+        "provider": "unpaywall",
+        "result": "blocked",
+        "host": "publisher.example",
+        "locator": "https://publisher.example/paper.pdf",
+        "outcome": "blocked",
+        "retryable": False,
+        "status_code": 403,
+    }
+    assert "password" not in str(outcome) and "private" not in str(outcome)
+
+
+def test_same_author_and_year_title_candidates_are_ambiguous_not_selected(monkeypatch):
+    candidates = {
+        "data": [
+            {
+                "title": "A Shared Title: A Method Study",
+                "year": 2020,
+                "authors": [{"name": "Alex Smith"}],
+                "openAccessPdf": {"url": "https://wrong.example/one.pdf"},
+            },
+            {
+                "title": "A Shared Title: A Method Study",
+                "year": 2020,
+                "authors": [{"name": "Alex Smith"}],
+                "openAccessPdf": {"url": "https://wrong.example/two.pdf"},
+            },
+        ]
+    }
+    monkeypatch.setattr(sources, "_semantic_scholar", lambda path, params: candidates)
+    monkeypatch.setattr(sources, "_pdf_of", lambda *args: pytest.fail("an ambiguous candidate was selected"))
+
+    with pytest.raises(sources.AmbiguousMatch):
+        sources._semantic_scholar_by_title("A Shared Title: A Method Study", lambda year, author: year == 2020)
+
+
+def test_conflicting_doi_candidate_is_rejected_before_download(monkeypatch, store_in_tmp):
+    wrong_doi = "10.1000/wrong"
+    candidate = sources.Resolution(
+        "https://wrong.example/paper.pdf",
+        "A Shared Title",
+        "semantic-scholar",
+        {"DOI": wrong_doi},
+        2020,
+        "Alex Smith",
+    )
+    downloaded = []
+    monkeypatch.setattr(sources, "_semantic_scholar_pdf", lambda paper_id: candidate)
+    monkeypatch.setattr(sources, "_unpaywall_pdf", lambda doi: candidate)
+    monkeypatch.setattr(sources, "_download", lambda *args: downloaded.append(args))
+
+    with pytest.raises(sources.IdentityMismatch) as failure:
+        sources._fetch(DOI, {"doi": DOI, "title": "A Shared Title", "authors": ["Alex Smith"], "year": 2020})
+
+    assert downloaded == []
+    assert sources.tool_error(failure.value)["source_outcome"]["outcome"] == "identity-mismatch"
