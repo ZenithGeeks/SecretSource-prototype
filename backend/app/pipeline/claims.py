@@ -1485,14 +1485,16 @@ def _deduplicated(claims: list[dict]) -> list[dict]:
 
 
 def _most_checkable(claims: list[dict], limit: int) -> list[dict]:
-    """At most `limit` claims, ranked by source information, restored to the paper's order.
+    """The first `limit` claims in the paper's order; limit <= 0 keeps every one.
 
-    CLAIM_LIMIT=0 keeps everything (what the benchmark wants).
+    Paper order keeps the direct, single-citation claims ("X showed Y [12]") that ranking by
+    citation count dropped first, so their share among the kept claims stays close to their
+    share in the whole paper (SCRUM-551). CLAIM_LIMIT=0 keeps everything (what the benchmark
+    wants).
     """
-    if limit <= 0 or len(claims) <= limit:
+    if limit <= 0:
         return claims
-    ranked = sorted(range(len(claims)), key=lambda index: _provenance(claims[index]), reverse=True)
-    return [claims[index] for index in sorted(ranked[:limit])]
+    return claims[:limit]
 
 
 def extract_claims_with_citations(pdf_path: str) -> dict:
