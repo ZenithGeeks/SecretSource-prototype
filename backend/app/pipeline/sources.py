@@ -1112,14 +1112,14 @@ def _reported(
     """Choose the most informative failure without hiding an outage behind a no-match."""
     if not failures:
         return LookupUnavailable("no resolver was asked")
+    retryable = next((error for error in failures if is_retryable(error)), None)
     mismatch = next((error for error in failures if isinstance(error, IdentityMismatch)), None)
     ambiguous = next((error for error in failures if isinstance(error, AmbiguousMatch)), None)
     no_copy = next((error for error in failures if isinstance(error, NoOpenAccessCopy)), None)
-    retryable = next((error for error in failures if is_retryable(error)), None)
-    if mismatch or ambiguous or no_copy:
-        chosen = mismatch or ambiguous or no_copy
-    elif retryable:
+    if retryable:
         chosen = retryable
+    elif mismatch or ambiguous or no_copy:
+        chosen = mismatch or ambiguous or no_copy
     else:
         skipped = next((error for error in failures if isinstance(error, OnlyOtherWorks)), None)
         chosen = (
