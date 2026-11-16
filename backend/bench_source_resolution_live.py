@@ -15,9 +15,9 @@ import re
 import subprocess
 import tempfile
 import unicodedata
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 from unittest.mock import patch
 
 import requests
@@ -224,7 +224,7 @@ def run_live_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     return {
         "schema_version": 1,
         "mode": "live-provider-comparison",
-        "run_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "run_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "git_revision": _revision(),
         "manifest": manifest_path.name,
         "providers_tested": providers,
@@ -404,7 +404,7 @@ def run_pipeline_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     return {
         "schema_version": 1,
         "mode": "live-pipeline",
-        "run_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "run_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "git_revision": _revision(),
         "manifest": manifest_path.name,
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
