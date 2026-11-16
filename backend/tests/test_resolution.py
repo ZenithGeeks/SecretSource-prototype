@@ -10,7 +10,7 @@ import sys
 
 import pytest
 import requests
-from app.pipeline import sources
+from app.pipeline import indexes, sources
 
 ARXIV_ATOM = """<feed xmlns="http://www.w3.org/2005/Atom">
   <entry><id>http://arxiv.org/abs/2112.01488v3</id><title>ColBERTv2: Effective and Efficient
@@ -43,6 +43,7 @@ class Response:
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
     """No waiting, no network, and no cache between tests."""
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: [])
     monkeypatch.setattr(sources, "S2_MIN_INTERVAL", 0.0)
     monkeypatch.setattr(sources, "RETRY_WAITS", (0.01,))
     monkeypatch.setattr(sources, "_s2_free_at", 0.0)
@@ -116,6 +117,52 @@ def test_a_wrong_title_is_not_answered_with_the_wrong_paper(monkeypatch):
     )
     with pytest.raises(sources.Unresolvable):
         sources._lookup("An entirely different paper about pastry")
+
+
+FRONTIER = {
+    "doi": "https://doi.org/10.1145/3581784.3607089",
+    "title": "Frontier: Exploring Exascale",
+    "publication_year": 2023,
+    "authorships": [{"author": {"display_name": "Scott Atchley"}}],
+    "locations": [
+        {"pdf_url": None},
+        {"pdf_url": "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089"},
+        {"pdf_url": "https://www.osti.gov/servlets/purl/2224161"},
+    ],
+}
+
+
+def test_a_title_only_citation_falls_back_to_openalex(monkeypatch):
+    s2_title = (
+        "Frontier: Exploring Exascale The System Architecture of the First Exascale Supercomputer"
+    )
+    route(
+        monkeypatch,
+        arxiv=Response(text='<feed xmlns="http://www.w3.org/2005/Atom"></feed>'),
+        semanticscholar=Response(payload={"data": [{**S2_PAPER, "title": s2_title}]}),
+    )
+    monkeypatch.setattr(indexes, "openalex_works", lambda params: [FRONTIER])
+
+    found = sources._lookup("Frontier: Exploring Exascale")
+
+    assert (found.url, found.index) == (
+        "https://dl.acm.org/doi/pdf/10.1145/3581784.3607089",
+        "openalex",
+    )
+    assert found.ids == {"DOI": "10.1145/3581784.3607089"}
+
+
+def test_paywall_from_semantic_scholar_remains_reported_over_openalex_no_match(monkeypatch):
+    route(
+        monkeypatch,
+        arxiv=Response(text='<feed xmlns="http://www.w3.org/2005/Atom"></feed>'),
+        semanticscholar=Response(
+            payload={"data": [{**S2_PAPER, "openAccessPdf": None, "externalIds": {}}]}
+        ),
+    )
+
+    with pytest.raises(sources.NoOpenAccessCopy):
+        sources._lookup(S2_PAPER["title"])
 
 
 def test_a_url_is_taken_as_the_paper_itself(monkeypatch):

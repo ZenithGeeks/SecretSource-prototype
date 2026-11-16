@@ -86,6 +86,13 @@ describe('unresolvedCitations', () => {
     expect(row).toEqual({ ref: 'b23', label: 'Top500', year: '', reason: 'a web page, not a paper we can check a claim against', links: [] })
   })
 
+  it('keeps the legacy wording for old unresolved citations without a lookup identifier', () => {
+    const [row] = unresolvedCitations(claim({
+      unchecked: [{ ref: 'b23', label: 'A talk', reason: 'unresolvable' }],
+    }), session)
+    expect(row.reason).toBe('no DOI or arXiv ID to look it up by')
+  })
+
   it('leaves out a work that has a PDF from another claim: that one opens', () => {
     const named = { ref: 'b4', label: 'Ref B', reason: 'named' }
     expect(unresolvedCitations(claim({ cited: ['b4', 'b23'], unchecked: [named, TOP500] }), session).map((c) => c.ref)).toEqual(['b23'])

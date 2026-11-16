@@ -62,6 +62,10 @@ class IdentityMismatch(ValueError):
 class NoOpenAccessCopy(ValueError):
     """The work is known, but no free PDF is published for it."""
 
+    def __init__(self, message: str, index: str = ""):
+        super().__init__(message)
+        self.index = index
+
 
 class NotDownloadable(ValueError):
     """A PDF was promised but could not be fetched, or was not a PDF."""
@@ -386,7 +390,7 @@ def _pdf_of(paper: dict, described_as: str) -> Resolution:
     if arxiv:
         url = f"https://arxiv.org/pdf/{arxiv}"
         return Resolution(url, title, "semantic-scholar", ids, year, first_author)
-    raise NoOpenAccessCopy(f"no open-access PDF known for {described_as}")
+    raise NoOpenAccessCopy(f"no open-access PDF known for {described_as}", "semantic-scholar")
 
 
 def _s2_first_author(paper: dict) -> str:
@@ -502,6 +506,46 @@ def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution
     raise Unresolvable(f"no paper found matching the title: {title}")
 
 
+def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
+    """Resolve title-only citations through OpenAlex after arXiv and Semantic Scholar."""
+    from app.pipeline.indexes import _IndexError, openalex_works
+
+    words = re.sub(r"[,|?*]", " ", title)
+    try:
+        works = openalex_works({
+            "filter": f"title.search:{words}",
+            "select": "doi,title,publication_year,authorships,locations",
+            "per-page": 5,
+        })
+    except _IndexError as error:
+        raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
+
+    others = []
+    paywalled = False
+    for work in works:
+        found_title = work.get("title") or ""
+        if not titles_match(title, found_title):
+            continue
+        year = work.get("publication_year")
+        authorships = work.get("authorships") or []
+        first_author = ((authorships[0].get("author") or {}).get("display_name") or "") if authorships else ""
+        if not fits(year, first_author):
+            others.append(_described(found_title, year, first_author))
+            continue
+        pdf = next((loc.get("pdf_url") for loc in work.get("locations") or [] if loc.get("pdf_url")), "")
+        if not pdf:
+            paywalled = True
+            continue
+        doi = doi_in(str(work.get("doi") or ""))
+        ids = {"DOI": doi} if doi else {}
+        return Resolution(pdf, found_title, "openalex", ids, year, first_author)
+    if paywalled:
+        raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
+    if others:
+        raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
+    raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")
+
+
 def _described(title: str, year: int | None, first_author: str) -> str:
     """ "Deep Learning (2018, Nicholas G. Polson)", for a message about a work that was skipped."""
     return f"{title} ({', '.join(str(part) for part in (year, first_author) if part)})"
@@ -530,7 +574,7 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
         locations.append(best)
     locations.extend(work.get("oa_locations") or [])
     if not locations:
-        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}")
+        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
 
     ids = {"DOI": doi}
     for location in locations:
@@ -552,7 +596,7 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
             _as_year(work.get("year")),
         ))
     if not resolutions:
-        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}")
+        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
     return resolutions
 
 
@@ -973,6 +1017,7 @@ def _by_title(title: str, expected: dict | None = None) -> Resolution:
     return _first_answer((
         ("arxiv", lambda query: _arxiv_by_title(query, _expected_fits(expected))),
         ("semantic_scholar", lambda query: _semantic_scholar_by_title(query, _expected_fits(expected))),
+        ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected))),
     ), title, expected)
 
 
@@ -999,7 +1044,11 @@ def find_by_title(title: str, fits: Fits) -> Resolution:
 
     failures: list[Exception] = []
     attempts = []
-    for provider, resolver in (("arxiv", _arxiv_by_title), ("semantic_scholar", _semantic_scholar_by_title)):
+    for provider, resolver in (
+        ("arxiv", _arxiv_by_title),
+        ("semantic_scholar", _semantic_scholar_by_title),
+        ("openalex", _openalex_by_title),
+    ):
         try:
             found = resolver(title, fits)
             break

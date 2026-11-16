@@ -724,7 +724,9 @@ export function unresolvedCitations(claim: SessionClaim, session: Pick<Session, 
       ref: row.ref,
       label: row.label,
       year: row.year ?? '',
-      reason: uncheckedReason(row.reason, row.source_outcome),
+      reason: row.reason === 'unresolvable' && !row.source_outcome && !row.doi && !row.url
+        ? 'no DOI or arXiv ID to look it up by'
+        : uncheckedReason(row.reason, row.source_outcome),
       links: [...doiLink(row.doi), ...webLink(row.url)],
       ...(row.source_outcome ? { sourceOutcome: row.source_outcome } : {}),
     })),
