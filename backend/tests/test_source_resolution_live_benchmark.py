@@ -44,3 +44,51 @@ def test_live_benchmark_compares_providers_on_the_same_manifest(monkeypatch, tmp
     assert report["run_at_utc"].endswith("+00:00")
     assert all("url" not in attempt for provider in report["cases"][0]["providers"].values()
                for attempt in provider["attempts"])
+
+
+def test_live_benchmark_accepts_title_only_corpus_and_provider_subset(monkeypatch, tmp_path):
+    title = "The Coding Manual for Qualitative Researchers"
+    manifest = tmp_path / "reported-live-manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "providers": ["openalex"],
+        "cases": [{
+            "id": "coding-manual-2009",
+            "title": title,
+            "year": 2009,
+            "authors": ["Johnny Saldaña"],
+        }],
+    }), encoding="utf-8")
+
+    def resolve(identifier, expected):
+        assert identifier == title
+        assert expected["year"] == 2009
+        return [sources.Resolution(
+            "https://openalex.example/book.pdf", title, "openalex", {}, 2009, "Johnny Saldana",
+        )]
+
+    monkeypatch.setattr("bench_source_resolution_live.PROVIDERS", {"openalex": resolve})
+    monkeypatch.setattr(sources, "_download", lambda url, name: Path(name))
+
+    report = run_live_benchmark(manifest)
+
+    assert report["providers_tested"] == ["openalex"]
+    assert report["providers"]["openalex"]["correct_source_precision"] == 1.0
+    assert report["providers"]["openalex"]["readable_copy_rate"] == 1.0
+    assert report["provider_contribution"] is None
+
+
+def test_live_benchmark_rejects_unknown_provider(tmp_path):
+    manifest = tmp_path / "invalid-provider-manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "providers": ["unknown"],
+        "cases": [{"id": "example", "doi": "10.1000/example"}],
+    }), encoding="utf-8")
+
+    try:
+        run_live_benchmark(manifest)
+    except ValueError as error:
+        assert "providers" in str(error)
+    else:
+        raise AssertionError("unsupported providers should be rejected")
