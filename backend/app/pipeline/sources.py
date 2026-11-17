@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote, urlparse
@@ -1220,6 +1221,8 @@ def _cache_keys(identifier: str, found: Resolution) -> set[str]:
 def _download(pdf_url: str, name: str) -> Path:
     import requests
 
+    from app.uploads import MAX_UPLOAD_BYTES
+
     PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     path = PAPERS_DIR / f"{name}.pdf"
     if path.is_file():
@@ -1230,24 +1233,50 @@ def _download(pdf_url: str, name: str) -> Path:
         except OSError:
             pass
 
-    response = requests.get(pdf_url, headers=USER_AGENT, timeout=120, allow_redirects=True)
-    response.raise_for_status()
-    if not response.content.startswith(b"%PDF"):
-        content_type = response.headers.get("Content-Type", "").lower()
-        prefix = response.content[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
-        is_html = (
-            "html" in content_type
-            or prefix.startswith((b"<!doctype html", b"<html"))
-            or b"<html" in prefix[:512]
-        )
-        if is_html:
-            raise WebSource(f"a web page, not a paper: {pdf_url}")
-        raise NotDownloadable(f"not a PDF: {pdf_url}")
-    # Written aside, then renamed, as save_upload does: another worker that finds this name
-    # never reads half a file. The link goes next to the PDF first, so a PDF on disk always
-    # says where it came from (#424).
-    _write_whole(_link_file(path), _safe_locator(pdf_url).encode())
-    _write_whole(path, response.content)
+    response = requests.get(
+        pdf_url, headers=USER_AGENT, timeout=120, allow_redirects=True, stream=True,
+    )
+    try:
+        response.raise_for_status()
+        declared = response.headers.get("Content-Length", "")
+        if declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+            raise NotDownloadable(f"the PDF is larger than 100 MB: {pdf_url}")
+        partial = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
+        size = 0
+        head = b""
+        try:
+            with partial.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_BYTES:
+                        raise NotDownloadable(f"the PDF is larger than 100 MB: {pdf_url}")
+                    if len(head) < 1024:
+                        head += chunk
+                    handle.write(chunk)
+            content_type = response.headers.get("Content-Type", "").lower()
+            prefix = head[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+            is_html = (
+                "html" in content_type
+                or prefix.startswith((b"<!doctype html", b"<html"))
+                or b"<html" in prefix[:512]
+            )
+            if not head.startswith(b"%PDF"):
+                if is_html:
+                    raise WebSource(f"a web page, not a paper: {pdf_url}")
+                raise NotDownloadable(f"not a PDF: {pdf_url}")
+            # Written aside, then renamed, as save_upload does: another worker that finds this
+            # name never reads half a file. The link goes next to the PDF first, so a PDF on
+            # disk always says where it came from (#424).
+            _write_whole(_link_file(path), _safe_locator(pdf_url).encode())
+            os.replace(partial, path)
+        except Exception:
+            with suppress(OSError):
+                partial.unlink(missing_ok=True)
+            raise
+    finally:
+        response.close()
     return path
 
 

@@ -244,6 +244,36 @@ def _schedule_stream(analysis_id: str) -> None:
     _open_stream(analysis_id)
 
 
+
+def _fail_stuck_rechecks(analysis: dict) -> bool:
+    """Record a failed stage when a detached re-check was dropped by a restart.
+
+    The re-check runs in the gateway, not on a worker, so `_resync_running` never
+    sees it. The row stays `done`, `pdfs` is set, and the last stage is `rechecking`.
+    Returns True when a stage was added, so the caller can save.
+    """
+    last: dict[str, str] = {}
+    for event in analysis.get("stages") or []:
+        stage = event.get("stage")
+        ref = event.get("ref")
+        if ref and stage in {"rechecking", "rechecked", "recheck-failed"}:
+            last[ref] = stage
+    stuck = [ref for ref, stage in last.items() if stage == "rechecking"]
+    if not stuck:
+        return False
+    now = round(time.time(), 1)
+    analysis.setdefault("stages", []).extend(
+        {
+            "stage": "recheck-failed",
+            "ref": ref,
+            "message": "interrupted by a restart",
+            "at": now,
+        }
+        for ref in stuck
+    )
+    return True
+
+
 def restore():
     """Load running analyses and the newest stored rows. A "running" row may belong to a job an RQ
     worker is still executing (or was, before this gateway process last exited); only mark it
@@ -274,6 +304,9 @@ def restore():
                 )
             # SSE replay invariant: a stream must hold every stage already recorded.
             _open_stream(analysis["id"])
+    for analysis in list(analyses.values()):
+        if _fail_stuck_rechecks(analysis):
+            store.save(analysis)
 
 
 def _apply_snapshot(snapshot: dict) -> None:
@@ -778,6 +811,9 @@ def ensure_owner(user: str | None) -> None:
         analyses.mark_owner_loaded(user)
     for analysis_id in to_open:
         _schedule_stream(analysis_id)
+        analysis = analyses.get(analysis_id)
+        if analysis and _fail_stuck_rechecks(analysis):
+            store.save(analysis)
 
 
 def lookup(analysis_id: str) -> dict | None:
@@ -789,7 +825,12 @@ def lookup(analysis_id: str) -> dict | None:
         if analysis_id in _deleted:
             return None
         row = analyses.get(analysis_id)
-        return row if row is not None else store.load(analysis_id)
+        if row is not None:
+            return row
+        loaded = store.load(analysis_id)
+        if loaded and _fail_stuck_rechecks(loaded):
+            store.save(loaded)
+        return loaded
     with _load_lock:
         if analysis_id in _deleted:
             return None
@@ -819,6 +860,8 @@ def lookup(analysis_id: str) -> dict | None:
             )
             analyses.order_owner(owner, [item["id"] for item in ordered])
         held = analyses.get(analysis_id)
+    if held is not None and _fail_stuck_rechecks(held):
+        store.save(held)
     if to_open:
         _schedule_stream(analysis_id)
     return held
@@ -957,9 +1000,11 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
 
     The result keeps the citation's lookup key as `cited`, so the claim card and the labeler
     still match it to the citation. Claims are checked one at a time: a reference is cited by
-    a few claims, and the gateway serves everyone else meanwhile.
+    a few claims, and the gateway serves everyone else meanwhile. Replacements are applied only
+    after every claim has been checked, so a mid-loop failure leaves the previous results in place.
     """
     analysis = analyses[analysis_id]
+    replacements: list[tuple[dict, str, dict, dict]] = []
     try:
         ready = await asyncio.to_thread(prepare_source, pdf.as_posix())
         for claim in analysis["claims"]:
@@ -978,13 +1023,16 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
                     verdict = await asyncio.to_thread(
                         check_prepared, *check_args,
                     )
-                claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") != source]
-                claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") != source]
-                fold_check(claim, source, citation, verdict)
+                replacements.append((claim, source, citation, verdict))
+        for claim, source, citation, verdict in replacements:
+            claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") != source]
+            claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") != source]
+            fold_check(claim, source, citation, verdict)
     except Exception:
         # Detached from the request, so nothing else would report it.
         logger.exception("checking analysis %s again against an uploaded %s failed", analysis_id, ref)
-    finally:
+        _record_stage(analysis_id, "recheck-failed", ref=ref)
+    else:
         _record_stage(analysis_id, "rechecked", ref=ref)
 
 

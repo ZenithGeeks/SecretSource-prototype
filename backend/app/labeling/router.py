@@ -118,8 +118,20 @@ def _candidates(claim_id: str, reference_id: str, file: str, hits: list[dict]) -
     ]
 
 
-def build_session(analysis: dict) -> dict:
-    """The claims of an analysis, each with the passages retrieval found for it."""
+def _session_file(analysis: dict, file: str, user: str | None) -> str:
+    """The PDF name a labeler may be given, or "" for an uploaded copy they may not open."""
+    if file and file in (analysis.get("pdfs") or {}).values() and user != analysis.get("owner"):
+        return ""
+    return file
+
+
+def build_session(analysis: dict, user: str | None = None) -> dict:
+    """The claims of an analysis, each with the passages retrieval found for it.
+
+    A cited PDF the owner uploaded is owner-only: teammates get no `file` (or
+    `reference_file`) for it, so the viewer is not pointed at a 404 and Ask cannot
+    open the full copy.
+    """
     paper_id = _paper_id(analysis)
     references: dict[str, dict] = {}
     claims = []
@@ -129,8 +141,8 @@ def build_session(analysis: dict) -> dict:
         for verdict in claim.get("verdicts") or []:
             if not verdict.get("source"):
                 continue
-            file = Path(verdict["source"]).name
-            reference_id = Path(file).stem
+            file = _session_file(analysis, Path(verdict["source"]).name, user)
+            reference_id = Path(verdict["source"]).stem
             citation = find_citation(claim, verdict) or {}
             references.setdefault(
                 reference_id,
@@ -294,10 +306,13 @@ async def status(who: str = Depends(annotator)):
 
 @router.get("/sessions/{analysis_id}")
 async def session(
-    analysis: dict = Depends(owned_analysis), who: str = Depends(annotator), me: str = Depends(labeler_id)
+    analysis: dict = Depends(owned_analysis),
+    who: str = Depends(annotator),
+    me: str = Depends(labeler_id),
+    user: str | None = Depends(current_user),
 ):
     store = _store()
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     paper_id = built["paper_id"]
     rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in TABS}
     blind = await _is_blind(analysis["id"], who)
@@ -317,7 +332,10 @@ async def _refuse_on_blind(analysis_id: str, who: str, what: str) -> None:
 
 @router.post("/sessions/{analysis_id}/candidates")
 async def added_claim_candidates(
-    body: AddedClaimIn, analysis: dict = Depends(owned_analysis), _who: str = Depends(annotator)
+    body: AddedClaimIn,
+    analysis: dict = Depends(owned_analysis),
+    _who: str = Depends(annotator),
+    user: str | None = Depends(current_user),
 ):
     """Passages retrieval finds for a claim the analysis has none for.
 
@@ -327,7 +345,7 @@ async def added_claim_candidates(
     for its own claims, so the labeler has passages to judge instead of reading every reference.
     The references are already in the ColBERT index from the analysis, and are searched at once.
     """
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     paper_id = built["paper_id"]
     if body.claim_id.startswith(f"{paper_id}#h-"):
         references = built["references"]
@@ -707,8 +725,9 @@ async def save(
     analysis: dict = Depends(owned_analysis),
     who: str = Depends(annotator),
     me: str = Depends(labeler_id),
+    user: str | None = Depends(current_user),
 ):
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     paper_id = built["paper_id"]
     extracted = {c["claim_id"]: c for c in built["claims"]}
     retrieved = {cand["cand_id"]: (c["claim_id"], cand) for c in built["claims"] for cand in c["candidates"]}
@@ -794,6 +813,7 @@ async def review_claim(
     analysis: dict = Depends(owned_analysis),
     who: str = Depends(annotator),
     me: str = Depends(labeler_id),
+    user: str | None = Depends(current_user),
 ):
     """The AI's review of one claim the caller has saved, as server-sent events.
 
@@ -803,7 +823,7 @@ async def review_claim(
     """
     await _refuse_on_blind(analysis["id"], who, "Review")
     store = _store()
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     paper_id = built["paper_id"]
     saved = await asyncio.to_thread(_saved_claim, store, paper_id, me, body.claim_id)
     if saved is None:
@@ -833,7 +853,7 @@ async def review_for(analysis_id: str, claim_number: int, user: str | None) -> l
             have, 409 for a claim the caller has not saved.
     """
     analysis = await owned_analysis(analysis_id, user)
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     claims = built["claims"]
     if not 1 <= claim_number <= len(claims):
         raise HTTPException(404, f"this paper has claims 1 to {len(claims)}, not {claim_number}")
@@ -862,7 +882,7 @@ async def labels_for(analysis_id: str, claim_number: int, user: str | None) -> d
             have, 409 for a claim the caller has not saved.
     """
     analysis = await owned_analysis(analysis_id, user)
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     claims = built["claims"]
     if not 1 <= claim_number <= len(claims):
         raise HTTPException(404, f"this paper has claims 1 to {len(claims)}, not {claim_number}")
@@ -914,7 +934,7 @@ async def progress_for(analysis_id: str, user: str | None) -> dict:
         HTTPException: 404 for an analysis the caller may not label.
     """
     analysis = await owned_analysis(analysis_id, user)
-    built = build_session(analysis)
+    built = build_session(analysis, user)
     who = await asyncio.to_thread(identity.annotator_for, user)
     me = user or who  # as labeler_id: with login off there is one shared space
     store = _store()
@@ -977,20 +997,26 @@ async def _review_events(store, stamp: dict, claim: dict, saved: review.Saved):
 
 
 @router.post("/sessions/{analysis_id}/ask")
-async def ask(body: AskIn, analysis: dict = Depends(owned_analysis), who: str = Depends(annotator)):
+async def ask(
+    body: AskIn,
+    analysis: dict = Depends(owned_analysis),
+    who: str = Depends(annotator),
+    user: str | None = Depends(current_user),
+):
     """Answer a question from the paper under review, from one of its references, or from one
     passage of a reference. A claim sent with the question is added to it, so the answer reads
     the passage with the claim as the labeler worded it.
 
     The same answer as the other roles' Ask (assistant.answer): short statements, each checked by
-    the judge, as server-sent events.
+    the judge, as server-sent events. A cited PDF the owner uploaded is owner-only: a teammate
+    cannot have Ask read that file.
     """
     await _refuse_on_blind(analysis["id"], who, "Ask")
     if body.passage and not body.reference_id:
         raise HTTPException(422, "a passage needs reference_id, the paper it is from")
     if not body.reference_id:
         pdf = analysis["file"]
-    elif (pdf := _reference_path(analysis, body.reference_id)) is None:
+    elif (pdf := _reference_path(analysis, body.reference_id, user)) is None:
         raise HTTPException(422, f"{body.reference_id} is not a paper this analysis read")
     question = f'{body.question}\nThe claim: "{body.claim}"' if body.claim else body.question
     passages = [body.passage] if body.passage else None
@@ -1000,13 +1026,19 @@ async def ask(body: AskIn, analysis: dict = Depends(owned_analysis), who: str = 
     return StreamingResponse(events, media_type="text/event-stream")
 
 
-def _reference_path(analysis: dict, reference_id: str) -> str | None:
-    """Where the analysis found a reference's PDF, by the id build_session gave it."""
+def _reference_path(analysis: dict, reference_id: str, user: str | None = None) -> str | None:
+    """Where the analysis found a reference's PDF, by the id build_session gave it.
+
+    An uploaded cited PDF is omitted for anyone but the owner, matching GET /papers/{name}.
+    """
     for claim in analysis.get("claims", []):
         for verdict in claim.get("verdicts") or []:
             if verdict.get("source") and Path(verdict["source"]).stem == reference_id:
+                name = Path(verdict["source"]).name
+                if name in (analysis.get("pdfs") or {}).values() and user != analysis.get("owner"):
+                    return None
                 # A verdict names the file only; local_pdf reads a bare name as a title to search.
-                return (config.PAPERS_DIR / Path(verdict["source"]).name).as_posix()
+                return (config.PAPERS_DIR / name).as_posix()
     return None
 
 

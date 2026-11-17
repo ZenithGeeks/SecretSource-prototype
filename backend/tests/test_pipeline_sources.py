@@ -31,6 +31,17 @@ class Reply:
         if not self.ok:
             raise requests.HTTPError(f"{self.status_code} Error")
 
+    def iter_content(self, chunk_size=1):
+        data = self.content
+        if not data:
+            return
+        size = chunk_size or len(data)
+        for i in range(0, len(data), size):
+            yield data[i:i + size]
+
+    def close(self):
+        pass
+
 
 @pytest.fixture
 def web(monkeypatch):
