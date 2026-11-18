@@ -36,7 +36,7 @@ async def owned(analysis_id, user):
 
 def test_a_claims_passages_carry_no_verdict_and_no_score(monkeypatch):
     monkeypatch.setattr(role_tools.labeling, "owned_analysis", owned)
-    monkeypatch.setattr(role_tools.labeling, "build_session", lambda analysis: BUILT)
+    monkeypatch.setattr(role_tools.labeling, "build_session", lambda analysis, user=None: BUILT)
     got = asyncio.run(role_tools.claim_passages("a1", 1, CONTEXT))
     assert got["passages"] == [
         {
@@ -51,7 +51,7 @@ def test_a_claims_passages_carry_no_verdict_and_no_score(monkeypatch):
 
 def test_a_claim_number_out_of_range_names_the_range(monkeypatch):
     monkeypatch.setattr(role_tools.labeling, "owned_analysis", owned)
-    monkeypatch.setattr(role_tools.labeling, "build_session", lambda analysis: BUILT)
+    monkeypatch.setattr(role_tools.labeling, "build_session", lambda analysis, user=None: BUILT)
     got = asyncio.run(role_tools.claim_passages("a1", 5, CONTEXT))
     assert got == {"status": "error", "message": "this paper has claims 1 to 1, not 5"}
 

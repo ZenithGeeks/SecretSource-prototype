@@ -66,19 +66,13 @@ def api(monkeypatch, tmp_path):
 
 
 def upload(client: TestClient, ref: str = "b13", content: bytes = b"%PDF-1.4 gmres"):
-    return client.post(
-        f"/analyses/a1/references/{ref}/pdf", files={"file": ("gmres.pdf", content)}
-    )
+    return client.post(f"/analyses/a1/references/{ref}/pdf", files={"file": ("gmres.pdf", content)})
 
 
-def test_an_uploaded_pdf_replaces_the_unchecked_result_of_its_citation(
-    api, monkeypatch
-):
+def test_an_uploaded_pdf_replaces_the_unchecked_result_of_its_citation(api, monkeypatch):
     client, analysis, detached = api
     checked = []
-    monkeypatch.setattr(
-        main, "prepare_source", lambda path: {"status": "ok", "path": path}
-    )
+    monkeypatch.setattr(main, "prepare_source", lambda path: {"status": "ok", "path": path})
 
     def check(claim, source_pdf_path, source, judged, other_citations):
         checked.append((claim, judged))
@@ -99,20 +93,14 @@ def test_an_uploaded_pdf_replaces_the_unchecked_result_of_its_citation(
 
     gmres, other = analysis["claims"]
     assert gmres["unchecked"] == []
-    assert [(v["cited"], v["source"], v["verdict"]) for v in gmres["verdicts"]] == [
-        (GMRES, pdf, "supports")
-    ]
-    assert checked == [
-        (gmres["claim"], "GMRES minimises the residual over a Krylov subspace [cited].")
-    ]
+    assert [(v["cited"], v["source"], v["verdict"]) for v in gmres["verdicts"]] == [(GMRES, pdf, "supports")]
+    assert checked == [(gmres["claim"], "GMRES minimises the residual over a Krylov subspace [cited].")]
     assert other["verdicts"] == ANALYSIS["claims"][1]["verdicts"]  # cites another work
     stages = [(stage["stage"], stage["ref"]) for stage in analysis["stages"]]
     assert stages == [("rechecking", "b13"), ("rechecked", "b13")]
 
 
-def test_a_pdf_that_cannot_be_read_leaves_the_citation_unchecked_with_why(
-    api, monkeypatch
-):
+def test_a_pdf_that_cannot_be_read_leaves_the_citation_unchecked_with_why(api, monkeypatch):
     client, analysis, detached = api
     failed = {
         "status": "error",
@@ -146,13 +134,9 @@ def test_the_owner_can_open_an_upload_no_check_could_read(api, monkeypatch):
     assert client.get(f"/papers/{pdf}").status_code == 200
 
 
-def test_a_crash_in_the_check_is_logged_and_leaves_the_old_result(
-    api, monkeypatch, caplog
-):
+def test_a_crash_in_the_check_is_logged_and_leaves_the_old_result(api, monkeypatch, caplog):
     client, analysis, detached = api
-    monkeypatch.setattr(
-        main, "prepare_source", lambda path: {"status": "ok", "path": path}
-    )
+    monkeypatch.setattr(main, "prepare_source", lambda path: {"status": "ok", "path": path})
 
     def crash(*args):
         raise RuntimeError("the judge is down")
@@ -212,9 +196,7 @@ def test_a_mid_loop_failure_leaves_every_citation_unchanged(api, monkeypatch, ca
             ],
         }
     )
-    monkeypatch.setattr(
-        main, "prepare_source", lambda path: {"status": "ok", "path": path}
-    )
+    monkeypatch.setattr(main, "prepare_source", lambda path: {"status": "ok", "path": path})
     calls = {"n": 0}
 
     def check(*args):
@@ -243,13 +225,9 @@ def test_a_mid_loop_failure_leaves_every_citation_unchanged(api, monkeypatch, ca
     assert other["verdicts"] == ANALYSIS["claims"][1]["verdicts"]
 
 
-def test_a_second_upload_replaces_the_verdict_and_keeps_the_lookup_key(
-    api, monkeypatch
-):
+def test_a_second_upload_replaces_the_verdict_and_keeps_the_lookup_key(api, monkeypatch):
     client, analysis, detached = api
-    monkeypatch.setattr(
-        main, "prepare_source", lambda path: {"status": "ok", "path": path}
-    )
+    monkeypatch.setattr(main, "prepare_source", lambda path: {"status": "ok", "path": path})
 
     def check(claim, source_pdf_path, source, judged, other_citations):
         return {
@@ -268,10 +246,9 @@ def test_a_second_upload_replaces_the_verdict_and_keeps_the_lookup_key(
 
     assert first != second
     assert analysis["pdfs"] == {"b13": second}
-    assert [
-        (v["cited"], v["source"], v["verdict"])
-        for v in analysis["claims"][0]["verdicts"]
-    ] == [(GMRES, second, "supports")]
+    assert [(v["cited"], v["source"], v["verdict"]) for v in analysis["claims"][0]["verdicts"]] == [
+        (GMRES, second, "supports")
+    ]
 
 
 TOKENS = {"token-ada": "user-ada", "token-bo": "user-bo"}
@@ -318,9 +295,7 @@ def test_a_non_owner_post_is_404_and_saves_nothing(signed_in):
 
 def test_a_teammate_cannot_open_an_uploaded_cited_pdf(signed_in, monkeypatch):
     client, analysis, detached, tmp_path = signed_in
-    monkeypatch.setattr(
-        main, "prepare_source", lambda path: {"status": "ok", "path": path}
-    )
+    monkeypatch.setattr(main, "prepare_source", lambda path: {"status": "ok", "path": path})
     monkeypatch.setattr(
         main,
         "check_prepared",
@@ -378,9 +353,7 @@ def test_build_session_and_ask_hide_an_upload_from_a_teammate(tmp_path, monkeypa
     assert teammate["references"][0]["file"] == ""
     assert owner["claims"][0]["candidates"][0]["reference_file"] == "gmres-aaa.pdf"
     assert teammate["claims"][0]["candidates"][0]["reference_file"] == ""
-    assert labeling._reference_path(analysis, "gmres-aaa", "user-ada") == str(
-        tmp_path / "gmres-aaa.pdf"
-    )
+    assert labeling._reference_path(analysis, "gmres-aaa", "user-ada") == str(tmp_path / "gmres-aaa.pdf")
     assert labeling._reference_path(analysis, "gmres-aaa", "user-bo") is None
 
 
@@ -404,9 +377,7 @@ def test_a_stuck_rechecking_stage_is_marked_failed_on_restore(monkeypatch):
         ],
         "claims": [],
     }
-    monkeypatch.setattr(
-        main.store, "load_startup", lambda n: {"a1": stuck, "a2": finished}
-    )
+    monkeypatch.setattr(main.store, "load_startup", lambda n: {"a1": stuck, "a2": finished})
     monkeypatch.setattr(main.store, "save", saved.append)
     main.analyses.clear()
 

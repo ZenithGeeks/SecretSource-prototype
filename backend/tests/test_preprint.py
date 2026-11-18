@@ -60,6 +60,15 @@ class FakeResponse:
         if self.status_code >= 400:
             raise requests.HTTPError(f"{self.status_code} Client Error: Forbidden")
 
+    def iter_content(self, chunk_size=1):
+        data = self.content
+        size = chunk_size or len(data) or 1
+        for i in range(0, len(data), size):
+            yield data[i : i + size]
+
+    def close(self):
+        pass
+
 
 @pytest.fixture
 def judge(monkeypatch):

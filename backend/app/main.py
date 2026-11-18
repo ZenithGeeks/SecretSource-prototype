@@ -244,7 +244,6 @@ def _schedule_stream(analysis_id: str) -> None:
     _open_stream(analysis_id)
 
 
-
 def _fail_stuck_rechecks(analysis: dict) -> bool:
     """Record a failed stage when a detached re-check was dropped by a restart.
 
@@ -789,6 +788,7 @@ def ensure_owner(user: str | None) -> None:
         return
     stored = store.load_owned(user)
     to_open: list[str] = []
+    fresh: list[str] = []
     with _load_lock:
         if analyses.owner_loaded(user):
             return
@@ -800,8 +800,12 @@ def ensure_owner(user: str | None) -> None:
                 continue
             seen.add(analysis_id)
             stored_ids.append(analysis_id)
-            if analysis_id not in analyses and _hold(row):
-                to_open.append(analysis_id)
+            # _hold returns True only for a running row. A stuck re-check is done, so record
+            # every newly held row and mark it after the lock, not only the ones that need a stream.
+            if analysis_id not in analyses:
+                if _hold(row):
+                    to_open.append(analysis_id)
+                fresh.append(analysis_id)
         memory_only = [
             row["id"]
             for row in analyses.owned_by(user)
@@ -811,6 +815,7 @@ def ensure_owner(user: str | None) -> None:
         analyses.mark_owner_loaded(user)
     for analysis_id in to_open:
         _schedule_stream(analysis_id)
+    for analysis_id in fresh:
         analysis = analyses.get(analysis_id)
         if analysis and _fail_stuck_rechecks(analysis):
             store.save(analysis)

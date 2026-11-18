@@ -37,7 +37,7 @@ class Reply:
             return
         size = chunk_size or len(data)
         for i in range(0, len(data), size):
-            yield data[i:i + size]
+            yield data[i : i + size]
 
     def close(self):
         pass

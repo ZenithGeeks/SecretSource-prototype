@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import tempfile
 from collections import Counter
@@ -54,14 +55,17 @@ def _response(result: str, status_code: int | None = None) -> requests.Response:
     }.get(result, 200)
     response.url = "https://fixture.invalid/mock"
     if result == "readable":
-        response._content = b"%PDF-1.7\nmock fixture paper\n%%EOF"
+        content = b"%PDF-1.7\nmock fixture paper\n%%EOF"
         response.headers["Content-Type"] = "application/pdf"
     elif result == "web-page":
-        response._content = b"<!doctype html><html><body>Mock web page</body></html>"
+        content = b"<!doctype html><html><body>Mock web page</body></html>"
         response.headers["Content-Type"] = "text/html; charset=utf-8"
     else:
-        response._content = b"not a PDF"
+        content = b"not a PDF"
         response.headers["Content-Type"] = "application/octet-stream"
+    # _download streams. A Response with only _content has no socket, so give it a body to read.
+    response._content = content
+    response.raw = io.BytesIO(content)
     return response
 
 

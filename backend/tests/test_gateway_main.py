@@ -518,6 +518,51 @@ def test_lookup_ignores_a_stored_row_whose_own_id_was_deleted_and_does_not_mark_
     assert "a1" not in main._missing
 
 
+def test_lookup_with_a_plain_dict_marks_a_stuck_recheck_and_leaves_a_finished_one(monkeypatch):
+    monkeypatch.setattr(main, "analyses", {})
+    stuck = _row("stuck", stages=[{"stage": "rechecking", "ref": "b13", "at": 1.0}])
+    quiet = _row("quiet", stages=[{"stage": "rechecked", "ref": "b13", "at": 2.0}])
+    saved = []
+
+    def load(analysis_id):
+        return {"stuck": stuck, "quiet": quiet, "gone": None}[analysis_id]
+
+    monkeypatch.setattr(main.store, "load", load)
+    monkeypatch.setattr(main.store, "save", saved.append)
+
+    assert main.lookup("stuck")["stages"][-1]["stage"] == "recheck-failed"
+    assert main.lookup("quiet") is quiet
+    assert main.lookup("gone") is None
+    assert saved == [stuck]
+
+
+def test_lookup_marks_a_stuck_recheck_when_the_row_is_loaded_from_the_store(monkeypatch):
+    stuck = _row("a1", stages=[{"stage": "rechecking", "ref": "b13", "at": 1.0}])
+    saved = []
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: stuck)
+    monkeypatch.setattr(main.store, "save", saved.append)
+
+    found = main.lookup("a1")
+
+    assert found["stages"][-1]["stage"] == "recheck-failed"
+    assert found["stages"][-1]["message"] == "interrupted by a restart"
+    assert saved == [stuck]
+
+
+def test_loading_an_owner_marks_a_finished_stuck_recheck_and_not_a_running_one(monkeypatch):
+    stuck = _row("done-one", "ada", stages=[{"stage": "rechecking", "ref": "b13", "at": 1.0}])
+    running = _row("run-one", "ada", status="running", stages=[{"stage": "checking", "at": 1.0}])
+    saved = []
+    monkeypatch.setattr(main.store, "load_owned", lambda user: [stuck, running])
+    monkeypatch.setattr(main.store, "save", saved.append)
+
+    main.ensure_owner("ada")
+
+    assert stuck["stages"][-1]["stage"] == "recheck-failed"
+    assert running["stages"] == [{"stage": "checking", "at": 1.0}]
+    assert saved == [stuck]
+
+
 def test_a_row_loaded_for_an_owner_already_in_memory_takes_its_place_by_start_time(monkeypatch):
     main.analyses["late"] = _row("late", "ada", started="2026-01-02")
     main.analyses.mark_owner_loaded("ada")

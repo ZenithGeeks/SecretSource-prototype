@@ -10,9 +10,7 @@ from app.uploads import MAX_UPLOAD_BYTES
 
 class _Response:
     def __init__(self, content=b"%PDF-1.7 the whole paper", headers=None):
-        self.headers = (
-            headers if headers is not None else {"Content-Type": "application/pdf"}
-        )
+        self.headers = headers if headers is not None else {"Content-Type": "application/pdf"}
         self.content = content
 
     def raise_for_status(self):
@@ -30,9 +28,7 @@ class _Response:
 
 def test_download_is_renamed_into_place(monkeypatch, tmp_path):
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
-    fake = type(
-        "requests", (), {"get": staticmethod(lambda *args, **kwargs: _Response())}
-    )
+    fake = type("requests", (), {"get": staticmethod(lambda *args, **kwargs: _Response())})
     monkeypatch.setitem(sys.modules, "requests", fake)
     moves = []
     real_replace = sources.os.replace
@@ -40,9 +36,7 @@ def test_download_is_renamed_into_place(monkeypatch, tmp_path):
     def replace(src, dst):
         moves.append((src, dst))
         if sources.Path(dst).suffix == ".pdf":
-            assert (
-                sources.Path(src).read_bytes() == _Response().content
-            )  # complete before it moves
+            assert sources.Path(src).read_bytes() == _Response().content  # complete before it moves
         real_replace(src, dst)
 
     monkeypatch.setattr(sources.os, "replace", replace)
@@ -64,9 +58,7 @@ def test_download_is_renamed_into_place(monkeypatch, tmp_path):
     ]  # no temp file left
 
 
-def test_a_declared_length_over_the_cap_is_refused_and_writes_nothing(
-    monkeypatch, tmp_path
-):
+def test_a_declared_length_over_the_cap_is_refused_and_writes_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
     headers = {
         "Content-Type": "application/pdf",
@@ -85,9 +77,7 @@ def test_a_declared_length_over_the_cap_is_refused_and_writes_nothing(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_body_that_grows_past_the_cap_is_aborted_and_leaves_no_file(
-    monkeypatch, tmp_path
-):
+def test_a_body_that_grows_past_the_cap_is_aborted_and_leaves_no_file(monkeypatch, tmp_path):
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
     import app.uploads as uploads
 
@@ -104,3 +94,29 @@ def test_a_body_that_grows_past_the_cap_is_aborted_and_leaves_no_file(
         sources._download("https://example.org/long.pdf", "long")
 
     assert [p.name for p in tmp_path.iterdir()] == []
+
+
+def test_empty_chunks_are_skipped_and_later_chunks_are_not_reread_into_the_head(monkeypatch, tmp_path):
+    monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
+    body = b"%PDF-1.7 " + b"y" * (64 * 1024)
+
+    class Chunked:
+        headers = {"Content-Type": "application/pdf", "Content-Length": str(len(body))}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size=1):
+            yield b""
+            yield body[:chunk_size]
+            yield body[chunk_size:]
+
+        def close(self):
+            pass
+
+    fake = type("requests", (), {"get": staticmethod(lambda *args, **kwargs: Chunked())})
+    monkeypatch.setitem(sys.modules, "requests", fake)
+
+    path = sources._download("https://example.org/chunked.pdf", "chunked")
+
+    assert path.read_bytes() == body
