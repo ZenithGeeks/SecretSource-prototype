@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const data = vi.hoisted(() => ({
@@ -23,11 +25,16 @@ vi.mock('../src/components/PageViewer', () => ({
 
 import { AnalysisView } from '../src/components/AnalysisView'
 
+function renderTeacher(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
+
 describe('teacher presentation of the shared analysis workflow', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('opens the selected claim in the submission PDF with its verdict color and keeps teacher controls in the shared claim', () => {
-    render(
+    renderTeacher(
       <AnalysisView
         id="analysis-7"
         presentation="teacher"
@@ -52,7 +59,7 @@ describe('teacher presentation of the shared analysis workflow', () => {
   })
 
   it('shows citation counts without the analysis action toolbar', () => {
-    render(<AnalysisView id="analysis-7" presentation="teacher" openPaperOnLoad />)
+    renderTeacher(<AnalysisView id="analysis-7" presentation="teacher" openPaperOnLoad />)
 
     expect(screen.queryByRole('button', { name: 'Copy all' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'CSV' })).not.toBeInTheDocument()

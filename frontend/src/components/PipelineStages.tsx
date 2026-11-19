@@ -33,6 +33,8 @@ const LABELS: Record<Stage['stage'], (stage: Stage) => string> = {
       : 'Checked the results: nothing to flag',
   done: () => 'Finished',
   error: (stage) => stage.message ?? 'Failed',
+  rechecking: () => 'Checking claims again against the uploaded PDF',
+  rechecked: () => 'Checked the claims again against the uploaded PDF',
 }
 
 /** A finished run can have forty lines; past this many only the last few show until asked. */

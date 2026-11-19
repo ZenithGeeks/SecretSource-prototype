@@ -1,14 +1,15 @@
 /** One claim, answered: whether it held, what the paper said, and what each source replied. */
 
-import { ChevronDown, ChevronRight, FileText, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Loader2, Sparkles, Upload } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 
-import type { Citation, Claim, Dispute, PaperFigure, Unchecked, Verdict } from '../lib/api'
+import type { Citation, Claim, Dispute, PaperFigure, Stage, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
 import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
 import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
+import { fromUploadedPdf, recheckStage, sourceUploadMessage } from '../lib/sourceUpload'
 import { cn } from '../lib/utils'
 import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
@@ -152,7 +153,7 @@ function PageLink({
 }
 
 /** A source we could not read, in the reader's terms and then in the operator's. */
-function Failure({ failure }: { failure: Unchecked }) {
+function Failure({ failure, action }: { failure: Unchecked; action?: ReactNode }) {
   return (
     <div className="mt-2 rounded-xl border border-dashed border-border-subtle p-3">
       <p className="text-sm">
@@ -163,6 +164,91 @@ function Failure({ failure }: { failure: Unchecked }) {
       {failure.message && (
         <p className="mt-1 text-xs text-ink-muted/80" title={failure.message}>
           {failure.message}
+        </p>
+      )}
+      {action}
+    </div>
+  )
+}
+
+/** The verdict was read from a PDF the analysis owner uploaded, not from an open-access copy. */
+function UploadedNote({ owns }: { owns: boolean }) {
+  return (
+    <p className="text-xs text-ink-muted">
+      {owns
+        ? 'This verdict was read from a PDF you uploaded.'
+        : 'This verdict was read from a PDF the analysis owner uploaded.'}
+    </p>
+  )
+}
+
+/** "Upload source PDF" for one unchecked citation, then "checking" until the re-check ends.
+ * The re-check is not on the event stream: `onUploaded` refetches the analysis, and the
+ * stages say when it has finished. */
+function SourcePdfUpload({
+  analysisId,
+  citationRef,
+  stages,
+  onUploaded,
+}: {
+  analysisId: string
+  citationRef: string
+  stages: Stage[]
+  onUploaded: () => Promise<unknown>
+}) {
+  // `since` is how many stages there were when this upload started. A `rechecked` stage
+  // appended after that means this upload's re-check has finished, so the action can return.
+  const [since, setSince] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const arrived = since === null ? [] : stages.slice(since)
+  const finished = arrived.some((stage) => stage.stage === 'rechecked' && stage.ref === citationRef)
+  const checking = (since !== null && !finished) || recheckStage(stages, citationRef) === 'rechecking'
+
+  const send = async (file: File) => {
+    setSince(stages.length)
+    setError(null)
+    try {
+      await api.uploadReferencePdf(analysisId, citationRef, file)
+    } catch (caught) {
+      setSince(null)
+      setError(sourceUploadMessage(caught))
+      return
+    }
+    try {
+      await onUploaded()
+    } catch {
+      // The upload was accepted. The analysis poll still updates the card once a refetch lands.
+    }
+  }
+
+  if (checking) {
+    return (
+      <p role="status" className="mt-2 flex items-center gap-2 text-sm text-ink-muted">
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+        Checking the uploaded PDF…
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-2 flex flex-col items-start gap-2">
+      <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-canvas pointer-coarse:min-h-11 hover:opacity-90 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
+        <Upload className="size-4" aria-hidden="true" />
+        Upload source PDF
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          className="sr-only"
+          onChange={(event) => {
+            const chosen = event.target.files?.[0]
+            event.target.value = ''
+            if (chosen) void send(chosen)
+          }}
+        />
+      </label>
+      {error && (
+        <p role="alert" className="text-sm text-refutes">
+          {error}
         </p>
       )}
     </div>
@@ -368,10 +454,15 @@ function Answer({
   verdict,
   onShow,
   footer,
+  fromUpload = false,
+  ownsAnalysis = false,
 }: {
   verdict: Verdict
   onShow?: (target: Target) => void
   footer?: ReactNode
+  /** The verdict was read from a PDF the owner uploaded. */
+  fromUpload?: boolean
+  ownsAnalysis?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [showEvidence, setShowEvidence] = useState(false)
@@ -423,6 +514,7 @@ function Answer({
         <Label>{WHY_LABELS[verdict.verdict]}</Label>
         <p className="max-w-prose text-sm text-ink-muted">{verdict.reasoning}</p>
         <PreprintNote verdict={verdict} />
+        {fromUpload && <UploadedNote owns={ownsAnalysis} />}
         {footer}
       </div>
 
@@ -461,6 +553,10 @@ function CitedWork({
   onlyNamed = false,
   onShow,
   footer,
+  stages = [],
+  pdfs,
+  ownsAnalysis = false,
+  sourceUpload,
 }: {
   citation: Citation
   verdict?: Verdict
@@ -470,6 +566,10 @@ function CitedWork({
   onShow?: (target: Target) => void
   /** Shown under the verdict's reasoning: the dispute control. */
   footer?: (verdict: Verdict) => ReactNode
+  stages?: Stage[]
+  pdfs?: Record<string, string>
+  ownsAnalysis?: boolean
+  sourceUpload?: { analysisId: string; onUploaded: () => Promise<unknown> }
 }) {
   const link = citationLink(citation)
   return (
@@ -493,8 +593,30 @@ function CitedWork({
           <span className="ml-1.5 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
         )}
       </p>
-      {verdict && <Answer verdict={verdict} onShow={onShow} footer={footer?.(verdict)} />}
-      {failure && <Failure failure={failure} />}
+      {verdict && (
+        <Answer
+          verdict={verdict}
+          onShow={onShow}
+          footer={footer?.(verdict)}
+          fromUpload={fromUploadedPdf(pdfs, citation)}
+          ownsAnalysis={ownsAnalysis}
+        />
+      )}
+      {failure && (
+        <Failure
+          failure={failure}
+          action={
+            sourceUpload && citation.ref ? (
+              <SourcePdfUpload
+                analysisId={sourceUpload.analysisId}
+                citationRef={citation.ref}
+                stages={stages}
+                onUploaded={sourceUpload.onUploaded}
+              />
+            ) : null
+          }
+        />
+      )}
       {!verdict && !failure && onlyNamed && (
         <p className="mt-1 text-xs text-ink-muted">
           Not checked — the claim only names this as something the paper used.
@@ -521,6 +643,10 @@ export function ClaimCard({
   startCollapsed = false,
   analysisId,
   disputes = [],
+  sourceUpload,
+  stages = [],
+  pdfs,
+  ownsAnalysis = false,
 }: {
   claim: Claim
   index: number
@@ -543,6 +669,14 @@ export function ClaimCard({
   analysisId?: string
   /** The owner's disputes in this analysis. */
   disputes?: Dispute[]
+  /** Set when this viewer owns a finished analysis and may upload a PDF for an unchecked citation. */
+  sourceUpload?: { analysisId: string; onUploaded: () => Promise<unknown> }
+  /** The analysis's stages, so a re-check shows as checking until it is rechecked. */
+  stages?: Stage[]
+  /** Refs whose verdict was read from a PDF the owner uploaded. */
+  pdfs?: Record<string, string>
+  /** The viewer owns the analysis, so the upload note says "you". */
+  ownsAnalysis?: boolean
 }) {
   const [open, setOpen] = useState(!startCollapsed && opensByDefault(standing))
   const [showEvidence, setShowEvidence] = useState(false)
@@ -719,6 +853,7 @@ export function ClaimCard({
             </TextButton>
           )}
           <PreprintNote verdict={primary} />
+          {fromUploadedPdf(pdfs, primaryCitation) && <UploadedNote owns={ownsAnalysis} />}
           {disputeOf(primary)}
         </div>
       )}
@@ -755,6 +890,10 @@ export function ClaimCard({
                 onlyNamed={onlyNamed}
                 onShow={onShow}
                 footer={disputeOf}
+                stages={stages}
+                pdfs={pdfs}
+                ownsAnalysis={ownsAnalysis}
+                sourceUpload={sourceUpload}
                 {...answers}
               />
             )

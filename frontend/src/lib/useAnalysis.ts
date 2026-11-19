@@ -1,4 +1,7 @@
-/** One analysis, kept current: fetch it, then follow its stage events while it runs. */
+/** One analysis, kept current: fetch it, then follow its stage events while it runs.
+ * A re-check after the owner uploads a cited PDF has no event stream (#986), so while that
+ * re-check is still going the analysis is refetched until its last stage for that ref is
+ * `rechecked`. */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
@@ -6,9 +9,13 @@ import { useEffect, useRef } from 'react'
 import { api, type Analysis } from './api'
 import { analysisLabel } from './claims'
 import { showDoneNotice } from './desktopNotice'
+import { refsRechecking } from './sourceUpload'
 
 /** Checks that report within this long of each other share one refetch of the analysis. */
 const REFETCH_WINDOW_MS = 300
+
+/** How often to ask again while an uploaded PDF is still being checked. */
+const RECHECK_POLL_MS = 1000
 
 export function useAnalysis(id: string | null) {
   const queryClient = useQueryClient()
@@ -19,7 +26,33 @@ export function useAnalysis(id: string | null) {
     enabled: Boolean(id),
   })
 
-  const running = query.data?.status === 'running'
+  const status = query.data?.status
+  const running = status === 'running'
+  const pendingRechecks = refsRechecking(query.data?.stages ?? []).join('\0')
+
+  // The re-check records its stages on the analysis and publishes nothing. Keep asking until
+  // every ref that started has a later `rechecked` stage. The key is the set of refs still
+  // going, so a refetch that is still `rechecking` does not restart the poll.
+  useEffect(() => {
+    if (!id || status !== 'done' || !pendingRechecks) return
+    let stopped = false
+    const pull = () => {
+      void api.getAnalysis(id).then(
+        (next) => {
+          if (!stopped) queryClient.setQueryData(['analysis', id], next)
+        },
+        () => {
+          // A missed poll leaves the analysis on screen. The next tick tries again.
+        },
+      )
+    }
+    pull()
+    const timer = window.setInterval(pull, RECHECK_POLL_MS)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [id, status, pendingRechecks, queryClient])
 
   useEffect(() => {
     if (!id || !running) return

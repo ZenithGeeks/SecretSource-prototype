@@ -77,7 +77,10 @@ export type Stage = {
     | 'audited'
     | 'done'
     | 'error'
+    | 'rechecking' // the owner uploaded a cited PDF; the claims that cite it are being checked again (#986)
+    | 'rechecked'
   message?: string
+  ref?: string // on rechecking / rechecked: the citation's ref, e.g. "b13"
   claims?: number
   extracted?: number // before repeats, announcements and the cap were taken out (#55)
   windows?: number // parts the paper was read in, one model call each
@@ -180,6 +183,9 @@ export type Analysis = {
   markers?: CitationMarker[] // missing on analyses from before #47
   outline?: OutlineEntry[] // missing on analyses from before #152
   disputes?: Dispute[] // the owner's disagreements with single verdicts (#856)
+  /** Ref to the file name of a PDF the owner uploaded for that citation (#986). A verdict for
+   * one of these refs was read from that PDF, not from an open-access copy. */
+  pdfs?: Record<string, string>
   stages: Stage[]
 }
 
@@ -281,6 +287,19 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ claim, source, note }),
     }),
+
+  /** Attach a PDF to one cited work that has no open copy, and check the claims that cite it
+   * again (#986). Answers 202 `{ref, pdf}` once the re-check has started; the analysis then
+   * gains a `rechecking` stage and, when the check ends, a `rechecked` one. Those stages come
+   * back with the analysis, not over the event stream. */
+  uploadReferencePdf: (id: string, ref: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<{ ref: string; pdf: string }>(
+      `/analyses/${encodeURIComponent(id)}/references/${encodeURIComponent(ref)}/pdf`,
+      { method: 'POST', body: form },
+    )
+  },
 
   startAnalysis: (paper: string, verify: boolean) =>
     request<{ id: string }>('/analyses', {
