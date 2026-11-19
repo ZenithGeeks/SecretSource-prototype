@@ -231,6 +231,15 @@ describe('useAnalysis', () => {
     expect(gateway.getAnalysis).toHaveBeenCalledTimes(1)
   })
 
+  it('stops asking once the re-check has failed', async () => {
+    const rechecking = analysis('done', [{ stage: 'rechecking', ref: 'b13' }])
+    const failed = analysis('done', [...rechecking.stages, { stage: 'recheck-failed', ref: 'b13', message: 'interrupted by a restart' }])
+    gateway.getAnalysis.mockResolvedValueOnce(rechecking).mockResolvedValue(failed)
+    const { result } = renderHook(() => useAnalysis('a1'), { wrapper })
+    await waitFor(() => expect(result.current.data?.stages.at(-1)?.stage).toBe('recheck-failed'))
+    expect(gateway.getAnalysis).toHaveBeenCalledTimes(2)
+  })
+
   it('does not ask again while the uploaded PDF is still being checked', async () => {
     const rechecking = analysis('done', [{ stage: 'rechecking', ref: 'b13' }])
     gateway.getAnalysis.mockResolvedValue(rechecking)

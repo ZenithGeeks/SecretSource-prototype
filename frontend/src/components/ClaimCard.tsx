@@ -9,7 +9,7 @@ import { api, figureImageUrl, reasonText } from '../lib/api'
 import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
 import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
 import type { Standing } from '../lib/claims'
-import { fromUploadedPdf, recheckStage, sourceUploadMessage } from '../lib/sourceUpload'
+import { fromUploadedPdf, recheckFailure, recheckStage, sourceUploadMessage } from '../lib/sourceUpload'
 import { cn } from '../lib/utils'
 import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
@@ -196,13 +196,17 @@ function SourcePdfUpload({
   stages: Stage[]
   onUploaded: () => Promise<unknown>
 }) {
-  // `since` is how many stages there were when this upload started. A `rechecked` stage
-  // appended after that means this upload's re-check has finished, so the action can return.
+  // `since` is how many stages there were when this upload started. A later `rechecked` or
+  // `recheck-failed` stage means this upload's re-check has finished, so the action can return.
   const [since, setSince] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const outcome = recheckStage(stages, citationRef)
   const arrived = since === null ? [] : stages.slice(since)
-  const finished = arrived.some((stage) => stage.stage === 'rechecked' && stage.ref === citationRef)
-  const checking = (since !== null && !finished) || recheckStage(stages, citationRef) === 'rechecking'
+  const finished = arrived.some(
+    (stage) => (stage.stage === 'rechecked' || stage.stage === 'recheck-failed') && stage.ref === citationRef,
+  )
+  const checking = (since !== null && !finished) || outcome === 'rechecking'
+  const notice = error ?? (checking ? undefined : recheckFailure(stages, citationRef))
 
   const send = async (file: File) => {
     setSince(stages.length)
@@ -246,9 +250,9 @@ function SourcePdfUpload({
           }}
         />
       </label>
-      {error && (
+      {notice && (
         <p role="alert" className="text-sm text-refutes">
-          {error}
+          {notice}
         </p>
       )}
     </div>

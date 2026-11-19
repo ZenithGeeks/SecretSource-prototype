@@ -31,7 +31,7 @@ vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => <div data-tes
 import { AnalysisView } from '../src/components/AnalysisView'
 import { ClaimCard } from '../src/components/ClaimCard'
 import type { Analysis, Citation, Claim, Stage, Verdict } from '../src/lib/api'
-import { fromUploadedPdf, recheckStage, refsRechecking, sourceUploadMessage } from '../src/lib/sourceUpload'
+import { fromUploadedPdf, recheckFailure, recheckStage, refsRechecking, sourceUploadMessage } from '../src/lib/sourceUpload'
 
 const gmres: Citation = {
   title: 'GMRES', authors: ['Saad', 'Schultz'], year: '1986', doi: '', arxiv: '', url: '', ref: 'b13',
@@ -99,16 +99,31 @@ describe('re-check stages', () => {
       stage('rechecking', 'b2'),
       stage('rechecked', 'b2'),
       stage('rechecking', 'b13'),
-      stage('verified'),
+      stage('verified', 'b9'),
       stage('rechecked', 'b13'),
       stage('rechecking', 'b13'),
+      stage('recheck-failed', 'b4'),
     ]
     expect(recheckStage(stages, 'b13')).toBe('rechecking')
     expect(recheckStage(stages, 'b2')).toBe('rechecked')
+    expect(recheckStage(stages, 'b4')).toBe('recheck-failed')
     expect(recheckStage(stages, 'b99')).toBeUndefined()
     expect(recheckStage([], 'b13')).toBeUndefined()
+    expect(recheckStage([stage('done', 'b13')], 'b13')).toBeUndefined()
     expect(refsRechecking(stages)).toEqual(['b13'])
-    expect(refsRechecking([stage('done'), stage('rechecked', 'b2')])).toEqual([])
+    expect(refsRechecking([stage('done'), stage('rechecked', 'b2'), stage('recheck-failed', 'b4')])).toEqual([])
+  })
+
+  it('says why a failed re-check stopped, or a plain sentence when the stage gives none', () => {
+    expect(recheckFailure([
+      { stage: 'done', ref: 'b2' },
+      { stage: 'recheck-failed', ref: 'b13', message: 'interrupted by a restart' },
+    ], 'b13')).toBe('interrupted by a restart')
+    expect(recheckFailure([{ stage: 'rechecking', ref: 'b13' }, { stage: 'recheck-failed', ref: 'b13' }], 'b13')).toBe(
+      'Checking the uploaded PDF failed. You can upload it again.',
+    )
+    expect(recheckFailure([{ stage: 'recheck-failed', ref: 'b13' }, { stage: 'rechecked', ref: 'b13' }], 'b13')).toBeUndefined()
+    expect(recheckFailure([{ stage: 'done' }], 'b13')).toBeUndefined()
   })
 })
 
@@ -161,6 +176,45 @@ describe('the upload action on a claim card', () => {
     fireEvent.change(input(), { target: { files: [pdf()] } })
     await waitFor(() => expect(gateway.uploadReferencePdf).toHaveBeenCalledWith('a1', 'b13', expect.any(File)))
     expect(gateway.uploadReferencePdf.mock.calls[0][2]).toBeInstanceOf(File)
+  })
+
+  it('puts the action back and says why when the re-check fails', () => {
+    card(uncheckedClaim(), {
+      stages: [{ stage: 'rechecking', ref: 'b13' }, { stage: 'recheck-failed', ref: 'b13', message: 'interrupted by a restart' }],
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('interrupted by a restart')
+    expect(screen.getByLabelText('Upload source PDF')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('shows the plain failure once a re-check that was started here stops', async () => {
+    let release: (value: { ref: string; pdf: string }) => void = () => {}
+    gateway.uploadReferencePdf.mockReturnValue(new Promise((resolve) => { release = resolve }))
+    function Harness() {
+      const [stages, setStages] = useState<Stage[]>([{ stage: 'done' }])
+      return (
+        <ClaimCard
+          claim={uncheckedClaim()}
+          index={1}
+          standing="unchecked"
+          ownsAnalysis
+          stages={stages}
+          sourceUpload={{
+            analysisId: 'a1',
+            onUploaded: async () => setStages([
+              { stage: 'done' },
+              { stage: 'recheck-failed', ref: 'b13' },
+            ]),
+          }}
+        />
+      )
+    }
+    clientWrap(<Harness />)
+    fireEvent.change(screen.getByLabelText('Upload source PDF'), { target: { files: [pdf()] } })
+    expect(await screen.findByRole('status')).toHaveTextContent('Checking the uploaded PDF…')
+    release({ ref: 'b13', pdf: 'gmres-abc.pdf' })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Checking the uploaded PDF failed. You can upload it again.')
+    expect(screen.getByLabelText('Upload source PDF')).toBeInTheDocument()
   })
 
   it('shows the citation as checking while the re-check runs, from the stages or from the upload itself', async () => {

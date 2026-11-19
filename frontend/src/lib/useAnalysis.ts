@@ -1,7 +1,7 @@
 /** One analysis, kept current: fetch it, then follow its stage events while it runs.
  * A re-check after the owner uploads a cited PDF has no event stream (#986), so while that
  * re-check is still going the analysis is refetched until its last stage for that ref is
- * `rechecked`. */
+ * `rechecked` or `recheck-failed`. */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
@@ -31,7 +31,7 @@ export function useAnalysis(id: string | null) {
   const pendingRechecks = refsRechecking(query.data?.stages ?? []).join('\0')
 
   // The re-check records its stages on the analysis and publishes nothing. Keep asking until
-  // every ref that started has a later `rechecked` stage. The key is the set of refs still
+  // every ref that started has a later `rechecked` or `recheck-failed` stage. The key is the set of refs still
   // going, so a refetch that is still `rechecking` does not restart the poll.
   useEffect(() => {
     if (!id || status !== 'done' || !pendingRechecks) return

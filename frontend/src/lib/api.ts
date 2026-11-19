@@ -79,8 +79,9 @@ export type Stage = {
     | 'error'
     | 'rechecking' // the owner uploaded a cited PDF; the claims that cite it are being checked again (#986)
     | 'rechecked'
+    | 'recheck-failed' // the re-check stopped without a new verdict (#1017)
   message?: string
-  ref?: string // on rechecking / rechecked: the citation's ref, e.g. "b13"
+  ref?: string // on a re-check stage: the citation's ref, e.g. "b13"
   claims?: number
   extracted?: number // before repeats, announcements and the cap were taken out (#55)
   windows?: number // parts the paper was read in, one model call each
