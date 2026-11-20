@@ -7,6 +7,7 @@
  * analysis and must not survive a switch to another.
  */
 
+import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
@@ -96,6 +97,7 @@ export function AnalysisView({
   const [filter, setFilter] = useState<Standing | null>(null)
   const [paperDismissedFor, setPaperDismissedFor] = useState<string | null>(null)
   const paperNotifiedFor = useRef<string | null>(null)
+  const queryClient = useQueryClient()
   const analysis = useAnalysis(id)
   const running = analysis.data?.status === 'running'
   const file = analysis.data?.file ? paperName(analysis.data.file) : undefined
@@ -174,6 +176,16 @@ export function AnalysisView({
   if (!analysis.data) return null
 
   const teacher = presentation === 'teacher'
+  const ownsAnalysis = !teacher
+  const current = analysis.data
+  // Only the owner of a finished analysis may attach a PDF. A running analysis answers 409,
+  // and a teacher is reading someone else's submission.
+  const sourceUpload = ownsAnalysis && current.status === 'done'
+    ? {
+        analysisId: current.id,
+        onUploaded: () => queryClient.invalidateQueries({ queryKey: ['analysis', current.id] }),
+      }
+    : undefined
   const settledCount = analysis.data.claims.filter(settled).length
   const pending = Math.min(3, analysis.data.claims.length - settledCount)
   const attention = counts.refutes + counts.insufficient + counts.unchecked > 0
@@ -233,6 +245,10 @@ export function AnalysisView({
                             section={claim.section ? sectionName(outline, claim.section) : undefined}
                             figures={analysis.data.figures}
                             references={analysis.data.references}
+                            stages={analysis.data.stages}
+                            pdfs={analysis.data.pdfs}
+                            ownsAnalysis={ownsAnalysis}
+                            sourceUpload={sourceUpload}
                             startCollapsed
                             onShow={(next) => setTarget(next.paper === file ? { ...next, section: claim.section } : next)}
                           />
@@ -306,6 +322,10 @@ export function AnalysisView({
                 references={analysis.data.references}
                 analysisId={teacher ? undefined : analysis.data.id}
                 disputes={analysis.data.disputes}
+                stages={analysis.data.stages}
+                pdfs={analysis.data.pdfs}
+                ownsAnalysis={ownsAnalysis}
+                sourceUpload={sourceUpload}
                 actions={renderClaimActions?.(claim, index)}
                 onSelect={presentation === 'teacher' && file && claim.source
                   ? () => setTarget({
