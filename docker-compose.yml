@@ -141,7 +141,7 @@ services:
       PARALLEL_SOURCES_TOTAL: ${PARALLEL_SOURCES_TOTAL:-} # the same, across all runs; empty = PARALLEL_SOURCES
       PARALLEL_CHECKS_TOTAL: ${PARALLEL_CHECKS_TOTAL:-} # the same, across all runs; empty = PARALLEL_CHECKS
       LLM_PARALLEL_REQUESTS: ${LLM_PARALLEL_REQUESTS:-3} # LLM requests in flight per process
-      LLM_INTERACTIVE_SLOTS: ${LLM_INTERACTIVE_SLOTS:-1} # of those, slots DSPy calls leave to the chat agents
+      LLM_INTERACTIVE_SLOTS: ${LLM_INTERACTIVE_SLOTS:-0} # of those, slots DSPy calls leave to the chat agents
       DOCLING_OCR: ${DOCLING_OCR:-auto} # auto: OCR only PDFs without a text layer
       VISUAL_EVIDENCE: ${VISUAL_EVIDENCE:-} # true: checks also search the cited paper's figures (#446)
       FIGURE_WAIT: ${FIGURE_WAIT:-} # empty: checks wait for the cited paper's figures; seconds: fast mode

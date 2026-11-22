@@ -150,8 +150,8 @@ PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECK
 # (#511). Other processes on the same key are not counted.
 LLM_PARALLEL_REQUESTS = int(os.getenv("LLM_PARALLEL_REQUESTS", "3"))
 # Of those, how many DSPy calls (checks, extraction, answers) may never take, so a chat agent's
-# turn does not wait behind a batch of checks. DSPy keeps at least one slot either way.
-LLM_INTERACTIVE_SLOTS = int(os.getenv("LLM_INTERACTIVE_SLOTS", "1"))
+# turn does not wait behind a batch of checks. 0 reserves none; DSPy always keeps one slot.
+LLM_INTERACTIVE_SLOTS = int(os.getenv("LLM_INTERACTIVE_SLOTS", "0"))
 # How long one LLM call keeps retrying while the provider is busy (HTTP 429) or has no route
 # (503), before it fails. Two workers can send 6 calls to a provider that takes 3 (#839), and a
 # TokenMe outage on 2026-11-08 lasted 4 minutes.
