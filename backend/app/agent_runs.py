@@ -346,23 +346,29 @@ async def _events(
 async def _run_with_progress(run: AsyncGenerator[Event, None]) -> AsyncGenerator[Event | str, None]:
     """The run's events, with the progress lines its data tools report (app/agents/progress.py) as
     plain strings in between. A tool reports while the run waits on it, so the run goes on in its
-    own task and both kinds of item meet in one queue."""
+    own task and both kinds of item meet in one queue. The task takes the next event only when the
+    reader asks for it, as a plain `async for` would, so a reader that stops early leaves the run
+    between events, never part way through one."""
     items: asyncio.Queue[tuple[str, Event | str | Exception | None]] = asyncio.Queue()
+    wanted = asyncio.Event()
 
     async def pump() -> None:
         try:
-            async for event in run:
-                await items.put(("event", event))
+            while True:
+                await wanted.wait()
+                wanted.clear()
+                await items.put(("event", await run.__anext__()))
+        except StopAsyncIteration:
+            await items.put(("end", None))
         except Exception as error:  # handed to the reader, which raises it in its own task
             await items.put(("error", error))
-        else:
-            await items.put(("end", None))
 
     # The task copies this context, so the tools it runs see the reporter.
     token = progress.reporter.set(lambda text: items.put_nowait(("progress", text)))
     task = asyncio.create_task(pump())
     progress.reporter.reset(token)
     try:
+        wanted.set()
         while True:
             kind, item = await items.get()
             if kind == "end":
@@ -370,8 +376,11 @@ async def _run_with_progress(run: AsyncGenerator[Event, None]) -> AsyncGenerator
             if kind == "error":
                 raise item
             yield item
+            if kind == "event":
+                wanted.set()
     finally:
-        # The reader stopped early (a browser tool cap, or the person left): stop the run too.
+        # Only reached early when the reader stopped (the browser tool cap, or the person left):
+        # the task then waits for `wanted`, outside the run, so cancelling it is safe.
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
