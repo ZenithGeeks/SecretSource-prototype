@@ -110,8 +110,9 @@ so React sees the change.
    `session_id` to go on in a conversation.
 2. The stream sends `{"type": "session", "id"}`, then the agent's steps: `{"type": "step", "name"}`
    for a server tool, `{"type": "agent", "name", "state", "task"}` when it hands work to a specialist
-   (`state` is `working`, then `done` or `failed`; `task` comes with `working`), `{"type": "say", "text"}`
-   for its words.
+   (`state` is `working`, then `done` or `failed`; `task` comes with `working`),
+   `{"type": "progress", "text"}` while `check_text` or `ask_library` runs ("Checked 2 of 6
+   sentences"; the chat shows the latest one), `{"type": "say", "text"}` for its words.
 3. A browser tool arrives as `{"type": "tool", "id", "name", "args"}` and the stream ends with
    `{"type": "done"}`. The browser runs it from the registry in `frontend/src/lib/agentTools.ts`
    with the cursor, then POSTs `{id, name, result, role}` to `/api/agent/runs/{session}/results`,

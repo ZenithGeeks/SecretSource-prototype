@@ -10,18 +10,22 @@ message with the new role and the old session_id; start_run carries only the las
 request into a fresh session for the new role so earlier tool calls and verdicts stay isolated.
 Other events: `{"type": "session", "id"}` first, `{"type": "step", "name"}` for a server tool,
 `{"type": "agent", "name", "state", "task"}` when the agent hands work to a specialist
-(`state` is "working", then "done" or "failed"), `{"type": "say", "text"}` for the agent's words,
-and `{"type": "done"}` last.
+(`state` is "working", then "done" or "failed"), `{"type": "progress", "text"}` while a slow data
+tool runs (app/agents/progress.py), `{"type": "say", "text"}` for the agent's words, and
+`{"type": "done"}` last.
 
 Sessions use app/sessions.py (Postgres in the `adk` schema when SESSION_DB_URL is set, in-memory
 otherwise) and expire after an hour of inactivity.
 """
 
+import asyncio
+import contextlib
 import functools
 import json
 import logging
 import re
 import time
+from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from typing import Literal
 
@@ -29,11 +33,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from google.adk.agents.invocation_context import LlmCallsLimitExceededError
 from google.adk.agents.run_config import RunConfig
+from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from pydantic import BaseModel, Field
 
+from app.agents import progress
 from app.auth import current_user
 from app.sessions import session_service
 
@@ -296,9 +302,14 @@ async def _events(
         yield _sse(session_event)
     run_config = RunConfig(max_llm_calls=MAX_LLM_CALLS)
     try:
-        async for event in get_runner(role).run_async(
-            user_id=user_id, session_id=session_id, new_message=message, run_config=run_config
+        async for event in _run_with_progress(
+            get_runner(role).run_async(
+                user_id=user_id, session_id=session_id, new_message=message, run_config=run_config
+            )
         ):
+            if isinstance(event, str):
+                yield _sse({"type": "progress", "text": event})
+                continue
             calls = event.get_function_calls()
             stopped = False
             for call in calls:
@@ -330,6 +341,50 @@ async def _events(
         log.exception("screen agent run %s failed", session_id)
         yield _sse({"type": "error", "message": "the agent could not go on"})
     yield _sse({"type": "done"})
+
+
+async def _run_with_progress(run: AsyncGenerator[Event, None]) -> AsyncGenerator[Event | str, None]:
+    """The run's events, with the progress lines its data tools report (app/agents/progress.py) as
+    plain strings in between. A tool reports while the run waits on it, so the run goes on in its
+    own task and both kinds of item meet in one queue. The task takes the next event only when the
+    reader asks for it, as a plain `async for` would, so a reader that stops early leaves the run
+    between events, never part way through one."""
+    items: asyncio.Queue[tuple[str, Event | str | Exception | None]] = asyncio.Queue()
+    wanted = asyncio.Event()
+
+    async def pump() -> None:
+        try:
+            while True:
+                await wanted.wait()
+                wanted.clear()
+                await items.put(("event", await run.__anext__()))
+        except StopAsyncIteration:
+            await items.put(("end", None))
+        except Exception as error:  # handed to the reader, which raises it in its own task
+            await items.put(("error", error))
+
+    # The task copies this context, so the tools it runs see the reporter.
+    token = progress.reporter.set(lambda text: items.put_nowait(("progress", text)))
+    task = asyncio.create_task(pump())
+    progress.reporter.reset(token)
+    try:
+        wanted.set()
+        while True:
+            kind, item = await items.get()
+            if kind == "end":
+                return
+            if kind == "error":
+                raise item
+            yield item
+            if kind == "event":
+                wanted.set()
+    finally:
+        # Only reached early when the reader stopped (the browser tool cap, or the person left):
+        # the task then waits for `wanted`, outside the run, so cancelling it is safe.
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await run.aclose()
 
 
 @functools.cache

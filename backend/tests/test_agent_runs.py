@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from app import agent_runs
-from app.agents import data_tools, screen
+from app.agents import data_tools, progress, screen
 from app.agents.data_tools import DATA_TOOLS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -233,6 +233,39 @@ def test_a_data_request_goes_to_the_data_agent_and_the_stream_says_so(api, monke
     assert got.index(agents[0]) < got.index(agents[1]) < got.index(said[0])
     # The coordinator's request, not the whole chat, is what the specialist was asked.
     assert "Which claims are contradicted?" in str(data_model.seen[0].contents)
+
+
+def test_a_slow_data_tool_streams_its_progress_while_the_specialist_works(api, monkeypatch):
+    client, model, _ = api
+
+    async def check_text(text: str, tool_context) -> dict:
+        """Check a piece of writing against the person's papers."""
+        for done in (1, 2):
+            await asyncio.sleep(0)  # the stream sends each line while the tool is still running
+            progress.report(f"Checked {done} of 2 sentences")
+        return {"results": [], "not_checked": 0}
+
+    data_model = ScriptedModel(
+        replies=[{"name": "check_text", "args": {"text": "Two sentences."}}, "Both are backed."], seen=[]
+    )
+    monkeypatch.setattr(screen.data_agent, "model", data_model)
+    monkeypatch.setattr(screen.data_agent, "tools", [check_text])
+    model.replies = [{"name": "data_agent", "args": {"request": "Check my text"}}, "Both are backed."]
+
+    got = events(client.post("/agent/runs", json={"message": "Check my text"}))
+
+    shown = [(e["type"], e.get("text") or e.get("state")) for e in got if e["type"] in {"agent", "progress"}]
+    assert shown == [
+        ("agent", "working"),
+        ("progress", "Checked 1 of 2 sentences"),
+        ("progress", "Checked 2 of 2 sentences"),
+        ("agent", "done"),
+    ]
+    assert got[-1] == {"type": "done"}
+
+
+def test_progress_outside_a_streamed_run_goes_nowhere():
+    progress.report("Checked 1 of 2 sentences")  # the MCP server and /commands set no reporter
 
 
 def test_a_command_from_the_ask_panel_runs_a_data_tool_for_the_person(api, monkeypatch):
