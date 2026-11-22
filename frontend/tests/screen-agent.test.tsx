@@ -575,6 +575,31 @@ describe('Do it', () => {
     expect(screen.getByText('Looking for gaps in your library')).toBeInTheDocument()
   })
 
+  it('shows one progress line for a slow tool and updates it as checks finish', async () => {
+    gateway.streams = [
+      [
+        { type: 'session', id: 's1' },
+        { type: 'agent', name: 'data_agent', state: 'working', task: 'Check my text' },
+        { type: 'step', name: 'check_text' },
+        { type: 'progress', text: 'Checked 1 of 3 sentences' },
+        { type: 'progress', text: 'Checked 2 of 3 sentences' },
+        { type: 'progress', text: 'Checked 3 of 3 sentences' },
+        { type: 'agent', name: 'data_agent', state: 'done' },
+        { type: 'say', text: 'All three are backed.' },
+        { type: 'done' },
+      ],
+    ]
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check my text' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+
+    expect(await screen.findByText('All three are backed.')).toBeInTheDocument()
+    expect(screen.getByText('Checking the text against your papers')).toBeInTheDocument()
+    expect(screen.getByText('Checked 3 of 3 sentences')).toBeInTheDocument()
+    expect(screen.queryByText('Checked 1 of 3 sentences')).not.toBeInTheDocument()
+    expect(screen.queryByText('Checked 2 of 3 sentences')).not.toBeInTheDocument()
+  })
+
   it('marks a hand-over stopped when the stream ends before the specialist answers', async () => {
     gateway.streams = [
       [{ type: 'session', id: 's1' }, { type: 'agent', name: 'data_agent', state: 'working', task: 'Check my draft' }, { type: 'done' }],
