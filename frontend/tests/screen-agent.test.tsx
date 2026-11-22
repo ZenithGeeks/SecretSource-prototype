@@ -585,4 +585,32 @@ describe('Do it', () => {
 
     expect(await screen.findByText('Stopped')).toBeInTheDocument()
   })
+
+  it('sends analysis_id or draft_id when open and omits them otherwise', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'say', text: 'One.' }, { type: 'done' }],
+      [{ type: 'session', id: 's2' }, { type: 'say', text: 'Two.' }, { type: 'done' }],
+      [{ type: 'session', id: 's3' }, { type: 'say', text: 'Three.' }, { type: 'done' }],
+    ]
+    const first = render(<DoIt actions={actions({ screen: 'analyses', analysisId: 'a1' })} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check claim' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('One.')).toBeInTheDocument()
+    first.unmount()
+
+    const second = render(<DoIt actions={actions({ role: 'writer', screen: 'editor', draftId: 'd1' })} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check draft' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('Two.')).toBeInTheDocument()
+    second.unmount()
+
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Plain' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('Three.')).toBeInTheDocument()
+
+    expect(gateway.posts[0].body).toEqual({ message: 'Check claim', screen: 'analyses', analysis_id: 'a1' })
+    expect(gateway.posts[1].body).toEqual({ role: 'writer', message: 'Check draft', screen: 'editor', draft_id: 'd1' })
+    expect(gateway.posts[2].body).toEqual({ message: 'Plain', screen: 'library' })
+  })
 })

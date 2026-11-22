@@ -195,6 +195,7 @@ export function AuthorApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =>
     actions: {
       role: 'writer',
       screen,
+      draftId: draftId ?? undefined,
       // The editor opens the draft Home has selected, so only once there is one.
       screens: draftId ? ['home', 'library', 'editor'] : ['home', 'library'],
       openScreen: (next) => {

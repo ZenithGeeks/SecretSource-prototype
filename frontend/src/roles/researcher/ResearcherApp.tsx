@@ -123,6 +123,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
     actions: {
       role: 'researcher',
       screen,
+      analysisId: screen === 'analyses' ? (history.selected ?? undefined) : undefined,
       screens: NAV.map((entry) => entry.key),
       openScreen: (next) => navigate(next as ResearcherScreen),
       openPaper: openAnalysis,

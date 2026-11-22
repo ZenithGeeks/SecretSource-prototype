@@ -58,7 +58,7 @@ _sessions = None  # built on first use: a database service opens its engine when
 # sessions do not accumulate. Database sessions check session.last_update_time on load.
 _last_active: dict[str, tuple[float, str]] = {}
 _MISSING_SESSION = "no such conversation, or it expired after an hour of inactivity"
-_SCREEN_PREFIX = re.compile(r"^\[On the [^\]]+ screen\]\s*")
+_CONTEXT_PREFIX = re.compile(r"^\[(?:On the |open (?:analysis|draft)_id=)[^\]]+\]\s*")
 
 
 def sessions():
@@ -90,7 +90,7 @@ async def _load_session(owner: str, session_id: str):
     return session
 
 
-# The web app's role ids with a screen agent (agents/screen.py ROLE_AGENTS). The Teacher has none.
+# The web app's role ids (agents/screen.py ROLE_AGENTS). Teacher has read-only Classroom tools only.
 Role = Literal["researcher", "labeler", "writer", "teacher"]
 
 
@@ -98,6 +98,8 @@ class RunStart(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     screen: str = Field(default="", max_length=40)  # the screen the person is on, for the agent
     role: Role = "researcher"  # whose agent answers; after switch_role the browser sends the new one
+    analysis_id: str | None = Field(default=None, max_length=200)
+    draft_id: str | None = Field(default=None, max_length=200)
     # Go on in this conversation instead of starting one: when role changes, start_run opens a
     # fresh session for the target role carrying only the last plain-text user request.
     session_id: str | None = Field(default=None, max_length=200)
@@ -112,14 +114,14 @@ class ToolResult(BaseModel):
 
 
 def _last_user_request(session) -> str | None:
-    """Return the latest plain-text user message in `session`, without its screen prefix."""
+    """Return the latest plain-text user message in `session`, without its context prefix."""
     for event in reversed(session.events):
         if event.author != "user" or not event.content or not event.content.parts:
             continue
         if any(part.function_response is not None for part in event.content.parts):
             continue
         raw = "".join(part.text or "" for part in event.content.parts)
-        cleaned = _SCREEN_PREFIX.sub("", raw, count=1).strip()
+        cleaned = _CONTEXT_PREFIX.sub("", raw, count=1).strip()
         if cleaned:
             return cleaned
     return None
@@ -147,6 +149,19 @@ async def _new_session(owner: str, role: Role):
     return session
 
 
+def _format_user_message(body: RunStart, message: str | None = None) -> str:
+    """Prefix the user's message with the active screen and open paper or draft id, when present."""
+    parts = []
+    if body.screen:
+        parts.append(f"On the {body.screen} screen")
+    if body.analysis_id:
+        parts.append(f"open analysis_id={body.analysis_id}")
+    if body.draft_id:
+        parts.append(f"open draft_id={body.draft_id}")
+    text = body.message if message is None else message
+    return f"[{', '.join(parts)}] {text}" if parts else text
+
+
 @router.post("/runs")
 async def start_run(body: RunStart, user: str | None = Depends(current_user)):
     """Start a conversation with the role's screen agent, or go on in one, and stream the turn."""
@@ -166,7 +181,7 @@ async def start_run(body: RunStart, user: str | None = Depends(current_user)):
                 prompt = f"Earlier request: {carried}\n{body.message}"
     else:
         session = await _new_session(owner, body.role)
-    text = f"[On the {body.screen} screen] {prompt}" if body.screen else prompt
+    text = _format_user_message(body, prompt)
     message = types.Content(role="user", parts=[types.Part(text=text)])
     return _stream(body.role, session.id, owner, message, session_event={"type": "session", "id": session.id})
 
