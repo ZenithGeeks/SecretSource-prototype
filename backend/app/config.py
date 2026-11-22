@@ -64,6 +64,11 @@ def _env_scopes(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 VLLM_URL = os.getenv("VLLM_URL") or "http://localhost:8000/v1"
 VLLM_MODEL = os.getenv("VLLM_MODEL") or "qwen"  # must match an id from {VLLM_URL}/models
 VLLM_API_KEY = os.getenv("VLLM_API_KEY") or "EMPTY"  # only checked when vLLM was started with a key
+# Optional models for the chat agents, unset means VLLM_MODEL. The router tier (screen_agent, the
+# role agents and the CLI coordinator) only picks a tool or a specialist, so a lighter model fits;
+# the agent tier (data_agent and the CLI specialists) reads results and writes the answer.
+ADK_ROUTER_MODEL = os.getenv("ADK_ROUTER_MODEL") or VLLM_MODEL
+ADK_AGENT_MODEL = os.getenv("ADK_AGENT_MODEL") or VLLM_MODEL
 
 # Retrieval services. Each serves plain HTTP under /api and MCP under /mcp.
 COLBERT_URL = os.getenv("COLBERT_URL") or "http://localhost:8893"
@@ -144,6 +149,9 @@ PARALLEL_CHECKS_TOTAL = int(os.getenv("PARALLEL_CHECKS_TOTAL") or PARALLEL_CHECK
 # checks and the assistant's agents. The 9arm key allows 3 and refuses the rest with HTTP 429
 # (#511). Other processes on the same key are not counted.
 LLM_PARALLEL_REQUESTS = int(os.getenv("LLM_PARALLEL_REQUESTS", "3"))
+# Of those, how many DSPy calls (checks, extraction, answers) may never take, so a chat agent's
+# turn does not wait behind a batch of checks. DSPy keeps at least one slot either way.
+LLM_INTERACTIVE_SLOTS = int(os.getenv("LLM_INTERACTIVE_SLOTS", "1"))
 # How long one LLM call keeps retrying while the provider is busy (HTTP 429) or has no route
 # (503), before it fails. Two workers can send 6 calls to a provider that takes 3 (#839), and a
 # TokenMe outage on 2026-11-08 lasted 4 minutes.

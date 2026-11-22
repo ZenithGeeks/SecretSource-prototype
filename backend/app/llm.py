@@ -1,7 +1,8 @@
 """One model behind two frameworks. ADK agents get a LiteLlm.
 DSPy programs get a dspy.LM. Both use the OpenAI wire format,
 which is what vLLM serves. Together they keep at most LLM_PARALLEL_REQUESTS requests
-in flight in this process, and wait out a busy provider instead of failing."""
+in flight in this process, and wait out a busy provider instead of failing. DSPy calls leave
+LLM_INTERACTIVE_SLOTS of those free for the chat agents."""
 
 import asyncio
 import itertools
@@ -17,12 +18,23 @@ from dspy.utils.exceptions import LMRateLimitError
 from google.adk.models.lite_llm import LiteLlm, LiteLLMClient
 
 from app.auth import acting_user
-from app.config import LLM_BUSY_RETRY_SECONDS, LLM_PARALLEL_REQUESTS, VLLM_API_KEY, VLLM_MODEL, VLLM_URL
+from app.config import (
+    ADK_AGENT_MODEL,
+    LLM_BUSY_RETRY_SECONDS,
+    LLM_INTERACTIVE_SLOTS,
+    LLM_PARALLEL_REQUESTS,
+    VLLM_API_KEY,
+    VLLM_MODEL,
+    VLLM_URL,
+)
 from app.metrics import LLM_RATE_LIMITED, LLM_SLOT_WAIT_SECONDS
 
 # One slot per request in flight, for every model in this process. dspy calls come from
 # worker threads and ADK calls from the event loop, so this is a threading semaphore.
 _slots = threading.BoundedSemaphore(LLM_PARALLEL_REQUESTS)
+# A DSPy call takes one of these before a slot, so it never holds the last slots the chat
+# agents need. A cap on DSPy, not a second pool: the total stays LLM_PARALLEL_REQUESTS.
+_dspy_slots = threading.BoundedSemaphore(max(1, LLM_PARALLEL_REQUESTS - LLM_INTERACTIVE_SLOTS))
 
 # HTTP statuses that mean "try again later": the provider's parallel slots are full (429), or
 # it has no route to the model right now (503). Waits between tries, then 30 s each.
@@ -64,26 +76,37 @@ Cache.cache_key = _cache_key_without_user
 
 @contextmanager
 def _slot():
-    """Hold a request slot, blocking this thread until one is free."""
+    """Hold a DSPy request slot, blocking this thread until one is free."""
     started = time.perf_counter()
-    with _slots:
+    with _dspy_slots, _slots:
         LLM_SLOT_WAIT_SECONDS.observe(time.perf_counter() - started)
         yield
 
 
-@asynccontextmanager
-async def _async_slot():
-    """Hold a request slot without blocking the event loop."""
-    started = time.perf_counter()
-    # Polling, not asyncio.to_thread(_slots.acquire): a cancelled to_thread call still takes
+async def _acquire(semaphore: threading.BoundedSemaphore) -> None:
+    """Take `semaphore` without blocking the event loop."""
+    # Polling, not asyncio.to_thread(semaphore.acquire): a cancelled to_thread call still takes
     # the slot in its thread, and nothing gives it back.
-    while not _slots.acquire(blocking=False):
+    while not semaphore.acquire(blocking=False):
         await asyncio.sleep(0.05)
-    LLM_SLOT_WAIT_SECONDS.observe(time.perf_counter() - started)
+
+
+@asynccontextmanager
+async def _async_slot(dspy_call: bool = False):
+    """Hold a request slot without blocking the event loop; a DSPy call also takes a DSPy slot."""
+    started = time.perf_counter()
+    if dspy_call:
+        await _acquire(_dspy_slots)
     try:
-        yield
+        await _acquire(_slots)
+        LLM_SLOT_WAIT_SECONDS.observe(time.perf_counter() - started)
+        try:
+            yield
+        finally:
+            _slots.release()
     finally:
-        _slots.release()
+        if dspy_call:
+            _dspy_slots.release()
 
 
 class CappedLM(dspy.LM):
@@ -111,7 +134,7 @@ class CappedLM(dspy.LM):
         waited = 0.0
         for attempt in itertools.count():
             try:
-                async with _async_slot():
+                async with _async_slot(dspy_call=True):
                     return await super().acall(*args, **kwargs)
             except Exception as error:
                 wait = _busy_wait(error, attempt, waited)
@@ -198,14 +221,15 @@ def count_adk_rate_limit(kwargs, completion_response, start_time, end_time):
         LLM_RATE_LIMITED.inc()
 
 
-def adk_model() -> CappedLiteLlm:
-    """The vLLM model for ADK agents, with thinking off and the shared request limit."""
+def adk_model(model: str = ADK_AGENT_MODEL) -> CappedLiteLlm:
+    """A model for ADK agents (ADK_AGENT_MODEL unless given), with thinking off and the shared
+    request limit."""
     return CappedLiteLlm(
-        model=f"openai/{VLLM_MODEL}",
+        model=f"openai/{model}",
         api_base=VLLM_URL,
         api_key=VLLM_API_KEY,
         temperature=0.3,
-        extra_body=NO_THINKING,
+        extra_body=no_thinking(model),
         failure_callback=[count_adk_rate_limit],
         llm_client=UserLiteLLMClient(),
     )
