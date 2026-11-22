@@ -224,9 +224,9 @@ Sprint 6 (Evaluation) ends Friday 20 Nov. Sprint 7 (Report & Delivery) runs Satu
 
 The Project Manager bot labels each weekday's plan with `today`, and removes that label from finished or deferred items. Agents work only on issues labeled `today`, so a session does not spend tokens on the rest of the backlog. See the session rule in [CLAUDE.md](../CLAUDE.md).
 
-Friday 20 Nov 2026. The open pull requests and the Sprint 7 start order are in Current priorities.
+Friday 20 Nov 2026. No new `today` list was recorded that day. The open pull requests and the Sprint 7 start order are in Current priorities. The list below is the previous one.
 
-Tuesday 17 Nov 2026, the open issues labeled `today`:
+Tuesday 17 Nov 2026, the last recorded `today` list:
 
 - [Issue #1005](https://github.com/ZenithGeeks/SecretSource-prototype/issues/1005) — `agent-claude`. [SCRUM-551](https://secretsources.atlassian.net/browse/SCRUM-551), To Do, assignee Vitawat. The 20-claim cap keeps claims that cite many works and drops single-citation claims first.
 - [Issue #1013](https://github.com/ZenithGeeks/SecretSource-prototype/issues/1013) — `agent-claude`. [SCRUM-546](https://secretsources.atlassian.net/browse/SCRUM-546). Should-fixes from the post-merge reviews [issue #987](https://github.com/ZenithGeeks/SecretSource-prototype/issues/987) and [issue #988](https://github.com/ZenithGeeks/SecretSource-prototype/issues/988): access control, a stuck rechecking stage, partial updates, tests, and a `_download` size cap. Security-adjacent. Vitawat merges. Unassigned.
