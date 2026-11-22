@@ -530,7 +530,7 @@ at least one LLM turn to each question, and #504 and #506 measured the direct pa
 | figure extraction | `backend/app/pipeline/figures.py` |
 | search behaviour (chunks, batches, collections) | `services/colbert`, `services/colpali` |
 | which LLM is used, or how it is called | `backend/app/llm.py`, `backend/app/config.py` |
-| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS`, `LLM_PARALLEL_REQUESTS` in `.env`; analyses at once = worker count (`--scale worker=N`) |
+| how much runs at the same time | `PARALLEL_SOURCES`, `PARALLEL_CHECKS`, `LLM_PARALLEL_REQUESTS`, `LLM_INTERACTIVE_SLOTS` in `.env`; analyses at once = worker count (`--scale worker=N`) |
 | how analyses are queued, or the Redis connection | `backend/app/queue.py` |
 | what the worker process does | `backend/worker.py` |
 | the chat agents and their routing | `backend/app/agents/team.py` |

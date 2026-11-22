@@ -30,7 +30,7 @@ from google.adk.agents import LlmAgent
 from google.adk.tools import ToolContext, load_memory
 from pydantic import BaseModel, Field
 
-from app.config import PAPERS_DIR
+from app.config import ADK_ROUTER_MODEL, PAPERS_DIR
 from app.llm import adk_model
 from app.pipeline import claims, rag, sources, verify
 
@@ -152,7 +152,7 @@ check_claim = LlmAgent(
 root_agent = LlmAgent(
     name="coordinator",
     description="Routes user requests to the right specialist, and combines checks against several papers.",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=(
         "You route requests. Never judge a claim or answer from your own knowledge.\n"
         "- what an EARLIER analysis found ('did we already check ...', 'what did we find for ...')\n"

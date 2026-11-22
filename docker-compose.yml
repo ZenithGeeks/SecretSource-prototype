@@ -116,6 +116,8 @@ services:
       VLLM_URL: ${VLLM_URL:-http://vllm:8000/v1}
       VLLM_MODEL: ${VLLM_MODEL:-${VLLM_SERVED_NAME:-qwen}} # the id {VLLM_URL}/models lists
       VLLM_API_KEY: ${VLLM_API_KEY:-EMPTY}
+      ADK_ROUTER_MODEL: ${ADK_ROUTER_MODEL:-} # chat routers (screen and role agents); empty = VLLM_MODEL
+      ADK_AGENT_MODEL: ${ADK_AGENT_MODEL:-} # data_agent and the CLI specialists; empty = VLLM_MODEL
       # Same idea for the retrieval services and GROBID: set COLBERT_URL / COLPALI_URL /
       # GROBID_URL in .env to reach ones running elsewhere; unset, the compose containers are used.
       COLBERT_URL: ${COLBERT_URL:-http://colbert:8893}
@@ -139,6 +141,7 @@ services:
       PARALLEL_SOURCES_TOTAL: ${PARALLEL_SOURCES_TOTAL:-} # the same, across all runs; empty = PARALLEL_SOURCES
       PARALLEL_CHECKS_TOTAL: ${PARALLEL_CHECKS_TOTAL:-} # the same, across all runs; empty = PARALLEL_CHECKS
       LLM_PARALLEL_REQUESTS: ${LLM_PARALLEL_REQUESTS:-3} # LLM requests in flight per process
+      LLM_INTERACTIVE_SLOTS: ${LLM_INTERACTIVE_SLOTS:-0} # of those, slots DSPy calls leave to the chat agents
       DOCLING_OCR: ${DOCLING_OCR:-auto} # auto: OCR only PDFs without a text layer
       VISUAL_EVIDENCE: ${VISUAL_EVIDENCE:-} # true: checks also search the cited paper's figures (#446)
       FIGURE_WAIT: ${FIGURE_WAIT:-} # empty: checks wait for the cited paper's figures; seconds: fast mode
