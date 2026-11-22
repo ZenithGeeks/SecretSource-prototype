@@ -22,12 +22,21 @@ def test_the_coordinator_routes_to_the_chat_specialists_and_calls_check_claim_as
     assert [agent.name for agent in team.root_agent.sub_agents if agent.mode == "chat"] == [
         "rag_agent",
         "paper_agent",
-        "verify_agent",
     ]
-    # load_memory searches past analyses (SCRUM-172); check_claim is the single-turn verify_agent.
+    # load_memory searches past analyses (SCRUM-172); check_claim is the one verify specialist.
     assert [tool.name for tool in team.root_agent.tools] == ["load_memory", "check_claim"]
     declaration = team.root_agent.tools[1]._get_declaration()
     assert declaration.parameters_json_schema["required"] == ["claim", "source"]
+
+
+def test_a_check_against_one_paper_also_goes_through_check_claim():
+    """SCRUM-553: handing a one-paper check to a chat specialist stranded the follow-up turns
+    in an agent without load_memory or paper_agent."""
+    instruction = team.root_agent.instruction
+
+    assert "verify_agent" not in instruction
+    assert "call check_claim once for each cited paper" in instruction
+    assert all(agent.name != "verify_agent" for agent in team.root_agent.sub_agents)
 
 
 def test_a_wrapped_tool_looks_the_same_to_the_model():
