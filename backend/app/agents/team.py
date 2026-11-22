@@ -1,16 +1,17 @@
 """Multi-agent tree (Google ADK).
 
-A coordinator sends requests to three specialists: rag_agent (answers from indexed
-papers, adds new PDFs), paper_agent (claims, citations, fetching cited papers), and
-verify_agent (checks whether a cited paper supports a claim). rag_agent answers and
-searches only the papers the caller may open. ColBERT's own MCP endpoint does not know
-who is calling, so the agent does not use it: an unscoped search there would return
-other people's passages.
+A coordinator hands requests to two specialists, rag_agent (answers from indexed papers,
+adds new PDFs) and paper_agent (claims, citations, fetching cited papers), and calls a third,
+check_claim (does a cited paper support a claim), as a tool. rag_agent answers and searches
+only the papers the caller may open. ColBERT's own MCP endpoint does not know who is
+calling, so the agent does not use it: an unscoped search there would return other people's
+passages.
 
-A request that one specialist owns is handed over whole with transfer_to_agent. A claim to
-check against several papers is not: the coordinator calls check_claim once per paper in
-the same turn, ADK runs the calls at the same time, and the coordinator combines the
-verdicts into one answer (SCRUM-171).
+A request that rag_agent or paper_agent owns is handed over whole with transfer_to_agent. A
+claim check is not: the coordinator calls check_claim once per cited paper, all in the same
+turn, ADK runs the calls at the same time, and the coordinator answers with the verdicts
+(SCRUM-171). The conversation stays with the coordinator, so a follow-up can still reach
+load_memory and paper_agent (SCRUM-553).
 
 A question about earlier work goes to load_memory, which searches the saved analyses
 through the runner's memory service, app/memory.py (SCRUM-172).
@@ -32,6 +33,10 @@ from pydantic import BaseModel, Field
 from app.config import PAPERS_DIR
 from app.llm import adk_model
 from app.pipeline import claims, rag, sources, verify
+
+# Per request in cli.py and the A2A server. Checking a claim against five papers takes about
+# 12 calls, so this stops a tool loop, not a real request.
+MAX_LLM_CALLS = 20
 
 
 def off_the_loop(function):
@@ -118,31 +123,14 @@ paper_agent = LlmAgent(
     tools=[extract_claims, extract_citations, extract_claims_with_citations, fetch_source],
 )
 
-VERIFY_INSTRUCTION = (
-    "Use verify_claim with the claim and the cited paper's PDF path.\n"
-    "Report the verdict (supports / refutes / insufficient), then the quote it relies on,\n"
-    "then the one-sentence reason. Never judge the claim yourself.\n"
-    "If status is error, say so briefly."
-)
-
-verify_agent = LlmAgent(
-    name="verify_agent",
-    description="Checks whether a cited paper actually supports a claim made about it.",
-    model=adk_model(),
-    instruction=VERIFY_INSTRUCTION,
-    tools=[verify_claim],
-)
-
 
 class ClaimAndSource(BaseModel):
     claim: str = Field(description="The claim to check, in the user's words")
     source: str = Field(description="One cited paper: a PDF path, DOI, arXiv ID, PMID or URL")
 
 
-# The same specialist as a tool. An agent has one parent and one mode, so routing to
-# verify_agent and calling it as a tool need two agents. single_turn is ADK's recommended
-# way to do what AgentTool did: the coordinator gets the result back instead of handing the
-# conversation over, and can call it several times in one turn.
+# single_turn is ADK's recommended way to do what AgentTool did: the coordinator gets the
+# result back instead of handing the conversation over, and can call it several times in one turn.
 check_claim = LlmAgent(
     name="check_claim",
     description=(
@@ -150,7 +138,12 @@ check_claim = LlmAgent(
         "To check a claim against several papers, call this once per paper in the same turn."
     ),
     model=adk_model(),
-    instruction=VERIFY_INSTRUCTION,
+    instruction=(
+        "Use verify_claim with the claim and the cited paper's PDF path.\n"
+        "Report the verdict (supports / refutes / insufficient), then the quote it relies on,\n"
+        "then the one-sentence reason. Never judge the claim yourself.\n"
+        "If status is error, say so briefly."
+    ),
     tools=[verify_claim],
     mode="single_turn",
     input_schema=ClaimAndSource,
@@ -166,11 +159,10 @@ root_agent = LlmAgent(
         "  -> call load_memory with the claim or the paper's title. Answer from what it returns:\n"
         "  the analysis id, the cited paper, the verdict and the quote. If it returns nothing,\n"
         "  say no earlier analysis matched, and offer to check the claim now.\n"
-        "- a claim to check against TWO OR MORE papers -> call check_claim once for each paper,\n"
-        "  all in the same turn. Then answer with one line per paper: the paper, the verdict\n"
-        "  and the quote. End with one sentence on whether the papers agree.\n"
-        "- whether ONE paper supports / backs / contradicts a claim, or any other request to\n"
-        "  verify, check or fact-check a claim -> transfer_to_agent(verify_agent)\n"
+        "- whether a paper supports / backs / contradicts a claim, or any other request to\n"
+        "  verify, check or fact-check a claim -> call check_claim once for each cited paper,\n"
+        "  all in the same turn. Answer with one line per paper: the paper, the verdict and\n"
+        "  the quote. With two or more papers, end with one sentence on whether they agree.\n"
         "- list the claims or the citations found in a paper -> transfer_to_agent(paper_agent)\n"
         "- download / fetch a paper by DOI, arXiv ID, PMID or URL -> transfer_to_agent(paper_agent)\n"
         "- questions about the indexed documents / knowledge base -> transfer_to_agent(rag_agent)\n"
@@ -178,5 +170,5 @@ root_agent = LlmAgent(
     ),
     # Searches past analyses (app/memory.py) when the runner has a memory service.
     tools=[load_memory],
-    sub_agents=[rag_agent, paper_agent, verify_agent, check_claim],
+    sub_agents=[rag_agent, paper_agent, check_claim],
 )
