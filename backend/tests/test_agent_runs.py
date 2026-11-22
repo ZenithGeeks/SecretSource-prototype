@@ -4,6 +4,7 @@ browser, the browser's result goes on with the run, and a session belongs to its
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_response import LlmResponse
+from google.adk.sessions import DatabaseSessionService, InMemorySessionService
 from google.adk.tools import load_memory
 from google.genai import types
 
@@ -42,6 +44,8 @@ class ScriptedModel(BaseLlm):
 def api(monkeypatch):
     model = ScriptedModel(replies=[], seen=[])
     monkeypatch.setattr(screen.screen_agent, "model", model)
+    monkeypatch.setattr(agent_runs, "_sessions", InMemorySessionService())
+    monkeypatch.setattr(agent_runs, "_last_active", {})
     agent_runs.get_runner.cache_clear()
     app = FastAPI()
     app.include_router(agent_runs.router)
@@ -165,7 +169,7 @@ def test_browser_tool_loop_stops_at_cap_and_resets_on_next_turn(api, monkeypatch
 
     # Another /results post on the same turn stops before calling the model again.
     stored = asyncio.run(
-        agent_runs._sessions.get_session(
+        agent_runs.sessions().get_session(
             app_name=agent_runs.APP_NAME, user_id="user-1", session_id=session
         )
     )
@@ -542,7 +546,7 @@ def test_role_switch_without_prior_user_text_and_idless_responses(api, monkeypat
 
     # Role switch from an existing session whose history has no plain-text user request.
     created = asyncio.run(
-        agent_runs._sessions.create_session(
+        agent_runs.sessions().create_session(
             app_name=agent_runs.APP_NAME, user_id="user-1", state={"user": "user-1", "role": "researcher"}
         )
     )
@@ -577,3 +581,91 @@ def test_teacher_agent_answers_with_the_scripted_model(api, monkeypatch):
     response = client.post("/agent/runs", json={"message": "Show my classes", "role": "teacher"})
     assert response.status_code == 200
     assert {"type": "say", "text": "Here are your classes."} in events(response)
+
+
+def test_sessions_uses_database_service_when_url_is_set_and_memory_otherwise(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(agent_runs, "_sessions", None)
+    monkeypatch.setenv("SESSION_DB_URL", "postgresql://user:secret@127.0.0.1:1/postgres")
+    assert isinstance(agent_runs.sessions(), DatabaseSessionService)
+    # Sweeping and touching in-memory cleanup are safe no-ops when backed by a database.
+    asyncio.run(agent_runs._forget_old_sessions())
+    agent_runs._touch("s1", "user-1")
+
+    monkeypatch.setattr(agent_runs, "_sessions", None)
+    monkeypatch.delenv("SESSION_DB_URL", raising=False)
+    monkeypatch.delenv("DIRECT_URL", raising=False)
+    assert isinstance(agent_runs.sessions(), InMemorySessionService)
+
+
+def test_a_paused_session_survives_a_gateway_restart_with_a_shared_store(api):
+    client, model, _ = api
+    model.replies = [{"name": "read_screen"}, "Screen read."]
+
+    first = events(client.post("/agent/runs", json={"message": "What is here?"}))
+    session = first[0]["id"]
+    [tool] = [e for e in first if e["type"] == "tool"]
+
+    # Simulate a gateway restart while keeping the shared session store intact.
+    agent_runs._last_active.clear()
+    agent_runs.get_runner.cache_clear()
+
+    resumed = client.post(
+        f"/agent/runs/{session}/results",
+        json={"id": tool["id"], "name": "read_screen", "result": {"screen": "library"}},
+    )
+    assert resumed.status_code == 200
+    assert {"type": "say", "text": "Screen read."} in events(resumed)
+
+
+def test_active_sessions_stay_alive_past_creation_and_idle_sessions_expire(api, monkeypatch):
+    from google.adk.platform import time as platform_time
+
+    client, model, _ = api
+    clock = [time.time()]
+
+    def now():
+        return clock[0]
+
+    monkeypatch.setattr(time, "time", now)
+    platform_time.set_time_provider(now)
+    try:
+        model.replies = [{"name": "read_screen"}, "Screen read.", "Still active."]
+
+        first = events(client.post("/agent/runs", json={"message": "First"}))
+        session = first[0]["id"]
+        [tool] = [e for e in first if e["type"] == "tool"]
+
+        clock[0] += 2400  # 40 minutes after creation
+        resumed = client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool["id"], "name": "read_screen", "result": {"screen": "library"}},
+        )
+        assert resumed.status_code == 200
+        assert {"type": "say", "text": "Screen read."} in events(resumed)
+
+        clock[0] += 2400  # 80 minutes after creation, 40 minutes after last activity
+        still_open = client.post("/agent/runs", json={"message": "Still here", "session_id": session})
+        assert still_open.status_code == 200
+        assert {"type": "say", "text": "Still active."} in events(still_open)
+
+        clock[0] += 3700  # idle over 60 minutes -> expires on load
+        expired_res = client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool["id"], "name": "read_screen", "result": {}},
+        )
+        assert expired_res.status_code == 404
+
+        # Second session is swept by _forget_old_sessions when a new conversation starts.
+        model.replies = ["Session two.", "Fresh run."]
+        session_two = events(client.post("/agent/runs", json={"message": "Two"}))[0]["id"]
+        clock[0] += 3700
+        events(client.post("/agent/runs", json={"message": "Three"}))
+        assert session_two not in agent_runs._last_active
+        assert (
+            client.post("/agent/runs", json={"message": "Gone", "session_id": session_two}).status_code
+            == 404
+        )
+    finally:
+        platform_time.reset_time_provider()

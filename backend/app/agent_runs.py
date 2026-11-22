@@ -13,8 +13,8 @@ Other events: `{"type": "session", "id"}` first, `{"type": "step", "name"}` for 
 (`state` is "working", then "done" or "failed"), `{"type": "say", "text"}` for the agent's words,
 and `{"type": "done"}` last.
 
-Sessions live in this process's memory for an hour: one gateway instance serves the app today
-(memory gateway-multi-instance-state). A second instance would need them in the database.
+Sessions use app/sessions.py (Postgres in the `adk` schema when SESSION_DB_URL is set, in-memory
+otherwise) and expire after an hour of inactivity.
 """
 
 import functools
@@ -35,6 +35,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from app.auth import current_user
+from app.sessions import session_service
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -52,9 +53,41 @@ MAX_TOOL_RESULT_BYTES = 128 * 1024
 # The specialists the screen agent hands work to (app/agents/screen.py), reported to the browser.
 DELEGATES = frozenset({"data_agent"})
 
-_sessions = InMemorySessionService()
-_started: dict[str, tuple[float, str]] = {}  # session id -> (when it began, user id)
+_sessions = None  # built on first use: a database service opens its engine when built
+# In-memory sweep index (session id -> (last_active_epoch, user_id)) so idle in-memory
+# sessions do not accumulate. Database sessions check session.last_update_time on load.
+_last_active: dict[str, tuple[float, str]] = {}
+_MISSING_SESSION = "no such conversation, or it expired after an hour of inactivity"
 _SCREEN_PREFIX = re.compile(r"^\[On the [^\]]+ screen\]\s*")
+
+
+def sessions():
+    """The session service screen-agent runs use, from app/sessions.py."""
+    global _sessions
+    if _sessions is None:
+        _sessions = session_service()
+    return _sessions
+
+
+def _touch(session_id: str, owner: str, at: float | None = None) -> None:
+    """Record activity for in-memory session cleanup."""
+    if isinstance(sessions(), InMemorySessionService):
+        _last_active[session_id] = (time.time() if at is None else at, owner)
+
+
+async def _load_session(owner: str, session_id: str):
+    """Return the owner's active session, or None if missing or idle past SESSION_SECONDS."""
+    svc = sessions()
+    session = await svc.get_session(app_name=APP_NAME, user_id=owner, session_id=session_id)
+    if session is None:
+        return None
+    now = time.time()
+    if session.last_update_time and now - session.last_update_time > SESSION_SECONDS:
+        _last_active.pop(session_id, None)
+        await svc.delete_session(app_name=APP_NAME, user_id=owner, session_id=session_id)
+        return None
+    _touch(session_id, owner, now)
+    return session
 
 
 # The web app's role ids with a screen agent (agents/screen.py ROLE_AGENTS). The Teacher has none.
@@ -107,10 +140,10 @@ def _pending_browser_calls(session) -> dict[str, str]:
 
 
 async def _new_session(owner: str, role: Role):
-    session = await _sessions.create_session(
+    session = await sessions().create_session(
         app_name=APP_NAME, user_id=owner, state={"user": owner, "role": role}
     )
-    _started[session.id] = (time.monotonic(), owner)
+    _touch(session.id, owner, session.last_update_time or time.time())
     return session
 
 
@@ -121,9 +154,9 @@ async def start_run(body: RunStart, user: str | None = Depends(current_user)):
     owner = user or ""  # "" is the signed-out space, as in app/sessions.py
     prompt = body.message
     if body.session_id:
-        session = await _sessions.get_session(app_name=APP_NAME, user_id=owner, session_id=body.session_id)
+        session = await _load_session(owner, body.session_id)
         if session is None:
-            raise HTTPException(404, "no such conversation, or it ended an hour after it began")
+            raise HTTPException(404, _MISSING_SESSION)
         prior_role = session.state.get("role")
         if prior_role and prior_role != body.role:
             # Isolate the target role from prior tool calls and verdicts (notably labeler_agent).
@@ -171,9 +204,9 @@ async def send_result(session_id: str, body: ToolResult, user: str | None = Depe
     from app.agents.screen import ROLE_BROWSER_TOOLS  # see get_runner for why not at the top
 
     owner = user or ""
-    session = await _sessions.get_session(app_name=APP_NAME, user_id=owner, session_id=session_id)
+    session = await _load_session(owner, session_id)
     if session is None:
-        raise HTTPException(404, "no such conversation, or it ended an hour after it began")
+        raise HTTPException(404, _MISSING_SESSION)
     session_role = session.state.get("role")
     if session_role and body.role != session_role:
         raise HTTPException(422, f"session belongs to role {session_role!r}, not {body.role!r}")
@@ -296,19 +329,21 @@ def get_runner(role: Role = "researcher") -> Runner:
     return Runner(
         agent=ROLE_AGENTS[role],
         app_name=APP_NAME,
-        session_service=_sessions,
+        session_service=sessions(),
         memory_service=AssistantMemory(),  # load_memory reads the owner's facts, then their analyses
     )
 
 
 async def _forget_old_sessions() -> None:
-    """Delete sessions older than SESSION_SECONDS. Runs at each new conversation, so an old
-    session lingers until the next one starts."""
-    cutoff = time.monotonic() - SESSION_SECONDS
-    for session_id, (started, user_id) in list(_started.items()):
-        if started < cutoff:
-            del _started[session_id]
-            await _sessions.delete_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    """Delete in-memory sessions idle past SESSION_SECONDS so memory stays bounded."""
+    svc = sessions()
+    if not isinstance(svc, InMemorySessionService):
+        return
+    cutoff = time.time() - SESSION_SECONDS
+    for session_id, (last_active, user_id) in list(_last_active.items()):
+        if last_active < cutoff:
+            del _last_active[session_id]
+            await svc.delete_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
 
 
 def _sse(event: dict) -> str:
