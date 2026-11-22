@@ -294,6 +294,9 @@ def load_owned(owner: str | None) -> list[dict]:
     return _sqlite_analyses("json_extract(data, '$.owner') = ?", (owner,))
 
 
+_search_missing_warned = False
+
+
 def search_owned(owner: str | None, words: list[str], limit: int) -> list[dict]:
     """This owner's analyses that mention any of `words`, oldest first.
 
@@ -302,13 +305,28 @@ def search_owned(owner: str | None, words: list[str], limit: int) -> list[dict]:
     SQLite, for local runs and tests, returns every owned analysis and leaves the matching
     to the caller.
     """
+    global _search_missing_warned
     if not _use_supabase():
         return load_owned(owner)
+    from postgrest.exceptions import APIError
+
     query = _supabase().rpc(
         "search_owned_analyses",
         {"owner_id": owner, "query": " or ".join(words), "max_rows": limit},
     )
-    analyses = [_analysis_from_row(row) for row in _execute_with_retry(query).data or []]
+    try:
+        rows = _execute_with_retry(query).data or []
+    except APIError as error:
+        # PGRST202: the function is not there yet, so this code deployed before its migration.
+        if error.code != "PGRST202":
+            raise
+        if not _search_missing_warned:
+            logger.warning(
+                "search_owned_analyses is missing; apply its migration. Reading every owned analysis."
+            )
+            _search_missing_warned = True
+        return load_owned(owner)
+    analyses = [_analysis_from_row(row) for row in rows]
     return sorted(analyses, key=lambda analysis: analysis.get("started") or "")
 
 
