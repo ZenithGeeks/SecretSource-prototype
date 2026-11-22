@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.data_tools import DATA_TOOLS, find_support, labeling_progress
 from app.agents.role_tools import AUTHOR_TOOLS, LABELER_TOOLS
+from app.config import ADK_ROUTER_MODEL
 from app.llm import adk_model
 from app.teacher.agent_tools import (
     teacher_assignments,
@@ -236,7 +237,7 @@ read_draft_tool = LongRunningFunctionTool(func=read_draft)
 
 screen_agent = LlmAgent(
     name="screen_agent",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=INSTRUCTION,
     tools=[*SCREEN_TOOLS, switch_role_tool],
     sub_agents=[data_agent],
@@ -246,7 +247,7 @@ screen_agent = LlmAgent(
 # the agent must not write or hint at the labels the checker is scored against.
 labeler_agent = LlmAgent(
     name="labeler_agent",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=WORK + LABELER_ROLE,
     tools=[
         read_screen_tool,
@@ -262,7 +263,7 @@ labeler_agent = LlmAgent(
 
 author_agent = LlmAgent(
     name="author_agent",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=WORK + AUTHOR_ROLE,
     tools=[
         read_screen_tool,
@@ -278,7 +279,8 @@ author_agent = LlmAgent(
 
 # The web app's role ids (frontend/src/lib/roles.ts; the Author role is "writer" there).
 teacher_agent = LlmAgent(
-    name="teacher_agent", model=adk_model(),
+    name="teacher_agent",
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=(
         "Help the signed-in teacher understand their Classroom courses, assignments, "
         "submissions and essay reviews. "
