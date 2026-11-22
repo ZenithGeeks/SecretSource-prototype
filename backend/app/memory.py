@@ -1,8 +1,9 @@
 """Memory over past analyses, for the chat agents' `load_memory` tool (SCRUM-172).
 
 The gateway already saves every analysis (app/store.py, Supabase or SQLite). So this memory
-service writes nothing: `search_memory` reads the saved verdicts and returns the ones whose
-claim, cited paper or quote share the most words with the question. The coordinator calls
+service writes nothing: `search_memory` asks the store for the user's analyses that match the
+question (Postgres full-text search on Supabase), then returns the verdicts whose claim, cited
+paper or quote share the most words with it. The coordinator calls
 `load_memory` only when a question is about earlier work, such as "did we already check this
 citation?".
 
@@ -29,9 +30,12 @@ from google.genai import types
 
 from app import store
 from app.sessions import SIGNED_OUT
-from app.text import search_terms
+from app.text import WORD, search_terms
 
 RESULTS = 5  # findings returned per search: enough to answer, few enough for the model to read
+# Analyses the store ranks first and hands back for the findings to be scored. Each holds up to
+# 20 claims, so the best RESULTS findings are almost always among the top few analyses.
+CANDIDATES = 20
 # Words that say nothing about which claim or paper is meant, on top of English stopwords.
 ABOUT_THE_TASK = search_terms("claim paper check find found earlier already analysis source cited")
 
@@ -67,6 +71,15 @@ def _findings(analysis: dict):
                 f"{unchecked.get('source', '')} ({unchecked.get('reason', '')})."
             )
             yield shown, f"{said} {unchecked.get('source', '')} {paper}"
+
+
+def _matching_analyses(query: str, owner: str | None) -> list[dict]:
+    """The owner's analyses the store finds for the query, oldest first. The words go to the
+    store unstemmed, because Postgres stems them with its own dictionary."""
+    words = [word for word in dict.fromkeys(WORD.findall(query.lower())) if _words(word)]
+    if not words:
+        return []
+    return store.search_owned(owner, words, CANDIDATES)
 
 
 def owner_of(user_id: str) -> str | None:
@@ -112,8 +125,8 @@ class AnalysisMemory(BaseMemoryService):
     async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
         if self.as_user is not None:
             user_id = self.as_user
-        # Only this user's rows are read, not the whole table (#314).
-        analyses = await asyncio.to_thread(store.load_owned, owner_of(user_id))  # oldest first
+        # Only this user's matching rows are read, not the whole table (#314) or history (#1027).
+        analyses = await asyncio.to_thread(_matching_analyses, query, owner_of(user_id))
         return SearchMemoryResponse(memories=search(query, analyses, user_id))
 
 
@@ -163,6 +176,6 @@ class AssistantMemory(BaseMemoryService):
         facts = await asyncio.to_thread(store.load_facts, owner) if owner else []
         found = search_facts(query, facts)
         if len(found) < RESULTS:
-            analyses = await asyncio.to_thread(store.load_owned, owner)  # oldest first
+            analyses = await asyncio.to_thread(_matching_analyses, query, owner)
             found += search(query, analyses, user_id, limit=RESULTS - len(found))
         return SearchMemoryResponse(memories=found)
