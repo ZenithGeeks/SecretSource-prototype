@@ -34,6 +34,10 @@ in `backend/app/agents/screen.py`; keep this page and those docstrings saying th
 | `saved_labels` | server, MCP only | What the person saved for one claim: a level (1-4), rationale and confidence per cited paper, and each passage they marked relevant or rejected. Saved claims only; marks the claim AI-reviewed | `analysis_id`, `claim_number` (from 1) | `{claim, labels: [{paper, level, rationale, confidence}], passages: [{paper, page, status, text}]}` |
 | `list_drafts` | server, `author_agent` | The person's drafts, most recently changed first, at most 30 | none | `{drafts: [{id, title, last_checked, checking_now}]}` |
 | `draft_issues` | server, `author_agent` | A draft's open citations from its last check (refuted, not backed, missing key) and its .bib and cite warnings, at most 20 each | `draft_id` | `{checked, citations: [{key, file, line, sentence, verdict, why}], warnings}` |
+| `teacher_classes` | server, `teacher_agent` | Lists the signed-in teacher's imported Classroom courses | none | `{courses: [{id, name}]}` |
+| `teacher_assignments` | server, `teacher_agent` | Lists imported coursework assignments for one course | `course_id` | `{assignments: [{id, title}]}` |
+| `teacher_submissions` | server, `teacher_agent` | Lists student submissions and states for one assignment | `course_id`, `assignment_id` | `{submissions: [{student_id, student_name, state}]}` |
+| `teacher_essay_review` | server, `teacher_agent` | Reads one student's saved essay review and analysis findings | `course_id`, `assignment_id`, `student_id` | Essay review summary and citation findings |
 
 The agent cannot save labels, start a draft check, delete or upload anything. There is no tool
 for it, and the instructions tell it to point at the button and let the person press it. It can
@@ -61,11 +65,12 @@ conversation, so after `switch_role` the next role's agent reads what was said b
 | `researcher` | `screen_agent` | `home`, `analyses`, `library`, `graph` | `list_papers`, `fill_field`, and `data_agent` with the server tools above |
 | `labeler` | `labeler_agent` | `papers`, `workspace` | `labeling_papers`, `labeling_progress`, `claim_passages`, `find_support` |
 | `writer` (Author) | `author_agent` | `home`, `library`, `editor` (once a draft is selected) | `list_drafts`, `draft_issues`, `find_support`, `fill_field`, `read_draft` |
+| `teacher` | `teacher_agent` | none (read-only Classroom assistant) | `teacher_classes`, `teacher_assignments`, `teacher_submissions`, `teacher_essay_review` |
 
-Every role also has `read_screen`, `open_screen`, `point_at` and `switch_role`. The Labeler's agent
+Researcher, Labeler, and Author also have `read_screen`, `open_screen`, `point_at`, and `switch_role`. The Labeler's agent
 has no `fill_field` and no tool that returns a verdict (`get_claim`, `get_analysis`, `check_text`,
 `ask_library`): the person's labels are the answer key the checker is scored against, so the
-agent must not write them or hint at them. The Teacher role has no agent yet.
+agent must not write them or hint at them. The Teacher role (`teacher_agent`) is read-only over Classroom data and has no browser tools or `switch_role`.
 
 ## Commands in the Ask input
 
@@ -100,8 +105,9 @@ so React sees the change.
 
 ## How a turn runs
 
-1. The browser POSTs the person's message to `/api/agent/runs` with the screen they are on and
-   its `role`, plus `session_id` to go on in a conversation.
+1. The browser POSTs the person's message to `/api/agent/runs` with the screen they are on,
+   its `role`, optional `analysis_id` or `draft_id` when a paper or draft is open, and
+   `session_id` to go on in a conversation.
 2. The stream sends `{"type": "session", "id"}`, then the agent's steps: `{"type": "step", "name"}`
    for a server tool, `{"type": "agent", "name", "state", "task"}` when it hands work to a specialist
    (`state` is `working`, then `done` or `failed`; `task` comes with `working`), `{"type": "say", "text"}`

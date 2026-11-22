@@ -13,6 +13,10 @@ export type ScreenActions = {
   /** Which role's screen agent answers (backend/app/agent_runs.py); the Researcher's when left out. */
   role?: 'researcher' | 'labeler' | 'writer' | 'teacher'
   screen: string
+  /** The analysis open on screen (Researcher analyses view or Labeler workspace). */
+  analysisId?: string
+  /** The draft selected or open in the Author role. */
+  draftId?: string
   screens: string[]
   openScreen: (screen: string) => void
   /** Missing in a role with no papers (the Author's), so open_paper fails instead of switching roles. */

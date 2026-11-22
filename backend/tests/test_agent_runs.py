@@ -669,3 +669,43 @@ def test_active_sessions_stay_alive_past_creation_and_idle_sessions_expire(api, 
         )
     finally:
         platform_time.reset_time_provider()
+
+
+def test_run_start_passes_open_analysis_and_draft_ids_to_the_model(api, monkeypatch):
+    client, model, _ = api
+    author_model = ScriptedModel(replies=["Draft checked."], seen=[])
+    monkeypatch.setattr(screen.author_agent, "model", author_model)
+    model.replies = ["Claim 2 checked.", "Summary ready."]
+
+    first = client.post(
+        "/agent/runs",
+        json={"message": "Check claim 2", "screen": "analyses", "analysis_id": "a1"},
+    )
+    assert first.status_code == 200
+    assert "[On the analyses screen, open analysis_id=a1] Check claim 2" in str(model.seen[0].contents)
+
+    second = client.post(
+        "/agent/runs",
+        json={"message": "What needs work?", "screen": "editor", "role": "writer", "draft_id": "d1"},
+    )
+    assert second.status_code == 200
+    assert "[On the editor screen, open draft_id=d1] What needs work?" in str(
+        author_model.seen[0].contents
+    )
+
+    third = client.post("/agent/runs", json={"message": "Summary?", "analysis_id": "a1"})
+    assert third.status_code == 200
+    assert "[open analysis_id=a1] Summary?" in str(model.seen[1].contents)
+
+
+def test_teacher_agent_is_read_only_and_documented_in_role_agents():
+    from google.adk.tools import LongRunningFunctionTool
+
+    assert screen.ROLE_AGENTS["teacher"] is screen.teacher_agent
+    assert not any(isinstance(tool, LongRunningFunctionTool) for tool in screen.teacher_agent.tools)
+    assert "analysis_id" in screen.RESEARCHER_ROLE
+    text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
+    assert "| `teacher` |" in text
+    assert "The Teacher role has no agent yet." not in text
+    for name in ("teacher_classes", "teacher_assignments", "teacher_submissions", "teacher_essay_review"):
+        assert f"`{name}`" in text

@@ -53,6 +53,7 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
     actions: {
       role: 'labeler',
       screen: analysis ? 'workspace' : 'papers',
+      analysisId: analysis ?? undefined,
       screens: analysis ? ['papers', 'workspace'] : ['papers'],
       openScreen: (next) => {
         if (next === 'papers')

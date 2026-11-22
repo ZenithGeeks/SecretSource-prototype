@@ -172,10 +172,12 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     try {
       // A new message starts a new session, except one carried across a role switch: that role's
       // agent reads the whole conversation (backend/app/agent_runs.py).
-      const { role, screen } = latest.current
+      const { role, screen, analysisId, draftId } = latest.current
       const sessionId = continued.current ? session.current : null
       const payload: Record<string, unknown> = { message, screen }
       if (role) payload.role = role
+      if (analysisId) payload.analysis_id = analysisId
+      if (draftId) payload.draft_id = draftId
       if (sessionId) payload.session_id = sessionId
       let call: ToolCall | null
       try {
