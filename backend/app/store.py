@@ -294,6 +294,24 @@ def load_owned(owner: str | None) -> list[dict]:
     return _sqlite_analyses("json_extract(data, '$.owner') = ?", (owner,))
 
 
+def search_owned(owner: str | None, words: list[str], limit: int) -> list[dict]:
+    """This owner's analyses that mention any of `words`, oldest first.
+
+    On Supabase, Postgres ranks them with full-text search and returns the best `limit`
+    (supabase/migrations/20261122120000_analyses_search.sql), so a long history is not read.
+    SQLite, for local runs and tests, returns every owned analysis and leaves the matching
+    to the caller.
+    """
+    if not _use_supabase():
+        return load_owned(owner)
+    query = _supabase().rpc(
+        "search_owned_analyses",
+        {"owner_id": owner, "query": " or ".join(words), "max_rows": limit},
+    )
+    analyses = [_analysis_from_row(row) for row in _execute_with_retry(query).data or []]
+    return sorted(analyses, key=lambda analysis: analysis.get("started") or "")
+
+
 def load_running() -> list[dict]:
     """Analyses still marked running, oldest first. A restart only needs these to recover jobs."""
     if _use_supabase():
