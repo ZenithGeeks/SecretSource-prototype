@@ -6,11 +6,14 @@ against the shared index.
 """
 
 import re
+import threading
 
 from app.clients.retrieval import colbert_add, colbert_search
 from app.pipeline.sources import tool_error
 
 _rag = None  # lazy: needs dspy, a running LM and the ColBERT service
+# The agents call answer_from_docs from worker threads, so two first calls could build it twice.
+_rag_lock = threading.Lock()
 
 # The same cut and the same weak-match line as services/colbert/server.py. /api/search returns
 # whole passages and no flag; search_passages is what the agent reads, so it matches the tool
@@ -88,8 +91,9 @@ def answer_from_docs(question: str, tool_context=None) -> dict:
         papers = caller_papers(tool_context)
         if not papers:
             return {"status": "ok", "answer": "", "sources": []}
-        if _rag is None:
-            _rag = _build_rag()
+        with _rag_lock:
+            if _rag is None:
+                _rag = _build_rag()
         prediction = _rag(question=question, papers=papers)
         return {"status": "ok", "answer": prediction.answer, "sources": list(prediction.context)}
     except Exception as error:

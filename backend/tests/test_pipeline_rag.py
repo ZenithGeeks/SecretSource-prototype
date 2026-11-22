@@ -4,6 +4,9 @@ ColBERT and the language model are fakes (a DummyLM for the answer). test_retrie
 covers whose papers a caller may read; here papers_of is a fixed set.
 """
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -199,6 +202,30 @@ def test_a_failing_model_is_reported_as_a_tool_error(monkeypatch, colbert):
     found = rag.answer_from_docs("What is late interaction?", tool_context=ADA)
 
     assert (found["status"], found["message"]) == ("error", "no model")
+
+
+def test_first_calls_from_several_threads_build_the_rag_once(monkeypatch, colbert):
+    """SCRUM-553: ADK runs the tool in worker threads, so first calls can arrive together."""
+    monkeypatch.setattr(rag, "_rag", None)
+    builds = []
+    started = threading.Barrier(4)
+
+    def slow_build():
+        builds.append(1)
+        time.sleep(0.2)
+        return lambda question, papers: SimpleNamespace(answer="Late interaction.", context=[])
+
+    monkeypatch.setattr(rag, "_build_rag", slow_build)
+
+    def ask(_):
+        started.wait()
+        return rag.answer_from_docs("What is late interaction?", tool_context=ADA)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        answers = list(pool.map(ask, range(4)))
+
+    assert len(builds) == 1
+    assert {answer["answer"] for answer in answers} == {"Late interaction."}
 
 
 def test_add_paper_returns_what_the_index_answers(monkeypatch):
