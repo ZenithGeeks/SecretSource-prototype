@@ -299,3 +299,7 @@ ROLE_AGENTS = {
 # SCREEN_TOOL_NAMES is the MCP server's; switch_role and read_draft are the web app's only.
 SCREEN_TOOL_NAMES = frozenset({"read_screen", "open_screen", "open_paper", "point_at", "fill_field"})
 BROWSER_TOOL_NAMES = SCREEN_TOOL_NAMES | {"switch_role", "read_draft"}
+ROLE_BROWSER_TOOLS: dict[str, frozenset[str]] = {
+    role: frozenset(tool.name for tool in agent.tools if isinstance(tool, LongRunningFunctionTool))
+    for role, agent in ROLE_AGENTS.items()
+}

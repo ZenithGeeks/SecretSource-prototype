@@ -209,6 +209,16 @@ def test_each_role_has_its_own_agent_and_each_can_ask_to_switch_role():
     assert {"teacher_classes", "teacher_assignments", "teacher_submissions", "teacher_essay_review"} <= set(
         tool_names(screen.teacher_agent)
     )
+    assert screen.ROLE_BROWSER_TOOLS == {
+        "researcher": frozenset(
+            {"read_screen", "open_screen", "open_paper", "point_at", "fill_field", "switch_role"}
+        ),
+        "labeler": frozenset({"read_screen", "open_screen", "open_paper", "point_at", "switch_role"}),
+        "writer": frozenset(
+            {"read_screen", "open_screen", "point_at", "fill_field", "switch_role", "read_draft"}
+        ),
+        "teacher": frozenset(),
+    }
     # The MCP server lists SCREEN_TOOLS and takes SCREEN_TOOL_NAMES: a coding agent has no role.
     assert "switch_role" not in screen.SCREEN_TOOL_NAMES
     assert "switch_role" in screen.BROWSER_TOOL_NAMES
@@ -308,7 +318,7 @@ def test_the_labeler_agent_cannot_write_or_see_a_verdict():
     assert screen.labeler_agent.sub_agents == []
 
 
-def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api, monkeypatch):
+def test_after_a_switch_the_new_roles_agent_starts_a_fresh_session_with_the_request(api, monkeypatch):
     client, model, _ = api
     labeler_model = ScriptedModel(replies=["Claim 4 is next."], seen=[])
     monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
@@ -317,7 +327,9 @@ def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api
         "Switched to the Labeler role.",
     ]
 
-    first = events(client.post("/agent/runs", json={"message": "Which claim do I label next?"}))
+    first = events(
+        client.post("/agent/runs", json={"message": "Which claim do I label next?", "screen": "library"})
+    )
     session = first[0]["id"]
     [tool] = [e for e in first if e["type"] == "tool"]
     assert tool["name"] == "switch_role"
@@ -327,10 +339,156 @@ def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api
 
     body = {"message": "Go on", "role": "labeler", "session_id": session}
     third = events(client.post("/agent/runs", json=body))
-    assert third[0] == {"type": "session", "id": session}
+    assert third[0]["type"] == "session"
+    assert third[0]["id"] != session
     assert {"type": "say", "text": "Claim 4 is next."} in third
-    # The Labeler's agent read the conversation the Researcher's agent started.
-    assert "Which claim do I label next?" in str(labeler_model.seen[0].contents)
+    seen_contents = str(labeler_model.seen[0].contents)
+    assert "Which claim do I label next?" in seen_contents
+    assert "Switched to the Labeler role." not in seen_contents
+    assert "switch_role" not in seen_contents
+
+
+def test_switching_to_labeler_drops_prior_researcher_verdicts_and_tool_calls(api, monkeypatch):
+    client, model, _ = api
+    data_model = ScriptedModel(replies=["SECRET_VERDICT: Claim 2 is refuted."], seen=[])
+    labeler_model = ScriptedModel(replies=["Claim 1 is ready to label."], seen=[])
+    monkeypatch.setattr(screen.data_agent, "model", data_model)
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+    model.replies = [
+        {"name": "data_agent", "args": {"request": "What is Claim 2's verdict?"}},
+        "Claim 2 is refuted.",
+        {"name": "switch_role", "args": {"role": "labeler", "reason": "Labeling lives there"}},
+        "Switched to Labeler.",
+    ]
+
+    first = events(client.post("/agent/runs", json={"message": "Check claim 2", "screen": "library"}))
+    session = first[0]["id"]
+    assert {"type": "say", "text": "Claim 2 is refuted."} in first
+
+    second = events(
+        client.post(
+            "/agent/runs",
+            json={
+                "message": "Switch me to labeler and see what is next",
+                "role": "researcher",
+                "session_id": session,
+            },
+        )
+    )
+    [tool] = [e for e in second if e["type"] == "tool"]
+    events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={
+                "id": tool["id"],
+                "name": "switch_role",
+                "result": {"status": "switched"},
+                "role": "researcher",
+            },
+        )
+    )
+
+    resumed = events(
+        client.post(
+            "/agent/runs",
+            json={
+                "message": "Go on with my last request in this role.",
+                "role": "labeler",
+                "session_id": session,
+            },
+        )
+    )
+    assert resumed[0]["type"] == "session"
+    assert resumed[0]["id"] != session
+    assert {"type": "say", "text": "Claim 1 is ready to label."} in resumed
+    seen_contents = str(labeler_model.seen[0].contents)
+    assert "Switch me to labeler and see what is next" in seen_contents
+    assert "SECRET_VERDICT" not in seen_contents
+    assert "Claim 2 is refuted" not in seen_contents
+    assert "data_agent" not in seen_contents
+
+
+def test_results_rejects_disallowed_role_tools_mismatched_roles_and_pending_calls(api, monkeypatch):
+    client, _, _ = api
+    labeler_model = ScriptedModel(replies=[{"name": "read_screen"}, "Screen read."], seen=[])
+    teacher_model = ScriptedModel(replies=["Here are your classes."], seen=[])
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+    monkeypatch.setattr(screen.teacher_agent, "model", teacher_model)
+
+    first = events(client.post("/agent/runs", json={"message": "What is on screen?", "role": "labeler"}))
+    session = first[0]["id"]
+    [tool] = [e for e in first if e["type"] == "tool"]
+
+    def post_result(sid: str, call_id: str, name: str, role: str, result: dict | None = None):
+        return client.post(
+            f"/agent/runs/{sid}/results",
+            json={"id": call_id, "name": name, "result": result or {}, "role": role},
+        )
+
+    assert post_result(session, tool["id"], "fill_field", "labeler").status_code == 422
+    assert post_result(session, tool["id"], "read_draft", "labeler").status_code == 422
+    assert post_result(session, tool["id"], "read_screen", "researcher").status_code == 422
+    assert post_result(session, "call-999", "read_screen", "labeler").status_code == 422
+
+    ok = post_result(session, tool["id"], "read_screen", "labeler", {"screen": "papers"})
+    assert ok.status_code == 200
+    assert {"type": "say", "text": "Screen read."} in events(ok)
+
+    # Already answered pending call cannot be replayed.
+    assert post_result(session, tool["id"], "read_screen", "labeler").status_code == 422
+
+    teacher_first = events(client.post("/agent/runs", json={"message": "Show classes", "role": "teacher"}))
+    teacher_session = teacher_first[0]["id"]
+    assert post_result(teacher_session, "call-1", "read_screen", "teacher").status_code == 422
+
+
+def test_role_switch_without_prior_user_text_and_idless_responses(api, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    client, _, _ = api
+    labeler_model = ScriptedModel(replies=["Ready."], seen=[])
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+
+    empty_session = SimpleNamespace(
+        events=[
+            SimpleNamespace(author="model", content=SimpleNamespace(parts=[types.Part(text="hi")])),
+            SimpleNamespace(
+                author="user",
+                content=SimpleNamespace(parts=[types.Part(text="[On the home screen]   ")]),
+            ),
+        ]
+    )
+    assert agent_runs._last_user_request(empty_session) is None
+
+    # Covers response without id in _pending_browser_calls.
+    pending = agent_runs._pending_browser_calls(
+        SimpleNamespace(
+            events=[
+                SimpleNamespace(
+                    long_running_tool_ids=["c1"],
+                    get_function_calls=lambda: [SimpleNamespace(id="c1", name="read_screen")],
+                    get_function_responses=lambda: [SimpleNamespace(id=None)],
+                )
+            ]
+        )
+    )
+    assert pending == {"c1": "read_screen"}
+
+    # Role switch from an existing session whose history has no plain-text user request.
+    created = asyncio.run(
+        agent_runs._sessions.create_session(
+            app_name=agent_runs.APP_NAME, user_id="user-1", state={"user": "user-1", "role": "researcher"}
+        )
+    )
+    resumed = events(
+        client.post(
+            "/agent/runs",
+            json={"message": "Go on", "role": "labeler", "session_id": created.id},
+        )
+    )
+    assert resumed[0]["id"] != created.id
+    assert {"type": "say", "text": "Ready."} in resumed
 
 
 def test_going_on_in_someone_elses_conversation_is_a_404(api):
