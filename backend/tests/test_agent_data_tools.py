@@ -206,3 +206,17 @@ def test_submit_analysis_starts_a_run_for_the_caller(monkeypatch):
 
     assert run(data_tools.submit_analysis, "2112.01488") == {"id": "n1", "status": "running"}
     assert started == [("2112.01488", True, "user-1")]
+
+
+def test_submit_analysis_returns_error_when_queue_is_unavailable(monkeypatch):
+    from fastapi import HTTPException
+
+    def unavailable(paper, verify, owner):
+        raise HTTPException(503, "the analysis queue is unavailable, try again shortly")
+
+    monkeypatch.setattr(main, "_start", unavailable)
+
+    assert run(data_tools.submit_analysis, "2112.01488") == {
+        "status": "error",
+        "message": "the analysis queue is unavailable, try again shortly",
+    }

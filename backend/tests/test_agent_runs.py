@@ -1,6 +1,7 @@
 """The screen agent's routes with a scripted model: a screen tool call ends the stream for the
 browser, the browser's result goes on with the run, and a session belongs to its owner."""
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -128,6 +129,70 @@ def test_a_run_that_keeps_calling_server_tools_stops_at_the_cap(api, monkeypatch
     got = events(client.post("/agent/runs", json={"message": "loop"}))
     assert any(e["type"] == "say" and "I stopped after 3 steps" in e["text"] for e in got)
     assert got[-1] == {"type": "done"}
+
+
+def test_browser_tool_loop_stops_at_cap_and_resets_on_next_turn(api, monkeypatch):
+    client, model, _ = api
+    monkeypatch.setattr(agent_runs, "MAX_BROWSER_STEPS", 2)
+    model.replies = [
+        {"name": "read_screen"},
+        {"name": "open_screen", "args": {"screen": "home"}},
+        {"name": "read_screen"},
+    ]
+
+    first = events(client.post("/agent/runs", json={"message": "loop browser"}))
+    session = first[0]["id"]
+    [tool_1] = [e for e in first if e["type"] == "tool"]
+
+    second = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool_1["id"], "name": "read_screen", "result": {"screen": "library"}},
+        )
+    )
+    [tool_2] = [e for e in second if e["type"] == "tool"]
+    assert tool_2["name"] == "open_screen"
+
+    third = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool_2["id"], "name": "open_screen", "result": {"status": "done"}},
+        )
+    )
+    assert not [e for e in third if e["type"] == "tool"]
+    assert {"type": "say", "text": "I stopped after 2 browser steps. Try a smaller request."} in third
+    assert third[-1] == {"type": "done"}
+
+    # Another /results post on the same turn stops before calling the model again.
+    stored = asyncio.run(
+        agent_runs._sessions.get_session(
+            app_name=agent_runs.APP_NAME, user_id="user-1", session_id=session
+        )
+    )
+    pending_id = next(iter(agent_runs._pending_browser_calls(stored)))
+    fourth = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": pending_id, "name": "read_screen", "result": {"screen": "home"}},
+        )
+    )
+    assert {"type": "say", "text": "I stopped after 2 browser steps. Try a smaller request."} in fourth
+    assert fourth[-1] == {"type": "done"}
+
+    # A new user message resets the browser-step counter for that turn.
+    model.replies = [{"name": "read_screen"}, "Done now."]
+    reset = events(
+        client.post("/agent/runs", json={"message": "Try again", "session_id": session})
+    )
+    [tool_3] = [e for e in reset if e["type"] == "tool"]
+    assert tool_3["name"] == "read_screen"
+    done = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool_3["id"], "name": "read_screen", "result": {"screen": "home"}},
+        )
+    )
+    assert {"type": "say", "text": "Done now."} in done
 
 
 def test_the_agent_is_built_from_the_documented_tools():

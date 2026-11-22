@@ -41,6 +41,8 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 APP_NAME = "secretsource-screen"
 MAX_LLM_CALLS = 8  # per request; a task takes 3-5 in eval_screen_agent.py, so this stops a loop, not a task
+# Browser tool round-trips allowed in one user turn before stopping a stuck loop (#1023).
+MAX_BROWSER_STEPS = 8
 SESSION_SECONDS = 3600
 # A browser tool's result as UTF-8 JSON. The largest real one is read_draft's: 24,000 characters of
 # text plus capped file and .bib key lists (frontend/src/lib/agentTools.ts), about 36,000 characters.
@@ -136,6 +138,33 @@ async def start_run(body: RunStart, user: str | None = Depends(current_user)):
     return _stream(body.role, session.id, owner, message, session_event={"type": "session", "id": session.id})
 
 
+def _browser_limit_message(limit: int) -> str:
+    return f"I stopped after {limit} browser steps. Try a smaller request."
+
+
+def _browser_steps_this_turn(session, browser_tools: frozenset[str]) -> int:
+    """Count browser tool results submitted since the latest plain-text user message."""
+    steps = 0
+    for event in reversed(session.events):
+        if event.author != "user":
+            continue
+        responses = event.get_function_responses()
+        if not responses:
+            break
+        steps += sum(1 for response in responses if response.name in browser_tools)
+    return steps
+
+
+def _limit_stream(limit: int) -> StreamingResponse:
+    from app import main  # main includes this router, so not at the top
+
+    async def stopped():
+        yield _sse({"type": "say", "text": _browser_limit_message(limit)})
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(main._keep_alive(stopped()), media_type="text/event-stream")
+
+
 @router.post("/runs/{session_id}/results")
 async def send_result(session_id: str, body: ToolResult, user: str | None = Depends(current_user)):
     """Give the agent what a screen tool did in the browser, and stream what it does next."""
@@ -157,6 +186,9 @@ async def send_result(session_id: str, body: ToolResult, user: str | None = Depe
     pending = _pending_browser_calls(session)
     if pending.get(body.id) != body.name:
         raise HTTPException(422, f"no pending {body.name!r} call with id {body.id!r} in this session")
+    steps = _browser_steps_this_turn(session, allowed)
+    if steps >= MAX_BROWSER_STEPS:
+        return _limit_stream(MAX_BROWSER_STEPS)
     result = body.result
     size = len(json.dumps(result, ensure_ascii=False).encode())
     if size > MAX_TOOL_RESULT_BYTES:
@@ -171,7 +203,7 @@ async def send_result(session_id: str, body: ToolResult, user: str | None = Depe
         result = {"status": "error", "message": "tool result too large"}
     response = types.FunctionResponse(id=body.id, name=body.name, response=result)
     message = types.Content(role="user", parts=[types.Part(function_response=response)])
-    return _stream(body.role, session_id, owner, message)
+    return _stream(body.role, session_id, owner, message, browser_steps=steps + 1)
 
 
 @router.post("/tools/{name}")
@@ -190,16 +222,26 @@ async def run_tool(name: str, args: dict, user: str | None = Depends(current_use
 
 
 def _stream(
-    role: Role, session_id: str, user_id: str, message: types.Content, session_event: dict | None = None
+    role: Role,
+    session_id: str,
+    user_id: str,
+    message: types.Content,
+    session_event: dict | None = None,
+    browser_steps: int = 0,
 ):
     from app import main  # main includes this router, so not at the top
 
-    events = _events(role, session_id, user_id, message, session_event)
+    events = _events(role, session_id, user_id, message, session_event, browser_steps)
     return StreamingResponse(main._keep_alive(events), media_type="text/event-stream")
 
 
 async def _events(
-    role: Role, session_id: str, user_id: str, message: types.Content, session_event: dict | None
+    role: Role,
+    session_id: str,
+    user_id: str,
+    message: types.Content,
+    session_event: dict | None,
+    browser_steps: int = 0,
 ):
     """One request's run, as server-sent events; it ends at a screen tool or at the agent's reply."""
     if session_event:
@@ -210,14 +252,21 @@ async def _events(
             user_id=user_id, session_id=session_id, new_message=message, run_config=run_config
         ):
             calls = event.get_function_calls()
+            stopped = False
             for call in calls:
                 if call.id in (event.long_running_tool_ids or ()):
+                    if browser_steps >= MAX_BROWSER_STEPS:
+                        yield _sse({"type": "say", "text": _browser_limit_message(MAX_BROWSER_STEPS)})
+                        stopped = True
+                        break
                     yield _sse({"type": "tool", "id": call.id, "name": call.name, "args": call.args or {}})
                 elif call.name in DELEGATES:
                     task = (call.args or {}).get("request", "")
                     yield _sse({"type": "agent", "name": call.name, "state": "working", "task": task})
                 else:
                     yield _sse({"type": "step", "name": call.name})
+            if stopped:
+                break
             responses = event.get_function_responses()
             for response in responses:
                 if response.name in DELEGATES:
