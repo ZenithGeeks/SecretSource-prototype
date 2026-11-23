@@ -315,12 +315,22 @@ async def _compare_rows(store: ledger.Store, paper_id: str, me: str, lead: bool)
     return rows
 
 
+async def _leads_paper(analysis_id: str, who: str, lead: bool) -> bool:
+    """Whether the caller compares this paper as a lead. Not on their own blind check: there a
+    lead sees only the pairs they judged, like anyone else."""
+    return lead and not await _is_blind(analysis_id, who)
+
+
 @router.get("/compare/{analysis_id}")
 async def compare_labels(
-    analysis: dict = Depends(owned_analysis), me: str = Depends(labeler_id), lead: bool = Depends(is_lead)
+    analysis: dict = Depends(owned_analysis),
+    who: str = Depends(annotator),
+    me: str = Depends(labeler_id),
+    lead: bool = Depends(is_lead),
 ):
     """Every labeler's verdict on each pair of this paper, next to the caller's (compare.py)."""
     built = build_session(analysis)
+    lead = await _leads_paper(analysis["id"], who, lead)
     rows = await _compare_rows(_store(), built["paper_id"], me, lead)
     found = compare.verdicts(rows["claims"], rows["labels"])
     return compare.view(built, found, rows["compare_notes"], me, lead)
@@ -338,6 +348,7 @@ async def add_compare_note(
     caller can see on the Compare screen."""
     paper_id = _paper_id(analysis)
     store = _store()
+    lead = await _leads_paper(analysis["id"], who, lead)
     rows = await _compare_rows(store, paper_id, me, lead)
     by_account = compare.verdicts(rows["claims"], rows["labels"]).get((body.claim_id, body.reference_id))
     if by_account is None or not (lead or me in by_account):

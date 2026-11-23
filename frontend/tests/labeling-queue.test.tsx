@@ -454,7 +454,7 @@ describe('the labeler queue', () => {
     expect(screen.queryByRole('radio', { name: 'Whole team' })).not.toBeInTheDocument()
   })
 
-  it('keeps papers checked blind out of the list and points to them', async () => {
+  it('lists papers checked blind, marked, and points to the Blind checks tab', async () => {
     const before = gateway.pool
     gateway.pool = { ...before, blind: ['x1'] }
     onTestFinished(() => {
@@ -462,7 +462,7 @@ describe('the labeler queue', () => {
     })
     renderQueue()
     await screen.findByRole('table')
-    expect(screen.queryByText('HPC paper')).not.toBeInTheDocument()
+    expect(within(screen.getByText('HPC paper').closest('tr')!).getByText('Blind check')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Open blind checks' }))
     expect(onShowBlind).toHaveBeenCalled()
   })
