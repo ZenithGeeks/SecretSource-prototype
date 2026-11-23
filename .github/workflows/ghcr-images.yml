@@ -1,0 +1,116 @@
+# Builds and pushes the gateway and web Docker images to GitHub Container Registry (GHCR)
+# on every push to main that touches backend/ or frontend/. docker-host pulls these images
+# automatically so production updates without building on the mini PC.
+name: ghcr-images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "!backend/tests/**"
+      - "!backend/**/*.md"
+      - "!backend/pytest.ini"
+      - "!backend/requirements-dev.txt"
+      - "frontend/**"
+      - "!frontend/tests/**"
+      - "!frontend/**/*.md"
+      - ".github/workflows/ghcr-images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ghcr-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      gateway: ${{ steps.paths.outputs.gateway }}
+      web: ${{ steps.paths.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "gateway=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BEFORE" "$SHA")
+          if echo "$changed" | grep -qx ".github/workflows/ghcr-images.yml"; then
+            echo "gateway=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gateway=false
+          web=false
+          if echo "$changed" | grep -qE '^backend/' && echo "$changed" | grep -E '^backend/' | grep -vqE '^backend/(tests/|.*\.md$|pytest\.ini$|requirements-dev\.txt$)'; then
+            gateway=true
+          fi
+          if echo "$changed" | grep -qE '^frontend/' && echo "$changed" | grep -E '^frontend/' | grep -vqE '^frontend/(tests/|.*\.md$)'; then
+            web=true
+          fi
+          echo "gateway=$gateway" >> "$GITHUB_OUTPUT"
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+
+  gateway:
+    needs: changes
+    if: needs.changes.outputs.gateway == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/zenithgeeks/secretsource-gateway:latest
+            ghcr.io/zenithgeeks/secretsource-gateway:sha-${{ github.sha }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,scope=gateway,mode=max
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ghcr.io/zenithgeeks/secretsource-web:latest
+            ghcr.io/zenithgeeks/secretsource-web:sha-${{ github.sha }}
+          build-args: |
+            VITE_SUPABASE_URL=${{ vars.VITE_SUPABASE_URL }}
+            VITE_SUPABASE_ANON_KEY=${{ vars.VITE_SUPABASE_ANON_KEY }}
+            VITE_TEACHER_BACKEND=${{ vars.VITE_TEACHER_BACKEND || 'remote' }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
