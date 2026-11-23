@@ -3,7 +3,8 @@
  * the claim panel is the person's to change. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { Home } from 'lucide-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/lib/api', async (original) => ({
@@ -38,6 +39,7 @@ const session = {
 }
 
 import { Workspace } from '../src/roles/labeler/screens/Workspace'
+import { AppShell } from '../src/components/AppShell'
 
 const SHORTCUTS = 'Keyboard shortcuts'
 
@@ -59,6 +61,36 @@ describe('the labeler workspace layout', () => {
     renderWorkspace()
     const strip = await screen.findByRole('navigation', { name: 'Claims of this paper' })
     expect(strip.closest('header')).not.toBeNull()
+  })
+
+  it('keeps an unfinished claim when the header moves across 1280px', async () => {
+    let width = 1100
+    const listeners = new Set<() => void>()
+    window.matchMedia = vi.fn((query: string) => ({
+      get matches() { return width >= Number(query.match(/\d+/)?.[0]) },
+      addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+    }) as unknown as MediaQueryList)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AppShell nav={[{ key: 'home', label: 'Home', icon: Home }]} active="home" onNavigate={() => {}} role="Labeler" roleIcon={Home} breadcrumb={['Papers', 'Paper A']} wide="full">
+          <Workspace analysisId="a1" />
+        </AppShell>
+      </QueryClientProvider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a missed claim' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'A claim extraction missed' }), { target: { value: 'A new claim' } })
+    const resize = (next: number) => act(() => { width = next; listeners.forEach((listener) => listener()) })
+    resize(1300)
+    expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('A new claim')
+    expect(screen.getByRole('navigation', { name: 'Claims of this paper' }).closest('main')).toBeNull()
+    resize(1100)
+    expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('A new claim')
+    expect(screen.getByRole('navigation', { name: 'Claims of this paper' }).closest('main')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
+    expect(screen.getByRole('button', { name: 'Claim 3, in progress, unsaved: A new claim' })).toHaveAttribute('aria-current', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed claim' }))
+    expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('')
   })
 
   it('shows the shortcuts only when ? or the button is pressed', async () => {

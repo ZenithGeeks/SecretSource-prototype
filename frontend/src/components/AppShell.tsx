@@ -457,10 +457,10 @@ export function AppShell<K extends string>({
           >
             {/* Full width: a screen may put a whole header row in the actions, so they get the
                 room and the breadcrumb is capped. */}
-            <div className={cn('min-w-0', wide === 'full' && 'max-w-xs shrink-0')}>
+            <div className={cn('min-w-0', wide === 'full' && 'max-w-xs lg:shrink-0')}>
               <Breadcrumb items={breadcrumb} />
             </div>
-            <div className={cn('flex items-center gap-1', wide === 'full' ? 'min-w-0 flex-1 justify-end' : 'shrink-0')}>
+            <div className={cn('flex items-center gap-1', wide === 'full' ? 'shrink-0 lg:min-w-0 lg:flex-1 lg:shrink lg:justify-end' : 'shrink-0')}>
               {toolbarLead}
               <div ref={setActionsEl} className={cn('flex items-center gap-1', wide === 'full' && 'min-w-0 flex-1 justify-end')} />
             </div>

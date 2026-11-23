@@ -238,6 +238,9 @@ function Body({
   const [drafts, setDrafts] = useState(() => ({ ...saved, ...restored?.drafts }))
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
   const [paperDone, setPaperDone] = useState(false)
+  // The header moves between the workspace and toolbar, so keep its unfinished entry here.
+  const [addingClaim, setAddingClaim] = useState(false)
+  const [claimText, setClaimText] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const panelScrollRef = useRef<HTMLDivElement>(null)
   const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
@@ -867,6 +870,10 @@ function Body({
         current={currentId}
         onSelect={select}
         onAdd={addClaim}
+        adding={addingClaim}
+        setAdding={setAddingClaim}
+        text={claimText}
+        setText={setClaimText}
       />
       <div className="relative ml-auto flex items-center gap-3 lg:ml-0">
         {wide && viewToggle}

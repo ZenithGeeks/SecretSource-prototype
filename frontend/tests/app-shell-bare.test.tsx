@@ -133,7 +133,10 @@ test('a full-width screen can put a header row in the top bar, and draws it in p
     </AppShell>,
   )
   expect(screen.getByText('Claim strip').closest('main')).toBeNull()
-  expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).parentElement).toHaveClass('max-w-xs')
+  const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' }).parentElement
+  expect(breadcrumb).toHaveClass('max-w-xs', 'lg:shrink-0')
+  expect(breadcrumb).not.toHaveClass('shrink-0')
+  expect(breadcrumb?.nextElementSibling).toHaveClass('shrink-0', 'lg:flex-1', 'lg:shrink')
   unmount()
   render(header)
   expect(screen.getByText('Claim strip')).toBeInTheDocument()

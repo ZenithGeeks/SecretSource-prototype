@@ -27,6 +27,10 @@ export function ClaimNav({
   onSelect,
   onAdd,
   className,
+  adding,
+  setAdding,
+  text,
+  setText,
 }: {
   /** How the strip sits in its parent: the workspace puts it in the header row. */
   className?: string
@@ -38,9 +42,11 @@ export function ClaimNav({
   current: string
   onSelect: (id: string) => void
   onAdd: (text: string) => void
+  adding: boolean
+  setAdding: (adding: boolean) => void
+  text: string
+  setText: (text: string) => void
 }) {
-  const [adding, setAdding] = useState(false)
-  const [text, setText] = useState('')
   const field = useId()
   const strip = useRef<HTMLOListElement>(null)
   const addButton = useRef<HTMLButtonElement>(null)
