@@ -5,11 +5,28 @@
  */
 
 import { ExternalLink } from 'lucide-react'
+import { useState } from 'react'
 
 import { Empty } from '../../../components/ui'
 import type { Unresolved } from '../../../lib/labeling'
 
-export function UnresolvedReferences({ citations }: { citations: Unresolved[] }) {
+export function UnresolvedReferences({
+  citations,
+  onUpload,
+  onRetry,
+  onRepair,
+  uploading = false,
+  retrying = false,
+  repairing = false,
+}: {
+  citations: Unresolved[]
+  onUpload?: (ref: string, file: File) => void
+  onRetry?: (ref: string) => void
+  onRepair?: (ref: string, replacement: { doi?: string; url?: string }) => void
+  uploading?: boolean
+  retrying?: boolean
+  repairing?: boolean
+}) {
   if (citations.length === 0) return <Empty title="No reference paper" hint="This claim cites no paper." />
   return (
     <section aria-labelledby="unresolved-title" className="flex flex-col gap-3 rounded-xl border border-dashed border-border-subtle px-6 py-8">
@@ -30,8 +47,25 @@ export function UnresolvedReferences({ citations }: { citations: Unresolved[] })
               {citation.year && ` (${citation.year})`}
             </p>
             <p className="mt-1 text-ink-muted">Not read: {citation.reason}</p>
+            {citation.repairError && (
+              <p role="status" className="mt-1 text-ink-muted">
+                The replacement was not used: {citation.repairError.message}. The earlier result is still available.
+              </p>
+            )}
             {citation.sourceOutcome?.retryable && (
-              <p className="mt-1 text-ink-muted">This may be a temporary failure; retrying later may help.</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="text-ink-muted">This may be a temporary failure; retrying later may help.</p>
+                {onRetry && citation.ref && (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-border-subtle px-3 py-2 font-medium text-accent hover:bg-surface-muted"
+                    disabled={retrying}
+                    onClick={() => onRetry(citation.ref)}
+                  >
+                    {retrying ? 'Retrying…' : 'Retry this reference'}
+                  </button>
+                )}
+              </div>
             )}
             {!!citation.sourceOutcome?.attempts.length && (
               <details className="mt-2 text-ink-muted">
@@ -62,9 +96,90 @@ export function UnresolvedReferences({ citations }: { citations: Unresolved[] })
                 <span className="sr-only">(opens in a new tab)</span>
               </a>
             ))}
+            {onUpload && citation.ref && citation.reason !== 'the paper only names it, so it was not checked' && (
+              <label className="mt-2 flex w-fit cursor-pointer items-center rounded-lg border border-border-subtle px-3 py-2 font-medium text-accent hover:bg-surface-muted">
+                {uploading ? 'Uploading PDF…' : 'Provide a PDF'}
+                <input
+                  className="sr-only"
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  disabled={uploading}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    if (file) onUpload(citation.ref, file)
+                    event.currentTarget.value = ''
+                  }}
+                  aria-label={`Provide a PDF for ${citation.label}`}
+                />
+              </label>
+            )}
+            {onRepair && citation.ref && citation.reason !== 'the paper only names it, so it was not checked' && (
+              <RepairForm citation={citation} disabled={repairing} onRepair={onRepair} />
+            )}
           </li>
         ))}
       </ul>
     </section>
+  )
+}
+
+function RepairForm({
+  citation,
+  disabled,
+  onRepair,
+}: {
+  citation: Unresolved
+  disabled: boolean
+  onRepair: (ref: string, replacement: { doi?: string; url?: string }) => void
+}) {
+  const initialDoi = citation.doi ?? ''
+  const initialUrl = citation.url ?? ''
+  const [doi, setDoi] = useState(initialDoi)
+  const [url, setUrl] = useState(initialUrl)
+  const replacementChanged = doi.trim() !== initialDoi || url.trim() !== initialUrl
+  return (
+    <form
+      className="mt-3 flex flex-col gap-2 rounded-lg border border-border-subtle p-3"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (doi.trim()) onRepair(citation.ref, { doi: doi.trim() })
+        else if (url.trim()) onRepair(citation.ref, { url: url.trim() })
+      }}
+    >
+      <p className="font-medium">Correct this citation</p>
+      <label className="flex flex-col gap-1 text-xs text-ink-muted">
+        DOI
+        <input
+          className="h-9 rounded border border-border-subtle bg-canvas px-2 text-sm text-ink"
+          value={doi}
+          onChange={(event) => {
+            setDoi(event.currentTarget.value)
+            if (event.currentTarget.value) setUrl('')
+          }}
+          placeholder="10.1234/example"
+          aria-label={`Correct DOI for ${citation.label}`}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-ink-muted">
+        Public page or PDF URL
+        <input
+          className="h-9 rounded border border-border-subtle bg-canvas px-2 text-sm text-ink"
+          value={url}
+          onChange={(event) => {
+            setUrl(event.currentTarget.value)
+            if (event.currentTarget.value) setDoi('')
+          }}
+          placeholder="https://example.org/article"
+          aria-label={`Correct URL for ${citation.label}`}
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={disabled || !replacementChanged || (!doi.trim() && !url.trim())}
+        className="self-start rounded-lg border border-border-subtle px-3 py-2 font-medium text-accent enabled:hover:bg-surface-muted disabled:opacity-50"
+      >
+        {disabled ? 'Checking replacement…' : 'Try replacement'}
+      </button>
+    </form>
   )
 }

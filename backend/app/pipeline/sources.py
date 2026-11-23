@@ -1,4 +1,4 @@
-"""Find the open-access PDF of a cited work and download it.
+"""Resolve and download cited papers, keeping web-page reading in `pipeline.web`.
 
 Takes a DOI, arXiv ID, PMID, direct URL, or a bare title. arXiv IDs resolve directly.
 Other works are matched through Semantic Scholar and Unpaywall. If the chosen PDF URL fails,
@@ -150,7 +150,8 @@ def is_retryable(error: BaseException) -> bool:
     if override is not None:
         return bool(override)
     network = tuple(
-        kind for kind in (
+        kind
+        for kind in (
             getattr(requests, "Timeout", None),
             getattr(requests, "ConnectionError", None),
             TimeoutError,
@@ -203,9 +204,15 @@ def _source_outcome(error: BaseException, attempts: list[dict] | None = None) ->
     if isinstance(error, WebSource):
         source_kind = "web-page"
     else:
-        source_kind = getattr(error, "source_kind", "paper" if isinstance(
-            error, (OnlyOtherWorks, AmbiguousMatch, IdentityMismatch, NoOpenAccessCopy, Withdrawn)
-        ) else "unknown")
+        source_kind = getattr(
+            error,
+            "source_kind",
+            "paper"
+            if isinstance(
+                error, (OnlyOtherWorks, AmbiguousMatch, IdentityMismatch, NoOpenAccessCopy, Withdrawn)
+            )
+            else "unknown",
+        )
     return {
         "source_kind": source_kind,
         "outcome": _outcome_code(error),
@@ -231,8 +238,11 @@ def _safe_locator(url: str) -> str:
 
 
 def _attempt(
-    provider: str, result: str, error: BaseException | None = None,
-    host: str = "", locator: str = "",
+    provider: str,
+    result: str,
+    error: BaseException | None = None,
+    host: str = "",
+    locator: str = "",
 ) -> dict:
     """One safe provider attempt; never retain credentials or URL query parameters."""
     item = {"provider": provider, "result": result}
@@ -259,10 +269,11 @@ def _http_status(error: BaseException) -> int | None:
 
 def _safe_message(error: BaseException) -> str:
     """Remove query strings from URLs in upstream errors before storing or returning them."""
+
     def without_query(match: re.Match) -> str:
         value = match.group(0)
         clean_value = value.rstrip(".,;)]}")
-        suffix = value[len(clean_value):]
+        suffix = value[len(clean_value) :]
         parsed = urlparse(clean_value)
         host = parsed.hostname or ""
         try:
@@ -278,8 +289,13 @@ def _safe_message(error: BaseException) -> str:
 
 def tool_error(error: BaseException) -> dict:
     """The error a tool returns: legacy reason plus structured outcome and safe attempts."""
-    return {"status": "error", "message": _safe_message(error), "reason": reason_for(error),
-            "retryable": is_retryable(error), "source_outcome": _source_outcome(error)}
+    return {
+        "status": "error",
+        "message": _safe_message(error),
+        "reason": reason_for(error),
+        "retryable": is_retryable(error),
+        "source_outcome": _source_outcome(error),
+    }
 
 
 # New ids (2303.12712) and the ones from before 2007 (hep-th/9901001, math.GT/0309136).
@@ -309,6 +325,8 @@ def doi_in(text: str) -> str | None:
     while doi[-1:] in CLOSING and doi.count(doi[-1]) > doi.count(CLOSING[doi[-1]]):
         doi = doi[:-1].rstrip(".,;]")
     return doi
+
+
 # An arXiv copy in an Unpaywall location: arxiv.org/pdf/<id>, arxiv.org/abs/<id>, or arXiv's DOI.
 ARXIV_LOCATION = re.compile(
     r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})|10\.48550/arxiv\.(\d{4}\.\d{4,5})", re.IGNORECASE
@@ -520,11 +538,13 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
 
     words = re.sub(r"[,|?*]", " ", title)
     try:
-        works = openalex_works({
-            "filter": f"title.search:{words}",
-            "select": "doi,title,publication_year,authorships,locations",
-            "per-page": 5,
-        })
+        works = openalex_works(
+            {
+                "filter": f"title.search:{words}",
+                "select": "doi,title,publication_year,authorships,locations",
+                "per-page": 5,
+            }
+        )
     except _IndexError as error:
         raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
 
@@ -536,10 +556,7 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
             continue
         year = work.get("publication_year")
         authorships = work.get("authorships") or []
-        first_author = (
-            ((authorships[0].get("author") or {}).get("display_name") or "")
-            if authorships else ""
-        )
+        first_author = ((authorships[0].get("author") or {}).get("display_name") or "") if authorships else ""
         if not fits(year, first_author):
             others.append(_described(found_title, year, first_author))
             continue
@@ -567,19 +584,23 @@ def _openalex_pdfs(doi: str) -> list[str]:
     if not normalized:
         return []
     try:
-        works = openalex_works({
-            "filter": f"doi:{normalized}",
-            "select": "locations",
-            "per-page": 5,
-        })
+        works = openalex_works(
+            {
+                "filter": f"doi:{normalized}",
+                "select": "locations",
+                "per-page": 5,
+            }
+        )
     except _IndexError:
         return []
-    return list(dict.fromkeys(
-        location["pdf_url"]
-        for work in works
-        for location in work.get("locations") or []
-        if location.get("pdf_url")
-    ))
+    return list(
+        dict.fromkeys(
+            location["pdf_url"]
+            for work in works
+            for location in work.get("locations") or []
+            if location.get("pdf_url")
+        )
+    )
 
 
 def _described(title: str, year: int | None, first_author: str) -> str:
@@ -614,9 +635,7 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
 
     ids = {"DOI": doi}
     for location in locations:
-        if found := ARXIV_LOCATION.search(
-            f"{location.get('url_for_pdf') or ''} {location.get('url') or ''}"
-        ):
+        if found := ARXIV_LOCATION.search(f"{location.get('url_for_pdf') or ''} {location.get('url') or ''}"):
             ids["ArXiv"] = found.group(1) or found.group(2)
             break
 
@@ -627,10 +646,15 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
         if not url or url in seen:
             continue
         seen.add(url)
-        resolutions.append(Resolution(
-            url, work.get("title") or "", "unpaywall", ids,
-            _as_year(work.get("year")),
-        ))
+        resolutions.append(
+            Resolution(
+                url,
+                work.get("title") or "",
+                "unpaywall",
+                ids,
+                _as_year(work.get("year")),
+            )
+        )
     if not resolutions:
         raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
     return resolutions
@@ -705,22 +729,36 @@ def _openalex_resolutions(work: dict, expected: dict | None = None) -> list[Reso
     first_author = (authorships[0].get("author") or {}).get("display_name", "") if authorships else ""
     ids = {"DOI": doi} if doi else {}
     base = Resolution(
-        "", title, "openalex", ids, work.get("publication_year"), first_author,
+        "",
+        title,
+        "openalex",
+        ids,
+        work.get("publication_year"),
+        first_author,
     )
     if expected:
         _validate_resolution(base, expected)
 
     locations = [
-        location for location in work.get("locations") or []
+        location
+        for location in work.get("locations") or []
         if location.get("is_oa") and location.get("pdf_url")
     ]
     # Repository versions are usually less likely to block a scripted download than the
     # publisher's copy. Within each class keep OpenAlex's own ranking.
-    locations.sort(key=lambda location: (
-        0 if (urlparse(location.get("pdf_url") or "").hostname or "").lower() in {
-            "arxiv.org", "biorxiv.org", "medrxiv.org", "europepmc.org",
-        } else 1
-    ))
+    locations.sort(
+        key=lambda location: (
+            0
+            if (urlparse(location.get("pdf_url") or "").hostname or "").lower()
+            in {
+                "arxiv.org",
+                "biorxiv.org",
+                "medrxiv.org",
+                "europepmc.org",
+            }
+            else 1
+        )
+    )
     resolutions = []
     seen = set()
     for location in locations:
@@ -773,8 +811,7 @@ def _openalex_candidates(identifier: str, expected: dict | None = None) -> list[
         matches.append(work)
 
     unique = {
-        doi_in(str(work.get("doi") or "")) or work.get("id") or work.get("title"): work
-        for work in matches
+        doi_in(str(work.get("doi") or "")) or work.get("id") or work.get("title"): work for work in matches
     }
     if len(unique) > 1:
         raise AmbiguousMatch(f"more than one OpenAlex work matches '{title}'")
@@ -797,7 +834,9 @@ def _acl_anthology_candidate(doi: str, expected: dict | None = None) -> Resoluti
         return None
     anthology_id = match.group(1)
     candidate = Resolution(
-        f"https://aclanthology.org/{anthology_id}.pdf", "", "acl_anthology",
+        f"https://aclanthology.org/{anthology_id}.pdf",
+        "",
+        "acl_anthology",
         {"DOI": doi, "ACL": anthology_id},
     )
     if expected:
@@ -943,9 +982,19 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
                 continue
 
             authors = paper.findall("./author")
-            first_author = " ".join(filter(None, (
-                _xml_text(authors[0].find("first")), _xml_text(authors[0].find("last")),
-            ))) if authors else ""
+            first_author = (
+                " ".join(
+                    filter(
+                        None,
+                        (
+                            _xml_text(authors[0].find("first")),
+                            _xml_text(authors[0].find("last")),
+                        ),
+                    )
+                )
+                if authors
+                else ""
+            )
             if not fits(year, first_author):
                 continue
             if paper.find("pdf") is None:
@@ -954,10 +1003,16 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
             ids = {"ACL": anthology_id}
             if found_doi:
                 ids["DOI"] = found_doi
-            matches.append(Resolution(
-                f"https://aclanthology.org/{anthology_id}.pdf", found_title,
-                "acl_anthology", ids, year, first_author,
-            ))
+            matches.append(
+                Resolution(
+                    f"https://aclanthology.org/{anthology_id}.pdf",
+                    found_title,
+                    "acl_anthology",
+                    ids,
+                    year,
+                    first_author,
+                )
+            )
 
     if mismatched_doi_titles:
         raise IdentityMismatch("the ACL Anthology DOI matches a paper with a different title")
@@ -970,7 +1025,9 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
 
 
 def _fallback_resolutions(
-    identifier: str, expected: dict | None, found: Resolution,
+    identifier: str,
+    expected: dict | None,
+    found: Resolution,
 ) -> tuple[list[Resolution], list[dict], list[Exception]]:
     """Ask other legal-copy indexes after the first provider's PDF could not be read."""
     import requests
@@ -1015,9 +1072,7 @@ def _fallback_resolutions(
                 attempts.append(_attempt(provider, "matched", locator=answer.url))
             resolutions.extend(answers)
 
-    prior_providers = {
-        str(attempt.get("provider", "")) for attempt in found.attempts
-    }
+    prior_providers = {str(attempt.get("provider", "")) for attempt in found.attempts}
     if doi and UNPAYWALL_EMAIL and "unpaywall" not in prior_providers:
         ask("unpaywall", lambda: _unpaywall_resolutions(doi))
 
@@ -1056,11 +1111,15 @@ def _first_answer(resolvers, argument: str, expected: dict | None = None) -> Res
 
 
 def _by_title(title: str, expected: dict | None = None) -> Resolution:
-    return _first_answer((
-        ("arxiv", lambda query: _arxiv_by_title(query, _expected_fits(expected))),
-        ("semantic_scholar", lambda query: _semantic_scholar_by_title(query, _expected_fits(expected))),
-        ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected))),
-    ), title, expected)
+    return _first_answer(
+        (
+            ("arxiv", lambda query: _arxiv_by_title(query, _expected_fits(expected))),
+            ("semantic_scholar", lambda query: _semantic_scholar_by_title(query, _expected_fits(expected))),
+            ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected))),
+        ),
+        title,
+        expected,
+    )
 
 
 def find_by_title(title: str, fits: Fits) -> Resolution:
@@ -1100,9 +1159,15 @@ def find_by_title(title: str, fits: Fits) -> Resolution:
     else:
         raise _reported(failures, attempts)
 
-    found = found._replace(attempts=tuple([
-        *found.attempts, *attempts, _attempt(provider, "matched", locator=found.url),
-    ]))
+    found = found._replace(
+        attempts=tuple(
+            [
+                *found.attempts,
+                *attempts,
+                _attempt(provider, "matched", locator=found.url),
+            ]
+        )
+    )
 
     for known in _cache_keys(title, found):
         store.remember_source(known, {**found._asdict(), "fetched_at": time.time()})
@@ -1110,7 +1175,10 @@ def find_by_title(title: str, fits: Fits) -> Resolution:
 
 
 def _reported(
-    failures: list[Exception], attempts: list[dict] | None = None, *, prefer_first: bool = False,
+    failures: list[Exception],
+    attempts: list[dict] | None = None,
+    *,
+    prefer_first: bool = False,
 ) -> Exception:
     """Choose the most informative failure without hiding an outage behind a no-match."""
     if not failures:
@@ -1126,8 +1194,11 @@ def _reported(
     else:
         skipped = next((error for error in failures if isinstance(error, OnlyOtherWorks)), None)
         chosen = (
-            skipped if skipped and any(type(error) is Unresolvable for error in failures)
-            else failures[0] if prefer_first else failures[-1]
+            skipped
+            if skipped and any(type(error) is Unresolvable for error in failures)
+            else failures[0]
+            if prefer_first
+            else failures[-1]
         )
     chosen.source_attempts = list(attempts or [])
     if not hasattr(chosen, "source_kind") and isinstance(
@@ -1138,10 +1209,14 @@ def _reported(
 
 
 def _by_doi(doi: str, expected: dict | None = None) -> Resolution:
-    return _first_answer((
-        ("semantic_scholar", lambda found: _semantic_scholar_pdf(f"DOI:{quote(found)}")),
-        ("unpaywall", _unpaywall_pdf),
-    ), doi, expected)
+    return _first_answer(
+        (
+            ("semantic_scholar", lambda found: _semantic_scholar_pdf(f"DOI:{quote(found)}")),
+            ("unpaywall", _unpaywall_pdf),
+        ),
+        doi,
+        expected,
+    )
 
 
 def _lookup(identifier: str, expected: dict | None = None) -> Resolution:
@@ -1149,9 +1224,7 @@ def _lookup(identifier: str, expected: dict | None = None) -> Resolution:
     doi = doi_in(identifier)
 
     if arxiv and ("arxiv" in identifier.lower() or arxiv.group(0) == identifier):
-        found = Resolution(
-            f"https://arxiv.org/pdf/{arxiv.group(1)}", "", "arxiv", {"ArXiv": arxiv.group(1)}
-        )
+        found = Resolution(f"https://arxiv.org/pdf/{arxiv.group(1)}", "", "arxiv", {"ArXiv": arxiv.group(1)})
         if expected:
             _validate_resolution(found, expected)
         return found._replace(attempts=(_attempt("arxiv", "matched", locator=found.url),))
@@ -1191,8 +1264,10 @@ def _resolve(identifier: str, expected: dict | None = None) -> Resolution:
                 _validate_resolution(found, expected)
                 arxiv = ARXIV_PATTERN.search(identifier)
                 title_lookup = (
-                    not doi_in(identifier) and not arxiv
-                    and not identifier.startswith("http") and not identifier.isdigit()
+                    not doi_in(identifier)
+                    and not arxiv
+                    and not identifier.startswith("http")
+                    and not identifier.isdigit()
                 )
                 if title_lookup:
                     if not _expected_fits(expected)(found.year, found.first_author):
@@ -1373,7 +1448,9 @@ def _fetch(identifier: str, expected: dict | None = None) -> tuple[Path, Resolut
         return downloaded
 
     alternate_resolutions, provider_attempts, provider_failures = _fallback_resolutions(
-        identifier, expected, found,
+        identifier,
+        expected,
+        found,
     )
     attempts.extend(provider_attempts)
     failures.extend(provider_failures)
@@ -1412,9 +1489,24 @@ def _withdrawn_by(arxiv_id: str) -> str:
 
 
 def lookup_key(citation: dict) -> str:
-    """What to look a cited work up by, or "" when the reference has nothing usable.
-    URL is last. It is usually a blog post or a spec, but we still report it."""
-    return citation.get("doi") or citation.get("arxiv") or citation.get("title") or citation.get("url") or ""
+    """What to resolve a cited work by, preferring scholarly identifiers and title over URL."""
+    return next(iter(lookup_keys(citation)), "")
+
+
+def lookup_keys(citation: dict) -> tuple[str, ...]:
+    """Every usable citation key, in lookup priority order, for results saved by older builds."""
+    return tuple(
+        dict.fromkeys(
+            str(value).strip()
+            for value in (
+                citation.get("doi"),
+                citation.get("arxiv"),
+                citation.get("title"),
+                citation.get("url"),
+            )
+            if value and str(value).strip()
+        )
+    )
 
 
 def index_paper(title: str, doi: str = "") -> dict:
@@ -1483,15 +1575,18 @@ def local_pdf_with_resolution(paper: str, expected: dict | None = None) -> tuple
     """Return the local PDF path and safe provenance for how the source was obtained."""
     if Path(paper).is_file():
         return paper, {
-            "source_kind": "paper", "outcome": "readable", "retryable": False,
+            "source_kind": "paper",
+            "outcome": "readable",
+            "retryable": False,
             "attempts": [{"provider": "local", "result": "readable_pdf"}],
         }
     path, found = _fetch(paper, expected)
     return path.as_posix(), {
-        "source_kind": "paper", "outcome": "readable", "retryable": False,
-        "attempts": list(found.attempts) or [
-            {"provider": found.index or "direct_url", "result": "readable_pdf"}
-        ],
+        "source_kind": "paper",
+        "outcome": "readable",
+        "retryable": False,
+        "attempts": list(found.attempts)
+        or [{"provider": found.index or "direct_url", "result": "readable_pdf"}],
     }
 
 
@@ -1508,9 +1603,19 @@ def fetch_source(identifier: str) -> dict:
     """
     try:
         path, found = _fetch(identifier)
-        return {"status": "ok", "path": path.as_posix(), "url": found.url, "title": found.title,
-                "index": found.index, "ids": found.ids,
-                "source_outcome": {"source_kind": "paper", "outcome": "readable", "retryable": False,
-                                   "attempts": list(found.attempts)}}
+        return {
+            "status": "ok",
+            "path": path.as_posix(),
+            "url": found.url,
+            "title": found.title,
+            "index": found.index,
+            "ids": found.ids,
+            "source_outcome": {
+                "source_kind": "paper",
+                "outcome": "readable",
+                "retryable": False,
+                "attempts": list(found.attempts),
+            },
+        }
     except Exception as error:
         return tool_error(error)

@@ -91,6 +91,21 @@ describe('the passages of a claim', () => {
     expect(props.onJudge).toHaveBeenCalledWith('c1', 'rejected')
   })
 
+  it('carries web candidate location metadata into the focused evidence', () => {
+    const props = setup({
+      claim: claim([cand('web-candidate', {
+        reference_id: 'web-ref', reference_file: 'web-ref', page: null, locator: 'https://example.org/paper#p2', paragraph: 2,
+      })]),
+      references: [{ reference_id: 'web-ref', file: 'web-ref', label: 'Web source', source_kind: 'web-page', url: 'https://example.org/paper' }],
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /text of web-candidate/ }))
+    expect(props.onFocus).toHaveBeenCalledWith({
+      file: 'web-ref', passage: 'text of web-candidate', page: null, key: 'web-candidate',
+      locator: 'https://example.org/paper#p2', reference_id: 'web-ref', paragraph: 2,
+    })
+  })
+
   it('marks the focused passage, shows the shortcut keys, and scrolls it into view', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
@@ -207,6 +222,20 @@ describe('passages the person added', () => {
     expect(scroll).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'cited only' }))
     expect(props.onFocus).toHaveBeenCalledWith({ file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' })
+  })
+
+  it('carries web location metadata into a manually added passage focus', () => {
+    const props = setup({
+      claim: claim([]),
+      references: [{ reference_id: 'web-ref', file: 'web-ref', label: 'Web source', source_kind: 'web-page', url: 'https://example.org/paper' }],
+      draft: { ...emptyDraft(), added: [{ reference_id: 'web-ref', page: null, passage: 'manual web excerpt' }] },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /manual web excerpt/ }))
+    expect(props.onFocus).toHaveBeenCalledWith({
+      file: 'web-ref', passage: 'manual web excerpt', page: null, key: 'added:web-ref:manual web excerpt',
+      reference_id: 'web-ref', locator: 'https://example.org/paper',
+    })
   })
 })
 

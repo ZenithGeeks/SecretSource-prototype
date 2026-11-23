@@ -69,6 +69,58 @@ def test_startup_recent_reads_the_env_and_falls_back_when_it_is_empty_or_not_a_n
     assert main.startup_recent() == expected
 
 
+def test_restore_terminates_a_recheck_interrupted_by_restart(monkeypatch):
+    row = _row(
+        "a1",
+        stages=[
+            {"stage": "rechecking", "ref": "b13"},
+            {"stage": "rechecking", "ref": "b14"},
+            {"stage": "rechecked", "ref": "b14"},
+        ],
+    )
+    monkeypatch.setattr(main.store, "load_startup", lambda _limit: {"a1": row})
+    monkeypatch.setattr(main, "_save_soon", lambda _analysis_id: None)
+
+    main.restore()
+
+    event = main.analyses["a1"]["stages"][-1]
+    assert event["ref"] == "b13"
+    assert {key: value for key, value in event.items() if key != "at"} == {
+        "stage": "rechecked",
+        "ref": "b13",
+        "interrupted": True,
+    }
+    assert isinstance(event["at"], float)
+
+
+def test_lazy_lookup_finishes_an_interrupted_recheck(monkeypatch):
+    row = _row("old", stages=[{"stage": "rechecking", "ref": "b13"}])
+    saved = []
+    monkeypatch.setattr(main.store, "load", lambda _: row)
+    monkeypatch.setattr(main, "_save_soon", saved.append)
+
+    async def lookup():
+        monkeypatch.setattr(main, "_loop", asyncio.get_running_loop())
+        loaded = await asyncio.to_thread(main.lookup, "old")
+        assert loaded["stages"][-1]["interrupted"] is True
+
+    asyncio.run(lookup())
+    assert saved == ["old"]
+
+
+def test_pending_recheck_refs_use_the_latest_stage_per_reference():
+    stages = [
+        {"stage": "rechecking", "ref": "b13"},
+        {"stage": "rechecking", "ref": "b14"},
+        {"stage": "rechecked", "ref": "b14"},
+        {"stage": "queued", "ref": "b16"},
+        {"stage": "rechecking", "ref": "b15"},
+        {"stage": "recheck-failed", "ref": "b15"},
+    ]
+
+    assert main._pending_recheck_refs(stages) == ["b13"]
+
+
 def test_remembering_a_missing_id_drops_marks_that_have_expired():
     main._missing["old"] = time.monotonic() - main._MISSING_TTL_SECONDS - 1
 
@@ -317,7 +369,12 @@ def pipeline(monkeypatch):
             "claims": [{"claim": "c1", "citations": [{"key": "s1"}]}],
         },
     )
-    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr(
+        main,
+        "checked_citations",
+        lambda claim: [(citation, citation["key"]) for citation in claim.get("citations", [])],
+    )
     monkeypatch.setattr(
         main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
     )
@@ -406,6 +463,29 @@ def test_a_readable_source_outcome_is_passed_to_each_check(monkeypatch, pipeline
     assert saved[-1]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
 
 
+def test_a_readable_web_page_is_checked_with_the_web_judge(monkeypatch, pipeline):
+    saved, _checked = pipeline
+    page = object()
+    monkeypatch.setattr(
+        main, "prepare_source",
+        lambda _source, expected=None: {"status": "web-page", "web_page": page},
+    )
+    checked = []
+    monkeypatch.setattr(
+        main, "check_web_page",
+        lambda claim, source, web_page, judged, others, outcome=None: (
+            checked.append((claim, source, web_page, judged, others))
+            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+        ),
+    )
+
+    result = run_analysis_job("g-web", "paper", True, None)
+
+    assert result["status"] == "done"
+    assert checked == [("c1", "s1", page, "c1", False)]
+    assert saved[-1]["claims"][0]["verdicts"][0]["verdict"] == "supports"
+
+
 def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
     outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
     main.analyses["g-recheck-outcome"] = {
@@ -432,7 +512,7 @@ def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
 
     asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf")))
 

@@ -1,8 +1,8 @@
 /** A claim whose cited work has no PDF: which reference opens for it (never one it does not cite),
  * and the card the reference pane shows for each work that could not be read. */
 
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   citedReferences,
@@ -61,6 +61,8 @@ describe('unresolvedCitations', () => {
         year: '2021',
         reason: 'the PDF would not download',
         links: [{ text: 'https://www.top500.org/', href: 'https://www.top500.org/' }],
+        doi: '',
+        url: 'https://www.top500.org/',
       },
     ])
   })
@@ -189,6 +191,96 @@ describe('UnresolvedReferences', () => {
     const doi = { text: 'doi:10.1016/j.jpdc.2014.07.003', href: 'https://doi.org/10.1016/j.jpdc.2014.07.003' }
     render(<UnresolvedReferences citations={[card({ links: [doi, card().links[0]] })]} />)
     expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([doi.href, 'https://www.top500.org/'])
+  })
+
+  it('lets a labeler upload a PDF for a cited reference and explains a failed replacement', () => {
+    const onUpload = vi.fn()
+    const file = new File(['%PDF-1.4'], 'paper.pdf', { type: 'application/pdf' })
+    render(<UnresolvedReferences citations={[card({
+      repairError: { status: 'error', reason: 'identity-mismatch', message: 'wrong paper' },
+    })]} onUpload={onUpload} />)
+
+    expect(screen.getByText(/The replacement was not used: wrong paper/)).toBeInTheDocument()
+    const input = screen.getByLabelText('Provide a PDF for Top500')
+    fireEvent.change(input, { target: { files: [file] } })
+    expect(onUpload).toHaveBeenCalledWith('b23', file)
+    fireEvent.change(input, { target: { files: [] } })
+    expect(onUpload).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers retry only for retryable outcomes and scopes it to that citation', () => {
+    const onRetry = vi.fn()
+    render(<UnresolvedReferences citations={[card({
+      sourceOutcome: { source_kind: 'unknown', outcome: 'temporary-failure', retryable: true, attempts: [] },
+    })]} onRetry={onRetry} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry this reference' }))
+    expect(onRetry).toHaveBeenCalledWith('b23')
+  })
+
+  it('offers a DOI or URL correction scoped to the unresolved citation', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ doi: '10.1234/old' })]} onRepair={onRepair} />)
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: '10.5678/new' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
+    expect(onRepair).toHaveBeenCalledWith('b23', { doi: '10.5678/new' })
+  })
+
+  it('submits a corrected DOI from the form and ignores an empty correction', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ doi: '10.1234/old' })]} onRepair={onRepair} />)
+    const form = screen.getByLabelText('Correct DOI for Top500').closest('form')!
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: '' } })
+    fireEvent.submit(form)
+    expect(onRepair).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: ' 10.5678/new ' } })
+    fireEvent.submit(form)
+    expect(onRepair).toHaveBeenCalledWith('b23', { doi: '10.5678/new' })
+  })
+
+  it('clears the old DOI when the labeler enters a replacement page URL', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ doi: '10.1234/old' })]} onRepair={onRepair} />)
+    fireEvent.change(screen.getByLabelText('Correct URL for Top500'), { target: { value: 'https://example.org/new' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
+    expect(onRepair).toHaveBeenCalledWith('b23', { url: 'https://example.org/new' })
+  })
+
+  it('allows clearing a URL without setting a DOI', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ url: 'https://example.org/old' })]} onRepair={onRepair} />)
+    fireEvent.change(screen.getByLabelText('Correct URL for Top500'), { target: { value: '' } })
+    expect(screen.getByLabelText('Correct URL for Top500')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Try replacement' })).toBeDisabled()
+  })
+
+  it('clears a prior URL when the labeler enters a replacement DOI', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ url: 'https://example.org/old' })]} onRepair={onRepair} />)
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: '10.5678/new' } })
+    expect(screen.getByLabelText('Correct URL for Top500')).toHaveValue('')
+  })
+
+  it('disables both repair actions while a request is running', () => {
+    render(<UnresolvedReferences citations={[card({
+      sourceOutcome: { source_kind: 'unknown', outcome: 'temporary-failure', retryable: true, attempts: [] },
+    })]} onRetry={vi.fn()} onUpload={vi.fn()} onRepair={vi.fn()} uploading retrying repairing />)
+
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled()
+    expect(screen.getByLabelText('Provide a PDF for Top500')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Checking replacement…' })).toBeDisabled()
+  })
+
+  it('hides repair actions for a named-only citation or a row without a reference marker', () => {
+    render(<UnresolvedReferences citations={[
+      card({ reason: 'the paper only names it, so it was not checked' }),
+      card({ ref: '' }),
+    ]} onUpload={vi.fn()} onRetry={vi.fn()} onRepair={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: 'Retry this reference' })).toBeNull()
+    expect(screen.queryByText('Provide a PDF')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Try replacement' })).toBeNull()
   })
 
   it('shows a sanitized retrieval attempt and distinguishes a retryable outage', () => {

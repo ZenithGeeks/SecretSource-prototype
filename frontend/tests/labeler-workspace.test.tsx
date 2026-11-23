@@ -8,9 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const gateway = vi.hoisted(() => ({
   session: {} as Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
   sessionError: '',
+  sessionReads: 0,
+  rejectSourceReview: false,
   posts: [] as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
   saveFails: false,
   saveHangs: false,
+  referenceErrorFor: '',
   searches: [] as unknown[],
   found: [] as unknown[],
   searchFails: false,
@@ -25,6 +28,18 @@ vi.mock('../src/lib/api', async (original) => ({
       if (gateway.searchFails) throw new Error('502: retrieval did not answer')
       return { candidates: gateway.found }
     }
+    if (path.endsWith('/source-review') && init?.method === 'POST') {
+      if (gateway.rejectSourceReview) {
+        gateway.session.claims[0].evidence_revision = 1
+        throw new Error('409: evidence changed; reload the latest session')
+      }
+      gateway.posts.push(JSON.parse(String(init.body)))
+      return { reviewed: true }
+    }
+    if (path.includes('/references/') && (path.endsWith('/pdf') || path.endsWith('/retry') || path.endsWith('/repair'))) {
+      if (gateway.referenceErrorFor === path) throw new Error('503: reference service unavailable')
+      return { id: 'reference-check' }
+    }
     if (init?.method === 'POST') {
       if (gateway.saveHangs) await new Promise(() => undefined)
       if (gateway.saveFails) throw new Error('503: not set up')
@@ -32,6 +47,7 @@ vi.mock('../src/lib/api', async (original) => ({
       return { claims: 1, candidates: 2, labels: 1 }
     }
     if (path.startsWith('/labeling/sessions/')) {
+      gateway.sessionReads += 1
       if (gateway.sessionError) throw new Error(gateway.sessionError)
       return gateway.session
     }
@@ -88,6 +104,7 @@ vi.mock('../src/components/PageViewer', () => ({
 }))
 
 import { Workspace } from '../src/roles/labeler/screens/Workspace'
+import { WebEvidenceViewer } from '../src/roles/labeler/components/WebEvidenceViewer'
 
 const marker = (ref: string, text: string) => ({ ref, text, page: 1, x0: 0, y0: 0, x1: 1, y1: 1, page_width: 600 })
 
@@ -163,9 +180,12 @@ const wideScreen = (matches: boolean) => {
 beforeEach(() => {
   gateway.session = makeSession()
   gateway.sessionError = ''
+  gateway.sessionReads = 0
+  gateway.rejectSourceReview = false
   gateway.posts.length = 0
   gateway.saveFails = false
   gateway.saveHangs = false
+  gateway.referenceErrorFor = ''
   gateway.searches.length = 0
   gateway.found = []
   gateway.searchFails = false
@@ -174,7 +194,182 @@ beforeEach(() => {
   window.localStorage.setItem('labeler.paperView', 'both')
   wideScreen(true)
 })
-afterEach(() => vi.restoreAllMocks())
+
+it.each([true, false])('shows citation repair failures (wide: %s)', async (wide) => {
+  wideScreen(wide)
+  const claim = { ...makeSession().claims[0], citation_repairs: { b9: { message: 'wrong paper' } } }
+  gateway.session = makeSession({ claims: [claim] })
+  await open()
+  expect(screen.getByRole('alert')).toHaveTextContent('Replacement for [b9] was not used: wrong paper. Previous evidence remains available.')
+})
+
+it('shows success and failure notices for cited-reference uploads and retries', async () => {
+  const claim = {
+    ...makeSession().claims[0],
+    cited: ['b9'],
+    unchecked: [{
+      ref: 'b9', label: 'Unread work', doi: '10.1234/old', reason: 'no-open-access',
+      source_outcome: { source_kind: 'unknown', outcome: 'temporary-failure', retryable: true, attempts: [] },
+    }],
+  }
+  gateway.session = makeSession({ claims: [claim], unread: [] })
+  await open()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry this reference' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Retry started for this reference.')
+  gateway.referenceErrorFor = '/analyses/a1/references/b9/retry'
+  fireEvent.click(screen.getByRole('button', { name: 'Retry this reference' }))
+  expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
+
+  const input = screen.getByLabelText('Provide a PDF for Unread work')
+  const file = new File(['%PDF-1.4'], 'replacement.pdf', { type: 'application/pdf' })
+  gateway.referenceErrorFor = ''
+  fireEvent.change(input, { target: { files: [file] } })
+  expect(await screen.findByRole('status')).toHaveTextContent('PDF received. Checking this reference now.')
+  gateway.referenceErrorFor = '/analyses/a1/references/b9/pdf'
+  fireEvent.change(input, { target: { files: [file] } })
+  expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
+})
+
+it('shows success and failure notices when correcting a citation in the workspace', async () => {
+  const claim = {
+    ...makeSession().claims[0], cited: ['b9'],
+    unchecked: [{ ref: 'b9', label: 'Unread work', doi: '10.1234/old', reason: 'no-open-access' }],
+  }
+  gateway.session = makeSession({ claims: [claim], unread: [] })
+  await open()
+
+  const doi = screen.getByLabelText('Correct DOI for Unread work')
+  fireEvent.change(doi, { target: { value: '10.5678/new' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Checking the corrected citation. Previous evidence stays available until it succeeds.')
+
+  gateway.referenceErrorFor = '/analyses/a1/references/b9/repair'
+  fireEvent.change(doi, { target: { value: '10.5678/other' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
+  expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
+})
+
+it('asks the labeler to review saved labels after a cited source changes', async () => {
+  const claim = { ...makeSession().claims[0], needs_review: true }
+  gateway.session = makeSession({ claims: [claim] })
+  await open()
+
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'A source for this claim changed. Review its evidence before reusing the saved label.',
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Mark evidence reviewed' }))
+  await waitFor(() => expect(gateway.posts).toContainEqual({ claim_id: 'paperA#0', evidence_revision: 0 }))
+})
+
+it('reloads the session and keeps review required when the evidence revision became stale', async () => {
+  const claim = { ...makeSession().claims[0], needs_review: true, evidence_revision: 0 }
+  gateway.session = makeSession({ claims: [claim] })
+  gateway.sessionReads = 0
+  gateway.rejectSourceReview = true
+  await open()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Mark evidence reviewed' }))
+  await waitFor(() => expect(gateway.sessionReads).toBeGreaterThanOrEqual(2))
+  expect(screen.getByText(/Reloaded the latest session/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Mark evidence reviewed' })).toBeInTheDocument()
+})
+
+it('opens readable web citations as linkable web evidence instead of a PDF page', async () => {
+  const url = 'https://example.org/article'
+  const page = makeSession()
+  page.claims[0] = {
+    ...page.claims[0],
+    cited: ['b5'],
+    candidates: [{
+      cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: `${url}#finding`,
+    }],
+  }
+  page.references = [{
+    reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5',
+    source_kind: 'web-page', url, retrieved_at: '2026-11-23T00:00:00+00:00',
+  }]
+  page.unread = []
+  gateway.session = page
+  await open()
+
+  expect(screen.getByRole('region', { name: 'Web source evidence' })).toHaveTextContent('Static text from the cited page.')
+  expect(screen.getByText(/Paragraph 2/)).toBeInTheDocument()
+  expect(screen.getByText('Retrieved 2026-11-23T00:00:00+00:00')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', `${url}#finding`)
+})
+
+it('does not render a web evidence link for a malformed locator', async () => {
+  const page = makeSession()
+  page.claims[0] = {
+    ...page.claims[0],
+    cited: ['b5'],
+    candidates: [{
+      cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: 'http://[',
+    }],
+  }
+  page.references = [{
+    reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5',
+    source_kind: 'web-page', url: 'https://example.org/article', retrieved_at: '2026-11-23T00:00:00+00:00',
+  }]
+  page.unread = []
+  gateway.session = page
+  await open()
+
+  expect(screen.queryByRole('link', { name: /Open cited page and passage/ })).not.toBeInTheDocument()
+})
+
+it('uses the page URL and default text when web evidence has no location details', () => {
+  render(<WebEvidenceViewer title="" url="https://example.org/article" />)
+  expect(screen.getByRole('heading', { name: 'Cited web page' })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', 'https://example.org/article')
+  expect(screen.getByText('Choose a retrieved paragraph to inspect its source location.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Close reference' })).not.toBeInTheDocument()
+})
+
+it('does not let an unsafe locator override the cited page URL', async () => {
+  const page = makeSession()
+  page.claims[0] = {
+    ...page.claims[0],
+    cited: ['b5'],
+    candidates: [{
+      cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: 'javascript:alert(1)',
+    }],
+  }
+  page.references = [{
+    reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5',
+    source_kind: 'web-page', url: 'javascript:alert(2)',
+  }]
+  page.unread = []
+  gateway.session = page
+  await open()
+
+  expect(screen.queryByRole('link', { name: /Open cited page and passage/ })).not.toBeInTheDocument()
+})
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
+it('polls a reference recheck until it finishes, then stops', async () => {
+  gateway.session = makeSession({ stages: [{ stage: 'rechecking' }] })
+  gateway.sessionReads = 0
+  vi.useFakeTimers()
+  renderWorkspace()
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  expect(gateway.sessionReads).toBe(1)
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(gateway.sessionReads).toBe(2)
+  gateway.session = { ...gateway.session, stages: [{ stage: 'rechecked' }] }
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(gateway.sessionReads).toBe(3)
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+  expect(gateway.sessionReads).toBe(3)
+})
 
 describe('when the paper cannot be shown', () => {
   it('says why the claims cannot be opened', async () => {
@@ -608,6 +803,33 @@ describe('on a narrow screen', () => {
     expect(screen.getByRole('button', { name: 'Read the reference' })).toBeDisabled()
     expect(screen.queryByLabelText('Open reference')).not.toBeInTheDocument()
   })
+
+  it('keeps unread citations visible while the mobile web reference overlay is open', async () => {
+    const url = 'https://example.org/article'
+    const page = makeSession()
+    page.claims[0] = {
+      ...page.claims[0],
+      cited: ['b5', 'b9'],
+      candidates: [{
+        cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+        score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: `${url}#finding`,
+      }],
+    }
+    page.references = [{
+      reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5', source_kind: 'web-page', url,
+    }]
+    page.unread = [{ reference_id: 'missing-b9', file: '', label: 'Unread work', ref: 'b9' }]
+    gateway.session = page
+    await open()
+
+    const unread = screen.getByRole('region', { name: 'Reference not found' })
+    expect(unread).toHaveTextContent('Unread work')
+    fireEvent.click(screen.getByRole('button', { name: 'Read the reference' }))
+    expect(screen.getByRole('region', { name: 'Web source evidence' })).toHaveTextContent('Static text from the cited page.')
+    expect(screen.getByRole('region', { name: 'Reference not found' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close reference' }))
+    expect(screen.queryByRole('region', { name: 'Web source evidence' })).not.toBeInTheDocument()
+  })
 })
 
 describe('the screen size', () => {
@@ -924,7 +1146,7 @@ describe('a claim with no passages', () => {
     await open()
     expect(reference()).toBe('refD.pdf|')
     expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('refD.pdf: Reference [b8]: Ref D / opens on page 1')
-    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Reference not found' })).toBeInTheDocument()
   })
 
   it('goes by the markers in its sentence when the gateway is older than the list of what it cites', async () => {
@@ -950,6 +1172,6 @@ describe('a claim with no passages', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Open reference'), { target: { value: 'refB' } })
     expect(reference()).toBe('refB.pdf|')
-    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Reference not found' })).toBeInTheDocument()
   })
 })
