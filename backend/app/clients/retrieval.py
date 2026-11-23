@@ -6,7 +6,7 @@ no session handshake in a hot loop.
 
 Files go with the request (/api/upload, /api/upload_figures), not as paths. A path
 means the same thing on both sides only under the compose bind-mount. The service may
-be on another machine or on Cloud Run.
+be on another machine.
 """
 
 import hashlib
@@ -35,7 +35,7 @@ tracer = trace.get_tracer(__name__)
 # off the machine. Ten covers what an answer keeps.
 MAX_TRACED_DOCUMENTS = 10
 
-# One session for every call, so connections to Cloud Run are reused instead of a new TLS
+# One session for every call, so connections to the service are reused instead of a new TLS
 # handshake each time. One retry for a refused connection or a 502/503/504, which is what a
 # scaling or restarting instance returns. Never on a read timeout: an upload can take 900 s,
 # and retrying it would double the wait. POST is listed because urllib3 skips it by default;

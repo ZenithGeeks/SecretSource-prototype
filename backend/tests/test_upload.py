@@ -69,13 +69,6 @@ def test_an_oversized_file_is_refused_and_not_saved(client_and_dir, monkeypatch)
     assert list(papers_dir.iterdir()) == []
 
 
-def test_upload_bootstrap_tells_legacy_clients_to_use_the_gateway(client_and_dir):
-    client, _ = client_and_dir
-    response = client.post("/uploads", json={"filename": "paper.pdf", "size": 10})
-    assert response.status_code == 200
-    assert response.json() == {"url": None}
-
-
 @pytest.fixture
 def client_and_dir(uploads, tmp_path):
     return TestClient(main.app), tmp_path

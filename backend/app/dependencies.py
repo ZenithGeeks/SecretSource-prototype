@@ -82,7 +82,7 @@ def _get(url: str, headers: dict) -> Answer:
     detail = f"HTTP {response.status_code}"
     if not response.ok:
         # Why it refused, in the service's words: a bare 500 does not say "billing is disabled".
-        # Cloud Run's error pages are HTML, so the tags go first.
+        # A proxy's error page is HTML, so the tags go first.
         detail += f": {' '.join(re.sub(r'<[^>]*>', ' ', response.text).split())[:160]}"
     return Answer(response.ok, detail, body)
 
@@ -182,9 +182,8 @@ def _worker() -> dict:
 
 
 def _not_probed(name: str, url: str) -> dict:
-    """A GPU service that scales to zero. Cloud Run bills a GPU instance for as long as it
-    is up, and asking every minute kept one up around the clock (~$38 a day). The pipeline
-    still asks it before each use (retrieval.colpali_available)."""
+    """A GPU service that scales to zero. Asking it every minute would keep it up around
+    the clock. The pipeline still asks it before each use (retrieval.colpali_available)."""
     return {
         "name": name,
         "url": _shown(url),

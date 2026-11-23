@@ -25,8 +25,8 @@ evaluating the running system, not something to point at a local dev gateway.
 - Prometheus UI: http://localhost:9090
 - Grafana UI: http://localhost:3001
 
-(Swap `localhost` for the host's Tailscale IP, or whatever `BIND_ADDRESS` was set to, if the
-stack isn't running on the machine you're browsing from.)
+(Swap `localhost` for whatever `BIND_ADDRESS` was set to, if the stack isn't running on the
+machine you're browsing from.)
 
 ## Grafana: provisioned automatically
 

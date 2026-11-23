@@ -738,7 +738,7 @@ def _start(paper: str, verify: bool, owner: str | None, claim_limit: int | None 
     # Stored now so a gateway restart before a worker picks the job up still finds it (else it
     # 404s, and the web app's event stream stops retrying). The worker's saves supersede this.
     _save_soon(analysis_id)
-    # Cloud Run can run several gateway instances, each with its own `analyses`. The others only
+    # Several gateway instances may run, each with its own `analyses`. The others only
     # learn of a run from a snapshot on Redis, and the worker sends its first one when it starts
     # the job. Until then (minutes, while a worker is busy with another run) they answered 404 for
     # this analysis (#259). Best-effort, like _publish: a later snapshot catches them up.
@@ -986,12 +986,6 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
         logger.exception("checking analysis %s again against an uploaded %s failed", analysis_id, ref)
     finally:
         _record_stage(analysis_id, "rechecked", ref=ref)
-
-
-@app.post("/uploads")
-async def new_upload():
-    """Direct bucket uploads are disabled; PDFs go through POST /analyses/upload."""
-    return {"url": None}
 
 
 def _listed(user: str | None) -> list[dict]:

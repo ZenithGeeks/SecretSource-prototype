@@ -218,7 +218,7 @@ backend/            gateway API, pipeline, ADK agents (Python, FastAPI, ADK, DSP
 frontend/           React + Vite UI (nginx proxies /api to gateway)
 services/colbert/   ColBERTv2 text retrieval service
 services/colpali/   ColPali visual retrieval service
-deploy/             GPU compose, Tailscale, and monitoring configs
+deploy/             GPU compose and monitoring configs
 supabase/           Optional Supabase Postgres migrations
 data/papers/        downloaded PDFs and figure crops (gitignored)
 ```

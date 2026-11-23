@@ -12,7 +12,7 @@
 # Ports are published on 127.0.0.1 only, because none of these services checks who is
 # calling: on café or campus Wi-Fi, 0.0.0.0 would open them to everyone on the network.
 # Containers reach each other by service name, so this changes nothing between them. To share
-# the stack with teammates over Tailscale, set BIND_ADDRESS to this machine's Tailscale IP.
+# the stack on a private network, set BIND_ADDRESS to this machine's address there.
 services:
   vllm:
     profiles: [gpu]

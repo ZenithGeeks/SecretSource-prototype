@@ -1,4 +1,4 @@
-"""_grobid_pdf sends GROBID a PDF over Cloud Run's 32 MiB limit with its images at about 72 dpi,
+"""_grobid_pdf sends GROBID a PDF over the 32 MiB upload limit with its images at about 72 dpi,
 and keys the cache on the original file, so a 34 MiB paper no longer stops with a 413."""
 
 import hashlib

@@ -42,7 +42,7 @@ def test_mcp_client_for_other_hosts_adds_nothing(monkeypatch):
     asyncio.run(client.aclose())
 
 
-GATEWAY = "https://gateway.example.ts.net:8443"
+GATEWAY = "https://gateway.example.test:8443"
 
 
 @pytest.fixture

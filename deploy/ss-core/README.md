@@ -35,27 +35,6 @@ To roll back:
 `sudo docker tag secretsource-worker-worker:pre-<sha> secretsource-worker-worker:latest`, then
 `sudo sh -c "cd /var/lib/docker/secretsource-worker && docker compose up -d --no-deps --no-build worker"`.
 
-### Cloud Run and direct upload retirement
-
-Before switching traffic, confirm whether any clients still use the old Cloud Run gateway or
-the Vercel edge proxy that authenticates to it. Verify PDF submission through the replacement
-gateway. If the old gateway still issues upload sessions, stop issuing new sessions before
-cutover. Keep its upload completion and `POST /analyses/from-upload` claim routes available
-until completed uploads have been claimed or affected users have been notified to resubmit;
-do not end the drain based only on upload completion or session expiry. If an upload was
-interrupted at cutover, ask the user to submit the original PDF again through the replacement
-gateway. Before retiring the bucket, copy each PDF referenced by a retained analysis into
-`PAPERS_DIR` under its saved file name so completed analyses remain readable after cutover,
-confirm the bucket's retention policy, and account for any completed but unclaimed PDFs.
-
-After traffic and uploads have moved, verify that no workloads still depend on each Cloud Run
-service and retire the confirmed-unused services first. Only then delete the old project and
-region Cloud Scheduler jobs (`gpu-guard-*`, `scale-guard-*`) and Cloud Monitoring alert
-policies tied to those retired services, including "GPU Cloud Run service billed
-continuously". Check which service account the scheduler jobs used and whether any proxy,
-scheduled job, or other workload still uses its credentials or permissions before revoking
-them. The repository change does not alter those external resources.
-
 ### One-time cleanup after removing `status-bot`
 
 `deploy-worker.sh` only recreates `worker` without `--remove-orphans`, so an existing
