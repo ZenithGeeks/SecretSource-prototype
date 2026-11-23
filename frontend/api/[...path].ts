@@ -1,8 +1,5 @@
-// Proxies every /api/* call from the Vercel-hosted frontend to the gateway on Cloud Run,
-// attaching the Google identity token the gateway's IAM requires. gcp-edu-471706 has a
-// domain-restricted-sharing org policy, so the gateway can never be made allUsers-public the
-// way ss-core's nginx proxy was — Vercel isn't a GCP identity and can't mint that token
-// itself, so this does it on its behalf.
+// Proxies every /api/* call from the Vercel-hosted frontend to the gateway,
+// attaching a Google identity token if the upstream gateway requires IAM auth.
 //
 // Edge runtime, not a Node serverless function, for two reasons:
 //  - Node functions on Vercel cap request bodies at 4.5MB; paper uploads go up to 100MB
@@ -19,10 +16,10 @@
 //
 // The gateway's own Authorization header is spent on this ID token, so the frontend's
 // Supabase session token (which the gateway's current_user dependency needs) travels as
-// X-User-Authorization instead — see backend/app/auth.py's matching change.
+// X-User-Authorization instead — see backend/app/auth.py.
 //
 // Vercel project env vars required (Settings > Environment Variables, not GitHub secrets):
-//   GATEWAY_URL        the gateway's Cloud Run URL, e.g. https://gateway-uotp7r3z6a-as.a.run.app
+//   GATEWAY_URL         the upstream gateway URL
 //   GCP_SA_EMAIL        the service account's client_email (backend/secrets/service-auth.json)
 //   GCP_SA_PRIVATE_KEY  its private_key, PEM, newlines as literal \n or real linebreaks (both handled)
 

@@ -23,8 +23,8 @@ from opentelemetry import trace
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from app.clients.cloud_run import uploadable
 from app.clients.service_auth import auth_headers
+from app.clients.upload_limit import uploadable
 from app.config import COLBERT_URL, COLPALI_URL
 
 # A no-op until app/tracing.py registers Phoenix in this process.

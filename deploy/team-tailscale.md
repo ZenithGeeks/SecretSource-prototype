@@ -96,7 +96,7 @@ Docker Desktop to start when you sign in.
   Settings -> Agents its MCP URL and the `/me/` page where people get their key.
 - `SCOPUS_API_KEY` turns on the Labeler's paper search.
 - `REDIS_URL` stays empty, so the queue is the local redis container.
-- `PAPERS_BUCKET` and `UPLOAD_ORIGINS` stay empty, so PDF uploads go through the gateway.
+- PDF uploads go directly through the gateway.
 - `VLLM_URL=http://host.docker.internal:9080/llm/v1` with the host's own gatehouse key, so the
   host's analyses share the judge LLM's 3 slots with the developers instead of competing with
   them. The provider key itself lives only in gatehouse's `.env`.

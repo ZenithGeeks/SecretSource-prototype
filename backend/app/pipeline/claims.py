@@ -383,8 +383,8 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
     """
     import requests
 
-    from app.clients.cloud_run import uploadable
     from app.clients.service_auth import auth_headers
+    from app.clients.upload_limit import uploadable
 
     with open(pdf_path, "rb") as pdf_file:
         pdf_bytes = pdf_file.read()

@@ -60,7 +60,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 from redis.exceptions import RedisError
 
-from app import chats, dependencies, mcp_server, researcher, store, uploads
+from app import chats, dependencies, mcp_server, researcher, store
 from app.agent_runs import get_runner
 from app.agent_runs import router as agent_router
 from app.analysis_table import AnalysisTable
@@ -69,7 +69,6 @@ from app.author.router import DRAFT_CHECK, author_pdfs
 from app.author.router import router as author_router
 from app.config import (
     AVATARS_DIR,
-    PAPERS_BUCKET,
     PAPERS_DIR,
     PARALLEL_CHECKS,
     PARALLEL_CHECKS_TOTAL,
@@ -911,8 +910,9 @@ async def upload_analysis(
     file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
 ):
     # Read one byte past the limit to tell a full-size file from an oversized one.
-    content = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
-    if len(content) > uploads.MAX_UPLOAD_BYTES:
+    max_upload_bytes = 100 * 1024 * 1024
+    content = await file.read(max_upload_bytes + 1)
+    if len(content) > max_upload_bytes:
         raise HTTPException(413, "the PDF must be 100 MB or smaller")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(422, "the file is not a PDF")
@@ -932,8 +932,9 @@ async def upload_reference_pdf(
         raise HTTPException(409, "wait for the analysis to finish")
     if ref not in (analysis.get("references") or {}):
         raise HTTPException(404, f"the paper has no reference {ref}")
-    content = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
-    if len(content) > uploads.MAX_UPLOAD_BYTES:
+    max_upload_bytes = 100 * 1024 * 1024
+    content = await file.read(max_upload_bytes + 1)
+    if len(content) > max_upload_bytes:
         raise HTTPException(413, "the PDF must be 100 MB or smaller")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(422, "the file is not a PDF")
@@ -988,43 +989,10 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
         _record_stage(analysis_id, "rechecked", ref=ref)
 
 
-class UploadRequest(BaseModel):
-    filename: str
-    size: int = Field(gt=0, le=uploads.MAX_UPLOAD_BYTES)
-
-
 @app.post("/uploads")
-async def new_upload(body: UploadRequest, request: Request, user: str | None = Depends(current_user)):
-    """A URL to PUT one PDF straight to the papers bucket (#266), or {"url": null} where direct
-    uploads are not set up (no bucket, or no page allowed to use it), and the PDF goes through
-    POST /analyses/upload instead."""
-    if not (PAPERS_BUCKET and uploads.UPLOAD_ORIGINS):
-        return {"url": None}
-    origin = request.headers.get("origin", "")
-    try:
-        return await asyncio.to_thread(uploads.start_upload, body.filename, body.size, origin, user)
-    except PermissionError as error:
-        raise HTTPException(403, str(error)) from None
-    except uploads.UploadRefused as error:
-        logger.warning("upload refused: %s", error)
-        raise HTTPException(503, "storage would not take the upload, try again shortly") from None
-
-
-class UploadedPaper(BaseModel):
-    object_name: str
-    verify: bool = True
-
-
-@app.post("/analyses/from-upload")
-async def analyse_uploaded_paper(body: UploadedPaper, user: str | None = Depends(current_user)):
-    """Start an analysis of a PDF the caller uploaded with a URL from POST /uploads, once."""
-    try:
-        path = await asyncio.to_thread(uploads.claim, body.object_name, user, PAPERS_DIR)
-    except LookupError as error:
-        raise HTTPException(404, str(error)) from None
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from None
-    return _start(path.as_posix(), body.verify, user)
+async def new_upload():
+    """Direct bucket uploads are disabled; PDFs go through POST /analyses/upload."""
+    return {"url": None}
 
 
 def _listed(user: str | None) -> list[dict]:

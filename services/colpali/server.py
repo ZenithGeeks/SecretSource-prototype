@@ -14,7 +14,7 @@ HTTP:
     POST /api/upload_figures  form source, title, figures (JSON) + "images" files -> like /api/add_figures
     The /add routes take paths on this machine. The /upload routes carry the files.
     Use them when the caller does not share this disk (a gateway on another machine,
-    or on Cloud Run).
+    or on another machine)."""
     GET  /health
 
 MCP (streamable HTTP at /mcp): tool search_media. It returns figures only for the file
@@ -60,7 +60,7 @@ def store() -> Store:
 
 
 # The SDK's DNS-rebinding guard only allows localhost Host headers. It returns 421 for
-# every request that comes through Cloud Run or a compose service name. Nothing here is
+# every request that comes through a compose service name. Nothing here is
 # bound to a loopback address, so the guard is off.
 mcp = FastMCP(
     "colpali-retrieval",

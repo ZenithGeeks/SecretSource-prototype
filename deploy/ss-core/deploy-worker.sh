@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the RQ worker on ss-core from a commit on main (#412), and the Discord status bot
-# when its code changed.
+# Deploy the RQ worker on ss-core from a commit on main (#412).
 #
 #   sudo /usr/local/bin/deploy-worker <commit-sha>
 #
@@ -18,7 +17,6 @@ REPO="git@github.com:ZenithGeeks/SecretSource-prototype.git"
 MIRROR=/var/lib/secretsource-deploy/repo.git
 WORKER_DIR=/var/lib/docker/secretsource-worker
 CONTAINER=secretsource-worker-worker-1
-BOT_DIR=services/status-bot
 IMAGE=secretsource-worker-worker
 KEY=/root/.ssh/secretsource_deploy
 WAIT_MINUTES=45 # an analysis takes ~25 min on ss-core's CPU
@@ -51,23 +49,6 @@ fi
 # The code is copied into the image at build time, so replacing the files and building do not
 # touch the running worker. Only the restart has to wait for it to be idle.
 git -C "$MIRROR" archive "$sha" | tar -x -C "$WORKER_DIR"
-
-# The bot runs no analyses, so it does not wait for the worker to be idle. A failed bot deploy is
-# reported and the worker deploy goes on: the worker matters more.
-bot_changed() {
-  [[ -n $deployed ]] || return 0
-  git -C "$MIRROR" cat-file -e "${deployed}^{commit}" 2>/dev/null || return 0
-  ! git -C "$MIRROR" diff --quiet "$deployed" "$sha" -- "$BOT_DIR"
-}
-deploy_status_bot() {
-  (cd "$WORKER_DIR" &&
-    docker compose --profile status-bot build --quiet status-bot &&
-    docker compose --profile status-bot up -d --no-deps --no-build --force-recreate status-bot)
-}
-if bot_changed; then
-  say "deploying the status bot at $short"
-  deploy_status_bot || say "the status bot did not deploy; see the output above" >&2
-fi
 
 say "building $short"
 (cd "$WORKER_DIR" && docker compose build --quiet worker)

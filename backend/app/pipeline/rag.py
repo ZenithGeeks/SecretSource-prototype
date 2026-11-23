@@ -45,7 +45,7 @@ def _build_rag():
 
         def forward(self, question: str, papers: frozenset[str]):
             # colbert_search, not dspy.ColBERTv2. dspy's client cannot send the identity
-            # token. The Cloud Run service requires it. `papers` is the caller's own set:
+            # token if SERVICE_AUTH=api-key is configured. `papers` is the caller's own set:
             # the request names them, and an empty set never reaches here.
             hits = colbert_search(question, k=self.k, sources=papers, visible=papers)
             passages = [hit["text"] for hit in hits]

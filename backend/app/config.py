@@ -86,24 +86,17 @@ PHOENIX_COLLECTOR_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT") or ""
 PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME") or "secretsource"
 
 # How calls to the services above prove who they are.
-# `google-id-token` adds a Google identity token to every *.run.app URL.
 # `api-key` sends SERVICE_API_KEY in an `apikey` header to the three URLs above, for the team
 # gateway in front of the host's GPU services.
 # `none` sends nothing, which compose needs.
 SERVICE_AUTH = os.getenv("SERVICE_AUTH") or "none"
-if SERVICE_AUTH not in ("none", "google-id-token", "api-key"):
-    raise ValueError(f"SERVICE_AUTH must be 'none', 'google-id-token' or 'api-key', got {SERVICE_AUTH!r}")
+if SERVICE_AUTH not in ("none", "api-key"):
+    raise ValueError(f"SERVICE_AUTH must be 'none' or 'api-key', got {SERVICE_AUTH!r}")
 SERVICE_API_KEY = os.getenv("SERVICE_API_KEY") or ""
 if SERVICE_AUTH == "api-key" and not SERVICE_API_KEY:
     raise ValueError("SERVICE_AUTH=api-key needs SERVICE_API_KEY: ask the host for your key")
 
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
-# The Cloud Storage bucket mounted at PAPERS_DIR in production. When set, the browser uploads
-# PDFs straight to it (app/uploads.py); when empty, uploads go through POST /analyses/upload.
-PAPERS_BUCKET = os.getenv("PAPERS_BUCKET", "")
-# The pages allowed to upload to that bucket, comma-separated. The bucket's CORS rule allows the
-# same origins (deploy/cloudrun.sh).
-UPLOAD_ORIGINS = {o.strip() for o in os.getenv("UPLOAD_ORIGINS", "").split(",") if o.strip()}
 AVATARS_DIR = Path(os.getenv("AVATARS_DIR", "data/avatars"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 

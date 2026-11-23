@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from app.clients.service_auth import auth_headers, sends_key, signs
+from app.clients.service_auth import auth_headers, sends_key
 from app.config import (
     ANALYSES_DB,
     COLBERT_URL,
@@ -53,8 +53,6 @@ def _shown(url: str) -> str:
 
 
 def _signed(url: str) -> str:
-    if signs(url):
-        return "google-id-token"
     return "api key" if sends_key(url) else "none"
 
 
@@ -122,12 +120,6 @@ def _service(name: str, url: str, path: str, required: bool) -> dict:
         }
     answer = _get(target, headers)
     ok, detail = answer.ok, answer.detail
-    # A signed URL is a Cloud Run service, and GROBID and ColBERT there scale to zero. A cold
-    # start takes longer than TIMEOUT, and this GET is what starts it, so no answer yet means
-    # starting, not down. A refusal or a wrong URL still fails at once.
-    if answer.timed_out and signs(url):
-        ok = None
-        detail = f"starting: no answer in {TIMEOUT} s, and it scales to zero; ask again in a minute"
     return {
         "name": name,
         "url": _shown(url),
