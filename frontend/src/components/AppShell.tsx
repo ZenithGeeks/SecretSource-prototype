@@ -352,7 +352,7 @@ export function AppShell<K extends string>({
   )
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    <div className={cn('flex min-h-screen flex-col lg:flex-row', wide === 'full' && !bare && 'xl:h-dvh xl:overflow-hidden')}>
       {!bare && (
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
           <Brand compact />
@@ -438,7 +438,7 @@ export function AppShell<K extends string>({
         </aside>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className={cn('flex min-w-0 flex-1 flex-col', wide === 'full' && !bare && 'xl:min-h-0')}>
         {breadcrumb && !bare && (
           // Translucent so the content scrolls under it, blurred. Under the phone top bar it
           // sticks just below it (the bar is 3.75rem tall).
@@ -451,13 +451,13 @@ export function AppShell<K extends string>({
           </div>
         )}
         <ToolbarSlot.Provider value={breadcrumb && !bare ? actionsEl : null}>
-          <div className="flex min-w-0 flex-1">
+          <div className={cn('flex min-w-0 flex-1', wide === 'full' && !bare && 'xl:min-h-0')}>
             <main
               className={cn(
                 bare
                   ? 'flex h-screen w-full min-w-0 flex-1 flex-col overflow-hidden'
                   : 'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-                !bare && (wide === 'full' ? 'max-w-none' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
+                !bare && (wide === 'full' ? 'max-w-none xl:min-h-0 xl:overflow-hidden' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
               )}
             >
               {children}
@@ -469,7 +469,7 @@ export function AppShell<K extends string>({
                 className={
                   bare
                     ? 'lg:sticky lg:top-0 lg:h-screen lg:w-[400px] lg:shrink-0'
-                    : 'lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0'
+                    : cn('lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0', wide === 'full' && 'xl:h-full')
                 }
               >
                 {panel}
