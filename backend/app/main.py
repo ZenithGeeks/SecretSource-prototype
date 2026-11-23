@@ -1125,13 +1125,13 @@ async def _recheck_reference(
                 if citation.get("ref") != ref:
                     continue
                 checked_citation = replacement_citation or citation
-                old_sources = set(lookup_keys(citation))
+                old_sources = set(lookup_keys(citation)) or {lookup_key(citation)}
                 if old_sources & set(claim.get("named", [])):
                     continue
                 source = lookup_key(checked_citation)
                 if not source:
                     continue
-                replacement_sources = set(lookup_keys(checked_citation))
+                replacement_sources = set(lookup_keys(checked_citation)) or {source}
                 if ready["status"] == "error":
                     verdict = {**ready, "claim": claim["claim"], "source": source}
                 elif ready["status"] == "web-page":

@@ -317,7 +317,7 @@ def pipeline(monkeypatch):
             "claims": [{"claim": "c1", "citations": [{"key": "s1"}]}],
         },
     )
-    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(
         main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
     )
@@ -432,7 +432,7 @@ def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
+    monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
 
     asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf")))
 

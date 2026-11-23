@@ -335,7 +335,7 @@ def test_a_journal_line_beside_a_link_is_still_the_title():
     assert parsed["venue"] == ""
     assert parsed["authors"] == []
     assert parsed["year"] == "2024"
-    assert sources.lookup_key(parsed) == "FFmpeg-Developers. ffmpeg tool"
+    assert sources.lookup_key(parsed) == "http://ffmpeg.org/"
 
 
 def test_a_journal_line_beside_a_doi_is_still_the_title():

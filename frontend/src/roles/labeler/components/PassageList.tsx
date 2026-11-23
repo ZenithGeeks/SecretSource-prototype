@@ -299,7 +299,12 @@ export function PassageList({
                     label={labelOf(id)}
                     shown={focus?.key === c.cand_id}
                     status={draft.cands[c.cand_id]}
-                    onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id, locator: c.locator, reference_id: c.reference_id, paragraph: c.paragraph })}
+                    onFocus={() => onFocus({
+                      file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id,
+                      ...(c.locator ? { locator: c.locator } : {}),
+                      ...(c.locator && c.reference_id ? { reference_id: c.reference_id } : {}),
+                      ...(c.paragraph != null ? { paragraph: c.paragraph } : {}),
+                    })}
                     onJudge={(status) => onJudge(c.cand_id, status)}
                     askEnabled={reference?.source_kind !== 'web-page'}
                     onAsk={
@@ -321,7 +326,11 @@ export function PassageList({
                         key={key}
                         a={a}
                         shown={focus?.key === key}
-                        onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key, reference_id: a.reference_id, locator: reference?.url })}
+                        onFocus={() => onFocus({
+                          file: fileOf(a.reference_id), passage: a.passage, page: a.page, key,
+                          ...(reference?.source_kind === 'web-page' ? { reference_id: a.reference_id } : {}),
+                          ...(reference?.url ? { locator: reference.url } : {}),
+                        })}
                         onRemove={() => onRemove(a)}
                         onAsk={
                           // Ask reads the reference's PDF; a web page has no PDF to open.

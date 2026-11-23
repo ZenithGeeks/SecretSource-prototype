@@ -129,7 +129,9 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   const c = passagesFromSearch(claim) ? bestCandidate(claim, session.references) : claim.candidates[0]
   if (c) return {
     file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id,
-    locator: c.locator, reference_id: c.reference_id, paragraph: c.paragraph,
+    ...(c.locator ? { locator: c.locator } : {}),
+    ...(c.locator && c.reference_id ? { reference_id: c.reference_id } : {}),
+    ...(c.paragraph != null ? { paragraph: c.paragraph } : {}),
   }
   // No passages: the first reference the claim itself cites that has a PDF, at page 1. Never the
   // analysis's first reference, which may be one this claim does not cite. With none, nothing
@@ -407,7 +409,12 @@ function Body({
   const deciding = Boolean(draft.status) && draft.status !== 'rejected'
   const ordered = claim ? displayOrder(claim) : []
   const focusPassage = (c: Candidate) =>
-    setFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id, locator: c.locator, reference_id: c.reference_id, paragraph: c.paragraph })
+    setFocus({
+      file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id,
+      ...(c.locator ? { locator: c.locator } : {}),
+      ...(c.locator && c.reference_id ? { reference_id: c.reference_id } : {}),
+      ...(c.paragraph != null ? { paragraph: c.paragraph } : {}),
+    })
 
   // Keys: Ctrl/⌘+S saves; K/E/X decide the claim; R/N judge the focused passage; J/U (or the
   // up and down arrows) move between passages; [ ] (or Shift+left/right) between claims;
@@ -532,7 +539,11 @@ function Body({
   // the list, or by clicking where the paper under review cites it. A citation of a reference
   // that was not read keeps the PDF's own link to the reference list.
   const openReference = (r: Reference) => {
-    setFocus({ file: r.file, passage: '', page: 1, key: `ref:${r.reference_id}`, reference_id: r.reference_id, locator: r.url })
+    setFocus({
+      file: r.file, passage: '', page: 1, key: `ref:${r.reference_id}`,
+      ...(r.source_kind === 'web-page' ? { reference_id: r.reference_id } : {}),
+      ...(r.url ? { locator: r.url } : {}),
+    })
     setPicked(null)
   }
   const readRefs = Object.fromEntries(session.references.flatMap((r) => (r.ref ? [[r.ref, r] as const] : [])))
@@ -713,7 +724,12 @@ function Body({
           onAdd={(p) => {
             patch({ added: [...draft.added, p] })
             const reference = session.references.find((r) => r.reference_id === p.reference_id)
-            setFocus({ file: reference?.file ?? '', passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}`, reference_id: p.reference_id, locator: reference?.url })
+            setFocus({
+              file: reference?.file ?? '', passage: p.passage, page: p.page,
+              key: `added:${p.reference_id}:${p.passage}`,
+              ...(reference?.source_kind === 'web-page' ? { reference_id: p.reference_id } : {}),
+              ...(reference?.source_kind === 'web-page' && reference.url ? { locator: reference.url } : {}),
+            })
           }}
           onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
           search={search}
