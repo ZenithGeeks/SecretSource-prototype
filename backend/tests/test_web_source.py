@@ -415,7 +415,10 @@ def test_page_parser_discards_short_text_and_rejects_unsafe_anchors():
     )
 
     assert len(parser.passages) == 2
-    assert all(item.locator == "https://example.org/page" for item in parser.passages)
+    assert [item.locator for item in parser.passages] == [
+        "https://example.org/page",
+        "https://example.org/page#good:id",
+    ]
 
 
 def test_private_or_unresolvable_hosts_and_credentials_are_rejected(monkeypatch):
