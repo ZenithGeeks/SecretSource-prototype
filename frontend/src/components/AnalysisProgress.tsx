@@ -127,9 +127,9 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
       progress.verdicts.supports ? `${progress.verdicts.supports} backed` : '',
       progress.verdicts.refutes ? `${progress.verdicts.refutes} contradicted` : '',
       progress.verdicts.insufficient ? `${progress.verdicts.insufficient} silent` : '',
-      progress.failed ? `${progress.failed} couldn't run` : '',
+      progress.failed ? `${progress.failed} not checked` : '',
     ].filter(Boolean)
-    const checks = count(progress.checksDone, 'source check')
+    const checks = count(progress.checksDone, 'citation check')
     const parts = [
       count(progress.claims, 'claim'),
       checked ? (outcomes.length ? `${checks}: ${outcomes.join(', ')}` : checks) : 'sources not checked',

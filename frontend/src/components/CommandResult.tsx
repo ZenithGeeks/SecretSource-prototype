@@ -17,9 +17,9 @@ type Look = { label: string; tone: 'supports' | 'insufficient' | 'refutes' | 'ne
 // The same words and tones as the labeler's stamps, so a claim reads the same everywhere.
 const STANDING: Record<Standing, Look> = {
   backed: { label: 'Backed', tone: 'supports', icon: Check, edge: 'border-l-supports' },
-  silent: { label: 'Not backed', tone: 'insufficient', icon: CircleAlert, edge: 'border-l-insufficient' },
+  silent: { label: 'Silent', tone: 'insufficient', icon: CircleAlert, edge: 'border-l-insufficient' },
   contradicted: { label: 'Contradicted', tone: 'refutes', icon: X, edge: 'border-l-refutes' },
-  unchecked: { label: "Can't check", tone: 'neutral', icon: CircleHelp, edge: 'border-l-border-subtle' },
+  unchecked: { label: 'Not checked', tone: 'neutral', icon: CircleHelp, edge: 'border-l-border-subtle' },
 }
 
 const VERDICT_STANDING: Record<StatementVerdict, Standing> = {
@@ -198,7 +198,7 @@ function ClaimEvidence({ view }: { view: Extract<CommandView, { kind: 'claim' }>
 
 function Gaps({ view }: { view: Extract<CommandView, { kind: 'gaps' }> }) {
   const tiles = [
-    { label: 'Not backed', hint: 'no cited work backs them', value: view.notBacked, look: STANDING.silent, text: 'text-insufficient' },
+    { label: 'Silent', hint: 'no cited work backs them', value: view.notBacked, look: STANDING.silent, text: 'text-insufficient' },
     { label: 'Contradicted', hint: 'a cited work disagrees', value: view.contradicted, look: STANDING.contradicted, text: 'text-refutes' },
     { label: 'Not held', hint: 'cited, not in your library', value: view.missing, look: STANDING.unchecked, text: 'text-ink' },
   ]

@@ -173,11 +173,75 @@ describe('the results', () => {
     expect(screen.getByText('§3.1 Encoder · page 4')).toBeInTheDocument()
   })
 
+  it('opens only the first claim, and J and K move the keyboard between claim rows', () => {
+    view()
+    const rows = () => [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+    expect(rows()[0]).toHaveAttribute('aria-expanded', 'true')
+    expect(rows().slice(1).every((row) => row.getAttribute('aria-expanded') === 'false')).toBe(true)
+
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(rows()[0]).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'J' })
+    expect(rows()[1]).toHaveFocus()
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(rows()[1]).toHaveFocus() // the last row stays put
+    fireEvent.keyDown(window, { key: 'k' })
+    expect(rows()[0]).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'k' })
+    expect(rows()[0]).toHaveFocus()
+    // @ts-expect-error jsdom has none; leave it missing for the next tests
+    delete Element.prototype.scrollIntoView
+  })
+
+  it('moves to adjacent rows from an evidence button inside an expanded claim', () => {
+    load(analysis({ claims: [refuted, { ...refuted, claim: 'Middle claim.' }, backed] }))
+    view()
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+    fireEvent.click(rows[0])
+    fireEvent.click(rows[1])
+    const evidence = screen.getByRole('button', { name: 'Show in paper' })
+
+    evidence.focus()
+    fireEvent.keyDown(evidence, { key: 'j' })
+    expect(rows[2]).toHaveFocus()
+
+    evidence.focus()
+    fireEvent.keyDown(evidence, { key: 'k' })
+    expect(document.querySelectorAll('[data-claim-toggle]')[0]).toHaveFocus()
+  })
+
+  it('leaves J and K alone with a modifier, in a text box, or with no claims to move to', () => {
+    view()
+    const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
+    fireEvent.keyDown(window, { key: 'j', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'x' })
+    expect(first).not.toHaveFocus()
+    const box = document.createElement('input')
+    document.body.appendChild(box)
+    box.focus()
+    fireEvent.keyDown(box, { key: 'j' })
+    expect(box).toHaveFocus()
+    box.remove()
+    // Without scrollIntoView (jsdom has none) the row still takes the focus.
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(first).toHaveFocus()
+  })
+
+  it('does nothing on J when no claim rows are on screen', () => {
+    load(analysis({ claims: [] }))
+    view()
+    expect(() => fireEvent.keyDown(window, { key: 'j' })).not.toThrow()
+  })
+
   it('says All claims, and has no Settled heading, when nothing needs attention', () => {
     load(analysis({ claims: [backed] }))
     view()
     expect(screen.getByRole('heading', { name: 'All claims' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Settled' })).not.toBeInTheDocument()
+    expect(screen.getByText('supports reasoning')).toBeInTheDocument()
   })
 
   it('has no Settled heading when every claim needs attention', () => {
@@ -191,9 +255,10 @@ describe('the results', () => {
     fireEvent.click(screen.getByRole('button', { name: '1 backs it' }))
     expect(screen.getByText('Showing 1 backs it')).toBeInTheDocument()
     expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /The backed claim/ })).toBeInTheDocument()
+    expect(screen.getByText('supports reasoning')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '1 backs it' }))
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /The backed claim/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('narrows to one section, and can show all claims again', () => {

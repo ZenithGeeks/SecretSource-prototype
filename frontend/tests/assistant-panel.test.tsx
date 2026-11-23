@@ -130,7 +130,7 @@ describe('the Ask panel', () => {
     })
   })
 
-  it('names the two other verdicts Not backed and Can’t check', async () => {
+  it('names the two other verdicts Silent and Not checked', async () => {
     const stream = controlledStream()
     gateway(stream)
     render(<Panel />)
@@ -141,8 +141,8 @@ describe('the Ask panel', () => {
     await stream.send({ type: 'verdict', index: 0, verdict: 'insufficient', quote: '', reasoning: 'No passage gives the factor.' })
     await stream.send({ type: 'verdict', index: 1, verdict: 'unchecked', quote: '', reasoning: '' })
 
-    expect(screen.getByText('Not backed')).toBeInTheDocument()
-    expect(screen.getByText('Can’t check')).toBeInTheDocument()
+    expect(screen.getByText('Silent')).toBeInTheDocument()
+    expect(screen.getByText('Not checked')).toBeInTheDocument()
     expect(screen.getByText('No passage named')).toBeInTheDocument()
   })
 
@@ -218,7 +218,7 @@ describe('the Ask panel', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
     // Its check never finished, so it is not still Checking…, and a late verdict changes nothing.
     expect(screen.queryByText('Checking…')).not.toBeInTheDocument()
-    expect(screen.getByText('Can’t check')).toBeInTheDocument()
+    expect(screen.getByText('Not checked')).toBeInTheDocument()
     await stream.send({ type: 'verdict', index: 0, verdict: 'supports', quote: 'q', reasoning: 'r' })
     expect(screen.queryByText('Backed')).not.toBeInTheDocument()
   })
