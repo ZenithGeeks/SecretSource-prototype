@@ -13,6 +13,7 @@ import {
   referenceFinished,
   referenceSummary,
   referencesOf,
+  uncheckedPlain,
   type AddedPassage,
   type Candidate,
   type CandidateStatus,
@@ -196,7 +197,7 @@ export function PassageList({
   onRemove: (passage: AddedPassage) => void
   /** What goes under one reference's passages: its level form, or a note that it needs a relevant passage. */
   grade: (referenceId: string) => ReactNode
-  /** The live search for a claim added by hand, while it runs or after it failed. */
+  /** The live search for a claim with no stored passages, while it runs or after it failed. */
   search?: 'searching' | 'failed'
   onSearchAgain?: () => void
   /** Ask AI about one passage; without it the cards have no Ask button. */
@@ -204,6 +205,8 @@ export function PassageList({
 }) {
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
+  // Missing on a gateway older than the field: there is then nothing to explain.
+  const missed = claim.unchecked ?? []
   // true: keep open, false: keep folded. Unset follows the work: open while unfinished or focused.
   const [forced, setForced] = useState<Record<string, boolean>>({})
   return (
@@ -226,7 +229,18 @@ export function PassageList({
         </p>
       )}
       {!search && claim.candidates.length === 0 && (
-        <p className="text-sm text-ink-muted">Retrieval found nothing for this claim. Add what supports it below.</p>
+        <div className="flex flex-col gap-2 text-sm text-ink-muted">
+          <p>No passages were stored for this claim. Add what supports it below.</p>
+          {missed.length > 0 && (
+            <ul aria-label="Citations that were not checked" className="flex list-disc flex-col gap-1 pl-5">
+              {missed.map((row, index) => (
+                <li key={`${row.ref}:${index}`}>
+                  {row.label}: {uncheckedPlain(row.reason)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
       {referencesOf(claim, draft).map((id) => {
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)

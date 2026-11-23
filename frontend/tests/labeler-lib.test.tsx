@@ -37,6 +37,7 @@ import {
   sameDraft,
   useAssignTopic,
   useScopusSearch,
+  uncheckedPlain,
   workClaims,
   writeUnsaved,
   type Candidate,
@@ -149,6 +150,29 @@ describe('workClaims', () => {
       { cand_id: 'x2', reference_id: 'gone', reference_file: '', rank: 0, score: null, page: null, passage: 'orphan' },
     ])
     expect(all[2]).toMatchObject({ sentence: '', section: '', page: null })
+  })
+
+  it('puts a saved live search back on an extracted claim, and does not add a passage it already has', () => {
+    const stored = cand('c1', { passage: 'already stored' })
+    const s = session(
+      {
+        claims: [{ claim_id: 'p#0', origin: 'extracted', claim: 'extracted' }],
+        candidates: [
+          { claim_id: 'p#0', origin: 'retrieved_added', cand_id: 'x1', reference_id: 'refB', rank: '1', score: '9', page: '3', passage: 'text-to-text' },
+          { claim_id: 'p#0', origin: 'retrieved_added', cand_id: 'c1', reference_id: 'refB', rank: '2', score: '1', page: '1', passage: 'already stored' },
+          { claim_id: 'p#0', origin: 'retrieved', cand_id: 'old', reference_id: 'refB', rank: '1', score: '1', page: '1', passage: 'from the analysis' },
+          { claim_id: 'p#9', origin: 'retrieved_added', cand_id: 'other', reference_id: 'refB', rank: '1', score: '1', page: '1', passage: 'elsewhere' },
+        ],
+      },
+      {
+        claims: [{ claim_id: 'p#0', claim: 'extracted', sentence: '', section: '', source: null, candidates: [stored] }],
+      },
+    )
+    const [extracted] = workClaims(s)
+    expect(extracted.candidates).toEqual([
+      stored,
+      { cand_id: 'x1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 1, score: 9, page: 3, passage: 'text-to-text', fromSearch: true },
+    ])
   })
 })
 
@@ -305,6 +329,30 @@ describe('buildSave', () => {
     expect(byHand.candidates[0]).toMatchObject({ origin: 'retrieved_added', rank: 4, score: 7, page: 1, passage: 'passage c1' })
   })
 
+  it('saves a live-search passage on an extracted claim as retrieved_added', () => {
+    const draft: Draft = { ...emptyDraft(), status: 'accepted', cands: { c1: 'relevant', c2: 'relevant' } }
+    const save = buildSave(
+      claim({
+        candidates: [cand('c1'), cand('c2', { fromSearch: true, rank: 1, score: 12, page: 3, passage: 'text-to-text' })],
+      }),
+      draft,
+    )
+    expect(save.candidates).toEqual([
+      { claim_id: 'p#0', reference_id: 'refB', cand_id: 'c1', origin: 'retrieved', status: 'relevant', page: null, passage: '' },
+      {
+        claim_id: 'p#0',
+        reference_id: 'refB',
+        cand_id: 'c2',
+        origin: 'retrieved_added',
+        status: 'relevant',
+        rank: 1,
+        score: 12,
+        page: 3,
+        passage: 'text-to-text',
+      },
+    ])
+  })
+
   it('retracts a passage that was saved and then removed, and keeps one still there', () => {
     const kept = { reference_id: 'refB', page: 1, passage: 'kept' }
     const gone = { reference_id: 'refB', page: 2, passage: 'gone' }
@@ -323,6 +371,20 @@ describe('buildSave', () => {
     expect(save.labels).toEqual([
       { claim_id: 'p#0', reference_id: 'refB', evidence: 2, rationale: 'ok', spans: ['kept'], confidence: 'low' },
     ])
+  })
+})
+
+describe('uncheckedPlain', () => {
+  it('has a short line for each reason the analysis reports, and something for a code it does not know', () => {
+    expect(uncheckedPlain('named')).toBe('not checked, the paper only names it')
+    expect(uncheckedPlain('no-open-access')).toBe('no open-access PDF')
+    expect(uncheckedPlain('not-downloadable')).toBe('the PDF could not be downloaded')
+    expect(uncheckedPlain('unresolvable')).toBe('no matching work was found')
+    expect(uncheckedPlain('lookup-unavailable')).toBe('the lookup service did not answer')
+    expect(uncheckedPlain('web-source')).toBe('a web page, not a paper')
+    expect(uncheckedPlain('withdrawn')).toBe('the paper was withdrawn')
+    expect(uncheckedPlain('failed')).toBe('the check failed')
+    expect(uncheckedPlain('mystery')).toBe('checking it failed')
   })
 })
 

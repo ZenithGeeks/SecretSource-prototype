@@ -32,6 +32,9 @@ export type Candidate = {
   score: number | null
   page: number | null
   passage: string
+  /** Set on a passage the live search found, including one put back from a saved row.
+   * The analysis did not store it, so a save sends the text rather than an id alone. */
+  fromSearch?: boolean
 }
 
 /** A citation the analysis did not check, with why: "named" (the paper only names the work) or
@@ -115,7 +118,8 @@ export type Save = {
     claim_id: string
     reference_id: string
     cand_id: string
-    /** retrieved_added: found by the live search for a claim added by hand. */
+    /** retrieved_added: found by the live search, for a hand-added claim or an extracted
+     * claim the analysis stored no passages for. */
     origin: 'retrieved' | 'retrieved_added' | 'human_added'
     status: CandidateStatus
     rank?: number
@@ -342,7 +346,7 @@ export const labelingApi = {
       `/labeling/sessions/${encodeURIComponent(analysisId)}/save`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     ),
-  /** Search every reference paper for a claim added by hand, as the analysis did for its own. */
+  /** Search the references for a claim the analysis stored no passages for, as it did for its own. */
   candidates: (analysisId: string, claimId: string, claim: string) =>
     request<{ candidates: Candidate[] }>(`/labeling/sessions/${encodeURIComponent(analysisId)}/candidates`, {
       method: 'POST',
@@ -547,9 +551,9 @@ export function readConfidence(value: string | undefined): Confidence | null {
 const numberOrNull = (value: string | undefined) => (value && !Number.isNaN(Number(value)) ? Number(value) : null)
 
 /** The claims to work through: the extracted ones, then the ones this person added earlier.
- * An added claim keeps the passages the live search found for it that were judged and saved. */
+ * A passage the live search found and the person judged is kept, on a hand-added claim and on
+ * an extracted claim the analysis stored no passages for. */
 export function workClaims(session: Session): WorkClaim[] {
-  const extracted = session.claims.map((c) => ({ ...c, origin: 'extracted' as const }))
   const known = new Set(session.claims.map((c) => c.claim_id))
   const fileOf = (id: string) => session.references.find((r) => r.reference_id === id)?.file ?? ''
   const searched = (claimId: string): Candidate[] =>
@@ -564,6 +568,13 @@ export function workClaims(session: Session): WorkClaim[] {
         page: numberOrNull(row.page),
         passage: row.passage,
       }))
+  const extracted = session.claims.map((c) => {
+    const have = new Set(c.candidates.map((cand) => cand.cand_id))
+    const restored = searched(c.claim_id)
+      .filter((cand) => !have.has(cand.cand_id))
+      .map((cand) => ({ ...cand, fromSearch: true as const }))
+    return { ...c, origin: 'extracted' as const, candidates: [...c.candidates, ...restored] }
+  })
   const added = session.saved.claims
     .filter((row) => row.origin === 'human_added' && !known.has(row.claim_id))
     .map((row) => ({
@@ -701,6 +712,21 @@ const OUTCOME_TEXT: Record<string, string> = {
 export const uncheckedReason = (reason: string, sourceOutcome?: SourceOutcome): string =>
   OUTCOME_TEXT[sourceOutcome?.outcome ?? ''] ??
   (reason === 'named' ? 'the paper only names it, so it was not checked' : reasonText(reason))
+
+/** One short line for a citation the analysis did not check, under a claim with no passages.
+ * A code this build does not know still says something, the same as reasonText. */
+const UNCHECKED_LINE: Record<string, string> = {
+  named: 'not checked, the paper only names it',
+  'no-open-access': 'no open-access PDF',
+  'not-downloadable': 'the PDF could not be downloaded',
+  unresolvable: 'no matching work was found',
+  'lookup-unavailable': 'the lookup service did not answer',
+  'web-source': 'a web page, not a paper',
+  withdrawn: 'the paper was withdrawn',
+  failed: 'the check failed',
+}
+
+export const uncheckedPlain = (reason: string): string => UNCHECKED_LINE[reason] ?? reasonText(reason)
 
 // Only http(s): the link comes from a PDF's reference list, so any other scheme is not followed.
 const webLink = (url: string | undefined) => (url && /^https?:\/\//i.test(url) ? [{ text: url, href: url }] : [])
@@ -911,7 +937,7 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
   for (const c of claim.candidates) {
     const status = draft.cands[c.cand_id]
     if (!status) continue
-    if (claim.origin === 'extracted') {
+    if (claim.origin === 'extracted' && !c.fromSearch) {
       // The server copies rank, page and text from the analysis, so the id is enough.
       save.candidates.push({
         claim_id: claim.claim_id,

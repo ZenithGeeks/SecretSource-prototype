@@ -112,10 +112,16 @@ function useMinWidth(px: number) {
   return matches
 }
 
+/** Passages the live search found, rather than ones the analysis stored. A hand-added claim is
+ * always searched. An extracted claim is searched only while it has none, so once results
+ * arrive every passage is from that search. */
+const passagesFromSearch = (claim: WorkClaim) =>
+  claim.origin === 'human_added' || (claim.candidates.length > 0 && claim.candidates.every((c) => c.fromSearch))
+
 const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
-  // A hand-added claim's passages come from several references at once, so take the best one;
-  // an extracted claim's first passage is already the one retrieval ranked first.
-  const c = claim.origin === 'human_added' ? bestCandidate(claim, session.references) : claim.candidates[0]
+  // Passages from several references at once: take the best one. An extracted claim's own
+  // first passage is already the one retrieval ranked first.
+  const c = passagesFromSearch(claim) ? bestCandidate(claim, session.references) : claim.candidates[0]
   if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id }
   // No passages: the first reference the claim itself cites that has a PDF, at page 1. Never the
   // analysis's first reference, which may be one this claim does not cite. With none, nothing
@@ -170,16 +176,18 @@ export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk
   )
 }
 
-/** Search the references for each claim added by hand, and add what is found to its passages (#404).
+/** Search for passages the analysis did not store, and add what is found (#404, #836).
  *
- * The analysis retrieved passages only for the claims it extracted. A hand-added claim is
- * searched when it is opened, once per claim and text. A search for a claim not in view is
- * disabled but still returns what it found before. Passages judged and saved earlier stay in the
- * list even when a new search ranks them out. */
+ * A hand-added claim is searched when it is opened. An extracted claim is searched the same
+ * way when it has no passages: one that only names a work was never checked, though another
+ * claim may have downloaded that work. An extracted claim that already has passages is not
+ * searched. A search for a claim not in view is disabled but still returns what it found
+ * before. Passages judged and saved earlier stay in the list even when a new search ranks
+ * them out. */
 function useAddedClaimSearch(analysisId: string, listed: WorkClaim[], currentId: string) {
-  const handAdded = listed.filter((c) => c.origin === 'human_added')
+  const pending = listed.filter((c) => c.origin === 'human_added' || c.candidates.length === 0)
   const searches = useQueries({
-    queries: handAdded.map((c) => ({
+    queries: pending.map((c) => ({
       queryKey: ['labeling', 'candidates', analysisId, c.claim_id, c.claim],
       queryFn: () => labelingApi.candidates(analysisId, c.claim_id, c.claim),
       enabled: c.claim_id === currentId,
@@ -187,12 +195,15 @@ function useAddedClaimSearch(analysisId: string, listed: WorkClaim[], currentId:
       retry: false,
     })),
   })
-  const searchOf = new Map(handAdded.map((c, i) => [c.claim_id, searches[i]]))
+  const searchOf = new Map(pending.map((c, i) => [c.claim_id, searches[i]]))
   const claims = listed.map((c) => {
     const found = searchOf.get(c.claim_id)?.data?.candidates
     if (!found) return c
     const known = new Set(c.candidates.map((cand) => cand.cand_id))
-    return { ...c, candidates: [...c.candidates, ...found.filter((cand) => !known.has(cand.cand_id))] }
+    const extra = found
+      .filter((cand) => !known.has(cand.cand_id))
+      .map((cand) => ({ ...cand, fromSearch: true as const }))
+    return { ...c, candidates: [...c.candidates, ...extra] }
   })
   const current = searchOf.get(currentId)
   let search: 'searching' | 'failed' | undefined
@@ -287,12 +298,12 @@ function Body({
     save.reset()
   }
 
-  // A claim added by hand has no passages until its search answers, so it opens on nothing, or
-  // on a reference its sentence cites at page 1 (a `ref:` focus). When the passages arrive, open
-  // the best one, once per claim. A passage the person opened is kept; reading that first page is not.
+  // A searched claim has no passages until its search answers, so it opens on nothing, or on a
+  // reference its sentence cites at page 1 (a `ref:` focus). When the passages arrive, open the
+  // best one, once per claim. A passage the person opened is kept; reading that first page is not.
   const autoOpened = useRef(new Set<string>())
   useEffect(() => {
-    if (claim?.origin !== 'human_added' || autoOpened.current.has(claim.claim_id)) return
+    if (!claim || !passagesFromSearch(claim) || autoOpened.current.has(claim.claim_id)) return
     const first = firstFocus(claim, session)
     if (!first?.passage) return
     autoOpened.current.add(claim.claim_id)
