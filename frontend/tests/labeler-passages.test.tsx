@@ -33,7 +33,7 @@ const refs: Reference[] = [
   { reference_id: 'refC', file: '', label: 'Ref C' },
 ]
 
-function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}) {
+function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}, reactStrictMode = false) {
   const props = {
     claim: claim([cand('c1'), cand('c2', { rank: 2, page: null, score: null })]),
     draft: emptyDraft() as Draft,
@@ -46,7 +46,7 @@ function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}) {
     grade: (id: string) => <p>grade for {id}</p>,
     ...over,
   }
-  const view = render(<PassageList {...props} />)
+  const view = render(<PassageList {...props} />, { reactStrictMode })
   return { ...props, rerender: (next: Partial<typeof props>) => view.rerender(<PassageList {...props} {...next} />) }
 }
 
@@ -113,18 +113,33 @@ describe('the passages of a claim', () => {
     expect(props.onJudge).toHaveBeenCalledWith('c1', 'rejected')
   })
 
-  it('marks the focused passage and shows the shortcut keys, without scrolling on the first draw', () => {
+  it('keeps automatic focus from scrolling during StrictMode replay but reveals explicit focus', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
-    setup({
-      focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' },
+    const props = setup({
+      focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1', automatic: true },
       draft: { ...emptyDraft(), cands: { c1: 'relevant', c2: 'rejected' } },
-    })
+    }, true)
     // A new claim opens at its decision: the first focused passage is not scrolled to.
     expect(scroll).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /text of c1/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-keyshortcuts', 'R')
     expect(screen.getAllByRole('radio', { name: /^Not relevant/ })[1]).toHaveAttribute('aria-checked', 'true')
+
+    props.rerender({ focus: { file: 'refB.pdf', passage: 'text of c2', page: null, key: 'c2' } })
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
+  })
+
+  it('reveals a newly added passage that mounts with explicit focus', () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    const props = setup({}, true)
+    props.rerender({
+      draft: { ...emptyDraft(), added: [{ reference_id: 'refB', page: 3, passage: 'new passage' }] },
+      focus: { file: 'refB.pdf', passage: 'new passage', page: 3, key: 'added:refB:new passage' },
+    })
+    expect(screen.getByRole('button', { name: /new passage/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
   })
 
   it('scrolls only the label panel to a newly focused passage, above or below the view', () => {

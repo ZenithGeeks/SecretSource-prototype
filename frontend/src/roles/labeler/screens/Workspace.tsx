@@ -116,7 +116,7 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   // Passages from several references at once: take the best one. An extracted claim's own
   // first passage is already the one retrieval ranked first.
   const c = passagesFromSearch(claim) ? bestCandidate(claim, session.references) : claim.candidates[0]
-  if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id }
+  if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id, automatic: true }
   // No passages: the first reference the claim itself cites that has a PDF, at page 1. Never the
   // analysis's first reference, which may be one this claim does not cite. With none, nothing
   // opens and the pane lists the claim's unresolved citations instead.
@@ -552,6 +552,7 @@ function Body({
       key={target.paper}
       target={target}
       onClose={onClose}
+      embedded={wide}
       toolbarLead={toolbarLead}
       {...(side === 'paper' && citing)}
       className={!wide ? VIEWER_HEIGHT : 'h-full min-h-0'}

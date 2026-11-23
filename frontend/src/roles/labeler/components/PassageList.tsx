@@ -26,7 +26,7 @@ import { cn } from '../../../lib/utils'
 import type { AskedPassage } from './AskPanel'
 import { Kbd } from './ClaimDecision'
 
-export type Focus = { file: string; passage: string; page: number | null; key: string }
+export type Focus = { file: string; passage: string; page: number | null; key: string; automatic?: true }
 
 const STATUS: { status: CandidateStatus; label: string; key: string }[] = [
   { status: 'relevant', label: 'Relevant', key: 'R' },
@@ -48,16 +48,14 @@ export function revealInPanel(card: HTMLElement) {
   else if (bottom > panel.scrollTop + panel.clientHeight) panel.scrollTop = bottom - panel.clientHeight
 }
 
-/** Reveals a card when it becomes the focused one, but not when it is first drawn: a new
- * claim opens at its decision, and the first passage is focused only for the viewer. */
-function useReveal(shown: boolean) {
+/** Reveal explicit focus even on mount (such as after adding a passage), once per focus. */
+function useReveal(shouldReveal: boolean) {
   const ref = useRef<HTMLLIElement>(null)
-  const drawn = useRef(false)
+  const revealed = useRef(false)
   useEffect(() => {
-    const first = !drawn.current
-    drawn.current = true
-    if (shown && !first && ref.current) revealInPanel(ref.current)
-  }, [shown])
+    if (shouldReveal && !revealed.current && ref.current) revealInPanel(ref.current)
+    revealed.current = shouldReveal
+  }, [shouldReveal])
   return ref
 }
 
@@ -79,6 +77,7 @@ function PassageCard({
   c,
   label,
   shown,
+  reveal,
   status,
   onFocus,
   onJudge,
@@ -87,12 +86,13 @@ function PassageCard({
   c: Candidate
   label: string
   shown: boolean
+  reveal: boolean
   status: CandidateStatus | undefined
   onFocus: () => void
   onJudge: (status: CandidateStatus) => void
   onAsk?: () => void
 }) {
-  const ref = useReveal(shown)
+  const ref = useReveal(shown && reveal)
   return (
     <li
       ref={ref}
@@ -147,17 +147,19 @@ function PassageCard({
 function AddedCard({
   a,
   shown,
+  reveal,
   onFocus,
   onRemove,
   onAsk,
 }: {
   a: AddedPassage
   shown: boolean
+  reveal: boolean
   onFocus: () => void
   onRemove: () => void
   onAsk?: () => void
 }) {
-  const ref = useReveal(shown)
+  const ref = useReveal(shown && reveal)
   return (
     <li
       ref={ref}
@@ -221,6 +223,8 @@ export function PassageList({
   /** Ask AI about one passage; without it the cards have no Ask button. */
   onAsk?: (passage: AskedPassage) => void
 }) {
+  // Automatic focus opens the PDF while leaving the label panel at the claim decision.
+  const revealFocused = !focus?.automatic
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
   // Missing on a gateway older than the field: there is then nothing to explain.
@@ -332,6 +336,7 @@ export function PassageList({
                     c={c}
                     label={labelOf(id)}
                     shown={focus?.key === c.cand_id}
+                    reveal={revealFocused}
                     status={draft.cands[c.cand_id]}
                     onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
                     onJudge={(status) => onJudge(c.cand_id, status)}
@@ -354,6 +359,7 @@ export function PassageList({
                         key={key}
                         a={a}
                         shown={focus?.key === key}
+                        reveal={revealFocused}
                         onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key })}
                         onRemove={() => onRemove(a)}
                         onAsk={

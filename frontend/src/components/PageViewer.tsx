@@ -204,6 +204,7 @@ export function PageViewer({
   zoomKey,
   onCitation,
   toolbarLead,
+  embedded = false,
 }: {
   target: Target
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
@@ -225,6 +226,8 @@ export function PageViewer({
   onCitation?: (marker: CitationMarker) => void
   /** Extra control placed inside the viewer toolbar (for example the labeler's reference picker). */
   toolbarLead?: React.ReactNode
+  /** The caller provides a pane even below xl; keep the viewer in it until expanded. */
+  embedded?: boolean
 }) {
   const [pageCount, setPageCount] = useState(0)
   const [pageRatio, setPageRatio] = useState(1.294) // height / width; US Letter until page 1 says
@@ -247,7 +250,8 @@ export function PageViewer({
   const [expanded, setExpanded] = useState(false)
   // Below xl there is no column beside the claims, so the viewer would open under all of them.
   // It opens over the whole screen instead.
-  const narrow = useNarrowScreen()
+  const narrowScreen = useNarrowScreen()
+  const narrow = narrowScreen && !embedded
   const fullScreen = narrow || expanded
   const [panelWidth, setPanelWidth] = useState(0)
   const [opened, setOpened] = useState<{ marker: CitationMarker; target: Target } | null>(null)
