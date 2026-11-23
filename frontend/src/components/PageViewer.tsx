@@ -416,6 +416,9 @@ export function PageViewer({
               {target.label}
               {target.detail && <span className="font-normal text-ink-muted"> · {target.detail}</span>}
               <span className="font-normal text-ink-muted"> · p.{targetPage(target)}</span>
+              {target.quote && (
+                <span className="font-serif font-normal italic text-ink-muted"> · “{target.quote}”</span>
+              )}
               {!target.error && !target.source && target.quote && (
                 <span className="font-normal text-ink-muted"> · exact place not found</span>
               )}

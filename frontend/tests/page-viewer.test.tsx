@@ -63,6 +63,7 @@ test('labeler paperRole mode merges header and quote into one line and renders t
     />,
   )
   expect(screen.getByRole('heading', { name: /\[b33\] Peters 2018/ })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: /Internal covariate shift slows training\./ })).toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: /Quoted passage/ })).not.toBeInTheDocument()
   expect(screen.getByText('Picker')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Fill the window' }))

@@ -32,6 +32,7 @@ import {
   LEVELS,
   labelingApi,
   nextPaperInTopic,
+  nextUnfinishedIndex,
   progress,
   readUnsaved,
   referencesOf,
@@ -449,9 +450,8 @@ function Body({
       else if (key === '[' || (key === 'ArrowLeft' && event.shiftKey)) stepClaim(-1)
       else if (key === 'f') {
         event.preventDefault()
-        const target = saveNextTarget(claims, drafts, saved, cited, position)
-        /* v8 ignore next -- @preserve */
-        if (target.kind === 'claim') select(claims[target.index].claim_id)
+        const index = nextUnfinishedIndex(claims, drafts, saved, cited, position)
+        if (index != null) select(claims[index].claim_id)
       }
       else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
@@ -795,7 +795,7 @@ function Body({
   const referencePane = right ? (
     viewer(right, 'reference', undefined, referencePicker)
   ) : (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
       {referencePicker}
       <UnresolvedReferences citations={unresolvedCitations(claim, session)} />
     </div>

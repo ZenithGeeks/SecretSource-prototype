@@ -154,4 +154,33 @@ describe('the labeler workspace layout', () => {
     fireEvent.keyDown(window, { key: 'f' })
     expect(screen.getByRole('heading', { name: 'Claim 1 of 2' })).toBeInTheDocument()
   })
+
+  it('keeps the current claim on F when only it is undecided or all claims are finished', async () => {
+    session.saved = {
+      claims: [{ claim_id: 'paperA#0', status: 'rejected' }],
+      candidates: [],
+      labels: [],
+    } as unknown as typeof session.saved
+    const { unmount } = renderWorkspace()
+    await screen.findByRole('heading', { name: 'Claim 1 of 2' })
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByRole('heading', { name: 'Claim 2 of 2' })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByRole('heading', { name: 'Claim 2 of 2' })).toBeInTheDocument()
+    unmount()
+
+    session.saved = {
+      claims: [
+        { claim_id: 'paperA#0', status: 'rejected' },
+        { claim_id: 'paperA#1', status: 'rejected' },
+      ],
+      candidates: [],
+      labels: [],
+    } as unknown as typeof session.saved
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Claim 1 of 2' })
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByRole('heading', { name: 'Claim 1 of 2' })).toBeInTheDocument()
+    session.saved = { claims: [], candidates: [], labels: [] }
+  })
 })
