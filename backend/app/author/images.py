@@ -11,11 +11,13 @@ as for every other draft route.
 """
 
 import hashlib
+import lzma
 import os
 import re
 import shutil
 import uuid
 import zipfile
+import zlib
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -124,8 +126,16 @@ def add(draft: dict, uploads: list[tuple[str, bytes]], strict: bool = True) -> l
         stored = _write(draft["id"], content, _extension(name))
         images[name] = {"name": name, "file": stored, "size": len(content)}
     draft["images"] = sorted(images.values(), key=lambda i: i["name"])
+    _bump(draft)
     remove_unused(draft)
     return skipped
+
+
+def _bump(draft: dict) -> None:
+    """`imagesVersion` counts the changes to a draft's figures. The editor keeps the list its
+    own upload answered with until a read of the draft carries that version or a later one, so
+    a read that left before the upload, and lands after it, cannot hide the new figure."""
+    draft["imagesVersion"] = int(draft.get("imagesVersion", 0)) + 1
 
 
 def _write(draft_id: str, content: bytes, ext: str) -> str:
@@ -148,6 +158,7 @@ def remove(draft: dict, name: str) -> None:
     if len(kept) == len(images):
         raise HTTPException(404, "no such image")
     draft["images"] = kept
+    _bump(draft)
     remove_unused(draft)
 
 
@@ -169,26 +180,49 @@ def delete_all(draft_id: str) -> None:
 
 
 def from_zip(archive: zipfile.ZipFile, infos: list[zipfile.ZipInfo]) -> list[tuple[str, bytes]]:
-    """The figures among a zip's entries, as (path, bytes). An entry over the per-file cap is
-    not read, nor one past the draft's caps, so a large export never sits in memory whole:
-    ZipExtFile stops at the declared size, so a forged size cannot read more either."""
-    found = []
-    total = 0
+    """The figures among a zip's entries that `add` will keep, as (path, bytes). Only a figure
+    with a kept name and the bytes its name says counts against the draft's caps, so entries
+    that are left out never crowd out a good one. An entry over the per-file cap is not read,
+    nor one past the draft's caps, so a large export never sits in memory whole: ZipExtFile
+    stops at the declared size, so a forged size cannot read more either. A name given twice
+    keeps its last entry, as `add` would."""
+    found: dict[str, bytes] = {}
     for info in infos:
         name = info.filename.replace("\\", "/")
         if info.is_dir() or not is_image_name(name) or info.file_size > MAX_IMAGE_FILE:
             continue
-        if name.startswith("__MACOSX/") or ".." in name.split("/"):
+        if name.startswith("__MACOSX/"):
             continue
-        if len(found) >= MAX_IMAGES or total + info.file_size > MAX_DRAFT_IMAGES:
+        try:
+            name = safe_image_name(name)
+        except HTTPException:
+            continue
+        others = {n: c for n, c in found.items() if n != name}
+        if len(others) >= MAX_IMAGES or sum(map(len, others.values())) + info.file_size > MAX_DRAFT_IMAGES:
             continue
         try:
             with archive.open(info) as entry:
                 content = entry.read(MAX_IMAGE_FILE + 1)
-        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError):
-            # A bad CRC, an encrypted entry, a compression zipfile cannot read: left out, like
-            # a file that is not the image it says, not a failed upload.
+        except _UNREADABLE:
+            # A bad CRC, damaged compressed data, an encrypted entry, a compression zipfile
+            # cannot read: left out, like a file that is not the image it says, not a failed
+            # upload.
             continue
-        total += len(content)
-        found.append((name, content))
-    return found
+        if len(content) > MAX_IMAGE_FILE or not looks_like(name, content):
+            continue
+        found[name] = content
+    return list(found.items())
+
+
+# What reading one damaged zip entry can raise: zipfile's own errors, and the deflate, bzip2
+# and LZMA decompressors' (zlib.error; OSError and ValueError from bz2; lzma.LZMAError).
+_UNREADABLE = (
+    zipfile.BadZipFile,
+    zlib.error,
+    lzma.LZMAError,
+    OSError,
+    ValueError,
+    EOFError,
+    RuntimeError,
+    NotImplementedError,
+)

@@ -9,6 +9,7 @@
 import { parseBib, serializeBib, type BibEntry } from './bibtex'
 import { shortMessage } from './citations'
 import { findCites } from './latexProject'
+import { findImage } from './latexPreview'
 import { referenceNote } from './referenceCheck'
 import { VERDICTS, isOpenIssue } from './verdict'
 import { zipStored } from './zip'
@@ -79,10 +80,36 @@ export function buildAnnotatedTex(file: ProjectFile, citations: Citation[]): str
   return lines.join('\n')
 }
 
+/** The paths a .tex file's \includegraphics (and the other image commands) name, comments
+ * left out. */
+function imagePaths(tex: string): string[] {
+  const source = tex.replace(/(^|[^\\])%.*$/gm, '$1')
+  const command = /\\(?:includegraphics|includesvg|includepdf|adjincludegraphics)\*?(?:\s*\[[^\]]*\])*\s*\{([^}]*)\}/g
+  return [...source.matchAll(command)].map((m) => m[1].trim()).filter(Boolean)
+}
+
 /** Every file of the project as a .zip, with the current file contents, and the draft's
- * figures at the paths its LaTeX names them by. */
+ * figures. Each figure is at its own path, and also at every path an \includegraphics names
+ * it by when that differs: the preview finds figures/posv as posv.png by its file name, but
+ * pdflatex looks only at figures/posv.png, so an export that kept only posv.png would not
+ * compile. A path without an extension gets the figure's. */
 export function buildProjectZip(draft: Draft, figures: { name: string; content: Uint8Array }[] = []): Blob {
-  return new Blob([zipStored([...draft.files, ...figures])], { type: 'application/zip' })
+  const byName = new Map(figures.map((f) => [f.name, f.name]))
+  const extra: { name: string; content: Uint8Array }[] = []
+  for (const file of draft.files) {
+    if (file.kind !== 'tex') continue
+    for (const path of imagePaths(file.content)) {
+      const stored = findImage(byName, path)
+      const figure = stored && figures.find((f) => f.name === stored)
+      if (!figure) continue
+      const wanted = path.replace(/^\.\//, '')
+      // Outside the project ("../x", "/abs", "C:"): not an entry an unzip should write.
+      if (wanted.startsWith('/') || wanted.includes(':') || wanted.split('/').includes('..')) continue
+      const name = /\.[A-Za-z0-9]+$/.test(wanted.split('/').pop() ?? '') ? wanted : `${wanted}${stored.slice(stored.lastIndexOf('.'))}`
+      if (name !== figure.name) extra.push({ name, content: figure.content })
+    }
+  }
+  return new Blob([zipStored([...draft.files, ...figures, ...extra])], { type: 'application/zip' })
 }
 
 /** "related-work-thesis-ch-2" from a draft title, for file names. */

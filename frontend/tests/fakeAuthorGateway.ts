@@ -33,6 +33,10 @@ export type FakeGateway = {
   failWrites: boolean
   /** A draft's figures' bytes by "<draft id>/<path>", as the real route stores them on disk. */
   imageBytes: Map<string, Uint8Array>
+  /** This many figure reads answer 503 before they succeed: a gateway that is down a moment. */
+  imageReadFailures: number
+  /** Awaited before a figure read answers, so a test can hold reads and count them. */
+  beforeImageRead?: (name: string) => Promise<void>
   /** Awaited before a file write is applied, so a test can hold one reply back and let a later
    * one land first. */
   beforeWrite?: (name: string, content: string) => Promise<void>
@@ -99,6 +103,7 @@ export function installFakeGateway(options: { files?: { name: string; content: s
     fetch: vi.fn(),
     failWrites: false,
     imageBytes: new Map(),
+    imageReadFailures: 0,
   }
 
   const t = now()
@@ -368,12 +373,21 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         gateway.imageBytes.set(key, new Uint8Array(await file.arrayBuffer()))
         const others = (draft.images ?? []).filter((i) => i.name !== name)
         draft.images = [...others, { name, size: file.size, hash: `h${++seq}` }].sort((a, b) => a.name.localeCompare(b.name))
+        draft.imagesVersion = (draft.imagesVersion ?? 0) + 1
         return json(draftView(gateway, draft))
       }
       if (!draft.images?.some((i) => i.name === name)) return fail(404, 'no such image')
-      if (method === 'GET') return new Response(gateway.imageBytes.get(key))
+      if (method === 'GET') {
+        if (gateway.beforeImageRead) await gateway.beforeImageRead(name)
+        if (gateway.imageReadFailures > 0) {
+          gateway.imageReadFailures -= 1
+          return fail(503, 'the gateway is down')
+        }
+        return new Response(gateway.imageBytes.get(key))
+      }
       if (method === 'DELETE') {
         draft.images = draft.images.filter((i) => i.name !== name)
+        draft.imagesVersion = (draft.imagesVersion ?? 0) + 1
         gateway.imageBytes.delete(key)
         return json(draftView(gateway, draft))
       }

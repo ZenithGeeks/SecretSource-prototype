@@ -12,6 +12,7 @@ import io
 import json
 import time
 import zipfile
+import zlib
 from datetime import datetime, timedelta
 
 import pytest
@@ -536,6 +537,41 @@ def test_a_zip_figure_that_cannot_be_read_is_left_out_not_a_failed_upload(client
     assert [i["name"] for i in response.json()["images"]] == ["good.png"]
 
 
+def test_a_zip_figure_with_damaged_compressed_data_is_left_out(client, figures_dir):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("good.png", PNG)
+        archive.writestr("bad.png", PNG * 4)
+    raw = bytearray(buffer.getvalue())
+    info = zipfile.ZipFile(io.BytesIO(bytes(raw))).getinfo("bad.png")
+    start = info.header_offset + 30 + len(info.filename) + len(info.extra)
+    raw[start : start + info.compress_size] = b"\xff" * info.compress_size  # not a deflate stream
+    with pytest.raises(zlib.error):  # the failure this test is about, not a CRC mismatch
+        zipfile.ZipFile(io.BytesIO(bytes(raw))).read("bad.png")
+    upload = {"file": ("deflate.zip", bytes(raw), "application/zip")}
+    response = client.post("/author/drafts/upload", headers=ADA, files=upload)
+    assert response.status_code == 200, response.text
+    assert [f["name"] for f in response.json()["files"]] == ["main.tex"]
+    assert [i["name"] for i in response.json()["images"]] == ["good.png"]
+
+
+def test_figures_a_zip_leaves_out_do_not_use_up_the_drafts_caps(client, figures_dir, monkeypatch):
+    monkeypatch.setattr(author_images, "MAX_IMAGES", 2)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        for n in range(5):
+            archive.writestr(f"fake{n}.png", b"not a png")  # not the image the name says
+        archive.writestr("x*y.png", PNG)  # a name that is not kept
+        archive.writestr("a.png", PNG)
+        archive.writestr("b.png", PNG + b"\x01")
+        archive.writestr("c.png", PNG + b"\x02")  # past MAX_IMAGES
+    upload = {"file": ("caps.zip", buffer.getvalue(), "application/zip")}
+    draft = client.post("/author/drafts/upload", headers=ADA, files=upload).json()
+    assert [i["name"] for i in draft["images"]] == ["a.png", "b.png"]
+
+
 def test_a_figure_name_may_hold_spaces_brackets_and_accents(client, figures_dir):
     draft = make_draft(client)
     for name in ("figure (1).png", "fig_a+b,c.png", "résumé.png"):
@@ -565,6 +601,8 @@ def test_uploading_replacing_and_deleting_a_figure(client, figures_dir):
     # Not an edit of the text: an open editor's next write still carries a current `updated`.
     assert first.json()["updated"] == draft["updated"]
 
+    # Every change to the figures counts up `imagesVersion`, which the editor orders answers by.
+    assert draft["imagesVersion"] == 0 and first.json()["imagesVersion"] == 1
     other = PNG + b"\x01"
     replaced = upload_image(client, draft["id"], "posv.png", other, path="figures/posv.png").json()
     assert len(replaced["images"]) == 1 and replaced["images"][0]["hash"] != first.json()["images"][0]["hash"]
@@ -573,7 +611,8 @@ def test_uploading_replacing_and_deleting_a_figure(client, figures_dir):
     url = f"/author/drafts/{draft['id']}/images/figures/posv.png"
     assert client.get(url, headers=ADA).content == other
 
-    assert client.delete(url, headers=ADA).json()["images"] == []
+    removed = client.delete(url, headers=ADA).json()
+    assert removed["images"] == [] and removed["imagesVersion"] == 3
     assert list(folder.iterdir()) == []
     assert client.delete(url, headers=ADA).status_code == 404
 

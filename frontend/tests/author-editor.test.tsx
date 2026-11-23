@@ -634,6 +634,43 @@ See the figure.
     }
   }, 30000)
 
+  test('a figure whose read fails for a moment is fetched again and drawn', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    gateway.drafts.get('d1')!.images = [{ name: 'figures/posv.png', size: 4, hash: 'h1' }]
+    gateway.imageBytes.set('d1/figures/posv.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+    gateway.imageReadFailures = 1
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    await waitFor(() => expect(preview()?.querySelector('img.ss-image')).toBeTruthy(), { timeout: 15000 })
+    expect(gateway.calls.filter((c) => c === 'GET /author/drafts/d1/images/figures/posv.png')).toHaveLength(2)
+  }, 30000)
+
+  test('figures load at most three at a time', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e']
+    const tex = names.map((n) => String.raw`\includegraphics{${n}}`).join('\n\n')
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: tex }] })
+    gateway.drafts.get('d1')!.images = names.map((n, i) => ({ name: `${n}.png`, size: 4, hash: `h${i}` }))
+    for (const n of names) gateway.imageBytes.set(`d1/${n}.png`, new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+    let open = 0
+    let most = 0
+    const held: (() => void)[] = []
+    gateway.beforeImageRead = () => {
+      open += 1
+      most = Math.max(most, open)
+      return new Promise<void>((resolve) => held.push(() => (open -= 1, resolve())))
+    }
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    await waitFor(() => expect(held).toHaveLength(3))
+    // The rest start only as these finish: release what is waiting until all five went out.
+    for (let released = 0; released < names.length; ) {
+      await waitFor(() => expect(held.length).toBeGreaterThan(released))
+      const waiting = held.slice(released)
+      released = held.length
+      act(() => waiting.forEach((release) => release()))
+    }
+    await waitFor(() => expect(preview()?.querySelectorAll('img.ss-image')).toHaveLength(5), { timeout: 15000 })
+    expect(most).toBe(3)
+  }, 30000)
+
   test('a refused upload says why and leaves the images as they were', async () => {
     gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
     renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })

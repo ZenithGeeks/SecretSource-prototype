@@ -214,6 +214,7 @@ def draft_view(draft: dict, runs: list[dict] | None = None) -> dict:
     )
     view["checks"] = len(done)
     view["images"] = images.view(draft.get("images", []))
+    view["imagesVersion"] = int(draft.get("imagesVersion", 0))
     return view
 
 

@@ -87,12 +87,39 @@ async function load(draftId: string, image: DraftImage, signal: AbortSignal): Pr
   return URL.createObjectURL(shown)
 }
 
+/** How many figures load (and convert) at once: each PDF or SVG drawn takes up to
+ * MAX_PIXELS × 4 bytes of canvas, so a draft of many figures must not draw them all at once. */
+const PARALLEL_LOADS = 3
+/** The pauses before a failed figure is fetched again: a request that failed for a moment
+ * (the gateway restarting, a dropped connection) still loads, and one that keeps failing
+ * stops after three tries. The next change to the draft's figures tries it again. */
+const RETRY_DELAYS_MS = [1000, 3000]
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => (window.clearTimeout(timer), reject(signal.reason)), { once: true })
+  })
+}
+
+async function loadWithRetries(draftId: string, image: DraftImage, signal: AbortSignal): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await load(draftId, image, signal)
+    } catch (error) {
+      if (signal.aborted || attempt >= RETRY_DELAYS_MS.length) throw error
+      await pause(RETRY_DELAYS_MS[attempt], signal)
+    }
+  }
+}
+
 export function useDraftImages(draftId: string, images: DraftImage[] | undefined): ImageMap {
   // Kept with the draft it belongs to: right after a switch, the last draft's map is not shown.
   const [state, setState] = useState<{ draftId: string; map: ImageMap }>({ draftId, map: EMPTY })
   const setMap = (map: ImageMap) => setState({ draftId, map })
-  // name → the hash it was loaded at and its URL (none: it failed to load).
-  const loaded = useRef(new Map<string, { hash: string; url?: string }>())
+  // name → the hash it was loaded at and its URL. A figure that failed is not here, so the next
+  // run of the effect below tries it again.
+  const loaded = useRef(new Map<string, { hash: string; url: string }>())
   // Stands for `images` in the effect below: a new array with the same figures is no change.
   const wanted = (images ?? []).map((i) => `${i.name}\u0000${i.hash}`).join('\u0001')
 
@@ -100,28 +127,35 @@ export function useDraftImages(draftId: string, images: DraftImage[] | undefined
     const current = loaded.current
     const list = images ?? []
     const controller = new AbortController()
-    const publish = () => setMap(new Map([...current].flatMap(([name, entry]) => (entry.url ? [[name, entry.url] as const] : []))))
+    const publish = () => setMap(new Map([...current].map(([name, entry]) => [name, entry.url] as const)))
     let changed = false
     for (const [name, entry] of current) {
       if (list.some((i) => i.name === name && i.hash === entry.hash)) continue
-      if (entry.url) URL.revokeObjectURL(entry.url)
+      URL.revokeObjectURL(entry.url)
       current.delete(name)
       changed = true
     }
     if (changed) publish()
-    for (const image of list) {
-      if (current.has(image.name)) continue
-      load(draftId, image, controller.signal).then(
-        (url) => {
-          if (controller.signal.aborted) return URL.revokeObjectURL(url)
+    // At most PARALLEL_LOADS at a time; once the effect is cancelled, no queued one starts.
+    const queue = list.filter((image) => !current.has(image.name))
+    let next = 0
+    const worker = async () => {
+      while (!controller.signal.aborted && next < queue.length) {
+        const image = queue[next++]
+        try {
+          const url = await loadWithRetries(draftId, image, controller.signal)
+          if (controller.signal.aborted) {
+            URL.revokeObjectURL(url)
+            return
+          }
           current.set(image.name, { hash: image.hash, url })
           publish()
-        },
-        () => {
-          if (!controller.signal.aborted) current.set(image.name, { hash: image.hash })
-        },
-      )
+        } catch {
+          // Left out: the preview names it, and the next change to the figures tries again.
+        }
+      }
     }
+    for (let i = 0; i < Math.min(PARALLEL_LOADS, queue.length); i++) void worker()
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, wanted])
@@ -130,7 +164,7 @@ export function useDraftImages(draftId: string, images: DraftImage[] | undefined
   useEffect(() => {
     const current = loaded.current
     return () => {
-      for (const entry of current.values()) if (entry.url) URL.revokeObjectURL(entry.url)
+      for (const entry of current.values()) URL.revokeObjectURL(entry.url)
       current.clear()
     }
   }, [draftId])

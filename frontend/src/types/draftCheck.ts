@@ -167,6 +167,8 @@ export type Draft = {
   /** The draft's figures, which the preview draws where \includegraphics names them
    * (SCRUM-463). Missing on answers from a gateway before them. */
   images?: DraftImage[]
+  /** Counts the changes to `images`: of two answers, the higher one is the newer list. */
+  imagesVersion?: number
 }
 
 /** One of a draft's figures. `name` is the path its LaTeX uses ("figures/posv.png"); `hash`

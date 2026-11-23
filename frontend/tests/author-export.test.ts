@@ -133,6 +133,27 @@ test('buildProjectZip adds the draft figures at their paths, bytes unchanged', (
     })
 })
 
+test('buildProjectZip also puts a figure where \\includegraphics names it, so the export compiles', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7])
+  const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 8])
+  const tex = [
+    '\\includegraphics[width=0.5\\textwidth]{figures/posv}', // no extension, found by file name
+    '\\includegraphics{./plots/arch.pdf}',
+    '\\includegraphics{../outside/posv}', // outside the project: no entry for it
+    '% \\includegraphics{commented/posv}',
+    '\\includegraphics{missing}',
+  ].join('\n')
+  const withTex: Draft = { ...draft, files: [{ name: 'main.tex', kind: 'tex', content: tex }] }
+  return buildProjectZip(withTex, [{ name: 'posv.png', content: png }, { name: 'arch.pdf', content: pdf }])
+    .arrayBuffer()
+    .then((buffer) => {
+      const files = unzipSync(new Uint8Array(buffer))
+      assert.deepEqual(Object.keys(files).sort(), ['arch.pdf', 'figures/posv.png', 'main.tex', 'plots/arch.pdf', 'posv.png'])
+      assert.deepEqual([...files['figures/posv.png']], [...png])
+      assert.deepEqual([...files['plots/arch.pdf']], [...pdf])
+    })
+})
+
 test('slug makes a safe file name', () => {
   assert.equal(slug('Related work — thesis ch.2'), 'related-work-thesis-ch-2')
   assert.equal(slug('   '), 'draft')

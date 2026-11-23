@@ -127,42 +127,45 @@ export function Editor({
   const active = files.find((f) => f.name === activeName) ?? files.find((f) => f.kind === 'tex') ?? files[0]
 
   // The draft's figures (SCRUM-463): the list the gateway sent, or the answer to this editor's
-  // own last upload or removal, until the draft is read again. Kept here and not in the query
-  // cache: see useAuthorActions().uploadImage.
-  const [ownImages, setOwnImages] = useState<DraftImage[] | null>(null)
-  const [seenImages, setSeenImages] = useState(draft.data?.images)
-  if (seenImages !== draft.data?.images) {
-    setSeenImages(draft.data?.images)
-    setOwnImages(null)
-  }
-  const images = ownImages ?? draft.data?.images ?? []
+  // own last upload or removal while it is newer. Kept here and not in the query cache: see
+  // useAuthorActions().uploadImage. Newer is by `imagesVersion`, which the gateway counts up on
+  // every change to the figures: a read of the draft that left before an upload and lands after
+  // it carries the older version, so it does not hide the new figure.
+  type ImageList = { images: DraftImage[]; version: number }
+  const [ownImages, setOwnImages] = useState<(ImageList & { draftId: string }) | null>(null)
+  const serverImages: ImageList = { images: draft.data?.images ?? [], version: draft.data?.imagesVersion ?? 0 }
+  const images = ownImages && ownImages.draftId === draftId && ownImages.version > serverImages.version ? ownImages.images : serverImages.images
   const imageMap = useDraftImages(draftId, images)
   const [imagesBusy, setImagesBusy] = useState(false)
-  const changeImages = async (work: () => Promise<DraftImage[] | undefined>) => {
+  const adoptImages = (answer: Draft) =>
+    setOwnImages((current) => {
+      const version = answer.imagesVersion ?? 0
+      // Two answers can land out of order too: the one with the higher version wins.
+      if (current && current.draftId === draftId && current.version >= version) return current
+      return { draftId, images: answer.images ?? [], version }
+    })
+  const changeImages = async (work: () => Promise<void>) => {
     setImagesBusy(true)
     try {
-      const next = await work()
-      if (next) setOwnImages(next)
+      await work()
     } finally {
       setImagesBusy(false)
     }
   }
   const uploadImages = (list: File[]) =>
     changeImages(async () => {
-      let next: DraftImage[] | undefined
       for (const file of list) {
         try {
-          next = (await actions.uploadImage(draftId, file)).images ?? []
+          adoptImages(await actions.uploadImage(draftId, file))
         } catch (error) {
           toast.error(`Could not upload ${file.name}: ${errorMessage(error)}`)
         }
       }
-      return next
     })
   const removeImage = (name: string) =>
     changeImages(async () => {
       try {
-        return (await actions.deleteImage(draftId, name)).images ?? []
+        adoptImages(await actions.deleteImage(draftId, name))
       } catch (error) {
         toast.error(`Could not remove ${name}: ${errorMessage(error)}`)
       }
