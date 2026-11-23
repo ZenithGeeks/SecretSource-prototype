@@ -5,11 +5,13 @@ Google nor the gateway's heavy imports.
 """
 
 import asyncio
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import app
 import requests
 from app import auth, config
 from app.labeling import dspy_export, ledger, pool, scopus
@@ -454,6 +456,78 @@ def test_session_lists_cited_works_that_have_no_pdf():
         }
     ]
     assert labeling.build_session(ANALYSIS)["unread"] == []
+
+
+def test_session_exposes_web_evidence_with_a_stable_page_location():
+    url = "https://example.org/article"
+    web_claim = {
+        **ANALYSIS["claims"][0],
+        "citations": [{"ref": "b5", "title": "Useful page", "url": url, "authors": ["A Writer"], "year": "2024"}],
+        "verdicts": [{
+            "cited": url, "source": url, "source_kind": "web-page", "web_title": "Useful page",
+            "retrieved_at": "2026-11-23T00:00:00+00:00",
+            "verdict": "supports", "evidence": [{"text": "The web paragraph is the evidence.", "page": None, "paragraph": 1, "locator": f"{url}#finding"}],
+        }],
+    }
+
+    session = labeling.build_session({**ANALYSIS, "claims": [web_claim]})
+
+    assert session["references"] == [{
+        "reference_id": "web-b5", "file": "web-b5", "label": "Useful page", "ref": "b5",
+        "authors": ["A Writer"], "year": "2024", "source_kind": "web-page", "url": url,
+        "retrieved_at": "2026-11-23T00:00:00+00:00",
+        "web_passages": [{
+            "text": "The web paragraph is the evidence.", "locator": f"{url}#finding", "paragraph": 1,
+        }],
+    }]
+    assert session["claims"][0]["candidates"][0]["locator"] == f"{url}#finding"
+    assert session["claims"][0]["candidates"][0]["paragraph"] == 1
+    assert session["unread"] == []
+
+
+def test_a_hand_added_claim_searches_cached_web_paragraphs_without_colbert(api, monkeypatch):
+    url = "https://example.org/article"
+    web_claim = {
+        **ANALYSIS["claims"][0],
+        "citations": [{"ref": "b5", "title": "Useful page", "url": url}],
+        "verdicts": [{
+            "cited": url, "source": url, "source_kind": "web-page", "web_title": "Useful page",
+            "verdict": "supports", "evidence": [{
+                "text": "Static analysis detects software defects in large projects.",
+                "page": None, "paragraph": 2, "locator": f"{url}#finding",
+            }],
+        }],
+    }
+    analysis = {**ANALYSIS, "claims": [web_claim]}
+    client, _, app_client = api
+    app_client.dependency_overrides[labeling.owned_analysis] = lambda: analysis
+    monkeypatch.setattr(verify, "evidence_from", lambda *args: pytest.fail("web pages are not in ColBERT"))
+
+    found = client.post("/labeling/sessions/a1/candidates", json={
+        "claim_id": HAND_ADDED, "claim": "Static analysis detects software defects.",
+    })
+
+    assert found.status_code == 200
+    [candidate] = found.json()["candidates"]
+    assert candidate["reference_id"] == "web-b5"
+    assert candidate["page"] is None
+    assert candidate["paragraph"] == 2
+    assert candidate["locator"] == f"{url}#finding"
+
+
+def test_a_labeler_can_acknowledge_review_of_changed_source_evidence(monkeypatch):
+    analysis = copy.deepcopy(ANALYSIS)
+    analysis["claims"][0]["needs_review"] = True
+    saved = []
+    monkeypatch.setattr(app, "main", SimpleNamespace(_save_soon=saved.append), raising=False)
+
+    response = asyncio.run(labeling.acknowledge_source_review(
+        "a1", {"claim_id": "paperA-0123456789ab#0"}, analysis, "chanya",
+    ))
+
+    assert response == {"claim_id": "paperA-0123456789ab#0", "reviewed": True}
+    assert analysis["claims"][0]["needs_review"] is False
+    assert saved == ["a1"]
 
 
 def test_save_keeps_a_passage_and_a_level_for_a_work_with_no_pdf(api):

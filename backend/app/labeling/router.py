@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from app import auth, config
@@ -48,7 +48,7 @@ from app.labeling.schema import (
     current,
 )
 from app.pipeline import verify
-from app.pipeline.sources import lookup_key
+from app.pipeline.sources import lookup_key, lookup_keys
 from app.researcher import find_citation
 
 log = logging.getLogger(__name__)
@@ -114,6 +114,8 @@ def _candidates(claim_id: str, reference_id: str, file: str, hits: list[dict]) -
             "score": hit.get("score"),
             "page": hit.get("page"),
             "passage": hit.get("text", ""),
+            **({"locator": hit["locator"]} if hit.get("locator") else {}),
+            **({"paragraph": hit["paragraph"]} if hit.get("paragraph") else {}),
         }
         for rank, hit in enumerate(hits, 1)
     ]
@@ -130,23 +132,42 @@ def build_session(analysis: dict) -> dict:
         for verdict in claim.get("verdicts") or []:
             if not verdict.get("source"):
                 continue
-            file = Path(verdict["source"]).name
-            reference_id = Path(file).stem
             citation = find_citation(claim, verdict) or {}
-            references.setdefault(
+            is_web = verdict.get("source_kind") == "web-page"
+            if is_web:
+                ref = citation.get("ref") or hashlib.sha1(verdict["source"].encode()).hexdigest()[:10]
+                reference_id = f"web-{ref}"
+                file = reference_id  # a stable key, never passed to the PDF API for a web source
+            else:
+                file = Path(verdict["source"]).name
+                reference_id = Path(file).stem
+            reference = references.setdefault(
                 reference_id,
                 {
                     "reference_id": reference_id,
                     "file": file,
                     # The title, so a labeler knows which paper this is; the arXiv id or DOI it
                     # was looked up by only when the citation list had no title for it.
-                    "label": citation.get("title") or verdict.get("cited") or file,
+                    "label": (verdict.get("web_title") if is_web else "") or citation.get("title") or verdict.get("cited") or file,
                     # GROBID's id for the citation: the "[b47]" in the claim's sentence.
                     "ref": citation.get("ref", ""),
                     "authors": citation.get("authors", []),
                     "year": citation.get("year", ""),
+                    **({"source_kind": "web-page", "url": verdict.get("source", "")} if is_web else {}),
+                    **({"retrieved_at": verdict.get("retrieved_at", "")} if is_web else {}),
                 },
             )
+            if is_web:
+                passages = reference.setdefault("web_passages", [])
+                known = {(item.get("locator"), item.get("text")) for item in passages}
+                for hit in verdict.get("evidence") or []:
+                    key = (hit.get("locator"), hit.get("text"))
+                    if hit.get("text") and key not in known:
+                        passages.append({
+                            "text": hit["text"], "locator": hit.get("locator", ""),
+                            "paragraph": hit.get("paragraph"),
+                        })
+                        known.add(key)
             candidates += _candidates(claim_id, reference_id, file, verdict.get("evidence") or [])
         claims.append(
             {
@@ -157,6 +178,8 @@ def build_session(analysis: dict) -> dict:
                 "source": claim.get("source"),
                 "candidates": candidates,
                 "unchecked": _unchecked(claim),
+                "needs_review": bool(claim.get("needs_review")),
+                "citation_repairs": claim.get("citation_repairs") or {},
                 # The "b23"s this claim cites, in the order it cites them, so the labeler opens
                 # one of its own references and never another claim's.
                 "cited": [ref for citation in claim.get("citations") or [] if (ref := citation.get("ref"))],
@@ -185,21 +208,21 @@ def _unchecked(claim: dict) -> list[dict]:
     failed = {row["source"]: row for row in claim.get("unchecked") or []}
     rows = []
     for citation in claim.get("citations") or []:
+        source_keys = set(lookup_keys(citation))
         source = lookup_key(citation)
-        failed_row = failed.get(source)
         if not source:
             reason = "unresolvable"
             source_outcome = {
                 "source_kind": "unknown", "outcome": "not-attempted",
                 "retryable": False, "attempts": [],
             }
-        elif source in named:
+        elif source_keys & named:
             reason = "named"
             source_outcome = {
                 "source_kind": "unknown", "outcome": "named-only",
                 "retryable": False, "attempts": [],
             }
-        elif failed_row:
+        elif failed_row := (failed.get(source) or next((failed[key] for key in source_keys if key in failed), None)):
             reason = failed_row["reason"]
             source_outcome = failed_row.get("source_outcome")
         else:
@@ -214,6 +237,9 @@ def _unchecked(claim: dict) -> list[dict]:
         }
         if source_outcome is not None:
             row["source_outcome"] = source_outcome
+        repair = (claim.get("citation_repairs") or {}).get(citation.get("ref", ""))
+        if repair:
+            row["repair_error"] = repair
         rows.append(row)
     return rows
 
@@ -358,6 +384,23 @@ async def add_compare_note(
     return {"author": who, "ts": row["ts"], "note": body.note}
 
 
+@router.post("/sessions/{analysis_id}/source-review")
+async def acknowledge_source_review(
+    analysis_id: str, body: dict = Body(...), analysis: dict = Depends(owned_analysis),
+    _who: str = Depends(annotator),
+):
+    """Clear a source-change notice after an authorized labeler reviews the refreshed evidence."""
+    claim = _extracted_claim(analysis, Path(analysis["file"]).stem, str(body.get("claim_id") or ""))
+    if claim is None:
+        raise HTTPException(404, "the analysis has no such extracted claim")
+    if claim.get("needs_review"):
+        claim["needs_review"] = False
+        from app import main
+
+        main._save_soon(analysis_id)
+    return {"claim_id": body["claim_id"], "reviewed": True}
+
+
 async def _is_blind(analysis_id: str, who: str) -> bool:
     """Whether `who` checks this paper blind."""
     return analysis_id in await asyncio.to_thread(pool.blind_for, who)
@@ -390,17 +433,32 @@ async def added_claim_candidates(
         references = [r for r in built["references"] if r["ref"] in cited]
     else:
         raise HTTPException(422, f"{body.claim_id} is not a claim of this paper")
+    paper_references = [reference for reference in references if reference.get("source_kind") != "web-page"]
+    web_hits = {
+        reference["reference_id"]: verify.rank_web_passages(body.claim, reference.get("web_passages") or [])
+        for reference in references
+        if reference.get("source_kind") == "web-page"
+    }
     try:
-        found = await asyncio.gather(
-            *(asyncio.to_thread(verify.evidence_from, body.claim, r["file"]) for r in references)
+        paper_hits = await asyncio.gather(
+            *(asyncio.to_thread(verify.evidence_from, body.claim, reference["file"])
+              for reference in paper_references)
         )
     except requests.RequestException as error:  # ColBERT down, or still waking up past the timeout
         raise HTTPException(502, "retrieval did not answer") from error
+    hits_by_reference = {
+        reference["reference_id"]: hits
+        for reference, hits in zip(paper_references, paper_hits, strict=True)
+    }
+    hits_by_reference.update(web_hits)
     return {
         "candidates": [
             cand
-            for reference, hits in zip(references, found, strict=True)
-            for cand in _candidates(body.claim_id, reference["reference_id"], reference["file"], hits)
+            for reference in references
+            for cand in _candidates(
+                body.claim_id, reference["reference_id"], reference["file"],
+                hits_by_reference.get(reference["reference_id"], []),
+            )
         ]
     }
 

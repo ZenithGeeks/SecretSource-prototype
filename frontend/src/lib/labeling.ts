@@ -35,6 +35,8 @@ export type Candidate = {
   /** Set on a passage the live search found, including one put back from a saved row.
    * The analysis did not store it, so a save sends the text rather than an id alone. */
   fromSearch?: boolean
+  locator?: string
+  paragraph?: number
 }
 
 /** A citation the analysis did not check, with why: "named" (the paper only names the work) or
@@ -48,6 +50,7 @@ export type UncheckedCitation = {
   doi?: string
   year?: string
   source_outcome?: SourceOutcome
+  repair_error?: { status: string; reason: string; message: string }
 }
 
 export type SessionClaim = {
@@ -62,13 +65,26 @@ export type SessionClaim = {
   /** The "b23"s the claim cites, in its order. Missing from a gateway older than this field,
    * and from a claim added by hand. */
   cited?: string[]
+  /** New evidence replaced an earlier result and needs a human review before labels are reused. */
+  needs_review?: boolean
+  citation_repairs?: Record<string, { status: string; reason: string; message: string }>
 }
 
 /** A cited paper. `label` is its title, or the arXiv id or DOI when the citation list had none;
  * `ref` is the "b47" the claim's sentence shows in brackets, empty when unknown. `ref`, `authors`
  * and `year` are missing from a gateway older than the frontend, for the minutes between the two
  * deploys. */
-export type Reference = { reference_id: string; file: string; label: string; ref?: string; authors?: string[]; year?: string }
+export type Reference = {
+  reference_id: string
+  file: string
+  label: string
+  ref?: string
+  authors?: string[]
+  year?: string
+  source_kind?: 'paper' | 'web-page'
+  url?: string
+  retrieved_at?: string
+}
 
 /** "Nogueira, Cho · 2019", "Karpukhin et al. · 2020": who wrote a reference, by surname. */
 export function byline(reference: Reference): string {
@@ -327,6 +343,32 @@ export const labelingApi = {
   /** Read one of your failed papers again; a new analysis takes its place on the list. */
   retryPaper: (analysisId: string) =>
     request<{ id: string }>(`/labeling/papers/${encodeURIComponent(analysisId)}/retry`, { method: 'POST' }),
+  /** Add one unread citation's PDF to an analysis and refresh only claims that cite it. */
+  uploadReferencePdf: (analysisId: string, ref: string, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<{ ref: string; pdf: string }>(
+      `/analyses/${encodeURIComponent(analysisId)}/references/${encodeURIComponent(ref)}/pdf`,
+      { method: 'POST', body },
+    )
+  },
+  /** Retry one citation only when its stored outcome says the failure may be temporary. */
+  retryReference: (analysisId: string, ref: string) =>
+    request<{ ref: string; retrying: boolean }>(
+      `/analyses/${encodeURIComponent(analysisId)}/references/${encodeURIComponent(ref)}/retry`,
+      { method: 'POST' },
+    ),
+  /** Try a corrected DOI or URL for one reference in the owner's analysis. */
+  repairReference: (analysisId: string, ref: string, replacement: { doi?: string; url?: string }) =>
+    request<{ ref: string; repairing: boolean }>(
+      `/analyses/${encodeURIComponent(analysisId)}/references/${encodeURIComponent(ref)}/repair`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(replacement) },
+    ),
+  acknowledgeSourceReview: (analysisId: string, claimId: string) =>
+    request<{ claim_id: string; reviewed: boolean }>(
+      `/labeling/sessions/${encodeURIComponent(analysisId)}/source-review`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_id: claimId }) },
+    ),
   /** Analyse a paper from its PDF and list it for the team. The PDF is uploaded the way the
    * Researcher role uploads one (straight to the papers bucket where the web proxy would refuse
    * a large file, #266), then the new analysis is listed. `doi` links it to its Scopus record;
@@ -533,6 +575,54 @@ export function useLabelSession(analysisId: string | null) {
   })
 }
 
+export function useUploadReferencePdf(analysisId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ref, file }: { ref: string; file: File }) =>
+      labelingApi.uploadReferencePdf(analysisId, ref, file),
+    onSuccess: () => {
+      // The endpoint starts a detached claim-only recheck (202). Refresh after it records its
+      // completion stage so the new evidence appears without rerunning unrelated extraction.
+      window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] })
+      }, 3_000)
+    },
+  })
+}
+
+export function useRetryReference(analysisId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ref: string) => labelingApi.retryReference(analysisId, ref),
+    onSuccess: () => {
+      window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] })
+      }, 3_000)
+    },
+  })
+}
+
+export function useRepairReference(analysisId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ref, replacement }: { ref: string; replacement: { doi?: string; url?: string } }) =>
+      labelingApi.repairReference(analysisId, ref, replacement),
+    onSuccess: () => {
+      window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] })
+      }, 3_000)
+    },
+  })
+}
+
+export function useAcknowledgeSourceReview(analysisId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (claimId: string) => labelingApi.acknowledgeSourceReview(analysisId, claimId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] }),
+  })
+}
+
 export function useSaveLabels(analysisId: string) {
   return useMutation({ mutationFn: (body: Save) => labelingApi.save(analysisId, body) })
 }
@@ -735,7 +825,10 @@ export type Unresolved = {
   year: string
   reason: string
   links: { text: string; href: string }[]
+  doi?: string
+  url?: string
   sourceOutcome?: SourceOutcome
+  repairError?: { status: string; reason: string; message: string }
 }
 
 /** Why a citation was not read, in plain words: api.ts's wording, plus the labeler's own "named". */
@@ -756,6 +849,15 @@ const OUTCOME_TEXT: Record<string, string> = {
   'retrieval-failed': 'the retrieval service could not finish checking this paper',
   withdrawn: 'the paper was withdrawn by its authors on arXiv',
   'indexing-failed': 'the paper was downloaded but could not be indexed for retrieval',
+  'web-page-unavailable': 'the public web page could not be read',
+  'unsupported-url': 'only public HTTP or HTTPS page URLs are supported',
+  dynamic: 'the page needs scripts or interaction to show its text',
+  empty: 'the page has no readable static text',
+  'redirect-limit': 'the page redirected too many times',
+  'too-large': 'the page exceeded the safe read limit',
+  'not-html': 'the URL did not return HTML or XHTML',
+  'http-error': 'the page returned an HTTP error',
+  'invalid-content': 'the URL did not return readable HTML or a PDF',
 }
 
 export const uncheckedReason = (reason: string, sourceOutcome?: SourceOutcome): string =>
@@ -805,7 +907,10 @@ export function unresolvedCitations(claim: SessionClaim, session: Pick<Session, 
           : !row.doi ? 'no DOI or arXiv ID to look it up by' : uncheckedReason(row.reason)
         : uncheckedReason(row.reason, row.source_outcome),
       links: [...doiLink(row.doi), ...webLink(row.url)],
+      doi: row.doi,
+      url: row.url,
       ...(row.source_outcome ? { sourceOutcome: row.source_outcome } : {}),
+      ...(row.repair_error ? { repairError: row.repair_error } : {}),
     })),
     ...unread.map((r) => ({
       ref: r.ref!, label: r.label, year: r.year ?? '',

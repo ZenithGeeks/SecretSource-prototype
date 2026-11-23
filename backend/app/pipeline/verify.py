@@ -1,8 +1,8 @@
-"""Verify a claim against the source it cites.
+"""Verify a claim against the paper or static web page it cites.
 
-The cited PDF is indexed (ColBERT service), passages are retrieved with the claim as the
-query, and the LLM judges whether they support it: supports / refutes / insufficient.
-Visual evidence (ColPali) is optional and skipped when that service is down.
+Papers are indexed (ColBERT service), passages are retrieved with the claim as the query, and
+the LLM judges them. Static web pages are read directly with safe paragraph locations and use
+the same judge without pretending they are PDFs. Visual evidence (ColPali) is optional.
 """
 
 import hashlib
@@ -12,6 +12,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app import store
 from app.clients import retrieval
@@ -334,13 +335,13 @@ def checked_citations(claim: dict) -> list[tuple[dict, str]]:
     """Each citation of `claim` to check, with the key it is looked up by. The gateway and the
     graph both plan their jobs with this. Left out: citations with nothing to look up by, and
     the ones that only name something the paper uses (`named`)."""
-    from app.pipeline.sources import lookup_key
+    from app.pipeline.sources import lookup_key, lookup_keys
 
     named = set(claim.get("named", []))
     return [
         (citation, source)
         for citation in claim["citations"]
-        if (source := lookup_key(citation)) and source not in named
+        if (source := lookup_key(citation)) and not (set(lookup_keys(citation)) & named)
     ]
 
 
@@ -418,11 +419,69 @@ def prepare_source(
     call many times for the same paper: the work is done only once. Returns once the text is indexed;
     the figures follow in the background unless `wait_for_figures` is set.
     """
+    from app.pipeline import sources, web
+
     try:
+        parsed = urlsplit(source_pdf_path)
+        if "://" in source_pdf_path and parsed.scheme.lower() not in {"http", "https"}:
+            raise web.WebReadError("unsupported-url", "only HTTP and HTTPS web pages are supported")
+        is_arxiv_url = (parsed.hostname or "").lower().removeprefix("www.") == "arxiv.org"
+        if (
+            parsed.scheme.lower() in {"http", "https"}
+            and not sources.doi_in(source_pdf_path)
+            and not is_arxiv_url
+        ):
+            resource = web.fetch_resource(source_pdf_path)
+            is_html = resource.content_type in {"text/html", "application/xhtml+xml"} or resource.body[:512].lstrip().lower().startswith((b"<!doctype html", b"<html"))
+            if is_html:
+                if resource.content_type not in {"text/html", "application/xhtml+xml"}:
+                    resource = web.WebResource(resource.url, "text/html", resource.encoding, resource.body)
+                page = web.page_from_resource(resource)
+                if expected and expected.get("_validate_web_title") and expected.get("title") and page.title:
+                    if not sources.titles_match(str(expected["title"]), page.title):
+                        raise web.WebReadError("identity-mismatch", "the page title does not match the cited work")
+                return {
+                    "status": "web-page", "web_page": page,
+                    "source_outcome": {
+                        "source_kind": "web-page", "outcome": "readable", "retryable": False,
+                        "attempts": [{"provider": "direct_url", "result": "readable_html", "locator": sources._safe_locator(page.url)}],
+                    },
+                }
+            if resource.body.startswith(b"%PDF-"):
+                digest = hashlib.sha256(source_pdf_path.encode() + resource.body).hexdigest()[:24]
+                pdf = sources.PAPERS_DIR / f"url-{digest}.pdf"
+                sources.PAPERS_DIR.mkdir(parents=True, exist_ok=True)
+                sources._write_whole(sources._link_file(pdf), sources._safe_locator(resource.url).encode())
+                sources._write_whole(pdf, resource.body)
+                try:
+                    validate_pdf_identity(pdf, expected)
+                except sources.IdentityMismatch:
+                    pdf.unlink(missing_ok=True)
+                    sources._link_file(pdf).unlink(missing_ok=True)
+                    raise
+                if failure := _index_once(pdf, wait_for_figures):
+                    return {
+                        **failure,
+                        "source_outcome": failure.get("source_outcome") or {
+                            "source_kind": "paper", "outcome": "indexing-failed",
+                            "retryable": bool(failure.get("retryable")),
+                            "attempts": [{"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}],
+                        },
+                    }
+                return {
+                    "status": "ok", "path": pdf.as_posix(),
+                    "source_outcome": {
+                        "source_kind": "paper", "outcome": "readable", "retryable": False,
+                        "attempts": [{"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}],
+                    },
+                }
+            raise web.WebReadError("invalid-content", "the URL did not return readable HTML or a PDF")
+
         from app.pipeline.sources import local_pdf_with_resolution
 
         path, source_outcome = local_pdf_with_resolution(source_pdf_path, expected)
         source = Path(path)
+        validate_pdf_identity(source, expected)
         if failure := _index_once(source, wait_for_figures):
             return {
                 **failure,
@@ -434,9 +493,122 @@ def prepare_source(
             }
         return {"status": "ok", "path": source.as_posix(), "source_outcome": source_outcome}
     except Exception as error:
+        if isinstance(error, web.WebReadError):
+            return {
+                "status": "error", "message": str(error), "reason": "web-page-unavailable",
+                "retryable": error.retryable,
+                "source_outcome": {
+                    "source_kind": "web-page", "outcome": error.outcome,
+                    "retryable": error.retryable,
+                    "attempts": [{
+                        "provider": "direct_url", "result": error.outcome,
+                        "locator": sources._safe_locator(source_pdf_path),
+                    }],
+                },
+            }
         from app.pipeline.sources import tool_error
 
         return tool_error(error)
+
+
+def validate_pdf_identity(pdf: str | Path, expected: dict | None) -> None:
+    """Reject a replacement PDF when available title, author or DOI metadata conflicts."""
+    if not expected:
+        return
+    from app.pipeline import sources
+
+    import pymupdf
+
+    try:
+        with pymupdf.open(pdf) as document:
+            metadata = document.metadata or {}
+            front_matter = "\n".join(
+                document[number].get_text("text") for number in range(min(3, len(document)))
+            )
+    except Exception:
+        # The normal preparation path will return its readable-PDF/indexing failure with detail.
+        return
+
+    cited_title = str(expected.get("title") or "").strip()
+    if cited_title:
+        from app.pipeline.claims import _printed_title
+
+        found_title = _printed_title(str(pdf)) or str(metadata.get("title") or "").strip()
+        if found_title and not sources.titles_match(cited_title, found_title):
+            raise sources.IdentityMismatch("the PDF title does not match the cited work")
+
+    cited_authors = expected.get("authors") or []
+    if isinstance(cited_authors, str):
+        cited_authors = [cited_authors]
+    author = str(metadata.get("author") or "").strip()
+    if cited_authors and author:
+        surname = re.sub(r"[^a-z0-9]", "", str(cited_authors[0]).split()[-1].lower())
+        found_author = re.sub(r"[^a-z0-9]", " ", author.lower()).split()
+        if surname and surname not in found_author:
+            raise sources.IdentityMismatch("the PDF author does not match the cited work")
+
+    cited_doi = sources.doi_in(str(expected.get("doi") or ""))
+    if cited_doi:
+        found_dois = {
+            sources.doi_in(match.group()).lower()
+            for match in sources.DOI.finditer(front_matter)
+            if sources.doi_in(match.group())
+        }
+        if found_dois and cited_doi.lower() not in found_dois:
+            raise sources.IdentityMismatch("the PDF DOI does not match the cited work")
+
+
+def check_web_page(
+    claim: str, source_url: str, page, judged: str = "", other_citations: bool = False,
+    source_outcome: dict | None = None,
+) -> dict:
+    """Judge a short, locally ranked set of static page paragraphs and preserve their URLs."""
+    try:
+        evidence = rank_web_passages(judged or claim, [
+            {"text": passage.text, "page": None, "locator": passage.locator, "paragraph": passage.paragraph}
+            for passage in page.passages
+        ])
+        passages = [item["text"] for item in evidence]
+        if not passages:
+            verdict = {"verdict": "insufficient", "quote": "", "reasoning": "the page has no extractable paragraphs"}
+        else:
+            global _judge
+            if _judge is None:
+                _judge = _build_judge()
+            verdict = _judge(judged or claim, passages)
+        return {
+            "status": "ok", "claim": claim, "source": page.url, "source_kind": "web-page",
+            "web_title": page.title, "retrieved_at": page.retrieved_at,
+            **verdict, "verdict_from": "text", "evidence": evidence, "pages": [],
+            "source_outcome": source_outcome or {
+                "source_kind": "web-page", "outcome": "readable", "retryable": False, "attempts": [],
+            },
+        }
+    except Exception as error:
+        from app.pipeline.sources import tool_error
+
+        return {**tool_error(error), "claim": claim, "source": source_url}
+
+
+def rank_web_passages(query: str, passages: list[dict], limit: int = EVIDENCE_COUNT) -> list[dict]:
+    """Rank stored static web paragraphs for the Labeler's added-claim search."""
+    common = {
+        "about", "after", "also", "been", "being", "between", "could", "does", "from", "have",
+        "into", "more", "most", "other", "over", "same", "some", "such", "than", "that",
+        "their", "there", "these", "they", "this", "those", "through", "under", "using",
+        "were", "what", "when", "where", "which", "while", "with", "would",
+    }
+    query_terms = set(re.findall(r"[a-z0-9]{3,}", query.lower())) - common
+    ranked = []
+    for index, passage in enumerate(passages):
+        terms = set(re.findall(r"[a-z0-9]{3,}", str(passage.get("text") or "").lower())) - common
+        score = len(query_terms & terms) / max(1, len(query_terms)) if query_terms else 0.0
+        ranked.append((score, int(passage.get("paragraph") or index + 1), passage))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return [
+        {**passage, "page": None, "score": score}
+        for score, _, passage in ranked[:max(0, limit)]
+    ]
 
 
 def judge_passages(claim: str, passages: list[str]) -> dict:

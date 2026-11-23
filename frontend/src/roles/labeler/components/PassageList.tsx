@@ -5,7 +5,7 @@
  * focused one is shown in full. Below, a form to add a passage retrieval missed.
  */
 
-import { Loader2, Plus, Sparkles, X } from 'lucide-react'
+import { ExternalLink, Loader2, Plus, Sparkles, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Button, IconButton, Input, Textarea } from '../../../components/ui'
@@ -26,7 +26,15 @@ import { cn } from '../../../lib/utils'
 import type { AskedPassage } from './AskPanel'
 import { Kbd } from './ClaimDecision'
 
-export type Focus = { file: string; passage: string; page: number | null; key: string }
+export type Focus = {
+  file: string
+  passage: string
+  page: number | null
+  key: string
+  locator?: string
+  reference_id?: string
+  paragraph?: number
+}
 
 const STATUS: { status: CandidateStatus; label: string; key: string }[] = [
   { status: 'relevant', label: 'Relevant', key: 'R' },
@@ -65,6 +73,7 @@ function PassageCard({
   onFocus,
   onJudge,
   onAsk,
+  askEnabled = true,
 }: {
   c: Candidate
   label: string
@@ -73,6 +82,7 @@ function PassageCard({
   onFocus: () => void
   onJudge: (status: CandidateStatus) => void
   onAsk?: () => void
+  askEnabled?: boolean
 }) {
   const ref = useReveal(shown)
   return (
@@ -93,11 +103,23 @@ function PassageCard({
         <span className="text-xs font-semibold text-ink">
           #{c.rank}
           {c.page != null && <span className="font-normal text-ink-muted"> · p.{c.page}</span>}
+          {c.page == null && c.paragraph != null && <span className="font-normal text-ink-muted"> · paragraph {c.paragraph}</span>}
         </span>
         <span title={shown ? undefined : c.passage} className={cn('mt-1 block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
           {c.passage}
         </span>
       </button>
+      {c.locator && (
+        <a
+          href={c.locator}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+        >
+          Open paragraph on source page <ExternalLink className="size-3" aria-hidden="true" />
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
+      )}
       <div role="radiogroup" aria-label={`Passage ${c.rank} of ${label}`} className="mt-2 flex gap-2">
         {STATUS.map((s) => (
           <button
@@ -121,7 +143,7 @@ function PassageCard({
           </button>
         ))}
       </div>
-      {onAsk && <AskAboutButton onAsk={onAsk} />}
+        {onAsk && askEnabled && <AskAboutButton onAsk={onAsk} />}
     </li>
   )
 }
@@ -277,8 +299,9 @@ export function PassageList({
                     label={labelOf(id)}
                     shown={focus?.key === c.cand_id}
                     status={draft.cands[c.cand_id]}
-                    onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
+                    onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id, locator: c.locator, reference_id: c.reference_id, paragraph: c.paragraph })}
                     onJudge={(status) => onJudge(c.cand_id, status)}
+                    askEnabled={reference?.source_kind !== 'web-page'}
                     onAsk={
                       onAsk &&
                       (() => onAsk({ referenceId: id, name: `#${c.rank} ${labelOf(id)}`, page: c.page, text: c.passage }))
@@ -298,11 +321,11 @@ export function PassageList({
                         key={key}
                         a={a}
                         shown={focus?.key === key}
-                        onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key })}
+                        onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key, reference_id: a.reference_id, locator: reference?.url })}
                         onRemove={() => onRemove(a)}
                         onAsk={
-                          // Ask reads the reference's PDF, which a work with no PDF does not have.
-                          onAsk && fileOf(id)
+                          // Ask reads the reference's PDF; a web page has no PDF to open.
+                          onAsk && fileOf(id) && reference?.source_kind !== 'web-page'
                             ? () => onAsk({ referenceId: id, name: `Yours · ${labelOf(id)}`, page: a.page, text: a.passage })
                             : undefined
                         }

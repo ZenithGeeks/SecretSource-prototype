@@ -174,6 +174,43 @@ beforeEach(() => {
   window.localStorage.setItem('labeler.paperView', 'both')
   wideScreen(true)
 })
+
+it('asks the labeler to review saved labels after a cited source changes', async () => {
+  const claim = { ...makeSession().claims[0], needs_review: true }
+  gateway.session = makeSession({ claims: [claim] })
+  await open()
+
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'A source for this claim changed. Review its evidence before reusing the saved label.',
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Mark evidence reviewed' }))
+  await waitFor(() => expect(gateway.posts).toContainEqual({ claim_id: 'paperA#0' }))
+})
+
+it('opens readable web citations as linkable web evidence instead of a PDF page', async () => {
+  const url = 'https://example.org/article'
+  const page = makeSession()
+  page.claims[0] = {
+    ...page.claims[0],
+    cited: ['b5'],
+    candidates: [{
+      cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: `${url}#finding`,
+    }],
+  }
+  page.references = [{
+    reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5',
+    source_kind: 'web-page', url, retrieved_at: '2026-11-23T00:00:00+00:00',
+  }]
+  page.unread = []
+  gateway.session = page
+  await open()
+
+  expect(screen.getByRole('region', { name: 'Web source evidence' })).toHaveTextContent('Static text from the cited page.')
+  expect(screen.getByText(/Paragraph 2/)).toBeInTheDocument()
+  expect(screen.getByText('Retrieved 2026-11-23T00:00:00+00:00')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', `${url}#finding`)
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe('when the paper cannot be shown', () => {

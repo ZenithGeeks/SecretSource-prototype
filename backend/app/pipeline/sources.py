@@ -1,4 +1,4 @@
-"""Find the open-access PDF of a cited work and download it.
+"""Resolve and download cited papers, keeping web-page reading in `pipeline.web`.
 
 Takes a DOI, arXiv ID, PMID, direct URL, or a bare title. arXiv IDs resolve directly.
 Other works are matched through Semantic Scholar and Unpaywall. If the chosen PDF URL fails,
@@ -1412,9 +1412,17 @@ def _withdrawn_by(arxiv_id: str) -> str:
 
 
 def lookup_key(citation: dict) -> str:
-    """What to look a cited work up by, or "" when the reference has nothing usable.
-    URL is last. It is usually a blog post or a spec, but we still report it."""
-    return citation.get("doi") or citation.get("arxiv") or citation.get("title") or citation.get("url") or ""
+    """What to resolve a cited work by, preferring its supplied URL over a guessed title."""
+    return next(iter(lookup_keys(citation)), "")
+
+
+def lookup_keys(citation: dict) -> tuple[str, ...]:
+    """Every usable citation key, in lookup priority order, for results saved by older builds."""
+    return tuple(dict.fromkeys(
+        str(value).strip()
+        for value in (citation.get("doi"), citation.get("arxiv"), citation.get("url"), citation.get("title"))
+        if value and str(value).strip()
+    ))
 
 
 def index_paper(title: str, doi: str = "") -> dict:

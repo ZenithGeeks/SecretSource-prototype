@@ -43,6 +43,10 @@ import {
   problem,
   usePool,
   useSaveLabels,
+  useRetryReference,
+  useUploadReferencePdf,
+  useRepairReference,
+  useAcknowledgeSourceReview,
   workClaims,
   writeUnsaved,
   type Candidate,
@@ -64,6 +68,7 @@ import { PassageList, type Focus } from '../components/PassageList'
 import { SaveBar } from '../components/SaveBar'
 import { SelectionBar, type Picked } from '../components/SelectionBar'
 import { UnresolvedReferences } from '../components/UnresolvedReferences'
+import { WebEvidenceViewer } from '../components/WebEvidenceViewer'
 
 const VIEWER_HEIGHT = 'h-[60vh]'
 
@@ -122,12 +127,15 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   // Passages from several references at once: take the best one. An extracted claim's own
   // first passage is already the one retrieval ranked first.
   const c = passagesFromSearch(claim) ? bestCandidate(claim, session.references) : claim.candidates[0]
-  if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id }
+  if (c) return {
+    file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id,
+    locator: c.locator, reference_id: c.reference_id, paragraph: c.paragraph,
+  }
   // No passages: the first reference the claim itself cites that has a PDF, at page 1. Never the
   // analysis's first reference, which may be one this claim does not cite. With none, nothing
   // opens and the pane lists the claim's unresolved citations instead.
   const ref = citedReferences(claim, session.references)[0]
-  return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
+  return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}`, reference_id: ref.reference_id, locator: ref.url } : null
 }
 
 /** "[b47]" matches the marker in the claim's sentence, so the two can be read together. */
@@ -246,6 +254,10 @@ function Body({
   const [notice, setNotice] = useState<string | null>(null)
   const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
   const pool = usePool()
+  const referenceUpload = useUploadReferencePdf(session.analysis_id)
+  const referenceRetry = useRetryReference(session.analysis_id)
+  const referenceRepair = useRepairReference(session.analysis_id)
+  const sourceReview = useAcknowledgeSourceReview(session.analysis_id)
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
   const draft = (claim && drafts[claim.claim_id]) || emptyDraft()
@@ -395,7 +407,7 @@ function Body({
   const deciding = Boolean(draft.status) && draft.status !== 'rejected'
   const ordered = claim ? displayOrder(claim) : []
   const focusPassage = (c: Candidate) =>
-    setFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })
+    setFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id, locator: c.locator, reference_id: c.reference_id, paragraph: c.paragraph })
 
   // Keys: Ctrl/⌘+S saves; K/E/X decide the claim; R/N judge the focused passage; J/U (or the
   // up and down arrows) move between passages; [ ] (or Shift+left/right) between claims;
@@ -484,7 +496,10 @@ function Body({
     queryKey: ['find', focus?.file, focus?.passage, focus?.page],
     // The whole passage: a 300-character prefix highlighted only the start of a long one.
     queryFn: () => api.findInPaper(focus!.file, focus!.passage, focus?.page ?? undefined),
-    enabled: Boolean(focus?.file && focus.passage),
+    enabled: Boolean(
+      focus?.file && focus.passage &&
+      !session.references.some((r) => r.reference_id === focus.reference_id && r.source_kind === 'web-page'),
+    ),
     staleTime: Infinity,
     retry: false,
   })
@@ -499,7 +514,7 @@ function Body({
     source: claimSource,
     page: claimSource?.page ?? claim.page ?? 1,
   }
-  const shown = focus && session.references.find((r) => r.file === focus.file)
+  const shown = focus && session.references.find((r) => r.file && r.file === focus.file)
   // A passage added for a work with no PDF has no file, so no reference opens for it.
   const right: Target | null = focus?.file
     ? {
@@ -517,7 +532,7 @@ function Body({
   // the list, or by clicking where the paper under review cites it. A citation of a reference
   // that was not read keeps the PDF's own link to the reference list.
   const openReference = (r: Reference) => {
-    setFocus({ file: r.file, passage: '', page: 1, key: `ref:${r.reference_id}` })
+    setFocus({ file: r.file, passage: '', page: 1, key: `ref:${r.reference_id}`, reference_id: r.reference_id, locator: r.url })
     setPicked(null)
   }
   const readRefs = Object.fromEntries(session.references.flatMap((r) => (r.ref ? [[r.ref, r] as const] : [])))
@@ -526,7 +541,7 @@ function Body({
     references: Object.fromEntries(
       Object.entries(readRefs).map(([ref, r]): [string, Citation] => [
         ref,
-        { title: r.label, authors: r.authors ?? [], year: r.year ?? '', doi: '', arxiv: '', url: '' },
+        { title: r.label, authors: r.authors ?? [], year: r.year ?? '', doi: '', arxiv: '', url: r.url ?? '' },
       ]),
     ),
     onCitation: (marker: CitationMarker) => openReference(readRefs[marker.ref]),
@@ -650,6 +665,18 @@ function Body({
     draft.status ? (
       <ClaimSticky key={claim.claim_id} text={claimWording} rejected={draft.status === 'rejected'} className={className} />
     ) : null
+  const uploadReference = (ref: string, file: File) => {
+    referenceUpload.mutate({ ref, file }, {
+      onSuccess: () => setNotice('PDF received. Checking this reference now.'),
+      onError: (error) => setNotice(problem(error).title),
+    })
+  }
+  const retryReference = (ref: string) => {
+    referenceRetry.mutate(ref, {
+      onSuccess: () => setNotice('Retry started for this reference.'),
+      onError: (error) => setNotice(problem(error).title),
+    })
+  }
   const paperDoneView = (
     <div role="status" className="flex flex-col items-start gap-3">
       <h2 className="font-serif text-lg font-semibold text-ink">This paper is labeled</h2>
@@ -685,8 +712,8 @@ function Body({
           onJudge={(id, status) => patch({ cands: { ...draft.cands, [id]: status } })}
           onAdd={(p) => {
             patch({ added: [...draft.added, p] })
-            const file = session.references.find((r) => r.reference_id === p.reference_id)?.file ?? ''
-            setFocus({ file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
+            const reference = session.references.find((r) => r.reference_id === p.reference_id)
+            setFocus({ file: reference?.file ?? '', passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}`, reference_id: p.reference_id, locator: reference?.url })
           }}
           onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
           search={search}
@@ -802,7 +829,29 @@ function Body({
           Stacked: the reference on top, since it is the paper being judged. */}
       <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
         {side && viewer(left_, 'paper')}
-        {right ? viewer(right, 'reference') : <UnresolvedReferences citations={unresolvedCitations(claim, session)} />}
+        {right ? shown?.source_kind === 'web-page' ? (
+          <WebEvidenceViewer
+            title={shown.label}
+            url={shown.url ?? ''}
+            locator={focus?.locator ?? shown.url}
+            passage={focus?.passage}
+            paragraph={focus?.paragraph}
+            retrievedAt={shown.retrieved_at}
+          />
+        ) : viewer(right, 'reference') : (
+          <UnresolvedReferences
+            citations={unresolvedCitations(claim, session)}
+            onUpload={uploadReference}
+            onRetry={retryReference}
+            onRepair={(ref, replacement) => referenceRepair.mutate({ ref, replacement }, {
+              onSuccess: () => setNotice('Checking the corrected citation. Previous evidence stays available until it succeeds.'),
+              onError: (error) => setNotice(problem(error).title),
+            })}
+            uploading={referenceUpload.isPending}
+            retrying={referenceRetry.isPending}
+            repairing={referenceRepair.isPending}
+          />
+        )}
         {both && viewer(left_, 'paper')}
       </div>
     </div>
@@ -814,6 +863,27 @@ function Body({
         <div className="p-4">{paperDoneView}</div>
       ) : (
         <>
+          {claim.needs_review && (
+            <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <span>A source for this claim changed. Review its evidence before reusing the saved label.</span>
+              <button
+                type="button"
+                disabled={sourceReview.isPending}
+                onClick={() => sourceReview.mutate(claim.claim_id, {
+                  onSuccess: () => setNotice('Updated evidence marked as reviewed.'),
+                  onError: (error) => setNotice(problem(error).title),
+                })}
+                className="rounded border border-amber-500 px-2 py-1 font-medium enabled:hover:bg-amber-100 disabled:opacity-50"
+              >
+                {sourceReview.isPending ? 'Saving…' : 'Mark evidence reviewed'}
+              </button>
+            </div>
+          )}
+          {Object.entries(claim.citation_repairs ?? {}).map(([ref, repair]) => (
+            <p key={ref} role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              Replacement for [{ref}] was not used: {repair.message}. Previous evidence remains available.
+            </p>
+          ))}
           {claimPin()}
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
           <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
