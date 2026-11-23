@@ -857,7 +857,6 @@ const OUTCOME_TEXT: Record<string, string> = {
   'too-large': 'the page exceeded the safe read limit',
   'not-html': 'the URL did not return HTML or XHTML',
   'http-error': 'the page returned an HTTP error',
-  'invalid-content': 'the URL did not return readable HTML or a PDF',
 }
 
 export const uncheckedReason = (reason: string, sourceOutcome?: SourceOutcome): string =>
