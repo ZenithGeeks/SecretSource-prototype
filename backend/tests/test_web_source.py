@@ -429,6 +429,25 @@ def test_a_direct_url_with_neither_html_nor_pdf_is_rejected(monkeypatch):
     assert result["source_outcome"]["outcome"] == "invalid-content"
 
 
+def test_html_body_with_a_generic_content_type_is_still_read_as_a_page(monkeypatch):
+    monkeypatch.setattr(
+        web,
+        "fetch_resource",
+        lambda url: web.WebResource(
+            url,
+            "application/octet-stream",
+            "utf-8",
+            b"<!doctype html><html><title>Useful</title><p>This paragraph contains enough "
+            b"static text for evidence.</p></html>",
+        ),
+    )
+
+    result = verify.prepare_source("https://example.org/article")
+
+    assert result["status"] == "web-page"
+    assert result["web_page"].title == "Useful"
+
+
 def test_failed_paper_lookup_falls_back_to_the_citation_page(monkeypatch):
     attempts = []
 
@@ -471,6 +490,18 @@ def test_failed_paper_and_page_lookup_returns_the_paper_failure(monkeypatch):
     )
 
     assert result["status"] == "error"
+
+
+def test_failed_paper_lookup_without_a_page_url_returns_its_error(monkeypatch):
+    def paper_lookup(_source, _expected):
+        raise sources.NoOpenAccessCopy("no free copy", "semantic-scholar")
+
+    monkeypatch.setattr(sources, "local_pdf_with_resolution", paper_lookup)
+
+    result = verify.prepare_source("Cited work", expected={"title": "Cited work"})
+
+    assert result["status"] == "error"
+    assert result["reason"] == "no-open-access"
 
 
 def test_web_claim_check_returns_stable_paragraph_locations(monkeypatch):
@@ -561,6 +592,28 @@ def test_web_judgment_does_not_recheck_insufficient_without_other_citations(monk
     verify.check_web_page("claim", page.url, page, "marked sentence [cited]")
 
     assert calls == ["claim"]
+
+
+def test_web_judgment_keeps_insufficient_when_cited_sentence_is_also_insufficient(monkeypatch):
+    page = web.WebPage(
+        "Useful", "https://example.org", "now",
+        (web.WebPassage("A sufficiently long evidence paragraph for a check.", "https://example.org#p", 1),),
+    )
+    calls = []
+    monkeypatch.setattr(
+        verify,
+        "_judge",
+        lambda claim, _passages: calls.append(claim) or {
+            "verdict": "insufficient", "quote": "", "reasoning": "not enough evidence"
+        },
+    )
+
+    checked = verify.check_web_page(
+        "claim", page.url, page, "marked sentence [cited]", other_citations=True
+    )
+
+    assert calls == ["claim", "marked sentence [cited]"]
+    assert checked["verdict"] == "insufficient"
 
 
 def test_web_judgment_rechecks_refutes_with_the_cited_sentence(monkeypatch):
@@ -855,7 +908,7 @@ def test_page_parser_discards_short_text_and_rejects_unsafe_anchors():
 
 def test_page_parser_ignores_unmatched_closing_tags():
     parser = web._PageParser("https://example.org/page")
-    parser.feed("</p><p>" + "useful static text " * 3 + "</p></div>")
+    parser.feed("<blockquote><p>" + "useful static text " * 3 + "</blockquote></p>")
 
     assert parser.passages[0].text.startswith("useful static text")
 

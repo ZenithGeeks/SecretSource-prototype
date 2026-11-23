@@ -479,7 +479,13 @@ def test_session_exposes_web_evidence_with_a_stable_page_location():
                         "page": None,
                         "paragraph": 1,
                         "locator": f"{url}#finding",
-                    }
+                    },
+                    {
+                        "text": "The web paragraph is the evidence.",
+                        "page": None,
+                        "paragraph": 1,
+                        "locator": f"{url}#finding",
+                    },
                 ],
             }
         ],
@@ -594,6 +600,50 @@ def test_source_review_cannot_acknowledge_a_newer_evidence_revision():
 
     assert error.value.status_code == 409
     assert analysis["claims"][0]["needs_review"] is True
+
+
+def test_source_review_does_not_save_when_review_is_not_required(monkeypatch):
+    analysis = copy.deepcopy(ANALYSIS)
+    saved = []
+    monkeypatch.setattr(app, "main", SimpleNamespace(_save_soon=saved.append), raising=False)
+
+    response = asyncio.run(
+        labeling.acknowledge_source_review(
+            "a1",
+            {"claim_id": "paperA-0123456789ab#0", "evidence_revision": 0},
+            analysis,
+            "chanya",
+        )
+    )
+
+    assert response["reviewed"] is True
+    assert saved == []
+
+
+def test_source_review_rejects_an_unknown_claim():
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            labeling.acknowledge_source_review(
+                "a1",
+                {"claim_id": "paperA-0123456789ab#99", "evidence_revision": 0},
+                copy.deepcopy(ANALYSIS),
+                "chanya",
+            )
+        )
+
+    assert error.value.status_code == 404
+
+
+def test_unread_reference_includes_a_failed_repair_message():
+    analysis = _with_an_unread_citation()
+    analysis["claims"][0]["citation_repairs"] = {"b2": {"status": "error", "message": "still unread"}}
+    analysis["claims"][0]["unchecked"] = [{
+        "source": UNREAD["title"], "reason": "no-open-access", "message": "no free copy"
+    }]
+
+    unread = labeling.build_session(analysis)["claims"][0]["unchecked"]
+
+    assert next(row for row in unread if row["ref"] == "b2")["repair_error"]["message"] == "still unread"
 
 
 def test_save_keeps_a_passage_and_a_level_for_a_work_with_no_pdf(api):
