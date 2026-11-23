@@ -35,6 +35,19 @@ To roll back:
 `sudo docker tag secretsource-worker-worker:pre-<sha> secretsource-worker-worker:latest`, then
 `sudo sh -c "cd /var/lib/docker/secretsource-worker && docker compose up -d --no-deps --no-build worker"`.
 
+### One-time cleanup after removing `status-bot`
+
+`deploy-worker.sh` only recreates `worker` without `--remove-orphans`, so an existing
+`status-bot` container from before its removal stays running with `restart: unless-stopped`.
+After rolling out this change, verify the container identity and remove only that container:
+
+```bash
+sudo docker ps -a \
+  --filter "label=com.docker.compose.project=secretsource-worker" \
+  --filter "label=com.docker.compose.service=status-bot"
+sudo docker rm -f secretsource-worker-status-bot-1
+```
+
 ## Install
 
 Done once, as a user with sudo on ss-core. Do it again for step 3 whenever `deploy-worker.sh`
