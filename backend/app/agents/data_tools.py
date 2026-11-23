@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from google.adk.tools import ToolContext
 
 from app import assistant, researcher
+from app.agents.progress import report
 from app.author import logic
 from app.labeling import router as labeling
 from app.names import surname
@@ -223,8 +224,18 @@ async def check_text(text: str, tool_context: ToolContext) -> dict:
     pieces = split_sentences(text.strip())
     sentences = [piece for piece in pieces if len(piece) >= MIN_SENTENCE]
     papers = await asyncio.to_thread(main.papers_of, _user(tool_context))
-    results = await assistant.check_text(sentences[:MAX_SENTENCES], papers)
-    return {"results": results, "not_checked": max(0, len(sentences) - MAX_SENTENCES)}
+    batch = sentences[:MAX_SENTENCES]
+    finished = 0
+
+    async def judged(sentence: str) -> dict:
+        nonlocal finished
+        [result] = await assistant.check_text([sentence], papers)
+        finished += 1
+        report(f"Checked {finished} of {len(batch)} sentences")
+        return result
+
+    results = await asyncio.gather(*(judged(sentence) for sentence in batch))
+    return {"results": list(results), "not_checked": max(0, len(sentences) - MAX_SENTENCES)}
 
 
 async def ask_library(question: str, tool_context: ToolContext) -> dict:
@@ -247,6 +258,8 @@ async def ask_library(question: str, tool_context: ToolContext) -> dict:
             statements[event["index"]] |= {
                 key: event[key] for key in ("verdict", "quote", "reasoning")
             }
+            checked = sum("verdict" in statement for statement in statements.values())
+            report(f"Checked {checked} of {len(statements)} statements")
     return {"statements": [statements[index] for index in sorted(statements)]}
 
 
@@ -313,7 +326,10 @@ async def submit_analysis(paper: str, tool_context: ToolContext) -> dict:
     """
     from app import main
 
-    started = main._start(paper, True, _user(tool_context))
+    try:
+        started = main._start(paper, True, _user(tool_context))
+    except HTTPException as error:
+        return _error(str(error.detail))
     # _start returns only the id. The new analysis is "running" from the moment it is queued.
     return {"id": started["id"], "status": "running"}
 

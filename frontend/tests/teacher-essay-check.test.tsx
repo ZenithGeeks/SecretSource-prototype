@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Analysis } from '../src/lib/api'
@@ -38,6 +40,11 @@ vi.mock('../src/lib/useTeacher', () => ({
   useSendTeacherFeedback: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('../src/components/PageViewer', () => ({ PageViewer: () => <div /> }))
+
+function renderEssay(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
 vi.mock('../src/lib/useAnalysis', () => ({ useAnalysis: () => ({ data: mocks.analysis, isPending: false, isError: false }) }))
 
 import { EssayCheck } from '../src/roles/teacher/screens/EssayCheck'
@@ -60,7 +67,7 @@ describe('Teacher essay check', () => {
       analysis: { id: 'analysis-1', status, error: null },
     }
     mocks.analysis = { id: 'analysis-1', paper: 'essay.pdf', status: 'done', claims: [], stages: [] }
-    render(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
+    renderEssay(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
   }
 
   it('requires confirmation before rechecking and lets the teacher cancel', () => {
@@ -99,7 +106,7 @@ describe('Teacher essay check', () => {
   it('starts an analysis for the current Classroom submission', () => {
     const onBack = vi.fn()
     const onNavigate = vi.fn()
-    render(
+    renderEssay(
       <EssayCheck
         courseId="course-1"
         assignmentId="work-1"
@@ -155,7 +162,7 @@ describe('Teacher essay check', () => {
 
     const onBack = vi.fn()
     const onNavigate = vi.fn()
-    render(
+    renderEssay(
       <EssayCheck
         courseId="course-1"
         assignmentId="work-1"
@@ -178,7 +185,7 @@ describe('Teacher essay check', () => {
   })
 
   it('offers a Classroom sync when the student email is missing', () => {
-    render(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
+    renderEssay(<EssayCheck courseId="course-1" assignmentId="work-1" studentId="student-1" onBack={vi.fn()} onNavigate={vi.fn()} />)
     fireEvent.change(screen.getByRole('textbox', { name: 'Email message to the student' }), { target: { value: 'Please revise your thesis.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send to student' }))
 

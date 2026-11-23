@@ -501,7 +501,7 @@ describe('Do it', () => {
     await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'switch_role', role: 'researcher', result: { status: 'cancelled' } }))
   })
 
-  it('Switch moves to the new role, whose agent goes on with the request in the same session', async () => {
+  it('Switch moves to the new role, whose agent picks up the new session and keeps the transcript', async () => {
     function TwoRoles() {
       const [role, setRole] = useState<'researcher' | 'labeler'>('researcher')
       const shared = { openScreen: vi.fn(), openPaper: vi.fn(), switchRole: setRole }
@@ -523,8 +523,8 @@ describe('Do it', () => {
         { type: 'done' },
       ],
       [{ type: 'say', text: 'Switched to the Labeler.' }, { type: 'done' }],
-      [{ type: 'session', id: 's1' }, { type: 'say', text: 'Here are the papers to label.' }, { type: 'done' }],
-      [{ type: 'session', id: 's1' }, { type: 'say', text: 'The papers are listed.' }, { type: 'done' }],
+      [{ type: 'session', id: 's2' }, { type: 'say', text: 'Here are the papers to label.' }, { type: 'done' }],
+      [{ type: 'session', id: 's2' }, { type: 'say', text: 'The papers are listed.' }, { type: 'done' }],
     ]
     render(
       <StrictMode>
@@ -540,7 +540,7 @@ describe('Do it', () => {
     expect(screen.getByText('I want to label claims')).toBeInTheDocument()
     await waitFor(() => expect(gateway.posts[1].body).toMatchObject({ name: 'switch_role', role: 'researcher', result: { status: 'switched' } }))
 
-    // The Labeler's agent picks up the request once, strict mode or not.
+    // The Labeler's agent picks up the request once, strict mode or not, and tracks the new session id.
     expect(await screen.findByText('Here are the papers to label.')).toBeInTheDocument()
     expect(screen.getByText('Going on in this role')).toBeInTheDocument()
     expect(gateway.posts[2].body).toMatchObject({ role: 'labeler', screen: 'papers', session_id: 's1' })
@@ -550,7 +550,7 @@ describe('Do it', () => {
     fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
     expect(await screen.findByText('The papers are listed.')).toBeInTheDocument()
     expect(gateway.posts).toHaveLength(4)
-    expect(gateway.posts[3].body).toMatchObject({ message: 'What is next?', role: 'labeler', screen: 'papers', session_id: 's1' })
+    expect(gateway.posts[3].body).toMatchObject({ message: 'What is next?', role: 'labeler', screen: 'papers', session_id: 's2' })
   })
 
   it('shows a badge when the agent hands work to a specialist, and settles it when the specialist answers', async () => {
@@ -575,6 +575,31 @@ describe('Do it', () => {
     expect(screen.getByText('Looking for gaps in your library')).toBeInTheDocument()
   })
 
+  it('shows one progress line for a slow tool and updates it as checks finish', async () => {
+    gateway.streams = [
+      [
+        { type: 'session', id: 's1' },
+        { type: 'agent', name: 'data_agent', state: 'working', task: 'Check my text' },
+        { type: 'step', name: 'check_text' },
+        { type: 'progress', text: 'Checked 1 of 3 sentences' },
+        { type: 'progress', text: 'Checked 2 of 3 sentences' },
+        { type: 'progress', text: 'Checked 3 of 3 sentences' },
+        { type: 'agent', name: 'data_agent', state: 'done' },
+        { type: 'say', text: 'All three are backed.' },
+        { type: 'done' },
+      ],
+    ]
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check my text' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+
+    expect(await screen.findByText('All three are backed.')).toBeInTheDocument()
+    expect(screen.getByText('Checking the text against your papers')).toBeInTheDocument()
+    expect(screen.getByText('Checked 3 of 3 sentences')).toBeInTheDocument()
+    expect(screen.queryByText('Checked 1 of 3 sentences')).not.toBeInTheDocument()
+    expect(screen.queryByText('Checked 2 of 3 sentences')).not.toBeInTheDocument()
+  })
+
   it('marks a hand-over stopped when the stream ends before the specialist answers', async () => {
     gateway.streams = [
       [{ type: 'session', id: 's1' }, { type: 'agent', name: 'data_agent', state: 'working', task: 'Check my draft' }, { type: 'done' }],
@@ -584,5 +609,33 @@ describe('Do it', () => {
     fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
 
     expect(await screen.findByText('Stopped')).toBeInTheDocument()
+  })
+
+  it('sends analysis_id or draft_id when open and omits them otherwise', async () => {
+    gateway.streams = [
+      [{ type: 'session', id: 's1' }, { type: 'say', text: 'One.' }, { type: 'done' }],
+      [{ type: 'session', id: 's2' }, { type: 'say', text: 'Two.' }, { type: 'done' }],
+      [{ type: 'session', id: 's3' }, { type: 'say', text: 'Three.' }, { type: 'done' }],
+    ]
+    const first = render(<DoIt actions={actions({ screen: 'analyses', analysisId: 'a1' })} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check claim' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('One.')).toBeInTheDocument()
+    first.unmount()
+
+    const second = render(<DoIt actions={actions({ role: 'writer', screen: 'editor', draftId: 'd1' })} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Check draft' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('Two.')).toBeInTheDocument()
+    second.unmount()
+
+    render(<DoIt actions={actions()} />)
+    fireEvent.change(screen.getByLabelText('What should the AI do?'), { target: { value: 'Plain' } })
+    fireEvent.submit(screen.getByLabelText('What should the AI do?').closest('form')!)
+    expect(await screen.findByText('Three.')).toBeInTheDocument()
+
+    expect(gateway.posts[0].body).toEqual({ message: 'Check claim', screen: 'analyses', analysis_id: 'a1' })
+    expect(gateway.posts[1].body).toEqual({ role: 'writer', message: 'Check draft', screen: 'editor', draft_id: 'd1' })
+    expect(gateway.posts[2].body).toEqual({ message: 'Plain', screen: 'library' })
   })
 })

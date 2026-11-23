@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.data_tools import DATA_TOOLS, find_support, labeling_progress
 from app.agents.role_tools import AUTHOR_TOOLS, LABELER_TOOLS
+from app.config import ADK_ROUTER_MODEL
 from app.llm import adk_model
 from app.teacher.agent_tools import (
     teacher_assignments,
@@ -37,10 +38,11 @@ How to work:
 - Before pointing at or filling in something, call read_screen unless an earlier read_screen in
   this conversation already listed its target. Use targets exactly as read_screen gives them.
 - If something is not on the screen or not in their papers, say that plainly. Do not guess ids.
-- The app has three roles: Researcher (analysed papers, the library, the graph), Labeler (papers
-  shared for labeling) and Author (drafts and their citation checks). If the request belongs to
-  another role, call switch_role; the person must approve it. When the result says "switched",
-  say so in one sentence and stop: the agent of that role goes on. If it says "cancelled", stop.
+- Three roles share screen tools and role switching: Researcher (analysed papers, the library,
+  the graph), Labeler (papers shared for labeling) and Author (drafts and their citation checks).
+  If the request belongs to one of those roles, call switch_role; the person must approve it.
+  When the result says "switched", say so in one sentence and stop: the agent of that role goes on.
+  If it says "cancelled", stop.
 """
 
 RESEARCHER_ROLE = """
@@ -50,13 +52,18 @@ You are in the Researcher role. Its screens: home, analyses, library, graph.
   says it was cancelled, say so and stop. Never say a change was made unless a result says so.
 - To answer about what is inside their papers (claims, verdicts, evidence, gaps, citations,
   checking some text, starting an analysis), call data_agent with the request in plain words.
-  Do not answer from memory, and do not call data_agent just to open or point at something.
+  If the question is about a paper and no `analysis_id` is in the message (such as
+  `open analysis_id=...`), call list_papers first and pass the paper's `analysis_id` in your
+  request to data_agent. Do not answer from memory, and do not call data_agent just to open or
+  point at something.
 - You cannot save labels, delete or upload anything. Point at the button and tell the person.
 """
 
 LABELER_ROLE = """
 You are in the Labeler role. Its screens: papers, workspace.
-- labeling_papers lists the papers shared for labeling and how far the person is on each.
+- If the message gives `open analysis_id=...`, use that id directly with labeling_progress or
+  claim_passages. labeling_papers lists the papers shared for labeling and how far the person is on
+  each.
   labeling_progress gives a paper's next claim to label with its passages; claim_passages gives
   any claim's passages; find_support searches the person's papers. Open a paper with open_paper.
 - Never say whether a passage supports, refutes or does not back a claim, and never suggest a
@@ -70,7 +77,8 @@ You are in the Author role. Its screens: home, library, editor.
 - Analyses (analysed papers, their claims and verdicts), History and the knowledge graph are in
   the Researcher role, not here: to open one of them, call switch_role with "researcher". A
   draft's check history is on its project in library.
-- list_drafts lists the person's drafts. draft_issues gives what needs work in one: citations
+- If the message gives `open draft_id=...`, use that id directly with draft_issues. list_drafts
+  lists the person's drafts. draft_issues gives what needs work in one: citations
   its last check did not back, and problems in its .bib file and cite commands. find_support
   finds passages in the person's papers for a sentence.
 - open_screen("editor") opens the draft selected on home in the editor. There, read_draft gives
@@ -236,7 +244,7 @@ read_draft_tool = LongRunningFunctionTool(func=read_draft)
 
 screen_agent = LlmAgent(
     name="screen_agent",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=INSTRUCTION,
     tools=[*SCREEN_TOOLS, switch_role_tool],
     sub_agents=[data_agent],
@@ -246,7 +254,7 @@ screen_agent = LlmAgent(
 # the agent must not write or hint at the labels the checker is scored against.
 labeler_agent = LlmAgent(
     name="labeler_agent",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=WORK + LABELER_ROLE,
     tools=[
         read_screen_tool,
@@ -262,7 +270,7 @@ labeler_agent = LlmAgent(
 
 author_agent = LlmAgent(
     name="author_agent",
-    model=adk_model(),
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=WORK + AUTHOR_ROLE,
     tools=[
         read_screen_tool,
@@ -278,7 +286,8 @@ author_agent = LlmAgent(
 
 # The web app's role ids (frontend/src/lib/roles.ts; the Author role is "writer" there).
 teacher_agent = LlmAgent(
-    name="teacher_agent", model=adk_model(),
+    name="teacher_agent",
+    model=adk_model(ADK_ROUTER_MODEL),
     instruction=(
         "Help the signed-in teacher understand their Classroom courses, assignments, "
         "submissions and essay reviews. "
@@ -299,3 +308,7 @@ ROLE_AGENTS = {
 # SCREEN_TOOL_NAMES is the MCP server's; switch_role and read_draft are the web app's only.
 SCREEN_TOOL_NAMES = frozenset({"read_screen", "open_screen", "open_paper", "point_at", "fill_field"})
 BROWSER_TOOL_NAMES = SCREEN_TOOL_NAMES | {"switch_role", "read_draft"}
+ROLE_BROWSER_TOOLS: dict[str, frozenset[str]] = {
+    role: frozenset(tool.name for tool in agent.tools if isinstance(tool, LongRunningFunctionTool))
+    for role, agent in ROLE_AGENTS.items()
+}

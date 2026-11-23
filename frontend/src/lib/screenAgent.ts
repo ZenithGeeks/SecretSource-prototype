@@ -17,6 +17,8 @@ export type AgentLine =
   | { kind: 'person'; text: string }
   | { kind: 'agent'; text: string }
   | { kind: 'step'; text: string }
+  /** How far a slow data tool got; the next one replaces it, so the chat shows one line. */
+  | { kind: 'progress'; text: string }
   | { kind: 'delegation'; name: string; task: string; state: DelegationState }
   | { kind: 'error'; text: string }
 
@@ -31,6 +33,7 @@ type AgentEvent =
   | { type: 'session'; id: string }
   | ({ type: 'tool' } & ToolCall)
   | { type: 'step'; name: string }
+  | { type: 'progress'; text: string }
   | { type: 'agent'; name: string; state: 'working' | 'done' | 'failed'; task?: string }
   | { type: 'say'; text: string }
   | { type: 'error'; message: string }
@@ -120,6 +123,12 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
         case 'step':
           add({ kind: 'step', text: SERVER_STEPS[event.name] ?? event.name })
           break
+        case 'progress': {
+          const lines = linesRef.current
+          const kept = lines.at(-1)?.kind === 'progress' ? lines.slice(0, -1) : lines
+          commit([...kept, { kind: 'progress', text: event.text }])
+          break
+        }
         case 'agent':
           if (event.state === 'working') add({ kind: 'delegation', name: event.name, task: event.task ?? '', state: 'working' })
           else commit(settle(linesRef.current, event.name, event.state))
@@ -172,10 +181,12 @@ export function useScreenAgent(actions: ScreenActions, point: (pointing: Pointin
     try {
       // A new message starts a new session, except one carried across a role switch: that role's
       // agent reads the whole conversation (backend/app/agent_runs.py).
-      const { role, screen } = latest.current
+      const { role, screen, analysisId, draftId } = latest.current
       const sessionId = continued.current ? session.current : null
       const payload: Record<string, unknown> = { message, screen }
       if (role) payload.role = role
+      if (analysisId) payload.analysis_id = analysisId
+      if (draftId) payload.draft_id = draftId
       if (sessionId) payload.session_id = sessionId
       let call: ToolCall | null
       try {

@@ -172,6 +172,18 @@ describe('api calls', () => {
   })
 })
 
+describe('uploadReferencePdf', () => {
+  it('posts the PDF for one citation and returns the stored name', async () => {
+    const file = new File(['%PDF'], 'gmres.pdf', { type: 'application/pdf' })
+    const fetchMock = stubFetch(() => json({ ref: 'b13', pdf: 'gmres-abc.pdf' }))
+    expect(await api.uploadReferencePdf('a/1', 'b 13', file)).toEqual({ ref: 'b13', pdf: 'gmres-abc.pdf' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/analyses/a%2F1/references/b%2013/pdf')
+    expect(init?.method).toBe('POST')
+    expect((init!.body as FormData).get('file')).toBe(file)
+  })
+})
+
 describe('uploadAnalysis', () => {
   const file = new File(['%PDF'], 'paper.pdf', { type: 'application/pdf' })
 

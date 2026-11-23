@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from app import assistant, main, researcher
-from app.agents import data_tools
+from app.agents import data_tools, progress
 from fastapi import HTTPException
 
 ME = SimpleNamespace(state={"user": "user-1"})
@@ -187,6 +187,41 @@ def test_check_text_judges_the_first_sentences_and_counts_the_rest(monkeypatch):
     assert len(result["results"]) == data_tools.MAX_SENTENCES
 
 
+def test_check_text_and_ask_library_report_how_far_they_got(monkeypatch):
+    async def judged(sentences, papers):
+        return [{"text": s, "verdict": "supports"} for s in sentences]
+
+    async def answer(question, papers):
+        for index in range(2):
+            yield {"type": "statement", "index": index, "text": f"S{index}", "source": "p.pdf", "page": 1}
+        for index in (1, 0):
+            yield {"type": "verdict", "index": index, "verdict": "supports", "quote": "q", "reasoning": "r"}
+
+    monkeypatch.setattr(main, "papers_of", lambda user: frozenset({"survey.pdf"}))
+    monkeypatch.setattr(assistant, "check_text", judged)
+    monkeypatch.setattr(assistant, "answer", answer)
+    lines = []
+    token = progress.reporter.set(lines.append)
+    try:
+        checked = run(data_tools.check_text, "The first sentence makes a claim. The second one does too.")
+        answered = run(data_tools.ask_library, "Who proposed late interaction?")
+    finally:
+        progress.reporter.reset(token)
+
+    assert lines == [
+        "Checked 1 of 2 sentences",
+        "Checked 2 of 2 sentences",
+        "Checked 1 of 2 statements",
+        "Checked 2 of 2 statements",
+    ]
+    # Results keep the sentence and statement order, whatever order the checks finish in.
+    assert [r["text"] for r in checked["results"]] == [
+        "The first sentence makes a claim.",
+        "The second one does too.",
+    ]
+    assert [s["text"] for s in answered["statements"]] == ["S0", "S1"]
+
+
 def test_assistant_check_text_leaves_a_sentence_no_passage_fits_unchecked(monkeypatch):
     monkeypatch.setattr(assistant, "library_passages", lambda sentence, papers: [])
 
@@ -206,3 +241,17 @@ def test_submit_analysis_starts_a_run_for_the_caller(monkeypatch):
 
     assert run(data_tools.submit_analysis, "2112.01488") == {"id": "n1", "status": "running"}
     assert started == [("2112.01488", True, "user-1")]
+
+
+def test_submit_analysis_returns_error_when_queue_is_unavailable(monkeypatch):
+    from fastapi import HTTPException
+
+    def unavailable(paper, verify, owner):
+        raise HTTPException(503, "the analysis queue is unavailable, try again shortly")
+
+    monkeypatch.setattr(main, "_start", unavailable)
+
+    assert run(data_tools.submit_analysis, "2112.01488") == {
+        "status": "error",
+        "message": "the analysis queue is unavailable, try again shortly",
+    }

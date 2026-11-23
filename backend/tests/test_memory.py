@@ -1,5 +1,5 @@
 """Memory over past analyses (SCRUM-172): what load_memory finds, and whose analyses it may read.
-No database: store.load_owned is replaced by a list of analyses."""
+No database: store.search_owned is replaced by a list of analyses."""
 
 import asyncio
 
@@ -76,14 +76,14 @@ def test_nothing_matching_returns_nothing():
 
 
 def stand_in_store(monkeypatch):
-    """Replace store.load_owned with every row, and record which owners were asked for."""
+    """Replace store.search_owned with every row, and record which owners were asked for."""
     asked = []
 
-    def load_owned(owner):
+    def search_owned(owner, words, limit):
         asked.append(owner)
         return list(ANALYSES)
 
-    monkeypatch.setattr(memory.store, "load_owned", load_owned)
+    monkeypatch.setattr(memory.store, "search_owned", search_owned)
     return asked
 
 
@@ -110,3 +110,18 @@ def test_a_service_with_as_user_ignores_the_runners_user_id(monkeypatch):
     found = search_memory(service, "user-bo", "late interaction index size")
     assert found and all(text.startswith("Analysis old1") for text in found)
     assert asked == [None]  # SIGNED_OUT reads the rows with no owner
+
+
+def test_the_store_gets_the_questions_words_unstemmed_once_each(monkeypatch):
+    calls = []
+    monkeypatch.setattr(memory.store, "search_owned", lambda *args: calls.append(args) or [])
+    search_memory(memory.AnalysisMemory(), "user-ada", "Did we check the indexes? The INDEXES of ColBERT")
+    # Postgres stems with its own dictionary; stopwords and task words never reach it.
+    assert calls == [("user-ada", ["indexes", "colbert"], memory.CANDIDATES)]
+
+
+def test_a_question_with_no_searchable_word_reads_nothing(monkeypatch):
+    calls = []
+    monkeypatch.setattr(memory.store, "search_owned", lambda *args: calls.append(args) or [])
+    assert search_memory(memory.AnalysisMemory(), "user-ada", "did we already check it?") == []
+    assert calls == []
