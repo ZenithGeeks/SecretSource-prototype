@@ -47,14 +47,14 @@ export function LabelForm({
         <span id={group} className="sr-only">
           Support level for {title}
         </span>
-        {LEVELS.map(({ level, name, hint }) => (
+        {LEVELS.map(({ level, name }) => (
           <button
             key={level}
             type="button"
             role="radio"
             aria-checked={value.evidence === level}
             aria-label={`${level} · ${name}`}
-            title={hint}
+            aria-describedby={`${group}-${level}`}
             onClick={() => onChange({ ...value, evidence: level as Level })}
             className={cn(
               'flex min-h-14 flex-col items-center justify-center rounded-lg border px-1 py-1.5 transition-colors',
@@ -69,11 +69,17 @@ export function LabelForm({
           </button>
         ))}
       </div>
-      <p className="text-sm leading-5 text-ink-muted">
-        {value.evidence
-          ? `${value.evidence} ${LEVELS[value.evidence - 1].name} — ${LEVELS[value.evidence - 1].hint}`
-          : 'Pick a level from 1 to 4. Each button’s title says what that level means.'}
-      </p>
+      <ul className="flex flex-col gap-0.5 text-xs leading-4 text-ink-muted">
+        {LEVELS.map(({ level, name, hint }) => (
+          <li
+            key={level}
+            id={`${group}-${level}`}
+            className={cn(value.evidence === level && 'font-medium text-ink')}
+          >
+            <span className="tabular-nums">{level}</span> {name} — {hint}
+          </li>
+        ))}
+      </ul>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={why} className="text-sm font-medium text-ink">
           Why this level? (the deciding fact: sample size, control, replication…)

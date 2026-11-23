@@ -393,12 +393,12 @@ export function AppShell<K extends string>({
           className={cn(
             'hidden shrink-0 flex-col border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen',
             wide === 'full' && 'xl:h-dvh',
-            folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-y-auto px-3 pb-3.5',
+            folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-x-hidden overflow-y-auto px-3 pb-3.5',
           )}
         >
           <div className={cn('flex items-center', folded ? 'flex-col gap-2' : 'gap-0.5 px-2')}>
             {!folded && (
-              <div className="mr-auto">
+              <div className="mr-auto min-w-0">
                 <Brand compact />
               </div>
             )}
@@ -461,7 +461,7 @@ export function AppShell<K extends string>({
                 bare
                   ? 'flex h-screen w-full min-w-0 flex-1 flex-col overflow-hidden'
                   : 'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-                !bare && (wide === 'full' ? 'max-w-none xl:min-h-0 xl:overflow-hidden' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
+                !bare && (wide === 'full' ? 'max-w-none py-2 xl:min-h-0 xl:overflow-hidden' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
               )}
             >
               {children}

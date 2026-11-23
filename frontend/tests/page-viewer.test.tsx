@@ -52,3 +52,25 @@ test('the quote panel heading names the page', () => {
   render(<PageViewer target={target} onClose={() => {}} />)
   expect(screen.getByRole('heading', { name: 'Quoted passage · page 3' })).toBeInTheDocument()
 })
+
+test('labeler paperRole mode merges header and quote into one line and renders toolbarLead', () => {
+  const onClose = vi.fn()
+  const { rerender } = render(
+    <PageViewer
+      target={{ ...target, paperRole: 'reference', label: '[b33] Peters 2018', detail: 'Peters 2018' }}
+      onClose={onClose}
+      toolbarLead={<span>Picker</span>}
+    />,
+  )
+  expect(screen.getByRole('heading', { name: /\[b33\] Peters 2018/ })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: /Internal covariate shift slows training\./ })).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: /Quoted passage/ })).not.toBeInTheDocument()
+  expect(screen.getByText('Picker')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Fill the window' }))
+  expect(screen.getByRole('button', { name: 'Back to the side panel' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(onClose).toHaveBeenCalledTimes(1)
+
+  rerender(<PageViewer target={{ ...target, paperRole: 'reference', error: 'Lookup failed' }} />)
+  expect(screen.getByRole('alert')).toHaveTextContent('Lookup failed')
+})

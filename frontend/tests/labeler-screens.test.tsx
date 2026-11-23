@@ -106,14 +106,14 @@ describe('Queue', () => {
       papers: [paper('b1'), paper('b2'), paper('r1', { status: 'running' }), paper('r2', { status: 'running' }), paper('d1')],
     })
     renderQueue()
-    expect(await screen.findByText('You have 2 papers to check blind. They are marked Blind check below.')).toBeInTheDocument()
+    expect(await screen.findByText('You have 2 papers to check blind.')).toBeInTheDocument()
     expect(screen.getByText('Reading 2 papers. This list updates by itself.')).toBeInTheDocument()
   })
 
   it('counts one blind paper and one paper being read', async () => {
     gateway.pool = pool({ blind: ['b1'], papers: [paper('b1'), paper('r1', { status: 'running' })] })
     renderQueue()
-    expect(await screen.findByText('You have 1 paper to check blind. They are marked Blind check below.')).toBeInTheDocument()
+    expect(await screen.findByText('You have 1 paper to check blind.')).toBeInTheDocument()
     expect(screen.getByText('Reading 1 paper. This list updates by itself.')).toBeInTheDocument()
   })
 
@@ -130,7 +130,7 @@ describe('Queue', () => {
 
     const finished = screen.getByRole('button', { name: 'Paper b2 (View labels)' }).closest('tr')!
     expect(within(finished).queryByText('Hidden until you finish')).not.toBeInTheDocument()
-    expect(within(finished).getAllByText('Somchai')).toHaveLength(2) // also labeled by, and added by
+    expect(within(finished).getByText('Somchai')).toBeInTheDocument()
     fireEvent.click(within(finished).getByRole('button', { name: 'Paper b2 (View labels)' }))
     expect(onOpenLabels).toHaveBeenCalledWith('b2')
   })
@@ -156,6 +156,25 @@ describe('Queue', () => {
     await screen.findByText('NLP one')
     const titles = screen.getAllByRole('row').slice(1).map((row) => row.querySelector('.line-clamp-2')?.textContent)
     expect(titles).toEqual(['NLP one', 'NLP done', 'CV open', 'CV done'])
+  })
+
+  it('offers Continue for the next unfinished paper and puts Add papers and Downloads behind disclosures', async () => {
+    const onOpen = vi.fn()
+    gateway.pool = pool({
+      papers: [paper('p-done', { judged: 4, title: 'Finished' }), paper('p-next', { title: 'Next unfinished' })],
+    })
+    withQuery(<Queue onOpen={onOpen} onShowBlind={vi.fn()} />)
+    const cont = await screen.findByRole('button', { name: 'Continue: Next unfinished' })
+    fireEvent.click(cont)
+    expect(onOpen).toHaveBeenCalledWith('p-next')
+
+    expect(screen.queryByRole('button', { name: 'Download labels CSV' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Downloads' }))
+    expect(screen.getByRole('button', { name: 'Download labels CSV' })).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'Search Scopus' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
+    expect(screen.getByRole('button', { name: 'Search Scopus' })).toBeInTheDocument()
   })
 })
 

@@ -70,13 +70,16 @@ vi.mock('../src/components/PageViewer', () => ({
     onSelectText,
     markers = [],
     onCitation,
+    toolbarLead,
   }: {
     target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; paperRole?: string }
     onSelectText?: (s: { text: string; page: number | null }) => void
     markers?: { ref: string; text: string }[]
     onCitation?: (marker: { ref: string; text: string }) => void
+    toolbarLead?: React.ReactNode
   }) => (
     <div>
+      {toolbarLead}
       <div data-testid="viewer">{target.paper}|{target.quote}</div>
       <p data-testid="viewer-box">{target.paper}: {target.source ? `boxed on page ${target.source.page}` : 'no box'}</p>
       <p data-testid="viewer-heading">{target.label}{target.detail && ` / ${target.detail}`}</p>
@@ -358,9 +361,9 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
     expect(screen.getByRole('radio', { name: /^Low/ })).toHaveAttribute('aria-checked', 'false')
     expect(screen.getByRole('radio', { name: /^Medium/ })).toHaveAttribute('aria-checked', 'false')
-    expect(screen.getByText(/Give \[b4\] a confidence/)).toBeInTheDocument()
+    expect(screen.getByText('· 1 left')).toHaveAttribute('title', 'Give [b4] a confidence')
     fireEvent.click(screen.getByRole('radio', { name: /^Medium/ }))
-    expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
+    expect(screen.getByText('Ready')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
     await waitFor(() => expect(gateway.posts).toHaveLength(1))
@@ -369,7 +372,7 @@ describe('the workspace', () => {
       candidates: [{ cand_id: 'c1', status: 'relevant' }, { cand_id: 'c2', status: 'rejected' }],
       labels: [{ reference_id: 'refB', evidence: 3, confidence: 'medium', spans: ['recall rose by 4 points'] }],
     })
-    expect(await screen.findByText('Saved 4 rows')).toBeInTheDocument()
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
   })
 
   it('keys 1-4 label the reference on the right', async () => {
@@ -507,7 +510,7 @@ describe('the workspace', () => {
     // Claim 1 stays flagged, and its decisions are still there when it is opened again.
     fireEvent.click(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ }))
     expect(await screen.findByRole('heading', { name: /Claim 1 of 2/ })).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -515,7 +518,7 @@ describe('the workspace', () => {
     await open()
     const typed = fireEvent.keyDown(window, { key: 'e' }) // false when the default was prevented
     expect(typed).toBe(false)
-    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Edit/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByLabelText('The claim, as it should read')).toHaveValue('Method Y improves recall.')
   })
 
@@ -559,7 +562,7 @@ describe('the workspace', () => {
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
     fireEvent.keyDown(window, { key: 'h' })
     expect(screen.getByRole('radio', { name: /^High/ })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByText('Every decision for this claim is made.')).toBeInTheDocument()
+    expect(screen.getByText('Ready')).toBeInTheDocument()
     expect(screen.getByText('0 of 2 claims finished')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
@@ -571,7 +574,7 @@ describe('the workspace', () => {
     await open()
     const shown = () => screen.getAllByTestId('viewer')[0].textContent
     fireEvent.keyDown(window, { key: 'k' })
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toHaveAttribute('aria-expanded', 'false')
     expect(shown()).toBe('refB.pdf|recall rose by 4 points')
     fireEvent.keyDown(window, { key: 'r' })
     expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-checked', 'true')
@@ -585,9 +588,9 @@ describe('the workspace', () => {
     expect(shown()).toBe('refB.pdf|unrelated text')
 
     fireEvent.keyDown(window, { key: 'e' })
-    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Edit/ })).toHaveAttribute('aria-expanded', 'false')
     fireEvent.keyDown(window, { key: 'x' })
-    expect(screen.getByRole('radio', { name: /Reject/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Reject/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('focuses the edit box when Edit is chosen, not when coming back to a claim being edited', async () => {
@@ -607,7 +610,7 @@ describe('the workspace', () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Edit/ }))
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'x' })
-    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Edit/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('moves between claims with ] and [', async () => {
@@ -751,22 +754,21 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /Reject/ })).toHaveTextContent('No, it is not a claim of this paper.')
   })
 
-  it('puts a level’s meaning on its button, and one line for the chosen level', async () => {
+  it('puts a level’s meaning on its button, and highlights the chosen level', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Relevant/ })[0])
-    expect(screen.queryByRole('list', { name: 'What each level means' })).not.toBeInTheDocument()
     const clear = screen.getByRole('radio', { name: '3 · Clear' })
-    expect(clear).toHaveAttribute('title', 'The passage backs the claim, with a gap in scope or detail.')
+    expect(clear).toHaveAccessibleDescription('3 Clear — The passage backs the claim, with a gap in scope or detail.')
     fireEvent.click(clear)
-    expect(screen.getByText('3 Clear — The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
+    expect(screen.getByText('Clear — The passage backs the claim, with a gap in scope or detail.')).toBeInTheDocument()
   })
 
   it('keeps an undecided claim when evidence is added to it', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('region', { name: 'Selected text' })).not.toBeInTheDocument()
   })
 
@@ -784,7 +786,7 @@ describe('the workspace', () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: "Use as this claim's wording" }))
-    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Edit/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByDisplayValue('picked in paperA.pdf')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
@@ -980,7 +982,7 @@ describe('unsaved labels', () => {
     first.unmount()
 
     await open()
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved labels from your last visit')
     fireEvent.click(screen.getByRole('radio', { name: /3 · Clear/ }))
     fireEvent.click(screen.getAllByRole('radio', { name: /^Not relevant/ })[1])

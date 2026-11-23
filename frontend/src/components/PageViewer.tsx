@@ -57,12 +57,6 @@ export type Target = {
 
 export type PaperRole = 'under-review' | 'reference'
 
-// Text and colour both, so the two papers differ without relying on colour.
-const ROLE_STRIP: Record<PaperRole, { name: string; hint: string; className: string }> = {
-  'under-review': { name: 'Paper under review', hint: 'where the claim is made', className: 'border-accent bg-accent-soft text-accent' },
-  reference: { name: 'Cited reference', hint: 'does it support the claim?', className: 'border-neutral bg-neutral-soft text-ink' },
-}
-
 const ZOOMS = [1, 1.25, 1.5, 2, 3] // 1 = fit the panel; beyond that the panel scrolls
 const COMPACT_TOOLBAR_BELOW = 420 // px of panel; narrower than this the full toolbar does not fit
 const PAGE_GAP = 16 // px between pages, and around them
@@ -209,6 +203,7 @@ export function PageViewer({
   compactQuote = false,
   zoomKey,
   onCitation,
+  toolbarLead,
 }: {
   target: Target
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
@@ -228,6 +223,8 @@ export function PageViewer({
   references?: Record<string, Citation>
   /** Called when a citation marker is clicked, in place of the card that names the paper. */
   onCitation?: (marker: CitationMarker) => void
+  /** Extra control placed inside the viewer toolbar (for example the labeler's reference picker). */
+  toolbarLead?: React.ReactNode
 }) {
   const [pageCount, setPageCount] = useState(0)
   const [pageRatio, setPageRatio] = useState(1.294) // height / width; US Letter until page 1 says
@@ -397,73 +394,110 @@ export function PageViewer({
       <aside
         aria-label={`${target.paper}, page ${page}`}
         className={cn(
-          'flex flex-col gap-3 overflow-hidden border-border-subtle bg-surface',
+          'flex flex-col overflow-hidden border-border-subtle bg-surface',
+          target.paperRole ? 'gap-0' : 'gap-3',
           narrow
-            ? 'fixed inset-0 z-50 p-3'
-            : cn('rounded-xl border p-4', fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : (className ?? 'h-[calc(100vh-3rem)]')),
+            ? cn('fixed inset-0 z-50', !target.paperRole && 'p-3')
+            : cn(
+                'rounded-xl border',
+                !target.paperRole && 'p-4',
+                fullScreen ? 'fixed inset-4 z-50 shadow-2xl' : (className ?? 'h-[calc(100vh-3rem)]'),
+              ),
         )}
       >
-        {target.paperRole && (
-          <p className={cn('-mx-4 -mt-4 border-b-2 px-4 py-1.5 text-xs', ROLE_STRIP[target.paperRole].className, narrow && '-mx-3 -mt-3 px-3')}>
-            <span className="font-semibold uppercase tracking-wide">{ROLE_STRIP[target.paperRole].name}</span>
-            <span className="text-ink-muted"> · {ROLE_STRIP[target.paperRole].hint}</span>
-          </p>
-        )}
-        <header className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}
-            <h2 title={target.label} className="truncate text-sm font-medium">{target.label}</h2>
-            <p className="truncate text-xs text-ink-muted">
-              {target.detail && `${target.detail} · `}
-              {target.paper}
-              {/* Only when there was a passage to find: opening the paper itself has none. */}
-              {!target.error && !target.source && target.quote && ' · exact place not found, showing the page'}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center">
-            {!narrow && (
-              <IconButton
-                label={expanded ? 'Back to the side panel' : 'Fill the window'}
-                onClick={() => setExpanded(!expanded)}
-              >
-                {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </IconButton>
-            )}
-            {onClose && (
-              <IconButton label="Close" onClick={onClose}>
-                <X className="size-4" />
-              </IconButton>
-            )}
-          </div>
-        </header>
-
-        {target.quote && (
-          <div
-            className={cn(
-              'shrink-0 rounded-xl bg-neutral-soft px-3.5',
-              compactQuote ? 'space-y-0.5 py-2' : 'max-h-32 space-y-1.5 overflow-y-auto py-3',
-            )}
-          >
-            <h3 className="type-label text-ink-muted">Quoted passage · page {targetPage(target)}</h3>
-            <blockquote
-              title={compactQuote ? target.quote : undefined}
-              className={cn(
-                'font-serif italic text-ink',
-                compactQuote ? 'line-clamp-2 text-[13px] leading-5' : 'text-[15px] leading-[22px]',
-              )}
+        {target.paperRole ? (
+          <header className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3 py-1">
+            <h2
+              title={target.quote ? `${target.label} — “${target.quote}”` : target.label}
+              className="min-w-0 truncate text-xs font-medium text-ink"
             >
-              “{target.quote}”
-            </blockquote>
-          </div>
+              <span className="sr-only">{target.paperRole === 'under-review' ? 'Paper under review: ' : 'Cited reference: '}</span>
+              {target.paperRole === 'under-review' ? 'Paper: ' : ''}
+              {target.label}
+              {target.detail && <span className="font-normal text-ink-muted"> · {target.detail}</span>}
+              <span className="font-normal text-ink-muted"> · p.{targetPage(target)}</span>
+              {target.quote && (
+                <span className="font-serif font-normal italic text-ink-muted"> · “{target.quote}”</span>
+              )}
+              {!target.error && !target.source && target.quote && (
+                <span className="font-normal text-ink-muted"> · exact place not found</span>
+              )}
+            </h2>
+            <div className="flex shrink-0 items-center">
+              {!narrow && (
+                <IconButton
+                  label={expanded ? 'Back to the side panel' : 'Fill the window'}
+                  onClick={() => setExpanded(!expanded)}
+                >
+                  {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                </IconButton>
+              )}
+              {onClose && (
+                <IconButton label="Close" onClick={onClose}>
+                  <X className="size-4" />
+                </IconButton>
+              )}
+            </div>
+          </header>
+        ) : (
+          <>
+            <header className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}
+                <h2 title={target.label} className="truncate text-sm font-medium">{target.label}</h2>
+                <p className="truncate text-xs text-ink-muted">
+                  {target.detail && `${target.detail} · `}
+                  {target.paper}
+                  {/* Only when there was a passage to find: opening the paper itself has none. */}
+                  {!target.error && !target.source && target.quote && ' · exact place not found, showing the page'}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center">
+                {!narrow && (
+                  <IconButton
+                    label={expanded ? 'Back to the side panel' : 'Fill the window'}
+                    onClick={() => setExpanded(!expanded)}
+                  >
+                    {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  </IconButton>
+                )}
+                {onClose && (
+                  <IconButton label="Close" onClick={onClose}>
+                    <X className="size-4" />
+                  </IconButton>
+                )}
+              </div>
+            </header>
+
+            {target.quote && (
+              <div
+                className={cn(
+                  'shrink-0 rounded-xl bg-neutral-soft px-3.5',
+                  compactQuote ? 'space-y-0.5 py-2' : 'max-h-32 space-y-1.5 overflow-y-auto py-3',
+                )}
+              >
+                <h3 className="type-label text-ink-muted">Quoted passage · page {targetPage(target)}</h3>
+                <blockquote
+                  title={compactQuote ? target.quote : undefined}
+                  className={cn(
+                    'font-serif italic text-ink',
+                    compactQuote ? 'line-clamp-2 text-[13px] leading-5' : 'text-[15px] leading-[22px]',
+                  )}
+                >
+                  “{target.quote}”
+                </blockquote>
+              </div>
+            )}
+          </>
         )}
 
         {target.error && (
-          <p role="alert" className="rounded-lg bg-refutes-soft px-3 py-2 text-sm leading-5 text-refutes">
+          <p role="alert" className={cn('bg-refutes-soft px-3 py-2 text-sm leading-5 text-refutes', target.paperRole ? 'border-b border-border-subtle' : 'rounded-lg')}>
             {target.error}
           </p>
         )}
 
-        <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-border-subtle bg-canvas">
+        <div className={cn('relative min-h-0 flex-1 overflow-hidden bg-canvas', !target.paperRole && 'rounded-lg border border-border-subtle')}>
           <div
             role="toolbar"
             aria-label="Page controls"
@@ -490,6 +524,7 @@ export function PageViewer({
             >
               <ChevronRight className="size-4" />
             </IconButton>
+            {toolbarLead && <div className="min-w-0 max-w-56 flex-1">{toolbarLead}</div>}
             <span className="flex-1" />
             <IconButton
               label="Zoom out"

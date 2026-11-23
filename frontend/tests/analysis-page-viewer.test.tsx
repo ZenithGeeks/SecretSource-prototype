@@ -225,9 +225,9 @@ describe('the header', () => {
 
   it('says which of two papers it is', async () => {
     const { rerender } = await render(<PageViewer target={{ ...target, paperRole: 'under-review' }} />)
-    expect(screen.getByText('Paper under review')).toBeInTheDocument()
+    expect(screen.getByText(/Paper under review/)).toBeInTheDocument()
     rerender(<PageViewer target={{ ...target, paperRole: 'reference' }} />)
-    expect(screen.getByText('Cited reference')).toBeInTheDocument()
+    expect(screen.getByText(/Cited reference/)).toBeInTheDocument()
   })
 
   it('has a close button only when it can be closed', async () => {
