@@ -93,6 +93,21 @@ def test_restore_terminates_a_recheck_interrupted_by_restart(monkeypatch):
     assert isinstance(event["at"], float)
 
 
+def test_lazy_lookup_finishes_an_interrupted_recheck(monkeypatch):
+    row = _row("old", stages=[{"stage": "rechecking", "ref": "b13"}])
+    saved = []
+    monkeypatch.setattr(main.store, "load", lambda _: row)
+    monkeypatch.setattr(main, "_save_soon", saved.append)
+
+    async def lookup():
+        monkeypatch.setattr(main, "_loop", asyncio.get_running_loop())
+        loaded = await asyncio.to_thread(main.lookup, "old")
+        assert loaded["stages"][-1]["interrupted"] is True
+
+    asyncio.run(lookup())
+    assert saved == ["old"]
+
+
 def test_pending_recheck_refs_use_the_latest_stage_per_reference():
     stages = [
         {"stage": "rechecking", "ref": "b13"},

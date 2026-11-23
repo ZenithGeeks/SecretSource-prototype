@@ -210,6 +210,8 @@ def _hold(row: dict) -> bool:
         return False
     _forget_missing(analysis_id)
     analyses[analysis_id] = row
+    if _finish_interrupted_rechecks(row) and _loop is not None:
+        _loop.call_soon_threadsafe(_save_soon, analysis_id)
     return row.get("status") == "running" and analysis_id not in streams
 
 
@@ -256,6 +258,17 @@ def _pending_recheck_refs(stages: list[dict]) -> list[str]:
     return [ref for ref, stage in latest.items() if stage == "rechecking"]
 
 
+def _finish_interrupted_rechecks(row: dict) -> bool:
+    if row.get("status") == "running":
+        return False
+    refs = _pending_recheck_refs(row.get("stages") or [])
+    for ref in refs:
+        row["stages"].append(
+            {"stage": "rechecked", "ref": ref, "interrupted": True, "at": round(time.time(), 1)}
+        )
+    return bool(refs)
+
+
 def restore():
     """Load running analyses and the newest stored rows. A "running" row may belong to a job an RQ
     worker is still executing (or was, before this gateway process last exited); only mark it
@@ -267,14 +280,9 @@ def restore():
         analyses.clear()
         analyses.update(loaded)
         pending = [analysis for analysis in analyses.values() if analysis["status"] == "running"]
-        interrupted_rechecks = [
-            (analysis["id"], ref)
-            for analysis in analyses.values()
-            if analysis["status"] != "running"
-            for ref in _pending_recheck_refs(analysis.get("stages") or [])
-        ]
-    for analysis_id, ref in interrupted_rechecks:
-        _record_stage(analysis_id, "rechecked", ref=ref, interrupted=True)
+        interrupted = [row["id"] for row in loaded.values() if _finish_interrupted_rechecks(row)]
+    for analysis_id in interrupted:
+        _save_soon(analysis_id)
     for analysis in pending:
         alive = job_is_alive(analysis["id"])
         if alive is False:
@@ -986,7 +994,7 @@ async def upload_reference_pdf(
     if not content.startswith(b"%PDF-"):
         raise HTTPException(422, "the file is not a PDF")
     path = await asyncio.to_thread(save_upload, content, file.filename)
-    _record_stage(analysis_id, "rechecking", ref=ref)
+    _begin_recheck(analysis_id, ref)
     _detach(_recheck_reference(analysis_id, ref, path, uploaded_pdf=True))
     return {"ref": ref, "pdf": path.name}
 
@@ -1046,10 +1054,10 @@ async def repair_reference(
         ):
             raise HTTPException(422, "enter a public HTTP or HTTPS URL without embedded credentials")
         updated.update(url=body.url.strip(), doi="", arxiv="")
-    source = lookup_key(updated)
+    source = updated["url"] or lookup_key(updated)
     if not source:
         raise HTTPException(422, "the replacement has no usable source identifier")
-    _record_stage(analysis_id, "rechecking", ref=ref)
+    _begin_recheck(analysis_id, ref)
     expected = {**updated, "_validate_web_title": bool(body.url.strip())}
     _detach(
         _recheck_reference(
@@ -1091,9 +1099,16 @@ async def retry_reference(analysis_id: str, ref: str, user: str | None = Depends
     )
     if not retryable:
         raise HTTPException(409, "this citation has no retryable retrieval failure")
-    _record_stage(analysis_id, "rechecking", ref=ref)
+    _begin_recheck(analysis_id, ref)
     _detach(_recheck_reference(analysis_id, ref, None, identifier=source, expected=citation))
     return {"ref": ref, "retrying": True}
+
+
+def _begin_recheck(analysis_id: str, ref: str) -> None:
+    # Check and reserve without yielding the gateway event loop.
+    if ref in _pending_recheck_refs(analyses[analysis_id]["stages"]):
+        raise HTTPException(409, "this reference is already being checked")
+    _record_stage(analysis_id, "rechecking", ref=ref)
 
 
 def _record_stage(analysis_id: str, stage: str, **fields) -> None:
