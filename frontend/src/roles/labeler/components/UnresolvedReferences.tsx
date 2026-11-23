@@ -142,7 +142,6 @@ function RepairForm({
       className="mt-3 flex flex-col gap-2 rounded-lg border border-border-subtle p-3"
       onSubmit={(event) => {
         event.preventDefault()
-        if (!citation.ref) return
         if (doi.trim()) onRepair(citation.ref, { doi: doi.trim() })
         else if (url.trim()) onRepair(citation.ref, { url: url.trim() })
       }}

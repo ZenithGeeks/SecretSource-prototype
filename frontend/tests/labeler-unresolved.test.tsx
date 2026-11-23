@@ -226,12 +226,40 @@ describe('UnresolvedReferences', () => {
     expect(onRepair).toHaveBeenCalledWith('b23', { doi: '10.5678/new' })
   })
 
+  it('submits a corrected DOI from the form and ignores an empty correction', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ doi: '10.1234/old' })]} onRepair={onRepair} />)
+    const form = screen.getByLabelText('Correct DOI for Top500').closest('form')!
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: '' } })
+    fireEvent.submit(form)
+    expect(onRepair).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: ' 10.5678/new ' } })
+    fireEvent.submit(form)
+    expect(onRepair).toHaveBeenCalledWith('b23', { doi: '10.5678/new' })
+  })
+
   it('clears the old DOI when the labeler enters a replacement page URL', () => {
     const onRepair = vi.fn()
     render(<UnresolvedReferences citations={[card({ doi: '10.1234/old' })]} onRepair={onRepair} />)
     fireEvent.change(screen.getByLabelText('Correct URL for Top500'), { target: { value: 'https://example.org/new' } })
     fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
     expect(onRepair).toHaveBeenCalledWith('b23', { url: 'https://example.org/new' })
+  })
+
+  it('allows clearing a URL without setting a DOI', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ url: 'https://example.org/old' })]} onRepair={onRepair} />)
+    fireEvent.change(screen.getByLabelText('Correct URL for Top500'), { target: { value: '' } })
+    expect(screen.getByLabelText('Correct URL for Top500')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Try replacement' })).toBeDisabled()
+  })
+
+  it('clears a prior URL when the labeler enters a replacement DOI', () => {
+    const onRepair = vi.fn()
+    render(<UnresolvedReferences citations={[card({ url: 'https://example.org/old' })]} onRepair={onRepair} />)
+    fireEvent.change(screen.getByLabelText('Correct DOI for Top500'), { target: { value: '10.5678/new' } })
+    expect(screen.getByLabelText('Correct URL for Top500')).toHaveValue('')
   })
 
   it('disables both repair actions while a request is running', () => {

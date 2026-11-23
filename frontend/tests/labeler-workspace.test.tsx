@@ -13,6 +13,7 @@ const gateway = vi.hoisted(() => ({
   posts: [] as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
   saveFails: false,
   saveHangs: false,
+  referenceErrorFor: '',
   searches: [] as unknown[],
   found: [] as unknown[],
   searchFails: false,
@@ -34,6 +35,10 @@ vi.mock('../src/lib/api', async (original) => ({
       }
       gateway.posts.push(JSON.parse(String(init.body)))
       return { reviewed: true }
+    }
+    if (path.includes('/references/') && (path.endsWith('/pdf') || path.endsWith('/retry'))) {
+      if (gateway.referenceErrorFor === path) throw new Error('503: reference service unavailable')
+      return { id: 'reference-check' }
     }
     if (init?.method === 'POST') {
       if (gateway.saveHangs) await new Promise(() => undefined)
@@ -179,6 +184,7 @@ beforeEach(() => {
   gateway.posts.length = 0
   gateway.saveFails = false
   gateway.saveHangs = false
+  gateway.referenceErrorFor = ''
   gateway.searches.length = 0
   gateway.found = []
   gateway.searchFails = false
@@ -186,6 +192,41 @@ beforeEach(() => {
   window.localStorage.clear()
   window.localStorage.setItem('labeler.paperView', 'both')
   wideScreen(true)
+})
+
+it('shows citation repair failures without hiding the existing evidence', async () => {
+  const claim = { ...makeSession().claims[0], citation_repairs: { b9: { message: 'wrong paper' } } }
+  gateway.session = makeSession({ claims: [claim] })
+  await open()
+  expect(screen.getByRole('alert')).toHaveTextContent('Replacement for [b9] was not used: wrong paper. Previous evidence remains available.')
+})
+
+it('shows success and failure notices for cited-reference uploads and retries', async () => {
+  const claim = {
+    ...makeSession().claims[0],
+    cited: ['b9'],
+    unchecked: [{
+      ref: 'b9', label: 'Unread work', doi: '10.1234/old', reason: 'no-open-access',
+      source_outcome: { source_kind: 'unknown', outcome: 'temporary-failure', retryable: true, attempts: [] },
+    }],
+  }
+  gateway.session = makeSession({ claims: [claim], unread: [] })
+  await open()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry this reference' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Retry started for this reference.')
+  gateway.referenceErrorFor = '/analyses/a1/references/b9/retry'
+  fireEvent.click(screen.getByRole('button', { name: 'Retry this reference' }))
+  expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
+
+  const input = screen.getByLabelText('Provide a PDF for Unread work')
+  const file = new File(['%PDF-1.4'], 'replacement.pdf', { type: 'application/pdf' })
+  gateway.referenceErrorFor = ''
+  fireEvent.change(input, { target: { files: [file] } })
+  expect(await screen.findByRole('status')).toHaveTextContent('PDF received. Checking this reference now.')
+  gateway.referenceErrorFor = '/analyses/a1/references/b9/pdf'
+  fireEvent.change(input, { target: { files: [file] } })
+  expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
 })
 
 it('asks the labeler to review saved labels after a cited source changes', async () => {
@@ -238,14 +279,14 @@ it('opens readable web citations as linkable web evidence instead of a PDF page'
   expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', `${url}#finding`)
 })
 
-it('does not render a web evidence link for a non-http locator', async () => {
+it('does not render a web evidence link for a malformed locator', async () => {
   const page = makeSession()
   page.claims[0] = {
     ...page.claims[0],
     cited: ['b5'],
     candidates: [{
       cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
-      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: 'javascript:alert(1)',
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: 'http://[',
     }],
   }
   page.references = [{
