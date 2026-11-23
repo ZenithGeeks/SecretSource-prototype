@@ -352,7 +352,10 @@ export function AppShell<K extends string>({
   )
 
   return (
-    <div className={cn('flex min-h-screen flex-col lg:flex-row', wide === 'full' && !bare && 'xl:h-dvh xl:overflow-hidden')}>
+    // `relative` makes the locked shell the containing block for absolute descendants (the
+    // `sr-only` inputs deep in a scrolled panel); without it they anchor to the page, escape
+    // the overflow clip and make the window scroll the workspace away.
+    <div className={cn('flex min-h-screen flex-col lg:flex-row', wide === 'full' && !bare && 'xl:relative xl:h-dvh xl:overflow-hidden')}>
       {!bare && (
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
           <Brand compact />
