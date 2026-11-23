@@ -886,11 +886,6 @@ function Body({
         <div className="p-4">{paperDoneView}</div>
       ) : (
         <>
-          {Object.entries(claim.citation_repairs ?? {}).map(([ref, repair]) => (
-            <p key={ref} role="alert" className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
-              Replacement for [{ref}] was not used: {repair.message}. Previous evidence remains available.
-            </p>
-          ))}
           {claimPin()}
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
           <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
@@ -983,6 +978,12 @@ function Body({
           Unsaved labels from your last visit were kept in this browser. Save them to keep them for good.
         </p>
       )}
+
+      {!paperDone && Object.entries(claim.citation_repairs ?? {}).map(([ref, repair]) => (
+        <p key={ref} role="alert" className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
+          Replacement for [{ref}] was not used: {repair.message}. Previous evidence remains available.
+        </p>
+      ))}
 
       {wide ? (
         <SplitPane

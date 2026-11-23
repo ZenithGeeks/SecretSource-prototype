@@ -13,6 +13,7 @@ import time
 import unicodedata
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 from app import store
@@ -410,6 +411,10 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
     prepared = prepare_source(source_pdf_path, wait_for_figures=True)
     if prepared["status"] == "error":
         return {**prepared, "claim": claim, "source": source_pdf_path}
+    if prepared["status"] == "web-page":
+        return check_web_page(
+            claim, source_pdf_path, prepared["web_page"], source_outcome=prepared.get("source_outcome")
+        )
     return check_prepared(
         claim, source_pdf_path, Path(prepared["path"]), source_outcome=prepared.get("source_outcome")
     )
@@ -445,8 +450,10 @@ def prepare_source(
         is_arxiv_url = (parsed.hostname or "").lower().removeprefix("www.") == "arxiv.org"
         if (
             parsed.scheme.lower() in {"http", "https"}
-            and not sources.doi_in(source_pdf_path)
-            and not is_arxiv_url
+            and (
+                (expected or {}).get("_validate_web_title")
+                or (not sources.doi_in(source_pdf_path) and not is_arxiv_url)
+            )
         ):
             resource = web.fetch_resource(source_pdf_path)
             is_html = resource.content_type in {"text/html", "application/xhtml+xml"} or resource.body[
@@ -481,14 +488,13 @@ def prepare_source(
                 digest = hashlib.sha256(source_pdf_path.encode() + resource.body).hexdigest()[:24]
                 pdf = sources.PAPERS_DIR / f"url-{digest}.pdf"
                 sources.PAPERS_DIR.mkdir(parents=True, exist_ok=True)
-                sources._write_whole(sources._link_file(pdf), sources._safe_locator(resource.url).encode())
-                sources._write_whole(pdf, resource.body)
-                try:
-                    validate_pdf_identity(pdf, expected)
-                except sources.IdentityMismatch:
-                    pdf.unlink(missing_ok=True)
-                    sources._link_file(pdf).unlink(missing_ok=True)
-                    raise
+                with TemporaryDirectory(dir=sources.PAPERS_DIR) as staging:
+                    candidate = Path(staging) / pdf.name
+                    candidate.write_bytes(resource.body)
+                    validate_pdf_identity(candidate, expected)
+                    locator = sources._safe_locator(resource.url)
+                    sources._write_whole(sources._link_file(pdf), locator.encode())
+                    candidate.replace(pdf)
                 if failure := _index_once(pdf, wait_for_figures):
                     return {
                         **failure,

@@ -536,7 +536,10 @@ def test_web_claim_check_returns_stable_paragraph_locations(monkeypatch):
         ),
     )
 
-    checked = verify.check_web_page("Static analysis detects software defects.", page.url, page)
+    monkeypatch.setattr(
+        verify, "prepare_source", lambda *_args, **_kwargs: {"status": "web-page", "web_page": page}
+    )
+    checked = verify.verify_claim("Static analysis detects software defects.", page.url)
 
     assert checked["source_kind"] == "web-page"
     assert checked["evidence"][0]["locator"].endswith("#finding")
@@ -754,10 +757,15 @@ def test_direct_pdf_indexing_failure_has_a_retrieval_outcome(monkeypatch, tmp_pa
     assert result["source_outcome"]["outcome"] == "indexing-failed"
 
 
-def test_direct_pdf_identity_mismatch_removes_the_saved_file(monkeypatch, tmp_path):
+@pytest.mark.parametrize("previously_accepted", [False, True])
+def test_direct_pdf_identity_mismatch_preserves_shared_cache(monkeypatch, tmp_path, previously_accepted):
     resource = web.WebResource("https://example.org/paper.pdf", "application/pdf", "utf-8", b"%PDF-fake")
     monkeypatch.setattr(web, "fetch_resource", lambda _: resource)
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
+    if previously_accepted:
+        monkeypatch.setattr(verify, "_index_once", lambda *_: None)
+        assert verify.prepare_source(resource.url)["status"] == "ok"
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     monkeypatch.setattr(
         verify, "validate_pdf_identity",
         lambda *_: (_ for _ in ()).throw(sources.IdentityMismatch("wrong paper")),
@@ -767,7 +775,7 @@ def test_direct_pdf_identity_mismatch_removes_the_saved_file(monkeypatch, tmp_pa
 
     assert result["status"] == "error"
     assert result["reason"] == "identity-mismatch"
-    assert not list(tmp_path.glob("url-*.pdf"))
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
 @pytest.mark.parametrize(

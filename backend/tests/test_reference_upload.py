@@ -187,6 +187,10 @@ def test_a_corrected_url_replaces_the_citation_only_after_its_claims_pass_check(
         "/analyses/a1/references/b13/repair", json={"url": "https://example.org/gmres.pdf"}
     )
     assert response.status_code == 202
+    assert client.post(
+        "/analyses/a1/references/b13/repair", json={"url": "https://example.org/other"}
+    ).status_code == 409
+    assert len(detached) == 1
     asyncio.run(detached[0])
 
     citation = analysis["claims"][0]["citations"][0]
@@ -197,7 +201,7 @@ def test_a_corrected_url_replaces_the_citation_only_after_its_claims_pass_check(
     assert analysis["claims"][0]["verdicts"][0]["cited"] == GMRES
     assert analysis["claims"][0]["needs_review"] is True
     assert "b13" not in analysis["pdfs"]
-    assert prepared[0][0] == GMRES
+    assert prepared[0][0] == citation["url"]
     assert prepared[0][1]["title"] == GMRES
 
 

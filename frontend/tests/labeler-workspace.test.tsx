@@ -195,7 +195,8 @@ beforeEach(() => {
   wideScreen(true)
 })
 
-it('shows citation repair failures without hiding the existing evidence', async () => {
+it.each([true, false])('shows citation repair failures (wide: %s)', async (wide) => {
+  wideScreen(wide)
   const claim = { ...makeSession().claims[0], citation_repairs: { b9: { message: 'wrong paper' } } }
   gateway.session = makeSession({ claims: [claim] })
   await open()
