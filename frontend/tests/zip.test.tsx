@@ -22,6 +22,13 @@ describe('zipStored', () => {
     for (const f of files) expect(strFromU8(read[f.name])).toBe(f.content)
   })
 
+  it('stores the bytes of a figure as they are, beside the text files (SCRUM-463)', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xc3, 0x28])
+    const read = unzipSync(zipStored([{ name: 'main.tex', content: '\\includegraphics{figures/posv}' }, { name: 'figures/posv.png', content: png }]))
+    expect(Object.keys(read)).toEqual(['main.tex', 'figures/posv.png'])
+    expect([...read['figures/posv.png']]).toEqual([...png]) // not re-encoded as UTF-8 text
+  })
+
   it('writes stored entries with UTF-8 names, the standard CRC-32 and the given time', () => {
     const bytes = zipStored([{ name: 'a.txt', content: '123456789' }], new Date(2026, 10, 13, 9, 30, 42))
     const head = view(bytes)

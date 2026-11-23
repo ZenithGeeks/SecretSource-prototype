@@ -79,10 +79,10 @@ export function buildAnnotatedTex(file: ProjectFile, citations: Citation[]): str
   return lines.join('\n')
 }
 
-/** Every file of the project as a .zip, with the current file contents. Figures would go
- * in here too once uploads carry them; the prototype has none. */
-export function buildProjectZip(draft: Draft): Blob {
-  return new Blob([zipStored(draft.files)], { type: 'application/zip' })
+/** Every file of the project as a .zip, with the current file contents, and the draft's
+ * figures at the paths its LaTeX names them by. */
+export function buildProjectZip(draft: Draft, figures: { name: string; content: Uint8Array }[] = []): Blob {
+  return new Blob([zipStored([...draft.files, ...figures])], { type: 'application/zip' })
 }
 
 /** "related-work-thesis-ch-2" from a draft title, for file names. */

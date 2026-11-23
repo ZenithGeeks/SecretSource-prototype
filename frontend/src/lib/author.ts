@@ -67,6 +67,15 @@ export const authorApi = {
     request<Draft>(`/author/drafts/${enc(id)}/bib-fork`, json('POST', { keep })),
   saveDraft: (id: string) => request<Draft>(`/author/drafts/${enc(id)}/save`, { method: 'POST' }),
   parseDraft: (id: string) => request<ParseResult>(`/author/drafts/${enc(id)}/parse`),
+  /** Adds a figure, or replaces the one of that name. `name` is the path the LaTeX uses;
+   * without it, the file's own name. */
+  uploadImage: (id: string, file: File, name?: string) =>
+    request<Draft>(`/author/drafts/${enc(id)}/images${name ? `?name=${enc(name)}` : ''}`, upload(file)),
+  deleteImage: (id: string, name: string) =>
+    request<Draft>(`/author/drafts/${enc(id)}/images/${name.split('/').map(enc).join('/')}`, { method: 'DELETE' }),
+  /** A figure's bytes; the gateway serves them to the draft's owner only. */
+  imageBlob: (id: string, name: string, signal?: AbortSignal) =>
+    requestBlob(`/author/drafts/${enc(id)}/images/${name.split('/').map(enc).join('/')}`, { signal }),
   attachPdf: (draftId: string, key: string, file: File) =>
     request<{ key: string; pdf: string }>(`/author/drafts/${enc(draftId)}/citations/${enc(key)}/pdf`, upload(file)),
 

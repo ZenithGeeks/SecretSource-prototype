@@ -31,6 +31,8 @@ export type FakeGateway = {
   fetch: ReturnType<typeof vi.fn>
   /** While true, every file write answers 503 — a gateway that is down mid-typing. */
   failWrites: boolean
+  /** A draft's figures' bytes by "<draft id>/<path>", as the real route stores them on disk. */
+  imageBytes: Map<string, Uint8Array>
   /** Awaited before a file write is applied, so a test can hold one reply back and let a later
    * one land first. */
   beforeWrite?: (name: string, content: string) => Promise<void>
@@ -96,6 +98,7 @@ export function installFakeGateway(options: { files?: { name: string; content: s
     calls: [],
     fetch: vi.fn(),
     failWrites: false,
+    imageBytes: new Map(),
   }
 
   const t = now()
@@ -352,6 +355,26 @@ async function handle(gateway: FakeGateway, input: RequestInfo | URL, init?: Req
         }
         draft.files = draft.files.filter((f) => f.name !== name)
         if (draft.keptBib === name) delete draft.keptBib
+        return json(draftView(gateway, draft))
+      }
+    }
+    if (parts[3] === 'images') {
+      // As the real route (SCRUM-463): a figure under its path; `updated` does not move.
+      const name = parts.length > 4 ? decodeURIComponent(parts.slice(4).join('/')) : (url.searchParams.get('name') ?? (form?.get('file') as File).name)
+      const key = `${draft.id}/${name}`
+      if (method === 'POST') {
+        const file = form?.get('file') as File
+        if (!/\.(png|jpe?g|svg|pdf)$/i.test(name)) return fail(400, 'an image is a .png, .jpg, .svg or .pdf name, without ..')
+        gateway.imageBytes.set(key, new Uint8Array(await file.arrayBuffer()))
+        const others = (draft.images ?? []).filter((i) => i.name !== name)
+        draft.images = [...others, { name, size: file.size, hash: `h${++seq}` }].sort((a, b) => a.name.localeCompare(b.name))
+        return json(draftView(gateway, draft))
+      }
+      if (!draft.images?.some((i) => i.name === name)) return fail(404, 'no such image')
+      if (method === 'GET') return new Response(gateway.imageBytes.get(key))
+      if (method === 'DELETE') {
+        draft.images = draft.images.filter((i) => i.name !== name)
+        gateway.imageBytes.delete(key)
         return json(draftView(gateway, draft))
       }
     }

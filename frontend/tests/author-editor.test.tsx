@@ -574,6 +574,100 @@ describe('Author LaTeX editor — the preview never edits the source', () => {
   }, 20000)
 })
 
+describe('Author LaTeX editor — images (SCRUM-463)', () => {
+  const FIGURE_TEX = String.raw`\section{Results}
+See the figure.
+\begin{figure}
+\includegraphics[width=0.5\textwidth]{figures/posv}
+\end{figure}
+`
+  const preview = () => screen.getByTestId('preview-page').shadowRoot
+
+  test('an uploaded image is drawn where \\includegraphics names it, at its width, until it is removed', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    await waitFor(() => expect(preview()?.querySelector('.ss-graphic')?.textContent).toBe('Image not uploaded: figures/posv'), { timeout: 15000 })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Images/ }))
+    const panel = screen.getByRole('region', { name: 'Draft images' })
+    expect(within(panel).getByText(/No images yet/)).toBeTruthy()
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'posv.png', { type: 'image/png' })
+    fireEvent.change(within(panel).getByLabelText('Upload images'), { target: { files: [png] } })
+
+    // Found by its file name from "figures/posv", fetched with the token, drawn from a blob: URL.
+    await waitFor(() => expect(preview()?.querySelector('img.ss-image')).toBeTruthy(), { timeout: 15000 })
+    const img = preview()!.querySelector('img.ss-image') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('blob:vitest')
+    expect(img.style.width).toBe('50%')
+    expect(gateway.calls).toContain('POST /author/drafts/d1/images')
+    expect(gateway.calls).toContain('GET /author/drafts/d1/images/posv.png')
+    expect(within(panel).getByText('posv.png')).toBeTruthy()
+    // Not an edit of the text: nothing was written and the draft's version stays.
+    expect(gateway.calls.filter((c) => c.startsWith('PUT '))).toEqual([])
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove posv.png' }))
+    await waitFor(() => expect(preview()?.querySelector('.ss-graphic')?.textContent).toBe('Image not uploaded: figures/posv'), { timeout: 15000 })
+    expect(gateway.drafts.get('d1')!.images).toEqual([])
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:vitest')
+  }, 30000)
+
+  test('an SVG reaches the preview only as a PNG drawn from it, so its own blob: URL is never shown', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX.replace('figures/posv', 'figures/logo') }] })
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
+    gateway.drafts.get('d1')!.images = [{ name: 'figures/logo.svg', size: svg.length, hash: 'h1' }]
+    gateway.imageBytes.set('d1/figures/logo.svg', svg)
+    vi.mocked(URL.createObjectURL).mockImplementation((blob) => `blob:${(blob as Blob).type}`)
+    // jsdom has no HTMLImageElement.decode: it resolves here as a loaded image would.
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { configurable: true, value: () => Promise.resolve() })
+    const drawImage = vi.fn()
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done) => done(new Blob(['png'], { type: 'image/png' })))
+    try {
+      renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+      await waitFor(() => expect(preview()?.querySelector('img.ss-image')?.getAttribute('src')).toBe('blob:image/png'), { timeout: 15000 })
+      expect(drawImage).toHaveBeenCalled()
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:image/svg+xml')
+    } finally {
+      for (const spy of [getContext, toBlob]) spy.mockRestore()
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode
+      vi.mocked(URL.createObjectURL).mockImplementation(() => 'blob:vitest')
+    }
+  }, 30000)
+
+  test('a refused upload says why and leaves the images as they were', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    fireEvent.click(await screen.findByRole('button', { name: /^Images/ }))
+    const panel = screen.getByRole('region', { name: 'Draft images' })
+    fireEvent.change(within(panel).getByLabelText('Upload images'), { target: { files: [new File(['GIF89a'], 'anim.gif')] } })
+    expect(await screen.findByText(/Could not upload anim\.gif/)).toBeTruthy()
+    expect(gateway.drafts.get('d1')!.images ?? []).toEqual([])
+  })
+
+  test('the project .zip carries the images at their paths', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+    gateway.drafts.get('d1')!.images = [{ name: 'figures/posv.png', size: bytes.length, hash: 'h1' }]
+    gateway.imageBytes.set('d1/figures/posv.png', bytes)
+    const saved: Blob[] = []
+    vi.mocked(URL.createObjectURL).mockImplementation((blob) => {
+      if (blob instanceof Blob && blob.type === 'application/zip') saved.push(blob)
+      return 'blob:vitest'
+    })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Project \.zip/ }))
+    await waitFor(() => expect(saved).toHaveLength(1))
+    const zip = new Uint8Array(await saved[0].arrayBuffer())
+    const text = new TextDecoder('latin1').decode(zip)
+    expect(text).toContain('main.tex')
+    expect(text).toContain('figures/posv.png')
+    // the figure's bytes are stored as they are
+    expect(text).toContain(new TextDecoder('latin1').decode(bytes))
+    vi.mocked(URL.createObjectURL).mockImplementation(() => 'blob:vitest')
+  })
+})
+
 describe('Author LaTeX editor — what Ask reads', () => {
   test('read_draft reads the text on screen, unsaved edits and an unsaved .bib key included, until the editor closes', async () => {
     let reader: DraftReader | null = null

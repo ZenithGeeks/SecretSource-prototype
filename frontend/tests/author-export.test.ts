@@ -122,6 +122,17 @@ test('buildProjectZip holds every project file with its current text', () => {
   })
 })
 
+test('buildProjectZip adds the draft figures at their paths, bytes unchanged', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00])
+  return buildProjectZip(draft, [{ name: 'figures/posv.png', content: png }])
+    .arrayBuffer()
+    .then((buffer) => {
+      const files = unzipSync(new Uint8Array(buffer))
+      assert.deepEqual(Object.keys(files).sort(), ['figures/posv.png', 'main.bib', 'related-work.tex'])
+      assert.deepEqual([...files['figures/posv.png']], [...png])
+    })
+})
+
 test('slug makes a safe file name', () => {
   assert.equal(slug('Related work — thesis ch.2'), 'related-work-thesis-ch-2')
   assert.equal(slug('   '), 'draft')

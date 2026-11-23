@@ -1,6 +1,6 @@
 /**
- * A .zip of text files, stored without compression. The Author's project export is a few .tex
- * and .bib files, so deflate would save the reader a few kilobytes and cost the app a
+ * A .zip of text files and figures, stored without compression. The Author's project export is
+ * a few .tex and .bib files and the draft's images (already compressed), so deflate would save the reader a few kilobytes and cost the app a
  * compression library in every download (SCRUM-527). Any unzip tool and Overleaf read a stored
  * entry like a deflated one. Names are flagged UTF-8 (general purpose bit 11).
  */
@@ -34,14 +34,15 @@ function dosStamp(at: Date): { time: number; date: number } {
 }
 
 /** Without ZIP64, a zip counts entries in 16 bits. Its 32-bit offsets (4 GiB) are out of reach:
- * a browser cannot hold a string that long, so files read as text never get there. */
+ * a draft's text and its figures (capped at 25 MB by the gateway) never get near them. */
 const MAX_ENTRIES = 0xffff
 
 /** The archive's bytes, one entry per name in the order names first appear. A name given twice
- * keeps its last content, as the export did with fflate (one object key per name). Throws past
- * what a zip without ZIP64 can hold, rather than write an archive readers would cut short. */
-export function zipStored(files: { name: string; content: string }[], at = new Date()): Uint8Array<ArrayBuffer> {
-  const byName = new Map<string, string>()
+ * keeps its last content, as the export did with fflate (one object key per name). Text is
+ * written as UTF-8, bytes as they are. Throws past what a zip without ZIP64 can hold, rather
+ * than write an archive readers would cut short. */
+export function zipStored(files: { name: string; content: string | Uint8Array }[], at = new Date()): Uint8Array<ArrayBuffer> {
+  const byName = new Map<string, string | Uint8Array>()
   for (const file of files) byName.set(file.name, file.content)
   if (byName.size > MAX_ENTRIES) throw new Error(`A zip holds at most ${MAX_ENTRIES} files; this one has ${byName.size}.`)
 
@@ -52,7 +53,7 @@ export function zipStored(files: { name: string; content: string }[], at = new D
 
   for (const [fileName, content] of byName) {
     const name = encoder.encode(fileName)
-    const data = encoder.encode(content)
+    const data = typeof content === 'string' ? encoder.encode(content) : content
     const crc = crc32(data)
 
     const head = new DataView(new ArrayBuffer(30))

@@ -128,7 +128,7 @@ export const REWRITES: readonly { construct: string; shownAs: string }[] = [
   { construct: '\\footnote, \\thanks', shownAs: 'the note in superscript brackets' },
   { construct: '\\eqref, \\pageref', shownAs: '(label) / ?' },
   { construct: '\\url, \\href', shownAs: 'a link for http, https, mailto or a #fragment; otherwise plain text' },
-  { construct: '\\includegraphics[width=0.49\\textwidth | 5cm | scale=0.5]{file}', shownAs: 'the image at that width when the draft has it, else a box of that width saying "Image not uploaded: file" (drafts keep no images yet)' },
+  { construct: '\\includegraphics[width=0.49\\textwidth | 5cm | scale=0.5]{file}', shownAs: 'the image at that width when the draft has it, else a box of that width saying "Image not uploaded: file" (a draft\'s figures are uploaded from Images in the file bar)' },
   { construct: 'a block of the body that will not compile (an unclosed group, …)', shownAs: 'an inline error with its line where the block stood; the other sections still render' },
 ]
 
@@ -797,9 +797,9 @@ function plain(text: string): string {
   return text.replace(/ﬁ/g, 'fi').replace(/ﬂ/g, 'fl').replace(/ﬀ/g, 'ff').replace(/ﬃ/g, 'ffi').replace(/ﬄ/g, 'ffl').replace(/‐/g, '-').replace(/​/g, '')
 }
 
-/** The draft's images by path ("figures/gemm_spock.png") to a URL the page can load. Nothing
- * supplies one yet: drafts keep only their .tex and .bib files, so every image is a box naming
- * it. When images are uploaded with a draft, the editor passes them here and they render. */
+/** The draft's images by path ("figures/gemm_spock.png") to a URL the page can load: the
+ * editor's blob: URLs of the figures uploaded with the draft (roles/author/useDraftImages,
+ * SCRUM-463). An image the draft does not have is a box naming it. */
 export type ImageMap = ReadonlyMap<string, string>
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'pdf', 'svg', 'gif', 'eps']
