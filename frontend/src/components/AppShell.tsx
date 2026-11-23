@@ -55,9 +55,11 @@ const ToolbarSlot = createContext<HTMLElement | null>(null)
 
 /** Screen actions for the shell toolbar's right side ("Open PDF", "Export"). Render it
  * anywhere inside the shell's children; it appears in the toolbar and unmounts with the screen. */
-export function ToolbarActions({ children }: { children: ReactNode }) {
+export function ToolbarActions({ children, orInline = false }: { children: ReactNode; orInline?: boolean }) {
   const slot = useContext(ToolbarSlot)
-  return slot ? createPortal(children, slot) : null
+  if (slot) return createPortal(children, slot)
+  // With no top bar (a bare shell, or a test with no shell), `orInline` draws them in place.
+  return orInline ? children : null
 }
 
 /** The profile footer: avatar, name, role and a settings gear. The row opens an upward menu
@@ -453,10 +455,14 @@ export function AppShell<K extends string>({
               wide === 'full' ? 'min-h-11' : 'min-h-[52px]',
             )}
           >
-            <Breadcrumb items={breadcrumb} />
-            <div className="flex shrink-0 items-center gap-1">
+            {/* Full width: a screen may put a whole header row in the actions, so they get the
+                room and the breadcrumb is capped. */}
+            <div className={cn('min-w-0', wide === 'full' && 'max-w-xs shrink-0')}>
+              <Breadcrumb items={breadcrumb} />
+            </div>
+            <div className={cn('flex items-center gap-1', wide === 'full' ? 'min-w-0 flex-1 justify-end' : 'shrink-0')}>
               {toolbarLead}
-              <div ref={setActionsEl} className="flex items-center gap-1" />
+              <div ref={setActionsEl} className={cn('flex items-center gap-1', wide === 'full' && 'min-w-0 flex-1 justify-end')} />
             </div>
           </div>
         )}

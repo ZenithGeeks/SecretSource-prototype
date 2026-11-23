@@ -120,3 +120,21 @@ test('a full-width shell is locked to the window and is the containing block for
   expect(container.firstElementChild).toHaveClass('lg:relative', 'lg:h-dvh', 'lg:min-h-0', 'lg:overflow-clip')
   expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveClass('lg:h-dvh')
 })
+
+test('a full-width screen can put a header row in the top bar, and draws it in place with no bar', () => {
+  const header = (
+    <ToolbarActions orInline>
+      <span>Claim strip</span>
+    </ToolbarActions>
+  )
+  const { unmount } = render(
+    <AppShell nav={NAV} active="home" onNavigate={() => {}} role="Labeler" roleIcon={Home} breadcrumb={['Papers', 'A paper']} wide="full">
+      {header}
+    </AppShell>,
+  )
+  expect(screen.getByText('Claim strip').closest('main')).toBeNull()
+  expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).parentElement).toHaveClass('max-w-xs')
+  unmount()
+  render(header)
+  expect(screen.getByText('Claim strip')).toBeInTheDocument()
+})
