@@ -54,6 +54,7 @@ vi.mock('../src/components/PageViewer', () => ({
     markers = [],
     onCitation,
     toolbarLead,
+    embedded,
   }: {
     target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; error?: string; page?: number }
     onSelectText?: (s: { text: string; page: number | null }) => void
@@ -61,10 +62,11 @@ vi.mock('../src/components/PageViewer', () => ({
     markers?: { ref: string; text: string }[]
     onCitation?: (marker: { ref: string; text: string }) => void
     toolbarLead?: React.ReactNode
+    embedded?: boolean
   }) => (
     <div>
       {toolbarLead}
-      <div data-testid="viewer">
+      <div data-testid="viewer" data-embedded={embedded}>
         {target.paper}|{target.quote}
       </div>
       <p data-testid="viewer-heading">
@@ -593,6 +595,7 @@ describe('on a narrow screen', () => {
     expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Read the claim in this paper' }))
     expect(screen.getByTestId('viewer')).toHaveTextContent('paperA.pdf|We show Y improves recall [4].')
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-embedded', 'false')
     fireEvent.click(screen.getByRole('button', { name: 'close paperA.pdf' }))
     expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
 
@@ -616,6 +619,22 @@ describe('on a narrow screen', () => {
 })
 
 describe('the screen size', () => {
+  it.each([1024, 1279])('embeds both viewers and keeps the label controls available at %ipx', async (width) => {
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: width >= Number(query.match(/\d+/)?.[0]),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+    await open()
+    const viewers = screen.getAllByTestId('viewer')
+    expect(viewers).toHaveLength(2)
+    viewers.forEach((viewer) => expect(viewer).toHaveAttribute('data-embedded', 'true'))
+    const viewToggle = screen.getByRole('group', { name: 'Which papers to show' })
+    expect(screen.getByRole('radio', { name: /^Keep/ })).toBeEnabled()
+    fireEvent.click(within(viewToggle).getByRole('button', { name: 'Reference only' }))
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-embedded', 'true')
+  })
+
   it('switches layout when the window crosses the width the workspace needs', async () => {
     const listeners: (() => void)[] = []
     let matches = true

@@ -116,7 +116,7 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   // Passages from several references at once: take the best one. An extracted claim's own
   // first passage is already the one retrieval ranked first.
   const c = passagesFromSearch(claim) ? bestCandidate(claim, session.references) : claim.candidates[0]
-  if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id }
+  if (c) return { file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id, automatic: true }
   // No passages: the first reference the claim itself cites that has a PDF, at page 1. Never the
   // analysis's first reference, which may be one this claim does not cite. With none, nothing
   // opens and the pane lists the claim's unresolved citations instead.
@@ -273,7 +273,7 @@ function Body({
       // the choice just is not remembered
     }
   }
-  const wide = useMinWidth(1280)
+  const wide = useMinWidth(1024) // Tailwind lg, where AppShell locks the shell to the window
   const roomy = useMinWidth(SIDE_BY_SIDE_FROM)
   const view: PaperView = paperView === 'side' && !roomy ? 'both' : paperView
   const both = view === 'both'
@@ -552,6 +552,7 @@ function Body({
       key={target.paper}
       target={target}
       onClose={onClose}
+      embedded={wide}
       toolbarLead={toolbarLead}
       {...(side === 'paper' && citing)}
       className={!wide ? VIEWER_HEIGHT : 'h-full min-h-0'}
@@ -834,7 +835,7 @@ function Body({
       ) : (
         <>
           {claimPin()}
-          <div ref={panelScrollRef} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <div ref={panelScrollRef} data-label-panel className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
             {panel}
           </div>
           <div className="border-t border-border-subtle">{saveBar('border-0')}</div>
@@ -847,15 +848,15 @@ function Body({
     // Fills the AppShell main box on wide screens so only the paper and label panes scroll.
     <div className={cn('flex flex-col gap-2', wide && 'min-h-0 flex-1')}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="min-w-0 xl:w-52 xl:shrink-0">
-          <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">
+        <div className="min-w-0 lg:w-52 lg:shrink-0">
+          <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink lg:line-clamp-1">
             {session.title}
           </h1>
           <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
         </div>
         {/* On a wide screen the strip shares this row; below it, the strip gets a row of its own. */}
         <ClaimNav
-          className="order-last w-full xl:order-none xl:w-auto xl:min-w-0 xl:flex-1"
+          className="order-last w-full lg:order-none lg:w-auto lg:min-w-0 lg:flex-1"
           claims={claims}
           drafts={drafts}
           saved={saved}
@@ -864,7 +865,7 @@ function Body({
           onSelect={select}
           onAdd={addClaim}
         />
-        <div className="relative ml-auto flex items-center gap-3 xl:ml-0">
+        <div className="relative ml-auto flex items-center gap-3 lg:ml-0">
           {wide && viewToggle}
           <div className="w-36">
             <button
