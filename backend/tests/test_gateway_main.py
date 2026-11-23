@@ -70,19 +70,39 @@ def test_startup_recent_reads_the_env_and_falls_back_when_it_is_empty_or_not_a_n
 
 
 def test_restore_terminates_a_recheck_interrupted_by_restart(monkeypatch):
-    row = _row("a1", stages=[{"stage": "rechecking", "ref": "b13"}])
+    row = _row(
+        "a1",
+        stages=[
+            {"stage": "rechecking", "ref": "b13"},
+            {"stage": "rechecking", "ref": "b14"},
+            {"stage": "rechecked", "ref": "b14"},
+        ],
+    )
     monkeypatch.setattr(main.store, "load_startup", lambda _limit: {"a1": row})
     monkeypatch.setattr(main, "_save_soon", lambda _analysis_id: None)
 
     main.restore()
 
     event = main.analyses["a1"]["stages"][-1]
+    assert event["ref"] == "b13"
     assert {key: value for key, value in event.items() if key != "at"} == {
         "stage": "rechecked",
         "ref": "b13",
         "interrupted": True,
     }
     assert isinstance(event["at"], float)
+
+
+def test_pending_recheck_refs_use_the_latest_stage_per_reference():
+    stages = [
+        {"stage": "rechecking", "ref": "b13"},
+        {"stage": "rechecking", "ref": "b14"},
+        {"stage": "rechecked", "ref": "b14"},
+        {"stage": "rechecking", "ref": "b15"},
+        {"stage": "recheck-failed", "ref": "b15"},
+    ]
+
+    assert main._pending_recheck_refs(stages) == ["b13"]
 
 
 def test_remembering_a_missing_id_drops_marks_that_have_expired():

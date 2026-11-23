@@ -246,6 +246,16 @@ def _schedule_stream(analysis_id: str) -> None:
     _open_stream(analysis_id)
 
 
+def _pending_recheck_refs(stages: list[dict]) -> list[str]:
+    """References whose newest recheck stage is still pending after a process restart."""
+    latest: dict[str, str] = {}
+    for stage in stages:
+        ref = stage.get("ref")
+        if ref and stage.get("stage") in {"rechecking", "rechecked", "recheck-failed"}:
+            latest[ref] = stage["stage"]
+    return [ref for ref, stage in latest.items() if stage == "rechecking"]
+
+
 def restore():
     """Load running analyses and the newest stored rows. A "running" row may belong to a job an RQ
     worker is still executing (or was, before this gateway process last exited); only mark it
@@ -258,11 +268,10 @@ def restore():
         analyses.update(loaded)
         pending = [analysis for analysis in analyses.values() if analysis["status"] == "running"]
         interrupted_rechecks = [
-            (analysis["id"], analysis["stages"][-1].get("ref"))
+            (analysis["id"], ref)
             for analysis in analyses.values()
             if analysis["status"] != "running"
-            and analysis.get("stages")
-            and analysis["stages"][-1].get("stage") == "rechecking"
+            for ref in _pending_recheck_refs(analysis.get("stages") or [])
         ]
     for analysis_id, ref in interrupted_rechecks:
         _record_stage(analysis_id, "rechecked", ref=ref, interrupted=True)
@@ -1173,6 +1182,20 @@ async def _recheck_reference(
                     )
                 else:
                     failures.append((claim, verdict))
+        stale_updates = [
+            (claim, citation, old_sources)
+            for claim, citation, _checked, old_sources, _new_sources, _source, _verdict in updates
+            if (set(lookup_keys(citation)) or {lookup_key(citation)}) != old_sources
+        ]
+        if replacement_citation is not None and stale_updates:
+            # Another replacement committed while this one was being checked. Abort the entire
+            # replacement so its metadata cannot describe evidence produced for a different URL.
+            logger.info(
+                "discarding stale replacement for analysis %s citation %s",
+                analysis_id,
+                ref,
+            )
+            return
         if not failures and updates:
             # Commit citation metadata and refreshed checks together. If one claim fails, every
             # previous result remains intact and the caller can correct the replacement.

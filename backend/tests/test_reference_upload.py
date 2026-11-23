@@ -115,6 +115,39 @@ def test_retry_does_not_commit_a_result_after_the_citation_changes(api, monkeypa
     asyncio.run(main._recheck_reference("a1", "b13", None, identifier=GMRES, expected=citation))
 
     assert analysis["claims"][0]["verdicts"] == [{"cited": "previous", "verdict": "supports"}]
+
+
+def test_stale_replacement_aborts_before_overwriting_a_newer_repair(api, monkeypatch):
+    _, analysis, _ = api
+    citation = analysis["claims"][0]["citations"][0]
+    newer_verdict = {"cited": GMRES, "source": "newer.pdf", "verdict": "supports"}
+    analysis["claims"][0]["verdicts"] = [newer_verdict]
+    replacement = {"ref": "b13", "title": GMRES, "url": "https://example.org/first"}
+    monkeypatch.setattr(
+        main,
+        "prepare_source",
+        lambda *_args, **_kwargs: {"status": "ok", "path": "first.pdf"},
+    )
+
+    def check(*_args, **_kwargs):
+        citation["url"] = "https://example.org/newer"
+        return {"status": "ok", "verdict": "refutes", "evidence": []}
+
+    monkeypatch.setattr(main, "check_prepared", check)
+
+    asyncio.run(
+        main._recheck_reference(
+            "a1",
+            "b13",
+            None,
+            identifier=GMRES,
+            expected=replacement,
+            replacement_citation=replacement,
+        )
+    )
+
+    assert citation["url"] == "https://example.org/newer"
+    assert analysis["claims"][0]["verdicts"] == [newer_verdict]
     assert analysis["claims"][1]["verdicts"] == ANALYSIS["claims"][1]["verdicts"]
 
 
