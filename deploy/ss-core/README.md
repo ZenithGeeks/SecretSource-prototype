@@ -35,7 +35,30 @@ To roll back:
 `sudo docker tag secretsource-worker-worker:pre-<sha> secretsource-worker-worker:latest`, then
 `sudo sh -c "cd /var/lib/docker/secretsource-worker && docker compose up -d --no-deps --no-build worker"`.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:34ffa06f9a97e3f7bd7a87992c09cdf8b3a94d80c974c957dd939082ebe54b71 -->
+
+### Cloud Run and direct upload retirement
+
+Before switching traffic, confirm whether any clients still use the old Cloud Run gateway or
+the Vercel edge proxy that authenticates to it. Verify PDF submission through the replacement
+gateway. If the old gateway still issues upload sessions, stop issuing new sessions before
+cutover. Keep its upload completion route available until outstanding bucket uploads have
+finished or their sessions have expired. If an upload was interrupted at cutover,
+ask the user to submit the original PDF again through the replacement gateway. Confirm the
+retired bucket's retention policy and account for completed but unclaimed PDFs before cleanup.
+
+After traffic and uploads have moved, check the old project and region for Cloud Scheduler jobs
+named `gpu-guard-*` and `scale-guard-*`, and Cloud Monitoring policies tied to the retired
+services, including “GPU Cloud Run service billed continuously”. Retire any confirmed unused
+resources. Check which service account the scheduler jobs used and whether any proxy, scheduled
+job, or other workload still uses its credentials or permissions before revoking them.
+The repository change does not alter those external resources.
+
 ### One-time cleanup after removing `status-bot`
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 `deploy-worker.sh` only recreates `worker` without `--remove-orphans`, so an existing
 `status-bot` container from before its removal stays running with `restart: unless-stopped`.

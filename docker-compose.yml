@@ -352,8 +352,6 @@ services:
   grafana:
     profiles: [monitoring]
     image: grafana/grafana:latest
-    # Extracts the GCP private key for the Cloud Monitoring data source, then runs /run.sh.
-    entrypoint: ["sh", "/etc/grafana/gcp-jwt-entrypoint.sh"]
     environment:
       # Only applies when grafana-data is empty; change it later in Grafana itself.
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -376,9 +374,6 @@ services:
       # hand — see deploy/monitoring/README.md.
       - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/files:ro
-      # For the Google Cloud Monitoring data source.
-      - ./backend/secrets/service-auth.json:/etc/grafana/gcp/service-auth.json:ro
-      - ./deploy/monitoring/grafana/gcp-jwt-entrypoint.sh:/etc/grafana/gcp-jwt-entrypoint.sh:ro
     depends_on:
       - prometheus
     restart: unless-stopped
