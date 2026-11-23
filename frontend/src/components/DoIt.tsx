@@ -219,7 +219,7 @@ function Line({ line }: { line: AgentLine }) {
   if (line.kind === 'person') {
     return <p className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">{line.text}</p>
   }
-  if (line.kind === 'step') {
+  if (line.kind === 'step' || line.kind === 'progress') {
     return (
       <p className="flex items-center gap-1.5 text-xs text-ink-muted">
         <MousePointerClick className="size-3.5 shrink-0 text-accent" aria-hidden="true" />

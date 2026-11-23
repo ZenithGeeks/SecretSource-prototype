@@ -508,3 +508,74 @@ def test_one_stored_row_is_loaded_by_id(db):
     # load_all still returns every valid row, for the maintenance script that needs them.
     assert set(store.load_all()) == {"only"}
     json.dumps(loaded)  # the row is a plain dict the rest of the gateway can save again
+
+
+def test_search_owned_on_sqlite_returns_the_owners_rows_for_memory_to_rank(db):
+    _paper("ada-1", "ada", "2020-01-01T00:00:00+00:00")
+    _paper("bo-1", "bo", "2020-01-02T00:00:00+00:00")
+    assert [row["id"] for row in store.search_owned("ada", ["colbert"], 20)] == ["ada-1"]
+
+
+class _RpcClient:
+    def __init__(self, rows, log):
+        self.rows = rows
+        self.log = log
+
+    def rpc(self, name, params):
+        self.log.append((name, params))
+        return self
+
+    def execute(self):
+        return type("Result", (), {"data": self.rows})()
+
+
+def test_search_owned_on_supabase_asks_postgres_for_the_ranked_rows(monkeypatch):
+    # Postgres returns rank order; memory wants oldest first so ties favour the newest.
+    rows = [
+        {"started": "2026-02-01T00:00:00+00:00", "data": {"id": "best", "owner": "ada"}},
+        {"started": "2026-01-01T00:00:00+00:00", "data": {"id": "older", "owner": "ada"}},
+    ]
+    log = []
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test")
+    monkeypatch.setattr(store, "_supabase", lambda: _RpcClient(rows, log))
+
+    found = store.search_owned("ada", ["late", "interaction"], 20)
+
+    assert [row["id"] for row in found] == ["older", "best"]
+    assert log == [
+        ("search_owned_analyses", {"owner_id": "ada", "query": "late or interaction", "max_rows": 20})
+    ]
+    monkeypatch.setattr(store, "_supabase", lambda: _RpcClient(None, log))
+    assert store.search_owned(None, ["late"], 20) == []
+    assert log[-1][1]["owner_id"] is None  # the signed-out space, as load_owned(None)
+
+
+class _MissingRpcClient(_RpcClient):
+    def __init__(self, code, log):
+        super().__init__([], log)
+        self.code = code
+
+    def execute(self):
+        from postgrest.exceptions import APIError
+
+        raise APIError({"code": self.code, "message": "Could not find the function"})
+
+
+def test_search_owned_reads_every_owned_row_until_the_migration_is_applied(monkeypatch, caplog):
+    log = []
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test")
+    monkeypatch.setattr(store, "_search_missing_warned", False)
+    monkeypatch.setattr(store, "_supabase", lambda: _MissingRpcClient("PGRST202", log))
+    monkeypatch.setattr(store, "load_owned", lambda owner: [{"id": f"all-of-{owner}"}])
+
+    assert store.search_owned("ada", ["late"], 20) == [{"id": "all-of-ada"}]
+    assert store.search_owned("ada", ["late"], 20) == [{"id": "all-of-ada"}]
+    assert [r.message for r in caplog.records].count(
+        "search_owned_analyses is missing; apply its migration. Reading every owned analysis."
+    ) == 1  # one warning per process, not one per question
+
+    monkeypatch.setattr(store, "_supabase", lambda: _MissingRpcClient("42501", log))
+    with pytest.raises(Exception, match="Could not find"):
+        store.search_owned("ada", ["late"], 20)  # any other error still surfaces

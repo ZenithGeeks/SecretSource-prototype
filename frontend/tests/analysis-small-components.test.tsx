@@ -155,6 +155,10 @@ describe('PipelineStages', () => {
     [stage('audited', { findings: 2 }), 'Checked the results: 2 to look at'],
     [stage('audited'), 'Checked the results: nothing to flag'],
     [stage('done'), 'Finished'],
+    [stage('rechecking'), 'Checking claims again against the uploaded PDF'],
+    [stage('rechecked'), 'Checked the claims again against the uploaded PDF'],
+    [stage('recheck-failed'), 'Checking the uploaded PDF failed'],
+    [stage('recheck-failed', { message: 'interrupted by a restart' }), 'Checking the uploaded PDF failed: interrupted by a restart'],
     [stage('error'), 'Failed'],
     [stage('error', { message: 'out of memory' }), 'out of memory'],
   ])('describes %j', (one, text) => {

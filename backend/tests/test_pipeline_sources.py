@@ -224,6 +224,23 @@ def test_openalex_title_search_respects_cited_year_and_author(monkeypatch):
     assert candidates[0].ids["DOI"] == "10.1000/correct"
 
 
+def test_openalex_title_search_skips_mismatched_titles(monkeypatch):
+    title = "A Shared Title: A Method Study"
+    unrelated = {
+        "doi": "https://doi.org/10.1000/unrelated",
+        "title": "A Completely Different Paper",
+        "publication_year": 2020,
+        "authorships": [{"author": {"display_name": "Alex Smith"}}],
+        "locations": [{"is_oa": True, "pdf_url": "https://unrelated.example/paper.pdf"}],
+    }
+    monkeypatch.setattr(indexes, "openalex_search_works", lambda requested: [unrelated])
+
+    with pytest.raises(sources.Unresolvable):
+        sources._openalex_candidates(
+            title, {"title": title, "year": 2020, "authors": ["Alex Smith"]},
+        )
+
+
 @pytest.mark.parametrize(
     ("doi", "anthology_id"),
     [

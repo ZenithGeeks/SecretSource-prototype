@@ -381,3 +381,81 @@ def test_only_qwen_models_get_the_no_thinking_field():
     assert no_thinking("qwen3.8-27b-fp8") == {"chat_template_kwargs": {"enable_thinking": False}}
     assert no_thinking("gpt-oss-120b") == {}
     assert no_thinking("gemma-4-31b-it") == {}
+
+
+def test_agent_models_default_to_vllm_model(monkeypatch):
+    import importlib
+
+    from app import config
+
+    monkeypatch.setenv("VLLM_MODEL", "qwen3.8-27b-fp8")
+    monkeypatch.delenv("ADK_ROUTER_MODEL", raising=False)
+    monkeypatch.setenv("ADK_AGENT_MODEL", "")
+    try:
+        importlib.reload(config)
+        assert config.ADK_ROUTER_MODEL == config.ADK_AGENT_MODEL == "qwen3.8-27b-fp8"
+
+        monkeypatch.setenv("ADK_ROUTER_MODEL", "gemma-4-31b-it")
+        importlib.reload(config)
+        assert config.ADK_ROUTER_MODEL == "gemma-4-31b-it"
+        assert config.ADK_AGENT_MODEL == "qwen3.8-27b-fp8"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
+def test_adk_model_binds_the_model_it_is_given():
+    router = llm.adk_model("gemma-4-31b-it")
+
+    assert router.model == "openai/gemma-4-31b-it"
+    # Thinking-off is per model: gemma behind the gateway would reject the Qwen field.
+    assert "chat_template_kwargs" not in (router._additional_args.get("extra_body") or {})
+    assert llm.adk_model().model == f"openai/{llm.ADK_AGENT_MODEL}"
+
+
+def test_dspy_calls_leave_a_slot_for_the_agents(monkeypatch):
+    monkeypatch.setattr(llm, "_slots", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(llm, "_dspy_slots", threading.BoundedSemaphore(1))
+
+    async def agent_turn() -> bool:
+        async with llm._async_slot():
+            return True
+
+    async def dspy_call() -> bool:
+        async with llm._async_slot(dspy_call=True):
+            return True
+
+    with llm._slot():  # a check holds the one DSPy slot
+        assert asyncio.run(asyncio.wait_for(agent_turn(), 1))
+        with pytest.raises(TimeoutError):
+            asyncio.run(asyncio.wait_for(dspy_call(), 0.2))
+
+    # Everything given back, the cancelled wait included.
+    assert llm._dspy_slots.acquire(blocking=False)
+    assert llm._slots.acquire(blocking=False) and llm._slots.acquire(blocking=False)
+
+
+def test_agent_turn_does_not_queue_behind_a_batch_of_checks(slow_gateway, monkeypatch):
+    # 2 slots, 1 kept for agents: 4 checks take turns on one slot while the agent uses the other.
+    monkeypatch.setattr(llm, "_dspy_slots", threading.BoundedSemaphore(1))
+    lm = llm.dspy_lm().copy(cache=False)
+    model = llm.adk_model()
+    request = LlmRequest(
+        model=model.model, contents=[types.Content(role="user", parts=[types.Part(text="hi")])]
+    )
+
+    async def agent_turn() -> float:
+        started = time.perf_counter()
+        async for response in model.generate_content_async(request):
+            assert response.content.parts[0].text == "ok"
+        return time.perf_counter() - started
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        checks = [pool.submit(lm, f"question {i}") for i in range(4)]
+        time.sleep(0.1)  # the checks are queued first
+        waited = asyncio.run(agent_turn())
+        assert [check.result() for check in checks] == [["ok"]] * 4
+
+    # One answer takes 0.3 s; behind 4 checks on a shared pool it would take at least 0.6 s.
+    assert waited < 0.6
+    assert SlowAnswer.most_open == 2

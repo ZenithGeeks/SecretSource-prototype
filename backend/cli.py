@@ -19,10 +19,12 @@ logging.getLogger("google_adk").setLevel(logging.ERROR)
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
 
-from app.agents.team import root_agent  # noqa: E402
+from app.agents.team import MAX_LLM_CALLS, root_agent  # noqa: E402
 from app.memory import SIGNED_OUT, AnalysisMemory  # noqa: E402
 from app.sessions import session_service  # noqa: E402
 from app.tracing import setup_tracing  # noqa: E402
+from google.adk.agents.invocation_context import LlmCallsLimitExceededError  # noqa: E402
+from google.adk.agents.run_config import RunConfig  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.genai import types  # noqa: E402
 
@@ -32,15 +34,21 @@ USER_ID = SIGNED_OUT  # no login: load_memory reads the analyses without an owne
 
 async def ask(runner, session_id, text):
     message = types.Content(role="user", parts=[types.Part(text=text)])
-    async for event in runner.run_async(user_id=USER_ID, session_id=session_id, new_message=message):
-        for call in event.get_function_calls():
-            print(f"  [{event.author}] -> {call.name}({call.args})")
-        for response in event.get_function_responses():
-            print(f"  [{event.author}] <- {str(response.response)[:200]}")
-        if event.is_final_response() and event.content:
-            reply = "".join(part.text or "" for part in event.content.parts or [])
-            if reply:
-                print(f"bot [{event.author}] > {reply}\n")
+    run_config = RunConfig(max_llm_calls=MAX_LLM_CALLS)
+    try:
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session_id, new_message=message, run_config=run_config
+        ):
+            for call in event.get_function_calls():
+                print(f"  [{event.author}] -> {call.name}({call.args})")
+            for response in event.get_function_responses():
+                print(f"  [{event.author}] <- {str(response.response)[:200]}")
+            if event.is_final_response() and event.content:
+                reply = "".join(part.text or "" for part in event.content.parts or [])
+                if reply:
+                    print(f"bot [{event.author}] > {reply}\n")
+    except LlmCallsLimitExceededError:
+        print(f"bot > I stopped after {MAX_LLM_CALLS} model calls. Try a smaller request.\n")
 
 
 async def main(prompts, session_id=None):

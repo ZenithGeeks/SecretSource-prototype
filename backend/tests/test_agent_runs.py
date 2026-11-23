@@ -1,18 +1,21 @@
 """The screen agent's routes with a scripted model: a screen tool call ends the stream for the
 browser, the browser's result goes on with the run, and a session belongs to its owner."""
 
+import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
 from app import agent_runs
-from app.agents import data_tools, screen
+from app.agents import data_tools, progress, screen
 from app.agents.data_tools import DATA_TOOLS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_response import LlmResponse
+from google.adk.sessions import DatabaseSessionService, InMemorySessionService
 from google.adk.tools import load_memory
 from google.genai import types
 
@@ -41,6 +44,8 @@ class ScriptedModel(BaseLlm):
 def api(monkeypatch):
     model = ScriptedModel(replies=[], seen=[])
     monkeypatch.setattr(screen.screen_agent, "model", model)
+    monkeypatch.setattr(agent_runs, "_sessions", InMemorySessionService())
+    monkeypatch.setattr(agent_runs, "_last_active", {})
     agent_runs.get_runner.cache_clear()
     app = FastAPI()
     app.include_router(agent_runs.router)
@@ -130,6 +135,70 @@ def test_a_run_that_keeps_calling_server_tools_stops_at_the_cap(api, monkeypatch
     assert got[-1] == {"type": "done"}
 
 
+def test_browser_tool_loop_stops_at_cap_and_resets_on_next_turn(api, monkeypatch):
+    client, model, _ = api
+    monkeypatch.setattr(agent_runs, "MAX_BROWSER_STEPS", 2)
+    model.replies = [
+        {"name": "read_screen"},
+        {"name": "open_screen", "args": {"screen": "home"}},
+        {"name": "read_screen"},
+    ]
+
+    first = events(client.post("/agent/runs", json={"message": "loop browser"}))
+    session = first[0]["id"]
+    [tool_1] = [e for e in first if e["type"] == "tool"]
+
+    second = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool_1["id"], "name": "read_screen", "result": {"screen": "library"}},
+        )
+    )
+    [tool_2] = [e for e in second if e["type"] == "tool"]
+    assert tool_2["name"] == "open_screen"
+
+    third = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool_2["id"], "name": "open_screen", "result": {"status": "done"}},
+        )
+    )
+    assert not [e for e in third if e["type"] == "tool"]
+    assert {"type": "say", "text": "I stopped after 2 browser steps. Try a smaller request."} in third
+    assert third[-1] == {"type": "done"}
+
+    # Another /results post on the same turn stops before calling the model again.
+    stored = asyncio.run(
+        agent_runs.sessions().get_session(
+            app_name=agent_runs.APP_NAME, user_id="user-1", session_id=session
+        )
+    )
+    pending_id = next(iter(agent_runs._pending_browser_calls(stored)))
+    fourth = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": pending_id, "name": "read_screen", "result": {"screen": "home"}},
+        )
+    )
+    assert {"type": "say", "text": "I stopped after 2 browser steps. Try a smaller request."} in fourth
+    assert fourth[-1] == {"type": "done"}
+
+    # A new user message resets the browser-step counter for that turn.
+    model.replies = [{"name": "read_screen"}, "Done now."]
+    reset = events(
+        client.post("/agent/runs", json={"message": "Try again", "session_id": session})
+    )
+    [tool_3] = [e for e in reset if e["type"] == "tool"]
+    assert tool_3["name"] == "read_screen"
+    done = events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool_3["id"], "name": "read_screen", "result": {"screen": "home"}},
+        )
+    )
+    assert {"type": "say", "text": "Done now."} in done
+
+
 def test_the_agent_is_built_from_the_documented_tools():
     names = [getattr(tool, "name", getattr(tool, "__name__", "")) for tool in screen.SCREEN_TOOLS]
     assert names == ["read_screen", "open_screen", "open_paper", "point_at", "fill_field", "list_papers"]
@@ -164,6 +233,39 @@ def test_a_data_request_goes_to_the_data_agent_and_the_stream_says_so(api, monke
     assert got.index(agents[0]) < got.index(agents[1]) < got.index(said[0])
     # The coordinator's request, not the whole chat, is what the specialist was asked.
     assert "Which claims are contradicted?" in str(data_model.seen[0].contents)
+
+
+def test_a_slow_data_tool_streams_its_progress_while_the_specialist_works(api, monkeypatch):
+    client, model, _ = api
+
+    async def check_text(text: str, tool_context) -> dict:
+        """Check a piece of writing against the person's papers."""
+        for done in (1, 2):
+            await asyncio.sleep(0)  # the stream sends each line while the tool is still running
+            progress.report(f"Checked {done} of 2 sentences")
+        return {"results": [], "not_checked": 0}
+
+    data_model = ScriptedModel(
+        replies=[{"name": "check_text", "args": {"text": "Two sentences."}}, "Both are backed."], seen=[]
+    )
+    monkeypatch.setattr(screen.data_agent, "model", data_model)
+    monkeypatch.setattr(screen.data_agent, "tools", [check_text])
+    model.replies = [{"name": "data_agent", "args": {"request": "Check my text"}}, "Both are backed."]
+
+    got = events(client.post("/agent/runs", json={"message": "Check my text"}))
+
+    shown = [(e["type"], e.get("text") or e.get("state")) for e in got if e["type"] in {"agent", "progress"}]
+    assert shown == [
+        ("agent", "working"),
+        ("progress", "Checked 1 of 2 sentences"),
+        ("progress", "Checked 2 of 2 sentences"),
+        ("agent", "done"),
+    ]
+    assert got[-1] == {"type": "done"}
+
+
+def test_progress_outside_a_streamed_run_goes_nowhere():
+    progress.report("Checked 1 of 2 sentences")  # the MCP server and /commands set no reporter
 
 
 def test_a_command_from_the_ask_panel_runs_a_data_tool_for_the_person(api, monkeypatch):
@@ -209,6 +311,16 @@ def test_each_role_has_its_own_agent_and_each_can_ask_to_switch_role():
     assert {"teacher_classes", "teacher_assignments", "teacher_submissions", "teacher_essay_review"} <= set(
         tool_names(screen.teacher_agent)
     )
+    assert screen.ROLE_BROWSER_TOOLS == {
+        "researcher": frozenset(
+            {"read_screen", "open_screen", "open_paper", "point_at", "fill_field", "switch_role"}
+        ),
+        "labeler": frozenset({"read_screen", "open_screen", "open_paper", "point_at", "switch_role"}),
+        "writer": frozenset(
+            {"read_screen", "open_screen", "point_at", "fill_field", "switch_role", "read_draft"}
+        ),
+        "teacher": frozenset(),
+    }
     # The MCP server lists SCREEN_TOOLS and takes SCREEN_TOOL_NAMES: a coding agent has no role.
     assert "switch_role" not in screen.SCREEN_TOOL_NAMES
     assert "switch_role" in screen.BROWSER_TOOL_NAMES
@@ -308,7 +420,7 @@ def test_the_labeler_agent_cannot_write_or_see_a_verdict():
     assert screen.labeler_agent.sub_agents == []
 
 
-def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api, monkeypatch):
+def test_after_a_switch_the_new_roles_agent_starts_a_fresh_session_with_the_request(api, monkeypatch):
     client, model, _ = api
     labeler_model = ScriptedModel(replies=["Claim 4 is next."], seen=[])
     monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
@@ -317,7 +429,9 @@ def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api
         "Switched to the Labeler role.",
     ]
 
-    first = events(client.post("/agent/runs", json={"message": "Which claim do I label next?"}))
+    first = events(
+        client.post("/agent/runs", json={"message": "Which claim do I label next?", "screen": "library"})
+    )
     session = first[0]["id"]
     [tool] = [e for e in first if e["type"] == "tool"]
     assert tool["name"] == "switch_role"
@@ -327,10 +441,156 @@ def test_after_a_switch_the_new_roles_agent_goes_on_in_the_same_conversation(api
 
     body = {"message": "Go on", "role": "labeler", "session_id": session}
     third = events(client.post("/agent/runs", json=body))
-    assert third[0] == {"type": "session", "id": session}
+    assert third[0]["type"] == "session"
+    assert third[0]["id"] != session
     assert {"type": "say", "text": "Claim 4 is next."} in third
-    # The Labeler's agent read the conversation the Researcher's agent started.
-    assert "Which claim do I label next?" in str(labeler_model.seen[0].contents)
+    seen_contents = str(labeler_model.seen[0].contents)
+    assert "Which claim do I label next?" in seen_contents
+    assert "Switched to the Labeler role." not in seen_contents
+    assert "switch_role" not in seen_contents
+
+
+def test_switching_to_labeler_drops_prior_researcher_verdicts_and_tool_calls(api, monkeypatch):
+    client, model, _ = api
+    data_model = ScriptedModel(replies=["SECRET_VERDICT: Claim 2 is refuted."], seen=[])
+    labeler_model = ScriptedModel(replies=["Claim 1 is ready to label."], seen=[])
+    monkeypatch.setattr(screen.data_agent, "model", data_model)
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+    model.replies = [
+        {"name": "data_agent", "args": {"request": "What is Claim 2's verdict?"}},
+        "Claim 2 is refuted.",
+        {"name": "switch_role", "args": {"role": "labeler", "reason": "Labeling lives there"}},
+        "Switched to Labeler.",
+    ]
+
+    first = events(client.post("/agent/runs", json={"message": "Check claim 2", "screen": "library"}))
+    session = first[0]["id"]
+    assert {"type": "say", "text": "Claim 2 is refuted."} in first
+
+    second = events(
+        client.post(
+            "/agent/runs",
+            json={
+                "message": "Switch me to labeler and see what is next",
+                "role": "researcher",
+                "session_id": session,
+            },
+        )
+    )
+    [tool] = [e for e in second if e["type"] == "tool"]
+    events(
+        client.post(
+            f"/agent/runs/{session}/results",
+            json={
+                "id": tool["id"],
+                "name": "switch_role",
+                "result": {"status": "switched"},
+                "role": "researcher",
+            },
+        )
+    )
+
+    resumed = events(
+        client.post(
+            "/agent/runs",
+            json={
+                "message": "Go on with my last request in this role.",
+                "role": "labeler",
+                "session_id": session,
+            },
+        )
+    )
+    assert resumed[0]["type"] == "session"
+    assert resumed[0]["id"] != session
+    assert {"type": "say", "text": "Claim 1 is ready to label."} in resumed
+    seen_contents = str(labeler_model.seen[0].contents)
+    assert "Switch me to labeler and see what is next" in seen_contents
+    assert "SECRET_VERDICT" not in seen_contents
+    assert "Claim 2 is refuted" not in seen_contents
+    assert "data_agent" not in seen_contents
+
+
+def test_results_rejects_disallowed_role_tools_mismatched_roles_and_pending_calls(api, monkeypatch):
+    client, _, _ = api
+    labeler_model = ScriptedModel(replies=[{"name": "read_screen"}, "Screen read."], seen=[])
+    teacher_model = ScriptedModel(replies=["Here are your classes."], seen=[])
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+    monkeypatch.setattr(screen.teacher_agent, "model", teacher_model)
+
+    first = events(client.post("/agent/runs", json={"message": "What is on screen?", "role": "labeler"}))
+    session = first[0]["id"]
+    [tool] = [e for e in first if e["type"] == "tool"]
+
+    def post_result(sid: str, call_id: str, name: str, role: str, result: dict | None = None):
+        return client.post(
+            f"/agent/runs/{sid}/results",
+            json={"id": call_id, "name": name, "result": result or {}, "role": role},
+        )
+
+    assert post_result(session, tool["id"], "fill_field", "labeler").status_code == 422
+    assert post_result(session, tool["id"], "read_draft", "labeler").status_code == 422
+    assert post_result(session, tool["id"], "read_screen", "researcher").status_code == 422
+    assert post_result(session, "call-999", "read_screen", "labeler").status_code == 422
+
+    ok = post_result(session, tool["id"], "read_screen", "labeler", {"screen": "papers"})
+    assert ok.status_code == 200
+    assert {"type": "say", "text": "Screen read."} in events(ok)
+
+    # Already answered pending call cannot be replayed.
+    assert post_result(session, tool["id"], "read_screen", "labeler").status_code == 422
+
+    teacher_first = events(client.post("/agent/runs", json={"message": "Show classes", "role": "teacher"}))
+    teacher_session = teacher_first[0]["id"]
+    assert post_result(teacher_session, "call-1", "read_screen", "teacher").status_code == 422
+
+
+def test_role_switch_without_prior_user_text_and_idless_responses(api, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    client, _, _ = api
+    labeler_model = ScriptedModel(replies=["Ready."], seen=[])
+    monkeypatch.setattr(screen.labeler_agent, "model", labeler_model)
+
+    empty_session = SimpleNamespace(
+        events=[
+            SimpleNamespace(author="model", content=SimpleNamespace(parts=[types.Part(text="hi")])),
+            SimpleNamespace(
+                author="user",
+                content=SimpleNamespace(parts=[types.Part(text="[On the home screen]   ")]),
+            ),
+        ]
+    )
+    assert agent_runs._last_user_request(empty_session) is None
+
+    # Covers response without id in _pending_browser_calls.
+    pending = agent_runs._pending_browser_calls(
+        SimpleNamespace(
+            events=[
+                SimpleNamespace(
+                    long_running_tool_ids=["c1"],
+                    get_function_calls=lambda: [SimpleNamespace(id="c1", name="read_screen")],
+                    get_function_responses=lambda: [SimpleNamespace(id=None)],
+                )
+            ]
+        )
+    )
+    assert pending == {"c1": "read_screen"}
+
+    # Role switch from an existing session whose history has no plain-text user request.
+    created = asyncio.run(
+        agent_runs.sessions().create_session(
+            app_name=agent_runs.APP_NAME, user_id="user-1", state={"user": "user-1", "role": "researcher"}
+        )
+    )
+    resumed = events(
+        client.post(
+            "/agent/runs",
+            json={"message": "Go on", "role": "labeler", "session_id": created.id},
+        )
+    )
+    assert resumed[0]["id"] != created.id
+    assert {"type": "say", "text": "Ready."} in resumed
 
 
 def test_going_on_in_someone_elses_conversation_is_a_404(api):
@@ -354,3 +614,131 @@ def test_teacher_agent_answers_with_the_scripted_model(api, monkeypatch):
     response = client.post("/agent/runs", json={"message": "Show my classes", "role": "teacher"})
     assert response.status_code == 200
     assert {"type": "say", "text": "Here are your classes."} in events(response)
+
+
+def test_sessions_uses_database_service_when_url_is_set_and_memory_otherwise(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(agent_runs, "_sessions", None)
+    monkeypatch.setenv("SESSION_DB_URL", "postgresql://user:secret@127.0.0.1:1/postgres")
+    assert isinstance(agent_runs.sessions(), DatabaseSessionService)
+    # Sweeping and touching in-memory cleanup are safe no-ops when backed by a database.
+    asyncio.run(agent_runs._forget_old_sessions())
+    agent_runs._touch("s1", "user-1")
+
+    monkeypatch.setattr(agent_runs, "_sessions", None)
+    monkeypatch.delenv("SESSION_DB_URL", raising=False)
+    monkeypatch.delenv("DIRECT_URL", raising=False)
+    assert isinstance(agent_runs.sessions(), InMemorySessionService)
+
+
+def test_a_paused_session_survives_a_gateway_restart_with_a_shared_store(api):
+    client, model, _ = api
+    model.replies = [{"name": "read_screen"}, "Screen read."]
+
+    first = events(client.post("/agent/runs", json={"message": "What is here?"}))
+    session = first[0]["id"]
+    [tool] = [e for e in first if e["type"] == "tool"]
+
+    # Simulate a gateway restart while keeping the shared session store intact.
+    agent_runs._last_active.clear()
+    agent_runs.get_runner.cache_clear()
+
+    resumed = client.post(
+        f"/agent/runs/{session}/results",
+        json={"id": tool["id"], "name": "read_screen", "result": {"screen": "library"}},
+    )
+    assert resumed.status_code == 200
+    assert {"type": "say", "text": "Screen read."} in events(resumed)
+
+
+def test_active_sessions_stay_alive_past_creation_and_idle_sessions_expire(api, monkeypatch):
+    from google.adk.platform import time as platform_time
+
+    client, model, _ = api
+    clock = [time.time()]
+
+    def now():
+        return clock[0]
+
+    monkeypatch.setattr(time, "time", now)
+    platform_time.set_time_provider(now)
+    try:
+        model.replies = [{"name": "read_screen"}, "Screen read.", "Still active."]
+
+        first = events(client.post("/agent/runs", json={"message": "First"}))
+        session = first[0]["id"]
+        [tool] = [e for e in first if e["type"] == "tool"]
+
+        clock[0] += 2400  # 40 minutes after creation
+        resumed = client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool["id"], "name": "read_screen", "result": {"screen": "library"}},
+        )
+        assert resumed.status_code == 200
+        assert {"type": "say", "text": "Screen read."} in events(resumed)
+
+        clock[0] += 2400  # 80 minutes after creation, 40 minutes after last activity
+        still_open = client.post("/agent/runs", json={"message": "Still here", "session_id": session})
+        assert still_open.status_code == 200
+        assert {"type": "say", "text": "Still active."} in events(still_open)
+
+        clock[0] += 3700  # idle over 60 minutes -> expires on load
+        expired_res = client.post(
+            f"/agent/runs/{session}/results",
+            json={"id": tool["id"], "name": "read_screen", "result": {}},
+        )
+        assert expired_res.status_code == 404
+
+        # Second session is swept by _forget_old_sessions when a new conversation starts.
+        model.replies = ["Session two.", "Fresh run."]
+        session_two = events(client.post("/agent/runs", json={"message": "Two"}))[0]["id"]
+        clock[0] += 3700
+        events(client.post("/agent/runs", json={"message": "Three"}))
+        assert session_two not in agent_runs._last_active
+        assert (
+            client.post("/agent/runs", json={"message": "Gone", "session_id": session_two}).status_code
+            == 404
+        )
+    finally:
+        platform_time.reset_time_provider()
+
+
+def test_run_start_passes_open_analysis_and_draft_ids_to_the_model(api, monkeypatch):
+    client, model, _ = api
+    author_model = ScriptedModel(replies=["Draft checked."], seen=[])
+    monkeypatch.setattr(screen.author_agent, "model", author_model)
+    model.replies = ["Claim 2 checked.", "Summary ready."]
+
+    first = client.post(
+        "/agent/runs",
+        json={"message": "Check claim 2", "screen": "analyses", "analysis_id": "a1"},
+    )
+    assert first.status_code == 200
+    assert "[On the analyses screen, open analysis_id=a1] Check claim 2" in str(model.seen[0].contents)
+
+    second = client.post(
+        "/agent/runs",
+        json={"message": "What needs work?", "screen": "editor", "role": "writer", "draft_id": "d1"},
+    )
+    assert second.status_code == 200
+    assert "[On the editor screen, open draft_id=d1] What needs work?" in str(
+        author_model.seen[0].contents
+    )
+
+    third = client.post("/agent/runs", json={"message": "Summary?", "analysis_id": "a1"})
+    assert third.status_code == 200
+    assert "[open analysis_id=a1] Summary?" in str(model.seen[1].contents)
+
+
+def test_teacher_agent_is_read_only_and_documented_in_role_agents():
+    from google.adk.tools import LongRunningFunctionTool
+
+    assert screen.ROLE_AGENTS["teacher"] is screen.teacher_agent
+    assert not any(isinstance(tool, LongRunningFunctionTool) for tool in screen.teacher_agent.tools)
+    assert "analysis_id" in screen.RESEARCHER_ROLE
+    text = (Path(__file__).parents[2] / "docs" / "agent-tools.md").read_text(encoding="utf-8")
+    assert "| `teacher` |" in text
+    assert "The Teacher role has no agent yet." not in text
+    for name in ("teacher_classes", "teacher_assignments", "teacher_submissions", "teacher_essay_review"):
+        assert f"`{name}`" in text
