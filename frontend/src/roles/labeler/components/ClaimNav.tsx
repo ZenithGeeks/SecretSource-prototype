@@ -1,7 +1,7 @@
 /** The paper's claims, with where each stands: untouched, in progress, or finished. */
 
-import { Check, CircleDot, Plus } from 'lucide-react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { Check, ChevronLeft, ChevronRight, CircleDot, Plus } from 'lucide-react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import { Button, Textarea } from '../../../components/ui'
 import { emptyDraft, isDone, sameDraft, type Draft, type Reference, type WorkClaim } from '../../../lib/labeling'
@@ -44,6 +44,16 @@ export function ClaimNav({
   const field = useId()
   const strip = useRef<HTMLOListElement>(null)
   const addButton = useRef<HTMLButtonElement>(null)
+  const [moreLeft, setMoreLeft] = useState(false)
+  const [moreRight, setMoreRight] = useState(false)
+
+  const measureOverflow = useCallback(() => {
+    const el = strip.current
+    /* v8 ignore next -- @preserve */
+    if (!el) return
+    setMoreLeft(el.scrollLeft > 4)
+    setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+  }, [])
 
   // Closing the form puts the keyboard back on the button that opened it.
   const closeForm = () => {
@@ -55,13 +65,39 @@ export function ClaimNav({
   useEffect(() => {
     const chip = strip.current?.querySelector<HTMLElement>('[aria-current="true"]')
     if (chip && typeof chip.scrollIntoView === 'function') chip.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [current])
+    measureOverflow()
+  }, [current, claims.length, measureOverflow])
+
+  useEffect(() => {
+    const el = strip.current
+    /* v8 ignore next -- @preserve */
+    if (!el) return
+    measureOverflow()
+    /* v8 ignore next -- @preserve */
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureOverflow)
+    observer?.observe(el)
+    return () => observer?.disconnect()
+  }, [measureOverflow])
 
   return (
     <nav aria-label="Claims of this paper" className={cn('relative', className)}>
       <div className="flex items-center gap-1.5">
+        {moreLeft && (
+          <button
+            type="button"
+            aria-label="Scroll claims left"
+            onClick={() => strip.current?.scrollBy({ left: -160, behavior: 'smooth' })}
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-surface text-ink-muted hover:border-accent hover:text-ink"
+          >
+            <ChevronLeft className="size-4" aria-hidden="true" />
+          </button>
+        )}
         {/* The scrollbar is hidden: it added a row of height, and the current chip scrolls into view. */}
-        <ol ref={strip} className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ol
+          ref={strip}
+          onScroll={measureOverflow}
+          className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {claims.map((claim, index) => {
             const draft = drafts[claim.claim_id] ?? emptyDraft()
             const text = draft.status === 'edited' && draft.edited ? draft.edited : claim.claim
@@ -93,6 +129,16 @@ export function ClaimNav({
             )
           })}
         </ol>
+        {moreRight && (
+          <button
+            type="button"
+            aria-label="More claims"
+            onClick={() => strip.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-surface text-ink-muted hover:border-accent hover:text-ink"
+          >
+            <ChevronRight className="size-4" aria-hidden="true" />
+          </button>
+        )}
         <button
           ref={addButton}
           type="button"

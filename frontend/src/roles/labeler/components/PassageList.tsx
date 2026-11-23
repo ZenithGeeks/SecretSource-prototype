@@ -207,10 +207,38 @@ export function PassageList({
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
   // Missing on a gateway older than the field: there is then nothing to explain.
   const missed = claim.unchecked ?? []
-  // true: keep open, false: keep folded. Unset follows the work: open while unfinished or focused.
-  const [forced, setForced] = useState<Record<string, boolean>>({})
+  const refIds = referencesOf(claim, draft)
+  const [pickedRef, setPickedRef] = useState<string | null>(null)
+  const focusedRefId = focus
+    ? refIds.find(
+        (id) =>
+          claim.candidates.some((c) => c.reference_id === id && c.cand_id === focus.key) ||
+          draft.added.some((a) => a.reference_id === id && focus.key === `added:${a.reference_id}:${a.passage}`) ||
+          focus.key === `ref:${id}`,
+      )
+    : undefined
+  const activeId =
+    focusedRefId ??
+    (pickedRef && refIds.includes(pickedRef) ? pickedRef : undefined) ??
+    refIds.find((id) => !referenceFinished(claim, draft, id)) ??
+    refIds[0]
+
+  const selectRef = (id: string) => {
+    setPickedRef(id)
+    const firstCand = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)[0]
+    if (firstCand) {
+      onFocus({ file: firstCand.reference_file, passage: firstCand.passage, page: firstCand.page, key: firstCand.cand_id })
+      return
+    }
+    const firstAdded = draft.added.find((a) => a.reference_id === id)
+    /* v8 ignore next -- @preserve */
+    if (firstAdded) {
+      onFocus({ file: fileOf(id), passage: firstAdded.passage, page: firstAdded.page, key: `added:${firstAdded.reference_id}:${firstAdded.passage}` })
+    }
+  }
+
   return (
-    <section aria-labelledby="passages-title" className="flex flex-col gap-4">
+    <section aria-labelledby="passages-title" className="flex flex-col gap-3">
       <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
         Passages retrieval found
       </h3>
@@ -242,33 +270,43 @@ export function PassageList({
           )}
         </div>
       )}
-      {referencesOf(claim, draft).map((id) => {
+      {refIds.length > 1 && (
+        <div role="tablist" aria-label="References for this claim" className="flex flex-wrap gap-1.5">
+          {refIds.map((id) => {
+            const finished = referenceFinished(claim, draft, id)
+            const reference = references.find((r) => r.reference_id === id)
+            const active = id === activeId
+            const tag = reference?.ref ? `[${reference.ref}] ${labelOf(id)}` : labelOf(id)
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => selectRef(id)}
+                className={cn(
+                  'max-w-full truncate rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+                  active
+                    ? 'border-accent bg-accent-soft text-ink'
+                    : finished
+                      ? 'border-border-subtle bg-canvas text-ink-muted hover:border-accent hover:text-ink'
+                      : 'border-border-subtle bg-surface text-ink hover:border-accent',
+                )}
+              >
+                {finished ? referenceSummary(claim, draft, reference, id) : tag}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {activeId && (() => {
+        const id = activeId
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)
         const added = draft.added.filter((a) => a.reference_id === id)
-        const finished = referenceFinished(claim, draft, id)
-        const focusedHere = Boolean(
-          focus &&
-            (cands.some((c) => c.cand_id === focus.key) ||
-              added.some((a) => focus.key === `added:${a.reference_id}:${a.passage}`) ||
-              focus.key === `ref:${id}`),
-        )
-        const open = !finished || forced[id] === true || (forced[id] === undefined && focusedHere)
-        const reference = references.find((r) => r.reference_id === id)
         return (
           <section key={id} aria-label={labelOf(id)} data-ask-target={askTarget({ kind: 'reference', id })} className="flex flex-col gap-2">
-            {finished ? (
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setForced((all) => ({ ...all, [id]: !open }))}
-                className="rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                {referenceSummary(claim, draft, reference, id)}
-              </button>
-            ) : (
-              <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>
-            )}
-            {open && cands.length > 0 && (
+            {refIds.length === 1 && <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>}
+            {cands.length > 0 && (
               <ul className="flex flex-col gap-2">
                 {cands.map((c) => (
                   <PassageCard
@@ -287,7 +325,7 @@ export function PassageList({
                 ))}
               </ul>
             )}
-            {open && added.length > 0 && (
+            {added.length > 0 && (
               <>
                 <p className="text-sm font-medium text-ink">Passages you added</p>
                 <ul className="flex flex-col gap-2">
@@ -312,10 +350,10 @@ export function PassageList({
                 </ul>
               </>
             )}
-            {open && grade(id)}
+            {grade(id)}
           </section>
         )
-      })}
+      })()}
 
       <AddPassage references={references} onAdd={onAdd} />
     </section>

@@ -64,23 +64,45 @@ describe('the passages of a claim', () => {
     expect(within(section).getByText('grade for refB')).toBeInTheDocument()
   })
 
-  it('lets a finished reference fold and reopen its passages', () => {
-    setup({
+  it('switches between reference tabs and shows the summary chip on a finished one', () => {
+    const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
+    const bothClaims: WorkClaim = claim([
+      cand('c1'),
+      cand('c2', { rank: 2 }),
+      cand('c3', { reference_id: 'refC', reference_file: 'refC.pdf' }),
+    ])
+    const props = setup({
+      claim: bothClaims,
+      references: [refs[0], second],
       draft: {
         ...emptyDraft(),
         cands: { c1: 'relevant', c2: 'rejected' },
         labels: { refB: { evidence: 3, rationale: '', confidence: 'high' } },
       },
     })
-    const section = screen.getByRole('region', { name: 'Ref B' })
-    const summary = within(section).getByRole('button', { name: /1\/2 relevant/ })
-    expect(summary).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(summary)
-    expect(summary).toHaveAttribute('aria-expanded', 'true')
-    expect(within(section).getByRole('button', { name: /text of c1/ })).toBeInTheDocument()
-    fireEvent.click(summary)
-    expect(summary).toHaveAttribute('aria-expanded', 'false')
-    expect(within(section).queryByRole('button', { name: /text of c1/ })).not.toBeInTheDocument()
+    const tabs = screen.getByRole('tablist', { name: 'References for this claim' })
+    const refBTab = within(tabs).getByRole('tab', { name: /1\/2 relevant/ })
+    const refCTab = within(tabs).getByRole('tab', { name: /\[b2\] Ref C/ })
+    expect(refCTab).toHaveAttribute('aria-selected', 'true')
+    expect(refBTab).toHaveAttribute('aria-selected', 'false')
+    fireEvent.click(refBTab)
+    expect(props.onFocus).toHaveBeenCalledWith({ file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' })
+  })
+
+  it('focuses an added passage or the reference file when switching to a tab with no candidates', () => {
+    const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
+    const props = setup({
+      claim: claim([cand('c1')]),
+      references: [refs[0], second],
+      draft: { ...emptyDraft(), added: [{ reference_id: 'refC', page: 2, passage: 'added note' }] },
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /\[b2\] Ref C/ }))
+    expect(props.onFocus).toHaveBeenCalledWith({
+      file: 'refC.pdf',
+      passage: 'added note',
+      page: 2,
+      key: 'added:refC:added note',
+    })
   })
 
   it('focuses a passage and judges it', () => {
