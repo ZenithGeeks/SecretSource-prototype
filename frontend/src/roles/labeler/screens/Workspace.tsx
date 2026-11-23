@@ -815,8 +815,8 @@ function Body({
   )
 
   return (
-    // The window less the shell's padding and its 52px toolbar.
-    <div className={cn('flex flex-col gap-3', wide && 'h-[calc(100dvh-3rem-52px)]')}>
+    // Fills the AppShell main box on wide screens so only the paper and label panes scroll.
+    <div className={cn('flex flex-col gap-3', wide && 'min-h-0 flex-1')}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 xl:w-52 xl:shrink-0">
           <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">

@@ -31,6 +31,9 @@ describe('Labeler: label a paper', () => {
     })
     cy.findByRole('radio', { name: '3 · Clear' }).click()
     cy.findByLabelText(/^Why this level/).type('The table shows a four point gain.')
+    cy.window().then((win) => {
+      expect(win.document.documentElement.scrollHeight).to.be.at.most(win.innerHeight)
+    })
 
     cy.findByRole('button', { name: 'Save and next claim' }).click()
 
