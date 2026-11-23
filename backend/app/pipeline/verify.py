@@ -33,7 +33,8 @@ _judge = None  # built on first use: needs dspy and a running LM
 def evidence_from(claim: str, source_name: str) -> list[dict]:
     """Passages from one indexed paper, most relevant first, each keeping page and span."""
     passages = [
-        passage for passage in retrieval.colbert_search(claim, k=10, source=source_name)
+        passage
+        for passage in retrieval.colbert_search(claim, k=10, source=source_name)
         if passage.get("source") == source_name
     ]
     return [
@@ -381,8 +382,11 @@ def fold_check(claim: dict, source: str, citation: dict, verdict: dict) -> None:
     if verdict["status"] == "ok":
         claim.setdefault("verdicts", []).append({**verdict, "cited": source})
     else:
-        row = {"source": source, "reason": unchecked_reason(verdict, citation),
-               "message": verdict.get("message", "")}
+        row = {
+            "source": source,
+            "reason": unchecked_reason(verdict, citation),
+            "message": verdict.get("message", ""),
+        }
         if verdict.get("source_outcome"):
             row["source_outcome"] = verdict["source_outcome"]
         claim.setdefault("unchecked", []).append(row)
@@ -411,7 +415,9 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
 
 
 def prepare_source(
-    source_pdf_path: str, wait_for_figures: bool = False, expected: dict | None = None,
+    source_pdf_path: str,
+    wait_for_figures: bool = False,
+    expected: dict | None = None,
 ) -> dict:
     """Get a cited paper ready: download it if needed and index it once.
 
@@ -432,19 +438,32 @@ def prepare_source(
             and not is_arxiv_url
         ):
             resource = web.fetch_resource(source_pdf_path)
-            is_html = resource.content_type in {"text/html", "application/xhtml+xml"} or resource.body[:512].lstrip().lower().startswith((b"<!doctype html", b"<html"))
+            is_html = resource.content_type in {"text/html", "application/xhtml+xml"} or resource.body[
+                :512
+            ].lstrip().lower().startswith((b"<!doctype html", b"<html"))
             if is_html:
                 if resource.content_type not in {"text/html", "application/xhtml+xml"}:
                     resource = web.WebResource(resource.url, "text/html", resource.encoding, resource.body)
                 page = web.page_from_resource(resource)
                 if expected and expected.get("_validate_web_title") and expected.get("title") and page.title:
                     if not sources.titles_match(str(expected["title"]), page.title):
-                        raise web.WebReadError("identity-mismatch", "the page title does not match the cited work")
+                        raise web.WebReadError(
+                            "identity-mismatch", "the page title does not match the cited work"
+                        )
                 return {
-                    "status": "web-page", "web_page": page,
+                    "status": "web-page",
+                    "web_page": page,
                     "source_outcome": {
-                        "source_kind": "web-page", "outcome": "readable", "retryable": False,
-                        "attempts": [{"provider": "direct_url", "result": "readable_html", "locator": sources._safe_locator(page.url)}],
+                        "source_kind": "web-page",
+                        "outcome": "readable",
+                        "retryable": False,
+                        "attempts": [
+                            {
+                                "provider": "direct_url",
+                                "result": "readable_html",
+                                "locator": sources._safe_locator(page.url),
+                            }
+                        ],
                     },
                 }
             if resource.body.startswith(b"%PDF-"):
@@ -462,17 +481,26 @@ def prepare_source(
                 if failure := _index_once(pdf, wait_for_figures):
                     return {
                         **failure,
-                        "source_outcome": failure.get("source_outcome") or {
-                            "source_kind": "paper", "outcome": "indexing-failed",
+                        "source_outcome": failure.get("source_outcome")
+                        or {
+                            "source_kind": "paper",
+                            "outcome": "indexing-failed",
                             "retryable": bool(failure.get("retryable")),
-                            "attempts": [{"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}],
+                            "attempts": [
+                                {"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}
+                            ],
                         },
                     }
                 return {
-                    "status": "ok", "path": pdf.as_posix(),
+                    "status": "ok",
+                    "path": pdf.as_posix(),
                     "source_outcome": {
-                        "source_kind": "paper", "outcome": "readable", "retryable": False,
-                        "attempts": [{"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}],
+                        "source_kind": "paper",
+                        "outcome": "readable",
+                        "retryable": False,
+                        "attempts": [
+                            {"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}
+                        ],
                     },
                 }
             raise web.WebReadError("invalid-content", "the URL did not return readable HTML or a PDF")
@@ -485,8 +513,10 @@ def prepare_source(
         if failure := _index_once(source, wait_for_figures):
             return {
                 **failure,
-                "source_outcome": failure.get("source_outcome") or {
-                    "source_kind": "paper", "outcome": "indexing-failed",
+                "source_outcome": failure.get("source_outcome")
+                or {
+                    "source_kind": "paper",
+                    "outcome": "indexing-failed",
                     "retryable": bool(failure.get("retryable")),
                     "attempts": source_outcome.get("attempts", []),
                 },
@@ -495,15 +525,21 @@ def prepare_source(
     except Exception as error:
         if isinstance(error, web.WebReadError):
             return {
-                "status": "error", "message": str(error), "reason": "web-page-unavailable",
+                "status": "error",
+                "message": str(error),
+                "reason": "web-page-unavailable",
                 "retryable": error.retryable,
                 "source_outcome": {
-                    "source_kind": "web-page", "outcome": error.outcome,
+                    "source_kind": "web-page",
+                    "outcome": error.outcome,
                     "retryable": error.retryable,
-                    "attempts": [{
-                        "provider": "direct_url", "result": error.outcome,
-                        "locator": sources._safe_locator(source_pdf_path),
-                    }],
+                    "attempts": [
+                        {
+                            "provider": "direct_url",
+                            "result": error.outcome,
+                            "locator": sources._safe_locator(source_pdf_path),
+                        }
+                    ],
                 },
             }
         from app.pipeline.sources import tool_error
@@ -515,9 +551,9 @@ def validate_pdf_identity(pdf: str | Path, expected: dict | None) -> None:
     """Reject a replacement PDF when available title, author or DOI metadata conflicts."""
     if not expected:
         return
-    from app.pipeline import sources
-
     import pymupdf
+
+    from app.pipeline import sources
 
     try:
         with pymupdf.open(pdf) as document:
@@ -559,29 +595,56 @@ def validate_pdf_identity(pdf: str | Path, expected: dict | None) -> None:
 
 
 def check_web_page(
-    claim: str, source_url: str, page, judged: str = "", other_citations: bool = False,
+    claim: str,
+    source_url: str,
+    page,
+    judged: str = "",
+    other_citations: bool = False,
     source_outcome: dict | None = None,
 ) -> dict:
     """Judge a short, locally ranked set of static page paragraphs and preserve their URLs."""
     try:
-        evidence = rank_web_passages(judged or claim, [
-            {"text": passage.text, "page": None, "locator": passage.locator, "paragraph": passage.paragraph}
-            for passage in page.passages
-        ])
+        evidence = rank_web_passages(
+            judged or claim,
+            [
+                {
+                    "text": passage.text,
+                    "page": None,
+                    "locator": passage.locator,
+                    "paragraph": passage.paragraph,
+                }
+                for passage in page.passages
+            ],
+        )
         passages = [item["text"] for item in evidence]
         if not passages:
-            verdict = {"verdict": "insufficient", "quote": "", "reasoning": "the page has no extractable paragraphs"}
+            verdict = {
+                "verdict": "insufficient",
+                "quote": "",
+                "reasoning": "the page has no extractable paragraphs",
+            }
         else:
             global _judge
             if _judge is None:
                 _judge = _build_judge()
             verdict = _judge(judged or claim, passages)
         return {
-            "status": "ok", "claim": claim, "source": page.url, "source_kind": "web-page",
-            "web_title": page.title, "retrieved_at": page.retrieved_at,
-            **verdict, "verdict_from": "text", "evidence": evidence, "pages": [],
-            "source_outcome": source_outcome or {
-                "source_kind": "web-page", "outcome": "readable", "retryable": False, "attempts": [],
+            "status": "ok",
+            "claim": claim,
+            "source": page.url,
+            "source_kind": "web-page",
+            "web_title": page.title,
+            "retrieved_at": page.retrieved_at,
+            **verdict,
+            "verdict_from": "text",
+            "evidence": evidence,
+            "pages": [],
+            "source_outcome": source_outcome
+            or {
+                "source_kind": "web-page",
+                "outcome": "readable",
+                "retryable": False,
+                "attempts": [],
             },
         }
     except Exception as error:
@@ -593,10 +656,43 @@ def check_web_page(
 def rank_web_passages(query: str, passages: list[dict], limit: int = EVIDENCE_COUNT) -> list[dict]:
     """Rank stored static web paragraphs for the Labeler's added-claim search."""
     common = {
-        "about", "after", "also", "been", "being", "between", "could", "does", "from", "have",
-        "into", "more", "most", "other", "over", "same", "some", "such", "than", "that",
-        "their", "there", "these", "they", "this", "those", "through", "under", "using",
-        "were", "what", "when", "where", "which", "while", "with", "would",
+        "about",
+        "after",
+        "also",
+        "been",
+        "being",
+        "between",
+        "could",
+        "does",
+        "from",
+        "have",
+        "into",
+        "more",
+        "most",
+        "other",
+        "over",
+        "same",
+        "some",
+        "such",
+        "than",
+        "that",
+        "their",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "through",
+        "under",
+        "using",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "with",
+        "would",
     }
     query_terms = set(re.findall(r"[a-z0-9]{3,}", query.lower())) - common
     ranked = []
@@ -605,10 +701,7 @@ def rank_web_passages(query: str, passages: list[dict], limit: int = EVIDENCE_CO
         score = len(query_terms & terms) / max(1, len(query_terms)) if query_terms else 0.0
         ranked.append((score, int(passage.get("paragraph") or index + 1), passage))
     ranked.sort(key=lambda row: (-row[0], row[1]))
-    return [
-        {**passage, "page": None, "score": score}
-        for score, _, passage in ranked[:max(0, limit)]
-    ]
+    return [{**passage, "page": None, "score": score} for score, _, passage in ranked[: max(0, limit)]]
 
 
 def judge_passages(claim: str, passages: list[str]) -> dict:
@@ -624,8 +717,12 @@ def judge_passages(claim: str, passages: list[str]) -> dict:
 
 
 def check_prepared(
-    claim: str, source_pdf_path: str, source: Path, judged: str = "",
-    other_citations: bool = False, source_outcome: dict | None = None,
+    claim: str,
+    source_pdf_path: str,
+    source: Path,
+    judged: str = "",
+    other_citations: bool = False,
+    source_outcome: dict | None = None,
 ) -> dict:
     """Judge a claim against a paper that prepare_source already made ready.
 
@@ -652,11 +749,22 @@ def check_prepared(
         indexed_in = known_index(source_pdf_path)
         version = version_of(source)  # {} unless the PDF came from arXiv (#424)
         if not passages:
-            return {"status": "ok", "claim": claim, "source": source.name,
-                    "verdict": "insufficient", "quote": "", "reasoning": "no passages retrieved",
-                    "verdict_from": "none", "judged_figure": "",
-                    "evidence": [], "pages": pages, "page_model": page_model, **source_details,
-                    "indexed_in": indexed_in, **version}
+            return {
+                "status": "ok",
+                "claim": claim,
+                "source": source.name,
+                "verdict": "insufficient",
+                "quote": "",
+                "reasoning": "no passages retrieved",
+                "verdict_from": "none",
+                "judged_figure": "",
+                "evidence": [],
+                "pages": pages,
+                "page_model": page_model,
+                **source_details,
+                "indexed_in": indexed_in,
+                **version,
+            }
 
         if _judge is None:
             _judge = _build_judge()
@@ -702,10 +810,20 @@ def check_prepared(
                 seen = {"verdict": "unparsed"}
             if seen["verdict"] == "supports":
                 verdict, verdict_from, judged_figure = seen, "figure", figure.name
-        return {"status": "ok", "claim": claim, "source": source.name,
-                **verdict, "verdict_from": verdict_from, "judged_figure": judged_figure,
-                "evidence": evidence, "pages": pages, **source_details,
-                "page_model": page_model, "indexed_in": indexed_in, **version}
+        return {
+            "status": "ok",
+            "claim": claim,
+            "source": source.name,
+            **verdict,
+            "verdict_from": verdict_from,
+            "judged_figure": judged_figure,
+            "evidence": evidence,
+            "pages": pages,
+            **source_details,
+            "page_model": page_model,
+            "indexed_in": indexed_in,
+            **version,
+        }
     except Exception as error:
         from app.pipeline.sources import tool_error
 
@@ -720,7 +838,8 @@ def check_prepared(
                 "attempts": [
                     *(source_outcome.get("attempts") or []),
                     {
-                        "provider": "retrieval", "result": "failed",
+                        "provider": "retrieval",
+                        "result": "failed",
                         "retryable": failure.get("retryable", False),
                     },
                 ],

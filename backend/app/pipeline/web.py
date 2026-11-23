@@ -122,9 +122,16 @@ def _public_http_url(url: str) -> str:
     if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
         raise WebReadError("blocked", "the page resolves to a non-public destination")
     try:
-        addresses = {ipaddress.ip_address(item[4][0].split("%", 1)[0]) for item in socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+        addresses = {
+            ipaddress.ip_address(item[4][0].split("%", 1)[0])
+            for item in socket.getaddrinfo(
+                host, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM
+            )
+        }
     except (OSError, ValueError) as error:
-        raise WebReadError("temporary-failure", "the page host could not be resolved", retryable=True) from error
+        raise WebReadError(
+            "temporary-failure", "the page host could not be resolved", retryable=True
+        ) from error
     if not addresses or any(not address.is_global for address in addresses):
         raise WebReadError("blocked", "the page resolves to a non-public destination")
     clean = parts._replace(fragment="")
@@ -136,9 +143,13 @@ def fetch_resource(url: str) -> WebResource:
     current = _public_http_url(url)
     for redirect in range(MAX_REDIRECTS + 1):
         try:
-            response = requests.get(current, headers=USER_AGENT, timeout=TIMEOUT, stream=True, allow_redirects=False)
+            response = requests.get(
+                current, headers=USER_AGENT, timeout=TIMEOUT, stream=True, allow_redirects=False
+            )
         except requests.Timeout as error:
-            raise WebReadError("temporary-failure", "the web page request timed out", retryable=True) from error
+            raise WebReadError(
+                "temporary-failure", "the web page request timed out", retryable=True
+            ) from error
         except requests.RequestException as error:
             raise WebReadError("fetch-failed", "the web page could not be fetched", retryable=True) from error
         try:
@@ -153,20 +164,28 @@ def fetch_resource(url: str) -> WebResource:
             if response.status_code in {401, 403}:
                 raise WebReadError("blocked", "the page requires access that is not available")
             if response.status_code >= 500 or response.status_code == 429:
-                raise WebReadError("temporary-failure", f"the page server returned HTTP {response.status_code}", retryable=True)
+                raise WebReadError(
+                    "temporary-failure",
+                    f"the page server returned HTTP {response.status_code}",
+                    retryable=True,
+                )
             if not response.ok:
                 raise WebReadError("http-error", f"the page returned HTTP {response.status_code}")
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
             limit = MAX_BYTES if content_type in {"text/html", "application/xhtml+xml"} else MAX_PDF_BYTES
             declared_size = response.headers.get("Content-Length")
             if declared_size and declared_size.isdigit() and int(declared_size) > limit:
-                raise WebReadError("too-large", f"the response exceeded the {limit // 1_000_000} MB read limit")
+                raise WebReadError(
+                    "too-large", f"the response exceeded the {limit // 1_000_000} MB read limit"
+                )
             size = 0
             chunks = []
             for chunk in response.iter_content(64 * 1024):
                 size += len(chunk)
                 if size > limit:
-                    raise WebReadError("too-large", f"the response exceeded the {limit // 1_000_000} MB read limit")
+                    raise WebReadError(
+                        "too-large", f"the response exceeded the {limit // 1_000_000} MB read limit"
+                    )
                 chunks.append(chunk)
             return WebResource(current, content_type, response.encoding or "utf-8", b"".join(chunks))
         finally:
@@ -186,12 +205,22 @@ def page_from_resource(resource: WebResource) -> WebPage:
     passages = tuple(parser.passages)
     if not passages:
         outcome = "dynamic" if parser.has_interaction else "empty"
-        message = "the page requires scripts or interaction to reveal its text" if parser.has_interaction else "the page did not contain readable static text"
+        message = (
+            "the page requires scripts or interaction to reveal its text"
+            if parser.has_interaction
+            else "the page did not contain readable static text"
+        )
         raise WebReadError(outcome, message)
-    canonical = _safe_locator(_public_http_url(urljoin(resource.url, parser.canonical))) if parser.canonical else safe_page_url
+    canonical = (
+        _safe_locator(_public_http_url(urljoin(resource.url, parser.canonical)))
+        if parser.canonical
+        else safe_page_url
+    )
     return WebPage(
-        " ".join(parser.title.split())[:300], canonical,
-        datetime.now(UTC).isoformat(timespec="seconds"), passages,
+        " ".join(parser.title.split())[:300],
+        canonical,
+        datetime.now(UTC).isoformat(timespec="seconds"),
+        passages,
     )
 
 

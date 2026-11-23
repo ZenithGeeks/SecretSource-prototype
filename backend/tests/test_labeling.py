@@ -10,8 +10,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 import app
+import pytest
 import requests
 from app import auth, config
 from app.labeling import dspy_export, ledger, pool, scopus
@@ -462,24 +462,51 @@ def test_session_exposes_web_evidence_with_a_stable_page_location():
     url = "https://example.org/article"
     web_claim = {
         **ANALYSIS["claims"][0],
-        "citations": [{"ref": "b5", "title": "Useful page", "url": url, "authors": ["A Writer"], "year": "2024"}],
-        "verdicts": [{
-            "cited": url, "source": url, "source_kind": "web-page", "web_title": "Useful page",
-            "retrieved_at": "2026-11-23T00:00:00+00:00",
-            "verdict": "supports", "evidence": [{"text": "The web paragraph is the evidence.", "page": None, "paragraph": 1, "locator": f"{url}#finding"}],
-        }],
+        "citations": [
+            {"ref": "b5", "title": "Useful page", "url": url, "authors": ["A Writer"], "year": "2024"}
+        ],
+        "verdicts": [
+            {
+                "cited": url,
+                "source": url,
+                "source_kind": "web-page",
+                "web_title": "Useful page",
+                "retrieved_at": "2026-11-23T00:00:00+00:00",
+                "verdict": "supports",
+                "evidence": [
+                    {
+                        "text": "The web paragraph is the evidence.",
+                        "page": None,
+                        "paragraph": 1,
+                        "locator": f"{url}#finding",
+                    }
+                ],
+            }
+        ],
     }
 
     session = labeling.build_session({**ANALYSIS, "claims": [web_claim]})
 
-    assert session["references"] == [{
-        "reference_id": "web-b5", "file": "web-b5", "label": "Useful page", "ref": "b5",
-        "authors": ["A Writer"], "year": "2024", "source_kind": "web-page", "url": url,
-        "retrieved_at": "2026-11-23T00:00:00+00:00",
-        "web_passages": [{
-            "text": "The web paragraph is the evidence.", "locator": f"{url}#finding", "paragraph": 1,
-        }],
-    }]
+    assert session["references"] == [
+        {
+            "reference_id": "web-b5",
+            "file": "web-b5",
+            "label": "Useful page",
+            "ref": "b5",
+            "authors": ["A Writer"],
+            "year": "2024",
+            "source_kind": "web-page",
+            "url": url,
+            "retrieved_at": "2026-11-23T00:00:00+00:00",
+            "web_passages": [
+                {
+                    "text": "The web paragraph is the evidence.",
+                    "locator": f"{url}#finding",
+                    "paragraph": 1,
+                }
+            ],
+        }
+    ]
     assert session["claims"][0]["candidates"][0]["locator"] == f"{url}#finding"
     assert session["claims"][0]["candidates"][0]["paragraph"] == 1
     assert session["unread"] == []
@@ -490,22 +517,36 @@ def test_a_hand_added_claim_searches_cached_web_paragraphs_without_colbert(api, 
     web_claim = {
         **ANALYSIS["claims"][0],
         "citations": [{"ref": "b5", "title": "Useful page", "url": url}],
-        "verdicts": [{
-            "cited": url, "source": url, "source_kind": "web-page", "web_title": "Useful page",
-            "verdict": "supports", "evidence": [{
-                "text": "Static analysis detects software defects in large projects.",
-                "page": None, "paragraph": 2, "locator": f"{url}#finding",
-            }],
-        }],
+        "verdicts": [
+            {
+                "cited": url,
+                "source": url,
+                "source_kind": "web-page",
+                "web_title": "Useful page",
+                "verdict": "supports",
+                "evidence": [
+                    {
+                        "text": "Static analysis detects software defects in large projects.",
+                        "page": None,
+                        "paragraph": 2,
+                        "locator": f"{url}#finding",
+                    }
+                ],
+            }
+        ],
     }
     analysis = {**ANALYSIS, "claims": [web_claim]}
     client, _, app_client = api
     app_client.dependency_overrides[labeling.owned_analysis] = lambda: analysis
     monkeypatch.setattr(verify, "evidence_from", lambda *args: pytest.fail("web pages are not in ColBERT"))
 
-    found = client.post("/labeling/sessions/a1/candidates", json={
-        "claim_id": HAND_ADDED, "claim": "Static analysis detects software defects.",
-    })
+    found = client.post(
+        "/labeling/sessions/a1/candidates",
+        json={
+            "claim_id": HAND_ADDED,
+            "claim": "Static analysis detects software defects.",
+        },
+    )
 
     assert found.status_code == 200
     [candidate] = found.json()["candidates"]
@@ -521,9 +562,14 @@ def test_a_labeler_can_acknowledge_review_of_changed_source_evidence(monkeypatch
     saved = []
     monkeypatch.setattr(app, "main", SimpleNamespace(_save_soon=saved.append), raising=False)
 
-    response = asyncio.run(labeling.acknowledge_source_review(
-        "a1", {"claim_id": "paperA-0123456789ab#0"}, analysis, "chanya",
-    ))
+    response = asyncio.run(
+        labeling.acknowledge_source_review(
+            "a1",
+            {"claim_id": "paperA-0123456789ab#0"},
+            analysis,
+            "chanya",
+        )
+    )
 
     assert response == {"claim_id": "paperA-0123456789ab#0", "reviewed": True}
     assert analysis["claims"][0]["needs_review"] is False
@@ -1867,15 +1913,27 @@ def test_a_claim_says_why_its_citations_were_not_checked(api):
     links = {"url": "", "doi": "", "year": "2020"}
     assert named["unchecked"] == [
         {
-            "ref": "b39", "label": "T5 paper", "reason": "named", **links,
+            "ref": "b39",
+            "label": "T5 paper",
+            "reason": "named",
+            **links,
             "source_outcome": {
-                "source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": [],
+                "source_kind": "unknown",
+                "outcome": "named-only",
+                "retryable": False,
+                "attempts": [],
             },
         },
         {
-            "ref": "b49", "label": "SuperGLUE", "reason": "named", **links,
+            "ref": "b49",
+            "label": "SuperGLUE",
+            "reason": "named",
+            **links,
             "source_outcome": {
-                "source_kind": "unknown", "outcome": "named-only", "retryable": False, "attempts": [],
+                "source_kind": "unknown",
+                "outcome": "named-only",
+                "retryable": False,
+                "attempts": [],
             },
         },
         {"ref": "b4", "label": "NeurIPS", "reason": "no-open-access", **links},
@@ -1901,7 +1959,10 @@ def test_an_empty_citation_is_marked_not_attempted(api):
             "doi": "",
             "year": "",
             "source_outcome": {
-                "source_kind": "unknown", "outcome": "not-attempted", "retryable": False, "attempts": [],
+                "source_kind": "unknown",
+                "outcome": "not-attempted",
+                "retryable": False,
+                "attempts": [],
             },
         }
     ]
@@ -1931,10 +1992,22 @@ def test_an_unchecked_citation_carries_its_own_link_doi_and_year(api):
     (claim,) = client.get("/labeling/sessions/a1").json()["claims"]
 
     assert claim["unchecked"] == [
-        {"ref": "b23", "label": "Top500", "reason": "not-downloadable",
-         "url": "https://www.top500.org/", "doi": "", "year": "2021"},
-        {"ref": "b7", "label": "Kokkos", "reason": "no-open-access",
-         "url": "", "doi": "10.1016/j.jpdc.2014.07.003", "year": "2014"},
+        {
+            "ref": "b23",
+            "label": "Top500",
+            "reason": "not-downloadable",
+            "url": "https://www.top500.org/",
+            "doi": "",
+            "year": "2021",
+        },
+        {
+            "ref": "b7",
+            "label": "Kokkos",
+            "reason": "no-open-access",
+            "url": "",
+            "doi": "10.1016/j.jpdc.2014.07.003",
+            "year": "2014",
+        },
         {"ref": "b9", "label": "A talk", "reason": "unresolvable", "url": "", "doi": "", "year": ""},
     ]
 

@@ -95,8 +95,8 @@ from app.pipeline.figures import figures_dir, paper_figures
 from app.pipeline.rag import add_paper
 from app.pipeline.sources import index_paper, lookup_key, lookup_keys
 from app.pipeline.verify import (
-    check_web_page,
     check_prepared,
+    check_web_page,
     checked_citations,
     cites_others,
     fold_check,
@@ -159,6 +159,7 @@ def startup_recent() -> int:
         return max(0, int(raw))
     except ValueError:
         return _STARTUP_RECENT_DEFAULT
+
 
 # Shared by every run, so N analyses at once are not N times the load on the retrieval
 # services and the LLM (#170). _run_queued takes its own limit first, then one of these.
@@ -261,9 +262,7 @@ def restore():
         if alive is False:
             analysis.update(status="error", message="interrupted by a restart")
             # Add a final stage. A client that reconnects then sees the run is over.
-            analysis["stages"].append(
-                {"stage": "error", "message": "interrupted by a restart"}
-            )
+            analysis["stages"].append({"stage": "error", "message": "interrupted by a restart"})
             store.save(analysis)
             with _load_lock:
                 _forget_missing(analysis["id"])
@@ -420,9 +419,7 @@ logging.getLogger("uvicorn.access").addFilter(PathWithoutQuery())
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SecretSource gateway", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(teacher_router)
 app.include_router(author_router)
 app.include_router(labeling_router)
@@ -583,7 +580,9 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
         analysis["outline"] = extracted.get("outline", [])
         # We send both counts. If a cap cut the claims in half, the paper would look short.
         await _publish(
-            analysis_id, "extracted", claims=len(claims),
+            analysis_id,
+            "extracted",
+            claims=len(claims),
             extracted=extracted.get("extracted", len(claims)),
             windows=extracted.get("windows", 1),
         )
@@ -644,19 +643,27 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                             verdict = {**ready, "claim": claim["claim"], "source": source}
                         elif ready["status"] == "web-page":
                             verdict = await asyncio.to_thread(
-                                check_web_page, claim["claim"], source, ready["web_page"],
-                                judged_text(claim, citation), cites_others(claim, citation),
+                                check_web_page,
+                                claim["claim"],
+                                source,
+                                ready["web_page"],
+                                judged_text(claim, citation),
+                                cites_others(claim, citation),
                                 ready.get("source_outcome"),
                             )
                         else:
                             check_args = [
-                                claim["claim"], source, Path(ready["path"]),
-                                judged_text(claim, citation), cites_others(claim, citation),
+                                claim["claim"],
+                                source,
+                                Path(ready["path"]),
+                                judged_text(claim, citation),
+                                cites_others(claim, citation),
                             ]
                             if ready.get("source_outcome") is not None:
                                 check_args.append(ready["source_outcome"])
                             verdict = await asyncio.to_thread(
-                                check_prepared, *check_args,
+                                check_prepared,
+                                *check_args,
                             )
                         outcome = verdict.get("verdict") or verdict.get("message", "")
                         span.set_attribute(SpanAttributes.OUTPUT_VALUE, outcome)
@@ -670,8 +677,12 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
                     reason = unchecked_reason(verdict, citation)
                     CLAIM_CHECKS_FAILED.labels(reason=reason).inc()
                     await _publish(
-                        analysis_id, "failed", claim=index, source=source,
-                        reason=reason, message=verdict.get("message", ""),
+                        analysis_id,
+                        "failed",
+                        claim=index,
+                        source=source,
+                        reason=reason,
+                        message=verdict.get("message", ""),
                     )
 
             await asyncio.gather(*(check(*job) for job in jobs))
@@ -712,8 +723,14 @@ async def _run_queued(analysis_id: str, analysis: dict, paper: str, verify: bool
 def _new_analysis(analysis_id: str, paper: str, owner: str | None) -> dict:
     """The skeleton dict an analysis starts as, shared by the gateway's in-process `_start`
     and the worker's job (app/queue.py), so the two can never drift apart."""
-    return {"id": analysis_id, "paper": paper, "status": "running",
-            "owner": owner, "stages": [], "claims": []}
+    return {
+        "id": analysis_id,
+        "paper": paper,
+        "status": "running",
+        "owner": owner,
+        "stages": [],
+        "claims": [],
+    }
 
 
 def _start(paper: str, verify: bool, owner: str | None, claim_limit: int | None = None) -> dict:
@@ -963,24 +980,30 @@ class ReferenceRepairRequest(BaseModel):
 
 @app.post("/analyses/{analysis_id}/references/{ref}/repair", status_code=202)
 async def repair_reference(
-    analysis_id: str, ref: str, body: ReferenceRepairRequest,
+    analysis_id: str,
+    ref: str,
+    body: ReferenceRepairRequest,
     user: str | None = Depends(current_user),
 ):
     """Try a corrected DOI or URL for one cited work, replacing stored identity only on success."""
-    from app.pipeline.sources import doi_in
     from urllib.parse import urlsplit
+
+    from app.pipeline.sources import doi_in
 
     analysis = await asyncio.to_thread(_owned, analysis_id, user)
     if analysis.get("status") != "done":
         raise HTTPException(409, "wait for the analysis to finish")
     if bool(body.doi.strip()) == bool(body.url.strip()):
         raise HTTPException(422, "provide exactly one corrected DOI or URL")
-    citation = next((
-        citation
-        for claim in analysis.get("claims", [])
-        for citation in claim.get("citations", [])
-        if citation.get("ref") == ref
-    ), None)
+    citation = next(
+        (
+            citation
+            for claim in analysis.get("claims", [])
+            for citation in claim.get("citations", [])
+            if citation.get("ref") == ref
+        ),
+        None,
+    )
     if citation is None:
         raise HTTPException(404, f"the paper has no reference {ref}")
     if not any(
@@ -997,7 +1020,12 @@ async def repair_reference(
         updated.update(doi=normalized, url="", arxiv="")
     else:
         parsed = urlsplit(body.url.strip())
-        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
             raise HTTPException(422, "enter a public HTTP or HTTPS URL without embedded credentials")
         updated.update(url=body.url.strip(), doi="", arxiv="")
     source = lookup_key(updated)
@@ -1005,9 +1033,16 @@ async def repair_reference(
         raise HTTPException(422, "the replacement has no usable source identifier")
     _record_stage(analysis_id, "rechecking", ref=ref)
     expected = {**updated, "_validate_web_title": bool(body.url.strip())}
-    _detach(_recheck_reference(
-        analysis_id, ref, None, identifier=source, expected=expected, replacement_citation=updated,
-    ))
+    _detach(
+        _recheck_reference(
+            analysis_id,
+            ref,
+            None,
+            identifier=source,
+            expected=expected,
+            replacement_citation=updated,
+        )
+    )
     return {"ref": ref, "repairing": True}
 
 
@@ -1017,12 +1052,15 @@ async def retry_reference(analysis_id: str, ref: str, user: str | None = Depends
     analysis = await asyncio.to_thread(_owned, analysis_id, user)
     if analysis.get("status") != "done":
         raise HTTPException(409, "wait for the analysis to finish")
-    citation = next((
-        citation
-        for claim in analysis.get("claims", [])
-        for citation in claim.get("citations", [])
-        if citation.get("ref") == ref
-    ), None)
+    citation = next(
+        (
+            citation
+            for claim in analysis.get("claims", [])
+            for citation in claim.get("citations", [])
+            if citation.get("ref") == ref
+        ),
+        None,
+    )
     if citation is None:
         raise HTTPException(404, f"the paper has no reference {ref}")
     source = lookup_key(citation)
@@ -1049,8 +1087,14 @@ def _record_stage(analysis_id: str, stage: str, **fields) -> None:
 
 
 async def _recheck_reference(
-    analysis_id: str, ref: str, pdf: Path | None, *, identifier: str = "", expected: dict | None = None,
-    uploaded_pdf: bool = False, replacement_citation: dict | None = None,
+    analysis_id: str,
+    ref: str,
+    pdf: Path | None,
+    *,
+    identifier: str = "",
+    expected: dict | None = None,
+    uploaded_pdf: bool = False,
+    replacement_citation: dict | None = None,
 ) -> None:
     """Check each claim that cites `ref` against `pdf`, replacing that citation's earlier result.
 
@@ -1063,12 +1107,15 @@ async def _recheck_reference(
     updates = []
     failures = []
     if uploaded_pdf and expected is None:
-        expected = next((
-            citation
-            for claim in analysis.get("claims", [])
-            for citation in claim.get("citations", [])
-            if citation.get("ref") == ref
-        ), None)
+        expected = next(
+            (
+                citation
+                for claim in analysis.get("claims", [])
+                for citation in claim.get("citations", [])
+                if citation.get("ref") == ref
+            ),
+            None,
+        )
     try:
         source_query = identifier or pdf.as_posix()
         ready = await asyncio.to_thread(prepare_source, source_query, expected=expected)
@@ -1089,31 +1136,53 @@ async def _recheck_reference(
                     verdict = {**ready, "claim": claim["claim"], "source": source}
                 elif ready["status"] == "web-page":
                     verdict = await asyncio.to_thread(
-                        verify.check_web_page, claim["claim"], source, ready["web_page"],
-                        judged_text(claim, checked_citation), cites_others(claim, checked_citation),
+                        verify.check_web_page,
+                        claim["claim"],
+                        source,
+                        ready["web_page"],
+                        judged_text(claim, checked_citation),
+                        cites_others(claim, checked_citation),
                         ready.get("source_outcome"),
                     )
                 else:
                     check_args = [
-                        claim["claim"], source_query, prepared_path,
-                        judged_text(claim, checked_citation), cites_others(claim, checked_citation),
+                        claim["claim"],
+                        source_query,
+                        prepared_path,
+                        judged_text(claim, checked_citation),
+                        cites_others(claim, checked_citation),
                     ]
                     if ready.get("source_outcome") is not None:
                         check_args.append(ready["source_outcome"])
                     verdict = await asyncio.to_thread(
-                        check_prepared, *check_args,
+                        check_prepared,
+                        *check_args,
                     )
                 if verdict.get("status") == "ok":
-                    updates.append((claim, citation, checked_citation, old_sources, replacement_sources, source, verdict))
+                    updates.append(
+                        (claim, citation, checked_citation, old_sources, replacement_sources, source, verdict)
+                    )
                 else:
                     failures.append((claim, verdict))
         if not failures and updates:
             # Commit citation metadata and refreshed checks together. If one claim fails, every
             # previous result remains intact and the caller can correct the replacement.
-            for claim, citation, checked_citation, old_sources, replacement_sources, source, verdict in updates:
+            for (
+                claim,
+                _citation,
+                checked_citation,
+                old_sources,
+                replacement_sources,
+                source,
+                verdict,
+            ) in updates:
                 old_sources |= replacement_sources
-                claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") not in old_sources]
-                claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") not in old_sources]
+                claim["verdicts"] = [
+                    v for v in claim.get("verdicts", []) if v.get("cited") not in old_sources
+                ]
+                claim["unchecked"] = [
+                    u for u in claim.get("unchecked", []) if u.get("source") not in old_sources
+                ]
                 fold_check(claim, source, checked_citation, verdict)
                 claim["needs_review"] = True
                 claim.get("citation_repairs", {}).pop(ref, None)
@@ -1133,7 +1202,13 @@ async def _recheck_reference(
                         target_citation.update(replacement_citation)
                 reference = (analysis.get("references") or {}).get(ref)
                 if isinstance(reference, dict):
-                    reference.update({k: replacement_citation[k] for k in ("doi", "url", "arxiv") if k in replacement_citation})
+                    reference.update(
+                        {
+                            k: replacement_citation[k]
+                            for k in ("doi", "url", "arxiv")
+                            if k in replacement_citation
+                        }
+                    )
             if uploaded_pdf:
                 analysis.setdefault("pdfs", {})[ref] = pdf.name
             elif replacement_citation is not None:
@@ -1143,7 +1218,8 @@ async def _recheck_reference(
                 logger.warning("analysis %s has no checked claims for citation %s", analysis_id, ref)
             for claim, verdict in failures:
                 claim.setdefault("citation_repairs", {})[ref] = {
-                    "status": "error", "reason": verdict.get("reason", "failed"),
+                    "status": "error",
+                    "reason": verdict.get("reason", "failed"),
                     "message": verdict.get("message", "the replacement source could not be read"),
                     "source_outcome": verdict.get("source_outcome"),
                 }
@@ -1153,8 +1229,10 @@ async def _recheck_reference(
     finally:
         # Preserve the old source on any failure. A first unreadable upload may be opened for
         # owner inspection, but a detected identity mismatch is never attached to the reference.
-        if uploaded_pdf and not previous_pdf and not any(
-            verdict.get("reason") == "identity-mismatch" for _, verdict in failures
+        if (
+            uploaded_pdf
+            and not previous_pdf
+            and not any(verdict.get("reason") == "identity-mismatch" for _, verdict in failures)
         ):
             analysis.setdefault("pdfs", {}).setdefault(ref, pdf.name)
         _record_stage(analysis_id, "rechecked", ref=ref)
@@ -1524,8 +1602,15 @@ async def create_project(request: ProjectRequest, user: str | None = Depends(cur
     if not name:
         raise HTTPException(400, "a project needs a name")
     now = datetime.now(UTC).isoformat()
-    project = {"id": uuid.uuid4().hex[:12], "owner": user, "name": name,
-               "description": request.description.strip(), "analyses": [], "created": now, "updated": now}
+    project = {
+        "id": uuid.uuid4().hex[:12],
+        "owner": user,
+        "name": name,
+        "description": request.description.strip(),
+        "analyses": [],
+        "created": now,
+        "updated": now,
+    }
     await asyncio.to_thread(store.save_project, project)
     return researcher.projects([project], [])[0]
 
@@ -1886,9 +1971,11 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         raise HTTPException(400, f"scope must be one of {', '.join(DELETE_SCOPES)}")
     researcher = scope in ("all", "researcher")
     author = scope in ("all", "author")
+
     def owned_in_scope() -> list[dict]:
         return [
-            analysis for analysis in visible_to(user)
+            analysis
+            for analysis in visible_to(user)
             if (author if analysis.get("kind") == DRAFT_CHECK else researcher)
         ]
 

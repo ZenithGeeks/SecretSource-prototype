@@ -148,7 +148,10 @@ def build_session(analysis: dict) -> dict:
                     "file": file,
                     # The title, so a labeler knows which paper this is; the arXiv id or DOI it
                     # was looked up by only when the citation list had no title for it.
-                    "label": (verdict.get("web_title") if is_web else "") or citation.get("title") or verdict.get("cited") or file,
+                    "label": (verdict.get("web_title") if is_web else "")
+                    or citation.get("title")
+                    or verdict.get("cited")
+                    or file,
                     # GROBID's id for the citation: the "[b47]" in the claim's sentence.
                     "ref": citation.get("ref", ""),
                     "authors": citation.get("authors", []),
@@ -163,10 +166,13 @@ def build_session(analysis: dict) -> dict:
                 for hit in verdict.get("evidence") or []:
                     key = (hit.get("locator"), hit.get("text"))
                     if hit.get("text") and key not in known:
-                        passages.append({
-                            "text": hit["text"], "locator": hit.get("locator", ""),
-                            "paragraph": hit.get("paragraph"),
-                        })
+                        passages.append(
+                            {
+                                "text": hit["text"],
+                                "locator": hit.get("locator", ""),
+                                "paragraph": hit.get("paragraph"),
+                            }
+                        )
                         known.add(key)
             candidates += _candidates(claim_id, reference_id, file, verdict.get("evidence") or [])
         claims.append(
@@ -213,16 +219,22 @@ def _unchecked(claim: dict) -> list[dict]:
         if not source:
             reason = "unresolvable"
             source_outcome = {
-                "source_kind": "unknown", "outcome": "not-attempted",
-                "retryable": False, "attempts": [],
+                "source_kind": "unknown",
+                "outcome": "not-attempted",
+                "retryable": False,
+                "attempts": [],
             }
         elif source_keys & named:
             reason = "named"
             source_outcome = {
-                "source_kind": "unknown", "outcome": "named-only",
-                "retryable": False, "attempts": [],
+                "source_kind": "unknown",
+                "outcome": "named-only",
+                "retryable": False,
+                "attempts": [],
             }
-        elif failed_row := (failed.get(source) or next((failed[key] for key in source_keys if key in failed), None)):
+        elif failed_row := (
+            failed.get(source) or next((failed[key] for key in source_keys if key in failed), None)
+        ):
             reason = failed_row["reason"]
             source_outcome = failed_row.get("source_outcome")
         else:
@@ -386,7 +398,9 @@ async def add_compare_note(
 
 @router.post("/sessions/{analysis_id}/source-review")
 async def acknowledge_source_review(
-    analysis_id: str, body: dict = Body(...), analysis: dict = Depends(owned_analysis),
+    analysis_id: str,
+    body: dict = Body(...),
+    analysis: dict = Depends(owned_analysis),
     _who: str = Depends(annotator),
 ):
     """Clear a source-change notice after an authorized labeler reviews the refreshed evidence."""
@@ -441,14 +455,15 @@ async def added_claim_candidates(
     }
     try:
         paper_hits = await asyncio.gather(
-            *(asyncio.to_thread(verify.evidence_from, body.claim, reference["file"])
-              for reference in paper_references)
+            *(
+                asyncio.to_thread(verify.evidence_from, body.claim, reference["file"])
+                for reference in paper_references
+            )
         )
     except requests.RequestException as error:  # ColBERT down, or still waking up past the timeout
         raise HTTPException(502, "retrieval did not answer") from error
     hits_by_reference = {
-        reference["reference_id"]: hits
-        for reference, hits in zip(paper_references, paper_hits, strict=True)
+        reference["reference_id"]: hits for reference, hits in zip(paper_references, paper_hits, strict=True)
     }
     hits_by_reference.update(web_hits)
     return {
@@ -456,7 +471,9 @@ async def added_claim_candidates(
             cand
             for reference in references
             for cand in _candidates(
-                body.claim_id, reference["reference_id"], reference["file"],
+                body.claim_id,
+                reference["reference_id"],
+                reference["file"],
                 hits_by_reference.get(reference["reference_id"], []),
             )
         ]

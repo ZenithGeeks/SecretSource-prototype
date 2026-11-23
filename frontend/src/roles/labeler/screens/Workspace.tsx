@@ -864,7 +864,7 @@ function Body({
       ) : (
         <>
           {claim.needs_review && (
-            <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
               <span>A source for this claim changed. Review its evidence before reusing the saved label.</span>
               <button
                 type="button"
@@ -873,14 +873,14 @@ function Body({
                   onSuccess: () => setNotice('Updated evidence marked as reviewed.'),
                   onError: (error) => setNotice(problem(error).title),
                 })}
-                className="rounded border border-amber-500 px-2 py-1 font-medium enabled:hover:bg-amber-100 disabled:opacity-50"
+                className="rounded border border-border-subtle px-2 py-1 font-medium enabled:hover:bg-canvas disabled:opacity-50"
               >
                 {sourceReview.isPending ? 'Saving…' : 'Mark evidence reviewed'}
               </button>
             </div>
           )}
           {Object.entries(claim.citation_repairs ?? {}).map(([ref, repair]) => (
-            <p key={ref} role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <p key={ref} role="alert" className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
               Replacement for [{ref}] was not used: {repair.message}. Previous evidence remains available.
             </p>
           ))}

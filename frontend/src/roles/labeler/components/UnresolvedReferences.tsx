@@ -48,7 +48,7 @@ export function UnresolvedReferences({
             </p>
             <p className="mt-1 text-ink-muted">Not read: {citation.reason}</p>
             {citation.repairError && (
-              <p role="status" className="mt-1 text-amber-900">
+              <p role="status" className="mt-1 text-ink-muted">
                 The replacement was not used: {citation.repairError.message}. The earlier result is still available.
               </p>
             )}
@@ -151,7 +151,7 @@ function RepairForm({
       <label className="flex flex-col gap-1 text-xs text-ink-muted">
         DOI
         <input
-          className="min-h-9 rounded border border-border-subtle bg-canvas px-2 text-sm text-ink"
+          className="h-9 rounded border border-border-subtle bg-canvas px-2 text-sm text-ink"
           value={doi}
           onChange={(event) => {
             setDoi(event.currentTarget.value)
@@ -164,7 +164,7 @@ function RepairForm({
       <label className="flex flex-col gap-1 text-xs text-ink-muted">
         Public page or PDF URL
         <input
-          className="min-h-9 rounded border border-border-subtle bg-canvas px-2 text-sm text-ink"
+          className="h-9 rounded border border-border-subtle bg-canvas px-2 text-sm text-ink"
           value={url}
           onChange={(event) => {
             setUrl(event.currentTarget.value)

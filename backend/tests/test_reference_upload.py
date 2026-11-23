@@ -57,15 +57,29 @@ def upload(client: TestClient, ref: str = "b13", content: bytes = b"%PDF-1.4 gmr
 def test_a_retry_rechecks_only_the_cited_reference_when_the_failure_is_retryable(api, monkeypatch):
     client, analysis, detached = api
     analysis["claims"][0]["unchecked"][0]["source_outcome"] = {
-        "source_kind": "unknown", "outcome": "temporary-failure", "retryable": True, "attempts": [],
+        "source_kind": "unknown",
+        "outcome": "temporary-failure",
+        "retryable": True,
+        "attempts": [],
     }
     prepared = []
-    monkeypatch.setattr(main, "prepare_source", lambda source, expected=None: (
-        prepared.append((source, expected)) or {"status": "ok", "path": "gmres.pdf"}
-    ))
-    monkeypatch.setattr(main, "check_prepared", lambda claim, source_path, path, judged, other: {
-        "status": "ok", "verdict": "supports", "source": path.name, "evidence": [],
-    })
+    monkeypatch.setattr(
+        main,
+        "prepare_source",
+        lambda source, expected=None: (
+            prepared.append((source, expected)) or {"status": "ok", "path": "gmres.pdf"}
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "check_prepared",
+        lambda claim, source_path, path, judged, other: {
+            "status": "ok",
+            "verdict": "supports",
+            "source": path.name,
+            "evidence": [],
+        },
+    )
 
     response = client.post("/analyses/a1/references/b13/retry")
     assert response.status_code == 202
@@ -81,17 +95,37 @@ def test_a_corrected_url_replaces_the_citation_only_after_its_claims_pass_check(
     client, analysis, detached = api
     analysis["pdfs"] = {"b13": "old-upload.pdf"}
     prepared = []
-    monkeypatch.setattr(main, "prepare_source", lambda source, expected=None: (
-        prepared.append((source, expected)) or {
-            "status": "ok", "path": "replacement.pdf",
-            "source_outcome": {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []},
-        }
-    ))
-    monkeypatch.setattr(main, "check_prepared", lambda claim, source_path, path, judged, other, *rest: {
-        "status": "ok", "verdict": "supports", "source": path.name, "evidence": [{"text": "replacement evidence"}],
-    })
+    monkeypatch.setattr(
+        main,
+        "prepare_source",
+        lambda source, expected=None: (
+            prepared.append((source, expected))
+            or {
+                "status": "ok",
+                "path": "replacement.pdf",
+                "source_outcome": {
+                    "source_kind": "paper",
+                    "outcome": "readable",
+                    "retryable": False,
+                    "attempts": [],
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "check_prepared",
+        lambda claim, source_path, path, judged, other, *rest: {
+            "status": "ok",
+            "verdict": "supports",
+            "source": path.name,
+            "evidence": [{"text": "replacement evidence"}],
+        },
+    )
 
-    response = client.post("/analyses/a1/references/b13/repair", json={"url": "https://example.org/gmres.pdf"})
+    response = client.post(
+        "/analyses/a1/references/b13/repair", json={"url": "https://example.org/gmres.pdf"}
+    )
     assert response.status_code == 202
     asyncio.run(detached[0])
 
@@ -111,10 +145,21 @@ def test_a_failed_corrected_url_keeps_the_original_source_and_explanation(api, m
     client, analysis, detached = api
     old_citation = copy.deepcopy(analysis["claims"][0]["citations"][0])
     old_unchecked = copy.deepcopy(analysis["claims"][0]["unchecked"])
-    monkeypatch.setattr(main, "prepare_source", lambda *args, **kwargs: {
-        "status": "error", "reason": "web-page-unavailable", "message": "page timed out",
-        "source_outcome": {"source_kind": "web-page", "outcome": "temporary-failure", "retryable": True, "attempts": []},
-    })
+    monkeypatch.setattr(
+        main,
+        "prepare_source",
+        lambda *args, **kwargs: {
+            "status": "error",
+            "reason": "web-page-unavailable",
+            "message": "page timed out",
+            "source_outcome": {
+                "source_kind": "web-page",
+                "outcome": "temporary-failure",
+                "retryable": True,
+                "attempts": [],
+            },
+        },
+    )
 
     response = client.post("/analyses/a1/references/b13/repair", json={"url": "https://example.org/gmres"})
     assert response.status_code == 202
@@ -130,7 +175,12 @@ def test_a_failed_corrected_url_keeps_the_original_source_and_explanation(api, m
 def test_a_repair_requires_exactly_one_doi_or_url(api):
     client, _, detached = api
     assert client.post("/analyses/a1/references/b13/repair", json={}).status_code == 422
-    assert client.post("/analyses/a1/references/b13/repair", json={"doi": "10.1234/x", "url": "https://example.org"}).status_code == 422
+    assert (
+        client.post(
+            "/analyses/a1/references/b13/repair", json={"doi": "10.1234/x", "url": "https://example.org"}
+        ).status_code
+        == 422
+    )
     assert detached == []
 
 
@@ -139,8 +189,13 @@ def test_another_owner_cannot_retry_repair_or_upload_a_reference(api):
     analysis["owner"] = "someone-else"
 
     assert client.post("/analyses/a1/references/b13/retry").status_code == 404
-    assert client.post("/analyses/a1/references/b13/repair", json={"doi": "10.1234/correct"}).status_code == 404
-    assert client.post("/analyses/a1/references/b13/pdf", files={"file": ("paper.pdf", b"%PDF-1.4")}).status_code == 404
+    assert (
+        client.post("/analyses/a1/references/b13/repair", json={"doi": "10.1234/correct"}).status_code == 404
+    )
+    assert (
+        client.post("/analyses/a1/references/b13/pdf", files={"file": ("paper.pdf", b"%PDF-1.4")}).status_code
+        == 404
+    )
     assert detached == []
 
 
@@ -189,7 +244,10 @@ def test_a_pdf_that_cannot_be_read_leaves_the_citation_unchecked_with_why(api, m
 
     assert analysis["claims"][0]["unchecked"] == ANALYSIS["claims"][0]["unchecked"]
     assert analysis["claims"][0]["citation_repairs"]["b13"] == {
-        "status": "error", "reason": "failed", "message": "no text in the PDF", "source_outcome": None,
+        "status": "error",
+        "reason": "failed",
+        "message": "no text in the PDF",
+        "source_outcome": None,
     }
 
 
@@ -197,15 +255,25 @@ def test_a_failed_replacement_keeps_the_previous_verdict_and_evidence(api, monke
     client, analysis, detached = api
     claim = analysis["claims"][0]
     previous = {
-        "status": "ok", "verdict": "supports", "cited": GMRES, "source": "old.pdf",
+        "status": "ok",
+        "verdict": "supports",
+        "cited": GMRES,
+        "source": "old.pdf",
         "evidence": [{"text": "the original passage", "page": 2}],
     }
     claim["verdicts"] = [previous]
     claim["unchecked"] = []
     analysis["pdfs"] = {"b13": "old.pdf"}
-    monkeypatch.setattr(main, "prepare_source", lambda path, expected=None: {
-        "status": "error", "reason": "identity-mismatch", "message": "wrong paper", "retryable": False,
-    })
+    monkeypatch.setattr(
+        main,
+        "prepare_source",
+        lambda path, expected=None: {
+            "status": "error",
+            "reason": "identity-mismatch",
+            "message": "wrong paper",
+            "retryable": False,
+        },
+    )
 
     assert upload(client).status_code == 202
     asyncio.run(detached[0])
@@ -220,7 +288,10 @@ def test_an_uploaded_pdf_with_a_conflicting_title_does_not_replace_the_previous_
     client, analysis, detached = api
     claim = analysis["claims"][0]
     previous = {
-        "status": "ok", "verdict": "supports", "cited": GMRES, "source": "old.pdf",
+        "status": "ok",
+        "verdict": "supports",
+        "cited": GMRES,
+        "source": "old.pdf",
         "evidence": [{"text": "the original passage", "page": 2}],
     }
     claim["verdicts"] = [previous]
@@ -258,12 +329,21 @@ def test_pdf_identity_validation_checks_title_author_and_doi(tmp_path):
     document.close()
 
     with pytest.raises(sources.IdentityMismatch, match="author"):
-        verify.validate_pdf_identity(path, {"title": "The work title", "authors": ["Right Person"], "doi": "10.1234/right"})
+        verify.validate_pdf_identity(
+            path, {"title": "The work title", "authors": ["Right Person"], "doi": "10.1234/right"}
+        )
 
     with pytest.raises(sources.IdentityMismatch, match="DOI"):
-        verify.validate_pdf_identity(path, {"title": "The work title", "authors": ["Wrong Author"], "doi": "10.1234/right"})
+        verify.validate_pdf_identity(
+            path, {"title": "The work title", "authors": ["Wrong Author"], "doi": "10.1234/right"}
+        )
 
-    assert verify.validate_pdf_identity(path, {"title": "The work title", "authors": ["Wrong Author"], "doi": "10.1234/wrong"}) is None
+    assert (
+        verify.validate_pdf_identity(
+            path, {"title": "The work title", "authors": ["Wrong Author"], "doi": "10.1234/wrong"}
+        )
+        is None
+    )
 
 
 def test_the_owner_can_open_an_upload_no_check_could_read(api, monkeypatch):

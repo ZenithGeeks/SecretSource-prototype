@@ -18,7 +18,7 @@ export function WebEvidenceViewer({
   const target = locator || url
   return (
     <section aria-label="Web source evidence" className="flex min-h-0 flex-col gap-4 overflow-auto rounded-xl border border-border-subtle bg-surface p-5">
-      <div className="rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-sm font-medium text-accent">
+      <div className="rounded-lg border border-border-subtle bg-accent-soft px-3 py-2 text-sm font-medium text-accent">
         Web page · static text
       </div>
       <div>
@@ -27,7 +27,7 @@ export function WebEvidenceViewer({
           href={target}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-2 flex w-fit max-w-full items-center gap-1 break-all text-sm font-medium text-accent hover:underline"
+          className="mt-2 flex w-fit max-w-full items-center gap-1 break-words text-sm font-medium text-accent hover:underline"
         >
           Open cited page and passage <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="sr-only">(opens in a new tab)</span>
