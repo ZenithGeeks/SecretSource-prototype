@@ -634,6 +634,35 @@ def test_a_replace_whose_save_fails_keeps_the_old_figure(client, figures_dir, mo
     assert client.get(f"/author/drafts/{draft['id']}/images/posv.png", headers=ADA).content == PNG
 
 
+@pytest.mark.parametrize("committed", [False, True])
+def test_failed_import_save_discards_only_unreferenced_files(client, figures_dir, monkeypatch, committed):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("a.png", PNG)
+    save_row = author.store.save_author_row
+
+    def fail_save(table, row):
+        assert list((figures_dir / row["id"]).iterdir())
+        if committed:
+            save_row(table, row)
+        raise RuntimeError("draft save response failed")
+
+    monkeypatch.setattr(author.store, "save_author_row", fail_save)
+    with pytest.raises(RuntimeError, match="draft save response failed"):
+        client.post(
+            "/author/drafts/upload",
+            headers=ADA,
+            files={"file": ("paper.zip", buffer.getvalue(), "application/zip")},
+        )
+    if committed:
+        (folder,) = figures_dir.iterdir()
+        assert client.get(f"/author/drafts/{folder.name}/images/a.png", headers=ADA).content == PNG
+    else:
+        assert not list(figures_dir.iterdir())
+        assert client.get("/author/drafts", headers=ADA).json() == []
+
+
 def test_delete_all_waits_for_a_write_that_holds_a_drafts_lock(client, figures_dir):
     draft = make_draft(client)
     assert upload_image(client, draft["id"], "a.png", PNG).status_code == 200
@@ -721,6 +750,29 @@ def test_deleting_a_draft_or_all_author_data_removes_its_figures(client, figures
     assert client.delete("/user/data", headers=ADA).status_code == 200
     assert not (figures_dir / second["id"]).exists()
     assert (figures_dir / kept["id"]).is_dir()  # another user's figures stay
+
+
+@pytest.mark.parametrize("delete_all", [False, True])
+def test_a_failed_figure_erasure_preserves_the_draft_for_retry(client, figures_dir, monkeypatch, delete_all):
+    draft_id = make_draft(client)["id"]
+    assert upload_image(client, draft_id, "a.png", PNG).status_code == 200
+    (figure,) = (figures_dir / draft_id).iterdir()
+    unlink = author_images.os.unlink
+
+    def deny_figure_unlink(path, *args, **kwargs):
+        if path == figure.name:
+            raise PermissionError("figure storage is not writable")
+        return unlink(path, *args, **kwargs)
+
+    url = "/user/data?scope=author" if delete_all else f"/author/drafts/{draft_id}"
+    with monkeypatch.context() as patch:
+        patch.setattr(author_images.os, "unlink", deny_figure_unlink)
+        assert client.delete(url, headers=ADA).status_code == 503
+    assert client.get(f"/author/drafts/{draft_id}/images/a.png", headers=ADA).content == PNG
+
+    assert client.delete(url, headers=ADA).status_code == 200
+    assert client.get(f"/author/drafts/{draft_id}", headers=ADA).status_code == 404
+    assert not figure.parent.exists()
 
 
 # --- draft checks -----------------------------------------------------------------------

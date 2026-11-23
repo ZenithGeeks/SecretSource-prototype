@@ -497,12 +497,32 @@ def _insert_draft(
         "savedHash": logic.content_hash(files),
         "images": [],
     }
-    if figures:
-        # A zip's figures: one that is not the image it says, or past the caps, is left out,
-        # and the preview names it as not uploaded.
+    if not figures:
+        store.save_author_row(DRAFTS, draft)
+        return draft
+
+    try:
+        # Invalid or over-budget ZIP figures are skipped by the importer.
         images.add(draft, figures, strict=False)
-    store.save_author_row(DRAFTS, draft)
+    except Exception:
+        _cleanup_failed_import(draft["id"], save_attempted=False)
+        raise
+    try:
+        store.save_author_row(DRAFTS, draft)
+    except Exception:
+        _cleanup_failed_import(draft["id"], save_attempted=True)
+        raise
     return draft
+
+
+def _cleanup_failed_import(draft_id: str, *, save_attempted: bool) -> None:
+    try:
+        # A remote store can commit an upsert and then fail to deliver the response.
+        if not save_attempted or store.load_author_row(DRAFTS, draft_id) is None:
+            images.delete_all(draft_id)
+    except Exception:
+        # Preserve the original import error; keep files if we could not confirm row absence.
+        logger.exception("Could not clean up figures for failed draft import %s", draft_id)
 
 
 def _files_from_upload(name: str, content: bytes) -> tuple[list[dict], list[tuple[str, bytes]]]:
@@ -619,8 +639,8 @@ async def delete_draft(draft_id: str, user: str | None = Depends(current_user)):
         # the row) or re-reads the row after it and answers 404, so it never brings it back.
         with _locked(DRAFTS, draft_id):
             _row(DRAFTS, draft_id, user, "draft")
+            _erase_draft_images(draft_id)
             store.delete_author_row(DRAFTS, draft_id)
-            images.delete_all(draft_id)
 
     await asyncio.to_thread(remove)
     return {"deleted": draft_id}
@@ -777,18 +797,27 @@ async def delete_image(draft_id: str, name: str, user: str | None = Depends(curr
     return await _draft_answer(await asyncio.to_thread(remove), user)
 
 
+def _erase_draft_images(draft_id: str) -> None:
+    try:
+        images.delete_all(draft_id)
+    except OSError as error:
+        logger.exception("Could not erase figures for draft %s", draft_id)
+        raise HTTPException(503, "Could not remove draft figures. Try deleting again.") from error
+
+
 def delete_author_data(user: str | None) -> None:
     """Settings -> Your data -> Delete all for the Author role: every project, draft and source
-    row of this owner, and every stored figure of the drafts. The drafts' locks are held from
-    before their rows go until their figures are gone, so a write that already holds one (an
+    row of this owner, and every stored figure of the drafts. The drafts' locks are held through
+    figure and row deletion, so a write that already holds one (an
     upload, an autosave) finishes first and is deleted with the rest, and one that comes after
     finds no draft (404) instead of saving it back."""
     with _titles_locked(DRAFTS, user):
         draft_ids = [draft["id"] for draft in _rows(DRAFTS, user)]
         with _locked(DRAFTS, *draft_ids):
-            store.delete_author_rows(user)
+            # Keep the draft IDs discoverable if a folder cannot be removed.
             for draft_id in draft_ids:
-                images.delete_all(draft_id)
+                _erase_draft_images(draft_id)
+            store.delete_author_rows(user)
 
 
 @router.post("/drafts/{draft_id}/save")

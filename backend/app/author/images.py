@@ -175,8 +175,12 @@ def remove_unused(draft: dict) -> None:
 
 
 def delete_all(draft_id: str) -> None:
-    """Every stored figure of a deleted draft."""
-    shutil.rmtree(_folder(draft_id), ignore_errors=True)
+    """Remove a draft's figure directory, surfacing any failure other than a missing path."""
+    def on_error(_operation, _path, error):
+        if not isinstance(error, FileNotFoundError):
+            raise error
+
+    shutil.rmtree(_folder(draft_id), onexc=on_error)
 
 
 def from_zip(archive: zipfile.ZipFile, infos: list[zipfile.ZipInfo]) -> list[tuple[str, bytes]]:
