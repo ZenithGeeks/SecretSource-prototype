@@ -94,14 +94,14 @@ describe('the passages of a claim', () => {
   it('carries web candidate location metadata into the focused evidence', () => {
     const props = setup({
       claim: claim([cand('web-candidate', {
-        reference_id: 'web-ref', reference_file: 'web-ref', locator: 'https://example.org/paper#p2', paragraph: 2,
+        reference_id: 'web-ref', reference_file: 'web-ref', page: null, locator: 'https://example.org/paper#p2', paragraph: 2,
       })]),
       references: [{ reference_id: 'web-ref', file: 'web-ref', label: 'Web source', source_kind: 'web-page', url: 'https://example.org/paper' }],
     })
 
     fireEvent.click(screen.getByRole('button', { name: /text of web-candidate/ }))
     expect(props.onFocus).toHaveBeenCalledWith({
-      file: 'web-ref', passage: 'text of web-candidate', page: 4, key: 'web-candidate',
+      file: 'web-ref', passage: 'text of web-candidate', page: null, key: 'web-candidate',
       locator: 'https://example.org/paper#p2', reference_id: 'web-ref', paragraph: 2,
     })
   })

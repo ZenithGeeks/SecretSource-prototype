@@ -36,7 +36,7 @@ vi.mock('../src/lib/api', async (original) => ({
       gateway.posts.push(JSON.parse(String(init.body)))
       return { reviewed: true }
     }
-    if (path.includes('/references/') && (path.endsWith('/pdf') || path.endsWith('/retry'))) {
+    if (path.includes('/references/') && (path.endsWith('/pdf') || path.endsWith('/retry') || path.endsWith('/repair'))) {
       if (gateway.referenceErrorFor === path) throw new Error('503: reference service unavailable')
       return { id: 'reference-check' }
     }
@@ -104,6 +104,7 @@ vi.mock('../src/components/PageViewer', () => ({
 }))
 
 import { Workspace } from '../src/roles/labeler/screens/Workspace'
+import { WebEvidenceViewer } from '../src/roles/labeler/components/WebEvidenceViewer'
 
 const marker = (ref: string, text: string) => ({ ref, text, page: 1, x0: 0, y0: 0, x1: 1, y1: 1, page_width: 600 })
 
@@ -229,6 +230,25 @@ it('shows success and failure notices for cited-reference uploads and retries', 
   expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
 })
 
+it('shows success and failure notices when correcting a citation in the workspace', async () => {
+  const claim = {
+    ...makeSession().claims[0], cited: ['b9'],
+    unchecked: [{ ref: 'b9', label: 'Unread work', doi: '10.1234/old', reason: 'no-open-access' }],
+  }
+  gateway.session = makeSession({ claims: [claim], unread: [] })
+  await open()
+
+  const doi = screen.getByLabelText('Correct DOI for Unread work')
+  fireEvent.change(doi, { target: { value: '10.5678/new' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Checking the corrected citation. Previous evidence stays available until it succeeds.')
+
+  gateway.referenceErrorFor = '/analyses/a1/references/b9/repair'
+  fireEvent.change(doi, { target: { value: '10.5678/other' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Try replacement' }))
+  expect(await screen.findByText('Labels cannot be saved yet')).toBeInTheDocument()
+})
+
 it('asks the labeler to review saved labels after a cited source changes', async () => {
   const claim = { ...makeSession().claims[0], needs_review: true }
   gateway.session = makeSession({ claims: [claim] })
@@ -298,6 +318,14 @@ it('does not render a web evidence link for a malformed locator', async () => {
   await open()
 
   expect(screen.queryByRole('link', { name: /Open cited page and passage/ })).not.toBeInTheDocument()
+})
+
+it('uses the page URL and default text when web evidence has no location details', () => {
+  render(<WebEvidenceViewer title="" url="https://example.org/article" />)
+  expect(screen.getByRole('heading', { name: 'Cited web page' })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', 'https://example.org/article')
+  expect(screen.getByText('Choose a retrieved paragraph to inspect its source location.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Close reference' })).not.toBeInTheDocument()
 })
 
 it('does not let an unsafe locator override the cited page URL', async () => {
