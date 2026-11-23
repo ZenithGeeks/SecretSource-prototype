@@ -29,7 +29,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app import auth, config
 from app.auth import current_user
-from app.labeling import dspy_export, identity, ledger, pool, review, scopus
+from app.labeling import compare, dspy_export, identity, ledger, pool, review, scopus
 from app.labeling.identity import annotator, is_lead
 from app.labeling.schema import (
     TABS,
@@ -37,6 +37,7 @@ from app.labeling.schema import (
     AddedClaimIn,
     AskIn,
     BlindCheckIn,
+    CompareNoteIn,
     PersonTopicIn,
     ReviewIn,
     SaveIn,
@@ -302,6 +303,48 @@ async def session(
     rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in TABS}
     blind = await _is_blind(analysis["id"], who)
     return {**built, "annotator": who, "blind": blind, **_mine_and_others(rows, me, paper_id, blind)}
+
+
+async def _compare_rows(store: ledger.Store, paper_id: str, me: str, lead: bool) -> dict[str, list[dict]]:
+    """This paper's `claims`, `labels` and `compare_notes` rows, or 403 for someone who may not
+    compare it yet."""
+    tabs = ("claims", "labels", "compare_notes")
+    rows = {tab: await asyncio.to_thread(store.read, tab, paper_id) for tab in tabs}
+    if not compare.may_compare(me, lead, rows["claims"], rows["labels"]):
+        raise HTTPException(403, "label this paper before comparing it with the other labelers")
+    return rows
+
+
+@router.get("/compare/{analysis_id}")
+async def compare_labels(
+    analysis: dict = Depends(owned_analysis), me: str = Depends(labeler_id), lead: bool = Depends(is_lead)
+):
+    """Every labeler's verdict on each pair of this paper, next to the caller's (compare.py)."""
+    built = build_session(analysis)
+    rows = await _compare_rows(_store(), built["paper_id"], me, lead)
+    found = compare.verdicts(rows["claims"], rows["labels"])
+    return compare.view(built, found, rows["compare_notes"], me, lead)
+
+
+@router.post("/compare/{analysis_id}/notes")
+async def add_compare_note(
+    body: CompareNoteIn,
+    analysis: dict = Depends(owned_analysis),
+    who: str = Depends(annotator),
+    me: str = Depends(labeler_id),
+    lead: bool = Depends(is_lead),
+):
+    """A note on one pair, for the labelers to talk a disagreement through. Only on a pair the
+    caller can see on the Compare screen."""
+    paper_id = _paper_id(analysis)
+    store = _store()
+    rows = await _compare_rows(store, paper_id, me, lead)
+    by_account = compare.verdicts(rows["claims"], rows["labels"]).get((body.claim_id, body.reference_id))
+    if by_account is None or not (lead or me in by_account):
+        raise HTTPException(404, "no such pair on your Compare screen")
+    row = {**_stamp(who, me, paper_id), **body.model_dump()}
+    await asyncio.to_thread(store.append, "compare_notes", [row])
+    return {"author": who, "ts": row["ts"], "note": body.note}
 
 
 async def _is_blind(analysis_id: str, who: str) -> bool:
