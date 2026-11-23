@@ -49,11 +49,18 @@ fi
 # The code is copied into the image at build time, so replacing the files and building do not
 # touch the running worker. Only the restart has to wait for it to be idle.
 git -C "$MIRROR" archive "$sha" | tar -x -C "$WORKER_DIR"
-rm -f \
-  "$WORKER_DIR/deploy/monitoring/grafana/provisioning/datasources/google-cloud-monitoring.yml" \
-  "$WORKER_DIR/deploy/monitoring/grafana/dashboards/cloud-run.json"
+retired_grafana_files=(
+  "deploy/monitoring/grafana/provisioning/datasources/google-cloud-monitoring.yml"
+  "deploy/monitoring/grafana/dashboards/cloud-run.json"
+)
+for rel in "${retired_grafana_files[@]}"; do
+  if ! git -C "$MIRROR" cat-file -e "$sha:$rel" 2>/dev/null; then
+    rm -f "$WORKER_DIR/$rel"
+  fi
+done
 if (cd "$WORKER_DIR" && [[ -n $(docker compose ps -q grafana 2>/dev/null) ]]); then
-  (cd "$WORKER_DIR" && docker compose up -d --no-deps --force-recreate grafana)
+  (cd "$WORKER_DIR" && docker compose up -d --no-deps --force-recreate grafana) \
+    || say "grafana recreate failed; continuing with the worker deploy" >&2
 fi
 
 say "building $short"
