@@ -287,11 +287,16 @@ def page_from_resource(resource: WebResource) -> WebPage:
             else "the page did not contain readable static text"
         )
         raise WebReadError(outcome, message)
-    canonical = (
-        _safe_locator(_public_http_url(urljoin(resource.url, parser.canonical)))
-        if parser.canonical
-        else safe_page_url
-    )
+    canonical = safe_page_url
+    if parser.canonical:
+        # Canonical metadata is optional. Keep the fetched URL when it does not
+        # describe a public page on the fetched host.
+        try:
+            candidate = urljoin(resource.url, parser.canonical)
+            if urlsplit(candidate).hostname == urlsplit(resource.url).hostname:
+                canonical = _safe_locator(_public_http_url(candidate))
+        except (ValueError, WebReadError):
+            pass
     return WebPage(
         " ".join(parser.title.split())[:300],
         canonical,

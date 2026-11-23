@@ -183,9 +183,8 @@ def test_a_corrected_url_replaces_the_citation_only_after_its_claims_pass_check(
         },
     )
 
-    response = client.post(
-        "/analyses/a1/references/b13/repair", json={"url": "https://example.org/gmres.pdf"}
-    )
+    submitted = "https://example.org/gmres.pdf?signature=private#section"
+    response = client.post("/analyses/a1/references/b13/repair", json={"url": submitted})
     assert response.status_code == 202
     assert client.post(
         "/analyses/a1/references/b13/repair", json={"url": "https://example.org/other"}
@@ -201,7 +200,9 @@ def test_a_corrected_url_replaces_the_citation_only_after_its_claims_pass_check(
     assert analysis["claims"][0]["verdicts"][0]["cited"] == GMRES
     assert analysis["claims"][0]["needs_review"] is True
     assert "b13" not in analysis["pdfs"]
-    assert prepared[0][0] == citation["url"]
+    assert prepared[0][0] == submitted
+    assert prepared[0][1]["url"] == citation["url"]
+    assert "signature=private" not in repr(analysis)
     assert prepared[0][1]["title"] == GMRES
 
 
@@ -305,6 +306,9 @@ def test_repair_rejects_invalid_doi_and_unsafe_url(api):
     assert client.post("/analyses/a1/references/b13/repair", json={"doi": "not a DOI"}).status_code == 422
     assert client.post(
         "/analyses/a1/references/b13/repair", json={"url": "https://user:pass@example.org/page"}
+    ).status_code == 422
+    assert client.post(
+        "/analyses/a1/references/b13/repair", json={"url": "https://example.org:bad/page"}
     ).status_code == 422
     assert detached == []
 

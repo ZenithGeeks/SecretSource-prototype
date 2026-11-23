@@ -504,7 +504,7 @@ def prepare_source(
                             "outcome": "indexing-failed",
                             "retryable": bool(failure.get("retryable")),
                             "attempts": [
-                                {"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}
+                                {"provider": "direct_url", "result": "readable_pdf", "locator": locator}
                             ],
                         },
                     }
@@ -516,7 +516,7 @@ def prepare_source(
                         "outcome": "readable",
                         "retryable": False,
                         "attempts": [
-                            {"provider": "direct_url", "result": "readable_pdf", "locator": resource.url}
+                            {"provider": "direct_url", "result": "readable_pdf", "locator": locator}
                         ],
                     },
                 }

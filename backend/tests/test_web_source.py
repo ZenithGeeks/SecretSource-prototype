@@ -729,7 +729,9 @@ def test_repaired_page_title_may_append_a_site_name(monkeypatch):
 
 
 def test_direct_pdf_url_is_validated_and_indexed_once(monkeypatch, tmp_path):
-    resource = web.WebResource("https://example.org/paper.pdf", "application/pdf", "utf-8", b"%PDF-fake")
+    resource = web.WebResource(
+        "https://example.org/paper.pdf?token=private", "application/pdf", "utf-8", b"%PDF-fake"
+    )
     monkeypatch.setattr(web, "fetch_resource", lambda _: resource)
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
     monkeypatch.setattr(verify, "validate_pdf_identity", lambda *_: None)
@@ -740,10 +742,13 @@ def test_direct_pdf_url_is_validated_and_indexed_once(monkeypatch, tmp_path):
     assert result["status"] == "ok"
     assert Path(result["path"]).read_bytes() == resource.body
     assert result["source_outcome"]["outcome"] == "readable"
+    assert result["source_outcome"]["attempts"][0]["locator"] == "https://example.org/paper.pdf"
 
 
 def test_direct_pdf_indexing_failure_has_a_retrieval_outcome(monkeypatch, tmp_path):
-    resource = web.WebResource("https://example.org/paper.pdf", "application/pdf", "utf-8", b"%PDF-fake")
+    resource = web.WebResource(
+        "https://example.org/paper.pdf?token=private", "application/pdf", "utf-8", b"%PDF-fake"
+    )
     monkeypatch.setattr(web, "fetch_resource", lambda _: resource)
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
     monkeypatch.setattr(verify, "validate_pdf_identity", lambda *_: None)
@@ -755,6 +760,7 @@ def test_direct_pdf_indexing_failure_has_a_retrieval_outcome(monkeypatch, tmp_pa
 
     assert result["reason"] == "indexing-failed"
     assert result["source_outcome"]["outcome"] == "indexing-failed"
+    assert result["source_outcome"]["attempts"][0]["locator"] == "https://example.org/paper.pdf"
 
 
 @pytest.mark.parametrize("previously_accepted", [False, True])
@@ -920,6 +926,16 @@ def test_page_parser_ignores_unmatched_closing_tags():
     parser.feed("<blockquote><p>" + "useful static text " * 3 + "</blockquote></p>")
 
     assert parser.passages[0].text.startswith("useful static text")
+
+
+def test_fetch_rejects_a_local_hostname_before_dns(monkeypatch):
+    def unexpected_dns(*_args, **_kwargs):
+        pytest.fail("a local hostname should be rejected before DNS")
+
+    monkeypatch.setattr(web.socket, "getaddrinfo", unexpected_dns)
+    with pytest.raises(web.WebReadError) as blocked:
+        web.fetch_resource("http://localhost/page")
+    assert blocked.value.outcome == "blocked"
 
 
 def test_private_or_unresolvable_hosts_and_credentials_are_rejected(monkeypatch):
@@ -1097,21 +1113,44 @@ def test_redirect_limit_of_zero_is_reported(monkeypatch):
         web.fetch_resource("https://example.org/start")
 
 
-def test_static_html_rejects_non_html_empty_text_and_unsafe_canonical():
+def test_static_html_rejects_non_html_and_empty_text():
     with pytest.raises(web.WebReadError, match="HTML"):
         web.page_from_resource(web.WebResource("https://example.org", "application/pdf", "utf-8", b"%PDF"))
     with pytest.raises(web.WebReadError) as empty:
         web.page_from_resource(web.WebResource("https://example.org", "text/html", "utf-8", b"<p>tiny</p>"))
     assert empty.value.outcome == "empty"
 
-    unsafe = web.WebResource(
-        "https://example.org", "text/html", "utf-8",
-        b"<link rel='canonical' href='http://localhost/private'>"
-        b"<p>This paragraph has enough readable static text to count as evidence.</p>",
+
+@pytest.mark.parametrize(
+    ("canonical", "resolves", "expected_path"),
+    [
+        ("http://localhost/private", True, "/article"),
+        ("https://other.example/copy", True, "/article"),
+        ("http://[broken", True, "/article"),
+        ("/canonical?token=private#fragment", True, "/canonical"),
+        ("/canonical", False, "/article"),
+    ],
+)
+def test_static_html_uses_only_a_valid_canonical_on_the_fetched_host(
+    monkeypatch, canonical, resolves, expected_path
+):
+    def resolve(host, *_args, **_kwargs):
+        assert host == "example.org"
+        if not resolves:
+            raise OSError("DNS unavailable")
+        return [(None, None, None, None, ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(web.socket, "getaddrinfo", resolve)
+    resource = web.WebResource(
+        "https://example.org/article?token=private", "text/html", "utf-8",
+        f"<link rel='canonical' href='{canonical}'>".encode()
+        + b"<p id='evidence'>This paragraph has enough readable static text to count as evidence.</p>",
     )
-    with pytest.raises(web.WebReadError) as blocked:
-        web.page_from_resource(unsafe)
-    assert blocked.value.outcome == "blocked"
+
+    page = web.page_from_resource(resource)
+
+    assert page.url == f"https://example.org{expected_path}"
+    assert page.passages[0].locator == "https://example.org/article#evidence"
 
 
 def test_read_page_fetches_then_extracts(monkeypatch):

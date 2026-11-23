@@ -1014,12 +1014,13 @@ async def repair_reference(
     """Try a corrected DOI or URL for one cited work, replacing stored identity only on success."""
     from urllib.parse import urlsplit
 
-    from app.pipeline.sources import doi_in
+    from app.pipeline.sources import _safe_locator, doi_in
 
     analysis = await asyncio.to_thread(_owned, analysis_id, user)
     if analysis.get("status") != "done":
         raise HTTPException(409, "wait for the analysis to finish")
-    if bool(body.doi.strip()) == bool(body.url.strip()):
+    url = body.url.strip()
+    if bool(body.doi.strip()) == bool(url):
         raise HTTPException(422, "provide exactly one corrected DOI or URL")
     citation = next(
         (
@@ -1045,20 +1046,21 @@ async def repair_reference(
             raise HTTPException(422, "enter a DOI such as 10.1234/example")
         updated.update(doi=normalized, url="", arxiv="")
     else:
-        parsed = urlsplit(body.url.strip())
+        parsed = urlsplit(url)
         if (
             parsed.scheme.lower() not in {"http", "https"}
             or not parsed.hostname
             or parsed.username
             or parsed.password
+            or not (locator := _safe_locator(url))
         ):
             raise HTTPException(422, "enter a public HTTP or HTTPS URL without embedded credentials")
-        updated.update(url=body.url.strip(), doi="", arxiv="")
-    source = updated["url"] or lookup_key(updated)
+        updated.update(url=locator, doi="", arxiv="")
+    source = url or lookup_key(updated)
     if not source:
         raise HTTPException(422, "the replacement has no usable source identifier")
     _begin_recheck(analysis_id, ref)
-    expected = {**updated, "_validate_web_title": bool(body.url.strip())}
+    expected = {**updated, "_validate_web_title": bool(url)}
     _detach(
         _recheck_reference(
             analysis_id,
