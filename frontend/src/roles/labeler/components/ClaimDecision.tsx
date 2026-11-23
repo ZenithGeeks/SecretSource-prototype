@@ -110,8 +110,6 @@ export function ClaimDecision({
       {collapsed && choice ? (
         <button
           type="button"
-          role="radio"
-          aria-checked="true"
           aria-expanded={false}
           aria-keyshortcuts={choice.key}
           onClick={() => setReopened(claim.claim_id)}

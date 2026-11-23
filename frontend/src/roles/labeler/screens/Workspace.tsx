@@ -11,7 +11,7 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
 import { EyeOff, Keyboard } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { PageViewer, type Target } from '../../../components/PageViewer'
@@ -68,18 +68,11 @@ import { UnresolvedReferences } from '../components/UnresolvedReferences'
 const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
-const SHORTCUTS_KEY = 'labeler.shortcuts' // "hidden" once the person closes the list
 const SPLIT_KEY = 'labeler.panelRatio' // the paper's share of the width, kept by SplitPane
+const STACKED_SPLIT_KEY = 'labeler.stackedRatio' // the reference's share of the height in Stacked view
 // The claim panel never gets narrower than this: it was a fixed 27rem before it could be resized.
 const PANEL_MIN_PX = 432
 const GUTTER_PX = 12 // the space between the handle and the panel (ml-3), outside the panel's box
-const shortcutsShown = () => {
-  try {
-    return window.localStorage.getItem(SHORTCUTS_KEY) !== 'hidden'
-  } catch {
-    return true // no stored choice: show them, new labelers need them
-  }
-}
 type PaperView = 'both' | 'reference' | 'side'
 const VIEW_NAMES: Record<PaperView, string> = {
   side: 'Side by side',
@@ -244,6 +237,7 @@ function Body({
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
   const [paperDone, setPaperDone] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const panelScrollRef = useRef<HTMLDivElement>(null)
   const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
   const pool = usePool()
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
@@ -296,6 +290,8 @@ function Body({
     setPaperDone(false)
     setNotice(null)
     save.reset()
+    /* v8 ignore next -- @preserve */
+    if (panelScrollRef.current) panelScrollRef.current.scrollTop = 0
   }
 
   // A searched claim has no passages until its search answers, so it opens on nothing, or on a
@@ -341,15 +337,8 @@ function Body({
   const dirty = !sameDraft(draft, saved[currentId])
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
 
-  const [shortcutsOpen, setShortcutsOpen] = useState(shortcutsShown)
-  const toggleShortcuts = () => {
-    setShortcutsOpen(!shortcutsOpen)
-    try {
-      window.localStorage.setItem(SHORTCUTS_KEY, shortcutsOpen ? 'hidden' : 'shown')
-    } catch {
-      // the choice just is not remembered
-    }
-  }
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const toggleShortcuts = () => setShortcutsOpen((open) => !open)
   // Kept with the claim it was for, so moving to another claim drops the cursor at once.
   const [pointing, setPointing] = useState<{ claimId: string; at: Pointing } | null>(null)
   const point = useCallback((at: Pointing | null) => setPointing(at && { claimId: currentId, at }), [currentId])
@@ -458,6 +447,12 @@ function Body({
       else if (key === 'u' || key === 'ArrowUp') stepPassage(-1)
       else if (key === ']' || (key === 'ArrowRight' && event.shiftKey)) stepClaim(1)
       else if (key === '[' || (key === 'ArrowLeft' && event.shiftKey)) stepClaim(-1)
+      else if (key === 'f') {
+        event.preventDefault()
+        const target = saveNextTarget(claims, drafts, saved, cited, position)
+        /* v8 ignore next -- @preserve */
+        if (target.kind === 'claim') select(claims[target.index].claim_id)
+      }
       else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
         const level = Number(key) as Level
@@ -532,35 +527,34 @@ function Body({
     onCitation: (marker: CitationMarker) => openReference(readRefs[marker.ref]),
   }
   const referencePicker = session.references.length > 0 && (
-    <label className="flex min-w-0 items-center gap-2 text-xs text-ink-muted">
-      Open reference
-      <select
-        value={refId ?? ''}
-        onChange={(e) => {
-          const r = session.references.find((x) => x.reference_id === e.target.value)
-          if (r) openReference(r)
-        }}
-        className="min-h-9 min-w-0 flex-1 truncate rounded-lg border border-border-subtle bg-surface px-2 text-sm text-ink"
-      >
-        {!refId && <option value="">Choose a reference</option>}
-        {session.references.map((r) => (
-          <option key={r.reference_id} value={r.reference_id}>
-            {r.ref ? `[${r.ref}] ` : ''}
-            {r.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <select
+      aria-label="Open reference"
+      value={refId ?? ''}
+      onChange={(e) => {
+        const r = session.references.find((x) => x.reference_id === e.target.value)
+        if (r) openReference(r)
+      }}
+      className="h-8 w-full min-w-0 truncate rounded-lg border border-border-subtle bg-surface px-2 text-xs text-ink"
+    >
+      {!refId && <option value="">Open reference…</option>}
+      {session.references.map((r) => (
+        <option key={r.reference_id} value={r.reference_id}>
+          {r.ref ? `[${r.ref}] ` : ''}
+          {r.label}
+        </option>
+      ))}
+    </select>
   )
   const { done, total } = progress(claims, drafts, cited, saved)
   const refs = referencesOf(claim, draft)
-  const viewer = (target: Target, side: Picked['side'], onClose?: () => void) => (
+  const viewer = (target: Target, side: Picked['side'], onClose?: () => void, toolbarLead?: ReactNode) => (
     <PageViewer
       key={target.paper}
       target={target}
       onClose={onClose}
+      toolbarLead={toolbarLead}
       {...(side === 'paper' && citing)}
-      className={!wide ? VIEWER_HEIGHT : both ? 'h-[75vh] shrink-0' : 'h-full min-h-0'}
+      className={!wide ? VIEWER_HEIGHT : 'h-full min-h-0'}
       keyboard={false}
       compactQuote={wide}
       zoomKey={`labeler.zoom.${side}`}
@@ -618,7 +612,11 @@ function Body({
 
   const legend = shortcutsOpen && (
     // Shortcuts need a keyboard, so a touch screen does not list them.
-    <ul id="labeler-shortcuts" aria-label="Keyboard shortcuts" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted pointer-coarse:hidden">
+    <ul
+      id="labeler-shortcuts"
+      aria-label="Keyboard shortcuts"
+      className="absolute right-0 top-full z-30 mt-2 flex w-80 max-w-[calc(100vw-2rem)] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-border-subtle bg-surface p-3 text-xs text-ink-muted shadow-lg pointer-coarse:hidden"
+    >
       {[
         ['?', 'hide this list'],
         ['K', 'keep'],
@@ -630,6 +628,7 @@ function Body({
         ['U', 'previous passage'],
         [']', 'next claim'],
         ['[', 'previous claim'],
+        ['F', 'next unfinished'],
         ['1–4', 'level'],
         ['L M H', 'confidence'],
         ['Z', 'undo'],
@@ -704,7 +703,6 @@ function Body({
         />
       )}
       {deciding && refs.length === 0 && <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>}
-      {!wide && legend}
     </>
   )
 
@@ -794,32 +792,52 @@ function Body({
     />
   )
 
-  const papers = (
-    <div className="mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+  const referencePane = right ? (
+    viewer(right, 'reference', undefined, referencePicker)
+  ) : (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {referencePicker}
+      <UnresolvedReferences citations={unresolvedCitations(claim, session)} />
+    </div>
+  )
+
+  const papers = (
+    <div className="mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       {selection}
       {/* Side by side: the paper under review left, the reference right, as they are read.
           Stacked: the reference on top, since it is the paper being judged. */}
-      <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
-        {side && viewer(left_, 'paper')}
-        {right ? viewer(right, 'reference') : <UnresolvedReferences citations={unresolvedCitations(claim, session)} />}
-        {both && viewer(left_, 'paper')}
-      </div>
+      {both ? (
+        <SplitPane
+          direction="vertical"
+          leftLabel="Cited reference"
+          rightLabel="Paper under review"
+          separatorLabel="Resize the reference and the paper under review"
+          initialRatio={0.6}
+          minRight={120}
+          storageKey={STACKED_SPLIT_KEY}
+          left={referencePane}
+          right={viewer(left_, 'paper')}
+        />
+      ) : (
+        <div className={cn('min-h-0 flex-1 gap-3', side ? 'grid grid-cols-2' : 'grid')}>
+          {side && viewer(left_, 'paper')}
+          {referencePane}
+        </div>
+      )}
     </div>
   )
 
   const labelPanel = (
-    <div className="ml-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface">
+    <div className="ml-3 flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
       {paperDone ? (
         <div className="p-4">{paperDoneView}</div>
       ) : (
         <>
           {claimPin()}
-          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">{panel}</div>
-          <div className="flex flex-col gap-2 border-t border-border-subtle p-3">
-            {legend}
-            {saveBar('border-0 p-0')}
+          <div ref={panelScrollRef} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+            {panel}
           </div>
+          <div className="border-t border-border-subtle">{saveBar('border-0')}</div>
         </>
       )}
     </div>
@@ -827,7 +845,7 @@ function Body({
 
   return (
     // Fills the AppShell main box on wide screens so only the paper and label panes scroll.
-    <div className={cn('flex flex-col gap-3', wide && 'min-h-0 flex-1')}>
+    <div className={cn('flex flex-col gap-2', wide && 'min-h-0 flex-1')}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 xl:w-52 xl:shrink-0">
           <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink xl:line-clamp-1">
@@ -846,7 +864,7 @@ function Body({
           onSelect={select}
           onAdd={addClaim}
         />
-        <div className="ml-auto flex items-center gap-3 xl:ml-0">
+        <div className="relative ml-auto flex items-center gap-3 xl:ml-0">
           {wide && viewToggle}
           <div className="w-36">
             <button
@@ -871,6 +889,7 @@ function Body({
             </div>
           </div>
           {shortcutsButton}
+          {legend}
         </div>
       </header>
       {session.blind && (

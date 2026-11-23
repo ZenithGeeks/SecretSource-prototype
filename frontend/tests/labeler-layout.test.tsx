@@ -61,32 +61,31 @@ describe('the labeler workspace layout', () => {
     expect(strip.closest('header')).not.toBeNull()
   })
 
-  it('shows the shortcuts until they are put away, and keeps them away after a reload', async () => {
-    const { unmount } = renderWorkspace()
-    expect(await screen.findByRole('list', { name: SHORTCUTS })).toBeInTheDocument()
-
-    fireEvent.keyDown(window, { key: '?' })
-    expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
-
-    unmount()
+  it('shows the shortcuts only when ? or the button is pressed', async () => {
     renderWorkspace()
     const button = await screen.findByRole('button', { name: SHORTCUTS })
     expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
     expect(button).toHaveAttribute('aria-expanded', 'false')
 
-    fireEvent.click(button)
+    fireEvent.keyDown(window, { key: '?' })
     expect(screen.getByRole('list', { name: SHORTCUTS })).toBeInTheDocument()
     expect(button).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.keyDown(window, { key: '?' })
+    expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
+
+    fireEvent.click(button)
+    expect(screen.getByRole('list', { name: SHORTCUTS })).toBeInTheDocument()
   })
 
   it('does not take a question mark typed in a text box for the shortcut', async () => {
     renderWorkspace()
-    await screen.findByRole('list', { name: SHORTCUTS })
+    await screen.findByRole('button', { name: SHORTCUTS })
     fireEvent.click(screen.getByRole('button', { name: 'Add a missed claim' }))
 
     fireEvent.keyDown(screen.getByRole('textbox'), { key: '?' })
 
-    expect(screen.getByRole('list', { name: SHORTCUTS })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
   })
 
   it('gives the keyboard back to the add button when the new-claim form closes', async () => {
@@ -114,5 +113,45 @@ describe('the labeler workspace layout', () => {
       'aria-valuenow',
       '65',
     )
+  })
+
+  it('resizes the stacked viewers with a vertical split and remembers it across reload', async () => {
+    const { unmount } = renderWorkspace()
+    fireEvent.click(await screen.findByRole('button', { name: 'Stacked' }))
+    const handle = screen.getByRole('separator', { name: 'Resize the reference and the paper under review' })
+    expect(handle).toHaveAttribute('aria-orientation', 'horizontal')
+    expect(handle).toHaveAttribute('aria-valuenow', '60')
+
+    fireEvent.keyDown(handle, { key: 'ArrowUp' })
+    expect(handle).toHaveAttribute('aria-valuenow', '55')
+    fireEvent.keyDown(handle, { key: 'ArrowDown' })
+    expect(handle).toHaveAttribute('aria-valuenow', '60')
+    fireEvent.keyDown(handle, { key: 'ArrowUp' })
+    expect(handle).toHaveAttribute('aria-valuenow', '55')
+
+    unmount()
+    renderWorkspace()
+    const reloaded = await screen.findByRole('separator', { name: 'Resize the reference and the paper under review' })
+    expect(reloaded).toHaveAttribute('aria-valuenow', '55')
+
+    reloaded.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(reloaded, { pointerId: 1, clientY: 50 })
+    fireEvent.pointerMove(reloaded, { clientY: 60 })
+    fireEvent.pointerUp(reloaded)
+  })
+
+  it('jumps to the next unfinished claim on F and resets scroll on claim change', async () => {
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Claim 1 of 2' })
+    const scroller = document.querySelector('.overflow-y-auto.p-4') as HTMLElement
+    scroller.scrollTop = 200
+
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByRole('heading', { name: 'Claim 2 of 2' })).toBeInTheDocument()
+    expect(scroller.scrollTop).toBe(0)
+
+    fireEvent.keyDown(window, { key: 'x' })
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByRole('heading', { name: 'Claim 1 of 2' })).toBeInTheDocument()
   })
 })

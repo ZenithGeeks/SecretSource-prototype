@@ -14,19 +14,12 @@ const HANDLE_PX = 6 // the separator's width (lg:w-1.5): it sits between the pan
 const clamp = (value: number) => Math.min(MAX, Math.max(MIN, value))
 
 /** Where a key sends the handle, or null for a key it does not use. */
-function ratioForKey(key: string, ratio: number): number | null {
-  switch (key) {
-    case 'ArrowLeft':
-      return ratio - STEP
-    case 'ArrowRight':
-      return ratio + STEP
-    case 'Home':
-      return MIN
-    case 'End':
-      return MAX
-    default:
-      return null
-  }
+function ratioForKey(key: string, ratio: number, vertical: boolean): number | null {
+  if (key === (vertical ? 'ArrowUp' : 'ArrowLeft')) return ratio - STEP
+  if (key === (vertical ? 'ArrowDown' : 'ArrowRight')) return ratio + STEP
+  if (key === 'Home') return MIN
+  if (key === 'End') return MAX
+  return null
 }
 
 function readRatio(key: string | undefined, fallback: number) {
@@ -57,6 +50,7 @@ export function SplitPane({
   initialRatio = 0.5,
   minRight = 0,
   storageKey,
+  direction = 'horizontal',
 }: {
   left: ReactNode
   right: ReactNode
@@ -64,24 +58,28 @@ export function SplitPane({
   rightLabel: string
   /** What a screen reader says for the handle. */
   separatorLabel?: string
-  /** The left pane's share of the width until the person moves the handle. */
+  /** The left (or top) pane's share until the person moves the handle. */
   initialRatio?: number
-  /** The narrowest the right pane may get, in px, so its content never has to squeeze. */
+  /** The narrowest the right (or bottom) pane may get, in px, so its content never has to squeeze. */
   minRight?: number
   /** Where to keep the ratio. Left out, the ratio is not kept. */
   storageKey?: string
+  direction?: 'horizontal' | 'vertical'
 }) {
+  const vertical = direction === 'vertical'
   const [ratio, setRatio] = useState(() => readRatio(storageKey, initialRatio))
   const container = useRef<HTMLDivElement>(null)
 
-  // The share the left pane may take: the right pane keeps `minRight` px of the measured width,
-  // even when that is less than MIN. A width of 0 is the page before it is laid out: no limit yet.
-  const limit = (value: number, width: number) => Math.min(clamp(value), width ? 1 - (minRight + HANDLE_PX) / width : MAX)
+  // The share the first pane may take: the second keeps `minRight` px of the measured size,
+  // even when that is less than MIN. A size of 0 is the page before it is laid out: no limit yet.
+  const limit = (value: number, size: number) => Math.min(clamp(value), size ? 1 - (minRight + HANDLE_PX) / size : MAX)
 
   const change = (value: number) => {
     // Unreachable fallback: change() only runs from the mounted handle.
     /* v8 ignore next -- @preserve */
-    const next = limit(value, container.current?.getBoundingClientRect().width ?? 0)
+    const rect = container.current?.getBoundingClientRect()
+    /* v8 ignore next -- @preserve */
+    const next = limit(value, (vertical ? rect?.height : rect?.width) ?? 0)
     setRatio(next)
     writeRatio(storageKey, next)
   }
@@ -96,7 +94,9 @@ export function SplitPane({
     handle.setPointerCapture(event.pointerId)
     let latest = ratio
     const move = (e: PointerEvent) => {
-      latest = limit((e.clientX - rect.left) / rect.width, rect.width)
+      const size = vertical ? rect.height : rect.width
+      const offset = vertical ? e.clientY - rect.top : e.clientX - rect.left
+      latest = limit(offset / size, size)
       setRatio(latest)
     }
     const up = () => {
@@ -111,25 +111,33 @@ export function SplitPane({
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const next = ratioForKey(event.key, ratio)
+    const next = ratioForKey(event.key, ratio, vertical)
     if (next === null) return
     event.preventDefault()
     change(next)
   }
 
   return (
-    <div ref={container} className="flex min-h-0 flex-1 flex-col lg:flex-row" style={{ '--split': `${ratio * 100}%` } as React.CSSProperties}>
+    <div
+      ref={container}
+      className={vertical ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1 flex-col lg:flex-row'}
+      style={{ '--split': `${ratio * 100}%` } as React.CSSProperties}
+    >
       <section
         aria-label={leftLabel}
-        className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-none lg:basis-[var(--split)]"
-        // A window narrowed after the ratio was saved must still leave the right pane its width.
-        style={minRight ? { maxWidth: `calc(100% - ${minRight + HANDLE_PX}px)` } : undefined}
+        className={
+          vertical
+            ? 'flex min-h-0 min-w-0 flex-none basis-[var(--split)] flex-col'
+            : 'flex min-h-0 min-w-0 flex-1 flex-col lg:flex-none lg:basis-[var(--split)]'
+        }
+        // A window narrowed after the ratio was saved must still leave the second pane its size.
+        style={minRight ? { [vertical ? 'maxHeight' : 'maxWidth']: `calc(100% - ${minRight + HANDLE_PX}px)` } : undefined}
       >
         {left}
       </section>
       <div
         role="separator"
-        aria-orientation="vertical"
+        aria-orientation={vertical ? 'horizontal' : 'vertical'}
         aria-label={separatorLabel}
         aria-valuemin={MIN * 100}
         aria-valuemax={MAX * 100}
@@ -138,14 +146,25 @@ export function SplitPane({
         onPointerDown={onPointerDown}
         onKeyDown={onKeyDown}
         onDoubleClick={() => change(initialRatio)}
-        // The bar is 6px wide; the pseudo-element makes the pointer target 24px (WCAG 2.2 target size).
-        className="relative hidden shrink-0 cursor-col-resize touch-none flex-col items-center justify-center gap-[3px] bg-border-subtle before:absolute before:inset-y-0 before:-left-[9px] before:-right-[9px] lg:flex lg:w-1.5 hover:bg-accent-soft focus-visible:bg-accent-soft"
+        // The bar is 6px; the pseudo-element makes the pointer target 24px (WCAG 2.2 target size).
+        className={
+          vertical
+            ? 'relative flex h-1.5 w-full shrink-0 cursor-row-resize touch-none items-center justify-center gap-[3px] bg-border-subtle before:absolute before:inset-x-0 before:-top-[9px] before:-bottom-[9px] hover:bg-accent-soft focus-visible:bg-accent-soft'
+            : 'relative hidden shrink-0 cursor-col-resize touch-none flex-col items-center justify-center gap-[3px] bg-border-subtle before:absolute before:inset-y-0 before:-left-[9px] before:-right-[9px] lg:flex lg:w-1.5 hover:bg-accent-soft focus-visible:bg-accent-soft'
+        }
       >
         <span aria-hidden="true" className="size-[3px] rounded-full bg-ink-muted" />
         <span aria-hidden="true" className="size-[3px] rounded-full bg-ink-muted" />
         <span aria-hidden="true" className="size-[3px] rounded-full bg-ink-muted" />
       </div>
-      <section aria-label={rightLabel} className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border-subtle lg:border-t-0">
+      <section
+        aria-label={rightLabel}
+        className={
+          vertical
+            ? 'flex min-h-0 min-w-0 flex-1 flex-col'
+            : 'flex min-h-0 min-w-0 flex-1 flex-col border-t border-border-subtle lg:border-t-0'
+        }
+      >
         {right}
       </section>
     </div>
