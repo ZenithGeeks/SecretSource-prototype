@@ -96,7 +96,7 @@ export function ClaimDecision({
       {!draft.status && (
         <p className="text-[15px] leading-6 text-ink">{claim.claim}</p>
       )}
-      {claim.sentence && claim.sentence !== claim.claim && (
+      {!draft.status && claim.sentence && claim.sentence !== claim.claim && (
         <p className="border-l-2 border-border-subtle pl-3 text-[13px] leading-5 text-ink-muted">
           The paper says: “{claim.sentence}”
         </p>
@@ -110,8 +110,6 @@ export function ClaimDecision({
       {collapsed && choice ? (
         <button
           type="button"
-          role="radio"
-          aria-checked="true"
           aria-expanded={false}
           aria-keyshortcuts={choice.key}
           onClick={() => setReopened(claim.claim_id)}

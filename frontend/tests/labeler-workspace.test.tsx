@@ -53,15 +53,20 @@ vi.mock('../src/components/PageViewer', () => ({
     onClose,
     markers = [],
     onCitation,
+    toolbarLead,
+    embedded,
   }: {
     target: { paper: string; quote?: string; label: string; detail?: string; source?: { page: number } | null; error?: string; page?: number }
     onSelectText?: (s: { text: string; page: number | null }) => void
     onClose?: () => void
     markers?: { ref: string; text: string }[]
     onCitation?: (marker: { ref: string; text: string }) => void
+    toolbarLead?: React.ReactNode
+    embedded?: boolean
   }) => (
     <div>
-      <div data-testid="viewer">
+      {toolbarLead}
+      <div data-testid="viewer" data-embedded={embedded}>
         {target.paper}|{target.quote}
       </div>
       <p data-testid="viewer-heading">
@@ -206,14 +211,14 @@ describe('the keyboard', () => {
   it('keeps, edits and rejects the claim, and takes no key typed into a text box', async () => {
     await open()
     key('k')
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toBeInTheDocument()
     key('e')
     const box = await screen.findByRole('textbox', { name: 'The claim, as it should read' })
     expect(box).toHaveValue('Method Y improves recall.')
     fireEvent.keyDown(box, { key: 'x' })
-    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument()
     key('x')
-    expect(screen.getByRole('radio', { name: /Reject/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Reject/ })).toBeInTheDocument()
   })
 
   it('ignores a letter pressed with Alt', async () => {
@@ -232,9 +237,11 @@ describe('the keyboard', () => {
     expect(reference()).toBe('refB.pdf|unrelated text')
     key('n')
     expect(reference()).toBe('refC.pdf|a different study')
+    fireEvent.click(screen.getByRole('tab', { name: /Ref B/ }))
     const [first, second] = screen.getAllByRole('radiogroup', { name: /^Passage \d of Ref B$/ })
     expect(within(first).getByRole('radio', { name: /^Relevant/ })).toHaveAttribute('aria-checked', 'true')
     expect(within(second).getByRole('radio', { name: /^Not relevant/ })).toHaveAttribute('aria-checked', 'true')
+    key('j')
     key('r')
     expect(reference()).toBe('refC.pdf|a different study') // everything is judged: it stays
   })
@@ -261,7 +268,7 @@ describe('the keyboard', () => {
     expect(reference()).toBe('refC.pdf|')
     key('j')
     expect(reference()).toBe('refB.pdf|recall rose by 4 points')
-    fireEvent.change(picker, { target: { value: 'refC' } })
+    fireEvent.change(screen.getByLabelText('Open reference'), { target: { value: 'refC' } })
     key('u')
     expect(reference()).toBe('refC.pdf|a different study')
   })
@@ -309,7 +316,7 @@ describe('the keyboard', () => {
     key('r') // focus moves on to the second passage of Ref B
     key('j') // and then to Ref C's
     key('3')
-    expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.queryByRole('radio', { name: '3 · Clear' })).not.toBeInTheDocument()
   })
 
   it('sets the reference confidence with the L, M and H shortcuts', async () => {
@@ -331,19 +338,21 @@ describe('the keyboard', () => {
     key('x')
     key('s', { metaKey: true })
     await waitFor(() => expect(gateway.posts).toHaveLength(1))
-    await screen.findByText('Saved 4 rows')
+    await screen.findByText('Saved')
     key('s', { ctrlKey: true })
     expect(gateway.posts).toHaveLength(1)
   })
 
   it('shows and hides the shortcut list with a question mark', async () => {
     await open()
+    expect(screen.queryByRole('list', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+    key('?')
     expect(screen.getByRole('list', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
     key('?')
     expect(screen.queryByRole('list', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
   })
 
-  it('shows the shortcuts when the browser will not say, and carries on when it will not remember', async () => {
+  it('carries on when the browser will not remember view choices', async () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
     })
@@ -351,10 +360,8 @@ describe('the keyboard', () => {
       throw new Error('full')
     })
     await open()
-    expect(screen.getByRole('list', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
-    key('?')
     fireEvent.click(screen.getByRole('button', { name: 'Stacked' }))
-    expect(screen.queryByRole('list', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stacked' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
 
@@ -388,7 +395,7 @@ describe('saving', () => {
     await open()
     key('x')
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
-    await screen.findByText('Saved 4 rows')
+    await screen.findByText('Saved')
     expect(heading()).toBe('Claim 1 of 3')
   })
 
@@ -398,7 +405,7 @@ describe('saving', () => {
     key('x')
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Not saved: Labels cannot be saved yet.')
-    expect(screen.getByText('Unsaved changes · Ctrl/⌘+S saves')).toBeInTheDocument()
+    expect(screen.getByText('Unsaved · Ctrl/⌘+S')).toBeInTheDocument()
   })
 
   it('does not move to another claim while a save is running', async () => {
@@ -446,6 +453,7 @@ describe('what the reference viewer is told', () => {
   it('names a reference with no marker plainly, and opens on page 1 for a passage with no page', async () => {
     await open()
     key('k')
+    fireEvent.click(screen.getByRole('tab', { name: 'Ref C' }))
     fireEvent.click(screen.getAllByRole('button', { name: /a different study/ })[0])
     expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('refC.pdf: Reference: Ref C')
     expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('opens on page 1')
@@ -486,7 +494,7 @@ describe('what the reference viewer is told', () => {
     const heading0 = screen.getAllByTestId('viewer-heading')[0]
     expect(heading0).toHaveTextContent('orphan.pdf: Reference /')
     const picker = screen.getByLabelText('Open reference')
-    expect(within(picker).getByRole('option', { name: 'Choose a reference' })).toBeInTheDocument()
+    expect(within(picker).getByRole('option', { name: 'Open reference…' })).toBeInTheDocument()
     fireEvent.change(picker, { target: { value: 'nothing' } }) // not an option: nothing opens
     expect(reference()).toBe('orphan.pdf|from a file nobody listed')
 
@@ -501,7 +509,7 @@ describe('text selected in a PDF', () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toBeInTheDocument()
     expect(screen.getByText('Passages you added')).toBeInTheDocument()
     expect(reference()).toBe('refB.pdf|picked in refB.pdf')
 
@@ -516,7 +524,7 @@ describe('text selected in a PDF', () => {
     key('e')
     fireEvent.click(screen.getByRole('button', { name: 'select in refB.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add as evidence' }))
-    expect(screen.getByRole('radio', { name: /Edit/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument()
   })
 
   it('will not add evidence to a rejected claim', async () => {
@@ -539,7 +547,7 @@ describe('text selected in a PDF', () => {
     fireEvent.click(screen.getByRole('button', { name: 'select in paperA.pdf' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add as a new claim' }))
     await waitFor(() => expect(heading()).toBe('Claim 4 of 4 · added'))
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toBeInTheDocument()
   })
 })
 
@@ -587,6 +595,7 @@ describe('on a narrow screen', () => {
     expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Read the claim in this paper' }))
     expect(screen.getByTestId('viewer')).toHaveTextContent('paperA.pdf|We show Y improves recall [4].')
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-embedded', 'false')
     fireEvent.click(screen.getByRole('button', { name: 'close paperA.pdf' }))
     expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
 
@@ -596,9 +605,8 @@ describe('on a narrow screen', () => {
     expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
   })
 
-  it('lists the shortcuts in the panel and keeps the save bar below', async () => {
+  it('keeps the save bar below on a narrow screen', async () => {
     await open()
-    expect(screen.getByRole('list', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Save labels/ })).toBeInTheDocument()
   })
 
@@ -611,6 +619,22 @@ describe('on a narrow screen', () => {
 })
 
 describe('the screen size', () => {
+  it.each([1024, 1279])('embeds both viewers and keeps the label controls available at %ipx', async (width) => {
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: width >= Number(query.match(/\d+/)?.[0]),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+    await open()
+    const viewers = screen.getAllByTestId('viewer')
+    expect(viewers).toHaveLength(2)
+    viewers.forEach((viewer) => expect(viewer).toHaveAttribute('data-embedded', 'true'))
+    const viewToggle = screen.getByRole('group', { name: 'Which papers to show' })
+    expect(screen.getByRole('radio', { name: /^Keep/ })).toBeEnabled()
+    fireEvent.click(within(viewToggle).getByRole('button', { name: 'Reference only' }))
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-embedded', 'true')
+  })
+
   it('switches layout when the window crosses the width the workspace needs', async () => {
     const listeners: (() => void)[] = []
     let matches = true
@@ -639,7 +663,7 @@ describe('claims added by hand', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Claim 4,/ }))
     await waitFor(() => expect(reference()).toBe('refB.pdf|found by search'))
     expect(gateway.searches).toEqual([{ claim_id: 'paperA#h-1', claim: 'A claim I added.' }])
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('lists a found passage once, though the claim already had it', async () => {
@@ -685,7 +709,7 @@ describe('claims added by hand', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
     await waitFor(() => expect(heading()).toBe('Claim 4 of 4 · added'))
     await waitFor(() => expect(gateway.searches).toHaveLength(1))
-    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Keep/ })).toHaveAttribute('aria-expanded', 'false')
   })
 })
 
@@ -802,6 +826,7 @@ describe('work kept from an earlier visit', () => {
     expect(screen.getByText(/Unsaved labels from your last visit were kept in this browser/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Claim 4, in progress, unsaved: Typed last time/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Claim 5/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'ghost' }))
     expect(screen.getByText('How well does ghost support the claim?')).toBeInTheDocument()
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
   })
@@ -841,7 +866,7 @@ describe('Ask about the claim', () => {
     key(']')
     key('x')
     fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
-    await screen.findByText('Saved 4 rows')
+    await screen.findByText('Saved')
     await waitFor(() => expect(within(slot).getByRole('button', { name: 'Review' })).toBeEnabled())
     key('k')
     await waitFor(() => expect(slot).toHaveTextContent('Save your changes first: the review checks what you saved.'))

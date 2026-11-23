@@ -94,7 +94,7 @@ default".
 | `PHOENIX_PROJECT_NAME` | `secretsource` | the Phoenix project the traces go in |
 | `PHOENIX_API_KEY` | empty | only for Phoenix Cloud |
 | `WORKER_METRICS_PORT` | `9101` | host runs of `worker.py` only: the port its Prometheus metrics are served on (under compose it is always 9101) |
-| `SERVICE_AUTH` | `none` | `google-id-token` adds an identity token for private Cloud Run services |
+| `SERVICE_AUTH` | `none` | `api-key` sends `SERVICE_API_KEY` in an `apikey` header |
 | `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
 | `PAPERS_DIR` | `data/papers` | downloaded PDFs and figure crops |
 | `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
@@ -299,19 +299,11 @@ lives on the mini PC and is shared over NFS, and the PC's workers mount that sha
 
 Without the shared folder, every uploaded PDF ends with "no paper found matching the title".
 
-The browser uploads a paper's PDF straight to that bucket, because the Vercel proxy refuses a
-request body over 4.5 MB (#266). `POST /uploads` starts a Cloud Storage resumable upload for one
-PDF of the size the browser states and returns its URL; the browser PUTs the file there and calls
-`POST /analyses/from-upload`. This needs `PAPERS_BUCKET`, `UPLOAD_ORIGINS` (the web app's origin)
-and a CORS rule on the bucket that allows PUT from that origin
-(`gcloud storage buckets update gs://gcp-edu-471706-papers --cors-file=...`). Without the two
-settings, uploads go through `POST /analyses/upload` as before.
-
 ## Tests
 
 The tests need `google-adk` and `pymupdf`, so run them inside the gateway image. Mount the
-whole repository, not only `backend/`: the teacher tests read `supabase/migrations/` and
-`.env.cloud` from the repository root.
+whole repository, not only `backend/`: the teacher tests read `supabase/migrations/` from
+the repository root.
 
 ```bash
 docker compose build gateway
@@ -374,7 +366,7 @@ files (#168).
 Response: `{"id": "<analysis id>"}`.
 
 Errors, and nothing is saved or created for any of them:
-- `413` when the file is over 100 MB (`uploads.MAX_UPLOAD_BYTES`).
+- `413` when the file is over 100 MiB (`app.main.MAX_UPLOAD_BYTES`).
 - `422` when the file does not start with `%PDF-`.
 - `503` when the queue (Redis) cannot be reached.
 
@@ -1048,7 +1040,7 @@ failed analysis.
 | --- | --- |
 | `degraded` | a required dependency did not answer; analyses will fail until it does |
 | `url` | what the gateway calls, without any password or query string |
-| `auth` | `google-id-token` for a `*.run.app` URL with `SERVICE_AUTH=google-id-token`, `api key`, `service role key`, or `none` |
+| `auth` | `api key` or `none` |
 | `required` | ColPali is not: checks go on with text passages when it is down. Supabase is only when it is set |
 | `ok` | answered with 2xx; for the LLM, also lists `VLLM_MODEL` in `/models`. `null` means not set |
 | `detail` | the HTTP status, or the error |

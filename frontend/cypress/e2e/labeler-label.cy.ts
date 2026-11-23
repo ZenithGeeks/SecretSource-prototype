@@ -8,6 +8,8 @@ describe('Labeler: label a paper', () => {
   it('picks a topic and the table lists the papers', () => {
     cy.intercept('PUT', '/api/labeling/people', { body: {} }).as('setTopic')
     chooseRole('Labeler')
+    // The team's topics are folded behind Team until asked for (#1059).
+    cy.findByRole('button', { name: 'Team' }).click()
 
     cy.findByRole('radiogroup', { name: 'Topic for Chanya' }).within(() => {
       cy.findByRole('radio', { name: 'NLP' }).click()
@@ -48,5 +50,34 @@ describe('Labeler: label a paper', () => {
       })
     })
     cy.findByRole('heading', { name: 'Claim 2 of 2' }).should('be.visible')
+  })
+
+  it('keeps a short wide window on the workspace: only the panels scroll', () => {
+    // Short enough that the label panel overflows. Absolute elements deep in it (sr-only
+    // inputs) used to escape the locked shell and let the window scroll the workspace away.
+    cy.viewport(1440, 560)
+    chooseRole('Labeler')
+    cy.findByRole('button', { name: 'Late interaction retrieval (Label)' }).click()
+    cy.findByRole('heading', { name: 'Claim 1 of 2' }).should('be.visible')
+    cy.findByRole('radiogroup', { name: 'Decision on this claim' }).within(() => {
+      cy.findByRole('radio', { name: /Keep/ }).click()
+    })
+    // Judging a passage shows the level form, whose sr-only radios sit below the fold.
+    cy.findByRole('radiogroup', { name: /^Passage 1 of/ }).within(() => {
+      cy.findByRole('radio', { name: /^Relevant/ }).click()
+    })
+    cy.findByRole('radio', { name: '3 · Clear' }).should('exist')
+
+    cy.window().then((win) => {
+      const doc = win.document
+      expect(doc.documentElement.scrollHeight, 'page height').to.be.at.most(win.innerHeight)
+      const sidebar = doc.querySelector('aside[aria-label="Sidebar"]') as HTMLElement
+      expect(sidebar.scrollWidth, 'sidebar width').to.be.at.most(sidebar.clientWidth)
+      const scrolls = [...doc.querySelectorAll('main *')].filter((el) => {
+        const style = win.getComputedStyle(el)
+        return /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight
+      })
+      expect(scrolls.length, 'panels that scroll').to.be.greaterThan(0)
+    })
   })
 })

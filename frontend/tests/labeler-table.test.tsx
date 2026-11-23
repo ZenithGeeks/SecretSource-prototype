@@ -110,7 +110,7 @@ describe('failed rows in the paper table', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again Paper f1' }))
     const starting = await screen.findByRole('button', { name: 'Starting Paper f1' })
     expect(starting).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Remove Paper f1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'More actions for Paper f1' })).toBeDisabled()
     expect(screen.getByRole('button', { name: /^Upload the PDF/ })).toBeDisabled()
   })
 
@@ -137,20 +137,23 @@ describe('failed rows in the paper table', () => {
     expect(screen.getByRole('button', { name: 'Try again Paper f1' })).toBeDisabled()
   })
 
-  it('removes a paper only after the person agrees', async () => {
+  it('removes a paper from the row menu only after the person agrees', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     withQuery(<PaperTable papers={[paper('r1')]} me="Chanya" myTopic="CV" onOpen={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Paper r1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for Paper r1' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
     expect(gateway.puts).toEqual([])
     confirm.mockReturnValue(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Paper r1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for Paper r1' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
     await waitFor(() => expect(gateway.puts).toEqual([{ topic: '' }]))
   })
 
-  it('credits the person who added it, or says Unknown', () => {
-    withQuery(<PaperTable papers={[paper('u1', { added_by: '', mine: false }), paper('s1', { added_by: 'Somchai', mine: false })]} me="Chanya" myTopic="NLP" onOpen={vi.fn()} />)
-    expect(screen.getByText('Unknown')).toBeInTheDocument()
-    expect(screen.getByText('Somchai')).toBeInTheDocument()
+  it('hides keywords behind a toggle', () => {
+    withQuery(<PaperTable papers={[paper('k1', { keywords: ['rag', 'llm'], mine: false })]} me="Chanya" myTopic="NLP" onOpen={vi.fn()} />)
+    expect(screen.queryByText('rag')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Keywords' }))
+    expect(screen.getByText('rag')).toBeInTheDocument()
   })
 })
 

@@ -184,37 +184,6 @@ describe('uploadReferencePdf', () => {
   })
 })
 
-describe('uploadAnalysis', () => {
-  const file = new File(['%PDF'], 'paper.pdf', { type: 'application/pdf' })
-
-  it('goes through the gateway when there is no papers bucket', async () => {
-    const fetchMock = stubFetch((url) => (url.endsWith('/uploads') ? json({ url: null }) : json({ id: 'new' })))
-    expect(await api.uploadAnalysis(file, false)).toEqual({ id: 'new' })
-    const [url, init] = fetchMock.mock.calls[1]
-    expect(url).toBe('/api/analyses/upload?verify=false')
-    expect((init!.body as FormData).get('file')).toBeInstanceOf(File)
-  })
-
-  it('puts the PDF straight to storage when there is a bucket', async () => {
-    const fetchMock = stubFetch((url) => {
-      if (url.endsWith('/uploads')) return json({ url: 'https://storage/put', object: 'obj-1', headers: { 'x-a': 'b' } })
-      if (url === 'https://storage/put') return new Response('', { status: 200 })
-      return json({ id: 'new' })
-    })
-    expect(await api.uploadAnalysis(file, true)).toEqual({ id: 'new' })
-    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PUT', headers: { 'x-a': 'b' }, body: file })
-    expect(fetchMock.mock.calls[2][0]).toBe('/api/analyses/from-upload')
-    expect(fetchMock.mock.calls[2][1]!.body).toBe(JSON.stringify({ object_name: 'obj-1', verify: true }))
-  })
-
-  it('fails when storage refuses the PDF', async () => {
-    stubFetch((url) =>
-      url.endsWith('/uploads') ? json({ url: 'https://storage/put', object: 'o', headers: {} }) : new Response('', { status: 403 }),
-    )
-    await expect(api.uploadAnalysis(file, true)).rejects.toThrow('403: the upload to storage failed')
-  })
-})
-
 describe('postEvents', () => {
   it('posts the body and hands on each event', async () => {
     const fetchMock = stubFetch(() => streamOf('data: {"n":1}\n\ndata:{"n":2}\n\n'))

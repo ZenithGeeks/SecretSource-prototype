@@ -1,6 +1,6 @@
 /** Papers to label: the ones the team brought in from Scopus, and whether the database is ready. */
 
-import { Download, EyeOff, Loader2, TriangleAlert } from 'lucide-react'
+import { ChevronDown, Download, EyeOff, Loader2, Plus, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Mascot } from '../../../components/Mascot'
@@ -61,6 +61,9 @@ export function Queue({
   const [downloading, setDownloading] = useState<Export | null>(null)
   const [scope, setScope] = useState<Scope>('mine')
   const [downloadError, setDownloadError] = useState<unknown>(null)
+  const [showExports, setShowExports] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+  const [showTeam, setShowTeam] = useState(false)
   const [filters, setFilters] = useState<Filters>(() => readFilters(window.location.search))
 
   useEffect(() => {
@@ -85,15 +88,17 @@ export function Queue({
   // Every paper is listed; one the viewer checks blind is marked, and Blind checks lists it too (#867).
   const blind = new Set(pool.data?.blind ?? [])
   const lead = pool.data?.lead ?? false
-  // Papers of the viewer's own topic first, then by topic; within a topic, unfinished before finished.
+  // The viewer's unfinished papers first, so the list opens on work to do; then their own
+  // topic, then by topic.
   const papers = [...(pool.data?.papers ?? [])].sort(
     (a, b) =>
+      Number(isFinished(a)) - Number(isFinished(b)) ||
       Number(b.topic === myTopic) - Number(a.topic === myTopic) ||
-      a.topic.localeCompare(b.topic) ||
-      Number(isFinished(a)) - Number(isFinished(b)),
+      a.topic.localeCompare(b.topic),
   )
   const me = pool.data?.me ?? ''
   const shown = papers.filter((paper) => matches(paper, filters, me))
+  const nextPaper = papers.find((paper) => paper.status === 'done' && !isFinished(paper))
   const reading = papers.filter((paper) => paper.status === 'running').length
   // Any "Added by" choice, same as Topic: one or more selected just broadens which papers
   // show (OR'd, already how `shown` works). How much of what they brought in is done, by the
@@ -106,10 +111,10 @@ export function Queue({
         )
       : null
   return (
-    <FadeIn className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <FadeIn className="flex flex-col gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Mascot role="labeler" size={52} className="hidden shrink-0 sm:block" />
+          <Mascot role="labeler" size={44} className="hidden shrink-0 sm:block" />
           <div>
             <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink">Label data</h1>
             <p className="text-sm text-ink-muted">
@@ -117,7 +122,37 @@ export function Queue({
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          {nextPaper && (
+            <Button onClick={() => onOpen(nextPaper.analysis_id)} aria-label={`Continue: ${nextPaper.title}`} className="max-w-xs">
+              {/* Only the title is cut short, so the button always says what it does. */}
+              <span className="shrink-0">Continue:</span>
+              <span className="min-w-0 truncate">{nextPaper.title}</span>
+            </Button>
+          )}
+          {pool.data && status.data?.scopus && (
+            <Button variant="ghost" aria-expanded={showAdd} onClick={() => setShowAdd((open) => !open)}>
+              <Plus className="size-4" aria-hidden="true" />
+              Add papers
+              <ChevronDown className={cn('size-4 transition-transform', showAdd && 'rotate-180')} aria-hidden="true" />
+            </Button>
+          )}
+          <Button variant="ghost" aria-expanded={showExports} onClick={() => setShowExports((open) => !open)}>
+            <Download className="size-4" aria-hidden="true" />
+            Downloads
+            <ChevronDown className={cn('size-4 transition-transform', showExports && 'rotate-180')} aria-hidden="true" />
+          </Button>
+          {pool.data && (
+            <Button variant="ghost" aria-expanded={showTeam} onClick={() => setShowTeam((open) => !open)}>
+              Team
+              <ChevronDown className={cn('size-4 transition-transform', showTeam && 'rotate-180')} aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {showExports && (
+        <Card className="flex flex-wrap items-center gap-2 py-2.5">
           {/* Only a lead may download the whole team's labels: with them a blind check would not be blind. */}
           {lead && (
             <div role="radiogroup" aria-label="Whose labels to download" className="flex rounded-lg border border-border-subtle p-0.5">
@@ -155,8 +190,8 @@ export function Queue({
               {label}
             </Button>
           ))}
-        </div>
-      </header>
+        </Card>
+      )}
 
       {downloadError !== null && (
         <p role="alert" className="text-sm text-refutes">
@@ -172,27 +207,24 @@ export function Queue({
       )}
 
       {blind.size > 0 && (
-        <Card className="flex flex-wrap items-center gap-3 py-3">
-          <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
-          <p className="min-w-0 flex-1 text-sm text-ink">
-            You have {blind.size} {blind.size === 1 ? 'paper' : 'papers'} to check blind. They are marked Blind check below.
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-surface px-3 py-2 text-sm">
+          <EyeOff className="size-4 shrink-0 text-accent" aria-hidden />
+          <p className="min-w-0 flex-1 text-ink">
+            You have {blind.size} {blind.size === 1 ? 'paper' : 'papers'} to check blind.
           </p>
-          <Button variant="ghost" onClick={onShowBlind} className="min-h-10">
+          <Button variant="ghost" onClick={onShowBlind}>
             Open blind checks
           </Button>
-        </Card>
+        </div>
       )}
 
-      {pool.data && <TeamTopics pool={pool.data} />}
-
-      {pool.data &&
-        (status.data?.scopus ? (
-          <ScopusAdd pool={pool.data} myTopic={myTopic} />
-        ) : (
-          <Setup title="Scopus search is not set up yet">
-            Set <code>SCOPUS_API_KEY</code> (a key from dev.elsevier.com) in the gateway's <code>.env</code>, then reload.
-          </Setup>
-        ))}
+      {pool.data && showTeam && <TeamTopics pool={pool.data} />}
+      {pool.data && showAdd && <ScopusAdd pool={pool.data} myTopic={myTopic} />}
+      {pool.data && !status.data?.scopus && (
+        <Setup title="Scopus search is not set up yet">
+          Set <code>SCOPUS_API_KEY</code> (a key from dev.elsevier.com) in the gateway's <code>.env</code>, then reload.
+        </Setup>
+      )}
 
       <section aria-labelledby="papers-heading" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

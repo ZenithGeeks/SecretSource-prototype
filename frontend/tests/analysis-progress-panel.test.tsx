@@ -132,11 +132,11 @@ describe('a finished analysis', () => {
     at('done', { at: NOW }),
   ]
 
-  it('is one line with the outcome of every source check and the time taken', () => {
+  it('is one line with the outcome of every citation check and the time taken', () => {
     show(full, 'done')
     expect(screen.getByText('Finished')).toBeInTheDocument()
     expect(screen.getByText('3 claims')).toBeInTheDocument()
-    expect(screen.getByText("4 source checks: 1 backed, 1 contradicted, 1 silent, 1 couldn't run")).toBeInTheDocument()
+    expect(screen.getByText('4 citation checks: 1 backed, 1 contradicted, 1 silent, 1 not checked')).toBeInTheDocument()
     expect(screen.getByText('5 min')).toBeInTheDocument()
   })
 
@@ -148,7 +148,7 @@ describe('a finished analysis', () => {
 
   it('counts checks with no outcome to list', () => {
     show([at('extracted'), at('planned', { checks: 2 }), at('done')], 'done')
-    expect(screen.getByText('0 source checks')).toBeInTheDocument()
+    expect(screen.getByText('0 citation checks')).toBeInTheDocument()
   })
 
   it('says Stopped for a run that ended in error', () => {

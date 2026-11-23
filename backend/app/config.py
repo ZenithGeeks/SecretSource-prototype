@@ -86,24 +86,17 @@ PHOENIX_COLLECTOR_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT") or ""
 PHOENIX_PROJECT_NAME = os.getenv("PHOENIX_PROJECT_NAME") or "secretsource"
 
 # How calls to the services above prove who they are.
-# `google-id-token` adds a Google identity token to every *.run.app URL.
 # `api-key` sends SERVICE_API_KEY in an `apikey` header to the three URLs above, for the team
 # gateway in front of the host's GPU services.
 # `none` sends nothing, which compose needs.
 SERVICE_AUTH = os.getenv("SERVICE_AUTH") or "none"
-if SERVICE_AUTH not in ("none", "google-id-token", "api-key"):
-    raise ValueError(f"SERVICE_AUTH must be 'none', 'google-id-token' or 'api-key', got {SERVICE_AUTH!r}")
+if SERVICE_AUTH not in ("none", "api-key"):
+    raise ValueError(f"SERVICE_AUTH must be 'none' or 'api-key', got {SERVICE_AUTH!r}")
 SERVICE_API_KEY = os.getenv("SERVICE_API_KEY") or ""
 if SERVICE_AUTH == "api-key" and not SERVICE_API_KEY:
     raise ValueError("SERVICE_AUTH=api-key needs SERVICE_API_KEY: ask the host for your key")
 
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
-# The Cloud Storage bucket mounted at PAPERS_DIR in production. When set, the browser uploads
-# PDFs straight to it (app/uploads.py); when empty, uploads go through POST /analyses/upload.
-PAPERS_BUCKET = os.getenv("PAPERS_BUCKET", "")
-# The pages allowed to upload to that bucket, comma-separated. The bucket's CORS rule allows the
-# same origins (deploy/cloudrun.sh).
-UPLOAD_ORIGINS = {o.strip() for o in os.getenv("UPLOAD_ORIGINS", "").split(",") if o.strip()}
 AVATARS_DIR = Path(os.getenv("AVATARS_DIR", "data/avatars"))
 # The Author drafts' figures, one folder per draft (app/author/images.py, SCRUM-463).
 DRAFT_IMAGES_DIR = Path(os.getenv("DRAFT_IMAGES_DIR", "data/draft-images"))
@@ -123,7 +116,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 S2_API_KEY = os.getenv("S2_API_KEY", "")
 UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "")
 # Without a key, OpenAlex answers from a small daily budget shared by everyone on the same IP
-# address, which on Cloud Run is used up by other tenants. Keys are free (#439).
+# address, which other users of that address can use up. Keys are free (#439).
 OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY", "")
 # The labeling page searches Scopus (dev.elsevier.com) for papers to label. Without a key it
 # shows that the search is not set up.
@@ -159,7 +152,7 @@ LLM_INTERACTIVE_SLOTS = int(os.getenv("LLM_INTERACTIVE_SLOTS", "0"))
 # TokenMe outage on 2026-11-08 lasted 4 minutes.
 LLM_BUSY_RETRY_SECONDS = float(os.getenv("LLM_BUSY_RETRY_SECONDS", "300"))
 # How many Docling PDF conversions run at once in this process. Each one holds about 2 GB of
-# layout and table models while it runs, which killed Cloud Run gateway instances at 4Gi and 8Gi.
+# layout and table models while it runs, which killed gateway containers capped at 4 and 8 GB.
 DOCLING_PARALLEL = int(os.getenv("DOCLING_PARALLEL", "1"))
 # Whether a check also indexes the cited paper's figures in ColPali and gives the judge the
 # captions it finds. Off by default: on the 192 production claim/source pairs, verdicts with

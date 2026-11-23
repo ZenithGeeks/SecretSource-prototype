@@ -285,7 +285,7 @@ describe('the answer a claim leads with', () => {
 
   it('says no passage matched when the verdict has no quote', () => {
     card({ verdicts: [verdict({ verdict: 'insufficient' })] })
-    expect(screen.getByText('No passage in the cited paper matched this claim.')).toBeInTheDocument()
+    expect(screen.getByText("No exact passage matched. The judge's reading of the paper is below.")).toBeInTheDocument()
     expect(screen.getByText('Why it isn’t settled')).toBeInTheDocument()
   })
 

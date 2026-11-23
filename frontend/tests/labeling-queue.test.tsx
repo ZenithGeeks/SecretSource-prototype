@@ -116,7 +116,7 @@ describe('the labeler queue', () => {
     expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'HPC paper', '10.1/closed'])
     expect(within(table).getAllByText(/your topic/)).toHaveLength(2) // the two NLP papers
     expect(within(table).getAllByRole('columnheader').map((th) => th.textContent)).toEqual([
-      'Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by', 'Actions',
+      'Paper', 'Progress', 'Also labeled by', 'Actions',
     ])
   })
 
@@ -135,10 +135,11 @@ describe('the labeler queue', () => {
   it('lets the person who added a paper remove it', async () => {
     renderQueue()
     const table = await screen.findByRole('table')
-    const removes = within(table).getAllByRole('button', { name: /^Remove / })
+    const removes = within(table).getAllByRole('button', { name: /^More actions for / })
     expect(removes).toHaveLength(3) // x2, x3, x4 are mine; x1 is someone else's
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    fireEvent.click(within(table).getByRole('button', { name: 'Remove NLP paper' }))
+    fireEvent.click(within(table).getByRole('button', { name: 'More actions for NLP paper' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
     expect(confirm).toHaveBeenCalledWith("Remove this paper from the team's list? Labels already saved are kept.")
     await waitFor(() => expect(gateway.puts).toEqual([{ path: '/labeling/papers/x2/topic', body: { topic: '' } }]))
     expect(onOpen).not.toHaveBeenCalled() // Remove does not also open the row
@@ -149,7 +150,8 @@ describe('the labeler queue', () => {
     renderQueue()
     const table = await screen.findByRole('table')
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    fireEvent.click(within(table).getByRole('button', { name: 'Remove NLP paper' }))
+    fireEvent.click(within(table).getByRole('button', { name: 'More actions for NLP paper' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
     await waitFor(() => expect(titlesIn(table)).not.toContain('NLP paper'))
     await waitFor(() => expect(titlesIn(table)).toContain('NLP paper'))
   })
@@ -186,8 +188,7 @@ describe('the labeler queue', () => {
       expect(within(row).getByRole('alert')).toHaveTextContent('Only Nuttadon can try again, upload its PDF or remove it.')
       expect(within(row).queryByRole('button', { name: /Try again/ })).toBeNull()
       expect(within(row).queryByRole('button', { name: /Upload the PDF/ })).toBeNull()
-      expect(within(row).queryByRole('button', { name: /Remove/ })).toBeNull()
-      expect(within(rowOf(table, 'HPC paper')).getAllByRole('cell')[5]).toHaveTextContent('Added by: Nuttadon')
+      expect(within(row).queryByRole('button', { name: /More actions/ })).toBeNull()
     } finally {
       gateway.pool.papers.pop()
     }
@@ -223,7 +224,8 @@ describe('the labeler queue', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderQueue()
     const table = await screen.findByRole('table')
-    fireEvent.click(within(table).getAllByRole('button', { name: /^Remove / })[0])
+    fireEvent.click(within(table).getAllByRole('button', { name: /^More actions for / })[0])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
     expect(confirm).toHaveBeenCalledOnce()
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(gateway.puts).toEqual([])
@@ -239,7 +241,7 @@ describe('the labeler queue', () => {
     const bar = within(table).getByRole('progressbar', { name: 'Claims the team decided in NLP paper' })
     expect(bar).toHaveAttribute('aria-valuenow', '4')
     expect(bar).toHaveAttribute('aria-valuemax', '5')
-    const labeledBy = within(rowOf(table, 'NLP paper')).getAllByRole('cell')[4]
+    const labeledBy = within(rowOf(table, 'NLP paper')).getAllByRole('cell')[2]
     expect(labeledBy).toHaveTextContent('Somchai') // not Chanya: that is the viewer
     expect(labeledBy).not.toHaveTextContent('Chanya')
   })
@@ -258,12 +260,12 @@ describe('the labeler queue', () => {
     }
   })
 
-  it('puts papers the viewer has not finished before finished ones of the same topic', async () => {
+  it('puts every paper the viewer has not finished before the finished ones', async () => {
     gateway.pool.papers.unshift({ analysis_id: 'x6', subject: '', keywords: [], title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')
-      expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'Done NLP paper', 'HPC paper', '10.1/closed'])
+      expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'HPC paper', '10.1/closed', 'Done NLP paper'])
     } finally {
       gateway.pool.papers.shift()
     }
@@ -348,13 +350,14 @@ describe('the labeler queue', () => {
   it('shows each paper’s subject and keywords, and finds a paper by a keyword', async () => {
     renderQueue()
     const table = await screen.findByRole('table')
+    fireEvent.click(within(rowOf(table, 'NLP paper')).getByRole('button', { name: 'Keywords' }))
     const tags = within(rowOf(table, 'NLP paper')).getByRole('list', { name: 'Subject and keywords' })
     expect(within(tags).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'Information Retrieval',
       'ColBERT',
       'dense retrieval',
     ])
-    expect(within(rowOf(table, 'HPC paper')).queryByRole('list', { name: 'Subject and keywords' })).toBeNull()
+    expect(within(rowOf(table, 'HPC paper')).queryByRole('button', { name: 'Keywords' })).toBeNull()
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search titles and keywords' }), { target: { value: 'colbert' } })
     expect(titlesIn(table)).toEqual(['NLP paper'])
@@ -383,6 +386,7 @@ describe('the labeler queue', () => {
 
   it('sets a teammate\'s topic from the dropdown', async () => {
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Team' }))
     const group = await screen.findByRole('radiogroup', { name: 'Topic for Nuttadon' })
     expect(within(group).getByRole('radio', { name: 'No topic' })).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(within(group).getByRole('radio', { name: 'HPC' }))
@@ -391,6 +395,7 @@ describe('the labeler queue', () => {
 
   it('searches Scopus by topic and adds a result under that topic', async () => {
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add papers' }))
     fireEvent.change(await screen.findByLabelText('Topic to search'), { target: { value: 'CV' } })
     fireEvent.change(screen.getByLabelText(/Words in the title/), { target: { value: 'late interaction' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search Scopus' }))
@@ -412,6 +417,7 @@ describe('the labeler queue', () => {
       saved.push(this.download)
     })
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }))
     for (const name of ['Download labels CSV', 'Download DSPy claims (JSONL)', 'Download DSPy verdicts (JSONL)']) {
       const button = await screen.findByRole('button', { name })
       await waitFor(() => expect(button).toBeEnabled())
@@ -440,6 +446,7 @@ describe('the labeler queue', () => {
       saved.push(this.download)
     })
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }))
     fireEvent.click(await screen.findByRole('radio', { name: 'Whole team' }))
     const button = await screen.findByRole('button', { name: 'Download labels CSV' })
     await waitFor(() => expect(button).toBeEnabled())
@@ -450,6 +457,7 @@ describe('the labeler queue', () => {
 
   it('offers the whole team download only to a lead', async () => {
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }))
     await screen.findByRole('button', { name: 'Download labels CSV' })
     expect(screen.queryByRole('radio', { name: 'Whole team' })).not.toBeInTheDocument()
   })
@@ -470,6 +478,7 @@ describe('the labeler queue', () => {
   it('says so, in plain words, when a download fails', async () => {
     gateway.downloadFails = true
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Download DSPy claims (JSONL)' }))
     expect(await screen.findByText(/Something went wrong\./)).toBeInTheDocument()
     expect(screen.queryByText(/500:/)).not.toBeInTheDocument()
@@ -503,6 +512,7 @@ describe('the labeler queue', () => {
 
   it('shows who has which topic on one line, and opens by itself for someone with no topic', async () => {
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Team' }))
     const summary = await screen.findByText(/NLP 1 · no topic 1 · you: NLP/)
     expect(summary.closest('details')).not.toHaveAttribute('open') // Chanya already has NLP
   })
@@ -510,6 +520,7 @@ describe('the labeler queue', () => {
   it('opens the team panel when the viewer has no topic yet', async () => {
     gateway.pool.people[0].topic = ''
     renderQueue()
+    fireEvent.click(await screen.findByRole('button', { name: 'Team' }))
     const summary = await screen.findByText(/no topic 2/)
     expect(summary.closest('details')).toHaveAttribute('open')
     gateway.pool.people[0].topic = 'NLP'

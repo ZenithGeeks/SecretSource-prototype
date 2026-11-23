@@ -100,19 +100,6 @@ def test_an_llm_that_does_not_serve_the_model_is_not_ok(services, monkeypatch):
     assert "qwen-typo" in llm["detail"]
 
 
-def test_a_cloud_run_service_still_starting_is_not_degraded(services, monkeypatch):
-    # GROBID and ColBERT on Cloud Run scale to zero, and the first GET wakes them.
-    services.answers["http://colbert:8893/health"] = ReadTimeout("read timed out")
-    monkeypatch.setattr(dependencies, "signs", lambda url: True)
-
-    result = dependencies.check()
-
-    colbert = by_name(result)["colbert"]
-    assert colbert["ok"] is None
-    assert colbert["detail"].startswith("starting: no answer in 5 s")
-    assert not result["degraded"]
-
-
 def test_a_local_service_that_times_out_is_unreachable(services):
     services.answers["http://colbert:8893/health"] = ReadTimeout("read timed out")
 

@@ -5,20 +5,21 @@
  */
 
 import { m } from 'framer-motion'
-import { Check, ChevronRight, CircleAlert, CircleCheck, EyeOff, Loader2, RotateCcw, Trash2 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Check, ChevronRight, CircleAlert, CircleCheck, EyeOff, Loader2, MoreVertical, RotateCcw, Trash2 } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 
+import { MenuButton } from '../../../components/library'
 import { Badge, Button, Progress } from '../../../components/ui'
 import { askTarget } from '../../../lib/askCursor'
 import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
-import { addedByOf, isFinished, opensLabels, type Paper } from '../paperFilters'
+import { isFinished, opensLabels, type Paper } from '../paperFilters'
 import { PaperKeywords } from './PaperKeywords'
 import { UploadPdfButton } from './UploadPdfButton'
 import { VenueRankBadge } from './VenueRankBadge'
 
-const COLUMNS = ['Paper', 'Topic', 'Status', 'Progress', 'Also labeled by', 'Added by']
+const COLUMNS = ['Paper', 'Progress', 'Also labeled by']
 
 // On narrow screens the header row is hidden, so each cell carries its own small label.
 function CellLabel({ children }: { children: ReactNode }) {
@@ -92,20 +93,21 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
   const retry = useRetryPaper()
   const upload = useUploadPaper()
   const online = useFeature('analyses')
+  const [showKeywords, setShowKeywords] = useState(false)
   const ready = paper.status === 'done'
   const failed = paper.status === 'error'
-  const addedBy = addedByOf(paper, me)
   // Only the person who shared a paper can retry or remove it, so others are told who that is.
   const adder = paper.added_by || 'the person who added it'
   const others = paper.labelers.filter((name) => name !== me)
   const isBlind = blind?.has(paper.analysis_id) ?? false
   const viewLabels = Boolean(onOpenLabels) && opensLabels(paper, lead && !isBlind)
   const open = viewLabels && onOpenLabels ? onOpenLabels : onOpen
+  const hasKeywords = Boolean(paper.subject || paper.keywords?.length)
   let action = 'Label'
   if (viewLabels) action = 'View labels'
   else if (isFinished(paper)) action = 'Review'
   else if (paper.judged > 0) action = 'Continue'
-  const cell = '@4xl:table-cell @4xl:px-3 @4xl:py-3 @4xl:align-middle'
+  const cell = '@4xl:table-cell @4xl:px-3 @4xl:py-2.5 @4xl:align-middle'
 
   return (
     // A row the list gains (a paper just added, one a filter brings back) fades in instead of
@@ -135,7 +137,12 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
         ) : (
           <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
         )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <Badge tone={paper.topic === myTopic ? 'accent' : 'neutral'} title={paper.topic === myTopic ? 'Your topic' : undefined}>
+            {paper.topic}
+            {paper.topic === myTopic && <span className="sr-only">, your topic</span>}
+          </Badge>
+          <StatusBadge status={paper.status} />
           {isBlind && (
             <Badge tone="accent">
               <EyeOff aria-hidden />
@@ -143,8 +150,22 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
             </Badge>
           )}
           <VenueRankBadge value={paper.venue_rank} source={paper.venue_rank_source} />
-          <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
+          {hasKeywords && (
+            <button
+              type="button"
+              aria-expanded={showKeywords}
+              onClick={() => setShowKeywords((open) => !open)}
+              className="relative z-10 rounded px-1.5 py-0.5 text-xs text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {showKeywords ? 'Hide keywords' : 'Keywords'}
+            </button>
+          )}
         </div>
+        {showKeywords && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
+          </div>
+        )}
         {failed && (
           <span role="alert" className="mt-1 block text-refutes">
             Could not be read: {paper.reason || 'no open PDF was found'}.{' '}
@@ -154,15 +175,6 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
             {paper.mine && !online && ` ${OFFLINE_REASON.analyses}`}
           </span>
         )}
-      </td>
-      <td className={cell}>
-        <Badge tone={paper.topic === myTopic ? 'accent' : 'neutral'} title={paper.topic === myTopic ? 'Your topic' : undefined}>
-          {paper.topic}
-          {paper.topic === myTopic && <span className="sr-only">, your topic</span>}
-        </Badge>
-      </td>
-      <td className={cell}>
-        <StatusBadge status={paper.status} />
       </td>
       <td className={cn(cell, 'w-full @4xl:w-40')}>
         <TeamProgress paper={paper} />
@@ -177,10 +189,6 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
         ) : (
           <span className="text-ink-muted">No one</span>
         )}
-      </td>
-      <td className={cell}>
-        <CellLabel>Added by</CellLabel>
-        {addedBy === me ? 'You' : addedBy || <span className="text-ink-muted">Unknown</span>}
       </td>
       <td className={cn(cell, 'flex w-full items-center justify-end gap-1 @4xl:w-auto @4xl:whitespace-nowrap')}>
         {ready && (
@@ -213,20 +221,37 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
           />
         )}
         {paper.mine && (
-          <Button
-            variant="ghost"
-            title="Remove"
-            className="relative z-10 min-h-11 min-w-11 px-3 hover:text-refutes @4xl:px-0"
-            aria-label={`Remove ${paper.title}`}
-            disabled={assign.isPending || retry.isPending || upload.isPending}
-            onClick={() => {
-              if (!window.confirm("Remove this paper from the team's list? Labels already saved are kept.")) return
-              assign.mutate({ analysisId: paper.analysis_id, topic: '' })
-            }}
-          >
-            <Trash2 className="size-4" aria-hidden="true" />
-            <span className="@4xl:sr-only">Remove</span>
-          </Button>
+          <MenuButton
+            label={`More actions for ${paper.title}`}
+            className="relative z-10"
+            trigger={(triggerProps) => (
+              <button
+                type="button"
+                aria-label={`More actions for ${paper.title}`}
+                disabled={assign.isPending || retry.isPending || upload.isPending}
+                className="flex size-10 items-center justify-center rounded-lg text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+                {...triggerProps}
+              >
+                <MoreVertical className="size-4" aria-hidden="true" />
+              </button>
+            )}
+            items={[
+              {
+                key: 'remove',
+                className: 'text-refutes hover:bg-refutes-soft',
+                content: (
+                  <span className="flex items-center gap-2">
+                    <Trash2 className="size-4" aria-hidden="true" />
+                    Remove
+                  </span>
+                ),
+                onSelect: () => {
+                  if (!window.confirm("Remove this paper from the team's list? Labels already saved are kept.")) return
+                  assign.mutate({ analysisId: paper.analysis_id, topic: '' })
+                },
+              },
+            ]}
+          />
         )}
       </td>
     </m.tr>

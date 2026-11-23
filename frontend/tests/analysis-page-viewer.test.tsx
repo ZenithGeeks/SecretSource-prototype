@@ -225,9 +225,9 @@ describe('the header', () => {
 
   it('says which of two papers it is', async () => {
     const { rerender } = await render(<PageViewer target={{ ...target, paperRole: 'under-review' }} />)
-    expect(screen.getByText('Paper under review')).toBeInTheDocument()
+    expect(screen.getByText(/Paper under review/)).toBeInTheDocument()
     rerender(<PageViewer target={{ ...target, paperRole: 'reference' }} />)
-    expect(screen.getByText('Cited reference')).toBeInTheDocument()
+    expect(screen.getByText(/Cited reference/)).toBeInTheDocument()
   })
 
   it('has a close button only when it can be closed', async () => {
@@ -475,6 +475,18 @@ describe('the toolbar and layout', () => {
     stub.narrow = false
     act(() => stub.mediaChange!())
     expect(screen.getByRole('button', { name: 'Fill the window' })).toBeInTheDocument()
+  })
+
+  it('keeps an embedded viewer inside its pane when the default would cover the screen', async () => {
+    stub.narrow = true
+    await render(<PageViewer target={{ ...target, paperRole: 'reference' }} embedded keyboard={false} className="h-full" />)
+    const pane = screen.getByRole('complementary')
+    expect(pane).toHaveClass('h-full')
+    expect(pane).not.toHaveClass('fixed')
+    fireEvent.click(screen.getByRole('button', { name: 'Fill the window' }))
+    expect(pane).toHaveClass('fixed', 'inset-4')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the side panel' }))
+    expect(pane).not.toHaveClass('fixed')
   })
 
   it('closes on Escape on a narrow screen even after expanding', async () => {

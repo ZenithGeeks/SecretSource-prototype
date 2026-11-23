@@ -26,20 +26,36 @@ import { cn } from '../../../lib/utils'
 import type { AskedPassage } from './AskPanel'
 import { Kbd } from './ClaimDecision'
 
-export type Focus = { file: string; passage: string; page: number | null; key: string }
+export type Focus = { file: string; passage: string; page: number | null; key: string; automatic?: true }
 
 const STATUS: { status: CandidateStatus; label: string; key: string }[] = [
   { status: 'relevant', label: 'Relevant', key: 'R' },
   { status: 'rejected', label: 'Not relevant', key: 'N' },
 ]
 
-/** Scrolls a card into view inside the panel when it becomes the focused one (not in jsdom). */
-function useReveal(shown: boolean) {
+/** Scrolls `card` into view inside its label panel only. `scrollIntoView` would also scroll
+ * every container above it, the locked app shell included, and hide the claim strip. */
+export function revealInPanel(card: HTMLElement) {
+  const panel = card.closest<HTMLElement>('[data-label-panel]')
+  if (!panel) {
+    // A narrow screen has no panel of its own: the page scrolls, so the browser's way is right.
+    if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
+    return
+  }
+  const top = card.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop
+  const bottom = top + card.offsetHeight
+  if (top < panel.scrollTop) panel.scrollTop = top
+  else if (bottom > panel.scrollTop + panel.clientHeight) panel.scrollTop = bottom - panel.clientHeight
+}
+
+/** Reveal explicit focus even on mount (such as after adding a passage), once per focus. */
+function useReveal(shouldReveal: boolean) {
   const ref = useRef<HTMLLIElement>(null)
+  const revealed = useRef(false)
   useEffect(() => {
-    const card = ref.current
-    if (shown && card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
-  }, [shown])
+    if (shouldReveal && !revealed.current && ref.current) revealInPanel(ref.current)
+    revealed.current = shouldReveal
+  }, [shouldReveal])
   return ref
 }
 
@@ -61,6 +77,7 @@ function PassageCard({
   c,
   label,
   shown,
+  reveal,
   status,
   onFocus,
   onJudge,
@@ -69,12 +86,13 @@ function PassageCard({
   c: Candidate
   label: string
   shown: boolean
+  reveal: boolean
   status: CandidateStatus | undefined
   onFocus: () => void
   onJudge: (status: CandidateStatus) => void
   onAsk?: () => void
 }) {
-  const ref = useReveal(shown)
+  const ref = useReveal(shown && reveal)
   return (
     <li
       ref={ref}
@@ -129,17 +147,19 @@ function PassageCard({
 function AddedCard({
   a,
   shown,
+  reveal,
   onFocus,
   onRemove,
   onAsk,
 }: {
   a: AddedPassage
   shown: boolean
+  reveal: boolean
   onFocus: () => void
   onRemove: () => void
   onAsk?: () => void
 }) {
-  const ref = useReveal(shown)
+  const ref = useReveal(shown && reveal)
   return (
     <li
       ref={ref}
@@ -203,14 +223,44 @@ export function PassageList({
   /** Ask AI about one passage; without it the cards have no Ask button. */
   onAsk?: (passage: AskedPassage) => void
 }) {
+  // Automatic focus opens the PDF while leaving the label panel at the claim decision.
+  const revealFocused = !focus?.automatic
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
   // Missing on a gateway older than the field: there is then nothing to explain.
   const missed = claim.unchecked ?? []
-  // true: keep open, false: keep folded. Unset follows the work: open while unfinished or focused.
-  const [forced, setForced] = useState<Record<string, boolean>>({})
+  const refIds = referencesOf(claim, draft)
+  const [pickedRef, setPickedRef] = useState<string | null>(null)
+  const focusedRefId = focus
+    ? refIds.find(
+        (id) =>
+          claim.candidates.some((c) => c.reference_id === id && c.cand_id === focus.key) ||
+          draft.added.some((a) => a.reference_id === id && focus.key === `added:${a.reference_id}:${a.passage}`) ||
+          focus.key === `ref:${id}`,
+      )
+    : undefined
+  const activeId =
+    focusedRefId ??
+    (pickedRef && refIds.includes(pickedRef) ? pickedRef : undefined) ??
+    refIds.find((id) => !referenceFinished(claim, draft, id)) ??
+    refIds[0]
+
+  const selectRef = (id: string) => {
+    setPickedRef(id)
+    const firstCand = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)[0]
+    if (firstCand) {
+      onFocus({ file: firstCand.reference_file, passage: firstCand.passage, page: firstCand.page, key: firstCand.cand_id })
+      return
+    }
+    const firstAdded = draft.added.find((a) => a.reference_id === id)
+    /* v8 ignore next -- @preserve */
+    if (firstAdded) {
+      onFocus({ file: fileOf(id), passage: firstAdded.passage, page: firstAdded.page, key: `added:${firstAdded.reference_id}:${firstAdded.passage}` })
+    }
+  }
+
   return (
-    <section aria-labelledby="passages-title" className="flex flex-col gap-4">
+    <section aria-labelledby="passages-title" className="flex flex-col gap-3">
       <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
         Passages retrieval found
       </h3>
@@ -242,33 +292,43 @@ export function PassageList({
           )}
         </div>
       )}
-      {referencesOf(claim, draft).map((id) => {
+      {refIds.length > 1 && (
+        <div role="tablist" aria-label="References for this claim" className="flex flex-wrap gap-1.5">
+          {refIds.map((id) => {
+            const finished = referenceFinished(claim, draft, id)
+            const reference = references.find((r) => r.reference_id === id)
+            const active = id === activeId
+            const tag = reference?.ref ? `[${reference.ref}] ${labelOf(id)}` : labelOf(id)
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => selectRef(id)}
+                className={cn(
+                  'max-w-full truncate rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+                  active
+                    ? 'border-accent bg-accent-soft text-ink'
+                    : finished
+                      ? 'border-border-subtle bg-canvas text-ink-muted hover:border-accent hover:text-ink'
+                      : 'border-border-subtle bg-surface text-ink hover:border-accent',
+                )}
+              >
+                {finished ? referenceSummary(claim, draft, reference, id) : tag}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {activeId && (() => {
+        const id = activeId
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)
         const added = draft.added.filter((a) => a.reference_id === id)
-        const finished = referenceFinished(claim, draft, id)
-        const focusedHere = Boolean(
-          focus &&
-            (cands.some((c) => c.cand_id === focus.key) ||
-              added.some((a) => focus.key === `added:${a.reference_id}:${a.passage}`) ||
-              focus.key === `ref:${id}`),
-        )
-        const open = !finished || forced[id] === true || (forced[id] === undefined && focusedHere)
-        const reference = references.find((r) => r.reference_id === id)
         return (
           <section key={id} aria-label={labelOf(id)} data-ask-target={askTarget({ kind: 'reference', id })} className="flex flex-col gap-2">
-            {finished ? (
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setForced((all) => ({ ...all, [id]: !open }))}
-                className="rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                {referenceSummary(claim, draft, reference, id)}
-              </button>
-            ) : (
-              <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>
-            )}
-            {open && cands.length > 0 && (
+            {refIds.length === 1 && <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>}
+            {cands.length > 0 && (
               <ul className="flex flex-col gap-2">
                 {cands.map((c) => (
                   <PassageCard
@@ -276,6 +336,7 @@ export function PassageList({
                     c={c}
                     label={labelOf(id)}
                     shown={focus?.key === c.cand_id}
+                    reveal={revealFocused}
                     status={draft.cands[c.cand_id]}
                     onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
                     onJudge={(status) => onJudge(c.cand_id, status)}
@@ -287,7 +348,7 @@ export function PassageList({
                 ))}
               </ul>
             )}
-            {open && added.length > 0 && (
+            {added.length > 0 && (
               <>
                 <p className="text-sm font-medium text-ink">Passages you added</p>
                 <ul className="flex flex-col gap-2">
@@ -298,6 +359,7 @@ export function PassageList({
                         key={key}
                         a={a}
                         shown={focus?.key === key}
+                        reveal={revealFocused}
                         onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key })}
                         onRemove={() => onRemove(a)}
                         onAsk={
@@ -312,10 +374,10 @@ export function PassageList({
                 </ul>
               </>
             )}
-            {open && grade(id)}
+            {grade(id)}
           </section>
         )
-      })}
+      })()}
 
       <AddPassage references={references} onAdd={onAdd} />
     </section>

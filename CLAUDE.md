@@ -28,6 +28,5 @@ When finished, open a PR that says `Fixes #N`, and comment any blocker on the is
 - ADK session tables live in schema `adk`, never `public`: the anon key can read `public`.
 - Supabase MCP `apply_migration` and `execute_sql` hit production. Test RLS in a throwaway
   Postgres container first.
-- No GCP deploys until release. Ask before any Cloud Run change.
 - Ask before a multi-run eval; it takes hours and LLM budget.
 - Never commit `.env` or anything under `backend/secrets/`.

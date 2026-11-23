@@ -2,7 +2,7 @@
 as safetensors vector files (services/colbert/vectorfiles.py or services/colpali/vectorfiles.py,
 which are kept identical).
 
-    QDRANT_URL=... QDRANT_API_KEY=... VECTOR_STORE=<gs://bucket/prefix or a folder> \\
+    QDRANT_URL=... QDRANT_API_KEY=... VECTOR_STORE=<a folder> \\
         python migrate_from_qdrant.py [--only colbert|colpali] [--limit-sources N]
 
 qdrant-client is no longer a dependency of either service, since production no longer

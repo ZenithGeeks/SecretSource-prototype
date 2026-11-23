@@ -2,7 +2,7 @@
 FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
-# CPU wheels by default: Cloud Run has no GPU here, and the CUDA wheel made the image 3.2 GB,
+# CPU wheels by default: the CUDA wheel made the image 3.2 GB,
 # which every cold start pulls. The GPU compose profile passes TORCH_INDEX=.../cu130
 # (RTX 50xx, sm_120, needs cu128+; that wheel bundles CUDA, the host only needs the driver).
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
