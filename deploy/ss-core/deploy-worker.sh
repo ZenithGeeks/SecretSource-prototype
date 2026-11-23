@@ -41,26 +41,34 @@ git -C "$MIRROR" merge-base --is-ancestor "$sha" main || fail "${sha:0:7} is not
 short=${sha:0:7}
 
 deployed=$(awk '{print $1; exit}' "$WORKER_DIR/REVISION" 2>/dev/null || true)
-if [[ $deployed == "$short" ]]; then
-  say "$short is already deployed"
-  exit 0
+if [[ $deployed != "$short" ]]; then
+  # Replacing the files and building do not touch the running worker.
+  # Only the worker restart has to wait for it to be idle.
+  git -C "$MIRROR" archive "$sha" | tar -x -C "$WORKER_DIR"
 fi
 
-# The code is copied into the image at build time, so replacing the files and building do not
-# touch the running worker. Only the restart has to wait for it to be idle.
-git -C "$MIRROR" archive "$sha" | tar -x -C "$WORKER_DIR"
+# The previous installed script may have deployed this SHA without removing these files.
 retired_grafana_files=(
   "deploy/monitoring/grafana/provisioning/datasources/google-cloud-monitoring.yml"
   "deploy/monitoring/grafana/dashboards/cloud-run.json"
 )
+removed_grafana_file=false
 for rel in "${retired_grafana_files[@]}"; do
-  if ! git -C "$MIRROR" cat-file -e "$sha:$rel" 2>/dev/null; then
+  if [[ -e $WORKER_DIR/$rel || -L $WORKER_DIR/$rel ]] &&
+    ! git -C "$MIRROR" cat-file -e "$sha:$rel" 2>/dev/null; then
     rm -f "$WORKER_DIR/$rel"
+    removed_grafana_file=true
   fi
 done
-if (cd "$WORKER_DIR" && [[ -n $(docker compose ps -q grafana 2>/dev/null) ]]); then
+if [[ $deployed != "$short" || $removed_grafana_file == true ]] &&
+  (cd "$WORKER_DIR" && [[ -n $(docker compose ps -q grafana 2>/dev/null) ]]); then
   (cd "$WORKER_DIR" && docker compose up -d --no-deps --force-recreate grafana) \
-    || say "grafana recreate failed; continuing with the worker deploy" >&2
+    || say "grafana recreate failed" >&2
+fi
+
+if [[ $deployed == "$short" ]]; then
+  say "$short is already deployed"
+  exit 0
 fi
 
 say "building $short"

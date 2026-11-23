@@ -13,8 +13,7 @@ HTTP:
     POST /api/upload          multipart "file"                        -> like /api/add
     POST /api/upload_figures  form source, title, figures (JSON) + "images" files -> like /api/add_figures
     The /add routes take paths on this machine. The /upload routes carry the files.
-    Use them when the caller does not share this disk (a gateway on another machine,
-    or on another machine)."""
+    Use them when the caller does not share this disk (for example, a gateway on another machine).
     GET  /health
 
 MCP (streamable HTTP at /mcp): tool search_media. It returns figures only for the file
