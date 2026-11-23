@@ -67,7 +67,7 @@ Author draft check:
 
 ## Quick start
 
-1. **Prerequisites:** Git and Docker Desktop (Docker with Compose). An NVIDIA GPU (~16 GB VRAM) is needed if you run `vllm` / `colpali` locally; otherwise you can point `VLLM_URL` at any OpenAI-compatible API.
+1. **Prerequisites:** Git and Docker Desktop (Docker with Compose). An NVIDIA GPU is required to run `colbert` locally (~16 GB VRAM when also running `vllm` and `colpali`); without a GPU, point `VLLM_URL` and `COLBERT_URL` at remote endpoints.
 
 2. **Clone and create `.env`:**
 
@@ -91,12 +91,19 @@ Author draft check:
    - `CLAIM_LIMIT=20` (`0` checks every extracted claim)
    - `PARALLEL_SOURCES=3`, `PARALLEL_CHECKS=3` (per-run concurrency)
    - `VISUAL_EVIDENCE=false` (set `true` to enable ColPali figure/page retrieval)
-   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_ANON_KEY`: optional Postgres persistence and sign-in; when unset, analyses are stored in local SQLite and the app runs without login.
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`: optional Postgres persistence; when unset, analyses are stored in local SQLite.
+   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`: optional sign-in; both are required to enable the login gate. When either is unset, the app runs without login.
    - `TEACHER_GOOGLE_ENABLED=false`: optional Google Classroom integration (see [Teacher Google Classroom setup](backend/README.md#teacher-google-classroom)).
 
 4. **Start the stack:**
 
-   With an external LLM endpoint (and local GROBID + ColBERT):
+   Without a local GPU (using external `VLLM_URL` and `COLBERT_URL` endpoints):
+
+   ```sh
+   docker compose up -d --build grobid redis gateway worker web
+   ```
+
+   With an external LLM endpoint and a local NVIDIA GPU for `colbert`:
 
    ```sh
    docker compose up -d --build grobid colbert redis gateway worker web
@@ -128,7 +135,7 @@ Author draft check:
 - Reload `.env` changes: `docker compose up -d`
 - Tail gateway logs: `docker compose logs -f gateway`
 - Profile a stuck request: `docker exec <gateway-container> py-spy dump --pid 1` (see [Profiling](backend/README.md#profiling))
-- Run Docling on GPU instead of CPU:
+- Run Docling on GPU instead of CPU (set `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` in `.env`, or `;` on Windows, so later `docker compose up -d` commands keep the override):
   ```sh
   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build worker gateway
   ```
@@ -139,8 +146,8 @@ Author draft check:
 | Symptom | Fix |
 | --- | --- |
 | `/health` says `"degraded": true` | Find the entry with `"ok": false`, fix its URL or key in `.env`, then run `docker compose up -d` |
-| 401 or 403 from `colbert`, `colpali`, or `grobid` | Check `SERVICE_AUTH` (`none` for local containers, `google-id-token` with `backend/secrets/service-auth.json` for Cloud Run) |
-| Gateway exits with `"SERVICE_AUTH must be 'none' or 'google-id-token'"` | Fix the typo in `SERVICE_AUTH` in `.env` |
+| 401 or 403 from `colbert`, `colpali`, or `grobid` | Check `SERVICE_AUTH` (`none` for local containers, `api-key` with `SERVICE_API_KEY`, or `google-id-token` with `backend/secrets/service-auth.json`) |
+| Gateway exits with `"SERVICE_AUTH must be 'none', 'google-id-token' or 'api-key'"` or missing `SERVICE_API_KEY` | Fix `SERVICE_AUTH` or set `SERVICE_API_KEY` in `.env` |
 | `"The LM returned an empty or null response."` | Check that `VLLM_URL` ends with `/v1` and `VLLM_MODEL` matches a model served by the endpoint |
 | Most citations show as unresolved / Semantic Scholar 429 | Set `S2_API_KEY` in `.env` |
 | No figure or page hints | ColPali runs only when `VISUAL_EVIDENCE=true` and `colpali` is running |
@@ -252,10 +259,11 @@ docker compose --profile a2a up -d a2a           # http://localhost:8002
 <summary>Tests and CI</summary>
 
 ```sh
+pip install ruff
 ruff check backend services
 python -m compileall -q backend/app backend/cli.py services
 cd backend && pip install -r requirements-dev.txt && pytest
-cd ../frontend && npm run lint && npm run build && npm test
+cd ../frontend && npm ci && npm run lint && npm run build && npm test
 ```
 </details>
 
