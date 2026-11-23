@@ -88,12 +88,13 @@ export function Queue({
   // Every paper is listed; one the viewer checks blind is marked, and Blind checks lists it too (#867).
   const blind = new Set(pool.data?.blind ?? [])
   const lead = pool.data?.lead ?? false
-  // Papers of the viewer's own topic first, then by topic; within a topic, unfinished before finished.
+  // The viewer's unfinished papers first, so the list opens on work to do; then their own
+  // topic, then by topic.
   const papers = [...(pool.data?.papers ?? [])].sort(
     (a, b) =>
+      Number(isFinished(a)) - Number(isFinished(b)) ||
       Number(b.topic === myTopic) - Number(a.topic === myTopic) ||
-      a.topic.localeCompare(b.topic) ||
-      Number(isFinished(a)) - Number(isFinished(b)),
+      a.topic.localeCompare(b.topic),
   )
   const me = pool.data?.me ?? ''
   const shown = papers.filter((paper) => matches(paper, filters, me))
@@ -123,8 +124,10 @@ export function Queue({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {nextPaper && (
-            <Button onClick={() => onOpen(nextPaper.analysis_id)} className="max-w-xs truncate">
-              Continue: {nextPaper.title}
+            <Button onClick={() => onOpen(nextPaper.analysis_id)} aria-label={`Continue: ${nextPaper.title}`} className="max-w-xs">
+              {/* Only the title is cut short, so the button always says what it does. */}
+              <span className="shrink-0">Continue:</span>
+              <span className="min-w-0 truncate">{nextPaper.title}</span>
             </Button>
           )}
           {pool.data && status.data?.scopus && (

@@ -143,7 +143,7 @@ describe('Queue', () => {
     expect(screen.getAllByText('Labels cannot be saved yet').length).toBeGreaterThan(0)
   })
 
-  it('puts papers of the reader’s own topic first, then by topic, unfinished before finished', async () => {
+  it('puts unfinished papers first, then the reader’s own topic, then by topic', async () => {
     gateway.pool = pool({
       papers: [
         paper('cv-done', { topic: 'CV', judged: 4, title: 'CV done' }),
@@ -153,9 +153,9 @@ describe('Queue', () => {
       ],
     })
     renderQueue()
-    await screen.findByText('NLP one')
+    await screen.findByRole('button', { name: 'Continue: NLP one' })
     const titles = screen.getAllByRole('row').slice(1).map((row) => row.querySelector('.line-clamp-2')?.textContent)
-    expect(titles).toEqual(['NLP one', 'NLP done', 'CV open', 'CV done'])
+    expect(titles).toEqual(['NLP one', 'CV open', 'NLP done', 'CV done'])
   })
 
   it('offers Continue for the next unfinished paper and puts Add papers and Downloads behind disclosures', async () => {

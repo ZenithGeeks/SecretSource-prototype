@@ -33,12 +33,30 @@ const STATUS: { status: CandidateStatus; label: string; key: string }[] = [
   { status: 'rejected', label: 'Not relevant', key: 'N' },
 ]
 
-/** Scrolls a card into view inside the panel when it becomes the focused one (not in jsdom). */
+/** Scrolls `card` into view inside its label panel only. `scrollIntoView` would also scroll
+ * every container above it, the locked app shell included, and hide the claim strip. */
+export function revealInPanel(card: HTMLElement) {
+  const panel = card.closest<HTMLElement>('[data-label-panel]')
+  if (!panel) {
+    // A narrow screen has no panel of its own: the page scrolls, so the browser's way is right.
+    if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
+    return
+  }
+  const top = card.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop
+  const bottom = top + card.offsetHeight
+  if (top < panel.scrollTop) panel.scrollTop = top
+  else if (bottom > panel.scrollTop + panel.clientHeight) panel.scrollTop = bottom - panel.clientHeight
+}
+
+/** Reveals a card when it becomes the focused one, but not when it is first drawn: a new
+ * claim opens at its decision, and the first passage is focused only for the viewer. */
 function useReveal(shown: boolean) {
   const ref = useRef<HTMLLIElement>(null)
+  const drawn = useRef(false)
   useEffect(() => {
-    const card = ref.current
-    if (shown && card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
+    const first = !drawn.current
+    drawn.current = true
+    if (shown && !first && ref.current) revealInPanel(ref.current)
   }, [shown])
   return ref
 }

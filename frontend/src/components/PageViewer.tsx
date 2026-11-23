@@ -386,6 +386,44 @@ export function PageViewer({
   const pdf = useAuthorizedUrl(`${API_BASE}/api/papers/${encodeURIComponent(target.paper)}`)
   const cannotOpen = failed || pdf.failed
 
+  // A paper shown as a role (the claim's paper, a cited reference) names itself in the
+  // toolbar row instead of a header line of its own: one row less above the page.
+  const roleTitle = target.paperRole ? (
+    <h2
+      title={target.quote ? `${target.label} — “${target.quote}”` : target.label}
+      className="min-w-0 flex-1 truncate px-1 text-xs font-medium text-ink"
+    >
+      <span className="sr-only">{target.paperRole === 'under-review' ? 'Paper under review: ' : 'Cited reference: '}</span>
+      {target.paperRole === 'under-review' ? 'Paper: ' : ''}
+      {target.label}
+      {target.detail && <span className="font-normal text-ink-muted"> · {target.detail}</span>}
+      <span className="font-normal text-ink-muted"> · p.{targetPage(target)}</span>
+      {target.quote && (
+        <span className="font-serif font-normal italic text-ink-muted"> · “{target.quote}”</span>
+      )}
+      {!target.error && !target.source && target.quote && (
+        <span className="font-normal text-ink-muted"> · exact place not found</span>
+      )}
+    </h2>
+  ) : null
+  const frameButtons = (
+    <div className="flex shrink-0 items-center">
+      {!narrow && (
+        <IconButton
+          label={expanded ? 'Back to the side panel' : 'Fill the window'}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </IconButton>
+      )}
+      {onClose && (
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      )}
+    </div>
+  )
+
   return (
     <>
       {expanded && !narrow && (
@@ -405,41 +443,7 @@ export function PageViewer({
               ),
         )}
       >
-        {target.paperRole ? (
-          <header className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3 py-1">
-            <h2
-              title={target.quote ? `${target.label} — “${target.quote}”` : target.label}
-              className="min-w-0 truncate text-xs font-medium text-ink"
-            >
-              <span className="sr-only">{target.paperRole === 'under-review' ? 'Paper under review: ' : 'Cited reference: '}</span>
-              {target.paperRole === 'under-review' ? 'Paper: ' : ''}
-              {target.label}
-              {target.detail && <span className="font-normal text-ink-muted"> · {target.detail}</span>}
-              <span className="font-normal text-ink-muted"> · p.{targetPage(target)}</span>
-              {target.quote && (
-                <span className="font-serif font-normal italic text-ink-muted"> · “{target.quote}”</span>
-              )}
-              {!target.error && !target.source && target.quote && (
-                <span className="font-normal text-ink-muted"> · exact place not found</span>
-              )}
-            </h2>
-            <div className="flex shrink-0 items-center">
-              {!narrow && (
-                <IconButton
-                  label={expanded ? 'Back to the side panel' : 'Fill the window'}
-                  onClick={() => setExpanded(!expanded)}
-                >
-                  {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                </IconButton>
-              )}
-              {onClose && (
-                <IconButton label="Close" onClick={onClose}>
-                  <X className="size-4" />
-                </IconButton>
-              )}
-            </div>
-          </header>
-        ) : (
+        {target.paperRole ? null : (
           <>
             <header className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -452,21 +456,7 @@ export function PageViewer({
                   {!target.error && !target.source && target.quote && ' · exact place not found, showing the page'}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center">
-                {!narrow && (
-                  <IconButton
-                    label={expanded ? 'Back to the side panel' : 'Fill the window'}
-                    onClick={() => setExpanded(!expanded)}
-                  >
-                    {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                  </IconButton>
-                )}
-                {onClose && (
-                  <IconButton label="Close" onClick={onClose}>
-                    <X className="size-4" />
-                  </IconButton>
-                )}
-              </div>
+              {frameButtons}
             </header>
 
             {target.quote && (
@@ -525,7 +515,7 @@ export function PageViewer({
               <ChevronRight className="size-4" />
             </IconButton>
             {toolbarLead && <div className="min-w-0 max-w-56 flex-1">{toolbarLead}</div>}
-            <span className="flex-1" />
+            {roleTitle ?? <span className="flex-1" />}
             <IconButton
               label="Zoom out"
               onClick={() => setZoom(ZOOMS[Math.max(0, zoomIndex - 1)])}
@@ -558,6 +548,7 @@ export function PageViewer({
                 <ExternalLink className="size-4" />
               </a>
             )}
+            {target.paperRole && frameButtons}
           </div>
           <div
             ref={scroller}

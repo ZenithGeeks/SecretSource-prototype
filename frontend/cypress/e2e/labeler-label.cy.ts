@@ -8,6 +8,8 @@ describe('Labeler: label a paper', () => {
   it('picks a topic and the table lists the papers', () => {
     cy.intercept('PUT', '/api/labeling/people', { body: {} }).as('setTopic')
     chooseRole('Labeler')
+    // The team's topics are folded behind Team until asked for (#1059).
+    cy.findByRole('button', { name: 'Team' }).click()
 
     cy.findByRole('radiogroup', { name: 'Topic for Chanya' }).within(() => {
       cy.findByRole('radio', { name: 'NLP' }).click()
