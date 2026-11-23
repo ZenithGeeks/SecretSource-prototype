@@ -660,6 +660,34 @@ def test_delete_all_waits_for_a_write_that_holds_a_drafts_lock(client, figures_d
     assert not (figures_dir / draft["id"]).exists()
 
 
+def test_named_figure_import_during_delete_all_cannot_leave_an_orphan(client, figures_dir, monkeypatch):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("a.png", PNG)
+    upload = {"file": ("paper.zip", buffer.getvalue(), "application/zip")}
+
+    def import_draft():
+        return client.post("/author/drafts/upload", headers=ADA, files=upload)
+
+    delete_rows = author.store.delete_author_rows
+
+    def after_snapshot(owner):
+        # The owner snapshot is complete, but its rows still exist. Drive a real upload
+        # on another request thread and let the normal lock timeout finish that request.
+        assert import_draft().status_code == 503
+        assert not list(figures_dir.glob("*"))
+        delete_rows(owner)
+
+    monkeypatch.setattr(author, "LOCK_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(author.store, "delete_author_rows", after_snapshot)
+    assert client.delete("/user/data?scope=author", headers=ADA).status_code == 200
+    retry = import_draft()
+    assert retry.status_code == 200
+    draft_id = retry.json()["id"]
+    assert client.get(f"/author/drafts/{draft_id}/images/a.png", headers=ADA).content == PNG
+
+
 def test_figure_uploads_are_checked_and_capped(client, figures_dir, monkeypatch):
     draft = make_draft(client)
     assert upload_image(client, draft["id"], "a.png", b"GIF89a").status_code == 400  # not a PNG

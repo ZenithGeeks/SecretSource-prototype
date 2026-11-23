@@ -461,7 +461,9 @@ def _new_draft(
     holds the project's lock too, so it cannot land in a project a delete is removing."""
     wanted = " ".join(title.split())[:MAX_TITLE]
     default = not wanted or wanted == UNTITLED
-    keys = [_title_key(DRAFTS, user)] if default else []
+    # Delete all takes this key before listing drafts. Named imports must take it too:
+    # creating their figure folder and saving the row must fall on the same side of deletion.
+    keys = [_title_key(DRAFTS, user)]
     if project_id:
         keys.append(_row_key(PROJECTS, project_id))
     with _hold(*keys):
@@ -781,11 +783,12 @@ def delete_author_data(user: str | None) -> None:
     before their rows go until their figures are gone, so a write that already holds one (an
     upload, an autosave) finishes first and is deleted with the rest, and one that comes after
     finds no draft (404) instead of saving it back."""
-    draft_ids = [draft["id"] for draft in _rows(DRAFTS, user)]
-    with _locked(DRAFTS, *draft_ids):
-        store.delete_author_rows(user)
-        for draft_id in draft_ids:
-            images.delete_all(draft_id)
+    with _titles_locked(DRAFTS, user):
+        draft_ids = [draft["id"] for draft in _rows(DRAFTS, user)]
+        with _locked(DRAFTS, *draft_ids):
+            store.delete_author_rows(user)
+            for draft_id in draft_ids:
+                images.delete_all(draft_id)
 
 
 @router.post("/drafts/{draft_id}/save")
