@@ -155,7 +155,7 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
         title={label}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="relative size-10 lg:size-10"
+        className="relative size-10 lg:size-8"
       >
         <Bell className="size-4" aria-hidden="true" />
         {unseen > 0 && (

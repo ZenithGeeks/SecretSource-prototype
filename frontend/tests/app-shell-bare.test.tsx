@@ -107,3 +107,16 @@ test('a breadcrumb part with an action is a button, and the last part is text ev
   expect(within(trail).getByText('Current')).toHaveAttribute('aria-current', 'page')
   expect(stay).not.toHaveBeenCalled()
 })
+
+test('a full-width shell is locked to the window and is the containing block for what is inside it', () => {
+  // An absolute element (an sr-only input) deep in a scrolled panel anchors to the nearest
+  // positioned ancestor. Unless that is the clipped shell, it stretches the page and the window
+  // scrolls the workspace away.
+  const { container } = render(
+    <AppShell nav={NAV} active="home" onNavigate={() => {}} role="Labeler" roleIcon={Home} breadcrumb={['Home']} wide="full">
+      <p>content</p>
+    </AppShell>,
+  )
+  expect(container.firstElementChild).toHaveClass('xl:relative', 'xl:h-dvh', 'xl:min-h-0', 'xl:overflow-hidden')
+  expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveClass('xl:h-dvh')
+})
