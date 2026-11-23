@@ -123,7 +123,7 @@ Production runs on our own machines with Docker Compose, not on Google Cloud.
 | Mini PC | `web`, `gateway`, `redis` (the analysis queue) and the papers folder, reached through a Cloudflare tunnel |
 | PC with an RTX 5070 Ti | GROBID, ColBERT, ColPali and the workers |
 
-Ask before any Cloud Run or other Google Cloud deploy.
+Ask before any Google Cloud deploy.
 
 ## Exceptions
 

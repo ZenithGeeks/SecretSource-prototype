@@ -70,7 +70,7 @@ def store() -> Store:
 
 
 # The SDK's DNS-rebinding guard only accepts localhost Host headers. It would 421 every
-# request from Cloud Run or a compose service name. Nothing here is on loopback, so it is off.
+# request from a compose service name. Nothing here is on loopback, so it is off.
 mcp = FastMCP(
     "colbert-retrieval",
     stateless_http=True,
@@ -263,7 +263,7 @@ def receive(upload: UploadFile, folder: Path) -> Path:
 @app.post("/api/upload")
 def upload(file: UploadFile = PDF_UPLOAD):
     """Index a PDF sent in the request body. Use this instead of /api/add when the caller
-    does not share this disk (a gateway on another machine, or on Cloud Run)."""
+    does not share this disk (a gateway on another machine)."""
     path = receive(file, PAPERS_DIR)
     return {"added": store().add_pdf(path), "papers": len(store())}
 

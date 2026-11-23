@@ -5,7 +5,6 @@ torch>=2.4
 transformers>=4.44
 safetensors>=0.4
 huggingface-hub>=0.24
-google-cloud-storage>=2.14
 pypdf>=5
 nltk>=3.9 # Punkt ends each passage at a sentence end (store.py); 3.9 reads the punkt_tab data
 fastapi>=0.110

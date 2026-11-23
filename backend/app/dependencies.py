@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from app.clients.service_auth import auth_headers, sends_key, signs
+from app.clients.service_auth import auth_headers, sends_key
 from app.config import (
     ANALYSES_DB,
     COLBERT_URL,
@@ -53,8 +53,6 @@ def _shown(url: str) -> str:
 
 
 def _signed(url: str) -> str:
-    if signs(url):
-        return "google-id-token"
     return "api key" if sends_key(url) else "none"
 
 
@@ -84,7 +82,7 @@ def _get(url: str, headers: dict) -> Answer:
     detail = f"HTTP {response.status_code}"
     if not response.ok:
         # Why it refused, in the service's words: a bare 500 does not say "billing is disabled".
-        # Cloud Run's error pages are HTML, so the tags go first.
+        # A proxy's error page is HTML, so the tags go first.
         detail += f": {' '.join(re.sub(r'<[^>]*>', ' ', response.text).split())[:160]}"
     return Answer(response.ok, detail, body)
 
@@ -122,12 +120,6 @@ def _service(name: str, url: str, path: str, required: bool) -> dict:
         }
     answer = _get(target, headers)
     ok, detail = answer.ok, answer.detail
-    # A signed URL is a Cloud Run service, and GROBID and ColBERT there scale to zero. A cold
-    # start takes longer than TIMEOUT, and this GET is what starts it, so no answer yet means
-    # starting, not down. A refusal or a wrong URL still fails at once.
-    if answer.timed_out and signs(url):
-        ok = None
-        detail = f"starting: no answer in {TIMEOUT} s, and it scales to zero; ask again in a minute"
     return {
         "name": name,
         "url": _shown(url),
@@ -190,9 +182,8 @@ def _worker() -> dict:
 
 
 def _not_probed(name: str, url: str) -> dict:
-    """A GPU service that scales to zero. Cloud Run bills a GPU instance for as long as it
-    is up, and asking every minute kept one up around the clock (~$38 a day). The pipeline
-    still asks it before each use (retrieval.colpali_available)."""
+    """A GPU service that scales to zero. Asking it every minute would keep it up around
+    the clock. The pipeline still asks it before each use (retrieval.colpali_available)."""
     return {
         "name": name,
         "url": _shown(url),

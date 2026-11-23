@@ -1,14 +1,8 @@
-"""vectorfiles.py: local and GCS-mode PaperFiles, and the maxsim scoring function.
-
-No real GCS: the lazily-created `google.cloud.storage` client is monkeypatched with an
-in-memory fake bucket, the same way the rest of this codebase fakes a lazily-imported
-client (see backend/tests/test_sources.py).
-"""
+"""vectorfiles.py: local PaperFiles and the maxsim scoring function."""
 
 import os
 import time
 
-import pytest
 import torch
 import vectorfiles
 from vectorfiles import Paper, PaperFiles, maxsim
@@ -145,100 +139,3 @@ def test_write_is_atomic_via_os_replace(tmp_path, monkeypatch):
     assert os.path.dirname(src) == os.path.dirname(str(final_path))
     assert src != dst
     assert ".tmp-" in os.path.basename(src)
-
-
-# --- GCS mode ------------------------------------------------------------------
-
-
-class FakeBlob:
-    def __init__(self, bucket, name):
-        self.bucket = bucket
-        self.name = name
-        self.metadata = None
-        self.generation = None
-
-    def upload_from_string(self, data, content_type=None):
-        self.generation = self.bucket._next_generation()
-        self.bucket._objects[self.name] = (data, self.metadata, self.generation)
-
-    def download_as_bytes(self):
-        data, _metadata, _generation = self.bucket._objects[self.name]
-        return data
-
-    def delete(self):
-        self.bucket._objects.pop(self.name, None)
-
-
-class FakeBucket:
-    def __init__(self, name):
-        self.name = name
-        self._objects: dict[str, tuple] = {}
-        self._generation_counter = 0
-
-    def _next_generation(self) -> int:
-        self._generation_counter += 1
-        return self._generation_counter
-
-    def blob(self, name):
-        return FakeBlob(self, name)
-
-    def get_blob(self, name):
-        if name not in self._objects:
-            return None
-        data, metadata, generation = self._objects[name]
-        blob = FakeBlob(self, name)
-        blob.metadata = metadata
-        blob.generation = generation
-        return blob
-
-    def list_blobs(self, prefix=""):
-        class _Named:
-            def __init__(self, name):
-                self.name = name
-
-        return [_Named(name) for name in self._objects if name.startswith(prefix)]
-
-
-class FakeStorageClient:
-    _buckets: dict[str, FakeBucket] = {}
-
-    def bucket(self, name):
-        return self._buckets.setdefault(name, FakeBucket(name))
-
-
-@pytest.fixture
-def fake_gcs(monkeypatch):
-    from google.cloud import storage
-
-    FakeStorageClient._buckets = {}
-    monkeypatch.setattr(storage, "Client", FakeStorageClient)
-    return storage
-
-
-def test_gcs_write_stored_hash_load_and_sources(fake_gcs):
-    files = PaperFiles("gs://my-bucket/prefix", "colbert")
-    rows = _rows(2)
-    vectors = [_unit(2), _unit(1)]
-
-    files.write("paper.pdf", rows, vectors, "hash-1")
-
-    assert files.stored_hash("paper.pdf") == ("hash-1", 2)
-    assert files.stored_hash("missing.pdf") == (None, 0)
-    assert files.sources() == ["paper.pdf"]
-
-    paper = files.load("paper.pdf")
-    assert paper.rows == rows
-
-    # a second load with no change reuses the cache (same generation)
-    cached = files.load("paper.pdf")
-    assert cached is paper
-
-    # writing again bumps the generation, so the next load re-downloads
-    files.write("paper.pdf", _rows(3), [_unit(1), _unit(1), _unit(1)], "hash-2")
-    reloaded = files.load("paper.pdf")
-    assert reloaded is not paper
-    assert len(reloaded.rows) == 3
-
-    files.delete("paper.pdf")
-    assert files.load("paper.pdf") is None
-    assert files.sources() == []

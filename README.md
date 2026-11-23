@@ -146,8 +146,8 @@ Author draft check:
 | Symptom | Fix |
 | --- | --- |
 | `/health` says `"degraded": true` | Find the entry with `"ok": false`, fix its URL or key in `.env`, then run `docker compose up -d` |
-| 401 or 403 from `colbert`, `colpali`, or `grobid` | Check `SERVICE_AUTH` (`none` for local containers, `api-key` with `SERVICE_API_KEY`, or `google-id-token` with `backend/secrets/service-auth.json`) |
-| Gateway exits with `"SERVICE_AUTH must be 'none', 'google-id-token' or 'api-key'"` or missing `SERVICE_API_KEY` | Fix `SERVICE_AUTH` or set `SERVICE_API_KEY` in `.env` |
+| 401 or 403 from `colbert`, `colpali`, or `grobid` | Check `SERVICE_AUTH` (`none` for local containers, or `api-key` with `SERVICE_API_KEY`) |
+| Gateway exits with `"SERVICE_AUTH must be 'none' or 'api-key'"` or missing `SERVICE_API_KEY` | Fix `SERVICE_AUTH` or set `SERVICE_API_KEY` in `.env` |
 | `"The LM returned an empty or null response."` | Check that `VLLM_URL` ends with `/v1` and `VLLM_MODEL` matches a model served by the endpoint |
 | Most citations show as unresolved / Semantic Scholar 429 | Set `S2_API_KEY` in `.env` |
 | No figure or page hints | ColPali runs only when `VISUAL_EVIDENCE=true` and `colpali` is running |
@@ -218,7 +218,7 @@ backend/            gateway API, pipeline, ADK agents (Python, FastAPI, ADK, DSP
 frontend/           React + Vite UI (nginx proxies /api to gateway)
 services/colbert/   ColBERTv2 text retrieval service
 services/colpali/   ColPali visual retrieval service
-deploy/             Cloud Run, GPU compose, and monitoring configs
+deploy/             GPU compose and monitoring configs
 supabase/           Optional Supabase Postgres migrations
 data/papers/        downloaded PDFs and figure crops (gitignored)
 ```
@@ -268,10 +268,9 @@ cd ../frontend && npm ci && npm run lint && npm run build && npm test
 </details>
 
 <details>
-<summary>Optional: Supabase persistence & Cloud Run deployment</summary>
+<summary>Optional: Supabase persistence</summary>
 
 - **Supabase**: Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` (and `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` for login). See [supabase/README.md](supabase/README.md).
-- **Cloud Run**: `PROJECT=<gcp-project> ./deploy/cloudrun.sh` builds and deploys the services to Google Cloud Run (set `VISION=0` to skip `colpali`). See [deploy/vllm-cloud-run.md](deploy/vllm-cloud-run.md) and [ARCHITECTURE.md](ARCHITECTURE.md#services).
 </details>
 
 <details>

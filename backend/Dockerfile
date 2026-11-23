@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 # Torch first, from TORCH_INDEX, so pip does not pick a build for us. The CPU index is the
-# default: Cloud Run has no GPU. On a machine with an NVIDIA GPU, docker-compose.gpu.yml builds
+# default: machines without a GPU do not need CUDA wheels. On a machine with an NVIDIA GPU, docker-compose.gpu.yml builds
 # with the cu130 index (RTX 50xx needs cu128 or newer), and Docling then runs its layout, table
 # and OCR models on the GPU. Its accelerator device is "auto", so nothing else changes.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu

@@ -1,4 +1,4 @@
-"""_grobid_pdf sends GROBID a PDF over Cloud Run's 32 MiB limit with its images at about 72 dpi,
+"""_grobid_pdf sends GROBID a PDF over the 32 MiB upload limit with its images at about 72 dpi,
 and keys the cache on the original file, so a 34 MiB paper no longer stops with a 413."""
 
 import hashlib
@@ -7,7 +7,7 @@ import sys
 import types
 
 import pytest
-from app.clients import cloud_run
+from app.clients import upload_limit
 from app.pipeline import claims
 
 
@@ -64,7 +64,7 @@ def test_a_pdf_over_the_limit_is_sent_with_its_images_resampled(sent, monkeypatc
 
     bodies, keys = sent
     pdf = _pdf_with_image(tmp_path / "2409.12191.pdf")
-    monkeypatch.setattr(cloud_run, "UPLOAD_LIMIT_BYTES", pdf.stat().st_size - 1)
+    monkeypatch.setattr(upload_limit, "UPLOAD_LIMIT_BYTES", pdf.stat().st_size - 1)
 
     claims._grobid_pdf("processFulltextDocument", str(pdf), coordinates=("ref", "head"))
 
