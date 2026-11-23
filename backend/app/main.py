@@ -119,6 +119,7 @@ from app.tracing import setup_tracing
 
 PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 PDF_UPLOAD = File(...)
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 AVATAR_UPLOAD = File(...)
 MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2MB — a square 128px+ photo, not a print-res upload
 AVATAR_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
@@ -910,9 +911,8 @@ async def upload_analysis(
     file: UploadFile = PDF_UPLOAD, verify: bool = True, user: str | None = Depends(current_user)
 ):
     # Read one byte past the limit to tell a full-size file from an oversized one.
-    max_upload_bytes = 100 * 1024 * 1024
-    content = await file.read(max_upload_bytes + 1)
-    if len(content) > max_upload_bytes:
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "the PDF must be 100 MB or smaller")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(422, "the file is not a PDF")
@@ -932,9 +932,8 @@ async def upload_reference_pdf(
         raise HTTPException(409, "wait for the analysis to finish")
     if ref not in (analysis.get("references") or {}):
         raise HTTPException(404, f"the paper has no reference {ref}")
-    max_upload_bytes = 100 * 1024 * 1024
-    content = await file.read(max_upload_bytes + 1)
-    if len(content) > max_upload_bytes:
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "the PDF must be 100 MB or smaller")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(422, "the file is not a PDF")

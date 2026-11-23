@@ -366,7 +366,7 @@ files (#168).
 Response: `{"id": "<analysis id>"}`.
 
 Errors, and nothing is saved or created for any of them:
-- `413` when the file is over 100 MB (`uploads.MAX_UPLOAD_BYTES`).
+- `413` when the file is over 100 MiB (`app.main.MAX_UPLOAD_BYTES`).
 - `422` when the file does not start with `%PDF-`.
 - `503` when the queue (Redis) cannot be reached.
 

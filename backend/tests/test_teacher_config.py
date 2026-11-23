@@ -21,10 +21,10 @@ GOOGLE_ENV = (
 )
 
 
-def test_cloud_env_keeps_optional_google_classroom_disabled_by_default():
-    cloud_env = Path(__file__).parents[2] / ".env.cloud"
+def test_example_env_keeps_optional_google_classroom_disabled_by_default():
+    example_env = Path(__file__).parents[2] / ".env.example"
 
-    assert "TEACHER_GOOGLE_ENABLED=false" in cloud_env.read_text(encoding="utf-8")
+    assert "TEACHER_GOOGLE_ENABLED=false" in example_env.read_text(encoding="utf-8").splitlines()
 
 
 def _clear_google_env(monkeypatch):
