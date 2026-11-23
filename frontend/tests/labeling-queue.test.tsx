@@ -260,12 +260,12 @@ describe('the labeler queue', () => {
     }
   })
 
-  it('puts papers the viewer has not finished before finished ones of the same topic', async () => {
+  it('puts every paper the viewer has not finished before the finished ones', async () => {
     gateway.pool.papers.unshift({ analysis_id: 'x6', subject: '', keywords: [], title: 'Done NLP paper', topic: 'NLP', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')
-      expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'Done NLP paper', 'HPC paper', '10.1/closed'])
+      expect(titlesIn(table)).toEqual(['NLP paper', '10.1/new', 'HPC paper', '10.1/closed', 'Done NLP paper'])
     } finally {
       gateway.pool.papers.shift()
     }

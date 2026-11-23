@@ -4,7 +4,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { emptyDraft, type Candidate, type Draft, type Reference, type UncheckedCitation, type WorkClaim } from '../src/lib/labeling'
-import { PassageList } from '../src/roles/labeler/components/PassageList'
+import { PassageList, revealInPanel } from '../src/roles/labeler/components/PassageList'
 
 const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   cand_id: id,
@@ -33,7 +33,7 @@ const refs: Reference[] = [
   { reference_id: 'refC', file: '', label: 'Ref C' },
 ]
 
-function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}) {
+function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}, reactStrictMode = false) {
   const props = {
     claim: claim([cand('c1'), cand('c2', { rank: 2, page: null, score: null })]),
     draft: emptyDraft() as Draft,
@@ -46,8 +46,8 @@ function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}) {
     grade: (id: string) => <p>grade for {id}</p>,
     ...over,
   }
-  render(<PassageList {...props} />)
-  return props
+  const view = render(<PassageList {...props} />, { reactStrictMode })
+  return { ...props, rerender: (next: Partial<typeof props>) => view.rerender(<PassageList {...props} {...next} />) }
 }
 
 afterEach(() => {
@@ -113,17 +113,66 @@ describe('the passages of a claim', () => {
     expect(props.onJudge).toHaveBeenCalledWith('c1', 'rejected')
   })
 
-  it('marks the focused passage, shows the shortcut keys, and scrolls it into view', () => {
+  it('keeps automatic focus from scrolling during StrictMode replay but reveals explicit focus', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
-    setup({
-      focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' },
+    const props = setup({
+      focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1', automatic: true },
       draft: { ...emptyDraft(), cands: { c1: 'relevant', c2: 'rejected' } },
-    })
-    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    }, true)
+    // A new claim opens at its decision: the first focused passage is not scrolled to.
+    expect(scroll).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /text of c1/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-keyshortcuts', 'R')
     expect(screen.getAllByRole('radio', { name: /^Not relevant/ })[1]).toHaveAttribute('aria-checked', 'true')
+
+    props.rerender({ focus: { file: 'refB.pdf', passage: 'text of c2', page: null, key: 'c2' } })
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
+  })
+
+  it('reveals a newly added passage that mounts with explicit focus', () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    const props = setup({}, true)
+    props.rerender({
+      draft: { ...emptyDraft(), added: [{ reference_id: 'refB', page: 3, passage: 'new passage' }] },
+      focus: { file: 'refB.pdf', passage: 'new passage', page: 3, key: 'added:refB:new passage' },
+    })
+    expect(screen.getByRole('button', { name: /new passage/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
+  })
+
+  it('scrolls only the label panel to a newly focused passage, above or below the view', () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    const panel = document.createElement('div')
+    panel.setAttribute('data-label-panel', '')
+    document.body.appendChild(panel)
+    const card = document.createElement('li')
+    panel.appendChild(card)
+    Object.defineProperty(panel, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(card, 'offsetHeight', { configurable: true, value: 40 })
+    panel.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+
+    panel.scrollTop = 0
+    card.getBoundingClientRect = () => ({ top: 200 }) as DOMRect
+    revealInPanel(card)
+    expect(panel.scrollTop).toBe(140)
+
+    card.getBoundingClientRect = () => ({ top: -100 }) as DOMRect
+    revealInPanel(card)
+    expect(panel.scrollTop).toBe(40)
+
+    card.getBoundingClientRect = () => ({ top: 10 }) as DOMRect
+    revealInPanel(card)
+    expect(panel.scrollTop).toBe(40)
+    expect(scroll).not.toHaveBeenCalled()
+    panel.remove()
+  })
+
+  it('leaves a narrow page alone when the browser cannot scroll an element into view', () => {
+    const card = document.createElement('li')
+    expect(() => revealInPanel(card)).not.toThrow()
   })
 
   it('names a reference by its id when the reference list does not know it', () => {
@@ -218,15 +267,16 @@ describe('passages the person added', () => {
     expect(props.onFocus).toHaveBeenCalledWith({ file: '', passage: 'lost', page: null, key: 'added:ghost:lost' })
   })
 
-  it('opens a passage added for a work with no PDF with no file, scrolling it into view when focused', () => {
+  it('opens a passage added for a work with no PDF with no file, scrolling it into view once focused', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
     const props = setup({
       claim: claim([]),
       draft: { ...emptyDraft(), added: [{ reference_id: 'refC', page: null, passage: 'cited only' }] },
-      focus: { file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' },
     })
-    expect(scroll).toHaveBeenCalled()
+    props.rerender({ focus: { file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' } })
+    // No label panel around it here, so the page scrolls the browser's way.
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
     fireEvent.click(screen.getByRole('button', { name: 'cited only' }))
     expect(props.onFocus).toHaveBeenCalledWith({ file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' })
   })

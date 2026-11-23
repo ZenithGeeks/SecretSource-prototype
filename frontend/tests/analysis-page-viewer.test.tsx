@@ -477,6 +477,18 @@ describe('the toolbar and layout', () => {
     expect(screen.getByRole('button', { name: 'Fill the window' })).toBeInTheDocument()
   })
 
+  it('keeps an embedded viewer inside its pane when the default would cover the screen', async () => {
+    stub.narrow = true
+    await render(<PageViewer target={{ ...target, paperRole: 'reference' }} embedded keyboard={false} className="h-full" />)
+    const pane = screen.getByRole('complementary')
+    expect(pane).toHaveClass('h-full')
+    expect(pane).not.toHaveClass('fixed')
+    fireEvent.click(screen.getByRole('button', { name: 'Fill the window' }))
+    expect(pane).toHaveClass('fixed', 'inset-4')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the side panel' }))
+    expect(pane).not.toHaveClass('fixed')
+  })
+
   it('closes on Escape on a narrow screen even after expanding', async () => {
     const onClose = vi.fn()
     stub.narrow = true

@@ -355,7 +355,7 @@ export function AppShell<K extends string>({
     // `relative` makes the locked shell the containing block for absolute descendants (the
     // `sr-only` inputs deep in a scrolled panel); without it they anchor to the page, escape
     // the overflow clip and make the window scroll the workspace away.
-    <div className={cn('flex min-h-screen flex-col lg:flex-row', wide === 'full' && !bare && 'xl:relative xl:h-dvh xl:min-h-0 xl:overflow-hidden')}>
+    <div className={cn('flex min-h-screen flex-col lg:flex-row', wide === 'full' && !bare && 'lg:relative lg:h-dvh lg:min-h-0 lg:overflow-clip')}>
       {!bare && (
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
           <Brand compact />
@@ -392,7 +392,7 @@ export function AppShell<K extends string>({
           data-folded={folded || undefined}
           className={cn(
             'hidden shrink-0 flex-col border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen',
-            wide === 'full' && 'xl:h-dvh',
+            wide === 'full' && 'lg:h-dvh',
             folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-x-hidden overflow-y-auto px-3 pb-3.5',
           )}
         >
@@ -442,11 +442,17 @@ export function AppShell<K extends string>({
         </aside>
       )}
 
-      <div className={cn('flex min-w-0 flex-1 flex-col', wide === 'full' && !bare && 'xl:min-h-0')}>
+      <div className={cn('flex min-w-0 flex-1 flex-col', wide === 'full' && !bare && 'lg:min-h-0')}>
         {breadcrumb && !bare && (
           // Translucent so the content scrolls under it, blurred. Under the phone top bar it
           // sticks just below it (the bar is 3.75rem tall).
-          <div className="sticky top-[3.75rem] z-20 flex min-h-[52px] items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8">
+          <div
+            className={cn(
+              'sticky top-[3.75rem] z-20 flex items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8',
+              // A full-width screen keeps every pixel of height for its panes.
+              wide === 'full' ? 'min-h-11' : 'min-h-[52px]',
+            )}
+          >
             <Breadcrumb items={breadcrumb} />
             <div className="flex shrink-0 items-center gap-1">
               {toolbarLead}
@@ -455,13 +461,13 @@ export function AppShell<K extends string>({
           </div>
         )}
         <ToolbarSlot.Provider value={breadcrumb && !bare ? actionsEl : null}>
-          <div className={cn('flex min-w-0 flex-1', wide === 'full' && !bare && 'xl:min-h-0')}>
+          <div className={cn('flex min-w-0 flex-1', wide === 'full' && !bare && 'lg:min-h-0')}>
             <main
               className={cn(
                 bare
                   ? 'flex h-screen w-full min-w-0 flex-1 flex-col overflow-hidden'
                   : 'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-                !bare && (wide === 'full' ? 'max-w-none py-2 xl:min-h-0 xl:overflow-hidden' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
+                !bare && (wide === 'full' ? 'max-w-none py-2 lg:min-h-0 lg:overflow-hidden' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
               )}
             >
               {children}
@@ -473,7 +479,7 @@ export function AppShell<K extends string>({
                 className={
                   bare
                     ? 'lg:sticky lg:top-0 lg:h-screen lg:w-[400px] lg:shrink-0'
-                    : cn('lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0', wide === 'full' && 'xl:h-full')
+                    : cn('lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0', wide === 'full' && 'lg:h-full')
                 }
               >
                 {panel}

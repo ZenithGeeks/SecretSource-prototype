@@ -117,6 +117,6 @@ test('a full-width shell is locked to the window and is the containing block for
       <p>content</p>
     </AppShell>,
   )
-  expect(container.firstElementChild).toHaveClass('xl:relative', 'xl:h-dvh', 'xl:min-h-0', 'xl:overflow-hidden')
-  expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveClass('xl:h-dvh')
+  expect(container.firstElementChild).toHaveClass('lg:relative', 'lg:h-dvh', 'lg:min-h-0', 'lg:overflow-clip')
+  expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveClass('lg:h-dvh')
 })
