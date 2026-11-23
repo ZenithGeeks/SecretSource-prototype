@@ -738,6 +738,7 @@ async def upload_image(
             draft = _row(DRAFTS, draft_id, user, "draft")
             images.add(draft, [(path, content)])
             store.save_author_row(DRAFTS, draft)
+            images.remove_unused(draft)  # the replaced file, once the row no longer lists it
             return draft
 
     return await _draft_answer(await asyncio.to_thread(add), user)
@@ -768,21 +769,22 @@ async def delete_image(draft_id: str, name: str, user: str | None = Depends(curr
             draft = _row(DRAFTS, draft_id, user, "draft")
             images.remove(draft, name)
             store.save_author_row(DRAFTS, draft)
+            images.remove_unused(draft)
             return draft
 
     return await _draft_answer(await asyncio.to_thread(remove), user)
 
 
-def owner_draft_ids(user: str | None) -> list[str]:
-    return [draft["id"] for draft in _rows(DRAFTS, user)]
-
-
-def delete_draft_images(draft_ids: list[str]) -> None:
-    """Every stored figure of these drafts, for Settings -> Your data -> Delete all, once their
-    rows are gone. Each under its draft's lock, so an upload that was already writing finishes
-    first and its file goes too."""
-    for draft_id in draft_ids:
-        with _locked(DRAFTS, draft_id):
+def delete_author_data(user: str | None) -> None:
+    """Settings -> Your data -> Delete all for the Author role: every project, draft and source
+    row of this owner, and every stored figure of the drafts. The drafts' locks are held from
+    before their rows go until their figures are gone, so a write that already holds one (an
+    upload, an autosave) finishes first and is deleted with the rest, and one that comes after
+    finds no draft (404) instead of saving it back."""
+    draft_ids = [draft["id"] for draft in _rows(DRAFTS, user)]
+    with _locked(DRAFTS, *draft_ids):
+        store.delete_author_rows(user)
+        for draft_id in draft_ids:
             images.delete_all(draft_id)
 
 

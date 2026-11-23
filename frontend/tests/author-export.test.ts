@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { strFromU8, unzipSync } from 'fflate'
 
-import { annotationFor, buildAnnotatedTex, buildProjectZip, buildUpdatedBib, mergeEntries, slug } from '../src/lib/authorExport.ts'
+import { annotationFor, buildAnnotatedTex, buildProjectZip, buildUpdatedBib, MAX_FIGURE_COPY_BYTES, mergeEntries, slug } from '../src/lib/authorExport.ts'
 import { parseBib } from '../src/lib/bibtex.ts'
 import type { Citation, Draft } from '../src/types/draftCheck.ts'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
@@ -152,6 +152,16 @@ test('buildProjectZip also puts a figure where \\includegraphics names it, so th
       assert.deepEqual([...files['figures/posv.png']], [...png])
       assert.deepEqual([...files['plots/arch.pdf']], [...pdf])
     })
+})
+
+test('buildProjectZip refuses more figure copies than MAX_FIGURE_COPY_BYTES, and writes each path once', () => {
+  const big = new Uint8Array(MAX_FIGURE_COPY_BYTES / 2 + 1)
+  const paths = (n: number) => Array.from({ length: n }, (_, i) => `\\includegraphics{copy${i}/posv}`).join('\n')
+  const withPaths = (n: number): Draft => ({ ...draft, files: [{ name: 'main.tex', kind: 'tex', content: `${paths(n)}\n${paths(n)}` }] })
+  // One extra path, named twice: one copy, under the budget.
+  assert.equal(buildProjectZip(withPaths(1), [{ name: 'posv.png', content: big }]).type, 'application/zip')
+  // Two extra paths: two copies, over it.
+  assert.throws(() => buildProjectZip(withPaths(2), [{ name: 'posv.png', content: big }]), /more than 25 MB/)
 })
 
 test('slug makes a safe file name', () => {

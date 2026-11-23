@@ -100,8 +100,8 @@ def add(draft: dict, uploads: list[tuple[str, bytes]], strict: bool = True) -> l
     """Stores each (name, bytes) for the draft and lists it on the row; a name it already has is
     replaced. With `strict`, a wrong file is refused (400/413) and nothing is added; without it
     (a zip's figures) a file that is not the image it says, is too big, or would go past the
-    draft's caps is skipped. Answers the names left out. The caller holds the draft's lock and
-    saves the row."""
+    draft's caps is skipped. Answers the names left out. The caller holds the draft's lock,
+    saves the row, then calls remove_unused for a replaced file."""
     images = {i["name"]: i for i in draft.get("images", [])}
     skipped = []
     for name, content in uploads:
@@ -127,7 +127,6 @@ def add(draft: dict, uploads: list[tuple[str, bytes]], strict: bool = True) -> l
         images[name] = {"name": name, "file": stored, "size": len(content)}
     draft["images"] = sorted(images.values(), key=lambda i: i["name"])
     _bump(draft)
-    remove_unused(draft)
     return skipped
 
 
@@ -152,19 +151,20 @@ def _write(draft_id: str, content: bytes, ext: str) -> str:
 
 def remove(draft: dict, name: str) -> None:
     """Takes one figure off the draft (404 when it has none of that name). The caller holds the
-    draft's lock and saves the row."""
+    draft's lock, saves the row, then calls remove_unused."""
     images = draft.get("images", [])
     kept = [i for i in images if i["name"] != name]
     if len(kept) == len(images):
         raise HTTPException(404, "no such image")
     draft["images"] = kept
     _bump(draft)
-    remove_unused(draft)
 
 
 def remove_unused(draft: dict) -> None:
     """Deletes the stored files the row no longer lists (a replaced or removed figure). Two
-    names with the same bytes share one file, so a file goes only when no name uses it."""
+    names with the same bytes share one file, so a file goes only when no name uses it. Called
+    after the row is saved, under the draft's lock: a save that fails leaves the old row and
+    every file it lists."""
     folder = _folder(draft["id"])
     if not folder.is_dir():
         return

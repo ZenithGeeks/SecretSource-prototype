@@ -595,7 +595,12 @@ export function Editor({
         )
         const figures = read.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
         const missing = images.filter((_, i) => read[i].status === 'rejected').map((i) => i.name)
-        downloadBlob(`${name}.zip`, buildProjectZip(current, figures))
+        try {
+          downloadBlob(`${name}.zip`, buildProjectZip(current, figures))
+        } catch (error) {
+          toast.error(`Could not build ${name}.zip: ${errorMessage(error)}`)
+          return false
+        }
         if (missing.length) toast.warning(`Downloaded ${name}.zip without ${missing.join(', ')}: could not read ${missing.length === 1 ? 'it' : 'them'}`)
         else toast.success(`Downloaded ${name}.zip`)
         return

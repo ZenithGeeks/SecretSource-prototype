@@ -10,6 +10,7 @@ directly under asyncio.run, as test_checks.py does for _run_check.
 import asyncio
 import io
 import json
+import threading
 import time
 import zipfile
 import zlib
@@ -615,6 +616,48 @@ def test_uploading_replacing_and_deleting_a_figure(client, figures_dir):
     assert removed["images"] == [] and removed["imagesVersion"] == 3
     assert list(folder.iterdir()) == []
     assert client.delete(url, headers=ADA).status_code == 404
+
+
+def test_a_replace_whose_save_fails_keeps_the_old_figure(client, figures_dir, monkeypatch):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "posv.png", PNG).status_code == 200
+
+    def broken(table, row):
+        raise RuntimeError("the store is down")
+
+    saved = author.store.save_author_row
+    monkeypatch.setattr(author.store, "save_author_row", broken)
+    with pytest.raises(RuntimeError):
+        upload_image(client, draft["id"], "posv.png", PNG + b"\x01")
+    monkeypatch.setattr(author.store, "save_author_row", saved)
+    # The row still lists the old figure, and its file is still there.
+    assert client.get(f"/author/drafts/{draft['id']}/images/posv.png", headers=ADA).content == PNG
+
+
+def test_delete_all_waits_for_a_write_that_holds_a_drafts_lock(client, figures_dir):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "a.png", PNG).status_code == 200
+    holding, done = threading.Event(), threading.Event()
+
+    def upload_in_flight():
+        # An upload that took the draft's lock before Delete all: it saves its row and file.
+        with author._locked(author.DRAFTS, draft["id"]):
+            holding.set()
+            time.sleep(0.3)
+            row = author.store.load_author_row(author.DRAFTS, draft["id"])
+            author_images.add(row, [("b.png", PNG + b"\x02")])
+            author.store.save_author_row(author.DRAFTS, row)
+        done.set()
+
+    writer = threading.Thread(target=upload_in_flight)
+    writer.start()
+    assert holding.wait(5)
+    assert client.delete("/user/data", headers=ADA).status_code == 200
+    writer.join(5)
+    assert done.is_set()
+    # Delete all waited for it, so neither the row nor its figures came back.
+    assert client.get("/author/drafts", headers=ADA).json() == []
+    assert not (figures_dir / draft["id"]).exists()
 
 
 def test_figure_uploads_are_checked_and_capped(client, figures_dir, monkeypatch):

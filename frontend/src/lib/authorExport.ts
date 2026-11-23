@@ -95,7 +95,7 @@ function imagePaths(tex: string): string[] {
  * compile. A path without an extension gets the figure's. */
 export function buildProjectZip(draft: Draft, figures: { name: string; content: Uint8Array }[] = []): Blob {
   const byName = new Map(figures.map((f) => [f.name, f.name]))
-  const extra: { name: string; content: Uint8Array }[] = []
+  const extra = new Map<string, Uint8Array>()
   for (const file of draft.files) {
     if (file.kind !== 'tex') continue
     for (const path of imagePaths(file.content)) {
@@ -106,11 +106,22 @@ export function buildProjectZip(draft: Draft, figures: { name: string; content: 
       // Outside the project ("../x", "/abs", "C:"): not an entry an unzip should write.
       if (wanted.startsWith('/') || wanted.includes(':') || wanted.split('/').includes('..')) continue
       const name = /\.[A-Za-z0-9]+$/.test(wanted.split('/').pop() ?? '') ? wanted : `${wanted}${stored.slice(stored.lastIndexOf('.'))}`
-      if (name !== figure.name) extra.push({ name, content: figure.content })
+      if (name !== figure.name) extra.set(name, figure.content)
     }
   }
-  return new Blob([zipStored([...draft.files, ...figures, ...extra])], { type: 'application/zip' })
+  // Each extra path is another whole copy of its figure, so a source naming one figure many
+  // ways could build an archive too large for the browser to hold.
+  let copied = 0
+  for (const content of extra.values()) copied += content.length
+  if (copied > MAX_FIGURE_COPY_BYTES) {
+    throw new Error(`The figures' extra copies at their \\includegraphics paths come to more than ${MAX_FIGURE_COPY_BYTES / (1024 * 1024)} MB; name each figure by one path.`)
+  }
+  return new Blob([zipStored([...draft.files, ...figures, ...[...extra].map(([name, content]) => ({ name, content }))])], { type: 'application/zip' })
 }
+
+/** The most bytes the copies of figures at their \includegraphics paths may add to a project
+ * .zip: the gateway's cap on one draft's figures (backend/app/author/images.py). */
+export const MAX_FIGURE_COPY_BYTES = 25 * 1024 * 1024
 
 /** "related-work-thesis-ch-2" from a draft title, for file names. */
 export function slug(title: string): string {
