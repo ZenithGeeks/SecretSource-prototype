@@ -1,8 +1,9 @@
 /**
  * App shell / temporary router. No routing library yet, so a small screen state stands in:
  * onboarding picks a role, which opens that role's home. `?role=` deep-links a screen, and
- * without it the role this browser opened last (lib/lastRole.ts) opens, so the picker shows
- * only on a first visit or from the role "change" link.
+ * without it the role this browser opened last (lib/lastRole.ts) opens, then the account's
+ * default role (app_metadata.role), so the picker shows only when none of those pick one or
+ * from the role "change" link.
  *
  * Role teams: build your screens in src/roles/<role>/ (own folder — no collisions), export
  * a <Role>App component, then wire its case below. That one case is the only
@@ -59,6 +60,18 @@ function syncRoleParam(screen: Screen) {
 export function Root() {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const { session, loading } = useAuth()
+  const userId = session?.user.id
+  const [roleCheckedFor, setRoleCheckedFor] = useState<string | undefined>()
+
+  // After ?role= and this browser's last role, the account's default role opens before the
+  // picker: once per sign-in, so a token refresh does not pull someone off the picker. Set by
+  // the host with backend/set_role.py; app_metadata, unlike user_metadata, is not writable by
+  // the user.
+  if (userId !== roleCheckedFor) {
+    setRoleCheckedFor(userId)
+    const accountRole: unknown = session?.user.app_metadata?.role
+    if (screen === 'onboarding' && typeof accountRole === 'string' && isRole(accountRole)) setScreen(accountRole)
+  }
 
   useEffect(() => {
     syncRoleParam(screen)
