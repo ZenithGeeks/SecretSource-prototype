@@ -15,6 +15,7 @@ import lzma
 import os
 import re
 import shutil
+import time
 import uuid
 import zipfile
 import zlib
@@ -36,6 +37,8 @@ IMAGE_TYPES = {
 MAX_IMAGE_FILE = 5 * 1024 * 1024  # one figure
 MAX_DRAFT_IMAGES = 25 * 1024 * 1024  # all of one draft's figures together
 MAX_IMAGES = 100
+# A `.part` file older than this is a write that will never finish: remove_unused deletes it.
+STALE_PART_SECONDS = 10 * 60
 
 # Any name a LaTeX path can hold ("figure (1).png", "résumé.png"): the stored file is named by
 # its hash, so the name never reaches the filesystem. Control characters, a backslash and the
@@ -169,8 +172,13 @@ def remove_unused(draft: dict) -> None:
     if not folder.is_dir():
         return
     used = {i["file"] for i in draft.get("images", [])}
+    stale = time.time() - STALE_PART_SECONDS
     for path in folder.iterdir():
-        if path.name not in used and not path.name.startswith("."):
+        if path.name.startswith("."):
+            # A `.part` file is a write in progress, or what a crash or a full disk left behind.
+            if path.name.endswith(".part") and path.stat().st_mtime < stale:
+                path.unlink(missing_ok=True)
+        elif path.name not in used:
             path.unlink(missing_ok=True)
 
 

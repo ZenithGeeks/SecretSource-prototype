@@ -97,6 +97,7 @@ default".
 | `SERVICE_AUTH` | `none` | `api-key` sends `SERVICE_API_KEY` in an `apikey` header |
 | `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
 | `PAPERS_DIR` | `data/papers` | downloaded PDFs and figure crops |
+| `DRAFT_IMAGES_DIR` | `data/draft-images` | Author drafts' uploaded figures; must be on a persistent volume (see Deploy) |
 | `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses and projects in Supabase instead of SQLite, and turn on login (see Login) |
 | `SESSION_DB_URL` | empty | Postgres URL where the chat agents keep their sessions (`app/sessions.py`); empty keeps them in memory, so a restart forgets them. ADK's tables go in the `adk` schema, never `public` |
@@ -298,6 +299,11 @@ serves pages and figures from it, and the worker reads the PDFs and writes the f
 lives on the mini PC and is shared over NFS, and the PC's workers mount that share.
 
 Without the shared folder, every uploaded PDF ends with "no paper found matching the title".
+
+Author drafts' figures live on the gateway's disk under `DRAFT_IMAGES_DIR`, which compose mounts
+as the persistent volume `draft-images`. The draft rows that list the figures are in the store, so
+a gateway that runs without that volume loses the files on restart while the rows still list
+them, and the editor shows those figures as missing.
 
 ## Tests
 

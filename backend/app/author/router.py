@@ -639,8 +639,13 @@ async def delete_draft(draft_id: str, user: str | None = Depends(current_user)):
         # the row) or re-reads the row after it and answers 404, so it never brings it back.
         with _locked(DRAFTS, draft_id):
             _row(DRAFTS, draft_id, user, "draft")
-            _erase_draft_images(draft_id)
+            # The row goes first: if it cannot be deleted, the draft keeps every figure it lists.
+            # A folder that then cannot be removed is logged; no row points at it any more.
             store.delete_author_row(DRAFTS, draft_id)
+            try:
+                images.delete_all(draft_id)
+            except OSError:
+                logger.exception("Could not remove figures of deleted draft %s", draft_id)
 
     await asyncio.to_thread(remove)
     return {"deleted": draft_id}
