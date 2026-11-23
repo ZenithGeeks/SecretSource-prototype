@@ -419,7 +419,7 @@ def _matches_title_with_site_suffix(cited_title: str, found_title: str) -> bool:
     """Compare a citation title with a PDF or page title that may append a site name."""
     from app.pipeline import sources
 
-    return any(
+    return sources.titles_match(cited_title, found_title) or any(
         sources.titles_match(cited_title, segment)
         for segment in re.split(r"\s+(?:\||-|–|—)\s+", found_title)
     )

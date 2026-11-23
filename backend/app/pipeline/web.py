@@ -5,6 +5,7 @@ number of HTTP redirects, rejects non-public destinations, and returns paragraph
 stable URL/anchor locations so callers never mistake a web page for a paper PDF.
 """
 
+import codecs
 import ipaddress
 import socket
 import threading
@@ -218,7 +219,20 @@ def fetch_resource(url: str) -> WebResource:
                 )
             if response.status >= 400:
                 raise WebReadError("http-error", f"the page returned HTTP {response.status}")
-            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            content_header = response.headers.get("Content-Type", "")
+            content_type = content_header.split(";", 1)[0].strip().lower()
+            charset = next(
+                (
+                    part.split("=", 1)[1].strip().strip("\"'")
+                    for part in content_header.split(";")[1:]
+                    if part.strip().lower().startswith("charset=")
+                ),
+                "utf-8",
+            )
+            try:
+                codecs.lookup(charset)
+            except LookupError:
+                charset = "utf-8"
             limit = MAX_BYTES if content_type in {"text/html", "application/xhtml+xml"} else MAX_PDF_BYTES
             declared_size = response.headers.get("Content-Length")
             if declared_size and declared_size.isdigit() and int(declared_size) > limit:
@@ -238,7 +252,7 @@ def fetch_resource(url: str) -> WebResource:
                         "too-large", f"the response exceeded the {limit // 1_000_000} MB read limit"
                     )
                 chunks.append(chunk)
-            return WebResource(current, content_type, "utf-8", b"".join(chunks))
+            return WebResource(current, content_type, charset, b"".join(chunks))
         except WebReadError:
             raise
         except Exception as error:

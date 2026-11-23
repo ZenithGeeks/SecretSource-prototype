@@ -338,6 +338,12 @@ def test_a_journal_line_beside_a_link_is_still_the_title():
     assert sources.lookup_key(parsed) == "FFmpeg-Developers. ffmpeg tool"
 
 
+def test_matching_full_title_with_an_em_dash_is_not_split_as_a_site_suffix():
+    title = "Efficient Indexing for Multilingual Documents — Reliable Retrieval for Distributed Collections"
+
+    assert verify._matches_title_with_site_suffix(title, title)
+
+
 def test_a_journal_line_beside_a_doi_is_still_the_title():
     with_doi = ET.fromstring(
         '<biblStruct xmlns="http://www.tei-c.org/ns/1.0"><analytic/>'

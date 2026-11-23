@@ -237,6 +237,48 @@ it('opens readable web citations as linkable web evidence instead of a PDF page'
   expect(screen.getByText('Retrieved 2026-11-23T00:00:00+00:00')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', `${url}#finding`)
 })
+
+it('does not render a web evidence link for a non-http locator', async () => {
+  const page = makeSession()
+  page.claims[0] = {
+    ...page.claims[0],
+    cited: ['b5'],
+    candidates: [{
+      cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: 'javascript:alert(1)',
+    }],
+  }
+  page.references = [{
+    reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5',
+    source_kind: 'web-page', url: 'https://example.org/article', retrieved_at: '2026-11-23T00:00:00+00:00',
+  }]
+  page.unread = []
+  gateway.session = page
+  await open()
+
+  expect(screen.queryByRole('link', { name: /Open cited page and passage/ })).not.toBeInTheDocument()
+})
+
+it('does not let an unsafe locator override the cited page URL', async () => {
+  const page = makeSession()
+  page.claims[0] = {
+    ...page.claims[0],
+    cited: ['b5'],
+    candidates: [{
+      cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+      score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: 'javascript:alert(1)',
+    }],
+  }
+  page.references = [{
+    reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5',
+    source_kind: 'web-page', url: 'javascript:alert(2)',
+  }]
+  page.unread = []
+  gateway.session = page
+  await open()
+
+  expect(screen.queryByRole('link', { name: /Open cited page and passage/ })).not.toBeInTheDocument()
+})
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()

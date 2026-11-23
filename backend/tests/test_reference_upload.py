@@ -88,6 +88,33 @@ def test_a_retry_rechecks_only_the_cited_reference_when_the_failure_is_retryable
     assert prepared == [(GMRES, ANALYSIS["claims"][0]["citations"][0])]
     assert analysis["claims"][0]["unchecked"] == []
     assert analysis["claims"][0]["needs_review"] is True
+
+
+def test_retry_does_not_commit_a_result_after_the_citation_changes(api, monkeypatch):
+    _, analysis, _ = api
+    citation = analysis["claims"][0]["citations"][0]
+    analysis["claims"][0]["unchecked"][0]["source_outcome"] = {
+        "source_kind": "unknown",
+        "outcome": "temporary-failure",
+        "retryable": True,
+        "attempts": [],
+    }
+    analysis["claims"][0]["verdicts"] = [{"cited": "previous", "verdict": "supports"}]
+    monkeypatch.setattr(
+        main,
+        "prepare_source",
+        lambda *_args, **_kwargs: {"status": "ok", "path": "gmres.pdf"},
+    )
+
+    def check(*_args, **_kwargs):
+        citation["url"] = "https://example.org/replacement"
+        return {"status": "ok", "verdict": "refutes", "evidence": []}
+
+    monkeypatch.setattr(main, "check_prepared", check)
+
+    asyncio.run(main._recheck_reference("a1", "b13", None, identifier=GMRES, expected=citation))
+
+    assert analysis["claims"][0]["verdicts"] == [{"cited": "previous", "verdict": "supports"}]
     assert analysis["claims"][1]["verdicts"] == ANALYSIS["claims"][1]["verdicts"]
 
 

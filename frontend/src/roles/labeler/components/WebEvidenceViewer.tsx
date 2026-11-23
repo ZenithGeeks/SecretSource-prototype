@@ -18,6 +18,13 @@ export function WebEvidenceViewer({
   onClose?: () => void
 }) {
   const target = locator || url
+  let safeTarget: string | undefined
+  try {
+    const parsed = new URL(target)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') safeTarget = target
+  } catch {
+    safeTarget = undefined
+  }
   return (
     <section aria-label="Web source evidence" className="flex min-h-0 flex-col gap-4 overflow-auto rounded-xl border border-border-subtle bg-surface p-5">
       <div className="rounded-lg border border-border-subtle bg-accent-soft px-3 py-2 text-sm font-medium text-accent">
@@ -32,15 +39,17 @@ export function WebEvidenceViewer({
         )}
       </div>
       <div>
-        <a
-          href={target}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 flex w-fit max-w-full items-center gap-1 break-words text-sm font-medium text-accent hover:underline"
-        >
-          Open cited page and passage <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="sr-only">(opens in a new tab)</span>
-        </a>
+        {safeTarget && (
+          <a
+            href={safeTarget}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex w-fit max-w-full items-center gap-1 break-words text-sm font-medium text-accent hover:underline"
+          >
+            Open cited page and passage <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        )}
       </div>
       {passage ? (
         <blockquote className="border-l-2 border-accent pl-4 text-sm leading-7 text-ink">{passage}</blockquote>

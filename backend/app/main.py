@@ -257,6 +257,15 @@ def restore():
         analyses.clear()
         analyses.update(loaded)
         pending = [analysis for analysis in analyses.values() if analysis["status"] == "running"]
+        interrupted_rechecks = [
+            (analysis["id"], analysis["stages"][-1].get("ref"))
+            for analysis in analyses.values()
+            if analysis["status"] != "running"
+            and analysis.get("stages")
+            and analysis["stages"][-1].get("stage") == "rechecking"
+        ]
+    for analysis_id, ref in interrupted_rechecks:
+        _record_stage(analysis_id, "rechecked", ref=ref, interrupted=True)
     for analysis in pending:
         alive = job_is_alive(analysis["id"])
         if alive is False:
@@ -1136,7 +1145,7 @@ async def _recheck_reference(
                     verdict = {**ready, "claim": claim["claim"], "source": source}
                 elif ready["status"] == "web-page":
                     verdict = await asyncio.to_thread(
-                        verify.check_web_page,
+                        check_web_page,
                         claim["claim"],
                         source,
                         ready["web_page"],
@@ -1176,7 +1185,15 @@ async def _recheck_reference(
                 source,
                 verdict,
             ) in updates:
-                old_sources = set(lookup_keys(_citation)) or {lookup_key(_citation)}
+                current_sources = set(lookup_keys(_citation)) or {lookup_key(_citation)}
+                if current_sources != old_sources:
+                    logger.info(
+                        "discarding stale retry for analysis %s citation %s after its source changed",
+                        analysis_id,
+                        ref,
+                    )
+                    continue
+                old_sources = current_sources
                 old_sources |= replacement_sources
                 claim["verdicts"] = [
                     v for v in claim.get("verdicts", []) if v.get("cited") not in old_sources

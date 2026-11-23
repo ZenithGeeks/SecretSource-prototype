@@ -100,6 +100,52 @@ def test_pinned_request_closes_its_pool_when_connection_fails(monkeypatch):
     assert closed == [True]
 
 
+def test_fetch_resource_preserves_a_declared_html_encoding(monkeypatch):
+    monkeypatch.setattr(
+        web.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+
+    class Response:
+        status_code = 200
+        headers = {"Content-Type": "text/html; charset=iso-8859-1"}
+
+        def iter_content(self, _size):
+            yield b"<p>caf\xe9"
+
+        def close(self):
+            pass
+
+    _mock_pinned_get(monkeypatch, lambda _url: Response())
+    resource = web.fetch_resource("https://example.org/page")
+
+    assert resource.encoding == "iso-8859-1"
+    assert resource.body.decode(resource.encoding) == "<p>café"
+
+
+def test_unknown_html_encoding_falls_back_to_utf8(monkeypatch):
+    monkeypatch.setattr(
+        web.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+
+    class Response:
+        status_code = 200
+        headers = {"Content-Type": "text/html; charset=not-real"}
+
+        def iter_content(self, _size):
+            yield b"<p>hello"
+
+        def close(self):
+            pass
+
+    _mock_pinned_get(monkeypatch, lambda _url: Response())
+
+    assert web.fetch_resource("https://example.org/page").encoding == "utf-8"
+
+
 def test_a_body_read_that_exceeds_the_total_deadline_is_retryable(monkeypatch):
     import time
 
