@@ -593,6 +593,34 @@ function Body({
       onSelectText={(s) => setPicked({ side, file: target.paper, ...s })}
     />
   )
+  const referenceView = right ? shown?.source_kind === 'web-page' ? (
+    <WebEvidenceViewer
+      title={shown.label}
+      url={shown.url ?? ''}
+      locator={focus?.locator ?? shown.url}
+      passage={focus?.passage}
+      paragraph={focus?.paragraph}
+      retrievedAt={shown.retrieved_at}
+    />
+  ) : viewer(right, 'reference') : null
+  const unresolved = unresolvedCitations(claim, session)
+  const unresolvedView = unresolved.length ? (
+    <UnresolvedReferences
+      citations={unresolved}
+      onUpload={uploadReference}
+      onRetry={retryReference}
+      onRepair={(ref, replacement) => referenceRepair.mutate({ ref, replacement }, {
+        onSuccess: () => setNotice('Checking the corrected citation. Previous evidence stays available until it succeeds.'),
+        onError: (error) => setNotice(problem(error).title),
+      })}
+      uploading={referenceUpload.isPending}
+      retrying={referenceRetry.isPending}
+      repairing={referenceRepair.isPending}
+    />
+  ) : null
+  const noReferenceView = !right && unresolved.length === 0 ? (
+    <Empty title="No reference paper" hint="This claim cites no paper." />
+  ) : null
 
   // `where` is set when the claim was selected in the paper: that text is its sentence.
   const addClaim = (text: string, where: { sentence: string; page: number | null } = { sentence: '', page: null }) => {
@@ -676,13 +704,13 @@ function Body({
     draft.status ? (
       <ClaimSticky key={claim.claim_id} text={claimWording} rejected={draft.status === 'rejected'} className={className} />
     ) : null
-  const uploadReference = (ref: string, file: File) => {
+  function uploadReference(ref: string, file: File) {
     referenceUpload.mutate({ ref, file }, {
       onSuccess: () => setNotice('PDF received. Checking this reference now.'),
       onError: (error) => setNotice(problem(error).title),
     })
   }
-  const retryReference = (ref: string) => {
+  function retryReference(ref: string) {
     referenceRetry.mutate(ref, {
       onSuccess: () => setNotice('Retry started for this reference.'),
       onError: (error) => setNotice(problem(error).title),
@@ -845,31 +873,10 @@ function Body({
           Stacked: the reference on top, since it is the paper being judged. */}
       <div className={cn('min-h-0 flex-1 gap-3', both ? 'flex flex-col overflow-y-auto' : side ? 'grid grid-cols-2' : 'grid')}>
         {side && viewer(left_, 'paper')}
-        {right ? shown?.source_kind === 'web-page' ? (
-          <WebEvidenceViewer
-            title={shown.label}
-            url={shown.url ?? ''}
-            locator={focus?.locator ?? shown.url}
-            passage={focus?.passage}
-            paragraph={focus?.paragraph}
-            retrievedAt={shown.retrieved_at}
-          />
-        ) : viewer(right, 'reference') : (
-          <UnresolvedReferences
-            citations={unresolvedCitations(claim, session)}
-            onUpload={uploadReference}
-            onRetry={retryReference}
-            onRepair={(ref, replacement) => referenceRepair.mutate({ ref, replacement }, {
-              onSuccess: () => setNotice('Checking the corrected citation. Previous evidence stays available until it succeeds.'),
-              onError: (error) => setNotice(problem(error).title),
-            })}
-            uploading={referenceUpload.isPending}
-            retrying={referenceRetry.isPending}
-            repairing={referenceRepair.isPending}
-          />
-        )}
+        {referenceView ?? noReferenceView}
         {both && viewer(left_, 'paper')}
       </div>
+      {unresolvedView}
     </div>
   )
 
@@ -879,22 +886,6 @@ function Body({
         <div className="p-4">{paperDoneView}</div>
       ) : (
         <>
-          {claim.needs_review && (
-            <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
-              <span>A source for this claim changed. Review its evidence before reusing the saved label.</span>
-              <button
-                type="button"
-                disabled={sourceReview.isPending}
-                onClick={() => sourceReview.mutate(claim.claim_id, {
-                  onSuccess: () => setNotice('Updated evidence marked as reviewed.'),
-                  onError: (error) => setNotice(problem(error).title),
-                })}
-                className="rounded border border-border-subtle px-2 py-1 font-medium enabled:hover:bg-canvas disabled:opacity-50"
-              >
-                {sourceReview.isPending ? 'Saving…' : 'Mark evidence reviewed'}
-              </button>
-            </div>
-          )}
           {Object.entries(claim.citation_repairs ?? {}).map(([ref, repair]) => (
             <p key={ref} role="alert" className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
               Replacement for [{ref}] was not used: {repair.message}. Previous evidence remains available.
@@ -968,6 +959,25 @@ function Body({
           </p>
         </div>
       )}
+      {claim.needs_review && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-ink">
+          <span>A source for this claim changed. Review its evidence before reusing the saved label.</span>
+          <button
+            type="button"
+            disabled={sourceReview.isPending}
+            onClick={() => sourceReview.mutate(
+              { claimId: claim.claim_id, evidenceRevision: claim.evidence_revision ?? 0 },
+              {
+                onSuccess: () => setNotice('Updated evidence marked as reviewed.'),
+                onError: (error) => setNotice(`${problem(error).title} Reloaded the latest session.`),
+              },
+            )}
+            className="rounded border border-border-subtle px-2 py-1 font-medium enabled:hover:bg-canvas disabled:opacity-50"
+          >
+            {sourceReview.isPending ? 'Saving…' : 'Mark evidence reviewed'}
+          </button>
+        </div>
+      )}
       {restored && anyDirty && (
         <p role="status" className="text-sm text-ink-muted">
           Unsaved labels from your last visit were kept in this browser. Save them to keep them for good.
@@ -996,8 +1006,23 @@ function Body({
             </button>
           </div>
           {referencePicker}
+          {unresolvedView}
           {overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
-          {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
+          {overlay === 'reference' && right && (
+            shown?.source_kind === 'web-page' ? (
+              <div className={VIEWER_HEIGHT}>
+                <WebEvidenceViewer
+                  title={shown.label}
+                  url={shown.url ?? ''}
+                  locator={focus?.locator ?? shown.url}
+                  passage={focus?.passage}
+                  paragraph={focus?.paragraph}
+                  retrievedAt={shown.retrieved_at}
+                  onClose={() => setOverlay(null)}
+                />
+              </div>
+            ) : viewer(right, 'reference', () => setOverlay(null))
+          )}
           {selection}
           {paperDone ? (
             paperDoneView

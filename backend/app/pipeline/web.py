@@ -7,13 +7,17 @@ stable URL/anchor locations so callers never mistake a web page for a paper PDF.
 
 import ipaddress
 import socket
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-import requests
+import urllib3
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.util import Timeout
 
 from app.pipeline.sources import USER_AGENT
 
@@ -21,6 +25,7 @@ MAX_REDIRECTS = 5
 MAX_BYTES = 2_000_000
 MAX_PDF_BYTES = 50_000_000
 TIMEOUT = (5, 15)
+BODY_DEADLINE = 60
 MAX_PARAGRAPHS = 500
 
 
@@ -112,7 +117,7 @@ class _PageParser(HTMLParser):
                 chunks.append(data)
 
 
-def _public_http_url(url: str) -> str:
+def _public_http_destination(url: str) -> tuple[str, str]:
     parts = urlsplit(url)
     if parts.scheme.lower() not in {"http", "https"} or not parts.hostname:
         raise WebReadError("unsupported-url", "only HTTP and HTTPS web pages are supported")
@@ -135,42 +140,84 @@ def _public_http_url(url: str) -> str:
     if not addresses or any(not address.is_global for address in addresses):
         raise WebReadError("blocked", "the page resolves to a non-public destination")
     clean = parts._replace(fragment="")
-    return urlunsplit(clean)
+    return urlunsplit(clean), str(next(iter(addresses)))
+
+
+def _public_http_url(url: str) -> str:
+    """Validate a public destination and return its fragment-free URL."""
+    return _public_http_destination(url)[0]
+
+
+def _pinned_get(url: str, address: str):
+    """Connect to the validated address while preserving the URL host for Host and TLS SNI."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    port = parts.port or (443 if parts.scheme.lower() == "https" else 80)
+    target = urlunsplit(("", "", parts.path or "/", parts.query, ""))
+    headers = {**USER_AGENT, "Host": parts.netloc}
+    timeout = Timeout(connect=TIMEOUT[0], read=TIMEOUT[1])
+    if parts.scheme.lower() == "https":
+        pool = HTTPSConnectionPool(
+            address,
+            port=port,
+            server_hostname=host,
+            assert_hostname=host,
+            timeout=timeout,
+            maxsize=1,
+        )
+    else:
+        pool = HTTPConnectionPool(address, port=port, timeout=timeout, maxsize=1)
+    try:
+        response = pool.urlopen(
+            "GET", target, headers=headers, redirect=False, retries=False, preload_content=False
+        )
+    except Exception:
+        pool.close()
+        raise
+    return response, pool
 
 
 def fetch_resource(url: str) -> WebResource:
     """Fetch one public HTTP resource, bounding redirects and the downloaded response body."""
-    current = _public_http_url(url)
+    current, address = _public_http_destination(url)
     for redirect in range(MAX_REDIRECTS + 1):
         try:
-            response = requests.get(
-                current, headers=USER_AGENT, timeout=TIMEOUT, stream=True, allow_redirects=False
-            )
-        except requests.Timeout as error:
+            response, pool = _pinned_get(current, address)
+        except urllib3.exceptions.TimeoutError as error:
             raise WebReadError(
                 "temporary-failure", "the web page request timed out", retryable=True
             ) from error
-        except requests.RequestException as error:
+        except urllib3.exceptions.HTTPError as error:
             raise WebReadError("fetch-failed", "the web page could not be fetched", retryable=True) from error
+        deadline = time.monotonic() + BODY_DEADLINE
+        expired = threading.Event()
+
+        def expire_response(event=expired, current_response=response):
+            event.set()
+            current_response.close()
+
+        timer = threading.Timer(BODY_DEADLINE, expire_response)
+        timer.daemon = True
+        timer.start()
         try:
-            if response.is_redirect or response.is_permanent_redirect:
+            if response.status in {301, 302, 303, 307, 308}:
                 if redirect == MAX_REDIRECTS:
                     raise WebReadError("redirect-limit", "the page redirected too many times")
                 target = response.headers.get("Location")
                 if not target:
                     raise WebReadError("http-error", "the page returned an invalid redirect")
-                current = _public_http_url(urljoin(current, target))
+                current, address = _public_http_destination(urljoin(current, target))
                 continue
-            if response.status_code in {401, 403}:
+            if response.status in {401, 403}:
                 raise WebReadError("blocked", "the page requires access that is not available")
-            if response.status_code >= 500 or response.status_code == 429:
+            if response.status >= 500 or response.status == 429:
                 raise WebReadError(
                     "temporary-failure",
-                    f"the page server returned HTTP {response.status_code}",
+                    f"the page server returned HTTP {response.status}",
                     retryable=True,
                 )
-            if not response.ok:
-                raise WebReadError("http-error", f"the page returned HTTP {response.status_code}")
+            if response.status >= 400:
+                raise WebReadError("http-error", f"the page returned HTTP {response.status}")
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
             limit = MAX_BYTES if content_type in {"text/html", "application/xhtml+xml"} else MAX_PDF_BYTES
             declared_size = response.headers.get("Content-Length")
@@ -180,16 +227,31 @@ def fetch_resource(url: str) -> WebResource:
                 )
             size = 0
             chunks = []
-            for chunk in response.iter_content(64 * 1024):
+            for chunk in response.stream(64 * 1024, decode_content=True):
+                if expired.is_set() or time.monotonic() > deadline:
+                    raise WebReadError(
+                        "temporary-failure", "the web page download exceeded its time limit", retryable=True
+                    )
                 size += len(chunk)
                 if size > limit:
                     raise WebReadError(
                         "too-large", f"the response exceeded the {limit // 1_000_000} MB read limit"
                     )
                 chunks.append(chunk)
-            return WebResource(current, content_type, response.encoding or "utf-8", b"".join(chunks))
+            return WebResource(current, content_type, "utf-8", b"".join(chunks))
+        except WebReadError:
+            raise
+        except Exception as error:
+            if expired.is_set():
+                raise WebReadError(
+                    "temporary-failure", "the web page download exceeded its time limit", retryable=True
+                ) from error
+            raise WebReadError("fetch-failed", "the web page could not be fetched", retryable=True) from error
         finally:
+            timer.cancel()
             response.close()
+            response.release_conn()
+            pool.close()
     raise WebReadError("redirect-limit", "the page redirected too many times")
 
 

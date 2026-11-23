@@ -565,15 +565,35 @@ def test_a_labeler_can_acknowledge_review_of_changed_source_evidence(monkeypatch
     response = asyncio.run(
         labeling.acknowledge_source_review(
             "a1",
-            {"claim_id": "paperA-0123456789ab#0"},
+            {"claim_id": "paperA-0123456789ab#0", "evidence_revision": 0},
             analysis,
             "chanya",
         )
     )
 
-    assert response == {"claim_id": "paperA-0123456789ab#0", "reviewed": True}
+    assert response == {
+        "claim_id": "paperA-0123456789ab#0", "evidence_revision": 0, "reviewed": True
+    }
     assert analysis["claims"][0]["needs_review"] is False
     assert saved == ["a1"]
+
+
+def test_source_review_cannot_acknowledge_a_newer_evidence_revision():
+    analysis = copy.deepcopy(ANALYSIS)
+    analysis["claims"][0].update(needs_review=True, evidence_revision=2)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            labeling.acknowledge_source_review(
+                "a1",
+                {"claim_id": "paperA-0123456789ab#0", "evidence_revision": 1},
+                analysis,
+                "chanya",
+            )
+        )
+
+    assert error.value.status_code == 409
+    assert analysis["claims"][0]["needs_review"] is True
 
 
 def test_save_keeps_a_passage_and_a_level_for_a_work_with_no_pdf(api):

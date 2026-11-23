@@ -185,6 +185,7 @@ def build_session(analysis: dict) -> dict:
                 "candidates": candidates,
                 "unchecked": _unchecked(claim),
                 "needs_review": bool(claim.get("needs_review")),
+                "evidence_revision": int(claim.get("evidence_revision") or 0),
                 "citation_repairs": claim.get("citation_repairs") or {},
                 # The "b23"s this claim cites, in the order it cites them, so the labeler opens
                 # one of its own references and never another claim's.
@@ -198,6 +199,7 @@ def build_session(analysis: dict) -> dict:
         "title": analysis.get("title") or Path(analysis["file"]).name,
         "claims": claims,
         "references": list(references.values()),
+        "stages": analysis.get("stages") or [],
         "unread": _unread_references(analysis, list(references.values())),
         # Where the paper cites each reference, so a click on "[12]" can open that reference.
         "markers": analysis.get("markers") or [],
@@ -407,12 +409,16 @@ async def acknowledge_source_review(
     claim = _extracted_claim(analysis, Path(analysis["file"]).stem, str(body.get("claim_id") or ""))
     if claim is None:
         raise HTTPException(404, "the analysis has no such extracted claim")
+    revision = int(body.get("evidence_revision", -1))
+    current_revision = int(claim.get("evidence_revision") or 0)
+    if revision != current_revision:
+        raise HTTPException(409, "the source evidence changed; reload the session before reviewing it")
     if claim.get("needs_review"):
         claim["needs_review"] = False
         from app import main
 
         main._save_soon(analysis_id)
-    return {"claim_id": body["claim_id"], "reviewed": True}
+    return {"claim_id": body["claim_id"], "evidence_revision": current_revision, "reviewed": True}
 
 
 async def _is_blind(analysis_id: str, who: str) -> bool:

@@ -10,6 +10,7 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -414,6 +415,16 @@ def verify_claim(claim: str, source_pdf_path: str) -> dict:
     )
 
 
+def _matches_title_with_site_suffix(cited_title: str, found_title: str) -> bool:
+    """Compare a citation title with a PDF or page title that may append a site name."""
+    from app.pipeline import sources
+
+    return any(
+        sources.titles_match(cited_title, segment)
+        for segment in re.split(r"\s+(?:\||-|–|—)\s+", found_title)
+    )
+
+
 def prepare_source(
     source_pdf_path: str,
     wait_for_figures: bool = False,
@@ -446,7 +457,7 @@ def prepare_source(
                     resource = web.WebResource(resource.url, "text/html", resource.encoding, resource.body)
                 page = web.page_from_resource(resource)
                 if expected and expected.get("_validate_web_title") and expected.get("title") and page.title:
-                    if not sources.titles_match(str(expected["title"]), page.title):
+                    if not _matches_title_with_site_suffix(str(expected["title"]), page.title):
                         raise web.WebReadError(
                             "identity-mismatch", "the page title does not match the cited work"
                         )
@@ -507,7 +518,20 @@ def prepare_source(
 
         from app.pipeline.sources import local_pdf_with_resolution
 
-        path, source_outcome = local_pdf_with_resolution(source_pdf_path, expected)
+        try:
+            path, source_outcome = local_pdf_with_resolution(source_pdf_path, expected)
+        except (sources.NoOpenAccessCopy, sources.NotDownloadable, sources.Unresolvable):
+            page_url = str((expected or {}).get("url") or "").strip()
+            if (
+                page_url
+                and page_url != source_pdf_path
+                and not (expected or {}).get("doi")
+                and not (expected or {}).get("arxiv")
+            ):
+                page_result = prepare_source(page_url, expected=expected)
+                if page_result.get("status") != "error":
+                    return page_result
+            raise
         source = Path(path)
         validate_pdf_identity(source, expected)
         if failure := _index_once(source, wait_for_figures):
@@ -570,7 +594,7 @@ def validate_pdf_identity(pdf: str | Path, expected: dict | None) -> None:
         from app.pipeline.claims import _printed_title
 
         found_title = _printed_title(str(pdf)) or str(metadata.get("title") or "").strip()
-        if found_title and not sources.titles_match(cited_title, found_title):
+        if found_title and not _matches_title_with_site_suffix(cited_title, found_title):
             raise sources.IdentityMismatch("the PDF title does not match the cited work")
 
     cited_authors = expected.get("authors") or []
@@ -578,9 +602,16 @@ def validate_pdf_identity(pdf: str | Path, expected: dict | None) -> None:
         cited_authors = [cited_authors]
     author = str(metadata.get("author") or "").strip()
     if cited_authors and author:
-        surname = re.sub(r"[^a-z0-9]", "", str(cited_authors[0]).split()[-1].lower())
-        found_author = re.sub(r"[^a-z0-9]", " ", author.lower()).split()
-        if surname and surname not in found_author:
+        def folded(text: str) -> str:
+            decomposed = unicodedata.normalize("NFKD", text)
+            return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+        family = folded(str(cited_authors[0]).split()[-1]).lower()
+        surname_parts = [
+            part for part in (re.sub(r"[^a-z0-9]", "", part) for part in family.split("-")) if part
+        ]
+        found_author = re.sub(r"[^a-z0-9]", " ", folded(author).lower()).split()
+        if surname_parts and not any(part in found_author for part in surname_parts):
             raise sources.IdentityMismatch("the PDF author does not match the cited work")
 
     cited_doi = sources.doi_in(str(expected.get("doi") or ""))
@@ -605,7 +636,7 @@ def check_web_page(
     """Judge a short, locally ranked set of static page paragraphs and preserve their URLs."""
     try:
         evidence = rank_web_passages(
-            judged or claim,
+            claim,
             [
                 {
                     "text": passage.text,
@@ -617,6 +648,7 @@ def check_web_page(
             ],
         )
         passages = [item["text"] for item in evidence]
+        verdict_from = "text"
         if not passages:
             verdict = {
                 "verdict": "insufficient",
@@ -627,7 +659,15 @@ def check_web_page(
             global _judge
             if _judge is None:
                 _judge = _build_judge()
-            verdict = _judge(judged or claim, passages)
+            verdict = _judge(claim, passages)
+            if verdict["verdict"] == "refutes" and judged and judged != claim:
+                recheck = _judge(judged, passages)
+                if recheck["verdict"] != "refutes":
+                    verdict, verdict_from = recheck, "cited"
+            elif verdict["verdict"] == "insufficient" and other_citations and judged and judged != claim:
+                recheck = _judge(judged, passages)
+                if recheck["verdict"] == "supports":
+                    verdict, verdict_from = recheck, "cited"
         return {
             "status": "ok",
             "claim": claim,
@@ -636,7 +676,7 @@ def check_web_page(
             "web_title": page.title,
             "retrieved_at": page.retrieved_at,
             **verdict,
-            "verdict_from": "text",
+            "verdict_from": verdict_from,
             "evidence": evidence,
             "pages": [],
             "source_outcome": source_outcome

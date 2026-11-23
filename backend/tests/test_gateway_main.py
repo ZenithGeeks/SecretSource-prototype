@@ -319,6 +319,11 @@ def pipeline(monkeypatch):
     )
     monkeypatch.setattr(main, "lookup_key", lambda citation: citation["key"])
     monkeypatch.setattr(
+        main,
+        "checked_citations",
+        lambda claim: [(citation, citation["key"]) for citation in claim.get("citations", [])],
+    )
+    monkeypatch.setattr(
         main, "prepare_source", lambda source, expected=None: {"status": "ok", "path": source}
     )
     monkeypatch.setattr(

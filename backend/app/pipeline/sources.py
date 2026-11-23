@@ -1489,7 +1489,7 @@ def _withdrawn_by(arxiv_id: str) -> str:
 
 
 def lookup_key(citation: dict) -> str:
-    """What to resolve a cited work by, preferring its supplied URL over a guessed title."""
+    """What to resolve a cited work by, preferring scholarly identifiers and title over URL."""
     return next(iter(lookup_keys(citation)), "")
 
 
@@ -1501,8 +1501,8 @@ def lookup_keys(citation: dict) -> tuple[str, ...]:
             for value in (
                 citation.get("doi"),
                 citation.get("arxiv"),
-                citation.get("url"),
                 citation.get("title"),
+                citation.get("url"),
             )
             if value and str(value).strip()
         )

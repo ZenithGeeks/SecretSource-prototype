@@ -1176,6 +1176,7 @@ async def _recheck_reference(
                 source,
                 verdict,
             ) in updates:
+                old_sources = set(lookup_keys(_citation)) or {lookup_key(_citation)}
                 old_sources |= replacement_sources
                 claim["verdicts"] = [
                     v for v in claim.get("verdicts", []) if v.get("cited") not in old_sources
@@ -1185,6 +1186,7 @@ async def _recheck_reference(
                 ]
                 fold_check(claim, source, checked_citation, verdict)
                 claim["needs_review"] = True
+                claim["evidence_revision"] = int(claim.get("evidence_revision") or 0) + 1
                 claim.get("citation_repairs", {}).pop(ref, None)
             if replacement_citation is not None:
                 new_key = lookup_key(replacement_citation)

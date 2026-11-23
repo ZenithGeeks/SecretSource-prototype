@@ -67,6 +67,7 @@ export type SessionClaim = {
   cited?: string[]
   /** New evidence replaced an earlier result and needs a human review before labels are reused. */
   needs_review?: boolean
+  evidence_revision?: number
   citation_repairs?: Record<string, { status: string; reason: string; message: string }>
 }
 
@@ -115,6 +116,7 @@ export type Session = {
   /** The signed-in person checks this paper blind: other labels, Review and Ask are hidden (#867).
    * Missing from a gateway older than this field. */
   blind?: boolean
+  stages?: { stage: string }[]
 }
 
 export type LabelStatus = { annotator: string; configured: boolean; scopus: boolean }
@@ -364,10 +366,13 @@ export const labelingApi = {
       `/analyses/${encodeURIComponent(analysisId)}/references/${encodeURIComponent(ref)}/repair`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(replacement) },
     ),
-  acknowledgeSourceReview: (analysisId: string, claimId: string) =>
-    request<{ claim_id: string; reviewed: boolean }>(
+  acknowledgeSourceReview: (analysisId: string, claimId: string, evidenceRevision: number) =>
+    request<{ claim_id: string; evidence_revision: number; reviewed: boolean }>(
       `/labeling/sessions/${encodeURIComponent(analysisId)}/source-review`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_id: claimId }) },
+      {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim_id: claimId, evidence_revision: evidenceRevision }),
+      },
     ),
   /** Analyse a paper from its PDF and list it for the team. The PDF is uploaded the way the
    * Researcher role uploads one (straight to the papers bucket where the web proxy would refuse
@@ -572,6 +577,8 @@ export function useLabelSession(analysisId: string | null) {
     // must never seed it, and a refetch must not replace what is being typed.
     gcTime: 0,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.data?.stages?.at(-1)?.stage === 'rechecking' ? 1_000 : false,
   })
 }
 
@@ -580,13 +587,7 @@ export function useUploadReferencePdf(analysisId: string) {
   return useMutation({
     mutationFn: ({ ref, file }: { ref: string; file: File }) =>
       labelingApi.uploadReferencePdf(analysisId, ref, file),
-    onSuccess: () => {
-      // The endpoint starts a detached claim-only recheck (202). Refresh after it records its
-      // completion stage so the new evidence appears without rerunning unrelated extraction.
-      window.setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] })
-      }, 3_000)
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] }),
   })
 }
 
@@ -594,11 +595,7 @@ export function useRetryReference(analysisId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (ref: string) => labelingApi.retryReference(analysisId, ref),
-    onSuccess: () => {
-      window.setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] })
-      }, 3_000)
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] }),
   })
 }
 
@@ -607,19 +604,17 @@ export function useRepairReference(analysisId: string) {
   return useMutation({
     mutationFn: ({ ref, replacement }: { ref: string; replacement: { doi?: string; url?: string } }) =>
       labelingApi.repairReference(analysisId, ref, replacement),
-    onSuccess: () => {
-      window.setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] })
-      }, 3_000)
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] }),
   })
 }
 
 export function useAcknowledgeSourceReview(analysisId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (claimId: string) => labelingApi.acknowledgeSourceReview(analysisId, claimId),
+    mutationFn: ({ claimId, evidenceRevision }: { claimId: string; evidenceRevision: number }) =>
+      labelingApi.acknowledgeSourceReview(analysisId, claimId, evidenceRevision),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] }),
+    onError: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'session', analysisId] }),
   })
 }
 

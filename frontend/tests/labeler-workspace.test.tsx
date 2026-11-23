@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const gateway = vi.hoisted(() => ({
   session: {} as Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
   sessionError: '',
+  sessionReads: 0,
+  rejectSourceReview: false,
   posts: [] as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
   saveFails: false,
   saveHangs: false,
@@ -25,6 +27,14 @@ vi.mock('../src/lib/api', async (original) => ({
       if (gateway.searchFails) throw new Error('502: retrieval did not answer')
       return { candidates: gateway.found }
     }
+    if (path.endsWith('/source-review') && init?.method === 'POST') {
+      if (gateway.rejectSourceReview) {
+        gateway.session.claims[0].evidence_revision = 1
+        throw new Error('409: evidence changed; reload the latest session')
+      }
+      gateway.posts.push(JSON.parse(String(init.body)))
+      return { reviewed: true }
+    }
     if (init?.method === 'POST') {
       if (gateway.saveHangs) await new Promise(() => undefined)
       if (gateway.saveFails) throw new Error('503: not set up')
@@ -32,6 +42,7 @@ vi.mock('../src/lib/api', async (original) => ({
       return { claims: 1, candidates: 2, labels: 1 }
     }
     if (path.startsWith('/labeling/sessions/')) {
+      gateway.sessionReads += 1
       if (gateway.sessionError) throw new Error(gateway.sessionError)
       return gateway.session
     }
@@ -163,6 +174,8 @@ const wideScreen = (matches: boolean) => {
 beforeEach(() => {
   gateway.session = makeSession()
   gateway.sessionError = ''
+  gateway.sessionReads = 0
+  gateway.rejectSourceReview = false
   gateway.posts.length = 0
   gateway.saveFails = false
   gateway.saveHangs = false
@@ -184,7 +197,20 @@ it('asks the labeler to review saved labels after a cited source changes', async
     'A source for this claim changed. Review its evidence before reusing the saved label.',
   )
   fireEvent.click(screen.getByRole('button', { name: 'Mark evidence reviewed' }))
-  await waitFor(() => expect(gateway.posts).toContainEqual({ claim_id: 'paperA#0' }))
+  await waitFor(() => expect(gateway.posts).toContainEqual({ claim_id: 'paperA#0', evidence_revision: 0 }))
+})
+
+it('reloads the session and keeps review required when the evidence revision became stale', async () => {
+  const claim = { ...makeSession().claims[0], needs_review: true, evidence_revision: 0 }
+  gateway.session = makeSession({ claims: [claim] })
+  gateway.sessionReads = 0
+  gateway.rejectSourceReview = true
+  await open()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Mark evidence reviewed' }))
+  await waitFor(() => expect(gateway.sessionReads).toBeGreaterThanOrEqual(2))
+  expect(screen.getByText(/Reloaded the latest session/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Mark evidence reviewed' })).toBeInTheDocument()
 })
 
 it('opens readable web citations as linkable web evidence instead of a PDF page', async () => {
@@ -211,7 +237,27 @@ it('opens readable web citations as linkable web evidence instead of a PDF page'
   expect(screen.getByText('Retrieved 2026-11-23T00:00:00+00:00')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: /Open cited page and passage/ })).toHaveAttribute('href', `${url}#finding`)
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
+it('polls a reference recheck until it finishes, then stops', async () => {
+  gateway.session = makeSession({ stages: [{ stage: 'rechecking' }] })
+  gateway.sessionReads = 0
+  vi.useFakeTimers()
+  renderWorkspace()
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  expect(gateway.sessionReads).toBe(1)
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(gateway.sessionReads).toBe(2)
+  gateway.session = { ...gateway.session, stages: [{ stage: 'rechecked' }] }
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(gateway.sessionReads).toBe(3)
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+  expect(gateway.sessionReads).toBe(3)
+})
 
 describe('when the paper cannot be shown', () => {
   it('says why the claims cannot be opened', async () => {
@@ -645,6 +691,33 @@ describe('on a narrow screen', () => {
     expect(screen.getByRole('button', { name: 'Read the reference' })).toBeDisabled()
     expect(screen.queryByLabelText('Open reference')).not.toBeInTheDocument()
   })
+
+  it('keeps unread citations visible while the mobile web reference overlay is open', async () => {
+    const url = 'https://example.org/article'
+    const page = makeSession()
+    page.claims[0] = {
+      ...page.claims[0],
+      cited: ['b5', 'b9'],
+      candidates: [{
+        cand_id: 'web-candidate', reference_id: 'web-b5', reference_file: 'web-b5', rank: 1,
+        score: 1, page: null, paragraph: 2, passage: 'Static text from the cited page.', locator: `${url}#finding`,
+      }],
+    }
+    page.references = [{
+      reference_id: 'web-b5', file: 'web-b5', label: 'Useful page', ref: 'b5', source_kind: 'web-page', url,
+    }]
+    page.unread = [{ reference_id: 'missing-b9', file: '', label: 'Unread work', ref: 'b9' }]
+    gateway.session = page
+    await open()
+
+    const unread = screen.getByRole('region', { name: 'Reference not found' })
+    expect(unread).toHaveTextContent('Unread work')
+    fireEvent.click(screen.getByRole('button', { name: 'Read the reference' }))
+    expect(screen.getByRole('region', { name: 'Web source evidence' })).toHaveTextContent('Static text from the cited page.')
+    expect(screen.getByRole('region', { name: 'Reference not found' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close reference' }))
+    expect(screen.queryByRole('region', { name: 'Web source evidence' })).not.toBeInTheDocument()
+  })
 })
 
 describe('the screen size', () => {
@@ -961,7 +1034,7 @@ describe('a claim with no passages', () => {
     await open()
     expect(reference()).toBe('refD.pdf|')
     expect(screen.getAllByTestId('viewer-heading')[0]).toHaveTextContent('refD.pdf: Reference [b8]: Ref D / opens on page 1')
-    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Reference not found' })).toBeInTheDocument()
   })
 
   it('goes by the markers in its sentence when the gateway is older than the list of what it cites', async () => {
@@ -987,6 +1060,6 @@ describe('a claim with no passages', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Open reference'), { target: { value: 'refB' } })
     expect(reference()).toBe('refB.pdf|')
-    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Reference not found' })).toBeInTheDocument()
   })
 })

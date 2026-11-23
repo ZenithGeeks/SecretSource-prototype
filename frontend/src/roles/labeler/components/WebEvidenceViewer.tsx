@@ -7,6 +7,7 @@ export function WebEvidenceViewer({
   passage,
   paragraph,
   retrievedAt,
+  onClose,
 }: {
   title: string
   url: string
@@ -14,6 +15,7 @@ export function WebEvidenceViewer({
   passage?: string
   paragraph?: number
   retrievedAt?: string
+  onClose?: () => void
 }) {
   const target = locator || url
   return (
@@ -21,8 +23,15 @@ export function WebEvidenceViewer({
       <div className="rounded-lg border border-border-subtle bg-accent-soft px-3 py-2 text-sm font-medium text-accent">
         Web page · static text
       </div>
-      <div>
+      <div className="flex items-start justify-between gap-3">
         <h3 className="font-serif text-lg font-semibold text-ink">{title || 'Cited web page'}</h3>
+        {onClose && (
+          <button type="button" onClick={onClose} className="rounded border border-border-subtle px-2 py-1 text-sm">
+            Close reference
+          </button>
+        )}
+      </div>
+      <div>
         <a
           href={target}
           target="_blank"
