@@ -124,7 +124,8 @@ export function AnalysisView({
       const rows = [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
       if (!rows.length) return
       event.preventDefault()
-      const at = rows.indexOf(document.activeElement as HTMLElement)
+      const focused = document.activeElement
+      const at = rows.findIndex((row) => row.closest('[data-claim-card]')!.contains(focused))
       const to = key === 'j' ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1)
       rows[to].focus()
       if (typeof rows[to].scrollIntoView === 'function') rows[to].scrollIntoView({ block: 'nearest' })
@@ -331,11 +332,11 @@ export function AnalysisView({
             <p className="px-1 text-sm text-ink-muted">No claims come from this section.</p>
           )}
           {(teacher || !running) && shown.map(({ claim, index, standing }, i) => (
-            <Fragment key={index}>
+            <Fragment key={!teacher && i === 0 ? `first-${index}` : index}>
               {!teacher && i > 0 && i === settledFrom && <h2 className="type-title pt-3">Settled</h2>}
               <ClaimCard
-                // Only the worst claim opens: twelve open cards made a 9,000px page nobody could scan.
-                startCollapsed={!teacher && i > 0}
+                // Only the first visible claim opens in finished non-teacher results.
+                defaultOpen={teacher ? undefined : i === 0}
                 claim={claim}
                 index={index}
                 standing={standing}

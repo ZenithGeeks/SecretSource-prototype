@@ -19,7 +19,7 @@ const STANDING: Record<Standing, Look> = {
   backed: { label: 'Backed', tone: 'supports', icon: Check, edge: 'border-l-supports' },
   silent: { label: 'Silent', tone: 'insufficient', icon: CircleAlert, edge: 'border-l-insufficient' },
   contradicted: { label: 'Contradicted', tone: 'refutes', icon: X, edge: 'border-l-refutes' },
-  unchecked: { label: "Can't check", tone: 'neutral', icon: CircleHelp, edge: 'border-l-border-subtle' },
+  unchecked: { label: 'Not checked', tone: 'neutral', icon: CircleHelp, edge: 'border-l-border-subtle' },
 }
 
 const VERDICT_STANDING: Record<StatementVerdict, Standing> = {

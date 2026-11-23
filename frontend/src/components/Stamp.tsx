@@ -1,5 +1,5 @@
 /**
- * The verdict stamp of the Ask panel (Backed, Contradicted, Silent, Can't check,
+ * The verdict stamp of the Ask panel (Backed, Contradicted, Silent, Not checked,
  * Checking…), shared so other redesign screens say a statement's verdict the same way (#713).
  * Words and colours come from src/lib/stamps.ts.
  */

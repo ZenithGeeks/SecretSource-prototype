@@ -196,6 +196,23 @@ describe('the results', () => {
     delete Element.prototype.scrollIntoView
   })
 
+  it('moves to adjacent rows from an evidence button inside an expanded claim', () => {
+    load(analysis({ claims: [refuted, { ...refuted, claim: 'Middle claim.' }, backed] }))
+    view()
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+    fireEvent.click(rows[0])
+    fireEvent.click(rows[1])
+    const evidence = screen.getByRole('button', { name: 'Show in paper' })
+
+    evidence.focus()
+    fireEvent.keyDown(evidence, { key: 'j' })
+    expect(rows[2]).toHaveFocus()
+
+    evidence.focus()
+    fireEvent.keyDown(evidence, { key: 'k' })
+    expect(document.querySelectorAll('[data-claim-toggle]')[0]).toHaveFocus()
+  })
+
   it('leaves J and K alone with a modifier, in a text box, or with no claims to move to', () => {
     view()
     const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
@@ -224,6 +241,7 @@ describe('the results', () => {
     view()
     expect(screen.getByRole('heading', { name: 'All claims' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Settled' })).not.toBeInTheDocument()
+    expect(screen.getByText('supports reasoning')).toBeInTheDocument()
   })
 
   it('has no Settled heading when every claim needs attention', () => {
@@ -237,9 +255,10 @@ describe('the results', () => {
     fireEvent.click(screen.getByRole('button', { name: '1 backs it' }))
     expect(screen.getByText('Showing 1 backs it')).toBeInTheDocument()
     expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /The backed claim/ })).toBeInTheDocument()
+    expect(screen.getByText('supports reasoning')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '1 backs it' }))
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /The backed claim/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('narrows to one section, and can show all claims again', () => {

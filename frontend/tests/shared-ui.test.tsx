@@ -46,7 +46,7 @@ describe('Stamp', () => {
       </>,
     )
     for (const label of ['Backed', 'Contradicted', 'Silent', 'Checking…']) expect(screen.getByText(label)).toBeInTheDocument()
-    expect(STAMPS.unchecked.label).toBe('Can’t check')
+    expect(STAMPS.unchecked.label).toBe('Not checked')
   })
 
   test('shows a spinner only while checking', () => {

@@ -153,7 +153,7 @@ describe('the result cards', () => {
 
     expect(screen.getByText('“6-10x smaller”')).toBeInTheDocument()
     expect(screen.getAllByText('Backed')).toHaveLength(2) // the claim's, and the cited paper's
-    expect(screen.getByText("Can't check")).toBeInTheDocument()
+    expect(screen.getByText('Not checked')).toBeInTheDocument()
     expect(screen.getByText('not found')).toBeInTheDocument()
   })
 

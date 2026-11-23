@@ -645,6 +645,7 @@ export function ClaimCard({
   onSelect,
   actions,
   startCollapsed = false,
+  defaultOpen = !startCollapsed && opensByDefault(standing),
   analysisId,
   disputes = [],
   sourceUpload,
@@ -669,6 +670,8 @@ export function ClaimCard({
   actions?: ReactNode
   /** Stay a one-line row until opened, whatever the verdict (the list shown while a run is going). */
   startCollapsed?: boolean
+  /** Override the initial expansion for a finished result list. */
+  defaultOpen?: boolean
   /** With it, the owner can dispute a verdict; left out where nobody may (shared or teacher views). */
   analysisId?: string
   /** The owner's disputes in this analysis. */
@@ -682,7 +685,7 @@ export function ClaimCard({
   /** The viewer owns the analysis, so the upload note says "you". */
   ownsAnalysis?: boolean
 }) {
-  const [open, setOpen] = useState(!startCollapsed && opensByDefault(standing))
+  const [open, setOpen] = useState(defaultOpen)
   const [showEvidence, setShowEvidence] = useState(false)
   const [fullReason, setFullReason] = useState(false)
   const loose = unpaired(claim)
@@ -733,7 +736,7 @@ export function ClaimCard({
   if (!open) {
     const cited = claim.citations.map(shortRef).join(' · ')
     return (
-      <div className={surface}>
+      <div data-claim-card className={surface}>
         <button
           type="button"
           onClick={toggle}
@@ -759,7 +762,7 @@ export function ClaimCard({
   ].filter(Boolean).join(' · ')
 
   return (
-    <div className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
+    <div data-claim-card className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
       <button
         type="button"
         onClick={toggle}
