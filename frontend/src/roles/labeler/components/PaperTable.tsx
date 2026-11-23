@@ -5,7 +5,7 @@
  */
 
 import { m } from 'framer-motion'
-import { Check, ChevronRight, CircleAlert, CircleCheck, Loader2, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, CircleCheck, EyeOff, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Badge, Button, Progress } from '../../../components/ui'
@@ -13,7 +13,7 @@ import { askTarget } from '../../../lib/askCursor'
 import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { problem, useAssignTopic, useRetryPaper, useUploadPaper } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
-import { addedByOf, isFinished, type Paper } from '../paperFilters'
+import { addedByOf, isFinished, opensLabels, type Paper } from '../paperFilters'
 import { PaperKeywords } from './PaperKeywords'
 import { UploadPdfButton } from './UploadPdfButton'
 import { VenueRankBadge } from './VenueRankBadge'
@@ -75,7 +75,19 @@ function TeamProgress({ paper }: { paper: Paper }) {
   )
 }
 
-function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; myTopic: string; onOpen: (id: string) => void }) {
+type RowProps = {
+  paper: Paper
+  me: string
+  myTopic: string
+  lead?: boolean
+  /** The viewer's blind checks. Being a lead does not open their labels before the viewer finishes. */
+  blind?: ReadonlySet<string>
+  onOpen: (id: string) => void
+  /** Opens the paper's labels (opensLabels); without it every paper opens the workspace. */
+  onOpenLabels?: (id: string) => void
+}
+
+function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabels }: RowProps) {
   const assign = useAssignTopic()
   const retry = useRetryPaper()
   const upload = useUploadPaper()
@@ -86,8 +98,12 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   // Only the person who shared a paper can retry or remove it, so others are told who that is.
   const adder = paper.added_by || 'the person who added it'
   const others = paper.labelers.filter((name) => name !== me)
+  const isBlind = blind?.has(paper.analysis_id) ?? false
+  const viewLabels = Boolean(onOpenLabels) && opensLabels(paper, lead && !isBlind)
+  const open = viewLabels && onOpenLabels ? onOpenLabels : onOpen
   let action = 'Label'
-  if (isFinished(paper)) action = 'Review'
+  if (viewLabels) action = 'View labels'
+  else if (isFinished(paper)) action = 'Review'
   else if (paper.judged > 0) action = 'Continue'
   const cell = '@4xl:table-cell @4xl:px-3 @4xl:py-3 @4xl:align-middle'
 
@@ -111,7 +127,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
           <button
             type="button"
             aria-label={`${paper.title} (${action})`}
-            onClick={() => onOpen(paper.analysis_id)}
+            onClick={() => open(paper.analysis_id)}
             className="text-left font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
           >
             <span className="line-clamp-2 break-words">{paper.title}</span>
@@ -120,6 +136,12 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
           <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
         )}
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {isBlind && (
+            <Badge tone="accent">
+              <EyeOff aria-hidden />
+              Blind check
+            </Badge>
+          )}
           <VenueRankBadge value={paper.venue_rank} source={paper.venue_rank_source} />
           <PaperKeywords subject={paper.subject} keywords={paper.keywords} />
         </div>
@@ -147,7 +169,14 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
       </td>
       <td className={cell}>
         <CellLabel>Also labeled by</CellLabel>
-        {others.length > 0 ? others.join(', ') : <span className="text-ink-muted">No one</span>}
+        {/* Who labeled a paper is a hint on a blind check (#867). */}
+        {isBlind && !isFinished(paper) ? (
+          <span className="text-ink-muted">Hidden until you finish</span>
+        ) : others.length > 0 ? (
+          others.join(', ')
+        ) : (
+          <span className="text-ink-muted">No one</span>
+        )}
       </td>
       <td className={cell}>
         <CellLabel>Added by</CellLabel>
@@ -204,7 +233,7 @@ function PaperRow({ paper, me, myTopic, onOpen }: { paper: Paper; me: string; my
   )
 }
 
-export function PaperTable({ papers, me, myTopic, onOpen }: { papers: Paper[]; me: string; myTopic: string; onOpen: (id: string) => void }) {
+export function PaperTable({ papers, ...row }: Omit<RowProps, 'paper'> & { papers: Paper[] }) {
   return (
     <div className="@container overflow-x-auto rounded-xl border border-border-subtle bg-surface">
       <table className="block w-full border-collapse text-left @4xl:table">
@@ -222,7 +251,7 @@ export function PaperTable({ papers, me, myTopic, onOpen }: { papers: Paper[]; m
         </thead>
         <tbody className="block @4xl:table-row-group">
           {papers.map((paper) => (
-            <PaperRow key={paper.analysis_id} paper={paper} me={me} myTopic={myTopic} onOpen={onOpen} />
+            <PaperRow key={paper.analysis_id} paper={paper} {...row} />
           ))}
         </tbody>
       </table>

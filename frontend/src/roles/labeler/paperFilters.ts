@@ -28,6 +28,10 @@ export function teamStatusOf(paper: Paper): keyof typeof PROGRESS_LABELS {
   return paper.team_judged > 0 ? 'started' : 'none'
 }
 
+/** Whether opening the paper shows its labels instead of the workspace: the team has judged every
+ * claim, and the viewer may see the labels (a lead, or someone who finished it themselves). */
+export const opensLabels = (paper: Paper, lead: boolean) => teamStatusOf(paper) === 'done' && (lead || isFinished(paper))
+
 export type Facet = 'addedBy' | 'topic' | 'status' | 'progress'
 export type Filters = { search: string } & Record<Facet, string[]>
 

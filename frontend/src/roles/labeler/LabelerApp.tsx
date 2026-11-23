@@ -14,6 +14,7 @@ import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
 import { BlindChecks } from './screens/BlindChecks'
+import { Labels } from './screens/Labels'
 import { Queue } from './screens/Queue'
 import { Workspace } from './screens/Workspace'
 import { usePaperNotices } from './usePaperNotices'
@@ -29,6 +30,8 @@ const TITLES: Record<Screen, string> = { papers: 'Papers to label', blind: 'Blin
 
 export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
   const [analysis, setAnalysis] = useState<string | null>(() => new URLSearchParams(window.location.search).get('analysis'))
+  // A paper's labels, read-only (Labels). Set only while no paper is open in the workspace.
+  const [labels, setLabels] = useState<string | null>(() => new URLSearchParams(window.location.search).get('labels'))
   const [screen, setScreen] = useState<Screen>(() => (new URLSearchParams(window.location.search).get('tab') === 'blind' ? 'blind' : 'papers'))
   const [unsaved, setUnsaved] = useState(false) // the open workspace holds drafts that are not saved
   // A modal over the current screen, as in the other roles, so unsaved labels stay open under it.
@@ -37,7 +40,11 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
     if (unsaved && !window.confirm('You have unsaved labels. Leave without saving?')) return
     go()
   }
-  const openPaper = (id: string) => leave(() => setAnalysis(id))()
+  const openPaper = (id: string) =>
+    leave(() => {
+      setLabels(null)
+      setAnalysis(id)
+    })()
   usePaperNotices(openPaper)
   // Where the workspace draws its claim tools (review, questions about the paper and its
   // references) inside the Ask panel's "This claim" mode.
@@ -73,11 +80,13 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
     const params = new URLSearchParams(window.location.search)
     if (analysis) params.set('analysis', analysis)
     else params.delete('analysis')
+    if (labels) params.set('labels', labels)
+    else params.delete('labels')
     if (screen === 'blind') params.set('tab', 'blind')
     else params.delete('tab')
     const query = params.toString()
     window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
-  }, [analysis, screen])
+  }, [analysis, labels, screen])
 
   return (
     <AppShell
@@ -87,6 +96,7 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
         leave(() => {
           setScreen(next)
           setAnalysis(null)
+          setLabels(null)
         })()
       }
       role="Labeler"
@@ -111,10 +121,12 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
           onBack={() => leave(() => setAnalysis(null))()}
           onOpenPaper={(id) => leave(() => setAnalysis(id))()}
         />
+      ) : labels ? (
+        <Labels analysisId={labels} onBack={() => setLabels(null)} onLabel={() => openPaper(labels)} />
       ) : screen === 'blind' ? (
         <BlindChecks onOpen={setAnalysis} />
       ) : (
-        <Queue onOpen={setAnalysis} onShowBlind={() => setScreen('blind')} />
+        <Queue onOpen={setAnalysis} onOpenLabels={setLabels} onShowBlind={() => setScreen('blind')} />
       )}
       {ask.viewer}
       <SettingsModal

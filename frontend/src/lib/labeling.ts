@@ -356,6 +356,55 @@ export const labelingApi = {
   /** The labels as CSV, or as the two sets of DSPy examples (JSONL): your own rows, or the whole team's. */
   exportFile: (tab: 'labels' | 'claims' | 'candidates' | 'dspy_claims' | 'dspy_verdicts', scope: 'mine' | 'team' = 'mine') =>
     fetchFile(`${API_BASE}/api/labeling/export?tab=${tab}&scope=${scope}`),
+  /** Every labeler's verdict on each pair of a paper. A lead gets every pair; anyone else only
+   * the pairs they judged, and 403 before they have saved anything on the paper. */
+  compare: (analysisId: string) => request<Comparison>(`/labeling/compare/${encodeURIComponent(analysisId)}`),
+  addCompareNote: (analysisId: string, body: { claim_id: string; reference_id: string; note: string }) =>
+    request<CompareNote>(`/labeling/compare/${encodeURIComponent(analysisId)}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+}
+
+/** One labeler's verdict on a pair. A rejected claim has no level. */
+export type CompareVerdict = {
+  labeler: string
+  evidence: Level | null
+  confidence: Confidence | ''
+  rationale: string
+  claim_status: ClaimStatus
+}
+export type CompareNote = { author: string; ts: string; note: string }
+export type ComparePair = {
+  claim_id: string
+  reference_id: string
+  claim: string
+  reference_title: string
+  /** Two or more labelers gave the same level (or all rejected the claim). */
+  agree: boolean
+  /** The viewer's own verdict first. */
+  verdicts: CompareVerdict[]
+  notes: CompareNote[]
+}
+/** Disagreements first, then agreements, then pairs only one person labeled. */
+export type Comparison = { paper_id: string; title: string; labelers: string[]; pairs: ComparePair[] }
+
+export function useComparison(analysisId: string) {
+  return useQuery({
+    queryKey: ['labeling', 'compare', analysisId],
+    queryFn: () => labelingApi.compare(analysisId),
+    retry: false,
+  })
+}
+
+export function useAddCompareNote(analysisId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { claim_id: string; reference_id: string; note: string }) =>
+      labelingApi.addCompareNote(analysisId, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['labeling', 'compare', analysisId] }),
+  })
 }
 
 export function useLabelStatus() {

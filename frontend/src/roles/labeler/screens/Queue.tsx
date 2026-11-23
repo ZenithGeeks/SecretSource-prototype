@@ -47,7 +47,15 @@ function Setup({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; onShowBlind: () => void }) {
+export function Queue({
+  onOpen,
+  onOpenLabels,
+  onShowBlind,
+}: {
+  onOpen: (id: string) => void
+  onOpenLabels?: (id: string) => void
+  onShowBlind: () => void
+}) {
   const status = useLabelStatus()
   const pool = usePool()
   const [downloading, setDownloading] = useState<Export | null>(null)
@@ -74,11 +82,11 @@ export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; o
   }
 
   const myTopic = pool.data?.people.find((p) => p.name === pool.data?.me)?.topic ?? ''
-  // A paper the viewer checks blind lives only under Blind checks, so the two lists never mix (#867).
+  // Every paper is listed; one the viewer checks blind is marked, and Blind checks lists it too (#867).
   const blind = new Set(pool.data?.blind ?? [])
   const lead = pool.data?.lead ?? false
   // Papers of the viewer's own topic first, then by topic; within a topic, unfinished before finished.
-  const papers = [...(pool.data?.papers ?? [])].filter((paper) => !blind.has(paper.analysis_id)).sort(
+  const papers = [...(pool.data?.papers ?? [])].sort(
     (a, b) =>
       Number(b.topic === myTopic) - Number(a.topic === myTopic) ||
       a.topic.localeCompare(b.topic) ||
@@ -167,7 +175,7 @@ export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; o
         <Card className="flex flex-wrap items-center gap-3 py-3">
           <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
           <p className="min-w-0 flex-1 text-sm text-ink">
-            You have {blind.size} {blind.size === 1 ? 'paper' : 'papers'} to check blind. They are kept apart from this list.
+            You have {blind.size} {blind.size === 1 ? 'paper' : 'papers'} to check blind. They are marked Blind check below.
           </p>
           <Button variant="ghost" onClick={onShowBlind} className="min-h-10">
             Open blind checks
@@ -214,7 +222,15 @@ export function Queue({ onOpen, onShowBlind }: { onOpen: (id: string) => void; o
             {shown.length === 0 ? (
               <NoMatch filters={filters} me={me} onClear={() => setFilters(NO_FILTERS)} />
             ) : (
-              <PaperTable papers={shown} me={me} myTopic={myTopic} onOpen={onOpen} />
+              <PaperTable
+                papers={shown}
+                me={me}
+                myTopic={myTopic}
+                lead={lead}
+                blind={blind}
+                onOpen={onOpen}
+                onOpenLabels={onOpenLabels}
+              />
             )}
           </>
         )}

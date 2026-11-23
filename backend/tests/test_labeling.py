@@ -2594,3 +2594,26 @@ def test_a_note_needs_a_pair_the_caller_can_see(api):
     app.dependency_overrides[labeling.is_lead] = lambda: True
     assert client.post("/labeling/compare/a1/notes", json=hidden).status_code == 200
     assert db.tabs["compare_notes"][-1]["annotator_id"] == "stranger"
+
+
+def test_a_lead_on_their_own_blind_check_compares_like_anyone_else(api, monkeypatch):
+    client, db, app = _blind_round(api, monkeypatch)
+    db.append(
+        "labels",
+        [
+            {
+                "annotator": "chanya",
+                "annotator_id": "chanya",
+                "paper_id": "paperA-0123456789ab",
+                "claim_id": "paperA-0123456789ab#1",
+                "reference_id": REF_B,
+                "evidence": "2",
+            }
+        ],
+    )
+    assert view_as(client, app, "somchai", lead=True).status_code == 403
+    save_as(client, app, "somchai", 4)
+    assert [p["claim_id"] for p in view_as(client, app, "somchai", lead=True).json()["pairs"]] == [CLAIM_0]
+    hidden = {"claim_id": "paperA-0123456789ab#1", "reference_id": REF_B, "note": "x"}
+    assert client.post("/labeling/compare/a1/notes", json=hidden).status_code == 404
+    assert len(view_as(client, app, "chanya", lead=True).json()["pairs"]) == 2  # not blind for chanya
