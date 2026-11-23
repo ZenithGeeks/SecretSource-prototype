@@ -402,4 +402,4 @@ Ask @EarthWittawat for the shared .env values and the credentials file.
 
 [ColBERT](https://github.com/stanford-futuredata/ColBERT), [ColPali](https://github.com/illuin-tech/colpali), [GROBID](https://github.com/kermitt2/grobid), [Docling](https://github.com/docling-project/docling), [DSPy](https://github.com/stanfordnlp/dspy), [Google ADK](https://github.com/google/adk-python), [safetensors](https://github.com/huggingface/safetensors), [vLLM](https://github.com/vllm-project/vllm), [Awesome Readme Template](https://github.com/Louis3797/awesome-readme-template)
 
-No license has been chosen yet; all rights reserved by the project team.
+Licensed under the [MIT License](LICENSE).
