@@ -140,6 +140,7 @@ test('buildProjectZip also puts a figure where \\includegraphics names it, so th
     '\\includegraphics[width=0.5\\textwidth]{figures/posv}', // no extension, found by file name
     '\\includegraphics{./plots/arch.pdf}',
     '\\includegraphics{../outside/posv}', // outside the project: no entry for it
+    String.raw`\includegraphics{figures\plots/posv}`, // backslashes are not portable ZIP separators
     '% \\includegraphics{commented/posv}',
     '\\includegraphics{missing}',
   ].join('\n')

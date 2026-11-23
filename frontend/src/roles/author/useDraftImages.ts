@@ -82,6 +82,7 @@ async function svgToPng(blob: Blob): Promise<Blob> {
 
 async function load(draftId: string, image: DraftImage, signal: AbortSignal): Promise<string> {
   const blob = await authorApi.imageBlob(draftId, image.name, signal)
+  signal.throwIfAborted()
   const name = image.name.toLowerCase()
   const shown = name.endsWith('.pdf') ? await pdfFirstPage(blob) : name.endsWith('.svg') ? await svgToPng(blob) : blob
   return URL.createObjectURL(shown)
@@ -90,6 +91,24 @@ async function load(draftId: string, image: DraftImage, signal: AbortSignal): Pr
 /** How many figures load (and convert) at once: each PDF or SVG drawn takes up to
  * MAX_PIXELS × 4 bytes of canvas, so a draft of many figures must not draw them all at once. */
 const PARALLEL_LOADS = 3
+
+// A cancelled effect cannot abort canvas work already in progress. Share slots across
+// effect runs (including editor remounts) and release them only when the load settles.
+const pendingLoads = new Set<() => Promise<void>>()
+let activeLoads = 0
+
+function drainLoads() {
+  for (const run of pendingLoads) {
+    if (activeLoads >= PARALLEL_LOADS) break
+    pendingLoads.delete(run)
+    activeLoads++
+    void run().finally(() => {
+      activeLoads--
+      drainLoads()
+    })
+  }
+}
+
 /** The pauses before a failed figure is fetched again: a request that failed for a moment
  * (the gateway restarting, a dropped connection) still loads, and one that keeps failing
  * stops after three tries. The next change to the draft's figures tries it again. */
@@ -136,27 +155,25 @@ export function useDraftImages(draftId: string, images: DraftImage[] | undefined
       changed = true
     }
     if (changed) publish()
-    // At most PARALLEL_LOADS at a time; once the effect is cancelled, no queued one starts.
-    const queue = list.filter((image) => !current.has(image.name))
-    let next = 0
-    const worker = async () => {
-      while (!controller.signal.aborted && next < queue.length) {
-        const image = queue[next++]
-        try {
-          const url = await loadWithRetries(draftId, image, controller.signal)
-          if (controller.signal.aborted) {
-            URL.revokeObjectURL(url)
-            return
-          }
-          current.set(image.name, { hash: image.hash, url })
-          publish()
-        } catch {
-          // Left out: the preview names it, and the next change to the figures tries again.
+    const jobs = list.filter((image) => !current.has(image.name)).map((image) => async () => {
+      try {
+        const url = await loadWithRetries(draftId, image, controller.signal)
+        if (controller.signal.aborted) {
+          URL.revokeObjectURL(url)
+          return
         }
+        current.set(image.name, { hash: image.hash, url })
+        publish()
+      } catch {
+        // Left out: the preview names it, and the next change to the figures tries again.
       }
+    })
+    for (const job of jobs) pendingLoads.add(job)
+    drainLoads()
+    return () => {
+      controller.abort()
+      for (const job of jobs) pendingLoads.delete(job)
     }
-    for (let i = 0; i < Math.min(PARALLEL_LOADS, queue.length); i++) void worker()
-    return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, wanted])
 

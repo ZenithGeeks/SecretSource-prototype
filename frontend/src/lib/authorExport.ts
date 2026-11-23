@@ -104,7 +104,7 @@ export function buildProjectZip(draft: Draft, figures: { name: string; content: 
       if (!figure) continue
       const wanted = path.replace(/^\.\//, '')
       // Outside the project ("../x", "/abs", "C:"): not an entry an unzip should write.
-      if (wanted.startsWith('/') || wanted.includes(':') || wanted.split('/').includes('..')) continue
+      if (wanted.startsWith('/') || wanted.includes(':') || wanted.includes('\\') || wanted.split('/').includes('..')) continue
       const name = /\.[A-Za-z0-9]+$/.test(wanted.split('/').pop() ?? '') ? wanted : `${wanted}${stored.slice(stored.lastIndexOf('.'))}`
       if (name !== figure.name) extra.set(name, figure.content)
     }

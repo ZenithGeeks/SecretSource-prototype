@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -9,6 +9,7 @@ import { runTool, type DraftReader } from '../src/lib/agentTools'
 import { checkedLabel } from '../src/lib/timeAgo'
 import { CodeEditor } from '../src/roles/author/components/editor/CodeEditor'
 import { Editor } from '../src/roles/author/screens/Editor'
+import { useDraftImages } from '../src/roles/author/useDraftImages'
 import { SplitPane } from '../src/components/SplitPane'
 import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
@@ -670,6 +671,41 @@ See the figure.
     await waitFor(() => expect(preview()?.querySelectorAll('img.ss-image')).toHaveLength(5), { timeout: 15000 })
     expect(most).toBe(3)
   }, 30000)
+
+  test('replacing the list waits for active SVG conversions and skips cancelled queued figures', async () => {
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    const images = ['a', 'b', 'c', 'queued', 'new'].map((name) => ({ name: `${name}.svg`, size: svg.length, hash: name }))
+    gateway.drafts.get('d1')!.images = images
+    for (const image of images) gateway.imageBytes.set(`d1/${image.name}`, svg)
+    const held: (() => void)[] = []
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { configurable: true, value: () => Promise.resolve() })
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D)
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done) => {
+      held.push(() => done(new Blob(['png'], { type: 'image/png' })))
+    })
+    const { result, rerender, unmount } = renderHook(
+      ({ list }) => useDraftImages('d1', list),
+      { initialProps: { list: images.slice(0, 4) } },
+    )
+    const read = (name: string) => `GET /author/drafts/d1/images/${name}.svg`
+    try {
+      await waitFor(() => expect(held).toHaveLength(3))
+      await act(async () => rerender({ list: images.slice(4) }))
+      expect(gateway.calls).not.toContain(read('new'))
+
+      await act(async () => held[0]())
+      await waitFor(() => expect(held).toHaveLength(4))
+      await act(async () => held.slice(1).forEach((finish) => finish()))
+      expect([...result.current.keys()]).toEqual(['new.svg'])
+      expect(gateway.calls).not.toContain(read('queued'))
+    } finally {
+      unmount()
+      await act(async () => held.forEach((finish) => finish()))
+      getContext.mockRestore()
+      toBlob.mockRestore()
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode
+    }
+  })
 
   test('a refused upload says why and leaves the images as they were', async () => {
     gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
