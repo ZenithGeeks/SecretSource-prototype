@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/lib/api', async (original) => ({
@@ -142,7 +142,12 @@ describe('ClaimNav', () => {
   const claims = [claim('c1', 'First claim.'), claim('c2', 'Second claim.')]
   const renderNav = (over: Partial<Parameters<typeof ClaimNav>[0]> = {}) => {
     const props = { claims, drafts: {}, saved: {}, references: [], current: 'c1', onSelect: vi.fn(), onAdd: vi.fn(), ...over }
-    render(<ClaimNav {...props} />)
+    function StatefulNav() {
+      const [adding, setAdding] = useState(false)
+      const [text, setText] = useState('')
+      return <ClaimNav adding={adding} setAdding={setAdding} text={text} setText={setText} {...props} />
+    }
+    render(<StatefulNav />)
     return props
   }
 

@@ -14,6 +14,7 @@ import { EyeOff, Keyboard } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
+import { ToolbarActions } from '../../../components/AppShell'
 import { PageViewer, type Target } from '../../../components/PageViewer'
 import { Button, Empty, LoadingScreen, Segmented } from '../../../components/ui'
 import { api, type Citation, type CitationMarker } from '../../../lib/api'
@@ -237,6 +238,9 @@ function Body({
   const [drafts, setDrafts] = useState(() => ({ ...saved, ...restored?.drafts }))
   const [currentId, setCurrentId] = useState(listed[0]?.claim_id ?? '')
   const [paperDone, setPaperDone] = useState(false)
+  // The header moves between the workspace and toolbar, so keep its unfinished entry here.
+  const [addingClaim, setAddingClaim] = useState(false)
+  const [claimText, setClaimText] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const panelScrollRef = useRef<HTMLDivElement>(null)
   const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
@@ -274,6 +278,8 @@ function Body({
     }
   }
   const wide = useMinWidth(1024) // Tailwind lg, where AppShell locks the shell to the window
+  // The header row fits in the top bar beside the breadcrumb and Ask AI only from 1280px.
+  const inBar = useMinWidth(1280)
   const roomy = useMinWidth(SIDE_BY_SIDE_FROM)
   const view: PaperView = paperView === 'side' && !roomy ? 'both' : paperView
   const both = view === 'both'
@@ -844,55 +850,65 @@ function Body({
     </div>
   )
 
+  // From 1280px the header row goes into the top bar: a row less above the papers and the panel.
+  const header = (
+    <header className={cn('flex items-center gap-x-3 gap-y-2', inBar ? 'min-w-0 flex-1' : 'flex-wrap')}>
+      {/* In the top bar the breadcrumb already names the paper, so the title is for screen readers. */}
+      <div className={cn('min-w-0 lg:w-52 lg:shrink-0', inBar && 'sr-only')}>
+        <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink lg:line-clamp-1">
+          {session.title}
+        </h1>
+        <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
+      </div>
+      {/* On a wide screen the strip shares this row; below it, the strip gets a row of its own. */}
+      <ClaimNav
+        className="order-last w-full lg:order-none lg:w-auto lg:min-w-0 lg:flex-1"
+        claims={claims}
+        drafts={drafts}
+        saved={saved}
+        references={cited}
+        current={currentId}
+        onSelect={select}
+        onAdd={addClaim}
+        adding={addingClaim}
+        setAdding={setAddingClaim}
+        text={claimText}
+        setText={setClaimText}
+      />
+      <div className="relative ml-auto flex items-center gap-3 lg:ml-0">
+        {wide && viewToggle}
+        <div className="w-36">
+          <button
+            type="button"
+            disabled={firstUnfinishedIndex(claims, drafts, saved, cited) == null}
+            onClick={() => {
+              const index = firstUnfinishedIndex(claims, drafts, saved, cited)
+              /* v8 ignore next -- @preserve */
+              if (index == null) return
+              setPaperDone(false)
+              select(claims[index].claim_id)
+            }}
+            className="mb-1 w-full whitespace-nowrap text-left text-xs text-ink-muted tabular-nums enabled:hover:text-ink enabled:hover:underline"
+          >
+            {done} of {total} claims finished
+          </button>
+          <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
+            {/* The bar exists only when a claim does, so `total` is at least 1. */}
+            {/* v8 ignore start -- @preserve */}
+            <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+            {/* v8 ignore stop -- @preserve */}
+          </div>
+        </div>
+        {shortcutsButton}
+        {legend}
+      </div>
+    </header>
+  )
+
   return (
     // Fills the AppShell main box on wide screens so only the paper and label panes scroll.
     <div className={cn('flex flex-col gap-2', wide && 'min-h-0 flex-1')}>
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="min-w-0 lg:w-52 lg:shrink-0">
-          <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink lg:line-clamp-1">
-            {session.title}
-          </h1>
-          <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
-        </div>
-        {/* On a wide screen the strip shares this row; below it, the strip gets a row of its own. */}
-        <ClaimNav
-          className="order-last w-full lg:order-none lg:w-auto lg:min-w-0 lg:flex-1"
-          claims={claims}
-          drafts={drafts}
-          saved={saved}
-          references={cited}
-          current={currentId}
-          onSelect={select}
-          onAdd={addClaim}
-        />
-        <div className="relative ml-auto flex items-center gap-3 lg:ml-0">
-          {wide && viewToggle}
-          <div className="w-36">
-            <button
-              type="button"
-              disabled={firstUnfinishedIndex(claims, drafts, saved, cited) == null}
-              onClick={() => {
-                const index = firstUnfinishedIndex(claims, drafts, saved, cited)
-                /* v8 ignore next -- @preserve */
-                if (index == null) return
-                setPaperDone(false)
-                select(claims[index].claim_id)
-              }}
-              className="mb-1 w-full whitespace-nowrap text-left text-xs text-ink-muted tabular-nums enabled:hover:text-ink enabled:hover:underline"
-            >
-              {done} of {total} claims finished
-            </button>
-            <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
-              {/* The bar exists only when a claim does, so `total` is at least 1. */}
-              {/* v8 ignore start -- @preserve */}
-              <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
-              {/* v8 ignore stop -- @preserve */}
-            </div>
-          </div>
-          {shortcutsButton}
-          {legend}
-        </div>
-      </header>
+      {inBar ? <ToolbarActions orInline>{header}</ToolbarActions> : header}
       {session.blind && (
         <div role="note" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5">
           <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
