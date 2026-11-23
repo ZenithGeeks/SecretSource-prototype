@@ -173,6 +173,52 @@ describe('the results', () => {
     expect(screen.getByText('§3.1 Encoder · page 4')).toBeInTheDocument()
   })
 
+  it('opens only the first claim, and J and K move the keyboard between claim rows', () => {
+    view()
+    const rows = () => [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+    expect(rows()[0]).toHaveAttribute('aria-expanded', 'true')
+    expect(rows().slice(1).every((row) => row.getAttribute('aria-expanded') === 'false')).toBe(true)
+
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(rows()[0]).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'J' })
+    expect(rows()[1]).toHaveFocus()
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(rows()[1]).toHaveFocus() // the last row stays put
+    fireEvent.keyDown(window, { key: 'k' })
+    expect(rows()[0]).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'k' })
+    expect(rows()[0]).toHaveFocus()
+    // @ts-expect-error jsdom has none; leave it missing for the next tests
+    delete Element.prototype.scrollIntoView
+  })
+
+  it('leaves J and K alone with a modifier, in a text box, or with no claims to move to', () => {
+    view()
+    const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
+    fireEvent.keyDown(window, { key: 'j', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'x' })
+    expect(first).not.toHaveFocus()
+    const box = document.createElement('input')
+    document.body.appendChild(box)
+    box.focus()
+    fireEvent.keyDown(box, { key: 'j' })
+    expect(box).toHaveFocus()
+    box.remove()
+    // Without scrollIntoView (jsdom has none) the row still takes the focus.
+    fireEvent.keyDown(window, { key: 'j' })
+    expect(first).toHaveFocus()
+  })
+
+  it('does nothing on J when no claim rows are on screen', () => {
+    load(analysis({ claims: [] }))
+    view()
+    expect(() => fireEvent.keyDown(window, { key: 'j' })).not.toThrow()
+  })
+
   it('says All claims, and has no Settled heading, when nothing needs attention', () => {
     load(analysis({ claims: [backed] }))
     view()

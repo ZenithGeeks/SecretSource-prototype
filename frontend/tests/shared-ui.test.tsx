@@ -45,7 +45,7 @@ describe('Stamp', () => {
         <Stamp verdict="checking" />
       </>,
     )
-    for (const label of ['Backed', 'Contradicted', 'Not backed', 'Checking…']) expect(screen.getByText(label)).toBeInTheDocument()
+    for (const label of ['Backed', 'Contradicted', 'Silent', 'Checking…']) expect(screen.getByText(label)).toBeInTheDocument()
     expect(STAMPS.unchecked.label).toBe('Can’t check')
   })
 

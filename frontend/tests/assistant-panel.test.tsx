@@ -130,7 +130,7 @@ describe('the Ask panel', () => {
     })
   })
 
-  it('names the two other verdicts Not backed and Can’t check', async () => {
+  it('names the two other verdicts Silent and Can’t check', async () => {
     const stream = controlledStream()
     gateway(stream)
     render(<Panel />)
@@ -141,7 +141,7 @@ describe('the Ask panel', () => {
     await stream.send({ type: 'verdict', index: 0, verdict: 'insufficient', quote: '', reasoning: 'No passage gives the factor.' })
     await stream.send({ type: 'verdict', index: 1, verdict: 'unchecked', quote: '', reasoning: '' })
 
-    expect(screen.getByText('Not backed')).toBeInTheDocument()
+    expect(screen.getByText('Silent')).toBeInTheDocument()
     expect(screen.getByText('Can’t check')).toBeInTheDocument()
     expect(screen.getByText('No passage named')).toBeInTheDocument()
   })

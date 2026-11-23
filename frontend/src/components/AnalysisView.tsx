@@ -113,6 +113,26 @@ export function AnalysisView({
   // Ranked worst first, so the first claim that needs nothing starts the settled group.
   const settledFrom = shown.findIndex((entry) => !opensByDefault(entry.standing))
 
+  // J and K move the keyboard to the next or previous claim's row, the way a reader works
+  // through a list of problems.
+  useEffect(() => {
+    if (presentation === 'teacher') return
+    const onKey = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      if ((key !== 'j' && key !== 'k') || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return
+      const rows = [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+      if (!rows.length) return
+      event.preventDefault()
+      const at = rows.indexOf(document.activeElement as HTMLElement)
+      const to = key === 'j' ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1)
+      rows[to].focus()
+      if (typeof rows[to].scrollIntoView === 'function') rows[to].scrollIntoView({ block: 'nearest' })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [presentation])
+
   const sectionTarget = jump && file && jump.at > opened.at
     ? { paper: file, label: `Section ${jump.n} · ${jump.title}`, source: null, page: jump.page, section: jump.n }
     : null
@@ -283,6 +303,7 @@ export function AnalysisView({
           {!teacher && !running && standings.length > 0 && (
             <div className="flex items-center gap-2 pt-1">
               <h2 className="type-title flex-1">{attention ? 'Needs your attention' : 'All claims'}</h2>
+              <p className="text-[13px] text-ink-muted pointer-coarse:hidden">J and K move between claims</p>
               {filter && (
                 <p className="text-[13px] text-ink-muted" aria-live="polite">
                   Showing {verdictCountLabel(filter, counts[filter])}
@@ -313,6 +334,8 @@ export function AnalysisView({
             <Fragment key={index}>
               {!teacher && i > 0 && i === settledFrom && <h2 className="type-title pt-3">Settled</h2>}
               <ClaimCard
+                // Only the worst claim opens: twelve open cards made a 9,000px page nobody could scan.
+                startCollapsed={!teacher && i > 0}
                 claim={claim}
                 index={index}
                 standing={standing}

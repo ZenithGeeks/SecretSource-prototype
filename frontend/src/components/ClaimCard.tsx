@@ -738,6 +738,7 @@ export function ClaimCard({
           type="button"
           onClick={toggle}
           aria-expanded={false}
+          data-claim-toggle
           className="flex w-full items-center gap-3.5 rounded-2xl px-5 py-3.5 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
         >
           {number}
@@ -763,6 +764,7 @@ export function ClaimCard({
         type="button"
         onClick={toggle}
         aria-expanded
+        data-claim-toggle
         className="flex w-full items-center gap-2.5 rounded text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
       >
         {number}
@@ -803,7 +805,7 @@ export function ClaimCard({
           {primary && !primary.quote && (
             <EvidencePanel bar={VERDICT_BAR[primary.verdict]} label={primaryName}>
               <span className="not-italic text-ink-muted">
-                No passage in the cited paper matched this claim.
+                No exact passage matched. The judge's reading of the paper is below.
               </span>
             </EvidencePanel>
           )}
@@ -879,6 +881,9 @@ export function ClaimCard({
       {primary && <FigureCrops verdict={primary} onShow={onShow} />}
       {primary && showEvidence && primary.evidence.length > 0 && <Passages verdict={primary} onShow={onShow} />}
 
+      {claim.citations.some((citation) => answersFor(claim, citation).verdict !== primary) && primary && (
+        <h3 className="type-label text-ink-muted">Other cited works</h3>
+      )}
       {claim.citations.length > 0 && (
         <ul className="space-y-4">
           {claim.citations.map((citation, i) => {
