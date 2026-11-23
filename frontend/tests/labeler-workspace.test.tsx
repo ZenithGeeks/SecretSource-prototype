@@ -689,6 +689,101 @@ describe('claims added by hand', () => {
   })
 })
 
+describe('an extracted claim the analysis stored no passages for', () => {
+  const bare = (over: Record<string, unknown> = {}) => ({
+    claim_id: 'paperA#7',
+    claim: 'Following the text-to-text approach of T5.',
+    sentence: 'Following the text-to-text approach of T5.',
+    section: '3',
+    source: null,
+    candidates: [],
+    ...over,
+  })
+  const found = {
+    cand_id: 't5',
+    reference_id: 'refB',
+    reference_file: 'refB.pdf',
+    rank: 1,
+    score: 12,
+    page: 3,
+    passage: 'text-to-text figure',
+  }
+
+  it('searches when it is opened and saves the passages as retrieved_added', async () => {
+    gateway.session = makeSession({ claims: [bare()] })
+    gateway.found = [found]
+    await open()
+    await waitFor(() => expect(reference()).toBe('refB.pdf|text-to-text figure'))
+    expect(gateway.searches).toEqual([{ claim_id: 'paperA#7', claim: 'Following the text-to-text approach of T5.' }])
+    // Passages are listed once the claim is kept. Until then only the reference is open.
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByRole('button', { name: /text-to-text figure/ })).toHaveTextContent(/p\.\s*3/)
+    fireEvent.click(screen.getByRole('radio', { name: /^Relevant/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save labels/ }))
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0].candidates).toEqual([
+      {
+        claim_id: 'paperA#7',
+        reference_id: 'refB',
+        cand_id: 't5',
+        origin: 'retrieved_added',
+        status: 'relevant',
+        rank: 1,
+        score: 12,
+        page: 3,
+        passage: 'text-to-text figure',
+      },
+    ])
+  })
+
+  it('shows passages saved earlier and does not search again', async () => {
+    gateway.session = makeSession({
+      claims: [bare()],
+      saved: {
+        claims: [],
+        labels: [],
+        candidates: [{ ...found, claim_id: 'paperA#7', origin: 'retrieved_added', status: 'relevant', rank: '1', score: '12', page: '3' }],
+      },
+    })
+    await open()
+    expect(reference()).toBe('refB.pdf|text-to-text figure')
+    expect(gateway.searches).toEqual([])
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.getByRole('button', { name: /text-to-text figure/ })).toHaveTextContent(/p\.\s*3/)
+    expect(screen.getByRole('radio', { name: /^Relevant/ })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('says why each citation was not checked when nothing is found', async () => {
+    gateway.session = makeSession({
+      claims: [
+        bare({
+          claim: 'SuperGLUE is a hard benchmark.',
+          unchecked: [
+            { ref: 'b49', label: 'SuperGLUE', reason: 'named' },
+            { ref: 'b4', label: 'NeurIPS', reason: 'no-open-access' },
+          ],
+        }),
+      ],
+    })
+    await open()
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(await screen.findByText('SuperGLUE: not checked, the paper only names it')).toBeInTheDocument()
+    expect(screen.getByText('NeurIPS: no open-access PDF')).toBeInTheDocument()
+    expect(screen.queryByText(/Retrieval found nothing/)).not.toBeInTheDocument()
+    expect(gateway.searches).toEqual([{ claim_id: 'paperA#7', claim: 'SuperGLUE is a hard benchmark.' }])
+  })
+
+  it('does not search an extracted claim that already has passages', async () => {
+    await open()
+    expect(gateway.searches).toEqual([])
+    key(']')
+    await waitFor(() => expect(gateway.searches).toEqual([{ claim_id: 'paperA#1', claim: 'Y is fast.' }]))
+    key(']')
+    await waitFor(() => expect(heading()).toBe('Claim 3 of 3'))
+    expect(gateway.searches).toEqual([{ claim_id: 'paperA#1', claim: 'Y is fast.' }])
+  })
+})
+
 describe('work kept from an earlier visit', () => {
   it('puts back the drafts and the claims added by hand, and says so', async () => {
     const added = { claim_id: 'paperA#h-9', claim: 'Typed last time', sentence: '', section: '', source: null, candidates: [], origin: 'human_added', page: null }

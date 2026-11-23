@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { emptyDraft, type Candidate, type Draft, type Reference, type WorkClaim } from '../src/lib/labeling'
+import { emptyDraft, type Candidate, type Draft, type Reference, type UncheckedCitation, type WorkClaim } from '../src/lib/labeling'
 import { PassageList } from '../src/roles/labeler/components/PassageList'
 
 const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
@@ -17,7 +17,7 @@ const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   ...over,
 })
 
-const claim = (candidates: Candidate[]): WorkClaim => ({
+const claim = (candidates: Candidate[], over: Partial<WorkClaim> = {}): WorkClaim => ({
   claim_id: 'p#0',
   claim: 'Y is fast.',
   sentence: '',
@@ -25,6 +25,7 @@ const claim = (candidates: Candidate[]): WorkClaim => ({
   source: null,
   candidates,
   origin: 'extracted',
+  ...over,
 })
 
 const refs: Reference[] = [
@@ -108,15 +109,41 @@ describe('the passages of a claim', () => {
     expect(screen.getByRole('region', { name: 'refB' })).toBeInTheDocument()
   })
 
-  it('says retrieval found nothing', () => {
+  it('says no passages were stored, without claiming a search found nothing', () => {
     setup({ claim: claim([]) })
-    expect(screen.getByText(/Retrieval found nothing/)).toBeInTheDocument()
+    expect(screen.getByText(/No passages were stored for this claim/)).toBeInTheDocument()
+    expect(screen.queryByText(/Retrieval found nothing/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Citations that were not checked' })).not.toBeInTheDocument()
+  })
+
+  it('lists why each citation was not checked', () => {
+    const reasons: [string, string][] = [
+      ['named', 'not checked, the paper only names it'],
+      ['no-open-access', 'no open-access PDF'],
+      ['not-downloadable', 'the PDF could not be downloaded'],
+      ['unresolvable', 'no matching work was found'],
+      ['lookup-unavailable', 'the lookup service did not answer'],
+      ['web-source', 'a web page, not a paper'],
+      ['withdrawn', 'the paper was withdrawn'],
+      ['failed', 'the check failed'],
+      ['mystery', 'checking it failed'],
+    ]
+    const unchecked: UncheckedCitation[] = reasons.map(([reason], index) => ({
+      ref: `b${index}`,
+      label: `Work ${reason}`,
+      reason,
+    }))
+    setup({ claim: claim([], { unchecked }) })
+    const list = screen.getByRole('list', { name: 'Citations that were not checked' })
+    for (const [reason, words] of reasons) {
+      expect(within(list).getByText(`Work ${reason}: ${words}`)).toBeInTheDocument()
+    }
   })
 
   it('says a search is running', () => {
     setup({ claim: claim([]), search: 'searching' })
     expect(screen.getByRole('status')).toHaveTextContent('Searching the reference papers')
-    expect(screen.queryByText(/Retrieval found nothing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No passages were stored/)).not.toBeInTheDocument()
   })
 
   it('offers to search again after a failed search', () => {
@@ -124,6 +151,7 @@ describe('the passages of a claim', () => {
     setup({ claim: claim([]), search: 'failed', onSearchAgain })
     fireEvent.click(screen.getByRole('button', { name: 'Search again' }))
     expect(onSearchAgain).toHaveBeenCalled()
+    expect(screen.queryByText(/No passages were stored/)).not.toBeInTheDocument()
   })
 })
 
