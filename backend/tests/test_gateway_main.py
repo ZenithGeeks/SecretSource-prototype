@@ -411,6 +411,29 @@ def test_a_readable_source_outcome_is_passed_to_each_check(monkeypatch, pipeline
     assert saved[-1]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
 
 
+def test_a_readable_web_page_is_checked_with_the_web_judge(monkeypatch, pipeline):
+    saved, _checked = pipeline
+    page = object()
+    monkeypatch.setattr(
+        main, "prepare_source",
+        lambda _source, expected=None: {"status": "web-page", "web_page": page},
+    )
+    checked = []
+    monkeypatch.setattr(
+        main, "check_web_page",
+        lambda claim, source, web_page, judged, others, outcome=None: (
+            checked.append((claim, source, web_page, judged, others))
+            or {"status": "ok", "claim": claim, "source": source, "verdict": "supports"}
+        ),
+    )
+
+    result = run_analysis_job("g-web", "paper", True, None)
+
+    assert result["status"] == "done"
+    assert checked == [("c1", "s1", page, "c1", False)]
+    assert saved[-1]["claims"][0]["verdicts"][0]["verdict"] == "supports"
+
+
 def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
     outcome = {"source_kind": "paper", "outcome": "readable", "retryable": False, "attempts": []}
     main.analyses["g-recheck-outcome"] = {

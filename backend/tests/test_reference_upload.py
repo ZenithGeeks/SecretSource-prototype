@@ -134,11 +134,50 @@ def test_a_corrected_url_replaces_the_citation_only_after_its_claims_pass_check(
     assert citation["doi"] == ""
     assert analysis["references"]["b13"]["url"] == citation["url"]
     assert analysis["claims"][0]["unchecked"] == []
-    assert analysis["claims"][0]["verdicts"][0]["cited"] == citation["url"]
+    assert analysis["claims"][0]["verdicts"][0]["cited"] == GMRES
     assert analysis["claims"][0]["needs_review"] is True
     assert "b13" not in analysis["pdfs"]
-    assert prepared[0][0] == citation["url"]
+    assert prepared[0][0] == GMRES
     assert prepared[0][1]["title"] == GMRES
+
+
+def test_a_web_repair_updates_named_duplicates_without_requiring_a_reference_dict(api, monkeypatch):
+    client, analysis, detached = api
+    analysis["references"]["b13"] = "GMRES"
+    analysis["claims"][1]["citations"].append({"ref": "b13", "title": GMRES})
+    analysis["claims"][1]["named"] = [GMRES]
+    monkeypatch.setattr(
+        main, "prepare_source",
+        lambda *_args, **_kwargs: {"status": "web-page", "web_page": object()},
+    )
+    checked = []
+    monkeypatch.setattr(
+        main, "check_web_page",
+        lambda *args, **kwargs: checked.append(args) or {
+            "status": "ok", "claim": args[0], "source": args[1], "verdict": "supports", "evidence": [],
+        },
+    )
+
+    response = client.post(
+        "/analyses/a1/references/b13/repair", json={"url": "https://example.org/gmres"}
+    )
+    assert response.status_code == 202
+    asyncio.run(detached[0])
+
+    assert len(checked) == 1
+    assert analysis["claims"][1]["citations"][1]["url"] == "https://example.org/gmres"
+    assert analysis["claims"][1]["named"] == [GMRES]
+
+
+def test_a_recheck_with_only_named_or_unresolvable_citations_logs_no_claims(api, monkeypatch, caplog):
+    _, analysis, _ = api
+    analysis["claims"][0]["named"] = [GMRES]
+    analysis["claims"][1]["citations"].append({"ref": "b13"})
+    monkeypatch.setattr(main, "prepare_source", lambda *_args, **_kwargs: {"status": "ok", "path": "x.pdf"})
+
+    asyncio.run(main._recheck_reference("a1", "b13", None, identifier=GMRES))
+
+    assert "has no checked claims for citation b13" in caplog.text
 
 
 def test_a_failed_corrected_url_keeps_the_original_source_and_explanation(api, monkeypatch):
@@ -181,6 +220,70 @@ def test_a_repair_requires_exactly_one_doi_or_url(api):
         ).status_code
         == 422
     )
+    assert detached == []
+
+
+def test_repair_rejects_missing_or_only_named_references(api):
+    client, analysis, detached = api
+    assert client.post(
+        "/analyses/a1/references/b99/repair", json={"doi": "10.1234/example"}
+    ).status_code == 404
+    analysis["claims"][0]["named"] = [GMRES]
+    assert client.post(
+        "/analyses/a1/references/b13/repair", json={"doi": "10.1234/example"}
+    ).status_code == 409
+    assert upload(client).status_code == 409
+    assert detached == []
+
+
+def test_repair_rejects_invalid_doi_and_unsafe_url(api):
+    client, _, detached = api
+    assert client.post("/analyses/a1/references/b13/repair", json={"doi": "not a DOI"}).status_code == 422
+    assert client.post(
+        "/analyses/a1/references/b13/repair", json={"url": "https://user:pass@example.org/page"}
+    ).status_code == 422
+    assert detached == []
+
+
+def test_repair_rejects_an_empty_resolved_identifier(api, monkeypatch):
+    client, _, detached = api
+    monkeypatch.setattr(main, "lookup_key", lambda _citation: "")
+
+    response = client.post("/analyses/a1/references/b13/repair", json={"doi": "10.1234/example"})
+
+    assert response.status_code == 422
+    assert detached == []
+
+
+def test_repair_and_retry_wait_until_the_analysis_is_done(api):
+    client, analysis, detached = api
+    analysis["status"] = "running"
+
+    response = client.post(
+        "/analyses/a1/references/b13/repair", json={"doi": "10.1234/example"}
+    )
+    assert response.status_code == 409
+    assert client.post("/analyses/a1/references/b13/retry").status_code == 409
+    assert detached == []
+
+
+def test_retry_rejects_missing_references_and_citations_without_an_identifier(api):
+    client, analysis, detached = api
+    assert client.post("/analyses/a1/references/b99/retry").status_code == 404
+    analysis["claims"][0]["citations"][0].clear()
+    analysis["claims"][0]["citations"][0]["ref"] = "b13"
+
+    response = client.post("/analyses/a1/references/b13/retry")
+
+    assert response.status_code == 409
+    assert detached == []
+
+
+def test_upload_rejects_a_reference_only_mentioned_by_a_claim(api):
+    client, analysis, detached = api
+    analysis["claims"][0]["named"] = [GMRES]
+
+    assert upload(client).status_code == 409
     assert detached == []
 
 

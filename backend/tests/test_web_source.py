@@ -55,6 +55,51 @@ def test_pinned_https_request_uses_validated_ip_and_original_host_for_tls(monkey
     assert seen["request"]["redirect"] is False
 
 
+def test_pinned_http_request_uses_the_validated_ip(monkeypatch):
+    seen = {}
+
+    class Pool:
+        def __init__(self, host, **kwargs):
+            seen.update(host=host, **kwargs)
+
+        def urlopen(self, method, target, **kwargs):
+            seen.update(method=method, target=target, request=kwargs)
+            return object()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(web, "HTTPConnectionPool", Pool)
+    response, _pool = web._pinned_get("http://example.org/path", "93.184.216.34")
+
+    assert response is not None
+    assert seen["host"] == "93.184.216.34"
+    assert seen["request"]["headers"]["Host"] == "example.org"
+    assert seen["target"] == "/path"
+
+
+def test_pinned_request_closes_its_pool_when_connection_fails(monkeypatch):
+    import urllib3
+
+    closed = []
+
+    class Pool:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def urlopen(self, *_args, **_kwargs):
+            raise urllib3.exceptions.HTTPError("offline")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(web, "HTTPConnectionPool", Pool)
+    with pytest.raises(urllib3.exceptions.HTTPError):
+        web._pinned_get("http://example.org/path", "93.184.216.34")
+
+    assert closed == [True]
+
+
 def test_a_body_read_that_exceeds_the_total_deadline_is_retryable(monkeypatch):
     import time
 
@@ -71,6 +116,35 @@ def test_a_body_read_that_exceeds_the_total_deadline_is_retryable(monkeypatch):
         def iter_content(self, _size):
             time.sleep(0.03)
             yield b"page"
+
+        def close(self):
+            pass
+
+    _mock_pinned_get(monkeypatch, lambda _url: Response())
+    with pytest.raises(web.WebReadError) as error:
+        web.fetch_resource("https://example.org/page")
+
+    assert error.value.outcome == "temporary-failure"
+    assert error.value.retryable
+
+
+def test_a_read_interrupted_by_deadline_is_retryable(monkeypatch):
+    import time
+
+    monkeypatch.setattr(
+        web.socket, "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr(web, "BODY_DEADLINE", 0.01)
+
+    class Response:
+        status_code = 200
+        headers = {"Content-Type": "text/html"}
+
+        def iter_content(self, _size):
+            time.sleep(0.03)
+            raise OSError("read interrupted")
+            yield b"unreachable"
 
         def close(self):
             pass
@@ -297,6 +371,18 @@ def test_direct_static_html_is_returned_as_a_web_source_without_indexing(monkeyp
     assert ready["web_page"].passages[0].locator == "https://example.org/final#evidence"
 
 
+def test_a_direct_url_with_neither_html_nor_pdf_is_rejected(monkeypatch):
+    monkeypatch.setattr(
+        web, "fetch_resource",
+        lambda url: web.WebResource(url, "text/plain", "utf-8", b"not a paper or page"),
+    )
+
+    result = verify.prepare_source("https://example.org/file")
+
+    assert result["status"] == "error"
+    assert result["source_outcome"]["outcome"] == "invalid-content"
+
+
 def test_failed_paper_lookup_falls_back_to_the_citation_page(monkeypatch):
     attempts = []
 
@@ -322,6 +408,23 @@ def test_failed_paper_lookup_falls_back_to_the_citation_page(monkeypatch):
 
     assert ready["status"] == "web-page"
     assert attempts == [("paper", "Cited work"), ("page", "https://example.org/work")]
+
+
+def test_failed_paper_and_page_lookup_returns_the_paper_failure(monkeypatch):
+    def paper_lookup(_source, _expected):
+        raise sources.NoOpenAccessCopy("no free copy", "semantic-scholar")
+
+    def page_lookup(_url):
+        raise web.WebReadError("not-found", "page is gone")
+
+    monkeypatch.setattr(sources, "local_pdf_with_resolution", paper_lookup)
+    monkeypatch.setattr(web, "fetch_resource", page_lookup)
+
+    result = verify.prepare_source(
+        "Cited work", expected={"title": "Cited work", "url": "https://example.org/work"}
+    )
+
+    assert result["status"] == "error"
 
 
 def test_web_claim_check_returns_stable_paragraph_locations(monkeypatch):
@@ -412,6 +515,65 @@ def test_web_judgment_does_not_recheck_insufficient_without_other_citations(monk
     verify.check_web_page("claim", page.url, page, "marked sentence [cited]")
 
     assert calls == ["claim"]
+
+
+def test_web_judgment_rechecks_refutes_with_the_cited_sentence(monkeypatch):
+    page = web.WebPage(
+        "Useful", "https://example.org", "now",
+        (web.WebPassage("A sufficiently long evidence paragraph for a check.", "https://example.org#p", 1),),
+    )
+    calls = []
+    verdicts = iter(("refutes", "supports"))
+
+    def judge(claim, _passages):
+        calls.append(claim)
+        return {"verdict": next(verdicts), "quote": "evidence", "reasoning": "checked"}
+
+    monkeypatch.setattr(verify, "_judge", judge)
+    checked = verify.check_web_page("claim", page.url, page, "marked sentence [cited]")
+
+    assert calls == ["claim", "marked sentence [cited]"]
+    assert checked["verdict"] == "supports"
+    assert checked["verdict_from"] == "cited"
+
+
+def test_web_judgment_keeps_a_refutes_result_when_the_cited_sentence_also_refutes(monkeypatch):
+    page = web.WebPage(
+        "Useful", "https://example.org", "now",
+        (web.WebPassage("A sufficiently long evidence paragraph for a check.", "https://example.org#p", 1),),
+    )
+    monkeypatch.setattr(
+        verify, "_judge",
+        lambda *_: {"verdict": "refutes", "quote": "evidence", "reasoning": "checked"},
+    )
+
+    checked = verify.check_web_page("claim", page.url, page, "marked sentence [cited]")
+
+    assert checked["verdict"] == "refutes"
+    assert checked["verdict_from"] == "text"
+
+
+def test_web_judgment_builds_the_judge_on_first_use(monkeypatch):
+    page = web.WebPage(
+        "Useful", "https://example.org", "now",
+        (web.WebPassage("A sufficiently long evidence paragraph for a check.", "https://example.org#p", 1),),
+    )
+    monkeypatch.setattr(verify, "_judge", None)
+    built = []
+    def build_judge():
+        built.append(True)
+
+        def judge(*_args):
+            return {"verdict": "supports", "quote": "evidence", "reasoning": "checked"}
+
+        return judge
+
+    monkeypatch.setattr(verify, "_build_judge", build_judge)
+
+    checked = verify.check_web_page("claim", page.url, page)
+
+    assert built == [True]
+    assert checked["verdict"] == "supports"
 
 
 def test_a_page_judge_failure_becomes_a_safe_tool_error(monkeypatch):
@@ -645,6 +807,13 @@ def test_page_parser_discards_short_text_and_rejects_unsafe_anchors():
     ]
 
 
+def test_page_parser_ignores_unmatched_closing_tags():
+    parser = web._PageParser("https://example.org/page")
+    parser.feed("</p><p>" + "useful static text " * 3 + "</p></div>")
+
+    assert parser.passages[0].text.startswith("useful static text")
+
+
 def test_private_or_unresolvable_hosts_and_credentials_are_rejected(monkeypatch):
     with pytest.raises(web.WebReadError, match="credentials"):
         web._public_http_url("https://user:pass@example.org/page")
@@ -812,6 +981,12 @@ def test_redirect_without_location_and_too_many_redirects_are_reported(monkeypat
     with pytest.raises(web.WebReadError) as error:
         web.fetch_resource("https://example.org/start")
     assert error.value.outcome == "http-error"
+
+
+def test_redirect_limit_of_zero_is_reported(monkeypatch):
+    monkeypatch.setattr(web, "MAX_REDIRECTS", -1)
+    with pytest.raises(web.WebReadError, match="redirected too many times"):
+        web.fetch_resource("https://example.org/start")
 
 
 def test_static_html_rejects_non_html_empty_text_and_unsafe_canonical():

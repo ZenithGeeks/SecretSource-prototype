@@ -320,7 +320,7 @@ def test_a_preprint_note_on_the_journal_line_is_not_a_venue():
 
 def test_a_journal_line_beside_a_link_is_still_the_title():
     # arXiv 2409.12191 [b28]: software, with its maker and name on the journal line and a link.
-    # The line is not a journal there, and the link is something to look the work up by.
+    # The line is not a journal there; keep its title for scholarly lookup before using the link.
     software = ET.fromstring(
         '<biblStruct xmlns="http://www.tei-c.org/ns/1.0">'
         '<analytic><title/><ptr target="http://ffmpeg.org/"/></analytic>'
@@ -335,7 +335,7 @@ def test_a_journal_line_beside_a_link_is_still_the_title():
     assert parsed["venue"] == ""
     assert parsed["authors"] == []
     assert parsed["year"] == "2024"
-    assert sources.lookup_key(parsed) == "http://ffmpeg.org/"
+    assert sources.lookup_key(parsed) == "FFmpeg-Developers. ffmpeg tool"
 
 
 def test_a_journal_line_beside_a_doi_is_still_the_title():
