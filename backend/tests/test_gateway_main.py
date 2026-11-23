@@ -98,6 +98,7 @@ def test_pending_recheck_refs_use_the_latest_stage_per_reference():
         {"stage": "rechecking", "ref": "b13"},
         {"stage": "rechecking", "ref": "b14"},
         {"stage": "rechecked", "ref": "b14"},
+        {"stage": "queued", "ref": "b16"},
         {"stage": "rechecking", "ref": "b15"},
         {"stage": "recheck-failed", "ref": "b15"},
     ]

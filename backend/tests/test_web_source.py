@@ -908,6 +908,7 @@ def test_page_parser_discards_short_text_and_rejects_unsafe_anchors():
 
 def test_page_parser_ignores_unmatched_closing_tags():
     parser = web._PageParser("https://example.org/page")
+    parser.feed("</p>")
     parser.feed("<blockquote><p>" + "useful static text " * 3 + "</blockquote></p>")
 
     assert parser.passages[0].text.startswith("useful static text")
