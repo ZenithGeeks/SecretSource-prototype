@@ -1,7 +1,7 @@
 /** Current Supabase auth session, kept live. When auth is disabled (no env), returns no
  * session and never loads, so the app renders open. */
 
-import type { Session } from '@supabase/supabase-js'
+import type { Session } from '@supabase/auth-js'
 import { useEffect, useState } from 'react'
 
 import { sessionStorageKey, supabase } from './supabase'
